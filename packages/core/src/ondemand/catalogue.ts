@@ -9,6 +9,7 @@
 // is still one version of one subscription. Nothing joins by name: a row without a TMDB id stays
 // on its own, whichever subscription lists another of its name, and so does a row for adults.
 import type { Title, TitleKind, TitleVersion } from "@mrstreamer/contracts/ondemand";
+import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { adultIn } from "../adult.ts";
 import type { OnDemandCatalogue, ProviderTitle } from "../provider.ts";
@@ -16,6 +17,7 @@ import { finish, pacer, type Steps } from "../steps.ts";
 import { indexNames, nameQuery, scoreNames, yearQuery, type SearchNames } from "../search/names.ts";
 import { suitability } from "./languages.ts";
 import { titleName, type TitleName } from "./names.ts";
+import { filterTitles, type FilterFiles } from "./filters.ts";
 
 /** How many titles of each kind a search returns. */
 export const SEARCH_LIMIT = 60;
@@ -333,16 +335,21 @@ export function search(
   return searchPage(catalogue, kind, query, aliases, limit).titles;
 }
 
-/** What `search` finds, with how many titles match in all, though only the best `limit` come back. */
+/**
+ * What `search` finds, counting every match while keeping only the best `limit`. Optional file
+ * filters select a real version before the cut, and also report the original matching total.
+ */
 export function searchPage(
   catalogue: IndexedCatalogue,
   kind: TitleKind,
   query: string,
   aliases: (title: Title) => string | TitleSearchAliases = () => "",
   limit = SEARCH_LIMIT,
-): { readonly titles: Title[]; readonly total: number } {
+  selection?: { readonly filters: TitleFilters; readonly files: FilterFiles },
+): { readonly titles: Title[]; readonly total: number; readonly unfiltered?: number } {
   const asked = nameQuery(query);
-  if (asked.words.length === 0) return { titles: [], total: 0 };
+  if (asked.words.length === 0)
+    return { titles: [], total: 0, ...(selection ? { unfiltered: 0 } : {}) };
   const qualified = yearQuery(query);
   const indexed = kindOf(catalogue, kind);
   const { titles } = indexed;
@@ -353,6 +360,7 @@ export function searchPage(
   const ranked: Ranked[] = [];
   let worst: Ranked | undefined;
   let total = 0;
+  let unfiltered = 0;
   for (const [index, title] of titles.entries()) {
     if (title.adult) continue;
     const alias = aliases(title);
@@ -370,9 +378,18 @@ export function searchPage(
       if (withYear !== undefined) rank = Math.min(rank ?? Infinity, withYear);
     }
     if (rank === undefined) continue;
+    unfiltered++;
+    const selected = selection
+      ? filterTitles([title], selection.filters, selection.files)[0]
+      : title;
+    if (!selected) continue;
     total++;
     // Ambiguous numeric names retain literal recall, after matches with the requested year.
-    const entry = { title, rank, yearRank: qualified && title.year !== qualified.year ? 1 : 0 };
+    const entry = {
+      title: selected,
+      rank,
+      yearRank: qualified && title.year !== qualified.year ? 1 : 0,
+    };
     if (worst && compareRanked(entry, worst) >= 0) continue;
     ranked.push(entry);
     if (ranked.length >= 2 * limit) {
@@ -382,7 +399,11 @@ export function searchPage(
     }
   }
   ranked.sort(compareRanked);
-  return { titles: ranked.slice(0, limit).map((entry) => entry.title), total };
+  return {
+    titles: ranked.slice(0, limit).map((entry) => entry.title),
+    total,
+    ...(selection ? { unfiltered } : {}),
+  };
 }
 
 interface Ranked {

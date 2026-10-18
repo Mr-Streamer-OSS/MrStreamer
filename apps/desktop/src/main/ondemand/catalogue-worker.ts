@@ -695,17 +695,17 @@ const handlers: {
   searchKind: async ({ language, kind, query, limit, owners, filters, files = [] }) => {
     speaking(language);
     const found = await catalogueOf(owners, language);
-    // Filters apply to every match before the cut; without them only the best `limit` are kept.
-    if (!filters) {
-      const page = searchPage(found.index, kind, query, aliases, limit);
-      return { titles: page.titles.map((title) => named(title, language)), total: page.total };
-    }
-    const unfiltered = search(found.index, kind, query, aliases, Infinity);
-    const matches = filterTitles(unfiltered, filters, filterFiles(found, kind, files));
+    const page = searchPage(
+      found.index,
+      kind,
+      query,
+      aliases,
+      limit,
+      filters ? { filters, files: filterFiles(found, kind, files) } : undefined,
+    );
     return {
-      titles: matches.slice(0, limit).map((title) => named(title, language)),
-      total: matches.length,
-      unfiltered: unfiltered.length,
+      ...page,
+      titles: page.titles.map((title) => named(title, language)),
     };
   },
   filterOptions: async ({ owners, language, kind, files, adults }) => {

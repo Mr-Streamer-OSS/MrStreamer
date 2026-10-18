@@ -29,6 +29,69 @@ const ids = (titles: readonly Title[]) =>
   titles.map((title) => `${title.subscriptionId}/${title.id}`);
 
 describe("the search relevance corpus", () => {
+  it.each([0, 1, 6, 20, 300, Infinity])(
+    "keeps filtered ranking, stable ties and both totals at limit %s",
+    (limit) => {
+      const rows = Array.from({ length: 650 }, (_, index) => ({
+        ...movie(String(index), `Story ${index} HD (EN)`),
+        tmdbId: String(100000 + index),
+      }));
+      const index = indexCatalogue(
+        [
+          source(rows),
+          source(
+            rows.map((row, n) => ({
+              ...row,
+              name: `Story ${n} ${n % 100 === 0 ? "4K" : "HD"} (FR)`,
+            })),
+            "two",
+          ),
+        ],
+        "en",
+      );
+      const files = new Map();
+      const page = searchPage(index, "movie", "story", undefined, limit, {
+        filters: { quality: "4k", language: "fr" },
+        files,
+      });
+      expect(page.total).toBe(7);
+      expect(page.unfiltered).toBe(650);
+      expect(ids(page.titles)).toEqual(
+        [0, 100, 200, 300, 400, 500, 600].slice(0, limit).map((id) => `two/${id}`),
+      );
+      for (const title of page.titles) {
+        expect(title.versions.map((version) => `${version.subscriptionId}/${version.id}`)).toEqual([
+          `one/${title.id}`,
+          `two/${title.id}`,
+        ]);
+      }
+      const broad = searchPage(index, "movie", "story", undefined, limit, {
+        filters: { quality: "hd", language: "fr" },
+        files,
+      });
+      expect(broad.total).toBe(643);
+      expect(broad.unfiltered).toBe(650);
+      expect(ids(broad.titles)).toEqual(
+        rows
+          .filter((_, n) => n % 100 !== 0)
+          .slice(0, limit)
+          .map((row) => `two/${row.id}`),
+      );
+      expect(
+        searchPage(index, "movie", "story", undefined, limit, {
+          filters: { quality: "sd" },
+          files,
+        }),
+      ).toEqual({ titles: [], total: 0, unfiltered: 650 });
+      expect(
+        searchPage(index, "movie", "", undefined, limit, {
+          filters: { quality: "hd" },
+          files,
+        }),
+      ).toEqual({ titles: [], total: 0, unfiltered: 0 });
+    },
+  );
+
   it.each([1, 6, 20, 60, 200, 300])(
     "keeps exact names before six newer prefixes at limit %i",
     (limit) => {
