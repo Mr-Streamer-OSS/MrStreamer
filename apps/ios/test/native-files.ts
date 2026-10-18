@@ -41,6 +41,8 @@ interface Native {
    * settles stands for the app stopping there. Null: each goes ahead at once.
    */
   gate: ((operation: FileOperation, path: string) => Promise<void> | undefined) | null;
+  /** Answers true for a file whose deletion the disk refuses. Null: every deletion goes ahead. */
+  undeletable: ((path: string) => boolean) | null;
 }
 
 /**
@@ -57,6 +59,7 @@ export const native: Native = ((
   pauseMs: 0,
   held: null,
   gate: null,
+  undeletable: null,
 });
 const { root } = native;
 
@@ -124,6 +127,7 @@ export class File {
     this.path = to.path;
   }
   delete() {
+    if (native.undeletable?.(this.path)) throw new Error("Operation not permitted");
     rmSync(this.path);
   }
   static async downloadFileAsync(

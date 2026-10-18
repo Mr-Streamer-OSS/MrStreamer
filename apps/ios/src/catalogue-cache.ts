@@ -14,11 +14,14 @@ import { Directory, File, Paths } from "expo-file-system";
 // account.ts alone calls this module and decides when a copy shows, when one is saved and when
 // one goes; this module only keeps the files. Caches is left out of backups, and iOS may empty
 // it: a copy that is missing, unreadable or doubtful is simply not there, and the lists load as
-// they would without one. Nothing here throws, and nothing is logged.
+// they would without one. Reading, saving and tidying never throw: a failure is a missing copy.
+// Deleting a subscription's copies, which a new password waits on, answers whether they are gone,
+// as a copy left behind would show again at the next launch. Nothing is logged.
 //
 // What is written is a copy of the fields the app reads, nothing else. An artwork address that
 // could carry the login is written as none, while this session's lists keep it; a list with the
-// password in any other text isn't written at all. A read checks every row before anything shows.
+// password in any other text the provider sent isn't written at all. A read checks every row
+// before anything shows.
 // Each subscription's lists are read, written and deleted one operation at a time, per list, so a
 // deletion waits for a write under way and a write never recreates what was deleted after it.
 // A write goes to a file beside the copy, then takes its place; on iOS that move deletes the copy
@@ -206,16 +209,22 @@ export function writeList(
   });
 }
 
-/** Deletes `id`'s copies once whatever reads or writes them has finished. Never rejects. */
-export async function dropLists(id: string): Promise<void> {
-  await Promise.all(
+/**
+ * Deletes `id`'s copies once whatever reads or writes them has finished. Answers whether none is
+ * left of either list, the copy or a write left halfway: false when the disk refuses a deletion.
+ * Never rejects.
+ */
+export async function dropLists(id: string): Promise<boolean> {
+  const gone = await Promise.all(
     (["live", "titles"] as const).map((kind) =>
-      queued(id, kind, undefined, async () => {
-        discard(fileOf(id, kind));
-        discard(pendingOf(id, kind));
+      queued(id, kind, false, async () => {
+        const files = [fileOf(id, kind), pendingOf(id, kind)];
+        for (const file of files) if (file.exists) file.delete();
+        return files.every((file) => !file.exists);
       }),
     ),
   );
+  return gone.every(Boolean);
 }
 
 /**
@@ -268,20 +277,32 @@ function shed(keep: string | null) {
 
 /**
  * The file's text for `saved`: its rows with the fields the app reads, artwork addresses that may
- * carry the login as none. Null when any other text holds the password, as nothing then says
- * what else of the login a row carries.
+ * carry the login as none. Null when any other text of the rows holds the password, as nothing
+ * then says what else of the login a row carries; their numbers and field names aren't text.
  */
 function textOf(id: string, saved: Saved, login: readonly string[]): string | null {
   const [username = "", password = ""] = login;
   const art = (url: string | null) => safeUrl(url, username, password);
-  const head = { version: VERSION, subscriptionId: id, fetchedAt: saved.fetchedAt };
-  const text = JSON.stringify(
-    saved.kind === "live"
-      ? { ...head, kind: saved.kind, catalogue: liveCopy(saved.catalogue, art) }
-      : { ...head, kind: saved.kind, catalogue: titlesCopy(saved.catalogue, art) },
+  const catalogue =
+    saved.kind === "live" ? liveCopy(saved.catalogue, art) : titlesCopy(saved.catalogue, art);
+  if (password !== "" && holds(catalogue, password)) return null;
+  return JSON.stringify({
+    version: VERSION,
+    subscriptionId: id,
+    fetchedAt: saved.fetchedAt,
+    kind: saved.kind,
+    catalogue,
+  });
+}
+
+/** Whether a text within `value`, a copy's rows, holds `password`. Artwork kept has none. */
+function holds(value: unknown, password: string): boolean {
+  if (typeof value === "string") return value.includes(password);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Object.values(value).some((each: unknown) => holds(each, password))
   );
-  // Escaped as JSON escapes every text in it, so it is found within any of them.
-  return password !== "" && text.includes(JSON.stringify(password).slice(1, -1)) ? null : text;
 }
 
 type Art = (url: string | null) => string | null;
@@ -341,21 +362,25 @@ const decoded = (text: string) => {
 
 /**
  * `url` when the disk may keep it: an http(s) address of at most 2048 characters, with no login
- * before its host, no path part or query value that is the username or the password, and the
- * password nowhere in it, as written or decoded. Otherwise null.
+ * before its host, no path part, query name or query value that is the username, and the password
+ * nowhere in it: not as written, decoded whole, nor within any decoded path part, fragment, or
+ * query name or value, which decode "+" as a space. Otherwise null.
  */
 function safeUrl(url: string | null, username: string, password: string): string | null {
   if (url === null || url.length > URL_LENGTH) return null;
   const parsed = URL.parse(url);
   if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) return null;
   if (parsed.username !== "" || parsed.password !== "") return null;
-  const whole = decoded(url);
-  if (whole === null) return null;
-  if (password !== "" && (url.includes(password) || whole.includes(password))) return null;
-  const parts = [...parsed.pathname.split("/").map(decoded), ...parsed.searchParams.values()];
+  const parts = [
+    url,
+    decoded(url),
+    decoded(parsed.hash),
+    ...parsed.pathname.split("/").map(decoded),
+    ...[...parsed.searchParams].flat(),
+  ];
   const named = (part: string | null) =>
     part === null ||
     (username !== "" && part === username) ||
-    (password !== "" && part === password);
+    (password !== "" && part.includes(password));
   return parts.some(named) ? null : url;
 }

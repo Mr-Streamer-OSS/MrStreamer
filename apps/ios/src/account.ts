@@ -63,9 +63,11 @@ import { eraseWatchlist, setWatchlistOwners } from "./watchlist.ts";
 // while each subscription signs in again. One saved less than 12 hours ago shows as loaded, and
 // the provider isn't asked for it, though the login is still checked; an older one shows while
 // its list loads again, and stays when that fails. Reload, Try again and an add always ask the
-// provider. A new password, for an account added again or edited, deletes the saved lists before
-// the Keychain takes it, and a removal deletes them: no list of the earlier login is saved after
-// that, and a write under way can't bring them back.
+// provider. A new password, for an account added again or edited, or an account added again
+// under a removed one's id, is given to the Keychain only once its saved lists are gone; when
+// they can't be deleted, the change fails and the login stays as it was. A removal deletes them
+// as it can, leaving the rest to the next launch or the next add. No list of an earlier login is
+// saved after a deletion, and a write under way can't bring them back.
 
 /** A list one subscription loads; a failed or repeated load keeps the last one it had. */
 export type Loadable<A> =
@@ -244,11 +246,27 @@ function save(id: string, source: Source, saved: Saved) {
 
 /**
  * Deletes `id`'s saved lists once what reads or writes them has finished; from now on none of a
- * login signed in before is saved again.
+ * login signed in before is saved again. Answers whether they are all gone.
  */
-function dropSaved(id: string): Promise<void> {
+function dropSaved(id: string): Promise<boolean> {
   dropped.set(id, revisions);
   return dropLists(id);
+}
+
+/**
+ * Deletes `id`'s saved lists before a new password or account takes its id, or throws when some
+ * are left, which the next launch would show for the new login. The login then stays as it was,
+ * and its lists may be saved again.
+ */
+async function clearSaved(id: string): Promise<void> {
+  const before = dropped.get(id);
+  if (await dropSaved(id)) return;
+  if (before === undefined) dropped.delete(id);
+  else dropped.set(id, before);
+  throw new AppFailure({
+    kind: "unexpected",
+    detail: "The lists this iPhone saved couldn't be deleted. Try again.",
+  });
 }
 
 /**
@@ -467,7 +485,8 @@ const authenticate = (account: XtreamAccount, signal?: AbortSignal) =>
  *
  * A new subscription is saved when the registry lists it: aborting `signal` before then, its
  * password's write included, leaves everything as it was. For an account already saved, the
- * change is made once its password starts to be written, as `update` makes one.
+ * change is made once its password starts to be written, as `update` makes one. Lists saved for
+ * the id that the phone won't delete leave everything as it was too, and the promise rejects.
  */
 export async function add(input: LoginInput, signal?: AbortSignal): Promise<string | null> {
   const { account } = parseLogin(input);
@@ -483,7 +502,7 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
     const name = nameOf(input.name);
     const known = registry.subscriptions.find((entry) => sameAccount(entry, account));
     if (known) {
-      await dropSaved(known.id);
+      await clearSaved(known.id);
       await keychainSecrets.write(known.id, account.password);
       const entry = name === undefined || name === known.name ? known : { ...known, name };
       if (entry !== known) {
@@ -510,8 +529,8 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
     };
     const first = registry.subscriptions.length === 0;
     try {
-      // A retired id's lists went with its removal; none is shown for this login either way.
-      await dropSaved(id);
+      // A retired id's lists went with its removal, unless the disk refused it then.
+      await clearSaved(id);
       await keychainSecrets.write(id, account.password);
       // Left while the password was written: it goes again, and nothing is saved.
       if (signal?.aborted) {
@@ -557,7 +576,9 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
  * checks the new one first, and nothing changes when it refuses. Aborting `signal` while the
  * provider checks it, or while another change runs, leaves it as it was. The change is made from
  * the moment it starts being saved, as the Keychain may hold the new password from then: aborting
- * after that changes nothing, and the change completes.
+ * after that changes nothing, and the change completes. A new password waits for the lists saved
+ * for the old one to be deleted; when the phone won't delete them, nothing changes and the promise
+ * rejects.
  */
 export async function update(
   id: string,
@@ -575,7 +596,7 @@ export async function update(
     const now = registry.subscriptions.find((each) => each.id === id);
     if (!now) throw new AppFailure({ kind: "no-subscription" });
     if (password) {
-      await dropSaved(id);
+      await clearSaved(id);
       await keychainSecrets.write(id, password);
     }
     const name = nameOf(change.name);
@@ -610,7 +631,8 @@ export function remove(id: string, { keepHistory }: { keepHistory: boolean }): P
     commit(withoutSubscription(registry, entry, keepHistory));
     for (const kind of ["live", "titles"] as const) loads.get(`${kind}|${id}`)?.abort();
     dropSource(id);
-    // After any write of them under way; an add again waits for it before its password is saved.
+    // After any write of them under way. What the disk refuses goes at the next launch, or before
+    // the account added again takes the id back.
     void dropSaved(id);
     // A request waiting to play, such as a series' resume, lapses; with none left, so does Watch,
     // unless it shows a downloaded copy, which needs no subscription.

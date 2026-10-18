@@ -29,6 +29,8 @@ const memory = vi.hoisted(() => ({
   holdLists: false,
   /** Changes a channel list's rows on their way to the app. */
   channels: null as null | ((rows: Record<string, unknown>[]) => Record<string, unknown>[]),
+  /** Passwords a panel takes for its own, as one whose password was changed. */
+  aliases: [] as Array<readonly [alias: string, password: string]>,
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -66,12 +68,17 @@ const LISTS = new Set([
 ]);
 const passThrough = globalThis.fetch;
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
-  const action = new URL(input).searchParams.get("action") ?? "login";
+  const url = memory.aliases.reduce(
+    (each, [alias, password]) =>
+      each.replaceAll(encodeURIComponent(alias), encodeURIComponent(password)),
+    input,
+  );
+  const action = new URL(url).searchParams.get("action") ?? "login";
   memory.requests.push(action);
   if (LISTS.has(action) && memory.holdLists) {
     await new Promise<void>((go) => memory.heldLists.push(go));
   }
-  const response = await passThrough(input, init);
+  const response = await passThrough(url, init);
   const rewrite = memory.channels;
   if (action !== "get_live_streams" || !rewrite || !response.ok) return response;
   const rows = (await response.json()) as Record<string, unknown>[];
@@ -111,6 +118,13 @@ beforeAll(async () => {
 afterAll(async () => {
   await Promise.all([one.close(), two.close()]);
 });
+/** Panels a test starts for a login of its own, closed after it. */
+const started: FakeProvider[] = [];
+async function panelFor(login: typeof ONE) {
+  const panel = await startFakeProvider({ ...login, channels: 10, titles: 10 });
+  started.push(panel);
+  return panel;
+}
 
 const folder = join(native.root, "cache", "catalogues");
 const pathOf = (name: string) => join(folder, name);
@@ -159,6 +173,8 @@ beforeEach(() => {
   rmSync(join(native.root, "documents"), { recursive: true, force: true });
   rmSync(join(native.root, "cache"), { recursive: true, force: true });
   native.gate = null;
+  native.undeletable = null;
+  memory.aliases = [];
   memory.keychain.clear();
   memory.holdSecrets = false;
   memory.heldSecrets.length = 0;
@@ -175,9 +191,10 @@ beforeEach(async () => {
   for (const each of [Paths.document, Paths.cache])
     new Directory(each).create({ idempotent: true });
 });
-afterEach(() => {
+afterEach(async () => {
   for (const go of memory.heldLists.splice(0)) go();
   vi.useRealTimers();
+  await Promise.all(started.splice(0).map((panel) => panel.close()));
 });
 
 describe("a launch with lists saved", () => {
@@ -417,6 +434,55 @@ describe("saving lists", () => {
     expect(member(app, id).live.kind).toBe("ready");
   });
 
+  it("writes as none artwork whose decoded query holds the password, as form encoding spells it", async () => {
+    const login = { username: "three", password: "canary space 3" };
+    const { password } = login;
+    const unsafe = [
+      `https://img.example/logo.png?${new URLSearchParams({ token: `prefix${password}suffix` })}`,
+      `https://proxy.example/image?${new URLSearchParams({ url: `http://panel.example/live/three/${password}/7.png` })}`,
+      `https://img.example/logo.png?${new URLSearchParams({ [`k${password}`]: "1" })}`,
+    ];
+    // The username within a longer part is no login.
+    const safe = "https://img.example/threefold/logo.png?ref=three-ish";
+    const art = [...unsafe, safe];
+    memory.channels = (rows) =>
+      rows.map((row, at) => (at < art.length ? { ...row, stream_icon: art[at] } : row));
+    const app = await launch();
+    const id = await added(app, await panelFor(login), login);
+    const listed = app.shownOf(member(app, id).live)?.channels ?? [];
+    const kept = contents(`${id}.live.json`).catalogue.channels as { logoUrl: string | null }[];
+    expect(kept).toHaveLength(listed.length);
+    expect(kept.slice(0, art.length).map((each) => each.logoUrl)).toEqual([
+      ...unsafe.map(() => null),
+      safe,
+    ]);
+    expect(listed.slice(0, art.length).map((each) => each.logoUrl)).toEqual(art);
+    const text = readFileSync(pathOf(`${id}.live.json`), "utf8");
+    for (const spelling of [
+      password,
+      password.replaceAll(" ", "+"),
+      encodeURIComponent(password),
+    ]) {
+      expect(text).not.toContain(spelling);
+    }
+  });
+
+  for (const [what, password] of [
+    ["a number", "90817"],
+    ["a field's name", "catchupDays"],
+  ] as const) {
+    it(`saves lists in which the password is only ${what}`, async () => {
+      const login = { username: "four", password };
+      memory.channels = (rows) => rows.map((row, at) => (at === 0 ? { ...row, num: 90817 } : row));
+      const app = await launch();
+      const id = await added(app, await panelFor(login), login);
+      expect(readFileSync(pathOf(`${id}.live.json`), "utf8")).toContain(password);
+      const again = await launch();
+      await until(() => member(again, id).titles.kind === "ready", "the saved lists");
+      expect(member(again, id).live).toMatchObject({ kind: "ready", from: "cache" });
+    });
+  }
+
   it("leaves a list loaded when it can't be saved", async () => {
     native.gate = (operation) =>
       operation === "write" ? Promise.reject(new Error("The disk is full")) : undefined;
@@ -453,6 +519,65 @@ describe("a login replaced or removed", () => {
       void changing;
     });
   }
+
+  for (const how of ["added again", "given a new password"] as const) {
+    it(`keeps the old login of one ${how} while its saved lists can't be deleted`, async () => {
+      const NEW = "oneNewPw7";
+      memory.aliases = [[NEW, ONE.password]];
+      const id = await added(await launch(), one, ONE);
+      const change = (app: App) =>
+        how === "added again"
+          ? app.add({ server: one.url, username: ONE.username, password: NEW })
+          : app.update(id, { password: NEW });
+      native.undeletable = (path) => path.endsWith(`${id}.live.json`);
+      const app = await launch();
+      await until(() => member(app, id).titles.kind === "ready", "the saved lists");
+      await expect(change(app)).rejects.toMatchObject({ error: { kind: "unexpected" } });
+      expect(memory.keychain.get(`s.${id}`)).toBe(ONE.password);
+      expect(member(app, id).live.kind).toBe("ready");
+
+      // Restarted: the old login, whose list stayed, signs in again.
+      const again = await launch();
+      await until(() => member(again, id).account !== null, "the login check");
+      expect(member(again, id).account).toMatchObject({ state: "active" });
+      expect(member(again, id).live).toMatchObject({ kind: "ready", from: "cache" });
+
+      // Once the phone deletes it, the change goes through, and nothing of the old login shows.
+      native.undeletable = null;
+      memory.holdLists = true;
+      await change(again);
+      expect(memory.keychain.get(`s.${id}`)).toBe(NEW);
+      expect(savedOf(id)).toEqual([]);
+      const waiting = memory.heldLists.length;
+      const third = await launch();
+      await until(() => memory.heldLists.length > waiting, "a list request");
+      expect(member(third, id).live).toMatchObject({ kind: "loading", last: null });
+    });
+  }
+
+  it("never gives an account added again the lists of its removal the phone couldn't delete", async () => {
+    const app = await launch();
+    const id = await added(app, one, ONE);
+    native.undeletable = (path) => path.endsWith(`${id}.titles.json`);
+    await app.remove(id, { keepHistory: true });
+    await settle();
+    expect(savedOf(id)).toEqual([`${id}.titles.json`]);
+    await expect(app.add({ server: one.url, ...ONE })).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    expect(app.members()).toEqual([]);
+    expect(memory.keychain.has(`s.${id}`)).toBe(false);
+
+    native.undeletable = null;
+    memory.holdLists = true;
+    expect(await app.add({ server: one.url, ...ONE })).toBe(id);
+    expect(savedOf(id)).toEqual([]);
+    const waiting = memory.heldLists.length;
+    const again = await launch();
+    await until(() => memory.heldLists.length > waiting, "a list request");
+    expect(member(again, id).live).toMatchObject({ kind: "loading", last: null });
+    expect(member(again, id).titles.kind).not.toBe("ready");
+  });
 
   it("keeps the saved lists for a new name alone", async () => {
     const app = await launch();
