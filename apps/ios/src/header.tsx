@@ -143,11 +143,17 @@ export function useCloseOnLeave() {
         if (!tabs || tabs.routes[tabs.index]?.key === key) return;
         const stack = tabs.routes.find((route) => route.key === key)?.state;
         if (!stack?.key) return;
+        const focus = stack.index ?? stack.routes.length - 1;
+        const top = stack.routes[focus]?.key;
         const first = stack.routes.findIndex((route) => SHARED.includes(route.name));
-        if (first < 1) return;
+        if (!top || first < 1 || first > focus) return;
+        // From the stack's top screen down to the first shared one. This tab's navigation names
+        // the tab as the action's source, which the stack can't find among its own screens, and
+        // then pops nothing; the stack's own top screen as the source is what it pops from.
         navigation.dispatch({
           type: "POP",
-          payload: { count: stack.routes.length - first },
+          payload: { count: focus - first + 1 },
+          source: top,
           target: stack.key,
         });
       }),

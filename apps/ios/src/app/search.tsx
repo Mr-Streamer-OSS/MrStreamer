@@ -397,7 +397,8 @@ const styles = StyleSheet.create({
   statusText: { color: colors.dim, fontSize: 15 },
   rail: { height: 2, borderRadius: 1, backgroundColor: colors.line, overflow: "hidden" },
   filled: { height: 2, backgroundColor: colors.text },
-  actions: { flexDirection: "row", gap: 24 },
+  // Settings goes under Retry when the two don't fit one line, as at the largest text sizes.
+  actions: { flexDirection: "row", flexWrap: "wrap", columnGap: 24 },
   nothing: { padding: 16, gap: 4 },
   nothingText: { color: colors.text, fontSize: 17, fontWeight: "600" },
   section: {
