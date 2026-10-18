@@ -253,6 +253,34 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     expect(a.provider.detailRequests()).toBe(requests);
   });
 
+  it("persists newly opened legacy-profile display data without restoring episode file rights", async () => {
+    const a = await app();
+    await a.service.refresh(a.subscriptionId);
+    await a.runtime.dispose();
+    const path = join(a.dir, "ondemand.json.gz");
+    const snapshot = JSON.parse(gunzipSync(await readFile(path)).toString()) as Record<
+      string,
+      unknown
+    >;
+    delete snapshot["catalogueStamp"];
+    await writeFile(path, gzipSync(JSON.stringify(snapshot)));
+    const upgraded = await a.start();
+    const displayed = await upgraded.service.details("series", a.series);
+    await upgraded.runtime.dispose();
+    a.provider.failDetails(503);
+    const offline = await a.start();
+    const requests = a.provider.detailRequests();
+    expect(await offline.service.details("series", a.series)).toEqual(displayed);
+    expect(await offline.service.season(a.series, 1)).not.toHaveLength(0);
+    expect(a.provider.detailRequests()).toBe(requests);
+    await expect(offline.service.file(a.episode)).rejects.toBeDefined();
+    a.provider.failDetails(null);
+    await offline.service.file(a.episode);
+    const renewed = a.provider.detailRequests();
+    await offline.service.file(a.episode);
+    expect(a.provider.detailRequests()).toBe(renewed);
+  });
+
   it("coalesces details and file callers while cancellation detaches one waiter", async () => {
     const hold = holdDetails();
     const a = await app();

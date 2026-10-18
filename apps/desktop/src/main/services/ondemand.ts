@@ -777,7 +777,15 @@ function make(deps: OnDemandDeps) {
           else kept = undefined;
         }
         const now = yield* Clock.currentTimeMillis;
-        if (kept && currentDetails(source, kept, stamp, now)) {
+        // An upgraded unstamped catalogue can cache display data too. Only currentDetails can
+        // authorize files; after restart this display-only record still requires provider renewal.
+        const legacyDisplay =
+          fallback &&
+          kept !== undefined &&
+          stamp === undefined &&
+          kept.catalogueStamp === undefined &&
+          younger(kept.at, now, DAY);
+        if (kept && (currentDetails(source, kept, stamp, now) || legacyDisplay)) {
           if (!(yield* stands(source))) return yield* switched;
           keep(details, key, { ...kept, title }, DETAILS_KEPT);
           return { ...kept, title };
@@ -809,12 +817,12 @@ function make(deps: OnDemandDeps) {
               sourceRevision: source.revision,
             };
             if (!(yield* stands(source))) return yield* switched;
-            if (cache && stamp)
+            if (cache)
               yield* cache
                 .remember(providerKey(source, kind, id), {
                   kind: "provider",
                   at: downloaded.at,
-                  catalogueStamp: stamp,
+                  catalogueStamp: stamp ?? "",
                   value: raw,
                 })
                 .pipe(Effect.ignore);
