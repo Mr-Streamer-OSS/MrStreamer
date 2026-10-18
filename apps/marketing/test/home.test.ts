@@ -112,7 +112,7 @@ describe("the download page", () => {
     expect(mine()).toEqual([
       {
         heading: "Windows your system",
-        line: "Windows 11, 64-bit. The Store keeps it updated.",
+        line: "Windows 11, 64-bit.",
         links: [
           ["Get it from Microsoft", STORE],
           ["Setup .exe", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-win-x64-setup.exe`],
@@ -126,7 +126,7 @@ describe("the download page", () => {
     expect(mine()).toEqual([
       {
         heading: "Mac your system",
-        line: "Version 0.0.7. macOS 13 or later, Apple silicon.",
+        line: "macOS 13 or later, Apple silicon.",
         links: [["Download the DMG", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-mac-arm64.dmg`]],
       },
     ]);
@@ -137,7 +137,7 @@ describe("the download page", () => {
     expect(mine()).toEqual([
       {
         heading: "Linux your system",
-        line: "Version 0.0.7. 64-bit Linux. The AppImage needs FUSE 2.",
+        line: "64-bit Linux. The AppImage needs FUSE 2.",
         links: [
           ["Download the AppImage", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-x86_64.AppImage`],
           [".deb", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-amd64.deb`],
