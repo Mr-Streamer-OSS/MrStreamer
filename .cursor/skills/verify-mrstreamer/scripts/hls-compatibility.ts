@@ -45,15 +45,41 @@ export async function hlsCompatibilityScenario(d: Driver, baseline: boolean) {
   });
   d.observed["firstEpoch"] = await d.evaluate<Playing>(video);
   await d.capture("hls-first-epoch");
+  await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 800, y: 700 });
+  await d.click("Open converted HLS subtitles", "document.querySelector('[aria-label=Subtitles]')");
+  await d.click(
+    "Choose the embedded CEA-608 captions",
+    "[...document.querySelectorAll('[data-item]')].find(b => b.textContent.trim() === 'Captions')",
+  );
+  const caption = "document.querySelector('[data-subtitle-text]')?.innerText?.trim() ?? ''";
+  await d.wait(async () => {
+    const v = await d.evaluate<Playing>(video);
+    return v.time < 6 && (await d.evaluate<string>(caption)) === "HELLO CAPTIONS";
+  });
+  d.observed["captionBeforeEpoch"] = {
+    ...(await d.evaluate<Playing>(video)),
+    cue: await d.evaluate<string>(caption),
+  };
+  await d.capture("hls-captions-before-epoch");
   const samples: Playing[] = [];
   d.observed["epochSamples"] = samples;
   await d.wait(async () => {
     const v = await d.evaluate<Playing>(video);
     samples.push(v);
-    return v.time > 8 && v.frames > 175 && v.audio > 0;
+    return (
+      v.time > 8 &&
+      v.frames > 175 &&
+      v.audio > 0 &&
+      (await d.evaluate<string>(caption)) === "HELLO CAPTIONS"
+    );
   });
   d.observed["afterEpoch"] = await d.evaluate<Playing>(video);
   await d.capture("hls-after-epoch");
+  d.observed["captionAfterEpoch"] = {
+    ...(await d.evaluate<Playing>(video)),
+    cue: await d.evaluate<string>(caption),
+  };
+  await d.capture("hls-captions-after-epoch");
   await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 800, y: 700 });
   await d.click("Open More", "document.querySelector('[aria-label=More]')");
   await d.click("Open Sound", "document.querySelector('[role=dialog] [aria-label=Sound]')");

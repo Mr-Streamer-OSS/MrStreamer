@@ -486,11 +486,17 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     if (mine === selection) {
       const error = appError(cause);
       observation.failure(playbackFailure(error), appDiagnostic(error));
-      store.setState({
-        phase: failed(
-          error.kind === "stream" ? classify(error.failure, null) : { kind: "app", error },
-        ),
-      });
+      const problem: PlaybackProblem =
+        error.kind === "stream" ? classify(error.failure, null) : { kind: "app", error };
+      // Converted HLS prepares during open. Reconnect failures consume the same bounded waits
+      // as failures after open; the initial observed-decode repair still gets only one try.
+      const delay = !first && !quiet && retries(problem) ? nextReconnect() : null;
+      if (delay !== null) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        if (mine !== selection) return;
+        if (!quiet) return start(channel, repair);
+      }
+      store.setState({ phase: failed(problem) });
     }
     return;
   }

@@ -14,12 +14,12 @@ const dispose: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   for (const close of dispose.splice(0).reverse()) await close();
 });
-async function app() {
+async function app(ffmpeg = FFMPEG) {
   const host = await startFakeHls();
   dispose.push(() => host.close());
   const runtime = runtimeFor(
-    Playback.layer({ userAgent, ffmpeg: FFMPEG, ffprobe: FFPROBE }).pipe(
-      Layer.provide(PlaybackCoordination.layer),
+    Playback.layer({ userAgent, ffmpeg, ffprobe: FFPROBE }).pipe(
+      Layer.provideMerge(PlaybackCoordination.layer),
       Layer.provideMerge(
         Subscriptions.layer({
           dataDir: await tempDir(),
@@ -35,7 +35,7 @@ async function app() {
   ).add({ server: host.link, username: "", password: "" });
   const playback = await promised(runtime, Playback);
   const channel = (name: string) => ({ subscriptionId: subscription.id, id: `${name}.test` });
-  return { host, playback, channel };
+  return { host, playback, channel, coordination: await promised(runtime, PlaybackCoordination) };
 }
 
 function decoded(bytes: Buffer) {
@@ -70,6 +70,231 @@ it("keeps compatible local HLS lazy and byte-preserving", async () => {
   await playback.close(session.sessionId);
   expect((await fetch(segment)).status).toBe(410);
 });
+
+it("reports a post-open provider refusal from converted HLS without borrowing an HLS selector", async () => {
+  const { host, playback, channel } = await app();
+  const session = await playback.open(channel("epochs"), ["h264", "aac"], { repair: true });
+  expect(session.format).toBe("mpegts");
+  host.overrides.set("/media/epochs-1.ts", { status: 403 });
+  expect(
+    await fetch(session.url)
+      .then((answer) => answer.arrayBuffer())
+      .then(
+        () => "complete",
+        () => "broken",
+      ),
+  ).toBe("broken");
+  expect(await playback.failure(session.sessionId)).toMatchObject({ kind: "refused", status: 403 });
+  expect(
+    await playback.failure(session.sessionId, {
+      kind: "hls",
+      requestId: new URL(session.url).pathname,
+    }),
+  ).toBeNull();
+  expect(host.requests().filter((path) => /epochs-\d.ts/.test(path))).toEqual([
+    "/media/epochs-0.ts",
+    "/media/epochs-1.ts",
+  ]);
+  expect(host.stats().peak).toBe(1);
+  await playback.close(session.sessionId);
+});
+
+it("reports a post-open converter launch failure with its typed conversion context", async () => {
+  const { host, playback, channel } = await app("/no-such-hls-test-ffmpeg");
+  const session = await playback.open(channel("epochs"), ["h264", "aac"], { repair: true });
+  expect(session.format).toBe("mpegts");
+  expect(
+    await fetch(session.url)
+      .then((answer) => answer.arrayBuffer())
+      .then(
+        () => "complete",
+        () => "broken",
+      ),
+  ).toBe("broken");
+  expect(await playback.failure(session.sessionId)).toMatchObject({
+    kind: "unsupported",
+    diagnostic: {
+      diagnostic_stage: "convert",
+      diagnostic_reason: "conversion_failed",
+      diagnostic_container: "hls",
+      diagnostic_delivery: "converted",
+    },
+  });
+  expect(host.requests().filter((path) => /epochs-\d.ts/.test(path))).toEqual([
+    "/media/epochs-0.ts",
+  ]);
+  await playback.close(session.sessionId);
+});
+
+it("preserves compatible receiver passthrough when a secondary AAC PID has no packets", async () => {
+  const { host, playback, channel } = await app();
+  const remuxed = spawnSync(
+    FFMPEG,
+    [
+      "-v",
+      "error",
+      "-i",
+      "pipe:0",
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a:0",
+      "-map",
+      "0:a:0",
+      "-c",
+      "copy",
+      "-f",
+      "mpegts",
+      "pipe:1",
+    ],
+    { input: fixture("h264-aac.mpegts") },
+  );
+  expect(remuxed.status, remuxed.stderr.toString()).toBe(0);
+  const packets: Buffer[] = [];
+  for (let at = 0; at + 188 <= remuxed.stdout.length; at += 188) {
+    const pid = ((remuxed.stdout[at + 1]! & 31) << 8) | remuxed.stdout[at + 2]!;
+    if (pid !== 258) packets.push(remuxed.stdout.subarray(at, at + 188));
+  }
+  const body = Buffer.concat(packets);
+  decoded(body);
+  host.overrides.set("/media/compatible-0.ts", { body });
+  const session = await playback.openReceiver(channel("compatible"), {
+    address: "127.0.0.1",
+    decoders: ["h264", "aac"],
+  });
+  const playlist = await (await fetch(session.url)).text();
+  const segment = playlist.split("\n").find((line) => line && !line.startsWith("#"))!;
+  expect(Buffer.from(await (await fetch(new URL(segment, session.url))).arrayBuffer())).toEqual(
+    body,
+  );
+  await playback.close(session.sessionId);
+});
+
+it("reports an initial one-byte HLS media stall as network, not a subset refusal", async () => {
+  const { host, playback, channel } = await app();
+  host.stalls.set("/media/epochs-0.ts", 1);
+  await expect(
+    playback.open(channel("epochs"), ["h264", "aac"], { repair: true }),
+  ).rejects.toMatchObject({
+    error: { kind: "stream", failure: { kind: "network" } },
+  });
+  expect(host.requests().filter((path) => /epochs-\d.ts/.test(path))).toEqual([
+    "/media/epochs-0.ts",
+  ]);
+});
+
+it("fails a post-open 188KB HLS media stall without treating the segment as complete", async () => {
+  const { host, playback, channel } = await app();
+  host.stalls.set("/media/epochs-0.ts", 188_000);
+  const session = await playback.open(channel("epochs"), ["h264", "aac"], { repair: true });
+  expect(
+    await fetch(session.url)
+      .then((answer) => answer.arrayBuffer())
+      .then(
+        () => "complete",
+        () => "broken",
+      ),
+  ).toBe("broken");
+  expect(await playback.failure(session.sessionId)).toMatchObject({ kind: "network" });
+  expect(host.requests().filter((path) => /epochs-\d.ts/.test(path))).toEqual([
+    "/media/epochs-0.ts",
+  ]);
+  expect(host.stats().peak).toBe(1);
+  await playback.close(session.sessionId);
+}, 20_000);
+
+// Read public output PMTs across the entire stream, including descriptor changes after an epoch.
+function programTracks(bytes: Buffer) {
+  const tracks: { type: number; pid: number; language: string }[] = [];
+  for (let offset = 0; offset + 188 <= bytes.length; offset += 188) {
+    const packet = bytes.subarray(offset, offset + 188);
+    if (packet[0] !== 0x47 || !(packet[1]! & 0x40)) continue;
+    const mode = (packet[3]! >> 4) & 3;
+    if (mode !== 1 && mode !== 3) continue;
+    const payload = packet.subarray(mode === 3 ? 5 + packet[4]! : 4);
+    const section = payload.subarray(1 + payload[0]!);
+    if (section[0] !== 2) continue;
+    const end = Math.min(section.length, 3 + (((section[1]! & 15) << 8) | section[2]!) - 4);
+    for (let at = 12 + (((section[10]! & 15) << 8) | section[11]!); at + 5 <= end;) {
+      const length = ((section[at + 3]! & 15) << 8) | section[at + 4]!;
+      if (section[at] === 15 || section[at] === 6) {
+        for (let d = at + 5; d + 2 <= at + 5 + length; d += 2 + section[d + 1]!)
+          if ([10, 86, 89].includes(section[d]!))
+            tracks.push({
+              type: section[at]!,
+              pid: ((section[at + 1]! & 31) << 8) | section[at + 2]!,
+              language: section.subarray(d + 2, d + 5).toString("ascii"),
+            });
+      }
+      at += 5 + length;
+    }
+  }
+  return tracks;
+}
+
+it("keeps Dutch sound across dut/nld aliases and reordered mixed-language epoch PIDs", async () => {
+  const { host, playback, channel } = await app();
+  const remuxed = spawnSync(
+    FFMPEG,
+    [
+      "-v",
+      "error",
+      "-i",
+      "pipe:0",
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a:1",
+      "-map",
+      "0:a:0",
+      "-map",
+      "0:s?",
+      "-c",
+      "copy",
+      "-metadata:s:a:0",
+      "language=nld",
+      "-metadata:s:a:1",
+      "language=eng",
+      "-metadata:s:s:0",
+      "language=nld",
+      "-metadata:s:s:1",
+      "language=nld",
+      ...[0, 1, 2, 3, 4].flatMap((index) => ["-streamid", `${index}:${512 + index}`]),
+      "-mpegts_pmt_start_pid",
+      "4097",
+      "-f",
+      "mpegts",
+      "pipe:1",
+    ],
+    { input: fixture("hls-epoch-1.mpegts"), maxBuffer: 4 * 1024 * 1024 },
+  );
+  expect(remuxed.status, remuxed.stderr.toString()).toBe(0);
+  host.overrides.set("/media/epochs-1.ts", { body: remuxed.stdout });
+  host.overrides.set("/media/epochs-selected.m3u8", {
+    body: "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nepochs-0.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:6,\nepochs-1.ts\n#EXT-X-ENDLIST\n",
+  });
+  const session = await playback.open(channel("epochs"), ["h264", "aac"], {
+    repair: true,
+    audioLanguage: "nl",
+  });
+  const bytes = Buffer.from(await (await fetch(session.url)).arrayBuffer());
+  decoded(bytes);
+  const tables = programTracks(bytes);
+  const tracks = tables.filter((track) => track.type === 15);
+  expect(new Set(tracks.map((track) => track.language))).toEqual(new Set(["dut", "nld"]));
+  expect(new Set(tracks.map((track) => track.pid))).toEqual(new Set([258]));
+  for (const pid of [259, 260])
+    expect(
+      new Set(tables.filter((track) => track.pid === pid).map((track) => track.language)),
+    ).toEqual(new Set(["dut", "nld"]));
+  expect(await playback.tracks(session.sessionId)).toMatchObject({
+    playing: 258,
+    audio: expect.arrayContaining([
+      { id: 258, language: "nl", label: "Nederlands", default: false },
+    ]),
+  });
+  expect(host.stats().peak).toBe(1);
+}, 20_000);
 
 it("converts ordered epochs with changed PIDs/PCR/codecs, stable selected sound and supported subtitles", async () => {
   const { host, playback, channel } = await app();
@@ -331,9 +556,9 @@ it("keeps picture and sound running when a declared subtitle stream supplies no 
   expect(await playback.failure(session.sessionId)).toBeNull();
 }, 20_000);
 
-it("cancels a pending HLS inspection when another session replaces it", async () => {
+it("releases a stalled HLS inspection at its deadline before admitting the replacement", async () => {
   const { host, playback, channel } = await app();
-  host.stalls.add("/media/epochs-0.ts");
+  host.stalls.set("/media/epochs-0.ts", 1);
   const pending = playback.open(channel("epochs"), ["h264", "aac"], { repair: true }).then(
     (value) => ({ value }),
     (error) => ({ error }),
@@ -405,3 +630,36 @@ it("classifies a dropped provider connection as network without a speculative re
   ).rejects.toMatchObject({ error: { failure: { kind: "network" } } });
   expect(host.requests().filter((path) => path === "/media/epochs-selected.m3u8")).toHaveLength(1);
 });
+
+it("releases a prepared session superseded during inspection without needing another open", async () => {
+  const { host, playback, channel, coordination } = await app();
+  const turn = await playback.begin();
+  const newer: Promise<number>[] = [];
+  host.overrides.set("/media/epochs-0.ts", {
+    body: () => {
+      newer.push(playback.begin());
+      return fixture("hls-epoch-0.mpegts");
+    },
+  });
+  await expect(
+    playback.open(channel("epochs"), ["h264", "aac"], { repair: true, turn }),
+  ).rejects.toMatchObject({ error: { kind: "unexpected" } });
+  await Promise.all(newer);
+  expect(newer).toHaveLength(1);
+  expect(await coordination.busy()).toEqual(new Set());
+});
+
+it.each(["refused", "network"] as const)(
+  "preserves receiver %s failures instead of falling back",
+  async (kind) => {
+    const { host, playback, channel } = await app();
+    if (kind === "refused") host.overrides.set("/media/compatible-0.ts", { status: 403 });
+    else host.failures.add("/media/compatible-0.ts");
+    await expect(
+      playback.openReceiver(channel("compatible"), {
+        address: "127.0.0.1",
+        decoders: ["h264", "aac"],
+      }),
+    ).rejects.toMatchObject({ error: { kind: "stream", failure: { kind } } });
+  },
+);

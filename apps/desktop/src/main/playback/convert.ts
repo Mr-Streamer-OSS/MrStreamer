@@ -86,6 +86,8 @@ export function ffmpegArguments(
   if (pids.subtitles.length > 0) args.push("-c:s", "copy");
   if (conversion.video === "copy") args.push("-c:v", "copy");
   if (conversion.video === "h264") {
+    const [filterOption, filter, ...pixelFormat] = H264_IMAGE_ARGUMENTS;
+    const picture = output?.picture;
     args.push(
       "-c:v",
       "libx264",
@@ -97,18 +99,15 @@ export function ffmpegArguments(
       "21",
       "-g",
       "50",
-      ...H264_IMAGE_ARGUMENTS,
+      filterOption,
+      picture
+        ? `${filter},scale=${picture.width}:${picture.height}:force_original_aspect_ratio=decrease,pad=${picture.width}:${picture.height}:(ow-iw)/2:(oh-ih)/2,setsar=1`
+        : filter,
+      ...pixelFormat,
     );
   }
   if (conversion.audio === "copy") args.push("-c:a", "copy");
   if (conversion.audio === "aac") args.push(...AAC_STEREO_ARGUMENTS);
-  if (output?.picture && conversion.video === "h264") {
-    const { width, height } = output.picture;
-    args.push(
-      "-vf",
-      `${H264_IMAGE_ARGUMENTS[1]},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`,
-    );
-  }
   // HLS epochs may change their input sample rate. Keep one MSE audio configuration.
   if (output && conversion.audio === "aac") args.push("-ar", "48000");
   if (output)

@@ -8,7 +8,7 @@ export async function startFakeHls(options: { readonly realtime?: boolean } = {}
   let peak = 0;
   let bytes = 0;
   const requests: string[] = [];
-  const stalls = new Set<string>();
+  const stalls = new Map<string, number>();
   const failures = new Set<string>();
   const resources: { path: string; range: string | undefined; agent: string | undefined }[] = [];
   const overrides = new Map<
@@ -92,7 +92,7 @@ export async function startFakeHls(options: { readonly realtime?: boolean } = {}
     bytes += body.length;
     if (stalls.has(path)) {
       response.writeHead(200, { "Content-Type": "video/mp2t" });
-      response.write(body.subarray(0, 1));
+      response.write(body.subarray(0, stalls.get(path)));
       return;
     }
     response.writeHead(200, { "Content-Type": "video/mp2t" });

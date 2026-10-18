@@ -862,6 +862,17 @@ export class Playback extends Context.Service<
   static readonly layer = (deps: PlaybackDeps) => Layer.effect(Playback, make(deps));
 }
 
+/** The requested input PID, else the remembered language, else the channel's first sound. */
+function liveAudio(layout: StreamLayout | null, pid: number | null, language: string | null) {
+  return (
+    layout?.audio.find((track) => track.pid === pid) ??
+    (language
+      ? layout?.audio.find((track) => languageCode(track.language) === language)
+      : undefined) ??
+    layout?.audio[0]
+  );
+}
+
 function make(deps: PlaybackDeps) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
@@ -1058,12 +1069,8 @@ function make(deps: PlaybackDeps) {
           ? cleanStart(read, createCleanStart(video.pid, video.codec))
           : read;
       // The track asked for, else the sound in the viewer's language, else the channel's first.
-      const chosen =
-        layout?.audio.find((track) => track.pid === session.audio) ??
-        (session.audioLanguage
-          ? layout?.audio.find((track) => languageCode(track.language) === session.audioLanguage)
-          : undefined);
-      session.playing = (chosen ?? layout?.audio[0])?.pid ?? null;
+      const chosen = liveAudio(layout, session.audio, session.audioLanguage);
+      session.playing = chosen?.pid ?? null;
       const conversion = layout
         ? planConversion(layout, session.decoders, {
             repair: session.repair,
@@ -1210,13 +1217,7 @@ function make(deps: PlaybackDeps) {
           );
           session.delivered = { ...session.delivered, variantId: variant.id };
           const layout = input.firstLayout;
-          const chosen =
-            layout.audio.find((track) => track.pid === session.audio) ??
-            layout.audio.find(
-              (track) =>
-                session.audioLanguage && languageCode(track.language) === session.audioLanguage,
-            ) ??
-            layout.audio[0];
+          const chosen = liveAudio(layout, session.audio, session.audioLanguage);
           const plan = planConversion(
             layout,
             receiver ? new Set<Codec>(["h264", "aac"]) : session.decoders,
@@ -1259,8 +1260,7 @@ function make(deps: PlaybackDeps) {
         } catch (cause) {
           if (session.closed.signal.aborted) throw cause;
           const failure = hlsFailure(cause);
-          if (receiver && failure.diagnostic?.diagnostic_reason === "hls_subset_unsupported")
-            return;
+          if (receiver && failure.kind === "unsupported") return;
           last = failure;
           if (failure.kind === "refused" || failure.kind === "unsupported") throw cause;
         }
@@ -1372,14 +1372,14 @@ function make(deps: PlaybackDeps) {
       signal: AbortSignal,
     ): AsyncGenerator<Uint8Array> {
       const first = input.firstLayout;
-      const initial =
-        first.audio.find((track) => track.pid === session.audio) ??
-        first.audio.find(
-          (track) =>
-            session.audioLanguage && languageCode(track.language) === session.audioLanguage,
-        ) ??
-        first.audio[0];
+      const initial = liveAudio(first, session.audio, session.audioLanguage);
       const position = initial ? first.audio.indexOf(initial) : 0;
+      const language = languageCode(initial?.language);
+      const sameLanguage = first.audio.filter(
+        (track) =>
+          languageCode(track.language) === language && track.description === initial?.description,
+      );
+      const ordinal = initial ? sameLanguage.indexOf(initial) : 0;
       const epochs = session.archive
         ? pacedEpochs(
             input.epochs,
@@ -1409,14 +1409,11 @@ function make(deps: PlaybackDeps) {
           const layout = epoch.layout;
           const matching = layout.audio.filter(
             (track) =>
-              track.language === initial?.language && track.description === initial?.description,
-          );
-          const sameLanguage = first.audio.filter(
-            (track) =>
-              track.language === initial?.language && track.description === initial?.description,
+              languageCode(track.language) === language &&
+              track.description === initial?.description,
           );
           const chosen =
-            matching[sameLanguage.indexOf(initial!)] ?? layout.audio[position] ?? layout.audio[0];
+            matching[ordinal] ?? matching[0] ?? layout.audio[position] ?? layout.audio[0];
           if (initial && !chosen) throw hlsSubsetFailure();
           const plan = planConversion(
             layout,
@@ -1438,7 +1435,7 @@ function make(deps: PlaybackDeps) {
             const stable = first.subtitles.find(
               (original) =>
                 original.format === track.format &&
-                original.language === track.language &&
+                languageCode(original.language) === languageCode(track.language) &&
                 original.page === track.page,
             );
             return stable ? [{ source: pid, output: stable.pid }] : [];
@@ -3184,12 +3181,7 @@ function make(deps: PlaybackDeps) {
           ? cleanStart(input, createCleanStart(video.pid, video.codec))
           : input;
       // The track asked for, else the sound in the viewer's language, else the channel's first.
-      const chosen =
-        layout.audio.find((track) => track.pid === session.audio) ??
-        (session.audioLanguage
-          ? layout.audio.find((track) => languageCode(track.language) === session.audioLanguage)
-          : undefined) ??
-        layout.audio[0];
+      const chosen = liveAudio(layout, session.audio, session.audioLanguage);
       if (!hls) session.playing = chosen?.pid ?? null;
       const decodes = (codec: Codec | "unknown") =>
         codec !== "unknown" && session.decoders.has(codec);
@@ -4243,7 +4235,9 @@ function make(deps: PlaybackDeps) {
             try: () => prepared,
             catch: (cause) => new Failed({ error: { kind: "stream", failure: hlsFailure(cause) } }),
           }).pipe(Effect.tapError(() => Scope.close(session.scope, Exit.void)));
-          yield* coordination.whileAsked(options.turn);
+          yield* coordination
+            .whileAsked(options.turn)
+            .pipe(Effect.tapError(() => Scope.close(session.scope, Exit.void)));
         }
         return session;
       });
@@ -4744,8 +4738,9 @@ function make(deps: PlaybackDeps) {
         Effect.sync(() => {
           const session = sessions.get(sessionId);
           if (!session || session.closed.signal.aborted) return null;
-          if (session.kind !== "live" || !session.hls) return selector ? null : session.failure;
-          // HLS never borrows a session-wide cause. Only a path issued by this session can select
+          if (session.kind !== "live" || session.delivery === "mpegts" || !session.hls)
+            return selector ? null : session.failure;
+          // Direct HLS never borrows a session-wide cause. Only a path issued by this session can select
           // a retained request; parser, native and watchdog errors select no request.
           if (session.receiver) return selector ? null : session.failure;
           const path = selector?.requestId;

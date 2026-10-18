@@ -102,13 +102,14 @@ async function readPart(
       reader.read(),
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => {
-          stop();
+          // Reject before cancellation resolves the pending read as a clean end of body.
           reject(
             new HlsInputFailure({
               kind: "network",
               detail: "The provider did not send HLS media in time.",
             }),
           );
+          stop();
         }, ms);
       }),
     ]);
