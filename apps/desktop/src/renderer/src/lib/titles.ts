@@ -158,15 +158,18 @@ export function useInContinueWatching(title: Title): boolean {
  * Continue watching from the viewing record, at most `limit`: core's `continueEntries`, with the
  * titles from the lists, so showing the row asks the provider nothing.
  */
-export function useContinueWatching(limit = CONTINUE_LIMIT): {
+export function useContinueWatching(
+  limit = CONTINUE_LIMIT,
+  enabled = true,
+): {
   readonly entries: readonly ContinueEntry[];
   readonly loading: boolean;
   readonly error: Error | null;
 } {
   const viewing = useQuery(queries.viewing());
   // All the record offers: the limit applies to what is left to show.
-  const items = viewing.data?.continueWatching ?? [];
-  const marks = viewing.data?.marked ?? [];
+  const items = enabled ? (viewing.data?.continueWatching ?? []) : [];
+  const marks = enabled ? (viewing.data?.marked ?? []) : [];
   /** The version each entry played: the movie, or the episode's series. */
   const played = ({ title }: TitleProgress): OwnedId =>
     title.kind === "movie" ? ownedId(title) : seriesOf(title);

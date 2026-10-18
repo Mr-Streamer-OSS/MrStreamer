@@ -12,6 +12,7 @@ import { t } from "@mrstreamer/core/i18n";
 import { useLocale } from "../../app/language.ts";
 import { useUi, type ChannelList } from "../../app/ui-store.ts";
 import { useNow } from "../../lib/clock.ts";
+import { usePresentationVisible } from "../../lib/presentation.ts";
 import { endOfDay } from "../../lib/format.ts";
 import {
   queries,
@@ -79,6 +80,7 @@ export function useListSearch(
   readonly pending: boolean;
   readonly failed: boolean;
 } {
+  const visible = usePresentationVisible();
   // What was typed, once typing pauses. An emptied field counts at once: the whole list shows
   // without a wait, and what the field held before never searches the list shown next.
   const [settled, settle] = useState(text);
@@ -105,12 +107,13 @@ export function useListSearch(
   const grouped = useQuery({
     ...queries.searchGroups(),
     // Start the one catalogue decision during the typing delay, before programme search waits.
-    enabled: searching,
+    enabled: searching && visible,
   });
   const actionable = text.trim() === "" || text === settled;
   const programmeSearch = queries.listSearch(scope, actionable ? query : "", until);
   const found = useQuery({
     ...programmeSearch,
+    enabled: visible && actionable && query !== "",
     queryKey: actionable
       ? programmeSearch.queryKey
       : ["guide", "searchList", "paused", scope, query, until],
@@ -390,11 +393,13 @@ export function useVisibleListings(
   channels: readonly LiveChannel[],
   visible: readonly number[],
 ): ReadonlyMap<string, Listing> {
+  const visiblePage = usePresentationVisible();
   const pages = [...new Set(visible.map((index) => Math.floor(index / LISTINGS_PAGE)))];
   return useQueries({
-    queries: pages.map((page) =>
-      queries.listings(channels.slice(page * LISTINGS_PAGE, (page + 1) * LISTINGS_PAGE)),
-    ),
+    queries: pages.map((page) => ({
+      ...queries.listings(channels.slice(page * LISTINGS_PAGE, (page + 1) * LISTINGS_PAGE)),
+      enabled: visiblePage,
+    })),
     combine: (results) => {
       const merged = new Map<string, Listing>();
       for (const result of results) {
