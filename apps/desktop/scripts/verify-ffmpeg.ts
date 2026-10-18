@@ -1,5 +1,6 @@
 // Verifies the shipped tools, including warm caches, before a package is built. The tiny source
-// fixtures exercise VP8/WebM, 10-bit VP9/MP4 and 10-bit AV1/Matroska without a system encoder.
+// fixtures exercise VP8/WebM, 10-bit VP9/MP4 and WebM, and 10-bit AV1/Matroska and MP4
+// without a system encoder.
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

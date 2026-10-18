@@ -207,8 +207,9 @@ jobs:
           cat "$RUNNER_TEMP/ffmpeg-codecs.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ffmpeg-codecs-${{ matrix.target }}-${{ inputs.version }}
+          name: ffmpeg-codecs-${{ matrix.target }}-${{ inputs.version }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ffmpeg-codecs.json
+          retention-days: ${{ env.KEEP_DAYS }}
           if-no-files-found: error
 
       # The AirPlay helper as it comes from the compiler, rebuilt only when what the script hashes
@@ -400,8 +401,9 @@ jobs:
           cat "$RUNNER_TEMP/ffmpeg-codecs.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ffmpeg-codecs-win-x64-${{ inputs.version }}
+          name: ffmpeg-codecs-win-x64-${{ inputs.version }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ffmpeg-codecs.json
+          retention-days: ${{ env.KEEP_DAYS }}
           if-no-files-found: error
 
       # Windows installers are unsigned for now. Signing belongs here, as its own step with its
