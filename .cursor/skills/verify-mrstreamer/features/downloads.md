@@ -10,6 +10,8 @@ A movie's details have **Download** beside Play and Save; a series' **Download**
 
 ## Driving it with Electron CDP
 
+Long-series progress checks use 520 episodes in 20 seasons, 2,000 unrelated complete copies and one advancing transfer. Unrelated progress must leave the selected episode statuses and details view unchanged; progress for that exact subscription/file must update its still bar, facts and action. Batch add/cancel/retry reads current queue snapshots after awaited commands, including a new completion or removed missing copy. `renderer/series-download.test.ts`, `downloads.test.ts` and `episode-rows.test.ts` preserve those contracts. `download-performance.probe.ts` is a separate React/happy-dom diagnostic, not native paint evidence.
+
 Run `xvfb-run -a pnpm verify:desktop downloads` after `pnpm build` (no Xvfb on macOS or Windows). It starts the app on an English system; `pnpm verify:desktop downloads fr-FR`, or another interface language, starts it on a system in that one, so System default shows it, and looks for each control and message in that language. The scenario in `scripts/downloads.ts` starts the built app three times on one profile, with the fake provider, fake TMDB and a loopback picture server, and drives it with pointer and key input:
 
 1. Connect; download the two-sound-track movie from its details and S1 E2 of the Formats series from its row, until **Watch offline** and **Downloaded** show.
