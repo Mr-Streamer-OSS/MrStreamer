@@ -124,9 +124,51 @@ it("tries converted sound once for local media and then fails without a network 
   await vi.advanceTimersByTimeAsync(60_000);
   expect(runs).toHaveLength(2);
   expect(ipc.argsOf("analytics.playbackFailure")).toEqual([
-    expect.objectContaining({ failure: "unsupported" }),
+    expect.objectContaining({
+      failure: "unsupported",
+      diagnostic: {
+        diagnostic_stage: "decode",
+        diagnostic_reason: "decode_rejected",
+        diagnostic_container: "mp4",
+        diagnostic_delivery: "unknown",
+        diagnostic_fallback: "audio",
+      },
+    }),
   ]);
-  expect(JSON.stringify(ipc.argsOf("analytics.playbackFailure"))).not.toContain("diagnostic");
+  expect(JSON.stringify(ipc.argsOf("analytics.playbackFailure"))).not.toContain(
+    "Local decoder diagnostic",
+  );
+});
+
+it("reports rejection of a known copy after progress without identifying a missing codec", async () => {
+  ipc.always("playback.diagnostic", {
+    diagnostic_container: "matroska",
+    diagnostic_delivery: "direct",
+    diagnostic_video_codec: "h264",
+    diagnostic_audio_codec: "aac",
+    diagnostic_fallback: "none",
+  });
+  await open();
+  runs[0]!.start();
+  await settle();
+  runs[0]!.fail({ kind: "media", detail: "PRIVATE missing decoder codec-name" });
+  await settle();
+  expect(runs).toHaveLength(1);
+  expect(ipc.argsOf("analytics.playbackFailure")).toEqual([
+    expect.objectContaining({
+      failure: "unsupported",
+      diagnostic: {
+        diagnostic_stage: "decode",
+        diagnostic_reason: "copy_rejected",
+        diagnostic_container: "matroska",
+        diagnostic_delivery: "direct",
+        diagnostic_video_codec: "h264",
+        diagnostic_audio_codec: "aac",
+        diagnostic_fallback: "none",
+      },
+    }),
+  ]);
+  expect(JSON.stringify(ipc.argsOf("analytics.playbackFailure"))).not.toContain("PRIVATE");
 });
 
 it.each([
