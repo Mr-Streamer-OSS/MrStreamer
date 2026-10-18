@@ -288,8 +288,9 @@ try {
     const started = Date.now();
     observations.push({ name: "covered idle begins", at: started });
     // Cross the existing one-minute listing poll while the underlying Home stays mounted.
-    await delay(33_000);
-    await delay(33_000);
+    await delay(42_000);
+    await delay(42_000);
+    await delay(42_000);
     observations.push({ name: "covered idle ends", at: Date.now() });
     const calls = await mainInspector!.evaluate<{ method: string; at: number; channels: number }[]>(
       `globalThis.__maintenanceCalls.filter(call => call.at >= ${started})`,
@@ -330,7 +331,18 @@ try {
       await key(page, "Escape", 27);
       await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role="dialog"]')`));
     }
+    const detailRequests = providers.reduce(
+      (total, provider) => total + provider.detailRequests(),
+      0,
+    );
     await openLongSeries(page);
+    observations.push({
+      name: "cold series provider details",
+      run,
+      requests:
+        providers.reduce((total, provider) => total + provider.detailRequests(), 0) -
+        detailRequests,
+    });
     page.close();
     await quit(app);
   }
