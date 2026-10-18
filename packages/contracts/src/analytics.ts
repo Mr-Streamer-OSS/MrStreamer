@@ -135,6 +135,7 @@ export function appDiagnostic(error: AppError): PlaybackDiagnostic {
       error.failure.kind === "no-network"
     )
       return { diagnostic_stage: "deliver", diagnostic_reason: "network" };
+    return { diagnostic_stage: "unknown", diagnostic_reason: "unknown" };
   }
   if (error.kind === "unreachable")
     return { diagnostic_stage: "open", diagnostic_reason: "network" };

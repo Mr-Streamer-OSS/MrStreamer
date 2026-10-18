@@ -1829,7 +1829,7 @@ function make(deps: PlaybackDeps) {
           detail: t("This build has no ffmpeg to play movies and episodes."),
           diagnostic: {
             ...titleDiagnostic(probe, null, run.audio),
-            diagnostic_stage: "convert",
+            diagnostic_stage: !deps.ffmpeg ? "convert" : "probe",
             diagnostic_reason: !deps.ffmpeg ? "tool_missing" : "probe_failed",
             diagnostic_fallback: run.convertSound ? "audio" : "none",
           },
@@ -1874,6 +1874,7 @@ function make(deps: PlaybackDeps) {
       };
       const child = spawn(deps.ffmpeg, plan.args, { stdio: ["ignore", "pipe", "pipe"] });
       let errors = "";
+      let spawnFailed = false;
       child.stderr.on("data", (chunk: Buffer) => {
         errors = (errors + chunk.toString()).slice(-2000);
       });
@@ -1907,16 +1908,7 @@ function make(deps: PlaybackDeps) {
       });
       child.on("error", (cause) => {
         errors = String(cause);
-        if (!signal.aborted)
-          session.failure ??= {
-            kind: "unsupported",
-            detail: String(cause),
-            diagnostic: {
-              ...session.diagnostic,
-              diagnostic_stage: "convert",
-              diagnostic_reason: "tool_failed",
-            },
-          };
+        spawnFailed = true;
       });
 
       const start = textRelay();
@@ -2033,7 +2025,7 @@ function make(deps: PlaybackDeps) {
           diagnostic: {
             ...session.diagnostic,
             diagnostic_stage: "convert",
-            diagnostic_reason: "conversion_failed",
+            diagnostic_reason: spawnFailed ? "tool_failed" : "conversion_failed",
           },
         };
         session.failure = failure;
@@ -2077,7 +2069,7 @@ function make(deps: PlaybackDeps) {
             diagnostic: {
               ...session.diagnostic,
               diagnostic_stage: "convert",
-              diagnostic_reason: "conversion_failed",
+              diagnostic_reason: spawnFailed ? "tool_failed" : "conversion_failed",
             },
           };
         }
@@ -2744,6 +2736,7 @@ function make(deps: PlaybackDeps) {
           kind: "unsupported",
           diagnostic: {
             ...liveDiagnostic(layout, null, session.repair, session.audio),
+            diagnostic_delivery: "unknown",
             diagnostic_stage: "inspect",
             diagnostic_reason: !ffmpeg ? "tool_missing" : "inspection_undetermined",
           },
@@ -3152,6 +3145,7 @@ function make(deps: PlaybackDeps) {
 
       const child = spawn(ffmpeg, planned.args, { stdio: ["ignore", "ignore", "pipe"] });
       let errors = "";
+      let spawnFailed = false;
       child.stderr.on("data", (chunk: Buffer) => {
         errors = (errors + chunk.toString()).slice(-2000);
       });
@@ -3164,16 +3158,7 @@ function make(deps: PlaybackDeps) {
         child.on("close", resolve);
         child.on("error", (cause) => {
           errors = String(cause);
-          if (!signal.aborted)
-            session.failure ??= {
-              kind: "unsupported",
-              detail: String(cause),
-              diagnostic: {
-                ...session.diagnostic,
-                diagnostic_stage: "convert",
-                diagnostic_reason: "tool_failed",
-              },
-            };
+          spawnFailed = true;
           resolve(null);
         });
       });
@@ -3240,7 +3225,7 @@ function make(deps: PlaybackDeps) {
             diagnostic: {
               ...session.diagnostic,
               diagnostic_stage: "convert",
-              diagnostic_reason: "conversion_failed",
+              diagnostic_reason: spawnFailed ? "tool_failed" : "conversion_failed",
             },
           };
           report(session.failure.kind);
@@ -3523,10 +3508,12 @@ function make(deps: PlaybackDeps) {
           { timeout: PROBE_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
           (error, stdout) => {
             session.closed.signal.removeEventListener("abort", stop);
-            toolFailed = error !== null && typeof error.code === "string";
             resolve(error ? null : stdout);
           },
         );
+        child.once("error", () => {
+          toolFailed = true;
+        });
         const stop = () => void child.kill("SIGKILL");
         session.closed.signal.addEventListener("abort", stop, { once: true });
       });
@@ -3534,7 +3521,7 @@ function make(deps: PlaybackDeps) {
       try {
         json = output === null ? null : JSON.parse(output);
       } catch {
-        // Not JSON: the file couldn't be read, handled below.
+        // Unusable probe output is a probe failure, not evidence about the media.
       }
       const probe = json === null ? null : readProbe(json);
       if (!probe || (!probe.video && probe.audio.length === 0)) {
@@ -3548,11 +3535,9 @@ function make(deps: PlaybackDeps) {
                 diagnostic_stage: "probe",
                 diagnostic_reason: toolFailed
                   ? "tool_failed"
-                  : output === null
+                  : !probe
                     ? "probe_failed"
-                    : !probe
-                      ? "malformed_input"
-                      : "unsupported_input",
+                    : "unsupported_input",
                 diagnostic_fallback: "none",
               },
             },

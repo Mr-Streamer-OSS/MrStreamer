@@ -367,11 +367,8 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
     ["missing tool", null, "tool_missing"],
     ["failed tool launch", "missing", "tool_failed"],
     ["failed probe", "process.exit(1)", "probe_failed"],
-    [
-      "malformed probe output",
-      'console.log("not JSON, missing decoder PRIVATE")',
-      "malformed_input",
-    ],
+    ["malformed probe output", 'console.log("not JSON, missing decoder PRIVATE")', "probe_failed"],
+    ["excess probe output", "process.stdout.write(' '.repeat(9 * 1024 * 1024))", "probe_failed"],
     ["unsupported input", "console.log(JSON.stringify({ streams: [] }))", "unsupported_input"],
   ])("distinguishes %s from a confirmed missing codec", async (_name, script, reason) => {
     const directory = await tempDir();
@@ -420,6 +417,9 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
         const failure = await playback.failure(session.sessionId);
         expect(failure).toMatchObject({
           kind: "unsupported",
+          ...(mode !== "missing"
+            ? { detail: expect.stringMatching(/^The file could not be played\./) }
+            : {}),
           diagnostic: {
             diagnostic_stage: "convert",
             diagnostic_reason:

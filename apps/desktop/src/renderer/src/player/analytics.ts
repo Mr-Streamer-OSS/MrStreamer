@@ -17,22 +17,24 @@ export function engineDiagnostic(
   fallback: "none" | "audio" | "repair",
   context: PlaybackDiagnostic | null = null,
 ): PlaybackDiagnostic {
+  const reason =
+    error.diagnosticReason ??
+    (error.kind === "network"
+      ? "network"
+      : (context?.diagnostic_reason ??
+        (error.kind === "wrong-container"
+          ? "unsupported_input"
+          : context?.diagnostic_delivery === "direct"
+            ? "copy_rejected"
+            : "decode_rejected")));
   return {
-    diagnostic_stage: "decode",
     diagnostic_container: container,
     diagnostic_delivery: "unknown",
     diagnostic_fallback: fallback,
     ...context,
-    diagnostic_reason:
-      error.diagnosticReason ??
-      (error.kind === "network"
-        ? "network"
-        : (context?.diagnostic_reason ??
-          (error.kind === "wrong-container"
-            ? "unsupported_input"
-            : context?.diagnostic_delivery === "direct"
-              ? "copy_rejected"
-              : "decode_rejected"))),
+    diagnostic_stage:
+      reason === "network" ? "deliver" : reason === "malformed_input" ? "inspect" : "decode",
+    diagnostic_reason: reason,
   };
 }
 

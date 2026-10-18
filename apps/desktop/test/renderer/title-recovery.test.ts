@@ -171,6 +171,29 @@ it("reports rejection of a known copy after progress without identifying a missi
   expect(JSON.stringify(ipc.argsOf("analytics.playbackFailure"))).not.toContain("PRIVATE");
 });
 
+it("reports malformed engine input at inspection after its bounded media recovery", async () => {
+  await open();
+  const failure = {
+    kind: "media",
+    detail: "PRIVATE parser error",
+    diagnosticReason: "malformed_input",
+  } as const;
+  runs[0]!.fail(failure);
+  await settle();
+  runs[1]!.fail(failure);
+  await settle();
+  expect(titlePlayer.state().phase.kind).toBe("failed");
+  expect(ipc.argsOf("analytics.playbackFailure")).toEqual([
+    expect.objectContaining({
+      diagnostic: expect.objectContaining({
+        diagnostic_stage: "inspect",
+        diagnostic_reason: "malformed_input",
+      }),
+    }),
+  ]);
+  expect(JSON.stringify(ipc.argsOf("analytics.playbackFailure"))).not.toContain("PRIVATE");
+});
+
 it.each([
   { kind: "refused", status: 403 },
   { kind: "unavailable", status: 404 },
@@ -234,6 +257,10 @@ it("exhausts four 1/2/4/8-second retries across one-second returns", async () =>
   expect(titlePlayer.state().phase).toMatchObject({ kind: "failed", problem: { kind: "network" } });
   await vi.advanceTimersByTimeAsync(60_000);
   expect(runs).toHaveLength(5);
+  expect(ipc.argsOf("analytics.playbackFailure").at(-1)?.diagnostic).toMatchObject({
+    diagnostic_stage: "deliver",
+    diagnostic_reason: "network",
+  });
   // Recovery stays within the original logical play and proxy session.
   expect(ipc.argsOf("analytics.playbackBegin")).toHaveLength(1);
   expect(ipc.argsOf("playback.openTitle")).toHaveLength(1);
