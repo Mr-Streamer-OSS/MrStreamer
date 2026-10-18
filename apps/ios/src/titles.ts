@@ -239,14 +239,26 @@ const making = new Map<TitleKind, IndexedCatalogue>();
 
 /**
  * The collections of `kind` for the lists that show, as TMDB's metadata stood when they were made:
- * null until the first are made, and again from when other lists show until theirs are. Each
- * screen that reads them, as it opens and whenever they are made again, has them made again if
- * time has moved past what they hold (`collect`); the last made show meanwhile.
+ * null until the first are made, and again from when other lists show until theirs are. `reads`
+ * are what the screen reads them by besides (`useHolding`).
  */
-export function useCollections(kind: TitleKind): Collections | null {
+export function useCollections(
+  kind: TitleKind,
+  reads: readonly unknown[] = [],
+): Collections | null {
   const kept = useStore(made[kind]);
-  useEffect(() => collect(kind), [kind, kept]);
+  useHolding(kind, [kept, ...reads]);
   return kept?.collections ?? null;
+}
+
+/**
+ * Has `kind`'s collections made again if time has moved past what they hold (`collect`), as the
+ * screen opens and whenever one of `reads` changes: what it reads them by, such as the title For
+ * you is led by or the collection it shows. The last made show meanwhile. `reads` keeps its
+ * length at each call.
+ */
+export function useHolding(kind: TitleKind, reads: readonly unknown[]): void {
+  useEffect(() => collect(kind), [kind, ...reads]);
 }
 
 /** `useCollections` for owners outside React. */

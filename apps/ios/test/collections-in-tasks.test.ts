@@ -1,3 +1,4 @@
+import * as React from "react";
 import type { CollectionId, Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import type { TitleMetadata } from "@mrstreamer/core/metadata/tmdb";
@@ -12,6 +13,7 @@ import {
 } from "@mrstreamer/core/ondemand/collections";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { xtreamProvider } from "@mrstreamer/core/xtream";
+import { Window } from "happy-dom";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { inTasks } from "../src/library.ts";
 
@@ -21,9 +23,10 @@ import { inTasks } from "../src/library.ts";
 // they show, never while a screen draws: none until the first for the lists that show are made,
 // the last made kept until newer ones are, and none made for lists that no longer show. Both
 // paths agree on how long collections hold: until a title passes New's 7 or 30 days, metadata
-// expires, the year turns or the clock goes back; the owner then makes them again. The
-// subscriptions and TMDB's metadata store stand in at the owner's edges; tasks run as the app
-// runs them.
+// expires, the year turns or the clock goes back; the owner then makes them again once a screen
+// reads them, as Movies and a collection do when what they show by changes. The subscriptions,
+// viewing, TMDB's metadata store and React Native's views stand in at the owner's edges; tasks
+// run as the app runs them.
 
 const edges = vi.hoisted(() => ({
   members: [] as Array<{
@@ -39,6 +42,9 @@ const edges = vi.hoisted(() => ({
   expiry: null as ((kind: string, id?: string) => number) | null,
   /** The owner's notices of what the metadata store learned. */
   notify: null as ((change: { content: boolean }) => void) | null,
+  /** What viewing says was watched lately, and who listens. */
+  viewing: null as unknown,
+  watching: new Set<() => void>(),
 }));
 
 vi.mock("expo-file-system", () => ({ File: class {}, Paths: { cache: "/cache" } }));
@@ -50,9 +56,61 @@ vi.mock("../src/account.ts", () => ({
   },
   shownOf: (titles: { kind: string; value?: unknown }) =>
     titles.kind === "ready" ? titles.value : null,
+  retryTitles: () => undefined,
 }));
 vi.mock("../src/sources.ts", () => ({ currentSource: () => undefined, sourceOf: () => null }));
-vi.mock("../src/viewing.ts", () => ({ serveViewing: () => undefined }));
+vi.mock("../src/viewing.ts", async () => {
+  const { useSyncExternalStore } = await import("react");
+  const subscribe = (listener: () => void) => {
+    edges.watching.add(listener);
+    return () => edges.watching.delete(listener);
+  };
+  return {
+    serveViewing: () => undefined,
+    useViewing: () => useSyncExternalStore(subscribe, () => edges.viewing),
+  };
+});
+vi.mock("expo-router", () => ({ router: { push: () => undefined } }));
+vi.mock("../src/errors.ts", () => ({ describeError: () => "failed" }));
+vi.mock("../src/tab-bar.ts", () => ({ useFixedTabBar: () => undefined }));
+vi.mock("../src/resume.ts", () => ({
+  detailsHref: () => "/",
+  openDetails: () => undefined,
+  resume: () => undefined,
+  useContinueWatching: () => [],
+}));
+vi.mock("react-native", async () => {
+  const { createElement } = await import("react");
+  const box = ({ children }: { children?: React.ReactNode }) =>
+    createElement("div", null, children);
+  return {
+    View: box,
+    Text: box,
+    ScrollView: box,
+    Pressable: box,
+    StyleSheet: { create: <T>(styles: T) => styles },
+  };
+});
+vi.mock("../src/ui.tsx", async () => {
+  const { createElement } = await import("react");
+  return {
+    colors: {},
+    Message: ({ text }: { text: string }) => createElement("p", null, text),
+  };
+});
+vi.mock("../src/titles-ui.tsx", async () => {
+  const { createElement } = await import("react");
+  /** A row or a grid as the ids of its titles. */
+  const shown = (name: string, titles: readonly Title[]) =>
+    createElement("section", { "data-shown": name }, titles.map(ownedKey).join(","));
+  return {
+    Artwork: () => null,
+    CollectionTileView: () => null,
+    TextTabs: () => null,
+    Shelf: ({ name, titles }: { name: string; titles: readonly Title[] }) => shown(name, titles),
+    PosterGrid: ({ titles }: { titles: readonly Title[] }) => shown("grid", titles),
+  };
+});
 vi.mock("../src/watchlist.ts", () => ({ alignWatchlist: () => undefined }));
 vi.mock("@mrstreamer/core/metadata/store", () => ({
   metadataStore: (deps: { onChange: (change: { content: boolean }) => void }) => {
@@ -254,6 +312,8 @@ describe("the collections Movies, Series, Home and details show", () => {
     edges.known = null;
     edges.services = [];
     edges.expiry = null;
+    edges.viewing = null;
+    edges.watching.clear();
     shift = 0;
     const real = Date.now.bind(Date);
     vi.spyOn(Date, "now").mockImplementation(() => real() + shift);
@@ -440,5 +500,79 @@ describe("the collections Movies, Series, Home and details show", () => {
     const again = titles.collectionsOf("movie");
     for (let task = 0; task < 100; task++) await new Promise((done) => setTimeout(done, 1));
     expect(titles.collectionsOf("movie")).toBe(again);
+  });
+
+  describe("on screen", () => {
+    const window = new Window();
+    const REACT_DOM = "react-dom/client";
+    type Root = { render(node: unknown): void; unmount(): void };
+    let root: Root;
+    let container: ReturnType<typeof window.document.createElement>;
+    beforeEach(async () => {
+      Object.assign(globalThis, { window, document: window.document });
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+      const { createRoot } = (await import(REACT_DOM)) as {
+        createRoot(container: object): Root;
+      };
+      container = window.document.createElement("div");
+      window.document.body.append(container);
+      root = createRoot(container);
+    });
+    afterEach(async () => {
+      await React.act(async () => root.unmount());
+      container.remove();
+    });
+
+    const draw = (node: React.ReactNode) => React.act(async () => root.render(node));
+    /** What a row or grid shows, as its titles' ids; null when it isn't there. */
+    const showing = (name: string) =>
+      container.querySelector(`[data-shown="${name}"]`)?.textContent ?? null;
+    /** Runs tasks inside act until `ready`, as the app's tasks run between draws. */
+    async function settled(ready: () => boolean, what: string) {
+      for (let task = 0; !ready(); task++) {
+        if (task > 1000) throw new Error(`Timed out waiting for ${what}`);
+        await React.act(async () => {
+          await new Promise((done) => setTimeout(done, 1));
+        });
+      }
+    }
+    const ids = (titles: readonly Title[]) => titles.map(ownedKey).join(",");
+
+    it("shows For you as it stands now once what was watched changes, after the clock passed New's days", async () => {
+      const { TitlesHome } = await import("../src/titles-screen.tsx");
+      edges.known = tmdbOf(0);
+      subscribe("a");
+      await until(() => titles.collectionsOf("movie") !== null, "the first collections");
+      const index = indexed();
+      const seed = index && seedOf(index);
+      if (!index || !seed) throw new Error("No lists");
+      await draw(React.createElement(TitlesHome, { kind: "movie" }));
+      expect(showing("New this week")).not.toBeNull();
+      // Six days on, nothing is new this week any more; then a film is watched.
+      shift = 6 * 86_400_000;
+      expect(atOnce("movie", index).list("new-week")).toEqual([]);
+      await React.act(async () => {
+        edges.viewing = { recentTitles: [{ title: seed }] };
+        for (const listener of edges.watching) listener();
+      });
+      await settled(() => showing("New this week") === null, "For you as it stands now");
+      const now = atOnce("movie", index);
+      expect(showing("Popular")).toBe(ids(now.list("popular").slice(0, 24)));
+    }, 20_000);
+
+    it("shows a collection as it stands now when the screen turns to another, after the clock passed", async () => {
+      const { CollectionScreen } = await import("../src/titles-screen.tsx");
+      subscribe("a");
+      await until(() => titles.collectionsOf("movie") !== null, "the first collections");
+      const index = indexed();
+      if (!index) throw new Error("No lists");
+      await draw(React.createElement(CollectionScreen, { kind: "movie", id: "all" }));
+      expect(showing("grid")).toBe(ids(atOnce("movie", index).list("all")));
+      shift = 6 * 86_400_000;
+      // The same screen turns to New this week, which has emptied by now.
+      await draw(React.createElement(CollectionScreen, { kind: "movie", id: "new-week" }));
+      await settled(() => showing("grid") === "", "the collection as it stands now");
+      expect(atOnce("movie", index).list("new-week")).toEqual([]);
+    }, 20_000);
   });
 });

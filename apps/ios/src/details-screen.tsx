@@ -558,7 +558,7 @@ function EpisodeRow({
 
 /** More like this: titles sharing the most genres, from TMDB's metadata. */
 function Related({ title }: { title: Title }) {
-  const made = useCollections(title.kind);
+  const made = useCollections(title.kind, [ownedKey(title)]);
   const like = useMemo(
     () => made?.list(`like:${ownedKey(title)}`).slice(0, 24) ?? [],
     [made, title],

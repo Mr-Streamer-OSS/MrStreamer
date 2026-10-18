@@ -10,7 +10,7 @@ import { describeError } from "./errors.ts";
 import { detailsHref, openDetails, resume, useContinueWatching } from "./resume.ts";
 import { store, useStore } from "./store.ts";
 import { useFixedTabBar } from "./tab-bar.ts";
-import { tilesOf, useCollections, useTitleLists } from "./titles.ts";
+import { tilesOf, useCollections, useHolding, useTitleLists } from "./titles.ts";
 import { Artwork, CollectionTileView, PosterGrid, Shelf, TextTabs } from "./titles-ui.tsx";
 import { colors, Message } from "./ui.tsx";
 import { useViewing } from "./viewing.ts";
@@ -95,6 +95,8 @@ function Browse({ made, kind }: { made: Collections; kind: TitleKind }) {
     () => (tab === "genres" || tab === "services" ? tilesOf(made, tab) : []),
     [made, tab],
   );
+  // TitlesHome asks as Movies opens and as collections are made; the tab and lead are Browse's.
+  useHolding(kind, [tab, like]);
   useFixedTabBar(grid);
   const choose = (next: Tab) => places.set((current) => ({ ...current, [kind]: next }));
   const header = <TextTabs tabs={tabs} value={tab} onChange={choose} />;
@@ -225,7 +227,7 @@ function Featured({ title }: { title: Title }) {
 
 /** A collection pushed over its tab: a row's All, a genre or a service. */
 export function CollectionScreen({ kind, id }: { kind: TitleKind; id: CollectionId }) {
-  const made = useCollections(kind);
+  const made = useCollections(kind, [id]);
   useFixedTabBar(true);
   const found = useMemo(
     () => (made ? { name: made.name(id) ?? "", titles: made.list(id) } : null),
