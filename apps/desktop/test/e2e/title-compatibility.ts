@@ -1,6 +1,6 @@
 // Built-checkout proof through the actual Movies and Downloads UI. System tools on Linux are
 // source-build evidence; run installed/bundled acceptance separately on each native platform.
-// xvfb-run -a node apps/desktop/test/e2e/title-compatibility.ts [h264-10bit | hevc-12bit | h264-rejected-copy]
+// xvfb-run -a node apps/desktop/test/e2e/title-compatibility.ts [h264-10bit | hevc-12bit | h264-rejected-copy | h264-later-rejection]
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -18,7 +18,7 @@ import { startFakeTmdb } from "../fake-tmdb.ts";
 import { connect, key, login, waitFor, type Page } from "./app.ts";
 
 const variant = process.argv[2] ?? "h264-10bit";
-if (variant !== "h264-10bit" && variant !== "hevc-12bit" && variant !== "h264-rejected-copy")
+if (!["h264-10bit", "hevc-12bit", "h264-rejected-copy", "h264-later-rejection"].includes(variant))
   throw new Error("Unknown fixture");
 const executable = await electronExecutable();
 const desktop = resolve("apps/desktop");
@@ -28,7 +28,7 @@ const provider = await startFakeProvider({ channels: 60, titles: 30, live: true 
 const tmdb = await startFakeTmdb();
 const movie = provider.titles.movies.find((each) => each.name.includes("Two sound tracks"))!;
 const clip = Buffer.from(
-  fixture(`title-${variant === "h264-rejected-copy" ? "h264-10bit" : variant}.mkv`),
+  fixture(`title-${variant.startsWith("h264-") ? "h264-10bit" : variant}.mkv`),
 );
 if (variant === "h264-rejected-copy") {
   // Invalid AVC configuration profile, valid High 10 SPS/pictures. Copy preserves that invalid
@@ -123,6 +123,9 @@ try {
   });
   await live.evaluate(
     `window.__compatibility = { checks: [], errors: [] }; const original = MediaSource.isTypeSupported.bind(MediaSource); MediaSource.isTypeSupported = (type) => { const supported = original(type); window.__compatibility.checks.push({ type, supported }); return supported; }; document.addEventListener('error', e => { if (e.target instanceof HTMLVideoElement) window.__compatibility.errors.push({ code: e.target.error?.code, message: e.target.error?.message, time: e.target.currentTime }); }, true);`,
+  );
+  await live.evaluate(
+    `const add = MediaSource.prototype.addSourceBuffer; MediaSource.prototype.addSourceBuffer = function(type) { const buffer = add.call(this, type); window.__compatibility.buffer = buffer; return buffer; };`,
   );
   await login(live, provider);
   const click = async (description: string, expression: string) => {
@@ -228,6 +231,41 @@ try {
   observations["onlineDecoded"] = await video();
   await live.evaluate("window.__compatibility.node = document.querySelector('video')");
   await shot("online-recovered");
+  if (variant === "h264-later-rejection") {
+    await key(live, " ", 32);
+    await waitFor(async () => (await video()).paused);
+    const position = (await video()).time;
+    for (const fallback of ["sound=convert", "picture=convert"]) {
+      const before = deliveries.length;
+      // This invokes the real MSE parser with an impossible ISO box size. No engine method or
+      // synthetic media error is involved. The browser's MediaError must drive recovery.
+      await live.evaluate(
+        `window.__compatibility.buffer.appendBuffer(new Uint8Array([0, 0, 0, 4, 109, 111, 111, 102]));`,
+      );
+      await waitFor(async () =>
+        deliveries.slice(before).some((entry) => JSON.stringify(entry).includes(fallback)),
+      );
+      await waitFor(async () => {
+        const v = await video();
+        return v.paused && v.time >= position - 0.1 && v.frames > 1;
+      });
+      observations[`later-${fallback}`] = await video();
+    }
+    observations["actualLaterRejections"] = await live.evaluate("window.__compatibility.errors");
+    await shot("later-recovered-paused");
+    const held = await video();
+    await key(live, " ", 32);
+    await waitFor(async () => {
+      const resumed = await video();
+      return (
+        !resumed.paused &&
+        resumed.time > held.time + 0.25 &&
+        resumed.frames > held.frames &&
+        resumed.audio > held.audio
+      );
+    });
+  }
+
   await key(live, " ", 32);
   await waitFor(async () => (await video()).paused);
   await key(live, "ArrowRight", 39);
@@ -258,8 +296,17 @@ try {
   await shot("fullscreen-paused");
   await key(live, "f", 70);
   await waitFor(() => live.evaluate<boolean>("!document.fullscreenElement"));
+  const held = await video();
   await key(live, " ", 32);
-  await moving();
+  await waitFor(async () => {
+    const resumed = await video();
+    return (
+      !resumed.paused &&
+      resumed.time > held.time + 0.25 &&
+      resumed.frames > held.frames &&
+      resumed.audio > held.audio
+    );
+  });
   observations["resumed"] = await video();
   await key(live, "Escape", 27);
   await waitFor(() => live.evaluate<boolean>("!document.querySelector('[data-view=title]')"));

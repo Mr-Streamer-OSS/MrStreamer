@@ -687,7 +687,7 @@ async function recover(
         ? streamDiagnostic(upstream)
         : {
             ...engineDiagnostic(error, "mp4", convertSound ? "audio" : "none", context),
-            ...(local && (rejectedCopy || error.video === "copy")
+            ...(local && !error.diagnosticReason && (rejectedCopy || error.video === "copy")
               ? {
                   diagnostic_stage: "decode" as const,
                   diagnostic_reason: "copy_rejected" as const,
