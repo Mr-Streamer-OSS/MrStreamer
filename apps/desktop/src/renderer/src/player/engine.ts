@@ -253,7 +253,7 @@ function hlsEngine(
 }
 
 /** Maps an HLS failure before teardown discards its loader and fragment context. */
-export function hlsError(data: ErrorData, source: string): EngineError {
+function hlsError(data: ErrorData, source: string): EngineError {
   // hls.js also groups malformed/empty playlist content under NETWORK_ERROR.
   const parsing = [
     Hls.ErrorDetails.MANIFEST_PARSING_ERROR,
