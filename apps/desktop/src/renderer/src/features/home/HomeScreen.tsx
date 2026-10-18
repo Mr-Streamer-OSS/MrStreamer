@@ -125,8 +125,9 @@ export function HomeScreen({ active }: { active: boolean }) {
   const posters = fit(POSTER_REM);
   const preferences = useQuery(queries.preferences());
   const rows = homeRows(preferences.data?.homeRows);
-  const needs = (id: HomeRowId) =>
-    visible && preferences.isSuccess && rows.some((row) => row.id === id && row.visible);
+  const allowed = (id: HomeRowId) =>
+    preferences.isSuccess && rows.some((row) => row.id === id && row.visible);
+  const needs = (id: HomeRowId) => visible && allowed(id);
   const channelRows = { favourites, recent, category: inCategory };
   const isChannelRow = (id: HomeRowId): id is keyof typeof channelRows => id in channelRows;
   const promoted = rows
@@ -156,7 +157,7 @@ export function HomeScreen({ active }: { active: boolean }) {
     ...queries.watchlist("saved", 0, PAGE, true),
     enabled: onDemand && needs("watchlist"),
   }).data;
-  const continuing = useContinueWatching(undefined, needs("continue"));
+  const continuing = useContinueWatching(undefined, allowed("continue"));
   const resume = useResume();
   const removal = useRemoveFromContinue();
   const playing = notForAdults(usePlayer((state) => state.channel));

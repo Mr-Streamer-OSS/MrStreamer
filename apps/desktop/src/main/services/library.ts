@@ -35,10 +35,12 @@ import type { CatalogueChannels, GuideChannels } from "@mrstreamer/core/guide/pr
 import type { LiveCatalogue } from "@mrstreamer/core/provider";
 import { normalize } from "@mrstreamer/core/text";
 import { indexNames, nameQuery, scoreNames, type SearchNames } from "@mrstreamer/core/search/names";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
@@ -318,7 +320,12 @@ function make(options: LibraryOptions) {
           running = { subscription, token, fiber };
           loading.set(subscription.id, running);
         }
-        return yield* Fiber.join(running.fiber);
+        // Removal or a newer source can stop this owned read. A waiting caller still cancels
+        // independently while awaiting it; only the read's own interruption means a cache miss.
+        const result = yield* Fiber.await(running.fiber);
+        if (Exit.isSuccess(result)) return result.value;
+        if (Cause.hasInterruptsOnly(result.cause)) return null;
+        return yield* Effect.failCause(result.cause);
       });
 
     const statusOf = (subscriptionId: string, shown: IndexedCatalogue | null): CatalogueStatus => {
