@@ -14,8 +14,10 @@ type Hit = {
 };
 
 /** Holds one public filesystem promise around a real atomic rename, never an analytics method. */
-export async function boundary(main: Page, profile: string) {
-  await main.evaluate(`(${install.toString()})(${JSON.stringify(profile)})`);
+export async function boundary(main: Page, profile: string, directory = profile) {
+  await main.evaluate(
+    `(${install.toString()})(${JSON.stringify(profile)},${JSON.stringify(directory)})`,
+  );
   return {
     arm: async (spec: Boundary) => {
       await main.evaluate(`globalThis.__nativeTelemetryFS.arm(${JSON.stringify(spec)})`);
@@ -30,7 +32,7 @@ export async function boundary(main: Page, profile: string) {
   };
 }
 
-async function install(profile: string) {
+async function install(profile: string, directory: string) {
   const fs = process.getBuiltinModule("fs").promises;
   const path = process.getBuiltinModule("path");
   const { syncBuiltinESMExports } = process.getBuiltinModule("module");
@@ -39,8 +41,11 @@ async function install(profile: string) {
     !process.argv.includes("--enable-automation")
   )
     throw new Error("Filesystem probe requires the owned automated profile");
+  // Electron can return the same Windows directory under its long rather than 8.3 name.
+  if (directory !== profile && (await fs.realpath(directory)) !== (await fs.realpath(profile)))
+    throw new Error("Filesystem probe directory differs from the owned profile");
   const original = fs.rename;
-  const destination = path.join(profile, "analytics.json");
+  const destination = path.join(directory, "analytics.json");
   const read = async (file: string) =>
     JSON.parse(await fs.readFile(file, "utf8")) as AnalyticsRecord;
   const queue = (record: AnalyticsRecord) => record.summaries?.pending ?? [];
@@ -114,7 +119,7 @@ async function install(profile: string) {
     if (
       typeof from !== "string" ||
       to !== destination ||
-      path.dirname(from) !== profile ||
+      path.dirname(from) !== directory ||
       !/^analytics\.json\.[0-9a-f-]{36}\.tmp$/.test(path.basename(from))
     )
       return original(from, to);

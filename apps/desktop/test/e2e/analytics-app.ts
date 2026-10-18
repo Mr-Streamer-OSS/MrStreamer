@@ -3,7 +3,17 @@ import { watch } from "node:fs";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -23,6 +33,7 @@ import { startFakeProvider } from "../fake-provider.ts";
 import { startFakeTmdb } from "../fake-tmdb.ts";
 import { connect, delay, type Page } from "./app.ts";
 import { analyticsOptions } from "./analytics-options.ts";
+import { boundary } from "./analytics-boundary.ts";
 import { closeNative } from "./analytics-exit.ts";
 import { runNativeTelemetry } from "./analytics-native.ts";
 import { disposableRunner, ownedTree } from "./installed-upgrade-windows.ts";
@@ -202,6 +213,16 @@ const updateFeed = createServer((_req, res) => {
 });
 const actions: { action: string; at: string }[] = [];
 const observations: Record<string, unknown> = {};
+let prefixProfile: string | undefined;
+let prefixObserving = false;
+let prefixProbe: Awaited<ReturnType<typeof boundary>> | undefined;
+const prefixErrors: string[] = [];
+const prefixCounters: {
+  key: UsageKey;
+  samples: number;
+  last: Record<string, unknown>;
+  transitions: { at: number; total: number }[];
+}[] = [];
 const pointerInputs: Record<string, unknown>[] = [];
 const log: string[] = [];
 let app: ChildProcess | undefined;
@@ -707,15 +728,171 @@ async function analyticsFile(): Promise<Record<string, unknown>> {
 
 /** Counters must be durable immediately, although their HTTP capture waits for sealing. */
 async function usageCount(key: UsageKey): Promise<number> {
-  const stored = AnalyticsRecord().assert(await analyticsFile());
-  const active = stored.summaries?.usage;
-  return (
-    sent().reduce(
-      (sum, event) =>
-        sum + (event.event === "usage_window" ? (event.properties.counts[key] ?? 0) : 0),
-      0,
-    ) + (active?.event === "usage_window" ? (active.properties.counts[key] ?? 0) : 0)
-  );
+  const observing =
+    prefixObserving && (key === "action_epg_opened" || key === "action_favourite_added");
+  let diagnostic = observing ? prefixCounters.find((sample) => sample.key === key) : undefined;
+  if (observing && !diagnostic) {
+    diagnostic = { key, samples: 0, last: {}, transitions: [] };
+    prefixCounters.push(diagnostic);
+  }
+  if (diagnostic) {
+    diagnostic.samples++;
+    diagnostic.last = { readStartedAt: Date.now(), stage: "read" };
+  }
+  try {
+    let kept: Record<string, unknown>;
+    if (diagnostic) {
+      const bytes = await readFile(join(profile, "analytics.json"));
+      Object.assign(diagnostic.last, {
+        readEndedAt: Date.now(),
+        rawBase64: bytes.toString("base64"),
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        stage: "parse",
+      });
+      const parsed: unknown = JSON.parse(bytes.toString("utf8"));
+      if (!record(parsed)) throw new Error("Invalid analytics state.");
+      kept = parsed;
+      diagnostic.last.stage = "record-validation";
+    } else kept = await analyticsFile();
+    const stored = AnalyticsRecord().assert(kept);
+    const active = stored.summaries?.usage;
+    if (diagnostic) diagnostic.last.stage = "wire-validation";
+    const received = sent();
+    const total =
+      received.reduce(
+        (sum, event) =>
+          sum + (event.event === "usage_window" ? (event.properties.counts[key] ?? 0) : 0),
+        0,
+      ) + (active?.event === "usage_window" ? (active.properties.counts[key] ?? 0) : 0);
+    if (diagnostic) {
+      Object.assign(diagnostic.last, {
+        stage: "complete",
+        sampledAt: Date.now(),
+        total,
+        active: active && { uuid: active.uuid, counts: active.properties.counts },
+        pending: stored.summaries?.pending.map((item) => ({
+          uuid: item.event.uuid,
+          event: item.event.event,
+          counts: item.event.event === "usage_window" ? item.event.properties.counts : undefined,
+          attempts: item.attempts,
+          failures: item.failures,
+          nextAttemptAt: item.nextAttemptAt,
+        })),
+        receivedUsage: received.flatMap((event, index) =>
+          event.event === "usage_window" ? [{ uuid: event.uuid, ...rawBodies[index] }] : [],
+        ),
+      });
+      if (diagnostic.transitions.at(-1)?.total !== total) {
+        diagnostic.transitions.push({ at: Date.now(), total });
+        if (diagnostic.transitions.length > 8) diagnostic.transitions.shift();
+      }
+    }
+    return total;
+  } catch (error) {
+    if (diagnostic) Object.assign(diagnostic.last, { failedAt: Date.now(), error: String(error) });
+    throw error;
+  }
+}
+
+// Ordinary guide/favourite prefix only: passive public renames, never an armed boundary.
+async function observePrefix() {
+  prefixProfile = profile;
+  prefixObserving = true;
+  observations.guideFavouriteDiagnostics = {
+    profile,
+    counters: prefixCounters,
+    errors: prefixErrors,
+  };
+  try {
+    const userData = await mainPage!.evaluate<string>(
+      `process.getBuiltinModule('module').createRequire(process.execPath)('electron').app.getPath('userData')`,
+    );
+    const paths = {
+      profile,
+      userData,
+      ownedReal: await realpath(profile),
+      appReal: await realpath(userData),
+    };
+    observations.guideFavouritePaths = paths;
+    if (!profiles.includes(profile) || paths.ownedReal !== paths.appReal)
+      throw new Error("Passive probe requires the same real owned app profile");
+    prefixProbe = await boundary(mainPage!, profile, userData);
+    observations.guideFavouriteProbeInstalledAt = Date.now();
+  } catch (error) {
+    prefixErrors.push(`attach: ${String(error)}`);
+  }
+}
+
+async function restorePrefix() {
+  const probe = prefixProbe;
+  prefixProbe = undefined;
+  prefixObserving = false;
+  if (!probe) return;
+  try {
+    try {
+      const measurements = await probe.measurements();
+      observations.guideFavouriteRenames = {
+        capturedAt: Date.now(),
+        count: measurements.length,
+        measurements,
+      };
+    } finally {
+      await probe.restore();
+      observations.guideFavouriteProbeRestoredAt = Date.now();
+    }
+  } catch (error) {
+    prefixErrors.push(`restore/measurements: ${String(error)}`);
+  }
+}
+
+/** Retain owned bytes and public reads before screenshot/quit; preserve the original failure. */
+async function capturePrefixFailure() {
+  if (profile !== prefixProfile || !profiles.includes(profile)) return;
+  const destination = join(evidence, "guide-favourite-failure");
+  const capture = async (name: string, read: () => Promise<unknown>) => {
+    const startedAt = Date.now();
+    try {
+      const value = await read();
+      await writeFile(
+        join(destination, name),
+        JSON.stringify({ startedAt, completedAt: Date.now(), value }, null, 2),
+      );
+    } catch (error) {
+      prefixErrors.push(`${name}: ${String(error)}`);
+    }
+  };
+  try {
+    await mkdir(destination, { recursive: true });
+  } catch (error) {
+    prefixErrors.push(`failure capture: ${String(error)}`);
+    return;
+  }
+  await capture("counter-samples.json", async () => prefixCounters);
+  await capture("rename-measurements.json", async () => observations.guideFavouriteRenames);
+  await capture("analytics.json.read.json", async () => {
+    const bytes = await readFile(join(profile, "analytics.json"));
+    await writeFile(join(destination, "analytics.json"), bytes);
+    return { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  });
+  await capture("temporary-files.json", async () => {
+    const files = await readdir(profile, { withFileTypes: true });
+    const temporary = files.filter(
+      (file) => file.isFile() && /^analytics\.json\.[0-9a-f-]{36}\.tmp$/.test(file.name),
+    );
+    for (const file of temporary) {
+      await capture(`${file.name}.read.json`, async () => {
+        const bytes = await readFile(join(profile, file.name));
+        await writeFile(join(destination, file.name), bytes);
+        return { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+      });
+    }
+    return temporary.map((file) => file.name);
+  });
+  if (page)
+    for (const method of ["preferences.get", "viewing.get"])
+      await capture(`${method}.json`, () =>
+        live().evaluate(`window.mrStreamer.invoke(${JSON.stringify(method)})`),
+      );
 }
 
 async function unfinished() {
@@ -803,11 +980,13 @@ async function volumePaths() {
 async function productPaths() {
   await keyEscape();
   await namedButton("header button", "Live TV");
+  await observePrefix();
   // Actual guide expansion/favourite/search use, without treating schedule queries as actions.
   await click('button[aria-label="Later programmes"]');
   await waitFor(async () => (await usageCount("action_epg_opened")) === 1);
   await click('button[aria-label="Add to favourites"]');
   await waitFor(async () => (await usageCount("action_favourite_added")) === 1);
+  await restorePrefix();
   await click('button[aria-label="Search"]');
   await send("Input.insertText", { text: "TEST | H.264 + AAC" });
   await waitFor(() =>
@@ -1485,6 +1664,8 @@ try {
     "Transport accepts only this literal loopback endpoint; explicit isolated profile and automation also exclude configured production transport.";
 } catch (error) {
   failure = error;
+  await restorePrefix();
+  await capturePrefixFailure();
   if (page) await snapshot("failure").catch(() => {});
 } finally {
   const clean = async (operation: () => Promise<unknown>) => {
