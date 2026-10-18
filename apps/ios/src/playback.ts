@@ -613,6 +613,19 @@ export function setAside() {
 }
 
 /**
+ * Watch shows again what was set aside, as it stands, when nothing else can bring it back: the
+ * tabs and their accessory went, as when the last provider is removed while a downloaded copy
+ * waits. A paused copy stays paused where it was; nothing opens again.
+ */
+export function unsetAside() {
+  if (!state.get().aside) return;
+  resumeOnReturn = false;
+  pauseOnStart = false;
+  player().muted = false;
+  state.set((s) => ({ ...s, watch: true, aside: false, muted: false }));
+}
+
+/**
  * Watch reports Picture in Picture starting and ending. It leaves Watch for the tabs, where the
  * accessory controls it; once it ends, Home's preview shows the player again.
  */

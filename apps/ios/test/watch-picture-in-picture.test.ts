@@ -155,7 +155,10 @@ vi.mock("expo-screen-orientation", () => ({
   unlockAsync: async () => undefined,
 }));
 vi.mock("expo-router", () => ({
-  router: { push: (href: string) => void native.pushed.push(href) },
+  router: {
+    push: (href: string) => void native.pushed.push(href),
+    dismiss: (count: number) => void native.pushed.push(`dismiss ${count}`),
+  },
   useRootNavigationState: () => native.root,
   usePathname: () => native.pathname,
 }));
@@ -349,6 +352,8 @@ async function watching(item: Playing, opens = open, { playing = true } = {}) {
   await act(() => play(item, opens, inWatch));
   if (playing) started();
   return {
+    /** Draws Watch again, as navigation's state changing does. */
+    rerender: () => act(() => root.render(React.createElement(WatchLayer))),
     press: (testID: string) =>
       act(() => {
         const button = container.querySelector(`[data-testid="${testID}"]`) as {
@@ -465,7 +470,8 @@ describe("Downloads and Settings from Watch", () => {
     deliver();
     act(() => view.stopped());
     await watch.press("watch-settings");
-    expect(native.pushed).toEqual(["/live/settings"]);
+    // Search closes first, so Settings goes on Live's own stack (tab-routes.test.ts).
+    expect(native.pushed).toEqual(["dismiss 1", "/live/settings"]);
   });
 
   it("brings a channel back live rather than from where it paused", async () => {
@@ -554,6 +560,69 @@ describe("Watch with no provider saved", () => {
       act(() => vi.advanceTimersByTime(1000));
       expect(playbackState.get()).toMatchObject({ watch: true, aside: false });
       expect(native.player).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("Watch set aside when the tabs go", () => {
+  /** A downloaded copy: no subscription, so removing the last provider keeps it. */
+  const copy = (): Playing => ({ ...movie("copy"), subscriptionId: null });
+  /** The last provider removed: the root guard leaves Connect, without the tabs or accessory. */
+  const providersGone = () => {
+    native.root = { index: 0, routes: [{ name: "connect" }] };
+    native.pathname = "/connect";
+  };
+
+  it("shows a paused copy in Watch again as it was, opening nothing", async () => {
+    const watch = await watching(copy());
+    await watch.press("watch-settings");
+    started(false);
+    native.player.length = 0;
+    providersGone();
+    watch.rerender();
+    expect(playbackState.get()).toMatchObject({
+      phase: { kind: "paused" },
+      watch: true,
+      aside: false,
+    });
+    expect(native.player).toEqual([]);
+  });
+
+  it("shows a copy played again from the accessory in Watch, still playing", async () => {
+    const watch = await watching(copy());
+    await watch.press("watch-settings");
+    started(false);
+    started();
+    native.player.length = 0;
+    providersGone();
+    watch.rerender();
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "playing" }, watch: true });
+    expect(native.player).toEqual([]);
+  });
+
+  it("brings back nothing the removed provider streamed, which its removal stopped", async () => {
+    const watch = await watching(movie("1"));
+    await watch.press("watch-settings");
+    act(() => stop());
+    providersGone();
+    watch.rerender();
+    expect(playbackState.get()).toMatchObject({ phase: { kind: "idle" }, watch: false });
+  });
+
+  it("drops a fallback waiting for Picture in Picture once the tabs go", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      native.pictureInPicture = { supported: true, starts: false };
+      const watch = await watching(copy());
+      await watch.press("watch-settings");
+      await act(async () => undefined);
+      providersGone();
+      watch.rerender();
+      act(() => vi.advanceTimersByTime(1000));
+      expect(playbackState.get()).toMatchObject({ watch: true, aside: false });
+      expect(native.player.at(-1)).not.toBe("pause");
     } finally {
       vi.useRealTimers();
     }

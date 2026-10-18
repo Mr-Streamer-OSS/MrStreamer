@@ -17,7 +17,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Glass, IconButton } from "./glass.tsx";
-import { tabHref, useTab, type TabScreen } from "./header.tsx";
+import { openOnTabs, useTabs, type TabScreen } from "./header.tsx";
 import {
   closeWatch,
   onEndPictureInPicture,
@@ -35,6 +35,7 @@ import {
   stop,
   togglePause,
   trackChoices,
+  unsetAside,
   usePlayback,
   usePlaybackClock,
   usePlaybackLength,
@@ -53,24 +54,32 @@ import { colors } from "./ui.tsx";
  *
  * Downloads and Settings open on the tab under Watch without stopping what plays: where Picture in
  * Picture can, it takes the picture over, as its own button does; otherwise Watch is set aside,
- * paused, until the accessory brings it back (`setAside`). With no provider saved there are no
- * tabs and no accessory: Downloads is the offline list, offered only while Picture in Picture can
- * take the picture, and Settings isn't offered.
+ * paused, until the accessory brings it back (`setAside`). A screen over the tabs, as Search,
+ * closes first. With no provider saved there are no tabs and no accessory: Downloads is the
+ * offline list, offered only while Picture in Picture can take the picture, and Settings isn't
+ * offered. If the tabs go while Watch is set aside, as when the last provider is removed and a
+ * downloaded copy waits there, Watch shows that copy again as it stands.
  */
 export function WatchLayer() {
   const { phase, watch, pip, external } = usePlayback();
   const view = useRef<VideoView>(null);
   const [controls, setControls] = useState(true);
-  const tab = useTab();
+  const tabs = useTabs();
+  const tab = tabs?.tab ?? null;
   const pathname = usePathname();
-  // Each press that asks Picture in Picture to take over gets a number, and its fallback acts only
-  // while that number is the latest: Picture in Picture starting, Watch closing or showing again,
-  // or another item playing each retire it.
-  const attempt = useRef(0);
+  // The press waiting for Picture in Picture to take over, with its fallback's timer. Picture in
+  // Picture starting, Watch closing or showing again, another item, another tab or none, and
+  // Watch going each retire it, so a fallback acts only for the press, item and tabs it was for.
+  const waiting = useRef<{ timer?: ReturnType<typeof setTimeout> } | null>(null);
+  const retire = () => {
+    clearTimeout(waiting.current?.timer);
+    waiting.current = null;
+  };
   const item = phase.kind === "idle" ? null : phase.item;
+  useEffect(() => retire, [watch, pip, item, tab]);
   useEffect(() => {
-    attempt.current++;
-  }, [watch, pip, item]);
+    if (!tab) unsetAside();
+  }, [tab]);
   const pictureCanTake = phase.kind === "playing" && !external && isPictureInPictureSupported();
   const screens: readonly TabScreen[] = tab
     ? ["downloads", "settings"]
@@ -78,22 +87,28 @@ export function WatchLayer() {
       ? ["downloads"]
       : [];
   const openScreen = (screen: TabScreen) => {
+    retire();
+    if (tabs) openOnTabs(tabs, screen);
     // Offline Downloads is usually the screen Watch opened over: then it only has to show.
-    const href = tab ? tabHref(tab, screen) : pathname === "/offline" ? null : "/offline";
-    if (href) router.push(href);
+    else if (pathname !== "/offline") router.push("/offline");
     const shown = view.current;
     if (!pictureCanTake || !shown) {
-      if (tab) setAside();
+      if (tabs) setAside();
       return;
     }
     // Picture in Picture reports starting, which closes Watch over the screen just opened. If it
     // refuses, or doesn't start within a second, Watch is set aside instead of staying over it;
     // with no tabs to come back from, Watch stays as it was.
-    const mine = ++attempt.current;
+    const mine: { timer?: ReturnType<typeof setTimeout> } = {};
+    waiting.current = mine;
     const unless = () => {
-      if (attempt.current === mine && tab) setAside();
+      if (waiting.current !== mine) return;
+      waiting.current = null;
+      if (tabs) setAside();
     };
-    void shown.startPictureInPicture().then(() => void setTimeout(unless, 1000), unless);
+    void shown.startPictureInPicture().then(() => {
+      if (waiting.current === mine) mine.timer = setTimeout(unless, 1000);
+    }, unless);
   };
 
   useEffect(() => {

@@ -177,11 +177,13 @@ stands; pressing one offers Retry, its reloads, Edit and Remove as a system shee
 whether to delete its history too.
 Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, because the view that
 starts Picture in Picture has to stay while it plays. Its Downloads and Settings open on the tab
-under it: Picture in Picture takes what plays where it can, else Watch is set aside paused
-(`setAside` in `playback.ts`) and the accessory brings it back, a title from where it paused and a
-channel live again. With no provider saved there are no tabs and no accessory, so Watch offers only
-Downloads, the offline list, and only while Picture in Picture can take the copy. A movie or an episode turns it to landscape
-(`expo-screen-orientation`); closing it unlocks again, and iOS turns the screens under it as the
+under it, closing Search first if Watch came back over it (`openOnTabs` in `src/header.tsx`):
+Picture in Picture takes what plays where it can, else Watch is set aside paused (`setAside` in
+`playback.ts`) and the accessory brings it back, a title from where it paused and a channel live
+again. With no provider saved there are no tabs and no accessory, so Watch offers only Downloads,
+the offline list, and only while Picture in Picture can take the copy; a copy set aside when the
+last provider is removed shows in Watch again as it stood. A movie or an episode turns it to
+landscape (`expo-screen-orientation`); closing it unlocks again, and iOS turns the screens under it as the
 phone is held. On the simulator the screens follow its device orientation (agent-device's
 `orientation`), not where Watch left them. `patches/` makes expo-video report Picture in Picture
 brought back to the app, which its own view never forwarded, and hold AVKit's answer until Watch

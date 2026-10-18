@@ -103,6 +103,7 @@ vi.mock("react-native", async () => {
 vi.mock("expo-router", () => ({
   router: {
     back: () => scenario.did.push("back"),
+    dismiss: (count: number) => scenario.did.push(`dismiss ${count}`),
     canGoBack: () => true,
     replace: (href: string) => scenario.did.push(`replace ${href}`),
     push: (href: string) => scenario.did.push(`push ${href}`),
@@ -284,7 +285,8 @@ describe("Search over the tabs", () => {
     expect(text()).toContain("Dune");
     press("text-Retry");
     press("text-Settings");
-    expect(scenario.did).toEqual(["retry b", "back", "push /live/settings"]);
+    // Search closes, then Settings goes on Live's own stack (tab-routes.test.ts).
+    expect(scenario.did).toEqual(["retry b", "dismiss 1", "push /live/settings"]);
   });
 
   it("doesn't say nothing has the name when a provider's lists failed", () => {

@@ -13,7 +13,7 @@ import {
   type Member,
 } from "../account.ts";
 import { useReduceMotion } from "../glass.tsx";
-import { tabHref, useTab } from "../header.tsx";
+import { openOnTabs, useTabs } from "../header.tsx";
 import { searchChannels, type Channel, type Library } from "../library.ts";
 import { playingChannel, usePlayback } from "../playback.ts";
 import { openDetails } from "../resume.ts";
@@ -118,7 +118,7 @@ let kept = "";
  * above the results.
  */
 export default function Search() {
-  const tab = useTab() ?? "(home)";
+  const tabs = useTabs();
   const insets = useSafeAreaInsets();
   const roster = useRoster();
   const catalogue = useCatalogue();
@@ -187,10 +187,8 @@ export default function Search() {
     close();
     openDetails(title);
   }, []);
-  const settings = () => {
-    close();
-    router.push(tabHref(tab, "settings"));
-  };
+  // Closes Search and opens Settings on the tab under it.
+  const settings = () => (tabs ? openOnTabs(tabs, "settings") : close());
 
   const playing = playingChannel(phase);
   const searching = typed.trim() !== "";

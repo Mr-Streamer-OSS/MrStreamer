@@ -41,27 +41,45 @@ interface Navigated {
   readonly routes: readonly { readonly name: string; readonly state?: Navigated }[];
 }
 
-/** The tab selected in the tabs `state` holds, or null when it holds none. */
-function tabIn(state: Navigated | undefined): Tab | null {
-  for (const route of state?.routes ?? []) {
-    if (route.name === "(tabs)") {
-      const tabs = route.state;
-      const name = tabs?.routes[tabs.index ?? 0]?.name;
-      return isTab(name) ? name : "(home)";
-    }
-    const found = tabIn(route.state);
-    if (found) return found;
-  }
-  return null;
+/**
+ * Where the tabs are: the tab selected in them, and how many screens over all the tabs, such as
+ * Search, lie above them in their stack.
+ */
+export interface TabsAt {
+  readonly tab: Tab;
+  readonly above: number;
 }
 
 /**
- * The tab selected in the tabs, also under a screen over all of them such as Search, read from
- * navigation's own state. Null when there are no tabs: with no provider saved, the root shows
- * Connect and offline Downloads instead.
+ * The tabs nearest under what shows, in navigation's `state`: down the focused routes, the
+ * `(tabs)` route at or below each stack's focus. Null when there are none: with no provider saved,
+ * the root shows Connect and offline Downloads instead.
  */
-export function useTab(): Tab | null {
-  return tabIn(useRootNavigationState());
+export function tabsAt(state: Navigated | undefined): TabsAt | null {
+  if (!state) return null;
+  const focus = state.index ?? state.routes.length - 1;
+  for (let at = focus; at >= 0; at--) {
+    const route = state.routes[at];
+    if (route?.name !== "(tabs)") continue;
+    const name = route.state?.routes[route.state.index ?? 0]?.name;
+    return { tab: isTab(name) ? name : "(home)", above: focus - at };
+  }
+  return tabsAt(state.routes[focus]?.state);
+}
+
+/** The tabs under what shows, from navigation's own state, as `tabsAt` finds them. */
+export function useTabs(): TabsAt | null {
+  return tabsAt(useRootNavigationState());
+}
+
+/**
+ * Opens `screen` on the selected tab's own stack, from anywhere over the tabs: the screens above
+ * them close first, so it goes on top of what that tab showed and Back returns there. The router
+ * runs both in the order asked, each against the state the one before left.
+ */
+export function openOnTabs({ tab, above }: TabsAt, screen: TabScreen) {
+  if (above > 0) router.dismiss(above);
+  router.push(tabHref(tab, screen));
 }
 
 /** Search, over the tabs. What it opens goes on the tab under it. */

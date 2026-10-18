@@ -29,7 +29,7 @@ import {
 } from "../../../account.ts";
 import { DownloadsLink } from "../../../downloads-screen.tsx";
 import { failureOf } from "../../../errors.ts";
-import { tabHref, useTab, type Tab } from "../../../header.tsx";
+import { tabHref, useTabs, type Tab } from "../../../header.tsx";
 import { setStatistics, useStatistics } from "../../../telemetry/index.ts";
 import { hasTmdb, useMetadataStatus, useTitleTimings } from "../../../titles.ts";
 import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
@@ -44,7 +44,7 @@ import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
 export default function Settings() {
   const roster = useRoster();
   const statistics = useStatistics();
-  const tab = useTab() ?? "(home)";
+  const tab = useTabs()?.tab ?? "(home)";
   if (roster.kind !== "ready") return null;
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
