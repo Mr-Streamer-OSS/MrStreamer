@@ -9,22 +9,21 @@ import {
   retryChannels,
   useCatalogue,
   useRoster,
-  type Member,
 } from "../../../account.ts";
 import { failureOf } from "../../../errors.ts";
 import { tabHref } from "../../../header.tsx";
 import type { Channel, Library, Region } from "../../../library.ts";
+import {
+  Docked,
+  libraryStatus,
+  loadingStatus,
+  PlaceholderRows,
+  useDockInset,
+} from "../../../loading.tsx";
 import { playingChannel, usePlayback } from "../../../playback.ts";
 import { useSavedState, writeState } from "../../../storage.ts";
 import { TextTabs } from "../../../titles-ui.tsx";
-import {
-  ChannelRow,
-  colors,
-  Notice,
-  PlaceholderRows,
-  TextButton,
-  useRowHeight,
-} from "../../../ui.tsx";
+import { ChannelRow, colors, Notice, useRowHeight } from "../../../ui.tsx";
 
 /** The text tab for all of a country's categories. Provider category ids are never "*". */
 const ALL = "*";
@@ -33,7 +32,9 @@ const ALL = "*";
  * Live: one country's channels, or one of its categories', in a virtualised list of rows of one
  * fixed height. The country is the first item of the row of text tabs above the list, its
  * categories the rest; the top bar is the shared one. Rows show the channel's category until iOS
- * reads a guide, which brings now and next.
+ * reads a guide, which brings now and next. While channels first load, still rows hold the list's
+ * place; what loads, updates or failed by provider is the status line at the bottom, with Retry
+ * and Settings, over the channels already there.
  */
 export default function Live() {
   const catalogue = useCatalogue();
@@ -42,14 +43,16 @@ export default function Live() {
   const providers = roster.kind === "ready" ? roster.members : [];
   // One provider is named; several are "your providers".
   const host = providers.length === 1 && providers[0] ? providers[0].label : "";
+  // With no channels at all, the failure has the screen to itself instead.
+  const status =
+    catalogue.kind === "failed"
+      ? null
+      : libraryStatus(providers, { channels: true, retry, settings: openSettings });
   if (catalogue.kind === "loading") {
     return (
-      <View style={styles.screen}>
-        <Text style={styles.note} accessibilityLiveRegion="polite">
-          {host ? `Loading channels from ${host}` : "Loading channels"}
-        </Text>
+      <Docked status={status ?? loadingStatus("channels")}>
         <PlaceholderRows height={height} />
-      </View>
+      </Docked>
     );
   }
   if (catalogue.kind === "failed") {
@@ -71,7 +74,7 @@ export default function Live() {
   }
   if (catalogue.library.regions.length === 0) {
     return (
-      <View style={styles.screen}>
+      <Docked status={status}>
         <Notice
           failure={{
             headline: "No live channels",
@@ -79,47 +82,22 @@ export default function Live() {
           }}
           actions={[{ label: "Reload", onPress: reloadAllChannels }]}
         />
-      </View>
+      </Docked>
     );
   }
-  return <Channels library={catalogue.library} failing={catalogue.failing} height={height} />;
+  return (
+    <Docked status={status}>
+      <Channels library={catalogue.library} height={height} />
+    </Docked>
+  );
 }
 
 /** Settings, on Live's own stack. */
 const openSettings = () => router.push(tabHref("live", "settings"));
 
-/**
- * One line for a provider whose channels didn't load, or whose password the iPhone no longer
- * gives back: its channels as they were stay in the list, and the others carry on.
- */
-function Failing({ member }: { member: Member }) {
-  const { entry, label, needsSecret } = member;
-  return (
-    <View style={styles.failing} testID={`live-failing-${entry.id}`}>
-      <Text style={styles.failingText} numberOfLines={2}>
-        {needsSecret
-          ? `Enter the password for ${label} in Settings.`
-          : `Couldn't load channels from ${label}.`}
-      </Text>
-      {needsSecret ? (
-        <TextButton label="Settings" onPress={openSettings} />
-      ) : (
-        <TextButton label="Retry" onPress={() => retry(entry.id)} />
-      )}
-    </View>
-  );
-}
-
-function Channels({
-  library,
-  failing,
-  height,
-}: {
-  library: Library;
-  failing: readonly Member[];
-  height: number;
-}) {
+function Channels({ library, height }: { library: Library; height: number }) {
   const saved = useSavedState();
+  const inset = useDockInset();
   const { phase } = usePlayback();
   const [shelfId, setShelfId] = useState<string>(ALL);
   const found = library.regions.find((each) => each.name === saved.region);
@@ -147,9 +125,6 @@ function Channels({
       : [];
   return (
     <View style={styles.screen}>
-      {failing.map((member) => (
-        <Failing key={member.entry.id} member={member} />
-      ))}
       {saved.region && !found ? (
         <Text style={styles.note}>{`${saved.region} isn't listed any more.`}</Text>
       ) : null}
@@ -185,6 +160,7 @@ function Channels({
         )}
         getItemLayout={(_, index) => ({ length: height, offset: height * index, index })}
         contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{ paddingBottom: inset }}
         initialNumToRender={16}
         maxToRenderPerBatch={16}
         windowSize={9}
@@ -240,13 +216,6 @@ function Country({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000000" },
   note: { color: colors.text, fontSize: 15, marginHorizontal: 16, marginVertical: 12 },
-  failing: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginHorizontal: 16,
-  },
-  failingText: { color: colors.text, fontSize: 15, flex: 1 },
   tabs: { borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth },
   country: { flexDirection: "row", alignItems: "center", gap: 4, minHeight: 44, maxWidth: 200 },
   countryName: { color: colors.text, fontSize: 15, fontWeight: "600", flexShrink: 1 },

@@ -34,6 +34,8 @@ const scenario = vi.hoisted(() => ({
   titles: [] as FoundTitle[],
   /** What the screen did, in order. */
   did: [] as string[],
+  /** What VoiceOver was given to read out. */
+  said: [] as string[],
 }));
 
 vi.mock("react-native", async () => {
@@ -98,6 +100,15 @@ vi.mock("react-native", async () => {
       timing: () => ({ start: () => undefined }),
     },
     StyleSheet: { create: <T>(styles: T) => styles },
+    AccessibilityInfo: {
+      announceForAccessibilityWithOptions: (text: string) => scenario.said.push(text),
+    },
+    AppState: { currentState: "active", addEventListener: () => undefined },
+    Keyboard: {
+      addListener: () => ({ remove: () => undefined }),
+      scheduleLayoutAnimation: () => undefined,
+    },
+    useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }),
   };
 });
 vi.mock("expo-router", () => ({
@@ -108,6 +119,7 @@ vi.mock("expo-router", () => ({
     replace: (href: string) => scenario.did.push(`replace ${href}`),
     push: (href: string) => scenario.did.push(`push ${href}`),
   },
+  useIsFocused: () => true,
   // Live is the tab under Search.
   useRootNavigationState: () => ({
     index: 1,
@@ -147,7 +159,14 @@ vi.mock("../src/playback.ts", () => ({
   usePlayback: () => ({ phase: { kind: "idle" } }),
   playingChannel: () => null,
 }));
-vi.mock("../src/glass.tsx", () => ({ useReduceMotion: () => false }));
+vi.mock("../src/glass.tsx", async () => {
+  const { createElement } = await import("react");
+  return {
+    useReduceMotion: () => false,
+    useMotionAllowed: () => false,
+    Glass: ({ children }: { children?: React.ReactNode }) => createElement("div", null, children),
+  };
+});
 vi.mock("../src/telemetry/index.ts", () => ({ onSearchText: () => undefined }));
 vi.mock("../src/titles-ui.tsx", () => ({ Artwork: () => null }));
 vi.mock("../src/ui.tsx", async () => {
@@ -230,6 +249,7 @@ beforeEach(() => {
     lists: indexed,
     titles: [dune],
     did: [],
+    said: [],
   });
 });
 afterEach(() => unmount());
@@ -268,6 +288,28 @@ describe("Search over the tabs", () => {
     expect(text()).toContain("NPO 1");
     type("zzq");
     expect(text()).not.toContain("Nothing named");
+    // Read out once, not again for each search while the lists stand as they were.
+    expect(scenario.said).toEqual([
+      "Movies and series still loading, 1 of 2 providers. Channels searched.",
+    ]);
+  });
+
+  it("says it is searching while the latest text waits, keeping the last results", () => {
+    open();
+    type("dun");
+    const shown: string[] = [];
+    const observer = new window.MutationObserver(() => undefined);
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+    type("dune");
+    for (const record of observer.takeRecords()) {
+      for (const node of record.addedNodes) shown.push(node.textContent ?? "");
+    }
+    observer.disconnect();
+    expect(shown.some((each) => each.includes("Searching."))).toBe(true);
+    // Once searched, the line goes and Dune is still there.
+    expect(text()).not.toContain("Searching.");
+    expect(text()).toContain("Dune");
+    expect(scenario.said).toEqual([]);
   });
 
   it("names a provider that failed, retries it, and opens Settings on the tab under Search", () => {

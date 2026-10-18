@@ -2,7 +2,17 @@ import type { Title } from "@mrstreamer/contracts/ondemand";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Pressable, SectionList, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Animated,
+  Keyboard,
+  Pressable,
+  SectionList,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   playChannel,
@@ -15,6 +25,7 @@ import {
 import { useReduceMotion } from "../glass.tsx";
 import { openOnTabs, useTabs } from "../header.tsx";
 import { searchChannels, type Channel, type Library } from "../library.ts";
+import { StatusLine, type Status } from "../loading.tsx";
 import { playingChannel, usePlayback } from "../playback.ts";
 import { openDetails } from "../resume.ts";
 import { onSearchText } from "../telemetry/index.ts";
@@ -114,8 +125,8 @@ let kept = "";
  * their names, TMDB's translations included, the best first. It comes down a little as it fades
  * in, or only fades under Reduce Motion, with the keyboard up. Cancel or a swipe back closes it
  * onto that screen. A title closes it and opens its details in Movies or Series; a channel closes
- * it and plays in Watch, which closes onto that screen too. What hasn't loaded or failed says so
- * above the results.
+ * it and plays in Watch, which closes onto that screen too. Searching, and what hasn't loaded or
+ * failed, is the status line at the bottom, above the keyboard.
  */
 export default function Search() {
   const tabs = useTabs();
@@ -192,6 +203,15 @@ export default function Search() {
 
   const playing = playingChannel(phase);
   const searching = typed.trim() !== "";
+  // The latest text isn't searched yet: the last results stay meanwhile.
+  const pending = query.trim() !== "" && typed !== query;
+  const keyboard = useKeyboardHeight();
+  const line = searchLine(
+    query.trim() !== "" ? status : null,
+    pending,
+    () => status?.retry.forEach((id) => retry(id)),
+    settings,
+  );
   return (
     <Animated.View style={[styles.screen, { transform: [{ translateY: drop }] }]}>
       <View
@@ -230,15 +250,6 @@ export default function Search() {
         sections={sections}
         keyExtractor={(row) => (row.kind === "title" ? row.title.key : row.channel.key)}
         extraData={playing}
-        ListHeaderComponent={
-          searching && status ? (
-            <Status
-              status={status}
-              onRetry={() => status.retry.forEach((id) => retry(id))}
-              onSettings={settings}
-            />
-          ) : undefined
-        }
         renderSectionHeader={({ section }) => (
           <Text style={styles.section} accessibilityRole="header">
             {section.total > section.data.length
@@ -264,56 +275,92 @@ export default function Search() {
         // A tap on a result opens it, with the keyboard up or not.
         keyboardShouldPersistTaps="handled"
         initialNumToRender={16}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+        // With the status line under it, the list ends above it; else it runs under the keyboard.
+        contentContainerStyle={{ paddingBottom: line ? 16 : insets.bottom + 16 }}
         ListEmptyComponent={
           // Nothing has the name only once the latest text was searched in every list. While one
-          // loads or failed, the status above says what was searched instead.
+          // loads or failed, the status line says what was searched instead.
           searching && typed === query && !status ? (
             <Nothing query={typed.trim()} library={library} lists={lists} />
           ) : undefined
         }
         testID="search-list"
       />
+      {line ? (
+        <View
+          style={[
+            styles.dock,
+            {
+              marginLeft: insets.left + 12,
+              marginRight: insets.right + 12,
+              marginBottom: (keyboard > 0 ? keyboard : insets.bottom) + 8,
+            },
+          ]}
+        >
+          <StatusLine status={line} />
+        </View>
+      ) : null}
     </Animated.View>
   );
+}
+
+/**
+ * Search's status line: Searching while the latest text waits to be searched, then what hasn't
+ * loaded or failed, with Retry and Settings. The provider count shows as a bar with two or more
+ * providers. Null with nothing to say.
+ */
+function searchLine(
+  status: SearchStatus | null,
+  pending: boolean,
+  onRetry: () => void,
+  onSettings: () => void,
+): Status | null {
+  if (!status && !pending) return null;
+  const actions = status
+    ? [
+        ...(status.retry.length > 0 ? [{ label: "Retry", onPress: onRetry }] : []),
+        ...(status.settings ? [{ label: "Settings", onPress: onSettings }] : []),
+      ]
+    : [];
+  return {
+    text: pending ? ["Searching.", status?.text].filter(Boolean).join(" ") : status!.text,
+    actions,
+    ...(status?.loading && status.loading.of > 1
+      ? { progress: status.loading.settled / status.loading.of }
+      : {}),
+    // Searching passes with each keystroke; only what the lists say is read out.
+    announce: !pending,
+  };
+}
+
+/**
+ * How far the keyboard covers the bottom of the window, 0 while it is down. Updated as it moves,
+ * with the layout animated along with it.
+ */
+function useKeyboardHeight(): number {
+  const { height: window } = useWindowDimensions();
+  const [top, setTop] = useState<number | null>(null);
+  useEffect(() => {
+    const change = Keyboard.addListener("keyboardWillChangeFrame", (event) => {
+      Keyboard.scheduleLayoutAnimation(event);
+      setTop(event.endCoordinates.screenY);
+    });
+    const hide = Keyboard.addListener("keyboardWillHide", (event) => {
+      Keyboard.scheduleLayoutAnimation(event);
+      setTop(null);
+    });
+    return () => {
+      change.remove();
+      hide.remove();
+    };
+  }, []);
+  return top === null ? 0 : Math.max(0, window - top);
 }
 
 /** Back to the screen Search opened over, or Home when it opened with none under it. */
 function close() {
   if (router.canGoBack()) router.back();
   else router.replace("/");
-}
-
-/** One block above the results: what failed or still loads, and what was searched. */
-function Status({
-  status,
-  onRetry,
-  onSettings,
-}: {
-  status: SearchStatus;
-  onRetry: () => void;
-  onSettings: () => void;
-}) {
-  const { loading } = status;
-  return (
-    <View style={styles.status} testID="search-status">
-      <Text style={styles.statusText} accessibilityLiveRegion="polite">
-        {status.text}
-      </Text>
-      {loading ? (
-        // A fixed bar: how many providers are in. It moves only as one arrives.
-        <View style={styles.rail} accessibilityElementsHidden importantForAccessibility="no">
-          <View style={[styles.filled, { width: `${(loading.settled / loading.of) * 100}%` }]} />
-        </View>
-      ) : null}
-      {status.retry.length > 0 || status.settings ? (
-        <View style={styles.actions}>
-          {status.retry.length > 0 ? <TextButton label="Retry" onPress={onRetry} /> : null}
-          {status.settings ? <TextButton label="Settings" onPress={onSettings} /> : null}
-        </View>
-      ) : null}
-    </View>
-  );
 }
 
 /** Nothing has that name: with every list in, how much was looked through. */
@@ -393,12 +440,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.fill,
   },
   input: { flex: 1, color: colors.text, fontSize: 17, paddingVertical: 8 },
-  status: { marginHorizontal: 16, marginTop: 8, gap: 8 },
   statusText: { color: colors.dim, fontSize: 15 },
-  rail: { height: 2, borderRadius: 1, backgroundColor: colors.line, overflow: "hidden" },
-  filled: { height: 2, backgroundColor: colors.text },
-  // Settings goes under Retry when the two don't fit one line, as at the largest text sizes.
-  actions: { flexDirection: "row", flexWrap: "wrap", columnGap: 24 },
+  dock: { marginTop: 8 },
   nothing: { padding: 16, gap: 4 },
   nothingText: { color: colors.text, fontSize: 17, fontWeight: "600" },
   section: {

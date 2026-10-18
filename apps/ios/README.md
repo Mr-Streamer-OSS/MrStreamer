@@ -182,8 +182,8 @@ button of the screen it is on. Downloads, Settings and Settings' provider form (
 provider or a provider's Edit) are Home's screens, pushed on the tab they were asked from (the other
 tabs' route files re-export them), and close as the viewer leaves that tab; Movies' and Series'
 details under them stay. `search` opens over the tabs, fading in, and closes back onto the screen
-it opened over; it keeps its text until the app ends, and says which providers' lists are still
-loading or failed. `connect` shows until a subscription is saved. With copies on
+it opened over; it keeps its text until the app ends, and says, above the keyboard, when the latest
+text is still being searched and which providers' lists are still loading or failed. `connect` shows until a subscription is saved. With copies on
 the phone, Connect also opens `offline`, the same Downloads outside the tabs, so copies play with
 no provider saved, after a relaunch too. Connect and `provider` share `src/provider-form.tsx`. Settings lists each provider as a row with how it
 stands; pressing one offers Retry, its reloads, Edit and Remove as a system sheet, and Remove asks
@@ -205,7 +205,11 @@ Watch's Audio and Subtitles list the tracks the player reports. Expo-video named
 label and language alone, so English stereo and English surround were one track to it; `patches/`
 gives each its place among what plays now as its `id`, and selects by it.
 `src/glass.tsx` draws the app's own controls as Liquid Glass, and solid before iOS 26 or with
-Reduce Transparency on.
+Reduce Transparency on. `src/loading.tsx` shows how lists stand, from what `account.ts` and
+`titles.ts` hold: still shapes where content hasn't come yet, with a soft highlight crossing them
+while the screen is in front, the app active and Reduce Motion off, and a status line in glass at
+the bottom of the screen naming what loads, updates or failed by provider, with Retry and
+Settings, over content that stays usable.
 
 Live channels are asked for as HLS, which AVPlayer plays and panels serve beside MPEG-TS. On the
 simulator the fixture channels showed what that covers: H.264 with AAC or AC-3 plays; MPEG-2 fails
