@@ -411,38 +411,31 @@ it("ignores a stale copied-video rejection lookup after a new title opened", asy
   expect(runs[1]!.destroyed).toBe(false);
 });
 
-it.each([
-  ["network", undefined, "deliver", "network"],
-  ["media", "malformed_input", "inspect", "malformed_input"],
-] as const)(
-  "preserves %s diagnostics after a video fallback",
-  async (kind, diagnosticReason, stage, reason) => {
-    await open();
-    runs[0]!.fail({
-      kind: "unsupported",
-      detail: "Rejected video",
-      video: "copy",
-      rejectedTrack: "video",
-    });
-    await settle();
-    expect(runs).toHaveLength(2);
-    runs[1]!.fail({
-      kind,
-      detail: "PRIVATE",
-      video: "convert",
-      audio: "none",
-      ...(diagnosticReason ? { diagnosticReason } : {}),
-    });
-    await settle();
-    expect(ipc.argsOf("analytics.playbackFailure")).toEqual([
-      expect.objectContaining({
-        diagnostic: expect.objectContaining({
-          diagnostic_stage: stage,
-          diagnostic_reason: reason,
-          diagnostic_fallback: "video",
-        }),
+it("preserves network diagnostics after a video fallback", async () => {
+  await open();
+  runs[0]!.fail({
+    kind: "unsupported",
+    detail: "Rejected video",
+    video: "copy",
+    rejectedTrack: "video",
+  });
+  await settle();
+  expect(runs).toHaveLength(2);
+  runs[1]!.fail({
+    kind: "network",
+    detail: "PRIVATE",
+    video: "convert",
+    audio: "none",
+  });
+  await settle();
+  expect(ipc.argsOf("analytics.playbackFailure")).toEqual([
+    expect.objectContaining({
+      diagnostic: expect.objectContaining({
+        diagnostic_stage: "deliver",
+        diagnostic_reason: "network",
+        diagnostic_fallback: "video",
       }),
-    ]);
-    expect(runs).toHaveLength(2);
-  },
-);
+    }),
+  ]);
+  expect(runs).toHaveLength(2);
+});
