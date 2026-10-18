@@ -119,11 +119,19 @@ const Provider = lazy(() =>
   }),
 );
 const Record = lazy(() =>
-  type.or(
-    { schema: "1", kind: "'provider'", at: "number", catalogueStamp: "string", value: Provider() },
-    { schema: "1", kind: "'about'", at: "number", value: About().or("null") },
-    { schema: "1", kind: "'season'", at: "number", value: Episode().array().or("null") },
-  ),
+  type
+    .or(
+      {
+        schema: "1",
+        kind: "'provider'",
+        at: "number",
+        catalogueStamp: "string",
+        value: Provider(),
+      },
+      { schema: "1", kind: "'about'", at: "number", value: About().or("null") },
+      { schema: "1", kind: "'season'", at: "number", value: Episode().array().or("null") },
+    )
+    .onDeepUndeclaredKey("delete"),
 );
 
 /** Also prepared by viewing erasure when the rest of the runtime has not opened the cache. */
@@ -182,20 +190,26 @@ function make(db: DatabaseSync): DetailCache["Service"] {
       attempt(() => {
         const id = keyOf(key);
         const row = read.get(id);
+        const discard = () => {
+          try {
+            remove.run(id);
+          } catch {}
+          return null;
+        };
         if (
           !row ||
           typeof row.payload !== "string" ||
           Buffer.byteLength(row.payload) > RECORD_BYTES
         )
-          return null;
+          return row ? discard() : null;
         let payload: unknown;
         try {
           payload = JSON.parse(row.payload);
         } catch {
-          return null;
+          return discard();
         }
         const record = Record()(payload);
-        if (record instanceof type.errors || record.kind !== key.kind) return null;
+        if (record instanceof type.errors || record.kind !== key.kind) return discard();
         // A read-only disk must still be able to supply its last good cached details.
         try {
           touch.run(Date.now(), id);
@@ -205,7 +219,10 @@ function make(db: DatabaseSync): DetailCache["Service"] {
     remember: (key, record) =>
       attempt(() => {
         if (record.kind !== key.kind) return;
-        const payload = JSON.stringify({ schema: 1, ...record });
+        // Validate and remove undeclared fields at every depth. Only parsed display data reaches disk.
+        const parsed = Record()({ schema: 1, ...record });
+        if (parsed instanceof type.errors) return;
+        const payload = JSON.stringify(parsed);
         const needed = Buffer.byteLength(payload);
         if (needed > RECORD_BYTES) return;
         const id = keyOf(key);

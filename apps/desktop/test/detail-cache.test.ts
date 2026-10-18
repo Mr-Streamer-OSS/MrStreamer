@@ -84,13 +84,20 @@ describe("opened title detail storage", () => {
     await cache.remember(providerKey, provider);
     const disk = new DatabaseSync(join(dir, "mrstreamer.db"));
     try {
+      const healthy = { kind: "season", id: "unaffected", number: 1, language: "en" } as const;
+      await cache.remember(healthy, { kind: "season", at: 100, value: null });
       for (const payload of [
         "{",
         '{"schema":2,"kind":"provider"}',
         '{"schema":1,"kind":"provider","value":{}}',
+        "x".repeat(9 * 1024 * 1024),
       ]) {
-        disk.prepare("update title_detail_cache set payload = ?").run(payload);
+        await cache.remember(providerKey, provider);
+        disk
+          .prepare("update title_detail_cache set payload = ? where owner = ?")
+          .run(payload, providerKey.subscriptionId);
         expect(await cache.read(providerKey)).toBeNull();
+        expect(await cache.read(healthy)).toMatchObject({ kind: "season", value: null });
       }
     } finally {
       disk.close();
@@ -117,5 +124,44 @@ describe("opened title detail storage", () => {
     expect(await cache.read(providerKey)).toBeNull();
     await cache.remember(providerKey, provider);
     expect(await cache.read(providerKey)).toMatchObject(provider);
+  });
+  it("persists only parsed display fields, excluding undeclared stream locations and headers", async () => {
+    const { cache } = await started(await tempDir());
+    const input = {
+      ...provider,
+      url: "private-stream",
+      value: {
+        ...provider.value,
+        headers: { Authorization: "private" },
+        episodes: [
+          {
+            id: "episode",
+            season: 1,
+            number: 1,
+            name: "Episode",
+            plot: null,
+            duration: null,
+            stillUrl: null,
+            airDate: null,
+            addedAt: null,
+            container: "mkv",
+            url: "private-episode",
+          },
+        ],
+      },
+    };
+    await cache.remember(providerKey, input);
+    const result = await cache.read(providerKey);
+    expect(result).toMatchObject({ kind: "provider", value: { episodes: [{ id: "episode" }] } });
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
+
+  it("evicts old records before live payload exceeds 64 MiB", async () => {
+    const { cache } = await started(await tempDir());
+    const record = { ...provider, value: { ...provider.value, plot: "x".repeat(6 * 1024 * 1024) } };
+    for (let id = 0; id < 11; id++)
+      await cache.remember({ ...providerKey, id: String(id) }, record);
+    expect(await cache.read({ ...providerKey, id: "0" })).toBeNull();
+    expect(await cache.read({ ...providerKey, id: "10" })).toMatchObject({ kind: "provider" });
   });
 });
