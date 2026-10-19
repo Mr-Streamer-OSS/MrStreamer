@@ -100,8 +100,9 @@ Each responsibility has one owner, a plain module with a store the screens read:
   operation at a time per subscription. A record holds the fields the app reads, artwork addresses
   that could carry the login as none, and isn't written when other text holds the password. A
   record may take 8 MiB, every record together 64 MiB and 2,048 records, counted in the UTF-8
-  bytes written with what writes under way have reserved; the least recently written go first, up
-  to 64 for one write, which isn't made when they don't make room. One older than 182 days isn't
+  bytes written with what writes under way have reserved, and a write left halfway that the disk
+  won't delete counts too; the least recently written go first, up to 64 for one write, which
+  isn't made when they don't make room. One older than 182 days isn't
   read. A new password or a removal deletes a subscription's records with its lists, and no write
   of the earlier login is saved after that. Launch reads no record: the budget is counted at the
   first write.

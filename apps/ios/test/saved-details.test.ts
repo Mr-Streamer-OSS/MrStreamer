@@ -764,4 +764,28 @@ describe("the records' budget", () => {
     expect(records().length).toBe(8);
     expect(bytesOnDisk()).toBeLessThanOrEqual(BUDGET);
   });
+
+  it("keeps counting a write left halfway that the disk won't delete, at the next launch too", async () => {
+    native.gate = (operation) =>
+      operation === "move" ? Promise.reject(new Error("The move was refused")) : undefined;
+    native.undeletable = (path) => path.endsWith(".next");
+    const { writeAbout } = await owner();
+    for (let at = 0; at < 9; at++) {
+      await writeAbout("movie", `h${at}`, "en", {
+        at: Date.now(),
+        value: aboutOf("h".repeat(7.5 * MIB)),
+      });
+    }
+    expect(bytesOnDisk()).toBeLessThanOrEqual(BUDGET);
+
+    // Relaunched, with the disk still keeping them: a write that doesn't fit beside them isn't made.
+    native.gate = null;
+    const again = await owner();
+    await again.writeAbout("movie", "after", "en", {
+      at: Date.now(),
+      value: aboutOf("a".repeat(7.5 * MIB)),
+    });
+    expect(saved("after")).toBe(false);
+    expect(bytesOnDisk()).toBeLessThanOrEqual(BUDGET);
+  });
 });

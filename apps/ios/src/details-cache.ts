@@ -179,6 +179,9 @@ let stored = 0;
 let reserved = { bytes: 0, records: 0 };
 const writing = new Set<string>();
 
+/** Whether a write under way owns `uri`: its record, or the file beside it it writes first. */
+const owned = (uri: string) => writing.has(uri.replace(/\.next$/, ""));
+
 /** Forgets the record at `uri`, gone from the disk. */
 function forget(uri: string) {
   const known = index?.get(uri);
@@ -224,13 +227,25 @@ async function load<R extends { readonly at: number }>(
 }
 
 /**
+ * Deletes `file`, a write left halfway; when the disk keeps it, it stays charged as a record is,
+ * until a later deletion, or a write that takes its place, frees it.
+ */
+function abandon(file: File, all: Map<string, { readonly bytes: number; readonly at: number }>) {
+  if (discard(file) || !file.exists) return;
+  const bytes = file.size;
+  if (all === index) forget(file.uri);
+  all.set(file.uri, { bytes, at: file.modificationTime ?? Date.now() });
+  if (all === index) stored += bytes;
+}
+
+/**
  * The records on disk, counted once per run: each one's size and time read once, here, never
- * while they are sorted. A write left halfway that no write under way owns is deleted.
+ * while they are sorted. A write left halfway that no write under way owns is deleted, or
+ * counted as a record when the disk keeps it (`abandon`).
  */
 function indexed() {
   if (index) return index;
   const found = new Map<string, { readonly bytes: number; readonly at: number }>();
-  let bytes = 0;
   const folders = providers().exists
     ? providers()
         .list()
@@ -241,16 +256,14 @@ function indexed() {
     for (const file of at.list()) {
       if (!(file instanceof File)) continue;
       if (file.name.endsWith(".json")) {
-        const size = file.size;
-        found.set(file.uri, { bytes: size, at: file.modificationTime ?? 0 });
-        bytes += size;
-      } else if (!writing.has(file.uri.replace(/\.next$/, ""))) {
-        discard(file);
+        found.set(file.uri, { bytes: file.size, at: file.modificationTime ?? 0 });
+      } else if (!owned(file.uri)) {
+        abandon(file, found);
       }
     }
   }
   index = found;
-  stored = bytes;
+  stored = [...found.values()].reduce((sum, each) => sum + each.bytes, 0);
   return found;
 }
 
@@ -275,7 +288,7 @@ function admit(file: File, bytes: number): Reservation | null {
     all.size + reserved.records + records <= RECORDS;
   if (!fits()) {
     const oldest = [...all]
-      .filter(([uri]) => uri !== file.uri && !writing.has(uri))
+      .filter(([uri]) => uri !== file.uri && !owned(uri))
       .toSorted(([, a], [, b]) => a.at - b.at)
       .slice(0, PRUNE_BATCH);
     for (const [uri] of oldest) {
@@ -297,7 +310,9 @@ function release(reservation: Reservation, placed: boolean) {
   };
   writing.delete(reservation.uri);
   if (!placed || !index) return;
+  // The record takes the place of what it replaced, and of the file beside it it was written to.
   forget(reservation.uri);
+  forget(`${reservation.uri}.next`);
   index.set(reservation.uri, { bytes: reservation.bytes, at: Date.now() });
   stored += reservation.bytes;
 }
@@ -326,8 +341,8 @@ async function store(at: Directory, name: string, text: string, stands: () => bo
   } catch {
     // Not written: what is left of it goes below.
   } finally {
-    if (!placed) discard(new File(at, `${name}.next`));
     release(reservation, placed);
+    if (!placed && index) abandon(new File(at, `${name}.next`), index);
   }
   if (!stands()) discard(file);
 }
