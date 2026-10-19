@@ -372,7 +372,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     await install();
     // The panel's pictures are on image.example: served here, its backdrops refused.
     const online = globalThis.fetch;
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const pictures = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       if (url.hostname !== "image.example") return online(input, init);
       return Promise.resolve(
@@ -381,21 +381,29 @@ describe("downloads", { timeout: 30_000 }, () => {
           : new Response(`picture ${url.pathname}`),
       );
     });
+    // What this test starts, it ends, passing or not, before its spy goes.
+    let app: App | null = null;
+    let film: { readonly id: string } | null = null;
     try {
-      const app = await launch();
-      const { a } = await withProviders(app);
+      const started = await launch();
+      app = started;
+      const { a } = await withProviders(started);
       const poster = `https://image.example/p/${movie().id}.jpg`;
       const wide = `https://image.example/b/m${movie().id}.jpg`;
-      const film = await app.addDownload(movieRef(a));
-      const item = () => app.downloadList().items.find((each) => each.id === film.id);
-      await until(() => isComplete(app, film.id) && item()?.posterUrl != null, "the copy's poster");
+      const copy = await started.addDownload(movieRef(a));
+      film = copy;
+      const item = () => started.downloadList().items.find((each) => each.id === copy.id);
+      await until(
+        () => isComplete(started, copy.id) && item()?.posterUrl != null,
+        "the copy's poster",
+      );
       await until(() => native.tasks.some((each) => each.url === wide), "its backdrop asked for");
       await sleep(50);
-      const kept = new DiskFile(native.root, "documents", "downloads", film.id, "poster");
+      const kept = new DiskFile(native.root, "documents", "downloads", copy.id, "poster");
       expect(item()?.posterUrl).toBe(kept.uri);
       expect(kept.textSync()).toBe(`picture /p/${movie().id}.jpg`);
       expect(item()?.wideUrl).toBeNull();
-      expect(new DiskFile(native.root, "documents", "downloads", film.id, "wide").exists).toBe(
+      expect(new DiskFile(native.root, "documents", "downloads", copy.id, "wide").exists).toBe(
         false,
       );
       // Every picture request, this test's and an earlier one's of the same film alike.
@@ -403,7 +411,9 @@ describe("downloads", { timeout: 30_000 }, () => {
       expect(new Set(asked.map((each) => each.url))).toEqual(new Set([poster, wide]));
       expect(asked.every((each) => each.sessionType === "foreground")).toBe(true);
     } finally {
-      vi.restoreAllMocks();
+      if (film) await app?.removeDownload(film.id).catch(() => undefined);
+      app?.stop();
+      pictures.mockRestore();
     }
   });
 
