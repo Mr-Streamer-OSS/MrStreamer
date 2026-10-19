@@ -22,7 +22,11 @@ import {
 } from "./guide-grid.ts";
 import { startGuideHost, type GuideHost } from "../../../../apps/desktop/test/fake-guide-host.ts";
 import { homeScenario } from "./home.ts";
-import { liveCategoriesScenario, LONG_CATEGORY } from "./live-categories.ts";
+import {
+  liveCategoriesScenario,
+  LONG_CATEGORY,
+  browseFixtureLanguages,
+} from "./live-categories.ts";
 import { languageScenario } from "./language.ts";
 import { settingsScenario } from "./settings.ts";
 import { preferencesScenario } from "./preferences.ts";
@@ -223,10 +227,11 @@ async function run(scenario: Scenario) {
       other = await startFakeProvider({ channels: 300, titles: 10, live: true });
     if (scenario === "live-categories")
       provider.serveCategories((all) =>
-        all.map((category) =>
+        browseFixtureLanguages(all).map((category) =>
           category.id === "1" ? { ...category, name: LONG_CATEGORY } : category,
         ),
       );
+    if (scenario === "live-categories") other!.serveCategories(browseFixtureLanguages);
     if (scenario.startsWith("hls-compatibility")) playlist = await startFakeHls({ realtime: true });
     if (scenario === "home-stage-live-only") playlist = await startFakePlaylist();
     if (scenario === "catch-up-hls") {
@@ -731,7 +736,7 @@ async function run(scenario: Scenario) {
           otherUrl: other!.url,
           refresh: (kind) => {
             provider!.serveCategories((all) =>
-              all
+              browseFixtureLanguages(all)
                 .filter((category) => kind !== "remove" || category.name !== "BE | Entertainment")
                 .map((category) =>
                   category.id === "1" ? { ...category, name: LONG_CATEGORY } : category,
@@ -739,7 +744,7 @@ async function run(scenario: Scenario) {
                 .toReversed(),
             );
             other!.serveCategories((all) =>
-              all
+              browseFixtureLanguages(all)
                 .filter((category) => kind !== "remove" || category.name !== "BE | Entertainment")
                 .toReversed(),
             );

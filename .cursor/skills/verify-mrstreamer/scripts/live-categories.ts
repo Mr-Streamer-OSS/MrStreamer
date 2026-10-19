@@ -1,10 +1,23 @@
 // TV B through the built window, including the shared Watch picker and retained viewing state.
+import type { FakeProvider } from "../../../../apps/desktop/test/fake-provider.ts";
 import { LANGUAGE_NAMES, type Locale } from "../../../../packages/contracts/src/language.ts";
 import { translate } from "../../../../packages/core/src/i18n.ts";
 import type { Driver } from "./language.ts";
 
 export const LONG_CATEGORY =
   "TEST | Formats and failures with a deliberately long provider category label";
+
+/** Explicit language facts for the real menu path, alongside a catalogue mostly lacking them. */
+export function browseFixtureLanguages(
+  categories: FakeProvider["catalogue"]["categories"],
+): FakeProvider["catalogue"]["categories"] {
+  return categories.map((category) => ({
+    ...category,
+    name: category.name
+      .replace(/^BE \| Sports$/, "BE - FR | Sports")
+      .replace(/^UK \| Sports$/, "UK - EN | Sports"),
+  }));
+}
 
 const named = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
@@ -76,6 +89,20 @@ export async function liveCategoriesScenario(
       "document.querySelector('[data-browse-filter=countries]')?.textContent.includes('Belgium') ?? false",
     ),
   );
+  await d.click(
+    "Open explicit Language filter",
+    "document.querySelector('[data-browse-filter=languages]')",
+  );
+  await d.click(
+    "Choose French in Sports",
+    "[...document.querySelectorAll('[role=menu] button')].find(e=>e.textContent.startsWith('French'))",
+  );
+  await d.key("Escape", 27);
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      "document.querySelector('[data-browse-filter=languages]')?.textContent.includes('French') ?? false",
+    ),
+  );
   d.observed["topicFilters"] = await d.evaluate<string>(
     "document.querySelector('[aria-label=\"Channel filters\"]').innerText",
   );
@@ -97,7 +124,7 @@ export async function liveCategoriesScenario(
   );
   await d.wait(() =>
     d.evaluate<boolean>(
-      "document.querySelector('main h1')?.textContent === 'Sports' && document.querySelector('[data-browse-filter=countries]')?.textContent.includes('Belgium')",
+      "document.querySelector('main h1')?.textContent === 'Sports' && document.querySelector('[data-browse-filter=countries]')?.textContent.includes('Belgium') && document.querySelector('[data-browse-filter=languages]')?.textContent.includes('French')",
     ),
   );
   await d.quit();
@@ -112,6 +139,12 @@ export async function liveCategoriesScenario(
       "document.querySelector('[data-browse-filter=countries]')?.textContent.includes('Any') ?? false",
     ),
     "Session filters survived startup",
+  );
+  expect(
+    await d.evaluate<boolean>(
+      "document.querySelector('[data-browse-filter=languages]')?.textContent.includes('Any') ?? false",
+    ),
+    "Language filter survived startup",
   );
   await d.capture("browse-topic-restored");
   await d.click("Choose All channels", row("All channels"));
