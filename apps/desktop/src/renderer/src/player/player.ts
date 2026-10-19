@@ -7,7 +7,7 @@ import {
   streamFailure,
   engineDiagnostic,
 } from "./analytics.ts";
-// The player controller: owns the one video element, the open stream session and the playback state.
+// The live controller owns its open stream session and playback state in the shared video element.
 //
 // Every `play` call starts a new selection. Anything that resolves for an older selection is
 // dropped, so a slow channel can never replace the one the viewer picked after it.
@@ -94,6 +94,11 @@ import {
 } from "./engine.ts";
 import type { SoundChoice } from "./hls-tracks.ts";
 import { outputs } from "./output.ts";
+import { mediaClaim, video } from "./shared-media.ts";
+import { RECONNECT_DELAYS_MS, STABLE_PLAYBACK_MS } from "./recovery-policy.ts";
+import { rememberSubtitles } from "./subtitle-preferences.ts";
+export { STABLE_PLAYBACK_MS } from "./recovery-policy.ts";
+export { rememberSubtitles } from "./subtitle-preferences.ts";
 import {
   addTextCue,
   clearSubtitles,
@@ -103,13 +108,6 @@ import {
   subtitlePresenter,
 } from "./subtitles.ts";
 
-/** Waits before each reconnect attempt after a stream breaks. Its length is the attempt limit. */
-const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000];
-/**
- * How long a channel has to play before a break gets every reconnect again. A channel that breaks
- * off sooner keeps the reconnects it has left. Time paused or waiting for data isn't time played.
- */
-export const STABLE_PLAYBACK_MS = 30_000;
 /**
  * How long zapping waits for the next key press before it opens a stream. Flicking through
  * channels shows each one at once but only tunes the one the viewer stops on, which matters on
@@ -268,9 +266,7 @@ function selectForWatching(channel: LiveChannel): void {
     observation.begin();
   }
 }
-const video = document.createElement("video");
-video.playsInline = true;
-video.className = "size-full";
+const claim = mediaClaim(() => player.makeWay());
 let selection = 0;
 /**
  * The current selection is a preview: a failure leaves it stopped instead of reconnecting, so a
@@ -349,16 +345,6 @@ let recovery = UNTRIED;
 /** The viewer asked for this computer, so the channel goes on here when the receiver is let go of. */
 let returning = false;
 
-/**
- * Hears when the viewer starts a live channel, so a movie or episode playing in the same element
- * closes first. Previews don't count: they never replace what the viewer chose.
- */
-let liveStarts: (() => void) | null = null;
-
-export function onLiveStart(listener: () => void): void {
-  liveStarts = listener;
-}
-
 function cancelZap(): void {
   if (zapTimer) clearTimeout(zapTimer);
   zapTimer = null;
@@ -402,6 +388,7 @@ function failed(problem: PlaybackProblem): PlayerPhase {
  * through before counts, and it has every reconnect.
  */
 function begin(channel: LiveChannel, preview = false): Promise<void> {
+  if (!claim.keep()) return Promise.resolve();
   recovery = UNTRIED;
   return start(channel, false, preview);
 }
@@ -444,6 +431,7 @@ function reconnecting(until: number | null): PlayerPhase {
  * it costs CPU, so it is the second try.
  */
 async function start(channel: LiveChannel, repair = false, preview = false): Promise<void> {
+  if (!claim.keep()) return;
   if (outputs.remote()) {
     // Nothing previews while a receiver has playback: it would take the provider's connection.
     if (!preview) await startOnReceiver(channel);
@@ -478,7 +466,7 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
       // The sound in the viewer's language, when the channel has it; the original is its own.
       audioLanguage: preferred && preferred !== ORIGINAL_SOUND ? preferred : null,
     };
-    if (!preview && mine !== selection) return;
+    if (mine !== selection) return;
     session = await call("playback.open", {
       ...(measurement ? { measurement } : {}),
       channel: ownedId(channel),
@@ -598,6 +586,7 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
  * there, or the reconnect it is at.
  */
 async function startOnReceiver(channel: LiveChannel): Promise<void> {
+  if (!claim.keep()) return;
   const mine = ++selection;
   const measurement = observation.measurement();
   const first = recovery.reconnects === 0;
@@ -1066,18 +1055,6 @@ function choose(track: SubtitleTrack | null): void {
   restartSubtitles();
 }
 
-/**
- * Remembers the subtitles picked, in a channel or a title, for the next ones: their language, or
- * none. Captions have no language, so picking them keeps the one remembered before.
- */
-export function rememberSubtitles(track: SubtitleTrack | null): void {
-  const language = track ? track.language : "off";
-  if (language === null) return;
-  void updatePreferences({ subtitleLanguage: language }).catch((error: unknown) => {
-    flashNote(`${t("Subtitles")}: ${describeError(appError(error))}`, true);
-  });
-}
-
 /** The receiver's volume, when one has playback and it can be set from here. */
 function receiverVolume(): { readonly level: number; readonly muted: boolean } | null {
   const { output } = outputs.status();
@@ -1139,8 +1116,8 @@ export const player = {
 
   /** Plays a channel live. */
   play(channel: LiveChannel): void {
+    if (!claim.take()) return;
     selectForWatching(channel);
-    liveStarts?.();
     cancelZap();
     live();
     store.setState({ stopped: false });
@@ -1153,8 +1130,8 @@ export const player = {
    */
   playArchive(channel: LiveChannel, programme: Programme): void {
     if (outputs.remote()) return;
+    if (!claim.take()) return;
     selectForWatching(channel);
-    liveStarts?.();
     cancelZap();
     archived = { programme, at: programme.start };
     store.setState({ stopped: false, archive: programme });
@@ -1170,9 +1147,9 @@ export const player = {
     const open =
       phase.kind === "playing" || phase.kind === "tuning" || phase.kind === "reconnecting";
     if (sameOwned(selected, channel) && open && !zapTimer) {
+      if (!claim.take()) return;
       selectForWatching(channel);
       if (current) observation.bind(current.sessionId);
-      liveStarts?.();
       quiet = false;
       store.setState({ stopped: false });
       return;
@@ -1232,8 +1209,8 @@ export const player = {
    * opens once the viewer stops switching for a moment.
    */
   zap(channel: LiveChannel): void {
+    if (!claim.take()) return;
     selectForWatching(channel);
-    liveStarts?.();
     cancelZap();
     selection++;
     release();
@@ -1323,6 +1300,7 @@ export const player = {
   /** Takes up a channel a receiver already plays, as when the window opens while it does. */
   adopt(channel: LiveChannel, media: RemoteMedia): void {
     if (onReceiver) return;
+    if (!claim.take()) return;
     explicitlySelected = channel;
     observation.adoptRemote();
     selection++;

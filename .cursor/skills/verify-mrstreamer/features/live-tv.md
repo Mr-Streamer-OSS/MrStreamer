@@ -1,5 +1,7 @@
 # Live TV
 
+Live and title playback share one media claim. An explicit channel, archive or zap closes the title immediately; preview, retry, quality and reconnect work cannot displace an open title. A delayed preview read cannot open an older channel after another selection. Preview to Watch keeps the same provider session. Main still owns actual connection admission and receiver transport. `renderer/playback-admission.test.ts`, `receiver.test.ts` and `next-episode.test.ts` cover both handoff directions, adoption without a receiver Stop, obsolete preview reads and cancellation of a held countdown. On a built app, cover preview to movie, return to preview, episode end under Settings, then a channel from global Search; require one provider reader and no later automatic episode. Add native mini-player/fullscreen proof for the same video node. Real providers and physical receivers remain separate acceptance.
+
 ## Sub-features
 
 Pick channels through global search, Live TV, its guide grid or favourites. Watch shares its live stream with the muted Home preview. Other paths include codec conversion, captions, recovery, favourite ordering and catch-up of programmes that aired.

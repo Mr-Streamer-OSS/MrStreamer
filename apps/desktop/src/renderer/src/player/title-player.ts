@@ -7,9 +7,8 @@ import {
   engineDiagnostic,
 } from "./analytics.ts";
 // The controller for movies and episodes: which title is open, where it is, its tracks, and
-// what the viewer does with it. It plays in the same element as live TV (see player.ts): opening a
-// title stops the live stream, and starting a live channel closes the title, so the provider sees
-// one connection.
+// what the viewer does with it. A claim on the shared media element ends the previous controller's
+// playback before this one starts, while main owns closing and admitting provider connections.
 //
 // How far the title got is saved as the viewer goes: every minute while playing, and at each
 // pause, seek, track change, the end, leaving and hiding the window. Never per frame.
@@ -73,7 +72,9 @@ import { flashNote } from "../features/watch/flash-state.ts";
 import { call, listen } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
 import type { EngineError } from "./engine.ts";
-import { onLiveStart, player, rememberSubtitles, STABLE_PLAYBACK_MS } from "./player.ts";
+import { mediaClaim, video } from "./shared-media.ts";
+import { RECONNECT_DELAYS_MS, STABLE_PLAYBACK_MS } from "./recovery-policy.ts";
+import { rememberSubtitles } from "./subtitle-preferences.ts";
 import {
   clearSubtitles,
   setSubtitleDelay,
@@ -92,8 +93,6 @@ import {
 const CHECKPOINT_MS = 60_000;
 /** A pause this long ends the run, so the provider's connection isn't held for nothing. */
 const RELEASE_AFTER_PAUSE_MS = 5 * 60_000;
-/** Waits before each new run after the connection broke. Its length is the attempt limit. */
-const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000];
 
 /** The speeds a title plays at, slowest first; 1 is its own. */
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
@@ -287,7 +286,7 @@ export function onSubtitleChoice(listener: () => void): void {
   subtitleChoices = listener;
 }
 
-const video = player.element;
+const claim = mediaClaim(() => titlePlayer.close());
 /** The open session: its id and the address runs play from. */
 let session: { readonly id: string; readonly url: string } | null = null;
 /**
@@ -379,10 +378,6 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") save();
 });
 window.addEventListener("beforeunload", () => save());
-// Starting a live channel closes the title.
-onLiveStart(() => {
-  if (store.getState().now) titlePlayer.close();
-});
 // What comes after the open episode follows the record: one marked or played since is passed over.
 listen("viewing.changed", () => void refreshNext());
 listen("playback.readingAhead", ({ sessionId }) => {
@@ -1218,6 +1213,38 @@ function keepSubtitleChoice(): void {
 
 outputs.subscribe(outputChanged);
 
+/** Synchronous self-cleanup also serves replacement, which keeps the controller's media claim. */
+function closeTitle(keepObservation = false): void {
+  if (!receiver && !keepObservation) observation.end();
+  const { now, phase } = store.getState();
+  if (!now) return;
+  if (receiver) {
+    generation++;
+    stopCountdown();
+    stopTicking();
+    receiver = null;
+    confirmedMedia = null;
+    released = null;
+    store.setState(idle);
+    return;
+  }
+  save();
+  generation++;
+  stopCountdown();
+  // An opening title may not have a session yet; cancel its provider request too.
+  if (phase.kind === "opening") void call("playback.closeAll").catch(() => {});
+  stopEngine();
+  if (releaseTimer) clearTimeout(releaseTimer);
+  releaseTimer = null;
+  released = null;
+  if (session) void call("playback.close", { sessionId: session.id }).catch(() => {});
+  session = null;
+  // Live plays at its own speed and subtitle timing when it next takes the element.
+  playAt(1);
+  setSubtitleDelay(video, 0);
+  store.setState(idle);
+}
+
 export const titlePlayer = {
   /**
    * Opens a title and plays it from `from` seconds: the resume position, or 0 to start at the
@@ -1233,10 +1260,10 @@ export const titlePlayer = {
       before.now.title.kind === "episode" &&
       now.title.kind === "episode" &&
       sameOwned(seriesOf(before.now.title), seriesOf(now.title));
-    titlePlayer.close(retry);
+    if (!claim.take()) return;
+    closeTitle(retry);
     // Subtitle timing belongs to a file; a new title starts on time.
     setSubtitleDelay(video, 0);
-    player.makeWay();
     if (!retry) observation.begin();
     const mine = ++generation;
     openedAt = Date.now();
@@ -1699,6 +1726,7 @@ export const titlePlayer = {
     media: RemoteMedia,
   ): void {
     if (store.getState().now) return;
+    if (!claim.take()) return;
     observation.adoptRemote();
     generation++;
     play++;
@@ -1728,34 +1756,10 @@ export const titlePlayer = {
    * receiver is only let go of here: the receiver plays on, or what is played next takes its place.
    */
   close(keepObservation = false): void {
-    if (!receiver && !keepObservation) observation.end();
-    const { now, phase } = store.getState();
-    if (!now) return;
-    if (receiver) {
-      generation++;
-      stopCountdown();
-      stopTicking();
-      receiver = null;
-      confirmedMedia = null;
-      released = null;
-      store.setState(idle);
-      return;
+    try {
+      closeTitle(keepObservation);
+    } finally {
+      claim.release();
     }
-    save();
-    generation++;
-    stopCountdown();
-    // Still reading the file, before its session is known: stop that too, so no request to the
-    // provider outlives the title.
-    if (phase.kind === "opening") void call("playback.closeAll").catch(() => {});
-    stopEngine();
-    if (releaseTimer) clearTimeout(releaseTimer);
-    releaseTimer = null;
-    released = null;
-    if (session) void call("playback.close", { sessionId: session.id }).catch(() => {});
-    session = null;
-    // The element plays live channels next, at their own speed and their subtitles on time.
-    playAt(1);
-    setSubtitleDelay(video, 0);
-    store.setState(idle);
   },
 };

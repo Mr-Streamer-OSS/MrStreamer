@@ -333,6 +333,48 @@ it("ignores obsolete begin replies and preferences without admitting an older ch
 });
 
 describe("switching between live and title playback", () => {
+  it.each(["preview", "retry", "reopen"] as const)(
+    "does not let a stale live %s interrupt an open title",
+    async (action) => {
+      player.watch(channel);
+      await settle();
+      await titlePlayer.open(now, 0);
+      await settle();
+      if (action === "preview") player.preview(channel);
+      else player[action]();
+      await settle();
+      expect(ipc.argsOf("playback.open")).toHaveLength(1);
+      expect(titlePlayer.state().phase.kind).toBe("playing");
+      expect(player.state().phase.kind).toBe("idle");
+    },
+  );
+
+  it.each([false, true])(
+    "does not send an obsolete preview after its preferences answer, newer live selection %s",
+    async (returnToLive) => {
+      const pending = ipc.hold("preferences.get");
+      player.preview(channel);
+      await titlePlayer.open(now, 0);
+      await settle();
+      const newer = {
+        ...channel,
+        id: "newer",
+        variants: [{ ...channel.variants[0]!, id: "newer" }],
+      };
+      if (returnToLive) {
+        player.watch(newer);
+        await settle();
+      }
+      pending.resolve(ipc.snapshot(defaultPreferences));
+      await settle();
+      expect(ipc.argsOf("playback.open").map((args) => args.channel.id)).toEqual(
+        returnToLive ? ["newer"] : [],
+      );
+      if (returnToLive) expect(player.state().channel?.id).toBe("newer");
+      else expect(titlePlayer.state().phase.kind).toBe("playing");
+    },
+  );
+
   it.each(["play", "archive", "zap"] as const)(
     "%s closes the title before opening a live session",
     async (action) => {

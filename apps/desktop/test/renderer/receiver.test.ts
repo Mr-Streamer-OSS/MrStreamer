@@ -1361,12 +1361,11 @@ describe("a channel that plays here", () => {
 describe("a preview", () => {
   it("says it is one, so a receiver that connects as it opens keeps the connection", async () => {
     await emit(HERE);
-    // The receiver connects while the preview is still about to open.
-    const preferences = ipc.hold("preferences.get");
+    // The receiver connects after the preview request was sent but before main answers it.
     const opened = ipc.hold("playback.open");
     player.preview(channel("a"));
+    await wait(0);
     await emit(connected());
-    await act(async () => preferences.resolve(ipc.snapshot(defaultPreferences)));
 
     expect(ipc.argsOf("playback.open")).toMatchObject([
       { channel: { subscriptionId: SUBSCRIPTION, id: "a" }, preview: true },
@@ -1376,6 +1375,17 @@ describe("a preview", () => {
     await act(async () =>
       opened.reject({ kind: "unexpected", detail: "A receiver has playback." }),
     );
+    expect(player.state().phase).toEqual({ kind: "idle" });
+    expect(ipc.methods()).not.toContain("output.playChannel");
+  });
+
+  it("opens nothing when a receiver connects before its preferences answer", async () => {
+    await emit(HERE);
+    const preferences = ipc.hold("preferences.get");
+    player.preview(channel("a"));
+    await emit(connected());
+    await act(async () => preferences.resolve(ipc.snapshot(defaultPreferences)));
+    expect(ipc.argsOf("playback.open")).toEqual([]);
     expect(player.state().phase).toEqual({ kind: "idle" });
     expect(ipc.methods()).not.toContain("output.playChannel");
   });
