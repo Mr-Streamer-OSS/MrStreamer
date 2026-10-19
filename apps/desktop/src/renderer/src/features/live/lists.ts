@@ -149,8 +149,12 @@ export function useListSearch(
   }, [text]);
   const query = text.trim() === "" ? "" : settled.trim();
   const until = endOfDay(useNow());
-  const scope = useMemo(() => ({ channels: channels.map(ownedId) }), [channels]);
   const searching = text.trim() !== "";
+  // Disabled queries still hash their keys on render. Empty search needs no channel scope.
+  const scope = useMemo(
+    () => ({ channels: searching ? channels.map(ownedId) : [] }),
+    [channels, searching],
+  );
   const grouped = useQuery({
     ...queries.searchGroups(),
     // Start the one catalogue decision during the typing delay, before programme search waits.
