@@ -24,6 +24,11 @@ const memory = vi.hoisted(() => ({
   /** Passwords the Keychain has stored but whose write it hasn't answered yet. */
   heldSecrets: [] as Array<() => void>,
   holdSecrets: false,
+  /**
+   * How the Keychain answers a subscription password's write: refused before storing it, stored
+   * then refused, or refused with the item lost. Null: it stores it.
+   */
+  secretFailure: null as null | "before" | "after" | "lost",
   /** Each request to a panel: its `action`, or "login" for the login check. */
   requests: [] as string[],
   /** Details requests held until a test lets them through. */
@@ -53,7 +58,14 @@ vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
   getItemAsync: async (key: string) => memory.keychain.get(key) ?? null,
   setItemAsync: async (key: string, value: string) => {
+    const failure = key.startsWith("s.") ? memory.secretFailure : null;
+    if (failure === "before") throw new Error("The Keychain refused the item");
+    if (failure === "lost") {
+      memory.keychain.delete(key);
+      throw new Error("The Keychain refused the item");
+    }
     memory.keychain.set(key, value);
+    if (failure === "after") throw new Error("The Keychain refused the answer");
     if (memory.holdSecrets && key.startsWith("s.")) {
       await new Promise<void>((go) => memory.heldSecrets.push(go));
     }
@@ -233,6 +245,7 @@ beforeEach(() => {
   memory.aliases = [];
   memory.keychain.clear();
   memory.holdSecrets = false;
+  memory.secretFailure = null;
   memory.requests.length = 0;
   memory.holdDetails = false;
   memory.details = null;
@@ -620,6 +633,79 @@ describe("a login replaced or removed", () => {
     tmdb.holdAbout(false);
     await expect(reading).rejects.toMatchObject({ error: { kind: "needs-secret" } });
     expect(shown).toHaveLength(1);
+  });
+
+  /** The first episode of `series` as `app` lists it now, as Play asks for its file. */
+  async function episodeFile(app: App, series: Title) {
+    const [episode] = seriesOf(await app.detailsOf(series)).seasons[0]?.episodes ?? [];
+    if (!episode) throw new Error("No episode");
+    const ref = {
+      kind: "episode" as const,
+      subscriptionId: episode.subscriptionId,
+      id: episode.id,
+      seriesId: episode.seriesId,
+      season: episode.season,
+      episode: episode.number,
+    };
+    return app.titleFile(ref, AbortSignal.timeout(5_000));
+  }
+
+  for (const how of ["given a new password", "added again"] as const) {
+    it(`reads under the old password when the Keychain refuses the new one, ${how}`, async () => {
+      const NEW = "canaryNew9";
+      memory.aliases = [[NEW, ONE.password]];
+      const app = await launch();
+      const id = await added(app);
+      const series = await first(app, "series");
+      await opened(app, series);
+
+      memory.secretFailure = "before";
+      const change =
+        how === "added again"
+          ? app.add({ server: panel.url, username: ONE.username, password: NEW })
+          : app.update(id, { password: NEW });
+      await expect(change).rejects.toMatchObject({ error: { kind: "keychain-refused" } });
+      expect(memory.keychain.get(`s.${id}`)).toBe(ONE.password);
+      expect(await app.detailsOf(series)).toMatchObject({ kind: "series" });
+      const file = await episodeFile(app, series);
+      expect(file.url).toContain(encodeURIComponent(ONE.password));
+      expect(file.url).not.toContain(NEW);
+    });
+  }
+
+  it("reads under the new password when the Keychain stored it though it answered with a failure", async () => {
+    const NEW = "canaryNew9";
+    memory.aliases = [[NEW, ONE.password]];
+    const app = await launch();
+    const id = await added(app);
+    const series = await first(app, "series");
+    await opened(app, series);
+
+    memory.secretFailure = "after";
+    await expect(app.update(id, { password: NEW })).rejects.toMatchObject({
+      error: { kind: "keychain-refused" },
+    });
+    expect(memory.keychain.get(`s.${id}`)).toBe(NEW);
+    const file = await episodeFile(app, series);
+    expect(file.url).toContain(NEW);
+    expect(file.url).not.toContain(encodeURIComponent(ONE.password));
+  });
+
+  it("asks for the password when the Keychain lost it refusing the new one", async () => {
+    memory.aliases = [["canaryNew9", ONE.password]];
+    const app = await launch();
+    const id = await added(app);
+    const series = await first(app, "series");
+    await opened(app, series);
+
+    memory.secretFailure = "lost";
+    await expect(app.update(id, { password: "canaryNew9" })).rejects.toMatchObject({
+      error: { kind: "keychain-refused" },
+    });
+    await expect(app.detailsOf(series)).rejects.toMatchObject({
+      error: { kind: "needs-secret" },
+    });
+    expect(app.members()[0]?.needsSecret).toBe(true);
   });
 
   it("keeps the old password when its saved details can't be deleted", async () => {

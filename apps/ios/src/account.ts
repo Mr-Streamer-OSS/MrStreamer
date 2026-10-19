@@ -69,7 +69,9 @@ import { eraseWatchlist, setWatchlistOwners } from "./watchlist.ts";
 // under a removed one's id, is given to the Keychain only once its saved lists are gone; when
 // they can't be deleted, the change fails and the login stays as it was. A removal deletes them
 // as it can, leaving the rest to the next launch or the next add. No list of an earlier login is
-// saved after a deletion, and a write under way can't bring them back. The details of titles
+// saved after a deletion, and a write under way can't bring them back. When the change fails after
+// that deletion, as when the Keychain refuses the password, the subscription signs in again with
+// whichever password the Keychain holds then, or asks for one (`recoverLogin`). The details of titles
 // opened from it (details-cache.ts, which titles.ts saves while `savable` holds) go with its lists.
 
 /** A list one subscription loads; a failed or repeated load keeps the last one it had. */
@@ -282,6 +284,23 @@ async function clearSaved(id: string): Promise<void> {
     kind: "unexpected",
     detail: "The lists this iPhone saved couldn't be deleted. Try again.",
   });
+}
+
+/**
+ * After a change that cleared `id`'s saved lists for a new password failed before that password
+ * signed in, `before` is no longer savable, though it may still be the login: signs the
+ * subscription in again with the password the Keychain holds now, whichever that is, under a new
+ * revision, so it answers again while nothing saved of `before` comes back. With no password to
+ * read back, it asks for one (`needsSecret`). Nothing when the new password already signed in.
+ */
+async function recoverLogin(id: string, before: Source | undefined): Promise<void> {
+  if (currentSource(id) !== before) return;
+  const password = await keychainSecrets.read(id).catch(() => null);
+  const entry = registry.subscriptions.find((each) => each.id === id);
+  if (!entry || currentSource(id) !== before) return;
+  if (password) return signIn(entry, password, null);
+  dropSource(id);
+  setMember(id, (member) => ({ ...member, needsSecret: true }));
 }
 
 /**
@@ -519,19 +538,26 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
     const name = nameOf(input.name);
     const known = registry.subscriptions.find((entry) => sameAccount(entry, account));
     if (known) {
+      const before = currentSource(known.id);
       await clearSaved(known.id);
-      await keychainSecrets.write(known.id, account.password);
-      const entry = name === undefined || name === known.name ? known : { ...known, name };
-      if (entry !== known) {
-        commit({
-          ...registry,
-          subscriptions: registry.subscriptions.map((each) => (each === known ? entry : each)),
-        });
+      try {
+        await keychainSecrets.write(known.id, account.password);
+        const entry = name === undefined || name === known.name ? known : { ...known, name };
+        if (entry !== known) {
+          commit({
+            ...registry,
+            subscriptions: registry.subscriptions.map((each) => (each === known ? entry : each)),
+          });
+        }
+        // The roster follows the registry, whatever an earlier change left of it.
+        syncRoster();
+        signIn(entry, account.password, status);
+        return entry.id;
+      } catch (cause) {
+        // Best effort: the change still fails with its own error.
+        await recoverLogin(known.id, before).catch(() => undefined);
+        throw cause;
       }
-      // The roster follows the registry, whatever an earlier change left of it.
-      syncRoster();
-      signIn(entry, account.password, status);
-      return entry.id;
     }
     const retired = registry.retired.find((each) => sameAccount(each, account));
     const id = retired?.id ?? newSubscriptionId(registry, Date.now());
@@ -612,20 +638,24 @@ export async function update(
     if (signal?.aborted) return;
     const now = registry.subscriptions.find((each) => each.id === id);
     if (!now) throw new AppFailure({ kind: "no-subscription" });
-    if (password) {
-      await clearSaved(id);
-      await keychainSecrets.write(id, password);
+    const before = currentSource(id);
+    if (password) await clearSaved(id);
+    try {
+      if (password) await keychainSecrets.write(id, password);
+      const name = nameOf(change.name);
+      const next = name === undefined || name === now.name ? now : { ...now, name };
+      if (next !== now) {
+        commit({
+          ...registry,
+          subscriptions: registry.subscriptions.map((each) => (each === now ? next : each)),
+        });
+        syncRoster();
+      }
+      if (password && status) signIn(next, password, status);
+    } catch (cause) {
+      if (password) await recoverLogin(id, before).catch(() => undefined);
+      throw cause;
     }
-    const name = nameOf(change.name);
-    const next = name === undefined || name === now.name ? now : { ...now, name };
-    if (next !== now) {
-      commit({
-        ...registry,
-        subscriptions: registry.subscriptions.map((each) => (each === now ? next : each)),
-      });
-      syncRoster();
-    }
-    if (password && status) signIn(next, password, status);
   });
 }
 
