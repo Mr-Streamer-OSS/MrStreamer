@@ -21,7 +21,7 @@ import { appError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { browseQuery } from "./lists.ts";
 import { useUi } from "../../app/ui-store.ts";
-import { keepViewing, queries, useSubscriptions } from "../../lib/queries.ts";
+import { keepViewing, queries, rosterOf, savedAs, useSubscriptions } from "../../lib/queries.ts";
 
 /** What of a row holds the focus: the row itself, or one of its two buttons. */
 export type RowPart = "row" | "up" | "down";
@@ -110,10 +110,6 @@ export function orderKey(event: KeyboardEvent, order: OrderEditor): void {
 const sameChannels = (a: readonly OwnedId[], b: readonly OwnedId[]) =>
   a === b || (a.length === b.length && a.every((channel, at) => sameOwned(channel, b[at])));
 
-/** The saved subscriptions as one word, which another one added or removed changes. */
-const savedAs = (subscriptions: readonly { readonly id: string }[] | undefined) =>
-  (subscriptions ?? []).map(({ id }) => id).join("\n");
-
 /** Whether a draft waits for the main process: nothing moves meanwhile, and nothing leaves it. */
 export const waits = (draft: Draft | null): boolean =>
   draft?.status === "saving" || draft?.status === "reading";
@@ -197,8 +193,7 @@ export function useFavouriteOrder(
     );
 
   /** Whether the subscriptions an answer is for are still the ones saved. */
-  const connected = (from: string) =>
-    savedAs(client.getQueryData(queries.subscriptions().queryKey)) === from;
+  const connected = (from: string) => rosterOf(client) === from;
 
   /**
    * Reads `channels` from the main process, as it lists them now, into the lists' cache, and
@@ -222,7 +217,7 @@ export function useFavouriteOrder(
     if (!connected(from) || later > viewing.sequence) return;
     // A list that can't be read says so itself, once it shows.
     await read(viewing).catch(() => {});
-    if (connected(from)) keepViewing(client, viewing);
+    keepViewing(client, viewing, from);
   };
 
   const select = (channel: OwnedId, part: RowPart = "row") => {
@@ -235,13 +230,15 @@ export function useFavouriteOrder(
     const commandId = from.commandId ?? crypto.randomUUID();
     setDraft({ ...from, status: "saving", commandId });
     const { saved, original, order } = from;
+    const roster = rosterOf(client);
+    if (roster !== saved) return setDraft(null);
     void call("viewing.reorderFavourites", {
       commandId,
       original: original.map(ownedId),
       order: order.map(ownedId),
     }).then(
       async (viewing) => {
-        await takeIn(saved, viewing);
+        await takeIn(roster, viewing);
         answer(commandId, () => null);
       },
       (cause: unknown) => {

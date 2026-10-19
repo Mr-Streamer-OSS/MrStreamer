@@ -187,27 +187,21 @@ function make() {
           const forgetSettings = yield* settings.prepareForget(subscription);
           // Erased as it goes, and not before: while the removal waits its turn the subscription
           // is saved still, and what is starred or saved for it then has to go with the rest.
-          yield* subscriptions.remove(
-            subscriptionId,
-            Effect.gen(function* () {
-              if (eraseViewing) yield* viewing.erase(subscription.key);
-              // It is saved no more, so new work is refused. Settle admitted writes before
-              // deleting their folder, including a guide mapping already being stored.
-              yield* Effect.all(
-                [
-                  library.forget(subscription),
-                  onDemand.forget(subscription),
-                  guide.forget({ id: subscriptionId, store: subscription.dir }),
-                ],
-                { concurrency: "unbounded", discard: true },
-              );
-            }),
-          );
+          yield* subscriptions.remove(subscriptionId, {
+            ...(eraseViewing ? { erase: viewing.erase(subscription.key) } : {}),
+            // After login deletion, each owner settles before the folder goes. Settings uses
+            // its existing turn both as the write barrier and to update remembered discovery.
+            settle: [
+              library.forget(subscription),
+              onDemand.forget(subscription),
+              guide.forget({ id: subscriptionId, store: subscription.dir }),
+              forgetSettings,
+            ],
+          });
           // An open asked for as it went has had its turn by now, and found it saved still.
           yield* playback.closeOf(subscriptionId);
           // As has a download queued as it went.
           yield* downloads.subscriptionGone(subscriptionId);
-          yield* forgetSettings;
         }),
 
       refreshDue: Effect.flatMap(subscriptions.sources, (sources) =>

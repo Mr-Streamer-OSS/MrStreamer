@@ -83,7 +83,8 @@ export class Settings extends Context.Service<
      * the versions and channel streams picked. For the original, lists not yet imported go too:
      * they belong to its account. Snapshot effective discovery before the folder is removed, so
      * a prior stable category edit keeps precedence while the surviving baseline changes. The
-     * returned effect runs after removal; a newer explicit choice wins over the captured one.
+     * returned effect settles admitted writes after logical removal and before folder deletion.
+     * A newer explicit choice wins over the captured one.
      */
     prepareForget(subscription: SavedSubscription): Effect.Effect<Effect.Effect<void>>;
 
@@ -119,13 +120,16 @@ function make(dataDir: string, usage?: UsageObservers) {
       return current;
     });
 
-    /** Applies a change to the file and writes it. Only runs while holding `one`. */
+    /**
+     * Applies a change while holding `one`. A native write keeps its turn until it settles,
+     * even if its caller cancels.
+     */
     const applied = (apply: (previous: Stored) => Stored) =>
       Effect.gen(function* () {
         const previous = yield* stored;
         const next = apply(previous);
         const changed = preferenceChanges(previous, next).map((key) => usage?.setting(key));
-        yield* Effect.promise(() => writeJsonFile(path, next));
+        yield* Effect.uninterruptible(Effect.promise(() => writeJsonFile(path, next)));
         current = next;
         for (const note of changed) note?.();
         return next;
@@ -204,7 +208,9 @@ function make(dataDir: string, usage?: UsageObservers) {
         if (subscription.original) yield* applied((file) => ({ ...file, lastCategoryId }));
         else {
           const next = { ...previous, lastCategoryId };
-          yield* Effect.promise(() => writeJsonFile(addedPath(subscription), next));
+          yield* Effect.uninterruptible(
+            Effect.promise(() => writeJsonFile(addedPath(subscription), next)),
+          );
           added.set(subscription.id, next);
         }
       });
@@ -263,7 +269,9 @@ function make(dataDir: string, usage?: UsageObservers) {
               )
             : Effect.gen(function* () {
                 const next = { ...(yield* ofAdded(subscription)), ...patch };
-                yield* Effect.promise(() => writeJsonFile(addedPath(subscription), next));
+                yield* Effect.uninterruptible(
+                  Effect.promise(() => writeJsonFile(addedPath(subscription), next)),
+                );
                 added.set(subscription.id, next);
                 return next;
               }),

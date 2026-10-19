@@ -232,7 +232,7 @@ export class Library extends Context.Service<
      * or a removal since shows at once.
      */
     lookup(subscriptionId: string): Effect.Effect<(channelId: string) => LiveChannel | undefined>;
-    /** Forgets a subscription's catalogue, for when it goes. */
+    /** Stops refreshes, waits for an admitted native write, then forgets the catalogue. */
     forget(subscription: SavedSubscription): Effect.Effect<void>;
     /** A subscription's status after each of its refreshes, successful or not. */
     readonly changes: Stream.Stream<CatalogueStatus>;
@@ -372,7 +372,8 @@ function make(options: LibraryOptions) {
           channels: fetched.channels,
         };
         // Written before it is used: the next start must not find an older catalogue on disk.
-        yield* Effect.promise(() => writeJsonFile(cachePath(source), file));
+        // Native writes cannot be cancelled. Keep the refresh alive until this one settles.
+        yield* Effect.uninterruptible(Effect.promise(() => writeJsonFile(cachePath(source), file)));
         // Nor is it shown for a subscription that went while it was written.
         if (!(yield* subscriptions.stands(source))) return yield* switched;
         catalogues.set(source.id, index(file, source.id, false));
@@ -403,7 +404,14 @@ function make(options: LibraryOptions) {
       playlist?: PlaylistRefresh,
     ): Effect.Effect<CatalogueStatus, Failed> =>
       Effect.gen(function* () {
+        if (!(yield* subscriptions.stands(source))) return yield* switched;
         const under = refreshing.get(source.id);
+        if (under && !sameSource(source, under.source)) {
+          // Leave ownership visible while its admitted write settles. Other refreshes must
+          // wait too, then re-read the owner and the saved login before admitting another.
+          yield* Fiber.interrupt(under.fiber);
+          return yield* refreshOf(source, playlist);
+        }
         // A mapped combined refresh needs its own snapshot after an earlier independent fetch.
         // Unmapped Live has no titles to align and can keep joining the fetch already running.
         if (playlist && source.playlistMapped && under && sameSource(source, under.source)) {
@@ -427,7 +435,10 @@ function make(options: LibraryOptions) {
           running = { source, token, fiber };
           refreshing.set(source.id, running);
         }
-        return yield* Fiber.join(running.fiber);
+        const exit = yield* Fiber.await(running.fiber);
+        if (Exit.isSuccess(exit)) return exit.value;
+        if (Cause.hasInterruptsOnly(exit.cause)) return yield* switched;
+        return yield* Effect.failCause(exit.cause);
       });
 
     /**
@@ -620,6 +631,15 @@ function make(options: LibraryOptions) {
 
       forget: (subscription: SavedSubscription) =>
         Effect.gen(function* () {
+          // Logical removal already refuses new writers. Keep each existing owner visible
+          // until it settles, including one being replaced after a login change.
+          for (
+            let refresh = refreshing.get(subscription.id);
+            refresh;
+            refresh = refreshing.get(subscription.id)
+          ) {
+            yield* Fiber.interrupt(refresh.fiber);
+          }
           const pending = loading.get(subscription.id);
           loading.delete(subscription.id);
           if (pending) yield* Fiber.interrupt(pending.fiber);

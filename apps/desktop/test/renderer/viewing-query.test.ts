@@ -4,7 +4,7 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { call } from "../../src/renderer/src/lib/ipc.ts";
-import { keepViewing, queries, syncViewing } from "../../src/renderer/src/lib/queries.ts";
+import { keepViewing, queries, rosterOf, syncViewing } from "../../src/renderer/src/lib/queries.ts";
 
 const own = (id: string) => ({ subscriptionId: SUBSCRIPTION, id });
 const viewing = (sequence: number, ids = [String(sequence)]): Viewing => ({
@@ -27,12 +27,13 @@ it("keeps an acknowledged favourite when the first read and command complete tog
     const old = ipc.hold("viewing.get");
     const command = ipc.hold("viewing.setFavourite");
     const reading = client.fetchQuery(queries.viewing());
+    const roster = rosterOf(client);
     const changing = call("viewing.setFavourite", {
       commandId: crypto.randomUUID(),
       channel: own("9"),
       favourite: true,
     }).then((saved) => {
-      keepViewing(client, saved);
+      keepViewing(client, saved, roster);
       ipc.emit("viewing.changed", { sequence: saved.sequence });
     });
     old.resolve(viewing(2));
@@ -50,9 +51,10 @@ it("keeps the acknowledgement throughout a read's promise-to-cache completion", 
     client.setQueryData(queries.viewing().queryKey, viewing(1));
     const reply = ipc.hold("viewing.get");
     const reading = client.fetchQuery({ ...queries.viewing(), staleTime: 0 });
+    const roster = rosterOf(client);
     reply.resolve(viewing(2));
     const acknowledge = (left: number): void => {
-      if (left === 0) keepViewing(client, viewing(9));
+      if (left === 0) keepViewing(client, viewing(9), roster);
       else queueMicrotask(() => acknowledge(left - 1));
     };
     acknowledge(microtasks);
@@ -98,6 +100,7 @@ it.each(["source removal", "account replacement"])(
         expect(original).toEqual(after.favourites);
         return { ...after, sequence: 101, favourites: order };
       });
+      const roster = rosterOf(client);
       keepViewing(
         client,
         await call("viewing.reorderFavourites", {
@@ -105,6 +108,7 @@ it.each(["source removal", "account replacement"])(
           original: [...reloaded.favourites],
           order: [own("2"), own("1")],
         }),
+        roster,
       );
       expect(observer.getCurrentResult().data?.favourites).toEqual([own("2"), own("1")]);
     } finally {
@@ -134,7 +138,8 @@ it("keeps the newer event read when an older command acknowledgement arrives", a
     const reply = ipc.hold("viewing.get");
     ipc.emit("viewing.changed", { sequence: 130 });
     for (let i = 0; i < 20; i++) await Promise.resolve();
-    keepViewing(client, viewing(125));
+    const roster = rosterOf(client);
+    keepViewing(client, viewing(125), roster);
     reply.resolve(viewing(130, ["125", "130"]));
     await vi.waitFor(() =>
       expect(observer.getCurrentResult().data).toEqual(viewing(130, ["125", "130"])),

@@ -46,8 +46,16 @@ const NO_SUBSCRIPTIONS: readonly SubscriptionSummary[] = [];
 // can reach React Query's commit after a command acknowledgement.
 const viewingReads = new WeakMap<
   object,
-  { client: QueryClient; before: Viewing | undefined; sequence: number }
+  { client: QueryClient; before: Viewing | undefined; sequence: number; roster: string }
 >();
+
+/** Ordered saved ids identify the sources for a read or command within this session. */
+export const savedAs = (subscriptions: readonly { readonly id: string }[] | undefined) =>
+  (subscriptions ?? []).map(({ id }) => id).join("\n");
+
+/** The saved sources known to this renderer, empty until the subscription query has data. */
+export const rosterOf = (client: QueryClient) =>
+  savedAs(client.getQueryData(queries.subscriptions().queryKey));
 
 export const queries = {
   /** Every saved subscription, in the order added. Changed only by what Settings does to them. */
@@ -86,10 +94,16 @@ export const queries = {
     queryOptions({
       queryKey: ["viewing"],
       queryFn: async ({ client }) => {
-        const before = client.getQueryData<Viewing>(["viewing"]);
-        const viewing = await call("viewing.get");
-        viewingReads.set(viewing, { client, before, sequence: viewing.sequence });
-        return viewing;
+        for (;;) {
+          const before = client.getQueryData<Viewing>(["viewing"]);
+          const roster = rosterOf(client);
+          const viewing = await call("viewing.get");
+          // Invalidation can join a first read. Keep its promise pending until it answers for
+          // the same saved sources, including a legitimate lower combined sequence.
+          if (rosterOf(client) !== roster) continue;
+          viewingReads.set(viewing, { client, before, sequence: viewing.sequence, roster });
+          return viewing;
+        }
       },
       structuralSharing: (previous, next) => {
         if (typeof next === "object" && next !== null) {
@@ -97,6 +111,20 @@ export const queries = {
           if (read) {
             viewingReads.delete(next);
             const cached = read.client.getQueryData<Viewing>(["viewing"]);
+            if (rosterOf(read.client) !== read.roster) {
+              // The sources changed after queryFn returned. Keep existing data and re-read
+              // after this commit, including inactive queries. With no cache, this reply is
+              // temporary until that re-read: structural sharing cannot return undefined.
+              queueMicrotask(() => {
+                void read.client
+                  .invalidateQueries(
+                    { queryKey: ["viewing"], exact: true, refetchType: "all" },
+                    { cancelRefetch: false },
+                  )
+                  .catch(() => {});
+              });
+              return cached ?? next;
+            }
             // Removing an account can lower the combined sequence. Only a concurrent cache write
             // can supersede this read, not the record it started with. Equal sequences may carry
             // refreshed canonical channel IDs after a catalogue update.
@@ -471,12 +499,13 @@ export function useToggleFavourite(): (channel: OwnedId) => void {
   return useCallback(
     (channel: OwnedId) => {
       const favourites = client.getQueryData(queries.viewing().queryKey)?.favourites ?? [];
+      const roster = rosterOf(client);
       void call("viewing.setFavourite", {
         commandId: crypto.randomUUID(),
         channel: ownedId(channel),
         favourite: !favourites.some((each) => sameOwned(each, channel)),
       }).then(
-        (viewing) => keepViewing(client, viewing),
+        (viewing) => keepViewing(client, viewing, roster),
         () => {},
       );
     },
@@ -531,7 +560,8 @@ export function keepGuideStatus(client: QueryClient, status: GuideStatus): void 
 }
 
 /** Keeps the latest viewing state: an answer can arrive after a later change's event. */
-export function keepViewing(client: QueryClient, viewing: Viewing): void {
+export function keepViewing(client: QueryClient, viewing: Viewing, roster: string): void {
+  if (rosterOf(client) !== roster) return;
   const queryKey = queries.viewing().queryKey;
   const cached = client.getQueryData(queryKey);
   if (cached && cached.sequence > viewing.sequence) return;

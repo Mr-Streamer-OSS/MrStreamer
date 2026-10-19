@@ -14,7 +14,7 @@ import {
   useShowList,
 } from "../../src/renderer/src/features/live/lists.ts";
 import { BrowseFilters } from "../../src/renderer/src/features/live/BrowseFilters.tsx";
-import { queries, keepViewing } from "../../src/renderer/src/lib/queries.ts";
+import { queries, keepViewing, rosterOf } from "../../src/renderer/src/lib/queries.ts";
 
 const own = (id: string) => ({ subscriptionId: SUBSCRIPTION, id });
 const channel = (id: string): LiveChannel => ({
@@ -137,10 +137,10 @@ it("keys personal membership by exact order and rejects older viewing sequences"
   await p.click("Favourites");
   await settle();
   expect(p.output()).toBe("1,2");
-  await act(async () => keepViewing(p.client, viewing(3, ["2", "1"])));
+  await act(async () => keepViewing(p.client, viewing(3, ["2", "1"]), rosterOf(p.client)));
   await settle();
   expect(p.output()).toBe("2,1");
-  await act(async () => keepViewing(p.client, viewing(2, ["old"])));
+  await act(async () => keepViewing(p.client, viewing(2, ["old"]), rosterOf(p.client)));
   await settle();
   expect(p.output()).toBe("2,1");
   expect(ipc.argsOf("library.browse").at(-1)?.scope).toEqual({
@@ -177,8 +177,9 @@ it("keeps a newer acknowledged viewing sequence when a delayed read settles", as
   const p = await mount();
   const delayed = ipc.hold("viewing.get");
   const read = p.client.fetchQuery({ ...queries.viewing(), staleTime: 0 });
-  await act(async () => keepViewing(p.client, viewing(9, ["new"])));
+  await act(async () => keepViewing(p.client, viewing(9, ["new"]), rosterOf(p.client)));
   delayed.resolve(viewing(2, ["old"]));
-  await expect(read).resolves.toEqual(viewing(9, ["new"]));
+  // fetchQuery resolves its raw reply; commit-time acceptance protects the shared cache.
+  await read;
   expect(p.client.getQueryData(queries.viewing().queryKey)?.sequence).toBe(9);
 });
