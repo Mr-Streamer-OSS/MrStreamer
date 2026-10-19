@@ -838,7 +838,12 @@ async function run(scenario: Scenario) {
           launch,
           quit,
         },
-        () => ({ requests: provider!.fileRequests(), mostAtOnce: provider!.mostFilesAtOnce() }),
+        () => ({
+          requests: provider!.fileRequests(),
+          mostAtOnce: provider!.mostFilesAtOnce(),
+          streams: provider!.streamRequests(),
+          active: provider!.activeStreams(),
+        }),
       );
     } else if (scenario === "live-tv") {
       await click("Open global Search", "document.querySelector('button[aria-label=Search]')");

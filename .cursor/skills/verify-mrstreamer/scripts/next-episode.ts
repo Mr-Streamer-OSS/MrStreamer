@@ -18,7 +18,7 @@ const expect = (condition: boolean, message: string) => {
 
 export async function nextEpisodeScenario(
   d: Driver,
-  files: () => { requests: number; mostAtOnce: number },
+  files: () => { requests: number; mostAtOnce: number; streams: number; active: number },
 ): Promise<void> {
   let locale: Locale = "en-US";
   const delay = () =>
@@ -316,6 +316,108 @@ export async function nextEpisodeScenario(
     finalOffFiles: offFiles,
     afterOnFiles: files(),
   };
+
+  // Exercise the shared-media handoff through real controls, including a held next episode.
+  await d.key("Escape", 27);
+  await playEpisode("S1 E1");
+  await seekEnd();
+  await openSettings();
+  await waitEnded("S1 E1");
+  const handoffHeld = files();
+  await d.capture("handoff-countdown-held");
+  await closeSettings();
+  d.action("Open global Search over the ended episode");
+  for (const type of ["rawKeyDown", "keyUp"])
+    await d.send("Input.dispatchKeyEvent", {
+      type,
+      key: "k",
+      windowsVirtualKeyCode: 75,
+      modifiers: process.platform === "darwin" ? 4 : 2,
+    });
+  await d.wait(() => d.exists("document.querySelector('[role=dialog] input')"));
+  await d.send("Input.insertText", { text: "TEST | H.264 + AAC" });
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      `document.querySelector('[aria-label="Search results"] [aria-selected=true]')?.textContent.includes('H.264 + AAC') ?? false`,
+    ),
+  );
+  await d.key("Enter", 13);
+  await d.wait(() =>
+    d.evaluate<boolean>(`!!document.querySelector('[data-view=watch]') &&
+      !document.querySelector('[data-view=title]') && document.querySelector('video')?.videoWidth > 0 &&
+      document.querySelector('video').currentTime > 0.5`),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  expect(
+    files().requests === handoffHeld.requests,
+    "The cancelled episode opened after live takeover",
+  );
+  const handoffLive = files();
+  await d.capture("handoff-title-to-live");
+  // Retain DOM references only to observe identity as Picture moves the existing nodes.
+  await d.evaluate(`(() => {
+    window.__handoffNodes = { video: document.querySelector('video'),
+      subtitles: document.querySelector('[data-subtitles]') };
+  })()`);
+  await d.key("Escape", 27);
+  if (await d.exists("document.querySelector('[role=dialog]')")) await d.key("Escape", 27);
+  await d.click("Return to Home's live preview", named("header button", "Home"));
+  await d.wait(() =>
+    d.evaluate<boolean>(`document.querySelector('video')?.muted &&
+      !document.querySelector('video').paused && document.querySelector('video').currentTime > 0.5`),
+  );
+  expect(files().streams === handoffLive.streams, "Returning Home reopened the live stream");
+  await d.capture("handoff-home-preview");
+  await d.click("Open Movies from the preview", named("header button", "Movies"));
+  await d.click("Open All movies", named("nav button", "All movies"));
+  await d.click(
+    "Open the two-track movie",
+    `[...document.querySelectorAll('button[title]')].find(e => e.title.includes('Two sound tracks'))`,
+  );
+  await d.click("Play the movie over the preview", named('[role="dialog"] button', "Play"));
+  await d.wait(() =>
+    d.evaluate<boolean>(`!!document.querySelector('[data-view=title]') &&
+      document.querySelector('video')?.videoWidth > 0 && document.querySelector('video').currentTime > 0.5`),
+  );
+  await d.capture("handoff-preview-to-movie");
+  const movieMedia = await media();
+  await d.key("p", 80);
+  await d.wait(() => d.exists("document.querySelector('[data-view=title][data-mini]')"));
+  await d.capture("handoff-movie-mini");
+  await d.key("Escape", 27);
+  await d.wait(
+    async () => !(await d.exists("document.querySelector('[data-view=title][data-mini]')")),
+  );
+  await d.key("f", 70);
+  await d.wait(() => d.evaluate<boolean>("!!document.fullscreenElement"));
+  await d.capture("handoff-movie-fullscreen");
+  await d.key("Escape", 27);
+  await d.wait(() => d.evaluate<boolean>("!document.fullscreenElement"));
+  const sameNodes =
+    await d.evaluate<boolean>(`window.__handoffNodes.video === document.querySelector('video') &&
+    window.__handoffNodes.subtitles === document.querySelector('[data-subtitles]')`);
+  expect(sameNodes, "The handoff or window movement replaced a media node");
+  await d.key("Escape", 27);
+  if (await d.exists("document.querySelector('[role=dialog]')")) await d.key("Escape", 27);
+  await d.click("Return to preview after closing the movie", named("header button", "Home"));
+  await d.wait(() =>
+    d.evaluate<boolean>(`!document.querySelector('[data-view=title]') &&
+      document.querySelector('video')?.muted && !document.querySelector('video').paused &&
+      document.querySelector('video').currentTime > 0.5`),
+  );
+  await d.capture("handoff-movie-to-preview");
+  expect(
+    files().active === 1,
+    "Returning to the preview did not leave exactly one provider reader",
+  );
+  d.observed["handoff"] = {
+    held: handoffHeld,
+    live: handoffLive,
+    movieMedia,
+    sameNodes,
+    final: files(),
+  };
+  await d.evaluate("delete window.__handoffNodes");
   d.observed["limits"] =
-    "Linux fake-provider UI proof. Native receivers, audible output and installed acceptance are separate. Session ordering and exact timings use the focused public controller tests; file requests include probing and ranges.";
+    "Source-build fake-provider UI proof. Native receivers, audible output and installed acceptance are separate. Session ordering and exact timings use the focused public controller tests; file requests include probing and ranges.";
 }
