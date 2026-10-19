@@ -55,7 +55,8 @@ it("accepts initial reads, save replies and events through one newest-revision p
 });
 
 it("preserves an event that arrives after queryFn returned but before React Query commits it", async () => {
-  stop = syncPreferences(client, () => {});
+  const applied: Preferences[] = [];
+  stop = syncPreferences(client, (preferences) => applied.push(preferences));
   ipc.always("preferences.get", snapshot(1));
   let injected = false;
   const unsubscribe = client.getQueryCache().subscribe((event) => {
@@ -67,6 +68,7 @@ it("preserves an event that arrives after queryFn returned but before React Quer
   await client.fetchQuery(preferenceQuery());
   unsubscribe();
   expect(cached()).toEqual(snapshot(2, { muted: true }));
+  expect(applied.at(-1)?.muted).toBe(true);
 });
 
 it("keeps the last known cache stale/error after an unreadable save and recovers through a read", async () => {

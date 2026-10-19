@@ -5,6 +5,8 @@ import { call, listen } from "./ipc.ts";
 
 const key = ["preferences"] as const;
 let connected: QueryClient | undefined;
+/** Synchronous cache observers can deliver another snapshot before the current call returns. */
+const applying = new WeakSet<QueryClient>();
 const consumers = new WeakMap<
   QueryClient,
   {
@@ -20,8 +22,30 @@ export function acceptPreferences(
 ): PreferenceSnapshot {
   const previous = client.getQueryData<PreferenceSnapshot>(key);
   if (previous && previous.revision >= incoming.revision) return previous;
-  client.setQueryData(key, incoming);
-  consumers.get(client)?.apply(incoming.preferences);
+  const delivering = applying.has(client);
+  applying.add(client);
+  try {
+    client.setQueryData(key, incoming);
+    // The outer delivery drains the cache, including any newer snapshot an observer accepted.
+    if (delivering) return client.getQueryData<PreferenceSnapshot>(key) ?? incoming;
+    let applied = previous;
+    while (true) {
+      const latest = client.getQueryData<PreferenceSnapshot>(key) ?? incoming;
+      if (applied && applied.revision >= latest.revision) return latest;
+      consumers.get(client)?.apply(latest.preferences);
+      applyChanges(client, applied, latest);
+      applied = latest;
+    }
+  } finally {
+    if (!delivering) applying.delete(client);
+  }
+}
+
+function applyChanges(
+  client: QueryClient,
+  previous: PreferenceSnapshot | undefined,
+  incoming: PreferenceSnapshot,
+): void {
   if (previous) {
     const before = previous.preferences;
     const after = incoming.preferences;
@@ -42,7 +66,6 @@ export function acceptPreferences(
       }
     }
   }
-  return incoming;
 }
 
 /** React Query's own queryFn completion must also preserve a newer event already in its cache. */
