@@ -9,9 +9,10 @@ export function focusSettingControl(button: HTMLButtonElement): void {
   const selector = "input:not(:disabled), select:not(:disabled), button:not(:disabled), a[href]";
   const previous = button.parentElement?.previousElementSibling;
   const control = previous?.matches(selector) ? previous : previous?.querySelector(selector);
-  const fallback = button
-    .closest('[data-view="settings"]')
-    ?.querySelector('nav button[aria-current="page"]');
+  const settings = button.closest('[data-view="settings"]');
+  const fallback =
+    settings?.querySelector('nav button[aria-current="page"]') ??
+    settings?.querySelector('nav input[type="search"]');
   if (control instanceof HTMLElement) control.focus();
   else if (fallback instanceof HTMLElement) fallback.focus();
 }

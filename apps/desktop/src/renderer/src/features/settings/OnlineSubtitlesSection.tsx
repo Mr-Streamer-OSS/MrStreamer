@@ -12,7 +12,7 @@ import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { call } from "../../lib/ipc.ts";
 import type { SettingsControl } from "./catalogue.ts";
-import { SaveFeedback } from "./SaveFeedback.tsx";
+import { focusSettingControl, SaveFeedback } from "./SaveFeedback.tsx";
 import { Row, RowForm, Section, Select } from "./Rows.tsx";
 
 export const subtitleSettingsQuery = {
@@ -254,7 +254,14 @@ export function OnlineSubtitlesSection() {
           <p>
             {t("Subtitle settings could not be saved or read. Your saved keys were not changed.")}
           </p>
-          <Button size="sm" variant="ghost" onClick={() => void settings.refetch()}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(event) => {
+              focusSettingControl(event.currentTarget);
+              void settings.refetch();
+            }}
+          >
             {t("Try again")}
           </Button>
         </div>

@@ -162,16 +162,18 @@ it("keeps acknowledged quality after a failed reset and retries only at that row
   expect(view.textContent).not.toContain("reset failed");
 });
 
-it("shows a preference read failure and recovers through Retry", async () => {
+it.each(["", "quality"])("recovers a preference read failure with search %j", async (query) => {
   ipc.refuse("preferences.get", { kind: "unexpected", detail: "read failed" });
   const { view } = await render();
   expect(view.textContent).toContain("Settings could not be read.");
+  const search = view.querySelector<HTMLInputElement>('[aria-label="Find a setting"]')!;
+  if (query) await type(search, query);
   ipc.always("preferences.get", ipc.snapshot(defaultPreferences));
   const read = ipc.hold("preferences.get");
   const retry = [...view.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === "Try again",
   )!;
-  const current = view.querySelector('nav button[aria-current="page"]');
+  const current = query ? search : view.querySelector('nav button[aria-current="page"]');
   await act(async () => {
     retry.focus();
     retry.click();
@@ -180,6 +182,36 @@ it("shows a preference read failure and recovers through Retry", async () => {
   await act(async () => read.resolve(ipc.snapshot(defaultPreferences)));
   await settle();
   expect(view.textContent).not.toContain("Settings could not be read.");
+  expect(document.activeElement).toBe(current);
+});
+
+it("recovers a subtitle settings read failure without losing keyboard focus", async () => {
+  ipc.refuse("subtitles.settings", { kind: "unexpected", detail: "read failed" });
+  useUi.setState({ settings: "subtitles" });
+  const { view } = await render();
+  const alert = [...view.querySelectorAll('[role="alert"]')].find((each) =>
+    each.textContent?.includes("Subtitle settings could not be saved or read"),
+  )!;
+  const retry = [...alert.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "Try again",
+  )!;
+  const current = view.querySelector('nav button[aria-current="page"]');
+  const read = ipc.hold("subtitles.settings");
+  await act(async () => {
+    retry.focus();
+    retry.click();
+  });
+  expect(document.activeElement).toBe(current);
+  await act(async () =>
+    read.resolve({
+      enabled: false,
+      service: "both",
+      languages: ["en"],
+      configured: { subdl: true, opensubtitles: false },
+    }),
+  );
+  await settle();
+  expect(alert.isConnected).toBe(false);
   expect(document.activeElement).toBe(current);
 });
 
