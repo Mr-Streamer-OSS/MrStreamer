@@ -75,6 +75,41 @@ afterEach(() => {
   boundary.deleting = null;
 });
 
+it("settles a refresh before its first scheduler turn and lets the saved source refresh again", async () => {
+  const dataDir = await tempDir();
+  const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
+  const subscriptions = await promised(runtime, Subscriptions);
+  const provider = await fakeProvider();
+  const { id } = await subscriptions.add({
+    server: provider.url,
+    username: "demo",
+    password: "demo",
+  });
+  const result = await runtime.runPromise(
+    Effect.gen(function* () {
+      const library = yield* Library;
+      const saved = (yield* (yield* Subscriptions).saved).find((source) => source.id === id)!;
+      const refresh = yield* Effect.forkChild(Effect.exit(library.refresh(id)), {
+        startImmediately: true,
+      });
+      // Let admission finish through microtasks without giving the new owner a scheduler turn.
+      yield* Effect.forEach(
+        Array.from({ length: 20 }),
+        () => Effect.promise(() => Promise.resolve()),
+        { discard: true },
+      );
+      const forgotten = yield* Effect.exit(library.forget(saved).pipe(Effect.timeout("2 seconds")));
+      yield* Fiber.await(refresh);
+      const later = yield* Effect.exit(library.refresh(id).pipe(Effect.timeout("5 seconds")));
+      return { forgotten, later };
+    }),
+  );
+  expect(Exit.isSuccess(result.forgotten), "forget must settle an owner that has not started").toBe(
+    true,
+  );
+  expect(Exit.isSuccess(result.later), "the saved source must remain refreshable").toBe(true);
+});
+
 it.each([
   { kind: "original", cancel: false },
   { kind: "added", cancel: false },

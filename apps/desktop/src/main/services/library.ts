@@ -410,6 +410,8 @@ function make(options: LibraryOptions) {
           // Leave ownership visible while its admitted write settles. Other refreshes must
           // wait too, then re-read the owner and the saved login before admitting another.
           yield* Fiber.interrupt(under.fiber);
+          // An owner interrupted before its first run never installed its cleanup.
+          if (refreshing.get(source.id) === under) refreshing.delete(source.id);
           return yield* refreshOf(source, playlist);
         }
         // A mapped combined refresh needs its own snapshot after an earlier independent fetch.
@@ -639,6 +641,7 @@ function make(options: LibraryOptions) {
             refresh = refreshing.get(subscription.id)
           ) {
             yield* Fiber.interrupt(refresh.fiber);
+            if (refreshing.get(subscription.id) === refresh) refreshing.delete(subscription.id);
           }
           const pending = loading.get(subscription.id);
           loading.delete(subscription.id);

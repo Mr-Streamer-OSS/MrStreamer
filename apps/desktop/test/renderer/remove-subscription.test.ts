@@ -305,6 +305,25 @@ describe("removing a subscription", () => {
     expect(player.current()).toEqual(kept);
   });
 
+  it("restores a source read as absent while its removal was later refused", async () => {
+    const { container, client, button, click } = await removing([northline, holiday], northline);
+    const answer = ipc.hold("subscription.remove");
+    await click(button("Remove"));
+    // Main temporarily excludes the source before an erase or login deletion can be refused.
+    ipc.always("subscription.list", [holiday]);
+    await act(async () => client.refetchQueries({ queryKey: ["subscriptions"] }));
+    await settled();
+    expect(container.textContent).not.toContain("Northline");
+    ipc.always("subscription.list", [northline, holiday]);
+    ipc.always("library.status", []);
+    ipc.always("guide.status", []);
+    ipc.always("ondemand.status", { lists: [], metadata: null });
+    await act(async () => answer.reject({ kind: "unexpected", detail: "Login deletion refused." }));
+    await settled();
+    expect(container.textContent).toContain("Northline");
+    expect(container.textContent).toContain("Holiday house");
+  });
+
   it("says the only subscription's removal returns to Connect, and keeps it on Keep", async () => {
     const { container, button, click } = await removing([northline], northline);
 

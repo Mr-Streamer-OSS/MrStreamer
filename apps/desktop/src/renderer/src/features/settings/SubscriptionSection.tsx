@@ -731,6 +731,10 @@ function Remove({
       // last by a record that still named it. The record read again names one that stays.
       if (player.current()?.subscriptionId === id) player.reset();
     },
+    onError: () => {
+      // Reads made during logical removal must see the source restored after a refusal.
+      void client.invalidateQueries();
+    },
   });
   const stays = others.map(subscriptionName);
   const unfinished =
