@@ -225,3 +225,18 @@ it("the metadata progress opener focuses the TMDB control", async () => {
     "tmdb",
   );
 });
+
+it("returns focus to the visible player when the original opener has gone", async () => {
+  const opener = document.createElement("button");
+  const player = document.createElement("div");
+  player.dataset["view"] = "title";
+  player.tabIndex = -1;
+  document.body.append(opener, player);
+  opener.focus();
+  await render();
+  opener.remove();
+  await act(async () => useUi.setState({ settings: null }));
+  await settle();
+  expect(document.activeElement).toBe(player);
+  player.remove();
+});

@@ -76,8 +76,18 @@ export function SettingsPage() {
     } else if (!tab && opened.current) {
       opened.current = false;
       setVisited(new Set());
-      if (returnFocus.current instanceof HTMLElement && returnFocus.current.isConnected)
-        returnFocus.current.focus();
+      const previous = returnFocus.current;
+      const fallback =
+        document.querySelector<HTMLElement>('[data-view="title"], [data-view="watch"]') ??
+        document.querySelector<HTMLButtonElement>(`header button[aria-label="${t("Settings")}"]`);
+      const target =
+        previous instanceof HTMLElement &&
+        previous !== document.body &&
+        previous.isConnected &&
+        !previous.closest("[inert], [hidden]")
+          ? previous
+          : fallback;
+      target?.focus();
       returnFocus.current = null;
     }
     if (shownTab) setVisited((previous) => new Set([...previous, shownTab]));
