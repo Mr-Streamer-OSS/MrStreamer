@@ -444,38 +444,48 @@ function launch(
         assert(page, "No verified page available for Browser.close");
         return page.send("Browser.close");
       };
-      record["exit"] =
-        (await attempt(async () => {
-          if (tree) {
-            const ended = await tree.stop(requestClose);
-            const exit = { ...ended, code: app.exitCode, signal: app.signalCode, alreadyExited };
-            record["exit"] = exit;
-            assert(
-              !alreadyExited &&
-                ended.graceful &&
-                ended.forced.length === 0 &&
-                app.exitCode === 0 &&
-                app.signalCode === null,
-              JSON.stringify(exit),
-            );
-            return exit;
-          }
-          const exit = await closeNative(app, requestClose);
+      const closed = await attempt(async () => {
+        if (tree) {
+          const ended = await tree.stop(requestClose);
+          const exit = { ...ended, code: app.exitCode, signal: app.signalCode, alreadyExited };
           record["exit"] = exit;
           assert(
-            !exit.alreadyExited &&
-              !exit.forced &&
-              exit.code === 0 &&
-              exit.signal === null &&
-              exit.requestError === null,
+            !alreadyExited &&
+              ended.graceful &&
+              ended.forced.length === 0 &&
+              app.exitCode === 0 &&
+              app.signalCode === null,
             JSON.stringify(exit),
           );
           return exit;
-        })) ?? record["exit"];
+        }
+        const exit = await closeNative(app, requestClose);
+        record["exit"] = exit;
+        assert(
+          !exit.alreadyExited &&
+            !exit.forced &&
+            exit.code === 0 &&
+            exit.signal === null &&
+            exit.requestError === null,
+          JSON.stringify(exit),
+        );
+        return exit;
+      });
+      record["exit"] = closed ?? record["exit"];
       page?.close();
-      const survivors = await attempt(async () => group?.sample());
+      // A failed main close stays failed and gets only an immediate survivor audit.
+      const drainStartedAt = Date.now();
+      const drainStarted = performance.now();
+      await attempt(async () => (closed ? group?.drain() : group?.sample()));
+      if (group)
+        record["groupDrain"] = {
+          startedAt: drainStartedAt,
+          wallMs: performance.now() - drainStarted,
+          waited: closed !== undefined,
+        };
+      const survivors = group ? ownershipSamples.at(-1)?.group : undefined;
       record["groupAfterClose"] = survivors;
-      if (survivors?.length)
+      if (!closed && survivors?.length)
         errors.push(new Error("Owned process group survivors; profile retained"));
       record["exitPins"] = await attempt(() => verifyPins(target));
       await attempt(() => writeFile(join(evidence, "electron.log"), log.join("")));
@@ -1554,6 +1564,7 @@ export async function installedMedia(args: string[]) {
     const helpers = [
       "app.ts",
       "installed-media-observer.ts",
+      "installed-media-posix.ts",
       "analytics-exit.ts",
       "analytics-installed-pair.ts",
       "installed-upgrade.ts",

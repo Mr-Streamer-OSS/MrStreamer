@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, type ChildProcess } from "node:child_process";
 import { readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 
 function posixProcesses() {
   if (process.platform === "linux")
@@ -52,6 +53,9 @@ function posixProcesses() {
 
 type ProcessRow = ReturnType<typeof posixProcesses>[number];
 export interface OwnershipSample {
+  at: number;
+  elapsedMs: number;
+  wallMs: number;
   phase: "acquire" | "audit";
   platform: NodeJS.Platform;
   startClock: "boot-ticks" | "epoch-ms";
@@ -75,10 +79,16 @@ export function ownedGroup(
   startedAt: number,
   record: (sample: OwnershipSample) => void,
 ) {
+  const started = performance.now();
   const pid = app.pid;
   const snapshot = (phase: OwnershipSample["phase"]) => {
+    const at = Date.now();
+    const before = performance.now();
     const all = posixProcesses();
     const sample: OwnershipSample = {
+      at,
+      elapsedMs: before - started,
+      wallMs: performance.now() - before,
       phase,
       platform: process.platform,
       startClock: process.platform === "linux" ? "boot-ticks" : "epoch-ms",
@@ -113,24 +123,39 @@ export function ownedGroup(
   );
   first.executable = executable;
   assert.equal(executable, expectedExecutable, "Process group root executable differs");
+  const sample = () => {
+    const { root: current, group } = snapshot("audit");
+    assert(
+      !current ||
+        (current.started === root.started &&
+          current.parent === root.parent &&
+          current.group === root.group &&
+          app.exitCode === null &&
+          app.signalCode === null),
+      "Owned process group PID was reused or its identity changed",
+    );
+    assert(
+      group.every((row) => row.started >= root.started),
+      "Group member predates owned app",
+    );
+    return group;
+  };
   return {
     root: { ...root, executable, startClock: first.startClock },
-    sample() {
-      const { root: current, group } = snapshot("audit");
-      assert(
-        !current ||
-          (current.started === root.started &&
-            current.parent === root.parent &&
-            current.group === root.group &&
-            app.exitCode === null &&
-            app.signalCode === null),
-        "Owned process group PID was reused or its identity changed",
-      );
-      assert(
-        group.every((row) => row.started >= root.started),
-        "Group member predates owned app",
-      );
-      return group;
+    sample,
+    /** After a strict successful main close, observe children ending without signaling them.
+     * Match Windows' child grace. Every poll retains raw rows and rechecks pinned ownership;
+     * deadline or audit failure leaves the last actual sample and profile for diagnosis.
+     */
+    async drain(childGraceMs = 20_000) {
+      const until = performance.now() + childGraceMs;
+      let remaining = sample();
+      while (remaining.length && performance.now() < until) {
+        await delay(Math.min(200, Math.max(0, until - performance.now())));
+        remaining = sample();
+      }
+      assert.equal(remaining.length, 0, "Owned process group survivors; profile retained");
+      return remaining;
     },
   };
 }

@@ -1,7 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import * as fs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { closeNative } from "./e2e/analytics-exit.ts";
 import { ownedGroup, type OwnershipSample } from "./e2e/installed-media-posix.ts";
 
 vi.mock("node:fs", { spy: true });
@@ -29,7 +32,106 @@ afterEach(async () => {
 });
 
 const posix = process.platform === "linux" || process.platform === "darwin";
+
+/** A real detached main exits first; its child keeps the same group until released or timed out.
+ * The host init reaps the orphan. No installed application or native media is involved.
+ */
+async function lingeringChild(autoExitMs: number) {
+  const profile = fs.mkdtempSync(join(tmpdir(), "installed-media-drain-"));
+  const release = join(profile, "release");
+  const signals = join(profile, "signals");
+  const companion = `
+    const fs = require('node:fs');
+    for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'])
+      process.on(signal, () => fs.appendFileSync(${JSON.stringify(signals)}, signal + '\\n'));
+    process.on('disconnect', () => {
+      const until = Date.now() + ${autoExitMs};
+      setInterval(() => {
+        if (fs.existsSync(${JSON.stringify(release)}) || Date.now() >= until) process.exit(0);
+      }, 20);
+    });
+    process.send('ready');
+  `;
+  const app = spawn(
+    process.execPath,
+    [
+      "-e",
+      `
+      const { spawn } = require('node:child_process');
+      const child = spawn(process.execPath, ['-e', ${JSON.stringify(companion)}], {
+        stdio: ['ignore', 'ignore', 'ignore', 'ipc']
+      });
+      child.once('message', () => process.send(child.pid));
+      process.on('message', () => process.exit(0));
+    `,
+    ],
+    { detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"] },
+  );
+  children.push(app);
+  const samples: OwnershipSample[] = [];
+  const owner = ownedGroup(app, executable, Date.now(), (sample) => samples.push(sample));
+  const [pid] = await once(app, "message");
+  const exit = await closeNative(app, async () => app.send("stop"));
+  expect(exit).toMatchObject({
+    code: 0,
+    signal: null,
+    forced: false,
+    alreadyExited: false,
+    requestError: null,
+  });
+  return {
+    owner,
+    samples,
+    pid,
+    profile,
+    signals,
+    async dispose() {
+      fs.writeFileSync(release, "release only this test child");
+      await owner.drain(5000);
+      fs.rmSync(profile, { recursive: true });
+    },
+  };
+}
+
 describe.runIf(posix)("installed media POSIX ownership", () => {
+  it("waits for an actual owned child after strict main close and retains the transient rows", async () => {
+    const fixture = await lingeringChild(600);
+    try {
+      const immediate = fixture.owner.sample();
+      expect(immediate.map((row) => row.pid)).toContain(fixture.pid);
+      expect(immediate.some((row) => row.pid === fixture.owner.root.pid)).toBe(false);
+      await expect(fixture.owner.drain()).resolves.toEqual([]);
+      expect(fixture.samples.at(-1)?.group).toEqual([]);
+      expect(
+        fixture.samples.some((sample) =>
+          sample.group.some((row) => row.pid === fixture.pid && row.raw),
+        ),
+      ).toBe(true);
+      expect(fs.existsSync(fixture.signals)).toBe(false);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  it("fails at the child deadline, preserves the actual survivor and profile, and sends no signal", async () => {
+    const fixture = await lingeringChild(5000);
+    try {
+      await expect(fixture.owner.drain(60)).rejects.toThrow("survivors; profile retained");
+      expect(fixture.samples.at(-1)?.group).toEqual([
+        expect.objectContaining({
+          pid: fixture.pid,
+          group: fixture.owner.root.pid,
+          raw: expect.any(String),
+        }),
+      ]);
+      expect(fs.existsSync(fixture.profile)).toBe(true);
+      expect(fs.existsSync(fixture.signals)).toBe(false);
+      expect(fixture.owner.sample().map((row) => row.pid)).toContain(fixture.pid);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
   it("pins an actually spawned detached child and observes its disappearance after exit", async () => {
     const startedAt = Date.now();
     const app = child();
