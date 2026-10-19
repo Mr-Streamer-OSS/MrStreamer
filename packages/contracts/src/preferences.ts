@@ -36,7 +36,7 @@ export const Preferences = lazy(() =>
     /** A series' next episode plays automatically at the end of one. On when absent. */
     "autoplayNext?": "boolean",
     /** Whole seconds before the next episode, zero for Instant. Ten when absent. */
-    "nextEpisodeDelay?": "0 <= number.integer <= 60",
+    "nextEpisodeDelaySeconds?": "0 <= number.integer <= 60",
     /**
      * Product-use and reliability statistics. On when absent; saved by the analytics
      * owner.

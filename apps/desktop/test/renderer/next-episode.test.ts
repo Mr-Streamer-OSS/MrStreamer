@@ -660,7 +660,7 @@ describe("the next episode, as the record answers", () => {
 
 describe("the saved countdown policy", () => {
   it("keeps the next episode end screen during Instant admission and shows its failure", async () => {
-    ipc.prefer({ nextEpisodeDelay: 0 });
+    ipc.prefer({ nextEpisodeDelaySeconds: 0 });
     let failed: ReturnType<typeof ipc.hold<"playback.openTitle">> | undefined;
     await playToEnd(pilotHouse, "s1", async () => {
       failed = ipc.hold("playback.openTitle");
@@ -678,23 +678,26 @@ describe("the saved countdown policy", () => {
     expect(opened()).toEqual(["e13", "e21", "e21"]);
   });
 
-  it.each([0, 1, 10, 37, 60])("opens once after exactly %i seconds", async (nextEpisodeDelay) => {
-    ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelay });
-    await playToEnd(pilotHouse, "s1");
-    if (nextEpisodeDelay > 0) {
-      expect(text()).toContain(`Plays in ${nextEpisodeDelay}`);
-      await wait(nextEpisodeDelay * 1000 - 1);
-      expect(opened()).toEqual(["e13"]);
-      await wait(1);
-    }
-    // Instant is already opening without advancing the clock.
-    expect(opened()).toEqual(["e13", "e21"]);
-    await wait(65_000);
-    expect(opened()).toEqual(["e13", "e21"]);
-  });
+  it.each([0, 1, 10, 37, 60])(
+    "opens once after exactly %i seconds",
+    async (nextEpisodeDelaySeconds) => {
+      ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelaySeconds });
+      await playToEnd(pilotHouse, "s1");
+      if (nextEpisodeDelaySeconds > 0) {
+        expect(text()).toContain(`Plays in ${nextEpisodeDelaySeconds}`);
+        await wait(nextEpisodeDelaySeconds * 1000 - 1);
+        expect(opened()).toEqual(["e13"]);
+        await wait(1);
+      }
+      // Instant is already opening without advancing the clock.
+      expect(opened()).toEqual(["e13", "e21"]);
+      await wait(65_000);
+      expect(opened()).toEqual(["e13", "e21"]);
+    },
+  );
 
   it("keeps Instant held with Next episode shown, then opens without a tick on release", async () => {
-    ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelay: 0 });
+    ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelaySeconds: 0 });
     await playToEnd(pilotHouse, "s1", () =>
       act(async () => useUi.setState({ settings: "general" })),
     );
@@ -707,19 +710,19 @@ describe("the saved countdown policy", () => {
   });
 
   it("resumes the saved remainder after off/on while held, and uses an edited delay next time", async () => {
-    ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelay: 37 });
+    ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelaySeconds: 37 });
     await playToEnd(pilotHouse, "s1");
     await wait(3000);
     await act(async () => useUi.setState({ settings: "general" }));
     ipc.always("preferences.get", {
       ...defaultPreferences,
-      nextEpisodeDelay: 60,
+      nextEpisodeDelaySeconds: 60,
       autoplayNext: false,
     });
     await wait(5000);
     ipc.always("preferences.get", {
       ...defaultPreferences,
-      nextEpisodeDelay: 60,
+      nextEpisodeDelaySeconds: 60,
       autoplayNext: true,
     });
     await act(async () => useUi.setState({ settings: null }));
@@ -751,7 +754,7 @@ describe("the saved countdown policy", () => {
     ipc.always("preferences.get", {
       ...defaultPreferences,
       autoplayNext: false,
-      nextEpisodeDelay: 37,
+      nextEpisodeDelaySeconds: 37,
     });
     await playToEnd(pilotHouse, "s1", () =>
       act(async () => useUi.setState({ settings: "general" })),
@@ -759,7 +762,7 @@ describe("the saved countdown policy", () => {
     ipc.always("preferences.get", {
       ...defaultPreferences,
       autoplayNext: true,
-      nextEpisodeDelay: 0,
+      nextEpisodeDelaySeconds: 0,
     });
     await act(async () => useUi.setState({ settings: null }));
     expect(titlePlayer.state().countdown).toBe(37);
@@ -775,7 +778,7 @@ describe("the saved countdown policy", () => {
     );
     await act(async () => useUi.setState({ settings: null }));
     ipc.always("preferences.get", { ...defaultPreferences, autoplayNext: false });
-    await act(async () => initial.resolve({ ...defaultPreferences, nextEpisodeDelay: 0 }));
+    await act(async () => initial.resolve({ ...defaultPreferences, nextEpisodeDelaySeconds: 0 }));
     await wait(65_000);
     expect(opened()).toEqual(["e13"]);
     expect(titlePlayer.state().countdown).toBeNull();
@@ -794,7 +797,7 @@ describe("the saved countdown policy", () => {
           playTitle(movieNow({ ...series.title, kind: "movie", id: "m1" }, null), 0);
         if (action === "removed source") resetForAccount();
       });
-      await act(async () => pending.resolve({ ...defaultPreferences, nextEpisodeDelay: 0 }));
+      await act(async () => pending.resolve({ ...defaultPreferences, nextEpisodeDelaySeconds: 0 }));
       await act(async () => useUi.setState({ settings: "general" }));
       await act(async () => useUi.setState({ settings: null }));
       await wait(65_000);
@@ -862,7 +865,7 @@ describe("the saved countdown policy", () => {
 });
 
 it("keeps an offline episode independent of autoplay and provider next-episode lookups", async () => {
-  ipc.prefer({ nextEpisodeDelay: 0 });
+  ipc.prefer({ nextEpisodeDelaySeconds: 0 });
   const now = episodeNow(series, pilotHouse);
   const openedCopy = ipc.hold("playback.openCopy");
   await act(async () => {

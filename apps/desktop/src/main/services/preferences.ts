@@ -42,7 +42,7 @@ import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 const Stored = lazy(() =>
   Preferences().merge(SubscriptionPreferences()).merge({
     /** Preserve malformed and future values until the viewer explicitly replaces this leaf. */
-    "nextEpisodeDelay?": "unknown",
+    "nextEpisodeDelaySeconds?": "unknown",
     "favouriteChannelIds?": "string[]",
     "recentChannelIds?": "string[]",
     /**
@@ -232,15 +232,15 @@ function general({
 
 /** Normalize replies only. File reconstruction must keep unsupported raw values intact. */
 function effective(file: Stored): Preferences {
-  const { nextEpisodeDelay, ...preferences } = general(file);
+  const { nextEpisodeDelaySeconds, ...preferences } = general(file);
   return {
     ...preferences,
-    nextEpisodeDelay:
-      typeof nextEpisodeDelay === "number" &&
-      Number.isInteger(nextEpisodeDelay) &&
-      nextEpisodeDelay >= 0 &&
-      nextEpisodeDelay <= 60
-        ? nextEpisodeDelay
+    nextEpisodeDelaySeconds:
+      typeof nextEpisodeDelaySeconds === "number" &&
+      Number.isInteger(nextEpisodeDelaySeconds) &&
+      nextEpisodeDelaySeconds >= 0 &&
+      nextEpisodeDelaySeconds <= 60
+        ? nextEpisodeDelaySeconds
         : DEFAULT_NEXT_EPISODE_DELAY,
   };
 }

@@ -1,11 +1,17 @@
 // Saved delays through Settings and actual media-ended events in an isolated built app.
 import type { Preferences } from "../../../../packages/contracts/src/preferences.ts";
+import {
+  LANGUAGE_NAMES,
+  LOCALES,
+  type Locale,
+} from "../../../../packages/contracts/src/language.ts";
+import { translate } from "../../../../packages/core/src/i18n.ts";
 import type { Driver } from "./language.ts";
 
 const named = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
-const DELAY = `document.querySelector('input[aria-label="Next episode delay"]')`;
 const AUTOPLAY = `document.querySelector('[role=checkbox][aria-label="Next episode"]')`;
+const LANGUAGE = `document.querySelector('main section select:has(option[value="en-US"])')`;
 const expect = (condition: boolean, message: string) => {
   if (!condition) throw new Error(message);
 };
@@ -14,6 +20,9 @@ export async function nextEpisodeScenario(
   d: Driver,
   files: () => { requests: number; mostAtOnce: number },
 ): Promise<void> {
+  let locale: Locale = "en-US";
+  const delay = () =>
+    `document.querySelector(${JSON.stringify(`input[aria-label="${translate(locale, "Next episode delay")}"]`)})`;
   const preferences = () =>
     d.evaluate<Preferences>(`(async () => {
       const reply = await window.mrStreamer.invoke('preferences.get');
@@ -21,6 +30,13 @@ export async function nextEpisodeScenario(
       return reply.value;
     })()`);
   const endText = () => d.evaluate<string>("document.body.innerText");
+  const media = () =>
+    d.evaluate(`(() => {
+      const video = document.querySelector('video');
+      return { position: video.currentTime, duration: video.duration, width: video.videoWidth,
+        decodedFrames: video.getVideoPlaybackQuality().totalVideoFrames,
+        decodedAudioBytes: video.webkitAudioDecodedByteCount };
+    })()`);
   const remaining = async () => /Plays in (\d+)/.exec(await endText())?.[1] ?? null;
   const openSettings = async () => {
     d.action("Open Settings with the application shortcut");
@@ -37,10 +53,10 @@ export async function nextEpisodeScenario(
       windowsVirtualKeyCode: 188,
       modifiers,
     });
-    await d.wait(() => d.exists(DELAY));
+    await d.wait(() => d.exists(delay()));
   };
   const setDelay = async (seconds: number) => {
-    await d.click(`Edit the delay to ${seconds}`, DELAY);
+    await d.click(`Edit the delay to ${seconds}`, delay());
     // Select the field text through the native editing shortcut.
     await d.send("Input.dispatchKeyEvent", {
       type: "rawKeyDown",
@@ -56,21 +72,59 @@ export async function nextEpisodeScenario(
     });
     await d.send("Input.insertText", { text: String(seconds) });
     await d.key("Enter", 13);
-    await d.wait(async () => (await preferences()).nextEpisodeDelay === seconds);
+    await d.wait(async () => (await preferences()).nextEpisodeDelaySeconds === seconds);
+    await d.wait(() =>
+      d.evaluate<boolean>(`(() => {
+        const field = ${delay()};
+        return field?.value === ${JSON.stringify(String(seconds))} && !field.disabled &&
+          field.closest('section').innerText.includes(${JSON.stringify(translate(locale, "Instant"))}) === ${seconds === 0};
+      })()`),
+    );
   };
   const closeSettings = async () => {
     await d.key("Escape", 27);
-    await d.wait(async () => !(await d.exists(DELAY)));
+    await d.wait(async () => !(await d.exists(delay())));
+  };
+  const pickLocale = async (next: Locale) => {
+    d.action(`Pick ${next} through Interface language`);
+    await d.evaluate(`${LANGUAGE}.focus()`);
+    // Native select type-ahead commits a single choice without intermediate language writes.
+    for (const char of LANGUAGE_NAMES[next].slice(0, 2)) {
+      await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
+      await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
+    }
+    await d.wait(() =>
+      d.evaluate<boolean>(`document.documentElement.lang === ${JSON.stringify(next)}`),
+    );
+    locale = next;
+    await d.wait(() => d.exists(delay()));
   };
   const playEpisode = async (episode: string) => {
-    await d.click("Open Series", named("header button", "Series"));
-    await d.click("Open All series", named("nav button", "All series"));
+    // Leaving playback returns to its still-open details, whose modal hides top navigation.
+    if (!(await d.exists("document.querySelector('[role=dialog]')"))) {
+      await d.click("Open Series", named("header button", "Series"));
+      await d.click("Open All series", named("nav button", "All series"));
+      await d.click(
+        "Open Formats details",
+        `[...document.querySelectorAll('button[title]')].find(e => e.title.includes('Formats'))`,
+      );
+    }
+    // Automatic prefers English, whose fixture has only one season. Choose the complete
+    // Dutch version through the same menu a viewer uses, keeping the cross-season path real.
     await d.click(
-      "Open Formats details",
-      `[...document.querySelectorAll('button[title]')].find(e => e.title.includes('Formats'))`,
+      "Open series versions",
+      `document.querySelector('[role=dialog] button[aria-label=Versions]')`,
+    );
+    await d.click(
+      "Choose the two-season Dutch fixture",
+      `[...document.querySelectorAll('[role=menuitemradio]')].find(e => e.getAttribute('aria-label')?.includes('Formats (NL)'))`,
     );
     const season = Number(/^S(\d+)/.exec(episode)?.[1]);
-    await d.click(`Open season ${season}`, named("[role=dialog] button", `Season ${season}`));
+    // The provider supplies season one's Dutch name and omits season two's name.
+    await d.click(
+      `Open season ${season}`,
+      named("[role=dialog] button", season === 1 ? "Seizoen 1" : `Season ${season}`),
+    );
     await d.click(
       `Play ${episode}`,
       `document.querySelector('[aria-label="More for ${episode}"]')?.closest('.group')?.querySelector('button')`,
@@ -82,22 +136,39 @@ export async function nextEpisodeScenario(
         document.querySelector('[data-view=title]')?.innerText.includes(${JSON.stringify(episode)});
     })()`),
     );
+    d.observed[`playing-${episode}`] = {
+      media: await media(),
+      files: files(),
+    };
   };
   const seekEnd = async () => {
-    await d.click(
-      "Focus the Position scrubber",
-      "document.querySelector('[role=slider][aria-label=Position]')",
-    );
+    const focused = () =>
+      d.evaluate<boolean>(
+        `document.activeElement?.matches('input[type=range][aria-label=Position]') ?? false`,
+      );
+    // Base UI's native range has an implicit slider role. Pointer release deliberately blurs
+    // it, so reach it with Tab before using its End key, as a keyboard viewer does.
+    for (let tabs = 0; tabs < 24 && !(await focused()); tabs++) await d.key("Tab", 9);
+    expect(await focused(), "Keyboard could not reach the Position scrubber");
     await d.key("End", 35);
   };
   const waitEnded = (episode: string) =>
     d.wait(async () => (await endText()).includes(`Finished ${episode}`));
-  const waitNext = (episode: string) =>
-    d.wait(() =>
-      d.evaluate<boolean>(
-        `document.querySelector('[data-view=title]')?.innerText.includes(${JSON.stringify(episode)}) && !document.body.innerText.includes('Finished')`,
-      ),
+  const waitNext = async (episode: string) => {
+    await d.wait(() =>
+      d.evaluate<boolean>(`(() => {
+        const video = document.querySelector('video');
+        const text = document.querySelector('[data-view=title]')?.innerText ?? '';
+        return text.includes(${JSON.stringify(episode)}) && !text.includes('Finished') &&
+          !text.includes('Starting') && video?.videoWidth > 0 && video.currentTime > 0 &&
+          !video.paused && video.getVideoPlaybackQuality().totalVideoFrames > 0;
+      })()`),
     );
+    d.observed[`next-playing-${episode}`] = {
+      media: await media(),
+      files: files(),
+    };
+  };
 
   await openSettings();
   await setDelay(0);
@@ -116,9 +187,17 @@ export async function nextEpisodeScenario(
   await d.capture("instant-held");
   const releasedAt = Date.now();
   await closeSettings();
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      `document.querySelector('[data-view=title]')?.innerText.includes('S1 E2') && !document.body.innerText.includes('Finished')`,
+    ),
+  );
+  const releaseToNextUiMs = Date.now() - releasedAt;
   await waitNext("S1 E2");
+  expect(files().requests > instantFiles.requests, "Instant never opened the next provider file");
   d.observed["instant"] = {
-    releaseToNextUiMs: Date.now() - releasedAt,
+    releaseToNextUiMs,
+    releaseToPlayingMs: Date.now() - releasedAt,
     before: instantFiles,
     after: files(),
   };
@@ -157,6 +236,11 @@ export async function nextEpisodeScenario(
   await d.capture("custom-cancelled");
   await d.key("n", 78);
   await waitNext("S1 E3");
+  expect(
+    files().requests > cancelledFiles.requests,
+    "Manual N never opened the next provider file",
+  );
+  await d.capture("manual-next-playing");
   d.observed["custom37"] = {
     initial: customInitial,
     held,
@@ -173,6 +257,34 @@ export async function nextEpisodeScenario(
   expect(maximumInitial <= 60 && maximumInitial >= 58, "The next countdown did not use 60 seconds");
   await d.capture("maximum-60-countdown");
   await openSettings();
+  const languages: Record<string, unknown> = {};
+  for (const next of LOCALES) {
+    await pickLocale(next);
+    await setDelay(0);
+    const instant = await d.evaluate<string>(`${delay()}.closest('section').innerText`);
+    expect(instant.includes(translate(locale, "Instant")), `Missing Instant in ${locale}`);
+    expect(instant.includes(translate(locale, "seconds")), `Missing seconds in ${locale}`);
+    await d.capture(`instant-settings-${locale}`);
+    await setDelay(60);
+    await d.capture(`maximum-settings-${locale}`);
+    await closeSettings();
+    const labels = await d.evaluate<string[]>(
+      `[...document.querySelectorAll('[data-view=title] span')].map(e => e.textContent.trim())`,
+    );
+    const countdown = Array.from({ length: 60 }, (_, index) =>
+      translate(locale, "Plays in {seconds}", { seconds: index + 1 }),
+    ).find((label) => labels.includes(label));
+    expect(countdown !== undefined, `Missing localized countdown in ${locale}`);
+    await d.capture(`countdown-${locale}`);
+    languages[locale] = {
+      instant,
+      countdown,
+      nextDelay: (await preferences()).nextEpisodeDelaySeconds,
+    };
+    await openSettings();
+  }
+  await pickLocale("en-US");
+  d.observed["languages"] = languages;
   await d.click("Turn autoplay off for final release", AUTOPLAY);
   await d.wait(async () => (await preferences()).autoplayNext === false);
   await closeSettings();

@@ -769,14 +769,14 @@ describe("a movie whose TV another takes the place of", () => {
 describe("an episode on a receiver", () => {
   it.each([0, 37, 60])(
     "uses %i seconds on the receiver and never opens local playback",
-    async (nextEpisodeDelay) => {
-      ipc.prefer({ nextEpisodeDelay });
+    async (nextEpisodeDelaySeconds) => {
+      ipc.prefer({ nextEpisodeDelaySeconds });
       await show(TitleWatch);
       const item = await onReceiver(episodeNow(series, firstLight), 0, 1);
       await emit(connected(said(1, item, "ended", 3600, 3600)));
-      if (nextEpisodeDelay > 0) {
-        expect(text()).toContain(`Plays in ${nextEpisodeDelay} on Living Room TV`);
-        await wait(nextEpisodeDelay * 1000 - 1);
+      if (nextEpisodeDelaySeconds > 0) {
+        expect(text()).toContain(`Plays in ${nextEpisodeDelaySeconds} on Living Room TV`);
+        await wait(nextEpisodeDelaySeconds * 1000 - 1);
         expect(ipc.argsOf("output.openTitle")).toHaveLength(1);
         await wait(1);
       }
@@ -787,7 +787,7 @@ describe("an episode on a receiver", () => {
   );
 
   it("never resurrects a held Instant episode after Stop on the receiver", async () => {
-    ipc.prefer({ nextEpisodeDelay: 0 });
+    ipc.prefer({ nextEpisodeDelaySeconds: 0 });
     await show(TitleWatch);
     const item = await onReceiver(episodeNow(series, firstLight), 0, 1);
     await act(async () => useUi.setState({ settings: "general" }));

@@ -528,7 +528,9 @@ function countDown(mine: number): Promise<void> {
     const preferences = await call("preferences.get").catch(() => null);
     if (countdownRun !== pending || mine !== generation) return;
     if (!preferences || store.getState().phase.kind !== "ended") return stopCountdown();
-    store.setState({ countdown: preferences.nextEpisodeDelay ?? DEFAULT_NEXT_EPISODE_DELAY });
+    store.setState({
+      countdown: preferences.nextEpisodeDelaySeconds ?? DEFAULT_NEXT_EPISODE_DELAY,
+    });
     // Settings may have changed policy during this read. Release reads its final saved value.
     if (countdownHeld || request !== nextRequest) return;
     if (preferences.autoplayNext === false) return stopCountdown();

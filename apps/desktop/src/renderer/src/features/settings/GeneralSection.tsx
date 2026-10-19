@@ -243,13 +243,13 @@ export function GeneralSection() {
         </Row>
         <Row
           label={t("Next episode delay")}
-          note={preferences.data?.nextEpisodeDelay === 0 ? t("Instant") : undefined}
+          note={preferences.data?.nextEpisodeDelaySeconds === 0 ? t("Instant") : undefined}
         >
           <EpisodeDelay
-            key={preferences.data?.nextEpisodeDelay ?? DEFAULT_NEXT_EPISODE_DELAY}
-            seconds={preferences.data?.nextEpisodeDelay ?? DEFAULT_NEXT_EPISODE_DELAY}
+            key={preferences.data?.nextEpisodeDelaySeconds ?? DEFAULT_NEXT_EPISODE_DELAY}
+            seconds={preferences.data?.nextEpisodeDelaySeconds ?? DEFAULT_NEXT_EPISODE_DELAY}
             disabled={!preferences.data || update.isPending}
-            onChange={(nextEpisodeDelay) => update.mutate({ nextEpisodeDelay })}
+            onChange={(nextEpisodeDelaySeconds) => update.mutate({ nextEpisodeDelaySeconds })}
           />
           <span className="text-muted-foreground">{t("seconds")}</span>
         </Row>
