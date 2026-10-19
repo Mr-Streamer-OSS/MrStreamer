@@ -133,10 +133,14 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
   const watchlist = useWatchlist();
   const state = useSavedState();
   const [picked, setPicked] = useState<OwnedId | typeof AUTOMATIC | null>(null);
-  // The title as listed now, for a version menu answered after the lists changed.
-  const listedNow = useRef(title);
+  // The title as listed now, for a version menu answered after the lists changed; none once these
+  // details are gone, as when the lists no longer have the title, though the sheet stays open.
+  const listedNow = useRef<Title | null>(null);
   useEffect(() => {
     listedNow.current = title;
+    return () => {
+      listedNow.current = null;
+    };
   }, [title]);
   const sequence = viewing?.sequence ?? 0;
   const versions = useMemo(() => title.versions.map(ownedId), [title]);
@@ -224,10 +228,10 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
         cancelButtonIndex: choices.length + 1,
       },
       (index) => {
-        // A menu shown before the lists changed answers only for the same title, and only with a
-        // version still listed: what it offers otherwise changes nothing, the pick saved included.
+        // A menu shown before the lists changed answers only for the same title, still shown, and
+        // only with a version still listed: otherwise it changes nothing, the pick saved included.
         const now = listedNow.current;
-        if (now.key !== title.key) return;
+        if (!now || now.key !== title.key) return;
         if (index === 0) {
           setPicked(AUTOMATIC);
           pickVersion(now, null);

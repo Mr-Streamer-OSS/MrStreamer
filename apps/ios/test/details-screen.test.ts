@@ -341,6 +341,34 @@ describe("a film's version", () => {
     expect(mount().play()).toBe("b");
   });
 
+  for (const answer of ["c", "Automatic"]) {
+    it(`keeps the pick saved when ${answer} answers a menu whose title the lists dropped`, () => {
+      providers("a", "b", "c");
+      const page = mount();
+      page.openVersions()("Cabin");
+      const pick = page.openVersions();
+      // Every provider is still saved; the lists no longer have the film, so its details go.
+      scenario.lists = {
+        kind: "ready",
+        index: indexCatalogue(
+          ["a", "b", "c"].map((subscriptionId) => ({
+            subscriptionId,
+            catalogue: { ...catalogue, movies: [] },
+          })),
+          "en",
+        ),
+      };
+      page.render();
+      expect(page.text()).toContain("The provider no longer lists this title.");
+      pick(answer);
+      providers("a", "b", "c");
+      page.render();
+      expect(page.play()).toBe("b");
+      unmount();
+      expect(mount().play()).toBe("b");
+    });
+  }
+
   it("keeps the pick saved on Automatic from a menu shown for a title the lists no longer have", () => {
     providers("a", "b");
     const page = mount();
