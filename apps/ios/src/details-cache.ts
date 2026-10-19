@@ -151,27 +151,51 @@ const Records = {
   ),
 };
 
-/** The last operation on each queue's files, settled or not: a subscription's, or a TMDB file's. */
+/** The last operation of each queue still under way: a subscription's, or a TMDB file's. */
 const queues = new Map<string, Promise<unknown>>();
 
-/** Runs `operation` once the queue's earlier ones have finished; answers `fallback` when it fails. */
+/**
+ * Runs `operation` once the queue's earlier ones have finished; answers `fallback` when it fails.
+ * A queue is forgotten once its last operation settles, keeping none of what it answered.
+ */
 function queued<A>(queue: string, fallback: A, operation: () => Promise<A>) {
   const run = (queues.get(queue) ?? Promise.resolve()).then(operation).catch(() => fallback);
   queues.set(queue, run);
+  void run.then(() => {
+    if (queues.get(queue) === run) queues.delete(queue);
+  });
   return run;
 }
 
-/** Deletes the file if it is there, whatever stops it. */
-function discard(file: File) {
+/**
+ * The records on disk, by address, with their bytes and when each was written: counted from the
+ * disk on the first write of a run, then kept as writes and deletions go. With what writes under
+ * way have reserved, these are what a write is admitted against (`admit`).
+ */
+let index: Map<string, { readonly bytes: number; readonly at: number }> | null = null;
+/** The bytes every record in `index` takes together. */
+let stored = 0;
+/** Bytes and records reserved by writes under way, and the records they will replace. */
+let reserved = { bytes: 0, records: 0 };
+const writing = new Set<string>();
+
+/** Forgets the record at `uri`, gone from the disk. */
+function forget(uri: string) {
+  const known = index?.get(uri);
+  if (!known || !index) return;
+  index.delete(uri);
+  stored -= known.bytes;
+}
+
+/** Deletes the file if it is there, whatever stops it; answers whether it is gone. */
+function discard(file: File): boolean {
   try {
-    if (!file.exists) return;
-    const bytes = file.size;
-    file.delete();
-    if (usage && file.name.endsWith(".json")) {
-      usage = { bytes: usage.bytes - bytes, records: usage.records - 1 };
-    }
+    if (file.exists) file.delete();
+    forget(file.uri);
+    return true;
   } catch {
-    // Left for the next launch's tidying.
+    // Left for a later write, or the next launch, to try again.
+    return false;
   }
 }
 
@@ -200,73 +224,112 @@ async function load<R extends { readonly at: number }>(
 }
 
 /**
- * Writes `text` as `name` in `at`, while `stands` holds: before, while it waits on the disk, and
- * once it is in place, which goes again when it no longer holds. Makes room first (`room`).
+ * The records on disk, counted once per run: each one's size and time read once, here, never
+ * while they are sorted. A write left halfway that no write under way owns is deleted.
  */
-async function store(at: Directory, name: string, text: string, stands: () => boolean) {
-  if (!stands() || text.length > RECORD_BYTES) return;
-  at.create({ intermediates: true, idempotent: true });
-  const file = new File(at, name);
-  const replaced = file.exists ? file.size : null;
-  if (!room(file, text.length, replaced)) return;
-  const pending = new File(at, `${file.name}.next`);
-  try {
-    pending.create({ overwrite: true });
-    await pending.write(text);
-    if (!stands() || pending.size > RECORD_BYTES) return discard(pending);
-    const bytes = pending.size;
-    await pending.move(file, { overwrite: true });
-    if (usage) {
-      usage = {
-        bytes: usage.bytes - (replaced ?? 0) + bytes,
-        records: usage.records + (replaced === null ? 1 : 0),
-      };
+function indexed() {
+  if (index) return index;
+  const found = new Map<string, { readonly bytes: number; readonly at: number }>();
+  let bytes = 0;
+  const folders = providers().exists
+    ? providers()
+        .list()
+        .filter((entry) => entry instanceof Directory)
+    : [];
+  for (const at of [...folders, tmdbFolder()]) {
+    if (!at.exists) continue;
+    for (const file of at.list()) {
+      if (!(file instanceof File)) continue;
+      if (file.name.endsWith(".json")) {
+        const size = file.size;
+        found.set(file.uri, { bytes: size, at: file.modificationTime ?? 0 });
+        bytes += size;
+      } else if (!writing.has(file.uri.replace(/\.next$/, ""))) {
+        discard(file);
+      }
     }
-  } catch {
-    return discard(new File(at, `${file.name}.next`));
   }
-  if (!stands()) discard(file);
+  index = found;
+  stored = bytes;
+  return found;
 }
 
-/** What the records take together, once counted; counted again after a deletion of many. */
-let usage: { readonly bytes: number; readonly records: number } | null = null;
-
-/** Every record there is, in each subscription's folder and TMDB's. */
-function records(): File[] {
-  const files = (at: Directory) =>
-    at.exists ? at.list().filter((entry) => entry instanceof File) : [];
-  const all = providers().exists ? providers().list() : [];
-  return [
-    ...all.flatMap((entry) => (entry instanceof Directory ? files(entry) : [])),
-    ...files(tmdbFolder()),
-  ].filter((file) => file.name.endsWith(".json"));
-}
-
-function counted() {
-  const all = records();
-  return { bytes: all.reduce((sum, file) => sum + file.size, 0), records: all.length };
+/** A write's share of the budget, held from its admission until it is in place or given up. */
+interface Reservation {
+  readonly uri: string;
+  readonly bytes: number;
+  readonly records: number;
 }
 
 /**
- * Whether `needed` more bytes fit as `file`, which takes `replaced` bytes now, or none: when they
- * don't, deletes up to a batch of the least recently written records but `file` first.
+ * Admits `bytes` as the record at `file`, against what is stored and what writes under way have
+ * reserved. The record it replaces counts until the new one takes its place. When they don't fit,
+ * deletes up to a batch of the least recently written records, but none a write under way owns,
+ * counting only those the disk actually deleted. Null when they still don't fit.
  */
-function room(file: File, needed: number, replaced: number | null): boolean {
-  const now = (usage ??= counted());
-  let bytes = now.bytes - (replaced ?? 0) + needed;
-  let count = now.records + (replaced === null ? 1 : 0);
-  if (bytes <= TOTAL_BYTES && count <= RECORDS) return true;
-  const oldest = records()
-    .filter((each) => each.uri !== file.uri)
-    .toSorted((a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0))
-    .slice(0, PRUNE_BATCH);
-  for (const each of oldest) {
-    if (bytes <= TOTAL_BYTES && count <= RECORDS) break;
-    bytes -= each.size;
-    count--;
-    discard(each);
+function admit(file: File, bytes: number): Reservation | null {
+  const all = indexed();
+  const records = all.has(file.uri) ? 0 : 1;
+  const fits = () =>
+    stored + reserved.bytes + bytes <= TOTAL_BYTES &&
+    all.size + reserved.records + records <= RECORDS;
+  if (!fits()) {
+    const oldest = [...all]
+      .filter(([uri]) => uri !== file.uri && !writing.has(uri))
+      .toSorted(([, a], [, b]) => a.at - b.at)
+      .slice(0, PRUNE_BATCH);
+    for (const [uri] of oldest) {
+      if (fits()) break;
+      discard(new File(uri));
+    }
+    if (!fits()) return null;
   }
-  return bytes <= TOTAL_BYTES && count <= RECORDS;
+  reserved = { bytes: reserved.bytes + bytes, records: reserved.records + records };
+  writing.add(file.uri);
+  return { uri: file.uri, bytes, records };
+}
+
+/** Gives a reservation back: its write is in place (`placed`, its bytes now stored) or given up. */
+function release(reservation: Reservation, placed: boolean) {
+  reserved = {
+    bytes: reserved.bytes - reservation.bytes,
+    records: reserved.records - reservation.records,
+  };
+  writing.delete(reservation.uri);
+  if (!placed || !index) return;
+  forget(reservation.uri);
+  index.set(reservation.uri, { bytes: reservation.bytes, at: Date.now() });
+  stored += reservation.bytes;
+}
+
+/**
+ * Writes `text` as `name` in `at`, while `stands` holds: before, while it waits on the disk, and
+ * once it is in place, which goes again when it no longer holds. Its UTF-8 bytes are admitted
+ * against the budget first (`admit`), and are what is written.
+ */
+async function store(at: Directory, name: string, text: string, stands: () => boolean) {
+  if (!stands() || text.length > RECORD_BYTES) return;
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.length > RECORD_BYTES) return;
+  at.create({ intermediates: true, idempotent: true });
+  const file = new File(at, name);
+  const reservation = admit(file, bytes.length);
+  if (!reservation) return;
+  const pending = new File(at, `${name}.next`);
+  let placed = false;
+  try {
+    pending.create({ overwrite: true });
+    await pending.write(bytes);
+    if (!stands()) return;
+    await pending.move(file, { overwrite: true });
+    placed = true;
+  } catch {
+    // Not written: what is left of it goes below.
+  } finally {
+    if (!placed) discard(new File(at, `${name}.next`));
+    release(reservation, placed);
+  }
+  if (!stands()) discard(file);
 }
 
 const titleName = (kind: TitleKind, titleId: string) => `${kind}.${encoded(titleId)}.json`;
@@ -389,43 +452,27 @@ export function writeSeason(
 export function dropTitles(id: string): Promise<boolean> {
   return queued(`provider|${id}`, false, async () => {
     const at = subscriptionFolder(id);
-    usage = null;
     if (!at.exists) return true;
-    for (const entry of at.list()) entry.delete();
-    // The folder itself goes at the next launch's tidying.
-    return at.list().length === 0;
+    const files = at.list().filter((entry) => entry instanceof File);
+    // Every deletion is tried, whatever one refuses; the folder goes at the next launch's tidying.
+    return files.map(discard).every(Boolean);
   });
 }
 
 /**
  * At launch, before any record is read: deletes the records of every subscription but `ids`, the
- * saved ones, and writes left halfway, then keeps them all within the budget.
+ * saved ones. Writes left halfway and the budget are seen to at the first write (`indexed`), so
+ * launch reads no record's size or time.
  */
 export function pruneDetails(ids: readonly string[]): void {
+  index = null;
   try {
-    usage = null;
+    if (!providers().exists) return;
     const kept = new Set(ids.map(encoded));
-    if (providers().exists) {
-      for (const entry of providers().list()) {
-        if (!(entry instanceof Directory) || !kept.has(entry.name)) entry.delete();
-        else for (const file of entry.list()) if (!file.name.endsWith(".json")) file.delete();
-      }
+    for (const entry of providers().list()) {
+      if (!kept.has(entry.name)) entry.delete();
     }
-    if (tmdbFolder().exists) {
-      for (const file of tmdbFolder().list()) if (!file.name.endsWith(".json")) file.delete();
-    }
-    const all = records().toSorted((a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0));
-    let bytes = all.reduce((sum, file) => sum + file.size, 0);
-    let count = all.length;
-    for (const file of all) {
-      if (bytes <= TOTAL_BYTES && count <= RECORDS) break;
-      bytes -= file.size;
-      count--;
-      file.delete();
-    }
-    usage = { bytes, records: count };
   } catch {
-    usage = null;
     // Tried again at the next launch.
   }
 }

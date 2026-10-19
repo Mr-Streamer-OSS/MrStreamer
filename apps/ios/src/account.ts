@@ -176,6 +176,13 @@ function serially<A>(change: () => Promise<A>): Promise<A> {
   return run;
 }
 
+/**
+ * Resolves once every change to the subscriptions begun before has finished, failed or not: what
+ * a read whose login stopped standing (`savable`) during a new password waits for, to see which
+ * login stands after it.
+ */
+export const accountChanges = (): Promise<void> => changing.then(() => undefined);
+
 function commit(next: Registry) {
   writeRegistry(next);
   registry = next;

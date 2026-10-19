@@ -146,7 +146,10 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
   const [retried, setRetried] = useState<Loaded<TitleDetails> | null>(null);
   const details = useRead(
     `${title.kind}|${ownedKey(version)}`,
-    useCallback(() => detailsOf(shownTitle), [shownTitle]),
+    useCallback(
+      (show: (details: TitleDetails) => void) => detailsOf(shownTitle, show),
+      [shownTitle],
+    ),
     again,
   );
   const failedHere = useFailure(title.kind, version);
@@ -430,7 +433,11 @@ function Seasons({
   // Until the season shown answers, its own provider rows show, never another season's.
   const episodes = useRead(
     shown ? `${ownedKey(title)}|${shown.number}` : null,
-    useCallback(() => (shown ? episodesOf(title, shown) : Promise.resolve([])), [title, shown]),
+    useCallback(
+      (show: (episodes: readonly EpisodeDetails[]) => void) =>
+        shown ? episodesOf(title, shown, show) : Promise.resolve([]),
+      [title, shown],
+    ),
   );
   if (!shown) return <Message text="No episodes listed." />;
   const rows: readonly (Episode | EpisodeDetails)[] =

@@ -31,8 +31,12 @@ const scenario = vi.hoisted(() => ({
   /** The film's download as the owner has it, and what it was asked to do. */
   download: undefined as Download | undefined,
   asked: [] as string[],
-  /** How each read of the film's details answers; by default, never. */
-  details: (): Promise<unknown> => new Promise(() => undefined),
+  /**
+   * How each read of the film's details answers, given the version read and what shows facts
+   * known before the answer; by default, never.
+   */
+  details: (_version: string, _show: (facts: unknown) => void): Promise<unknown> =>
+    new Promise(() => undefined),
 }));
 
 vi.mock("react-native", async () => {
@@ -124,7 +128,8 @@ vi.mock("../src/titles.ts", () => ({
   useMetadataVersion: () => 0,
   titleOf: (index: IndexedCatalogue, kind: "movie" | "series", version: OwnedId) =>
     byIds(index, kind, [version])[0],
-  detailsOf: () => scenario.details(),
+  detailsOf: (title: OwnedId, show: (facts: unknown) => void) =>
+    scenario.details(`${title.subscriptionId}:${title.id}`, show),
   useCollections: () => null,
   episodesOf: async () => [],
 }));
@@ -213,6 +218,17 @@ afterEach(() => {
   scenario.download = undefined;
   scenario.asked.length = 0;
   scenario.details = () => new Promise(() => undefined);
+});
+
+/** A film's facts as the details owner answers them, with `plot`. */
+const factsOf = (plot: string) => ({
+  kind: "movie",
+  plot,
+  directors: [],
+  cast: [],
+  genres: [],
+  duration: null,
+  backdropUrl: null,
 });
 
 function mount() {
@@ -365,5 +381,41 @@ describe("a film's facts", () => {
     );
     expect(page.text()).toContain("A film that answered the second time.");
     expect(page.has("placeholder-lines")).toBe(false);
+  });
+
+  it("show saved facts while fresh ones are asked, then the fresh ones", async () => {
+    providers("a");
+    let answer: (facts: unknown) => void = () => undefined;
+    scenario.details = (_version, show) => {
+      show(factsOf("The story saved on the phone."));
+      return new Promise((resolve) => (answer = resolve));
+    };
+    const page = mount();
+    await React.act(async () => undefined);
+    expect(page.text()).toContain("The story saved on the phone.");
+    expect(page.has("placeholder-lines")).toBe(false);
+
+    await React.act(async () => answer(factsOf("The provider's story now.")));
+    expect(page.text()).toContain("The provider's story now.");
+    expect(page.text()).not.toContain("The story saved on the phone.");
+  });
+
+  it("never show what a read of another version shows once that version is left", async () => {
+    providers("a", "b");
+    const shows = new Map<string, (facts: unknown) => void>();
+    scenario.details = (version, show) => {
+      shows.set(version, show);
+      return new Promise(() => undefined);
+    };
+    const page = mount();
+    await React.act(async () => undefined);
+    page.openVersions()("Cabin");
+    await React.act(async () => undefined);
+    await React.act(async () => shows.get("a:1")?.(factsOf("Home's saved story.")));
+    expect(page.text()).not.toContain("Home's saved story.");
+    expect(page.has("placeholder-lines")).toBe(true);
+
+    await React.act(async () => shows.get("b:1")?.(factsOf("Cabin's saved story.")));
+    expect(page.text()).toContain("Cabin's saved story.");
   });
 });

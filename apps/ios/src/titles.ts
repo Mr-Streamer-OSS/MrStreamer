@@ -36,7 +36,7 @@ import type { OnDemandCatalogue, ProviderDetails, ProviderFile } from "@mrstream
 import type { Steps } from "@mrstreamer/core/steps";
 import { File, Paths } from "expo-file-system";
 import { useEffect } from "react";
-import { members, onRoster, savable, shownOf, type Member } from "./account.ts";
+import { accountChanges, members, onRoster, savable, shownOf, type Member } from "./account.ts";
 import {
   readAbout,
   readSeason,
@@ -45,7 +45,6 @@ import {
   writeSeason,
   writeTitle,
   type Saved,
-  type SavedTitle,
 } from "./details-cache.ts";
 import { inTasks } from "./library.ts";
 import { currentSource, sourceOf, type Source } from "./sources.ts";
@@ -62,12 +61,13 @@ import { alignWatchlist } from "./watchlist.ts";
 // need it are empty and details show the provider's facts. account.ts gives a subscription's
 // lists saved on the phone at launch as it gives its provider's (catalogue-cache.ts).
 //
-// Details opened are saved on the phone too (details-cache.ts): a provider's facts of a title
-// show again after a restart while they are fresher than a day and the lists they came with
-// still show, and when the provider doesn't answer; TMDB's about of a title and of a season for
-// 150 days, a day when TMDB didn't know it. A TMDB failure is asked again at the next open.
-// Saved facts are for display only: where a title streams from is asked of its provider under
-// its current login, with facts this run asked for.
+// Details opened are saved on the phone too (details-cache.ts) and show again after a restart:
+// a provider's facts of a title without asking while they are fresher than a day and the lists
+// they came with still show, else while it is asked, staying when it doesn't answer; TMDB's about
+// of a title and of a season likewise for 150 days, a day when TMDB didn't know it. A TMDB failure
+// is asked again at the next open, and a slow TMDB never holds the provider's facts back. Nothing
+// of a login replaced or removed since shows (`underLogin`). Saved facts are for display only:
+// where a title streams from is asked of its provider under its current login.
 //
 // Collections are made here, never while a screen draws: each kind's in short tasks once the
 // lists are indexed and again whenever TMDB's metadata changes what they show. Until the first
@@ -471,79 +471,137 @@ function listedAt(id: string): number | null {
   return titles?.kind === "ready" ? titles.fetchedAt : null;
 }
 
+const askedKey = (title: Title, source: Source) =>
+  `${source.revision}|${title.kind}|${ownedKey(title)}`;
+
 /**
- * The provider's facts of the version `title` names, asked once per sign-in of its subscription:
- * a failed read is asked again next time. An answer for a login replaced meanwhile is asked again
- * of the new one; with the subscription removed, this fails. Saves the answer while its login may.
+ * The provider's facts of the version `title` names under `source`, asked once per sign-in: a
+ * failed read is asked again next time. Saves the answer while its login may (`savable`).
  */
-async function ask(
+function askUnder(title: Title, source: Source): Promise<ProviderDetails> {
+  const id = title.subscriptionId;
+  const key = askedKey(title, source);
+  const found = used(asked, key);
+  if (found) return found.read;
+  const listed = listedAt(id);
+  const signal = AbortSignal.timeout(20_000);
+  const read =
+    title.kind === "movie"
+      ? source.provider.movieDetails(title.id, signal)
+      : source.provider.seriesDetails(title.id, signal);
+  const asking: Asked = { subscriptionId: id, source, read };
+  keep(asked, key, asking);
+  read.then(
+    (value) => {
+      const saved = { at: Date.now(), listedAt: listed, value };
+      void writeTitle(id, title.kind, title.id, saved, source.login, () => savable(id, source));
+    },
+    () => {
+      if (asked.get(key) === asking) asked.delete(key);
+    },
+  );
+  return read;
+}
+
+/**
+ * What `read` answers under `id`'s login, settled only while that login stands (`savable`).
+ * Once it no longer does, `read` runs again under the login after it: the new password's, or the
+ * same one when a change that would have replaced it failed; changes under way are waited for
+ * first. Rejects once the subscription is removed, or when its login still doesn't stand after
+ * every change, so nothing is read again under a login that can't answer.
+ */
+async function underLogin<A>(id: string, read: (source: Source) => Promise<A>): Promise<A> {
+  let source = sourceOf(id);
+  for (;;) {
+    if (savable(id, source)) {
+      try {
+        const answer = await read(source);
+        if (savable(id, source)) return answer;
+      } catch (cause) {
+        if (savable(id, source)) throw cause;
+      }
+    }
+    if (currentSource(id) === source) await accountChanges();
+    const next = sourceOf(id);
+    if (next === source && !savable(id, source)) throw new AppFailure({ kind: "no-subscription" });
+    source = next;
+  }
+}
+
+/**
+ * A title's details under `source`: the provider's facts of the version `title` names, with
+ * TMDB's overview, cast and artwork when the build has a key and TMDB knows the title. Saved facts
+ * show at once through `show`, while `source` stands: this run's answer, or the saved one while it
+ * is fresher than a day and its lists haven't come again since; else the provider is asked, the
+ * saved facts showing meanwhile and staying when it fails. TMDB's answer is waited for only by
+ * the result, with what it said before showing until then.
+ */
+async function detailsUnder(
   title: Title,
-): Promise<{ readonly raw: ProviderDetails; readonly source: Source }> {
+  source: Source,
+  show: ((details: TitleDetails) => void) | undefined,
+): Promise<TitleDetails> {
   const id = title.subscriptionId;
-  const source = sourceOf(id);
-  const key = `${source.revision}|${title.kind}|${ownedKey(title)}`;
-  let found = used(asked, key);
-  if (!found) {
-    const listed = listedAt(id);
-    const signal = AbortSignal.timeout(20_000);
-    const read =
-      title.kind === "movie"
-        ? source.provider.movieDetails(title.id, signal)
-        : source.provider.seriesDetails(title.id, signal);
-    const asking: Asked = { subscriptionId: id, source, read };
-    found = asking;
-    keep(asked, key, asking);
-    read.then(
-      (value) => {
-        const saved = { at: Date.now(), listedAt: listed, value };
-        void writeTitle(id, title.kind, title.id, saved, source.login, () => savable(id, source));
-      },
-      () => {
-        if (asked.get(key) === asking) asked.delete(key);
-      },
-    );
-  }
-  const raw = await found.read;
-  if (currentSource(id) !== source) return ask(title);
-  return { raw, source };
-}
-
-/**
- * The provider's facts of the version `title` names, to show: this run's answer, else the saved
- * one while it is fresher than a day and its lists haven't come again since, else the provider's
- * answer, or the saved one when that fails. A saved record shows only for the login it was saved
- * under, until that is replaced (`savable`).
- */
-async function providerFacts(title: Title): Promise<ProviderDetails> {
-  const id = title.subscriptionId;
-  const source = sourceOf(id);
   const stands = () => savable(id, source);
-  const saved = () => readTitle(id, title.kind, title.id, stands);
-  let kept: SavedTitle | null = null;
-  if (!asked.has(`${source.revision}|${title.kind}|${ownedKey(title)}`)) {
-    kept = await saved();
-    const fresh = kept && Date.now() - kept.at < PROVIDER_FRESH && kept.listedAt === listedAt(id);
-    if (kept && fresh && stands()) return kept.value;
+  const about = aboutOf(title);
+  const shown = (raw: ProviderDetails, known: TitleAbout | null) =>
+    title.kind === "movie"
+      ? movieDetails(title, raw, known)
+      : seriesDetails(title, raw, known, language);
+  const early = async (raw: ProviderDetails) => {
+    const known = about ? await about.now : null;
+    if (show && stands()) show(shown(raw, known));
+  };
+  const saved = await readTitle(id, title.kind, title.id, stands);
+  const fresh = saved && Date.now() - saved.at < PROVIDER_FRESH && saved.listedAt === listedAt(id);
+  const refresh =
+    used(asked, askedKey(title, source))?.read ?? (fresh ? null : askUnder(title, source));
+  if (saved) await early(saved.value);
+  let raw = saved?.value;
+  if (refresh) {
+    try {
+      raw = await refresh;
+      await early(raw);
+    } catch (cause) {
+      if (!raw) throw cause;
+    }
   }
-  try {
-    return (await ask(title)).raw;
-  } catch (cause) {
-    kept ??= await saved();
-    if (kept && stands()) return kept.value;
-    throw cause;
-  }
+  if (!raw) throw new AppFailure({ kind: "title-not-found", titleId: title.id });
+  return shown(raw, about ? await about.final : null);
 }
 
 /**
- * A TMDB answer: the saved one while it is fresh, else TMDB's, which is saved, as "missing" too.
- * When TMDB doesn't answer, the saved one, or none: not `final`, so it is asked again next time.
+ * A title's details, as `detailsUnder` reads them under its subscription's current login, read
+ * again under a new password (`underLogin`). `show`, when given, has the facts already known
+ * before the result: saved ones while the provider and TMDB are asked. Nothing of a login replaced
+ * or removed since is shown or answered.
+ */
+export function detailsOf(
+  title: Title,
+  show?: (details: TitleDetails) => void,
+): Promise<TitleDetails> {
+  return underLogin(title.subscriptionId, (source) => detailsUnder(title, source, show));
+}
+
+/**
+ * A TMDB answer: what is known without waiting for TMDB, `now`, and the answer to show in the
+ * end, `final`. `now` is the saved one, of any age, until `final` settles; then `final`'s.
+ */
+interface Answer<A> {
+  now: Promise<A | null>;
+  readonly final: Promise<A | null>;
+}
+
+/**
+ * `final` for a saved TMDB answer `kept`: itself while it is fresh, else TMDB's, which is saved,
+ * as "missing" too. When TMDB doesn't answer, `kept`'s, or none: not `final`, so it is asked
+ * again next time.
  */
 async function fromTmdb<A>(
-  saved: Promise<Saved<A | null> | null>,
+  kept: Saved<A | null> | null,
   answer: (signal: AbortSignal) => Promise<A>,
   write: (saved: Saved<A | null>) => Promise<void>,
 ): Promise<{ readonly value: A | null; readonly final: boolean }> {
-  const kept = await saved;
   if (kept && Date.now() - kept.at < (kept.value === null ? MISSING_FRESH : TMDB_FRESH)) {
     return { value: kept.value, final: true };
   }
@@ -561,98 +619,119 @@ async function fromTmdb<A>(
 }
 
 /** `key`'s TMDB answer, asked once until it is final (`fromTmdb`). */
-function remembered<A>(
-  map: Map<string, Promise<A | null>>,
+function tmdbAnswer<A>(
+  map: Map<string, Answer<A>>,
   key: string,
-  answer: () => Promise<{ readonly value: A | null; readonly final: boolean }>,
-): Promise<A | null> {
+  saved: () => Promise<Saved<A | null> | null>,
+  answer: (signal: AbortSignal) => Promise<A>,
+  write: (saved: Saved<A | null>) => Promise<void>,
+): Answer<A> {
   const found = used(map, key);
   if (found) return found;
-  const asking: Promise<A | null> = answer().then(({ value, final }) => {
-    if (!final && map.get(key) === asking) map.delete(key);
-    return value;
-  });
-  keep(map, key, asking);
-  return asking;
+  const kept = saved();
+  const entry: Answer<A> = {
+    now: kept.then((record) => record?.value ?? null),
+    final: kept
+      .then((record) => fromTmdb(record, answer, write))
+      .then(({ value, final }) => {
+        if (final) entry.now = Promise.resolve(value);
+        else if (map.get(key) === entry) map.delete(key);
+        return value;
+      }),
+  };
+  keep(map, key, entry);
+  return entry;
 }
 
 /** What TMDB says of a title for the viewer, by kind, TMDB id and language. */
-const abouts = new Map<string, Promise<TitleAbout | null>>();
+const abouts = new Map<string, Answer<TitleAbout>>();
 
-function aboutOf(title: Title): Promise<TitleAbout | null> {
+function aboutOf(title: Title): Answer<TitleAbout> | null {
   const { kind, tmdbId } = title;
-  if (!client || !tmdbId || title.adult) return Promise.resolve(null);
-  return remembered(abouts, `${kind}|${tmdbId}|${language}`, () =>
-    fromTmdb(
-      readAbout(kind, tmdbId, language),
-      (signal) => client.about(tmdbKind(kind), tmdbId, language, signal),
-      (saved) => writeAbout(kind, tmdbId, language, saved),
-    ),
+  if (!client || !tmdbId || title.adult) return null;
+  return tmdbAnswer(
+    abouts,
+    `${kind}|${tmdbId}|${language}`,
+    () => readAbout(kind, tmdbId, language),
+    (signal) => client.about(tmdbKind(kind), tmdbId, language, signal),
+    (saved) => writeAbout(kind, tmdbId, language, saved),
   );
-}
-
-/**
- * A title's details: the provider's facts of the version `title` names, from its subscription,
- * with TMDB's overview, cast and artwork when the build has a key and TMDB knows the title. Both
- * are saved on the phone, and shown again after a restart (`providerFacts`, `fromTmdb`).
- */
-export async function detailsOf(title: Title): Promise<TitleDetails> {
-  const [raw, known] = await Promise.all([providerFacts(title), aboutOf(title)]);
-  return title.kind === "movie"
-    ? movieDetails(title, raw, known)
-    : seriesDetails(title, raw, known, language);
 }
 
 /**
  * What TMDB says of a season's episodes, by TMDB id, season and language. It is the same whichever
  * provider lists the series; the provider's episodes are those of the details read.
  */
-const seasons = new Map<string, Promise<readonly EpisodeAbout[] | null>>();
+const seasons = new Map<string, Answer<readonly EpisodeAbout[]>>();
 
-/** A season's episodes as its details list them, with TMDB's worked in where it answers. */
-export async function episodesOf(title: Title, season: Season): Promise<readonly EpisodeDetails[]> {
+/**
+ * A season's episodes as its details list them, with TMDB's worked in where it answers. `show`,
+ * when given, has them with what TMDB said before, while TMDB is asked. Rejects, showing nothing,
+ * once the login the details were read under no longer stands: details of the login after it
+ * bring their own season.
+ */
+export async function episodesOf(
+  title: Title,
+  season: Season,
+  show?: (episodes: readonly EpisodeDetails[]) => void,
+): Promise<readonly EpisodeDetails[]> {
   const { tmdbId } = title;
   if (!client || !tmdbId || title.adult) return seasonEpisodes(season, []);
+  const id = title.subscriptionId;
+  const source = currentSource(id);
+  const stands = () => source !== undefined && savable(id, source);
   const { number } = season;
-  const ask = (asked: string) =>
-    remembered(seasons, `${tmdbId}|${number}|${asked}`, () =>
-      fromTmdb(
-        readSeason(tmdbId, number, asked),
-        (signal) => client.season(tmdbId, number, asked, signal),
-        (saved) => writeSeason(tmdbId, number, asked, saved),
-      ),
+  const answers = (language === "en" ? [language] : [language, "en"]).map((asked) =>
+    tmdbAnswer(
+      seasons,
+      `${tmdbId}|${number}|${asked}`,
+      () => readSeason(tmdbId, number, asked),
+      (signal) => client.season(tmdbId, number, asked, signal),
+      (saved) => writeSeason(tmdbId, number, asked, saved),
+    ),
+  );
+  const worked = (told: readonly (readonly EpisodeAbout[] | null)[]) =>
+    seasonEpisodes(
+      season,
+      told.map((each) => each ?? []),
     );
-  const answers = await Promise.all(
-    language === "en" ? [ask(language)] : [ask(language), ask("en")],
-  );
-  return seasonEpisodes(
-    season,
-    answers.map((answer) => answer ?? []),
-  );
+  if (show) {
+    const now = await Promise.all(answers.map((answer) => answer.now));
+    if (stands()) show(worked(now));
+  }
+  const told = await Promise.all(answers.map((answer) => answer.final));
+  if (!stands()) throw new AppFailure({ kind: "no-subscription" });
+  return worked(told);
 }
 
 /**
  * Where a movie or an episode streams from, by the file type its provider lists: a movie's in the
  * lists or this run's answer for its details, an episode's in this run's answer for its series'.
- * Asks the subscription that lists it, under its current login, which the address carries.
+ * Asks the subscription that lists it, under its current login, which the address carries; never
+ * a saved record.
  */
 export async function titleFile(ref: TitleRef, signal: AbortSignal): Promise<ProviderFile> {
   const reading = sourceOf(ref.subscriptionId).provider;
   const ready = lists.get();
   if (ready.kind !== "ready") throw new AppFailure({ kind: "no-subscription" });
   const missing = new AppFailure({ kind: "title-not-found", titleId: ref.id });
+  const answered = (title: Title) =>
+    underLogin(ref.subscriptionId, async (source) => ({
+      raw: await askUnder(title, source),
+      source,
+    }));
   if (ref.kind === "movie") {
     const title = titleOf(ready.index, "movie", ref);
     if (!title) throw missing;
     const listed = title.versions.find((version) => sameOwned(version, ref))?.container;
     if (listed) return reading.titleFile("movie", ref.id, listed, signal);
-    const { raw, source } = await ask({ ...title, ...ownedId(ref) });
+    const { raw, source } = await answered({ ...title, ...ownedId(ref) });
     return source.provider.titleFile("movie", ref.id, raw.container ?? "mp4", signal);
   }
   const series = { subscriptionId: ref.subscriptionId, id: ref.seriesId };
   const title = titleOf(ready.index, "series", series);
   if (!title) throw missing;
-  const { raw, source } = await ask({ ...title, ...series });
+  const { raw, source } = await answered({ ...title, ...series });
   const episode = raw.episodes.find((each) => each.id === ref.id);
   if (!episode) throw missing;
   return source.provider.titleFile("episode", ref.id, episode.container, signal);

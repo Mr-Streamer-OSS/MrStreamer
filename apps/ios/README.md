@@ -99,10 +99,12 @@ Each responsibility has one owner, a plain module with a store the screens read:
   as its list metadata is. `titles.ts` decides when one shows; this module keeps the files, one
   operation at a time per subscription. A record holds the fields the app reads, artwork addresses
   that could carry the login as none, and isn't written when other text holds the password. A
-  record may take 8 MiB, every record together 64 MiB and 2,048 records, the least recently
-  written going first, 64 at a time; one older than 182 days isn't read. A new password or a
-  removal deletes a subscription's records with its lists, and no write of the earlier login is
-  saved after that.
+  record may take 8 MiB, every record together 64 MiB and 2,048 records, counted in the UTF-8
+  bytes written with what writes under way have reserved; the least recently written go first, up
+  to 64 for one write, which isn't made when they don't make room. One older than 182 days isn't
+  read. A new password or a removal deletes a subscription's records with its lists, and no write
+  of the earlier login is saved after that. Launch reads no record: the budget is counted at the
+  first write.
 - `src/subscriptions.ts`: the registry, `subscriptions.json`, and how private beta 2's one
   subscription in `state.json` becomes its first entry under the same id. Accounts removed with
   their history kept are remembered, so adding one again takes its id, and its history, back. Ids
@@ -128,10 +130,12 @@ Each responsibility has one owner, a plain module with a store the screens read:
   search, details with TMDB's facts, and the file each version streams from, asked of its own
   subscription. TMDB's metadata comes from core's store (`metadata/store.ts`, shared with the
   desktop) and is kept in Caches. Opened details are saved (`details-cache.ts`) and show again
-  after a restart: a provider's facts while younger than a day and its lists haven't come again,
-  else once it answers, or as saved when it fails; TMDB's for 150 days, a day when TMDB didn't
-  know the title, and a TMDB failure is asked again at the next open. Where a title streams from
-  is only ever asked of its provider under the current login, never read from a saved record.
+  after a restart: a provider's facts without asking while younger than a day and its lists
+  haven't come again, else while it is asked, replaced by its answer or kept when it fails; TMDB's
+  likewise for 150 days, a day when TMDB didn't know the title, and a TMDB failure is asked again
+  at the next open. The details screen shows what is saved at once, and the answers as they come
+  (`read.ts`). Nothing of a login replaced or removed since shows. Where a title streams from is
+  only ever asked of its provider under the current login, never read from a saved record.
 - `src/viewing.ts`: how far titles got, episode marks and Continue watching: core's
   `ViewingRecord` service over core's in-memory store, its snapshot in `viewing.json`, one record
   per subscription under its id.

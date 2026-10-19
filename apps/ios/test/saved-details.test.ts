@@ -1,6 +1,15 @@
 import type { SeriesDetails, Title, TitleDetails } from "@mrstreamer/contracts/ondemand";
 import { kindOf } from "@mrstreamer/core/ondemand/catalogue";
-import { existsSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +21,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const memory = vi.hoisted(() => ({
   keychain: new Map<string, string>(),
+  /** Passwords the Keychain has stored but whose write it hasn't answered yet. */
+  heldSecrets: [] as Array<() => void>,
+  holdSecrets: false,
   /** Each request to a panel: its `action`, or "login" for the login check. */
   requests: [] as string[],
   /** Details requests held until a test lets them through. */
@@ -40,7 +52,12 @@ vi.mock("expo-video", () => ({
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
   getItemAsync: async (key: string) => memory.keychain.get(key) ?? null,
-  setItemAsync: async (key: string, value: string) => void memory.keychain.set(key, value),
+  setItemAsync: async (key: string, value: string) => {
+    memory.keychain.set(key, value);
+    if (memory.holdSecrets && key.startsWith("s.")) {
+      await new Promise<void>((go) => memory.heldSecrets.push(go));
+    }
+  },
   deleteItemAsync: async (key: string) => void memory.keychain.delete(key),
 }));
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
@@ -86,6 +103,7 @@ interface FakeTmdb {
   aboutRequests(): number;
   seasonRequests(): readonly string[];
   failSeasons(answer: number | "hold" | null): void;
+  holdAbout(hold: boolean): void;
   refuse(refused: boolean): void;
   close(): Promise<void>;
 }
@@ -184,6 +202,23 @@ async function opened(app: App, title: Title) {
   return details;
 }
 
+/** A series' details answer with every episode's plot as `plot`. */
+const episodePlots = (body: Record<string, unknown>, plot: string) => ({
+  ...body,
+  episodes: Object.fromEntries(
+    Object.entries(body["episodes"] as Record<string, Record<string, unknown>[]>).map(
+      ([season, episodes]) => [
+        season,
+        episodes.map((episode) => ({
+          ...episode,
+          info: { ...(episode["info"] as Record<string, unknown>), plot },
+        })),
+      ],
+    ),
+  ),
+});
+const firstEpisodePlot = (details: TitleDetails) => seriesOf(details).seasons[0]?.episodes[0]?.plot;
+
 const plotOf = (body: Record<string, unknown>, plot: string) => ({
   ...body,
   info: { ...(body["info"] as Record<string, unknown>), plot },
@@ -197,6 +232,7 @@ beforeEach(() => {
   native.sizeOf = null;
   memory.aliases = [];
   memory.keychain.clear();
+  memory.holdSecrets = false;
   memory.requests.length = 0;
   memory.holdDetails = false;
   memory.details = null;
@@ -213,7 +249,9 @@ beforeEach(async () => {
     new Directory(each).create({ idempotent: true });
 });
 afterEach(() => {
-  for (const go of memory.heldDetails.splice(0)) go();
+  for (const go of [...memory.heldDetails.splice(0), ...memory.heldSecrets.splice(0)]) go();
+  tmdb.holdAbout(false);
+  tmdb.failSeasons(null);
   vi.useRealTimers();
   vi.unstubAllEnvs();
 });
@@ -347,6 +385,73 @@ describe("details saved on the phone", () => {
   });
 });
 
+describe("details while they are asked again", () => {
+  it("show the saved facts while the provider is asked, then its answer", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    const app = await launch();
+    await added(app);
+    memory.details = (body) => plotOf(body, "Saved story.");
+    await opened(app, await first(app, "movie"));
+
+    vi.setSystemTime(start + 25 * 60 * 60 * 1000);
+    const later = await launch();
+    const movie = await first(later, "movie");
+    memory.holdDetails = true;
+    memory.details = (body) => plotOf(body, "New story.");
+    const shown: (string | null)[] = [];
+    const reading = later.detailsOf(movie, (details) => shown.push(details.plot));
+    await until(() => memory.heldDetails.length === 1 && shown.length === 1, "the saved facts");
+    expect(shown).toEqual(["Saved story."]);
+
+    memory.holdDetails = false;
+    for (const go of memory.heldDetails.splice(0)) go();
+    expect(await reading).toMatchObject({ plot: "New story." });
+  });
+
+  it("show the provider's facts while TMDB is slow, then TMDB's", async () => {
+    const app = await launch({ withTmdb: true });
+    await added(app);
+    const series = await first(app, "series");
+    tmdb.holdAbout(true);
+    const shown: (string | null)[] = [];
+    const reading = app.detailsOf(series, (details) => shown.push(details.plot));
+    await until(() => shown.length === 1, "the provider's facts");
+    expect(shown[0]).toMatch(/^All about/u);
+
+    tmdb.holdAbout(false);
+    expect((await reading).plot).toMatch(/^TMDB's story of/u);
+  });
+
+  it("show a season with what TMDB said before while TMDB is asked again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    const app = await launch({ withTmdb: true });
+    await added(app);
+    const series = await first(app, "series");
+    const [season] = seriesOf(await opened(app, series)).seasons;
+    if (!season) throw new Error("No season");
+    const told = await app.episodesOf(series, season);
+    await until(() => records().some((path) => path.startsWith("tmdb/season.")), "the season");
+
+    vi.setSystemTime(start + 151 * 24 * 60 * 60 * 1000);
+    const later = await launch({ withTmdb: true });
+    const again = await first(later, "series");
+    const [now] = seriesOf(await later.detailsOf(again)).seasons;
+    if (!now) throw new Error("No season");
+    tmdb.failSeasons("hold");
+    const asked = tmdb.seasonRequests().length;
+    const shown: (readonly unknown[])[] = [];
+    const reading = later.episodesOf(again, now, (episodes) => shown.push(episodes));
+    await until(() => shown.length === 1, "the saved season");
+    expect(shown[0]).toEqual(told);
+    await until(() => tmdb.seasonRequests().length > asked, "TMDB asked again");
+
+    tmdb.failSeasons(null);
+    expect(await reading).toEqual(told);
+  });
+});
+
 describe("playback", () => {
   it("asks the provider where an episode streams from, never a saved record", async () => {
     const app = await launch();
@@ -459,6 +564,64 @@ describe("a login replaced or removed", () => {
     expect(detailsAskedSince(from)).toBe(0);
   });
 
+  it("shows nothing of the old password read while TMDB answered during a new one", async () => {
+    const NEW = "canaryNew9";
+    memory.aliases = [[NEW, ONE.password]];
+    memory.details = (body) => episodePlots(body, "Old login's episode.");
+    tmdb.refuse(true);
+    const app = await launch({ withTmdb: true });
+    const id = await added(app);
+    await opened(app, await first(app, "series"));
+    tmdb.refuse(false);
+
+    // Relaunched: the saved facts show while TMDB is held.
+    const later = await launch({ withTmdb: true });
+    const series = await first(later, "series");
+    tmdb.holdAbout(true);
+    const shown: (string | null | undefined)[] = [];
+    const reading = later.detailsOf(series, (details) => shown.push(firstEpisodePlot(details)));
+    await until(() => shown.length === 1, "the saved facts");
+    expect(shown).toEqual(["Old login's episode."]);
+    let settled = false;
+    void reading.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+
+    // The new password is being written to the Keychain when TMDB answers.
+    memory.holdSecrets = true;
+    memory.details = (body) => episodePlots(body, "New login's episode.");
+    const changing = later.update(id, { password: NEW });
+    await until(() => memory.heldSecrets.length === 1, "the password's write");
+    tmdb.holdAbout(false);
+    await settle(200);
+    expect(settled).toBe(false);
+    expect(shown).toHaveLength(1);
+
+    memory.holdSecrets = false;
+    for (const go of memory.heldSecrets.splice(0)) go();
+    await changing;
+    expect(firstEpisodePlot(await reading)).toBe("New login's episode.");
+    expect(shown.slice(1).every((plot) => plot === "New login's episode.")).toBe(true);
+    await settle();
+    expect(providerRecords().every((path) => !textOf(path).includes("Old login"))).toBe(true);
+  });
+
+  it("answers nothing for a subscription removed while TMDB is asked", async () => {
+    const app = await launch({ withTmdb: true });
+    const id = await added(app);
+    const series = await first(app, "series");
+    tmdb.holdAbout(true);
+    const shown: unknown[] = [];
+    const reading = app.detailsOf(series, (details) => shown.push(details));
+    await until(() => shown.length === 1, "the provider's facts");
+
+    await app.remove(id, { keepHistory: true });
+    tmdb.holdAbout(false);
+    await expect(reading).rejects.toMatchObject({ error: { kind: "needs-secret" } });
+    expect(shown).toHaveLength(1);
+  });
+
   it("keeps the old password when its saved details can't be deleted", async () => {
     memory.aliases = [["canaryNew9", ONE.password]];
     const app = await launch();
@@ -510,27 +673,95 @@ describe("the records", () => {
     expect(detailsAskedSince(from)).toBe(1);
     expect(providerRecords()).toEqual([]);
   });
+});
 
-  it("stay within their budget, the least recently written going first", async () => {
-    const app = await launch();
-    await added(app);
-    await until(() => app.titleLists().kind === "ready", "the lists");
-    const lists = app.titleLists();
-    if (lists.kind !== "ready") throw new Error("No lists");
-    const movies = kindOf(lists.index, "movie").titles.slice(0, 9);
-    expect(movies).toHaveLength(9);
-    // Each provider record reports 8 MiB: eight fill the 64 MiB the records may take.
-    native.sizeOf = (path) =>
-      path.includes(join("details", "providers")) ? 8 * 1024 * 1024 : undefined;
-    const written: string[] = [];
-    for (const [at, movie] of movies.entries()) {
-      await opened(app, movie);
-      const path = providerRecords().find((each) => each.endsWith(`/movie.${movie.id}.json`));
-      if (!path) throw new Error("Not saved");
-      written.push(path);
-      const time = new Date(Date.now() - (movies.length - at) * 60_000);
-      utimesSync(join(folder, path), time, time);
+describe("the records' budget", () => {
+  const MIB = 1024 * 1024;
+  const BUDGET = 64 * MIB;
+  const tmdbFolder = join(folder, "tmdb");
+  const aboutOf = (overview: string) => ({
+    original: null,
+    language: "en",
+    overview,
+    poster: null,
+    backdrop: null,
+    genres: [],
+    runtime: null,
+    cast: [],
+    directors: [],
+  });
+  const bytesOnDisk = () =>
+    records().reduce((sum, path) => sum + statSync(join(folder, path)).size, 0);
+  const saved = (name: string) => records().includes(`tmdb/about.movie.${name}.en.json`);
+  /** The records' owner as a launch starts it. */
+  async function owner() {
+    vi.resetModules();
+    return import("../src/details-cache.ts");
+  }
+
+  it("counts what a record takes in UTF-8", async () => {
+    const { writeAbout } = await owner();
+    for (let at = 0; at < 8; at++) {
+      await writeAbout("movie", `a${at}`, "en", {
+        at: Date.now(),
+        value: aboutOf("a".repeat(7.5 * MIB)),
+      });
     }
-    expect(providerRecords().toSorted()).toEqual(written.slice(1).toSorted());
+    await writeAbout("movie", "wide", "en", {
+      at: Date.now(),
+      value: aboutOf("界".repeat(2 * MIB)),
+    });
+    expect(saved("wide")).toBe(true);
+    expect(bytesOnDisk()).toBeLessThanOrEqual(BUDGET);
+  });
+
+  it("admits writes under way together within it", async () => {
+    const { writeAbout } = await owner();
+    await Promise.all(
+      Array.from({ length: 9 }, (_, at) =>
+        writeAbout("movie", `p${at}`, "en", {
+          at: Date.now(),
+          value: aboutOf("p".repeat(7.5 * MIB)),
+        }),
+      ),
+    );
+    expect(records().length).toBe(8);
+    expect(bytesOnDisk()).toBeLessThanOrEqual(BUDGET);
+  });
+
+  it("keeps to 2,048 records, written together too, the least recently written going first", async () => {
+    mkdirSync(tmdbFolder, { recursive: true });
+    const old = new Date(Date.now() - 60 * 60 * 1000);
+    for (let at = 0; at < 2047; at++) {
+      const path = join(tmdbFolder, `about.movie.seed${at}.en.json`);
+      writeFileSync(path, "{}");
+      utimesSync(path, old, old);
+    }
+    const { writeAbout } = await owner();
+    await Promise.all(
+      ["n0", "n1", "n2"].map((name) =>
+        writeAbout("movie", name, "en", { at: Date.now(), value: aboutOf(name) }),
+      ),
+    );
+    expect(records().length).toBe(2048);
+    expect(["n0", "n1", "n2"].every(saved)).toBe(true);
+  });
+
+  it("never counts a deletion the disk refuses as room, and keeps the records as they are", async () => {
+    const { writeAbout } = await owner();
+    for (let at = 0; at < 8; at++) {
+      await writeAbout("movie", `r${at}`, "en", {
+        at: Date.now(),
+        value: aboutOf("r".repeat(7.9 * MIB)),
+      });
+    }
+    native.undeletable = () => true;
+    await writeAbout("movie", "late", "en", {
+      at: Date.now(),
+      value: aboutOf("l".repeat(7.9 * MIB)),
+    });
+    expect(saved("late")).toBe(false);
+    expect(records().length).toBe(8);
+    expect(bytesOnDisk()).toBeLessThanOrEqual(BUDGET);
   });
 });
