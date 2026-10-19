@@ -77,4 +77,61 @@ describe("Settings > General", () => {
     useUi.setState({ settings: null });
     vi.restoreAllMocks();
   });
+
+  it("saves custom seconds and Instant separately from autoplay, retaining the acknowledged delay on failure", async () => {
+    ipc.reset();
+    ipc.prefer({ nextEpisodeDelay: 10 });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient() },
+          createElement(GeneralSection),
+        ),
+      ),
+    );
+    unmount = () =>
+      act(() => {
+        root.unmount();
+        container.remove();
+      });
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    const field = () =>
+      container.querySelector<HTMLInputElement>('[aria-label="Next episode delay"]')!;
+    const enter = async (value: string) => {
+      await act(async () => {
+        field().focus();
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+          field(),
+          value,
+        );
+        field().dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => field().blur());
+      await act(() => vi.advanceTimersByTimeAsync(20));
+    };
+    const saving = ipc.hold("preferences.update");
+    await enter("37");
+    expect(ipc.argsOf("preferences.update")).toEqual([{ nextEpisodeDelay: 37 }]);
+    await act(async () => saving.resolve({ ...defaultPreferences, nextEpisodeDelay: 37 }));
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(field().value).toBe("37");
+    const failed = ipc.hold("preferences.update");
+    await enter("60");
+    await act(async () => failed.reject({ kind: "unexpected", detail: "write failed" }));
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(field().value).toBe("37");
+    for (const value of ["-1", "37.5", "61", ""]) await enter(value);
+    expect(ipc.argsOf("preferences.update")).toHaveLength(2);
+    const instant = ipc.hold("preferences.update");
+    await enter("0");
+    await act(async () => instant.resolve({ ...defaultPreferences, nextEpisodeDelay: 0 }));
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(field().value).toBe("0");
+    expect(container.textContent).toContain("Instant");
+    expect(ipc.argsOf("preferences.update").at(-1)).toEqual({ nextEpisodeDelay: 0 });
+  });
 });

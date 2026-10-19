@@ -62,7 +62,10 @@ export const nl: Translation = {
   "titles in their own tab, channels only in Live TV":
     "titels in een eigen tabblad, zenders alleen in Live-tv",
   "Next episode": "Volgende aflevering",
-  "plays after a 10 second countdown": "start na 10 seconden aftellen",
+  "plays automatically": "speelt automatisch",
+  "Next episode delay": "Wachttijd volgende aflevering",
+  Instant: "Direct",
+  seconds: "seconden",
   "no key": "geen sleutel",
   "refused the key": "weigerde de sleutel",
   "{known} of {wanted} titles": "{known} van {wanted} titels",

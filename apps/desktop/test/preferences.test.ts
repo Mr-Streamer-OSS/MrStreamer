@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { type } from "arktype";
 import * as Layer from "effect/Layer";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Preferences, SubscriptionPreferences } from "@mrstreamer/contracts/preferences";
 import { ipcInputs } from "@mrstreamer/contracts/ipc";
 import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
@@ -90,6 +91,7 @@ describe("preferences", () => {
       muted: true,
       audioLanguage: "nl",
       autoplayNext: false,
+      nextEpisodeDelay: 10,
     });
   });
 
@@ -107,7 +109,7 @@ describe("preferences", () => {
     };
     expect(await settings.ofSubscription(id)).toEqual(left);
     expect(await (await settingsIn(dataDir)).ofSubscription(id)).toEqual(left);
-    expect(await settings.get()).toEqual({ volume: 0.4, muted: false });
+    expect(await settings.get()).toEqual({ volume: 0.4, muted: false, nextEpisodeDelay: 10 });
     // A subscription that isn't saved has none to read, and takes none.
     await expect(settings.ofSubscription("another-subscription")).rejects.toMatchObject({
       error: { kind: "no-subscription" },
@@ -144,7 +146,7 @@ describe("preferences", () => {
     );
     const returned = await settingsIn(dataDir);
 
-    expect(await returned.get()).toEqual({ volume: 0.9, muted: true });
+    expect(await returned.get()).toEqual({ volume: 0.9, muted: true, nextEpisodeDelay: 10 });
     expect(await returned.ofSubscription(id)).toEqual({ lastChannelId: "5", lastCategoryId: "2" });
   });
 
@@ -281,7 +283,11 @@ describe("preferences", () => {
       }),
     );
 
-    expect(await (await settingsIn(dataDir)).get()).toEqual({ volume: 0.3, muted: true });
+    expect(await (await settingsIn(dataDir)).get()).toEqual({
+      volume: 0.3,
+      muted: true,
+      nextEpisodeDelay: 10,
+    });
   });
 });
 
@@ -305,6 +311,7 @@ describe("the interface language", () => {
       titleLanguage: "nl",
       audioLanguage: "original",
       subtitleLanguage: "en",
+      nextEpisodeDelay: 10,
     });
     await returned.setInterfaceLanguage("system");
     expect(await (await settingsIn(dataDir)).interfaceLanguage()).toBe("system");
@@ -331,7 +338,7 @@ describe("the interface language", () => {
 
     const settings = await settingsIn(dataDir);
     expect(await settings.interfaceLanguage()).toBe("it-IT");
-    expect(await settings.get()).toEqual({ volume: 0.6, muted: false });
+    expect(await settings.get()).toEqual({ volume: 0.6, muted: false, nextEpisodeDelay: 10 });
     await settings.update({ muted: true });
     expect(await stored(dataDir)).toEqual({ ...later, muted: true, interfaceLanguage: "it-IT" });
   });
@@ -344,5 +351,122 @@ describe("the interface language", () => {
     await settings.forget(gone);
 
     expect(await (await settingsIn(dataDir)).interfaceLanguage()).toBe("es-ES");
+  });
+});
+
+describe("the next-episode delay", () => {
+  it.each([0, 1, 10, 37, 60])(
+    "accepts and keeps exactly %i seconds across restart",
+    async (nextEpisodeDelay) => {
+      const dataDir = await tempDir();
+      const patch = ipcInputs["preferences.update"]()({ nextEpisodeDelay });
+      if (patch instanceof type.errors) throw new Error(patch.summary);
+      expect((await (await settingsIn(dataDir)).update(patch)).nextEpisodeDelay).toBe(
+        nextEpisodeDelay,
+      );
+      expect((await (await settingsIn(dataDir)).get()).nextEpisodeDelay).toBe(nextEpisodeDelay);
+    },
+  );
+
+  it.each([-1, 0.5, 37.5, 61, NaN, Infinity, -Infinity, "37", null])(
+    "rejects %s at IPC ingress",
+    (nextEpisodeDelay) => {
+      expect(ipcInputs["preferences.update"]()({ nextEpisodeDelay })).toBeInstanceOf(type.errors);
+    },
+  );
+
+  it("defaults an absent delay without adding it to unrelated writes", async () => {
+    const dataDir = await tempDir();
+    const settings = await settingsIn(dataDir);
+    expect((await settings.get()).nextEpisodeDelay).toBe(10);
+    expect((await settings.update({ muted: true })).nextEpisodeDelay).toBe(10);
+    expect(await stored(dataDir)).not.toHaveProperty("nextEpisodeDelay");
+  });
+
+  it.each([75, "future", { mode: "future" }, null, -1, 37.5])(
+    "preserves unsupported raw %j through writes, older readers and original-source forgetting",
+    async (nextEpisodeDelay) => {
+      const { dataDir, subscriptions, id } = await connected();
+      const raw = {
+        volume: 0.4,
+        muted: true,
+        autoplayNext: false,
+        nextEpisodeDelay,
+        lastChannelId: "818",
+        lastCategoryId: "7",
+        titleVersions: { "movie:603": "4012" },
+        channelVariants: { "818": "819" },
+        favouriteChannelIds: ["818"],
+        recentChannelIds: ["819"],
+        interfaceLanguage: "de-DE",
+        futurePreference: { mode: "kept" },
+      };
+      await writeFile(join(dataDir, "preferences.json"), JSON.stringify(raw));
+      const settings = await settingsIn(dataDir);
+      expect(await settings.get()).toMatchObject({
+        volume: 0.4,
+        muted: true,
+        autoplayNext: false,
+        nextEpisodeDelay: 10,
+      });
+      await settings.update({ volume: 0.6 });
+      await settings.setInterfaceLanguage("fr-FR");
+      await settings.updateSubscription(id, { lastChannelId: "9" });
+      await settings.dropLegacyLists();
+      await settings.forget(await savedAs(subscriptions, id));
+      const expected = {
+        volume: 0.6,
+        muted: true,
+        autoplayNext: false,
+        nextEpisodeDelay,
+        lastChannelId: null,
+        lastCategoryId: null,
+        interfaceLanguage: "fr-FR",
+        futurePreference: { mode: "kept" },
+      };
+      expect(await stored(dataDir)).toEqual(expected);
+      // Stable's schema has no delay key, and retains it when reconstructing the flat file.
+      const stable = Preferences().omit("nextEpisodeDelay").merge(SubscriptionPreferences())(
+        await stored(dataDir),
+      );
+      if (stable instanceof type.errors) throw new Error(stable.summary);
+      await writeFile(
+        join(dataDir, "preferences.json"),
+        JSON.stringify({ ...stable, muted: false }),
+      );
+      const restarted = await settingsIn(dataDir);
+      expect(await restarted.get()).toMatchObject({
+        volume: 0.6,
+        muted: false,
+        nextEpisodeDelay: 10,
+      });
+      await restarted.update({ audioLanguage: "nl" });
+      expect(await stored(dataDir)).toEqual({ ...expected, muted: false, audioLanguage: "nl" });
+      await restarted.update({ nextEpisodeDelay: 37 });
+      expect((await (await settingsIn(dataDir)).get()).nextEpisodeDelay).toBe(37);
+      expect(await stored(dataDir)).toEqual({
+        ...expected,
+        muted: false,
+        audioLanguage: "nl",
+        nextEpisodeDelay: 37,
+      });
+    },
+  );
+
+  it("retains the acknowledged policy when a write fails", async () => {
+    const dataDir = await tempDir();
+    const settings = await settingsIn(dataDir);
+    await settings.update({ nextEpisodeDelay: 37, autoplayNext: true });
+    const blocked = Promise.withResolvers<void>();
+    disk.ready = blocked.promise;
+    const writing = settings.update({ nextEpisodeDelay: 0, autoplayNext: false });
+    const failed = expect(writing).rejects.toBeDefined();
+    blocked.reject(new Error("disk unavailable"));
+    await failed;
+    expect(await settings.get()).toMatchObject({ nextEpisodeDelay: 37, autoplayNext: true });
+    expect(await (await settingsIn(dataDir)).get()).toMatchObject({
+      nextEpisodeDelay: 37,
+      autoplayNext: true,
+    });
   });
 });

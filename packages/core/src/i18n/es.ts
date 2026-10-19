@@ -61,7 +61,10 @@ export const es: Translation = {
   "titles in their own tab, channels only in Live TV":
     "títulos en su propia pestaña, canales solo en TV en directo",
   "Next episode": "Siguiente episodio",
-  "plays after a 10 second countdown": "empieza tras una cuenta atrás de 10 segundos",
+  "plays automatically": "reproducción automática",
+  "Next episode delay": "Espera para el siguiente episodio",
+  Instant: "Inmediato",
+  seconds: "segundos",
   "no key": "sin clave",
   "refused the key": "rechazó la clave",
   "{known} of {wanted} titles": "{known} de {wanted} títulos",

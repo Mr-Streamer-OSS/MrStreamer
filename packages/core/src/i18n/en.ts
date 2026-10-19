@@ -61,7 +61,10 @@ export const en = {
   "titles in their own tab, channels only in Live TV":
     "titles in their own tab, channels only in Live TV",
   "Next episode": "Next episode",
-  "plays after a 10 second countdown": "plays after a 10 second countdown",
+  "plays automatically": "plays automatically",
+  "Next episode delay": "Next episode delay",
+  Instant: "Instant",
+  seconds: "seconds",
   "no key": "no key",
   "refused the key": "refused the key",
   "{known} of {wanted} titles": "{known} of {wanted} titles",

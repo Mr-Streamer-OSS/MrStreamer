@@ -56,7 +56,11 @@ import type {
   SubtitleFormat,
   SubtitleTrack,
 } from "@mrstreamer/contracts/playback";
-import { ORIGINAL_SOUND, type Preferences } from "@mrstreamer/contracts/preferences";
+import {
+  DEFAULT_NEXT_EPISODE_DELAY,
+  ORIGINAL_SOUND,
+  type Preferences,
+} from "@mrstreamer/contracts/preferences";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { chooseTracks } from "@mrstreamer/core/ondemand/tracks";
@@ -87,8 +91,6 @@ const CHECKPOINT_MS = 60_000;
 const RELEASE_AFTER_PAUSE_MS = 5 * 60_000;
 /** Waits before each new run after the connection broke. Its length is the attempt limit. */
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000];
-/** At the end of an episode, the next one plays after this many seconds. */
-const COUNTDOWN_S = 10;
 
 /** The speeds a title plays at, slowest first; 1 is its own. */
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
@@ -218,7 +220,7 @@ export interface TitlePlayerState {
    * doesn't list, and until the record has answered for this one.
    */
   readonly next: Episode | null | undefined;
-  /** At the end of an episode, the seconds until the next one plays; null without a countdown. */
+  /** Seconds until the next episode. Zero is pending Instant; null means no countdown. */
   readonly countdown: number | null;
   /**
    * Started as the next episode, by the countdown or Next, and not played yet: a failure then
@@ -319,6 +321,8 @@ let lastSubtitle: SubtitleTrack | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 /** The countdown waits, at the seconds it has left, as while Settings is open over the title. */
 let countdownHeld = false;
+/** One ended episode's policy read and saved delay. Cancellation discards this identity. */
+let countdownRun: { generation: number; ready: Promise<void> } | null = null;
 /** Counts the plays the viewer began: the open title is the last of them. */
 let play = 0;
 /** The play that recorded that its series is finished, or is finding out whether it is. */
@@ -501,6 +505,7 @@ async function finishSeries(
 /** Stops the countdown to the next episode, and one asked for that the record hasn't answered. */
 function stopCountdown(): void {
   nextRequest++;
+  countdownRun = null;
   if (countdownTimer) clearInterval(countdownTimer);
   countdownTimer = null;
   if (store.getState().countdown !== null) store.setState({ countdown: null });
@@ -512,24 +517,56 @@ function stopCountdown(): void {
  * marked and a change made while it played count. Nothing counts down while the record doesn't
  * say what comes next.
  */
-async function countDown(mine: number): Promise<void> {
-  const known = await refreshNext();
-  if (mine !== generation || !known || !store.getState().next) return;
-  const preferences = await call("preferences.get").catch((): Preferences | null => null);
-  if (mine !== generation || store.getState().phase.kind !== "ended") return;
-  if (preferences?.autoplayNext === false) return;
-  store.setState({ countdown: COUNTDOWN_S });
-  if (!countdownHeld) tickCountdown();
+function countDown(mine: number): Promise<void> {
+  const pending = { generation: mine, ready: Promise.resolve() };
+  countdownRun = pending;
+  const request = ++nextRequest;
+  pending.ready = (async () => {
+    const known = await refreshNext();
+    if (countdownRun !== pending || mine !== generation) return;
+    if (!known || !store.getState().next) return stopCountdown();
+    const preferences = await call("preferences.get").catch(() => null);
+    if (countdownRun !== pending || mine !== generation) return;
+    if (!preferences || store.getState().phase.kind !== "ended") return stopCountdown();
+    store.setState({ countdown: preferences.nextEpisodeDelay ?? DEFAULT_NEXT_EPISODE_DELAY });
+    // Settings may have changed policy during this read. Release reads its final saved value.
+    if (countdownHeld || request !== nextRequest) return;
+    if (preferences.autoplayNext === false) return stopCountdown();
+    tickCountdown();
+  })();
+  return pending.ready;
+}
+
+/** Release rechecks autoplay only; editing the delay never changes this countdown's remainder. */
+async function resumeCountdown(): Promise<void> {
+  const pending = countdownRun;
+  if (!pending) return;
+  const request = ++nextRequest;
+  await pending.ready;
+  if (countdownRun !== pending || request !== nextRequest) return;
+  const preferences = await call("preferences.get").catch(() => null);
+  if (
+    countdownRun !== pending ||
+    pending.generation !== generation ||
+    request !== nextRequest ||
+    countdownHeld
+  )
+    return;
+  if (!preferences || preferences.autoplayNext === false) return stopCountdown();
+  tickCountdown();
 }
 
 /** Takes a second off the countdown each second, and plays the next episode at zero. */
 function tickCountdown(): void {
+  // Instant and an expired countdown have no artificial tick, including after a Settings hold.
+  if (store.getState().countdown === 0) return titlePlayer.playNext();
   countdownTimer = setInterval(() => {
     const left = (store.getState().countdown ?? 0) - 1;
     if (left > 0) return store.setState({ countdown: left });
     // Counted down once: the next episode is asked for again before it opens.
     if (countdownTimer) clearInterval(countdownTimer);
     countdownTimer = null;
+    store.setState({ countdown: 0 });
     titlePlayer.playNext();
   }, 1000);
 }
@@ -636,7 +673,7 @@ async function run(start: number, attempt = 0, paused = false): Promise<void> {
     if (store.getState().phase.kind === "playing") save();
   }, CHECKPOINT_MS);
   started.onEnded(() => {
-    if (mine !== generation) return;
+    if (mine !== generation || store.getState().phase.kind === "ended") return;
     observation.end();
     const { duration: length } = store.getState();
     store.setState({ phase: { kind: "ended" }, position: length ?? started.position() });
@@ -1384,6 +1421,8 @@ export const titlePlayer = {
   playNext(): void {
     const { now, continued, phase } = store.getState();
     if (now?.kind !== "provider" || !now.series || (continued && phase.kind !== "failed")) return;
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = null;
     const { series } = now;
     const mine = ++nextRequest;
     void refreshNext().then((known) => {
@@ -1402,8 +1441,8 @@ export const titlePlayer = {
 
   /**
    * Holds the countdown to the next episode while `held`, as while Settings is open over the
-   * title, so nothing starts behind it. Let go, it carries on from the seconds it had left; one
-   * that started meanwhile, at an episode's end, starts counting then.
+   * title, so nothing starts behind it. Release rechecks saved autoplay before carrying on from
+   * the seconds it had left, including Instant. Delay edits apply to the next countdown.
    */
   holdNext(held: boolean): void {
     if (held === countdownHeld) return;
@@ -1413,8 +1452,8 @@ export const titlePlayer = {
       nextRequest++;
       if (countdownTimer) clearInterval(countdownTimer);
       countdownTimer = null;
-    } else if (store.getState().countdown !== null) {
-      tickCountdown();
+    } else if (countdownRun) {
+      void resumeCountdown();
     }
   },
 

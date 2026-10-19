@@ -14,6 +14,7 @@ import { QUALITIES } from "@mrstreamer/contracts/library";
 import { LANGUAGE_NAMES, LOCALES, type LanguageChoice } from "@mrstreamer/contracts/language";
 import {
   DEFAULT_LIVE_QUALITY,
+  DEFAULT_NEXT_EPISODE_DELAY,
   ORIGINAL_SOUND,
   type Preferences,
 } from "@mrstreamer/contracts/preferences";
@@ -228,7 +229,7 @@ export function GeneralSection() {
             </Checkbox.Indicator>
           </Checkbox.Root>
         </Row>
-        <Row label={t("Next episode")} note={t("plays after a 10 second countdown")}>
+        <Row label={t("Next episode")} note={t("plays automatically")}>
           <Checkbox.Root
             aria-label={t("Next episode")}
             checked={preferences.data?.autoplayNext ?? true}
@@ -239,6 +240,18 @@ export function GeneralSection() {
               <Check className="size-3 text-black" strokeWidth={3} />
             </Checkbox.Indicator>
           </Checkbox.Root>
+        </Row>
+        <Row
+          label={t("Next episode delay")}
+          note={preferences.data?.nextEpisodeDelay === 0 ? t("Instant") : undefined}
+        >
+          <EpisodeDelay
+            key={preferences.data?.nextEpisodeDelay ?? DEFAULT_NEXT_EPISODE_DELAY}
+            seconds={preferences.data?.nextEpisodeDelay ?? DEFAULT_NEXT_EPISODE_DELAY}
+            disabled={!preferences.data || update.isPending}
+            onChange={(nextEpisodeDelay) => update.mutate({ nextEpisodeDelay })}
+          />
+          <span className="text-muted-foreground">{t("seconds")}</span>
         </Row>
         <Tmdb
           ownKey={Boolean(preferences.data?.tmdbKey)}
@@ -251,6 +264,40 @@ export function GeneralSection() {
       <OnlineSubtitlesSection />
       <UpdatesSection />
     </>
+  );
+}
+
+/** Commit exact seconds on blur or Enter. Failed writes leave the acknowledged value intact. */
+function EpisodeDelay({
+  seconds,
+  disabled,
+  onChange,
+}: {
+  seconds: number;
+  disabled: boolean;
+  onChange: (seconds: number) => void;
+}) {
+  const [value, setValue] = useState(String(seconds));
+  return (
+    <Input
+      aria-label={t("Next episode delay")}
+      type="number"
+      min={0}
+      max={60}
+      step={1}
+      value={value}
+      disabled={disabled}
+      className="h-9 w-20 rounded-none px-2 text-right tabular-nums"
+      onChange={(event) => setValue(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+      }}
+      onBlur={(event) => {
+        const next = event.currentTarget.valueAsNumber;
+        setValue(String(seconds));
+        if (Number.isInteger(next) && next >= 0 && next <= 60 && next !== seconds) onChange(next);
+      }}
+    />
   );
 }
 

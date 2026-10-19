@@ -1,7 +1,11 @@
 import { homeRows } from "@mrstreamer/core/home/rows";
 import { isDeepStrictEqual } from "node:util";
 import type { UsageObservers } from "../analytics/observers.ts";
-import { DEFAULT_LIVE_QUALITY, DEFAULT_SUBTITLE_LOOK } from "@mrstreamer/contracts/preferences";
+import {
+  DEFAULT_LIVE_QUALITY,
+  DEFAULT_NEXT_EPISODE_DELAY,
+  DEFAULT_SUBTITLE_LOOK,
+} from "@mrstreamer/contracts/preferences";
 // Viewing settings in preferences.json. Two kinds share the file, as they always have, so the
 // newest stable release reads and writes it too. Preferences hold whichever subscription plays:
 // volume, mute, languages, the quality live channels start in. What the viewer left a subscription
@@ -37,6 +41,8 @@ import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
  */
 const Stored = lazy(() =>
   Preferences().merge(SubscriptionPreferences()).merge({
+    /** Preserve malformed and future values until the viewer explicitly replaces this leaf. */
+    "nextEpisodeDelay?": "unknown",
     "favouriteChannelIds?": "string[]",
     "recentChannelIds?": "string[]",
     /**
@@ -151,11 +157,11 @@ function make(dataDir: string, usage?: UsageObservers) {
       });
 
     return {
-      get: one.withPermits(1)(Effect.map(stored, general)),
+      get: one.withPermits(1)(Effect.map(stored, effective)),
       update: (patch: Partial<Preferences>) =>
         Effect.map(
           change((previous) => ({ ...previous, ...patch })),
-          general,
+          effective,
         ),
       interfaceLanguage: one.withPermits(1)(Effect.map(stored, (file) => file.interfaceLanguage)),
       setInterfaceLanguage: (choice: LanguageChoice) =>
@@ -220,8 +226,23 @@ function general({
   recentChannelIds: _recent,
   interfaceLanguage: _language,
   ...preferences
-}: Stored): Preferences {
+}: Stored) {
   return preferences;
+}
+
+/** Normalize replies only. File reconstruction must keep unsupported raw values intact. */
+function effective(file: Stored): Preferences {
+  const { nextEpisodeDelay, ...preferences } = general(file);
+  return {
+    ...preferences,
+    nextEpisodeDelay:
+      typeof nextEpisodeDelay === "number" &&
+      Number.isInteger(nextEpisodeDelay) &&
+      nextEpisodeDelay >= 0 &&
+      nextEpisodeDelay <= 60
+        ? nextEpisodeDelay
+        : DEFAULT_NEXT_EPISODE_DELAY,
+  };
 }
 
 /** What the file keeps for the original subscription. */

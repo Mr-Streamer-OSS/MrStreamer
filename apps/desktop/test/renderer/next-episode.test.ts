@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// At the end of an episode the next one in its series plays after a ten-second countdown, which
+// At the end of an episode the next one in its series plays after its saved delay, which
 // the viewer can cancel, skip with Play now or N, or turn off in Settings. It waits while Settings
 // is open. One next episode opens, only once the countdown ends and the episode before has closed;
 // leaving, another title or a new account plays nothing. A next episode that fails says it didn't start, and the last
@@ -12,7 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Episode, SeriesDetails, TitleRef } from "@mrstreamer/contracts/ondemand";
+import type { Episode, SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import type { EpisodeMark, SeriesViewing, TitleProgress } from "@mrstreamer/contracts/viewing";
 import { resetForAccount, useUi } from "../../src/renderer/src/app/ui-store.ts";
@@ -170,8 +170,7 @@ async function playToEnd(
 }
 
 /** The episodes and movies playback was asked to open, by id. */
-const opened = () =>
-  ipc.argsOf("playback.openTitle").map((args) => (args as { title: TitleRef }).title.id);
+const opened = () => ipc.argsOf("playback.openTitle").map((args) => args.title.id);
 
 const text = () => container.textContent ?? "";
 
@@ -657,4 +656,236 @@ describe("the next episode, as the record answers", () => {
     await key("n");
     expect(opened()).toEqual(["e13", "e22"]);
   });
+});
+
+describe("the saved countdown policy", () => {
+  it("keeps the next episode end screen during Instant admission and shows its failure", async () => {
+    ipc.prefer({ nextEpisodeDelay: 0 });
+    let failed: ReturnType<typeof ipc.hold<"playback.openTitle">> | undefined;
+    await playToEnd(pilotHouse, "s1", async () => {
+      failed = ipc.hold("playback.openTitle");
+    });
+    expect(opened()).toEqual(["e13", "e21"]);
+    expect(text()).toContain("S2 E1 · Low Tide");
+    expect(text()).toContain("Next episode");
+    expect(text()).toContain("Starting");
+    await act(async () =>
+      failed?.reject({ kind: "stream", failure: { kind: "unavailable", status: 404 } }),
+    );
+    expect(text()).toContain("Didn't start");
+    expect(text()).toContain("S2 E1 · Low Tide");
+    await press("Try again");
+    expect(opened()).toEqual(["e13", "e21", "e21"]);
+  });
+
+  it.each([0, 1, 10, 37, 60])("opens once after exactly %i seconds", async (nextEpisodeDelay) => {
+    ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelay });
+    await playToEnd(pilotHouse, "s1");
+    if (nextEpisodeDelay > 0) {
+      expect(text()).toContain(`Plays in ${nextEpisodeDelay}`);
+      await wait(nextEpisodeDelay * 1000 - 1);
+      expect(opened()).toEqual(["e13"]);
+      await wait(1);
+    }
+    // Instant is already opening without advancing the clock.
+    expect(opened()).toEqual(["e13", "e21"]);
+    await wait(65_000);
+    expect(opened()).toEqual(["e13", "e21"]);
+  });
+
+  it("keeps Instant held with Next episode shown, then opens without a tick on release", async () => {
+    ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelay: 0 });
+    await playToEnd(pilotHouse, "s1", () =>
+      act(async () => useUi.setState({ settings: "general" })),
+    );
+    expect(text()).toContain("Next episode");
+    expect(text()).not.toContain("Plays in 0");
+    await wait(30_000);
+    expect(opened()).toEqual(["e13"]);
+    await act(async () => useUi.setState({ settings: null }));
+    expect(opened()).toEqual(["e13", "e21"]);
+  });
+
+  it("resumes the saved remainder after off/on while held, and uses an edited delay next time", async () => {
+    ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelay: 37 });
+    await playToEnd(pilotHouse, "s1");
+    await wait(3000);
+    await act(async () => useUi.setState({ settings: "general" }));
+    ipc.always("preferences.get", {
+      ...defaultPreferences,
+      nextEpisodeDelay: 60,
+      autoplayNext: false,
+    });
+    await wait(5000);
+    ipc.always("preferences.get", {
+      ...defaultPreferences,
+      nextEpisodeDelay: 60,
+      autoplayNext: true,
+    });
+    await act(async () => useUi.setState({ settings: null }));
+    expect(titlePlayer.state().countdown).toBe(34);
+    await wait(33_000);
+    expect(opened()).toEqual(["e13"]);
+    await wait(1000);
+    expect(opened()).toEqual(["e13", "e21"]);
+    await playToEnd(lowTide, "s2");
+    expect(titlePlayer.state().countdown).toBe(60);
+  });
+
+  it("cancels on final Off, keeps manual Next, and never restarts on a later On", async () => {
+    await playToEnd(pilotHouse, "s1");
+    await act(async () => useUi.setState({ settings: "general" }));
+    ipc.always("preferences.get", { ...defaultPreferences, autoplayNext: false });
+    await act(async () => useUi.setState({ settings: null }));
+    expect(titlePlayer.state().countdown).toBeNull();
+    ipc.always("preferences.get", { ...defaultPreferences, autoplayNext: true });
+    await act(async () => useUi.setState({ settings: "general" }));
+    await act(async () => useUi.setState({ settings: null }));
+    await wait(65_000);
+    expect(opened()).toEqual(["e13"]);
+    await press("Next episode");
+    expect(opened()).toEqual(["e13", "e21"]);
+  });
+
+  it("uses the final saved On when an end behind Settings initially read Off", async () => {
+    ipc.always("preferences.get", {
+      ...defaultPreferences,
+      autoplayNext: false,
+      nextEpisodeDelay: 37,
+    });
+    await playToEnd(pilotHouse, "s1", () =>
+      act(async () => useUi.setState({ settings: "general" })),
+    );
+    ipc.always("preferences.get", {
+      ...defaultPreferences,
+      autoplayNext: true,
+      nextEpisodeDelay: 0,
+    });
+    await act(async () => useUi.setState({ settings: null }));
+    expect(titlePlayer.state().countdown).toBe(37);
+    await wait(37_000);
+    expect(opened()).toEqual(["e13", "e21"]);
+  });
+
+  it("rechecks policy after releasing Settings while the initial policy read is pending", async () => {
+    ipc.hold("preferences.get").resolve(defaultPreferences);
+    const initial = ipc.hold("preferences.get");
+    await playToEnd(pilotHouse, "s1", () =>
+      act(async () => useUi.setState({ settings: "general" })),
+    );
+    await act(async () => useUi.setState({ settings: null }));
+    ipc.always("preferences.get", { ...defaultPreferences, autoplayNext: false });
+    await act(async () => initial.resolve({ ...defaultPreferences, nextEpisodeDelay: 0 }));
+    await wait(65_000);
+    expect(opened()).toEqual(["e13"]);
+    expect(titlePlayer.state().countdown).toBeNull();
+  });
+
+  it.each(["cancel", "stop", "new title", "removed source"])(
+    "discards a pending Instant policy on %s",
+    async (action) => {
+      ipc.hold("preferences.get").resolve(defaultPreferences);
+      const pending = ipc.hold("preferences.get");
+      await playToEnd(pilotHouse, "s1");
+      await act(async () => {
+        if (action === "cancel") titlePlayer.cancelNext();
+        if (action === "stop") titlePlayer.close();
+        if (action === "new title")
+          playTitle(movieNow({ ...series.title, kind: "movie", id: "m1" }, null), 0);
+        if (action === "removed source") resetForAccount();
+      });
+      await act(async () => pending.resolve({ ...defaultPreferences, nextEpisodeDelay: 0 }));
+      await act(async () => useUi.setState({ settings: "general" }));
+      await act(async () => useUi.setState({ settings: null }));
+      await wait(65_000);
+      expect(opened()).not.toContain("e21");
+    },
+  );
+
+  it.each(["cancel", "stop", "new title"])(
+    "ignores an outstanding release policy after %s",
+    async (action) => {
+      await playToEnd(pilotHouse, "s1");
+      await act(async () => useUi.setState({ settings: "general" }));
+      const released = ipc.hold("preferences.get");
+      await act(async () => useUi.setState({ settings: null }));
+      await act(async () => {
+        if (action === "cancel") titlePlayer.cancelNext();
+        if (action === "stop") titlePlayer.close();
+        if (action === "new title")
+          playTitle(movieNow({ ...series.title, kind: "movie", id: "m1" }, null), 0);
+      });
+      await act(async () => released.resolve({ ...defaultPreferences, autoplayNext: true }));
+      await wait(65_000);
+      expect(opened()).not.toContain("e21");
+    },
+  );
+
+  it("ignores an older release policy after Settings is reopened and released again", async () => {
+    await playToEnd(pilotHouse, "s1");
+    await act(async () => useUi.setState({ settings: "general" }));
+    const before = ipc.hold("preferences.get");
+    await act(async () => useUi.setState({ settings: null }));
+    await act(async () => useUi.setState({ settings: "general" }));
+    const after = ipc.hold("preferences.get");
+    await act(async () => useUi.setState({ settings: null }));
+    await act(async () => after.resolve({ ...defaultPreferences, autoplayNext: false }));
+    await act(async () => before.resolve({ ...defaultPreferences, autoplayNext: true }));
+    await wait(65_000);
+    expect(opened()).toEqual(["e13"]);
+    expect(titlePlayer.state().countdown).toBeNull();
+  });
+
+  it.each([false, true])(
+    "keeps manual Next on policy read failure, at release %s",
+    async (atRelease) => {
+      if (atRelease) {
+        await playToEnd(pilotHouse, "s1");
+        await act(async () => useUi.setState({ settings: "general" }));
+      } else {
+        ipc.hold("preferences.get").resolve(defaultPreferences);
+      }
+      const policy = ipc.hold("preferences.get");
+      if (atRelease) await act(async () => useUi.setState({ settings: null }));
+      else await playToEnd(pilotHouse, "s1");
+      await act(async () =>
+        policy.reject({ kind: "unexpected", detail: "cannot read preferences" }),
+      );
+      await wait(65_000);
+      expect(opened()).toEqual(["e13"]);
+      expect(text()).toContain("Next episode");
+      expect(titlePlayer.state().countdown).toBeNull();
+      await key("n");
+      expect(opened()).toEqual(["e13", "e21"]);
+    },
+  );
+});
+
+it("keeps an offline episode independent of autoplay and provider next-episode lookups", async () => {
+  ipc.prefer({ nextEpisodeDelay: 0 });
+  const now = episodeNow(series, pilotHouse);
+  const openedCopy = ipc.hold("playback.openCopy");
+  await act(async () => {
+    void titlePlayer.open({ ...now, kind: "copy", copy: "saved-episode" }, 0);
+  });
+  await act(async () =>
+    openedCopy.resolve({
+      copy: "saved-episode",
+      sessionId: "copy-1",
+      url: "http://127.0.0.1/copy.mp4",
+      duration: 2700,
+      audio: [],
+      subtitles: [],
+      progress: null,
+    }),
+  );
+  await act(async () => runs.at(-1)?.start());
+  await act(async () => runs.at(-1)?.end());
+  await wait(65_000);
+  expect(titlePlayer.state()).toMatchObject({ phase: { kind: "ended" }, countdown: null });
+  expect(ipc.argsOf("viewing.episodes")).toHaveLength(0);
+  expect(ipc.argsOf("playback.openTitle")).toHaveLength(0);
+  expect(ipc.argsOf("downloads.recordProgress")).toMatchObject([
+    { id: "saved-episode", position: 2700 },
+  ]);
 });

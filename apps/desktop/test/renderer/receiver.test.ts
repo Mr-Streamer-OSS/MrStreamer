@@ -767,6 +767,39 @@ describe("a movie whose TV another takes the place of", () => {
 });
 
 describe("an episode on a receiver", () => {
+  it.each([0, 37, 60])(
+    "uses %i seconds on the receiver and never opens local playback",
+    async (nextEpisodeDelay) => {
+      ipc.prefer({ nextEpisodeDelay });
+      await show(TitleWatch);
+      const item = await onReceiver(episodeNow(series, firstLight), 0, 1);
+      await emit(connected(said(1, item, "ended", 3600, 3600)));
+      if (nextEpisodeDelay > 0) {
+        expect(text()).toContain(`Plays in ${nextEpisodeDelay} on Living Room TV`);
+        await wait(nextEpisodeDelay * 1000 - 1);
+        expect(ipc.argsOf("output.openTitle")).toHaveLength(1);
+        await wait(1);
+      }
+      expect(ipc.argsOf("output.openTitle")).toHaveLength(2);
+      expect(ipc.argsOf("output.openTitle").at(-1)?.title.id).toBe("e2");
+      expect(ipc.argsOf("playback.openTitle")).toHaveLength(0);
+    },
+  );
+
+  it("never resurrects a held Instant episode after Stop on the receiver", async () => {
+    ipc.prefer({ nextEpisodeDelay: 0 });
+    await show(TitleWatch);
+    const item = await onReceiver(episodeNow(series, firstLight), 0, 1);
+    await act(async () => useUi.setState({ settings: "general" }));
+    await emit(connected(said(1, item, "ended", 3600, 3600)));
+    expect(titlePlayer.state().countdown).toBe(0);
+    await act(async () => titlePlayer.stop());
+    await act(async () => useUi.setState({ settings: null }));
+    await wait(65_000);
+    expect(ipc.argsOf("output.openTitle")).toHaveLength(1);
+    expect(titlePlayer.state().now).toBeNull();
+  });
+
   it("counts down to the next one there once the receiver played to the end", async () => {
     await show(TitleWatch);
     const item = await onReceiver(episodeNow(series, firstLight), 0, 1);

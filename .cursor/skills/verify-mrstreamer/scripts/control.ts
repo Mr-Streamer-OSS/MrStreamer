@@ -25,6 +25,7 @@ import { homeScenario } from "./home.ts";
 import { liveCategoriesScenario, LONG_CATEGORY } from "./live-categories.ts";
 import { languageScenario } from "./language.ts";
 import { movedGuideScenario } from "./moved-guide.ts";
+import { nextEpisodeScenario } from "./next-episode.ts";
 import { removeDuringGuideScenario } from "./remove-during-guide.ts";
 import {
   electronExecutable,
@@ -62,6 +63,7 @@ const scenarios = [
   "guide-grid-cells",
   "guide-grid-scroll",
   "titles",
+  "next-episode",
   "watchlist",
   "downloads",
   "language",
@@ -203,6 +205,7 @@ async function run(scenario: Scenario) {
         ? { guideIdOf: (channel) => labelledGuideId(channel.name) ?? channel.guideId }
         : {}),
     });
+    if (scenario === "next-episode") provider.replaceEpisodeFile(81000, "title-h264-aac.mp4");
     if (scenario === "guides") {
       guideHosts = { north: await startGuideHost(), south: await startGuideHost() };
       serveGuides(guideHosts.north, guideHosts.south);
@@ -809,6 +812,24 @@ async function run(scenario: Scenario) {
         });
       else if (scenario === "guide-grid-cells") await guideGridCellsScenario(driver);
       else await guideGridScrollScenario(driver);
+    } else if (scenario === "next-episode") {
+      await nextEpisodeScenario(
+        {
+          profile,
+          observed,
+          evaluate: livePage.evaluate,
+          send,
+          wait,
+          exists,
+          click,
+          key,
+          capture,
+          action,
+          launch,
+          quit,
+        },
+        () => ({ requests: provider!.fileRequests(), mostAtOnce: provider!.mostFilesAtOnce() }),
+      );
     } else if (scenario === "live-tv") {
       await click("Open global Search", "document.querySelector('button[aria-label=Search]')");
       action("Search TEST | H.264 + AAC");
