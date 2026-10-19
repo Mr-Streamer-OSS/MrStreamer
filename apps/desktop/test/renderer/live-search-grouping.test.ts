@@ -238,6 +238,59 @@ async function page(
 }
 
 describe("real search components with two subscriptions", () => {
+  it("uses a complete fresh palette answer immediately without another IPC read", async () => {
+    const p = await page("palette", "");
+    p.client.setQueryData(queries.search("Canvas").queryKey, responses([green[3]!]));
+    p.client.setQueryData(queries.programmes("Canvas").queryKey, []);
+    p.client.setQueryData(queries.titleSearch("Canvas").queryKey, { movies: [], series: [] });
+
+    await p.type("Canvas");
+    expect(p.rows()).toHaveLength(1);
+    expect(p.field().getAttribute("aria-activedescendant")).toBeTruthy();
+    await p.press("Enter", p.field());
+    expect(p.watch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(ownedId(green[3]!)));
+    for (const method of ["library.channels", "guide.search", "ondemand.search"] as const)
+      expect(ipc.argsOf(method)).toEqual([]);
+  });
+
+  it.each(["missing programmes", "expired programmes", "changed catalogue"] as const)(
+    "keeps the palette typing delay and old rows inactive with %s",
+    async (condition) => {
+      const p = await page("palette");
+      p.client.setQueryData(queries.search("Canvas").queryKey, responses([green[3]!]));
+      p.client.setQueryData(queries.titleSearch("Canvas").queryKey, { movies: [], series: [] });
+      if (condition !== "missing programmes")
+        p.client.setQueryData(queries.programmes("Canvas").queryKey, []);
+      // An unobserved guide answer still expires while the viewer searches elsewhere.
+      if (condition === "expired programmes") vi.setSystemTime(Date.now() + 61_000);
+      if (condition === "changed catalogue")
+        await p.client.invalidateQueries({
+          queryKey: queries.search("Canvas").queryKey,
+          exact: true,
+        });
+      ipc.always("library.channels", responses([green[3]!]));
+      ipc.always("guide.search", []);
+      ipc.always("ondemand.search", { movies: [], series: [] });
+
+      await p.type("Canvas");
+      const tree = p.scope().querySelector('[role="tree"]')!;
+      expect(tree.getAttribute("aria-disabled")).toBe("true");
+      await p.press("Enter", p.field());
+      await p.click(p.rows()[0]!);
+      expect(p.watch).not.toHaveBeenCalled();
+      for (const method of ["library.channels", "guide.search", "ondemand.search"] as const)
+        expect(ipc.argsOf(method)).toEqual([]);
+      await settled(150);
+      expect(p.rows()).toHaveLength(1);
+      expect(p.scope().querySelector('[role="tree"]')?.getAttribute("aria-disabled")).toBe("false");
+      await p.press("Enter", p.field());
+      expect(p.watch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(ownedId(green[3]!)));
+      expect(
+        ipc.argsOf(condition === "changed catalogue" ? "library.channels" : "guide.search"),
+      ).toHaveLength(1);
+    },
+  );
+
   it("starts the palette catalogue read during typing and shares it across searches and reopen", async () => {
     const p = await page("palette", "");
     expect(ipc.argsOf("library.searchGroups")).toEqual([]);
