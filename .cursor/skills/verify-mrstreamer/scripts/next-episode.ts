@@ -40,7 +40,7 @@ export async function nextEpisodeScenario(
   const remaining = async () => /Plays in (\d+)/.exec(await endText())?.[1] ?? null;
   const openSettings = async () => {
     d.action("Open Settings with the application shortcut");
-    const modifiers = process.platform === "darwin" ? 8 : 2;
+    const modifiers = process.platform === "darwin" ? 4 : 2;
     await d.send("Input.dispatchKeyEvent", {
       type: "rawKeyDown",
       key: ",",
@@ -62,13 +62,13 @@ export async function nextEpisodeScenario(
       type: "rawKeyDown",
       key: "a",
       windowsVirtualKeyCode: 65,
-      modifiers: process.platform === "darwin" ? 8 : 2,
+      modifiers: process.platform === "darwin" ? 4 : 2,
     });
     await d.send("Input.dispatchKeyEvent", {
       type: "keyUp",
       key: "a",
       windowsVirtualKeyCode: 65,
-      modifiers: process.platform === "darwin" ? 8 : 2,
+      modifiers: process.platform === "darwin" ? 4 : 2,
     });
     await d.send("Input.insertText", { text: String(seconds) });
     await d.key("Enter", 13);
