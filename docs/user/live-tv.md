@@ -117,6 +117,8 @@ When the picture stands still for three seconds, "Waiting for data" shows at the
 | F, M, I            |                                                                                           | Full screen, mute, show the details                                     |
 | P                  |                                                                                           | Mini player, and back                                                   |
 
+Number entry searches All channels with the current adult visibility, even while browsing a filtered or personal list. It keeps the browsing selection and filters and chooses the first matching source when numbers repeat.
+
 While you reorder favourites, the keys are these alone:
 
 | Key                             | While reordering                                |

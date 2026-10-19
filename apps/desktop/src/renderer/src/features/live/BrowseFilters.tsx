@@ -47,6 +47,20 @@ export function BrowseFilters({
   useLayoutEffect(() => {
     menu.current?.querySelector<HTMLButtonElement>("button")?.focus();
   }, [open]);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const position = () => {
+      const popup = menu.current;
+      if (!popup) return;
+      popup.style.transform = "";
+      const bounds = popup.getBoundingClientRect();
+      const shift = Math.max(8 - bounds.left, Math.min(0, window.innerWidth - 8 - bounds.right));
+      popup.style.transform = `translateX(${shift}px)`;
+    };
+    position();
+    window.addEventListener("resize", position);
+    return () => window.removeEventListener("resize", position);
+  }, [open, filters, result]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
@@ -127,7 +141,7 @@ export function BrowseFilters({
                 ref={menu}
                 role="menu"
                 aria-label={t(LABELS[dimension])}
-                className="absolute top-full left-0 z-30 max-h-72 min-w-48 overflow-y-auto border border-white/25 bg-black py-1 shadow-xl"
+                className="absolute top-full left-0 z-30 max-h-72 w-max min-w-48 max-w-[min(24rem,calc(100vw-1rem))] overflow-y-auto border border-white/25 bg-black py-1 shadow-xl"
               >
                 <button
                   role="menuitemcheckbox"
@@ -140,11 +154,11 @@ export function BrowseFilters({
                 >
                   <span className="flex-1">{t("Any")}</span>
                   {result && (
-                    <span className="text-muted-foreground tabular-nums">
+                    <span className="flex-none text-muted-foreground tabular-nums">
                       {formatNumber(result.counts[dimension])}
                     </span>
                   )}
-                  {selected.length === 0 && <Check className="size-3" />}
+                  {selected.length === 0 && <Check className="size-3 flex-none" />}
                 </button>
                 {[...options].map(([value, count]) => (
                   <button
@@ -161,8 +175,10 @@ export function BrowseFilters({
                     }
                     className="flex h-8 w-full items-center gap-3 px-3 text-left hover:bg-white/10 focus:bg-white/10 focus:outline-none"
                   >
-                    <span className="flex-1 whitespace-nowrap">{label(dimension, value)}</span>
-                    <span className="text-muted-foreground tabular-nums">
+                    <span className="min-w-0 flex-1 truncate" title={label(dimension, value)}>
+                      {label(dimension, value)}
+                    </span>
+                    <span className="flex-none text-muted-foreground tabular-nums">
                       {formatNumber(count)}
                     </span>
                     {selected.includes(value) && <Check className="size-3 flex-none" />}

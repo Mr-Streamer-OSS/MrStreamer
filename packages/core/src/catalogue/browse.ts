@@ -6,9 +6,8 @@ import {
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { ProviderCategory } from "../provider.ts";
 import { languageCode, languageName } from "../ondemand/tracks.ts";
-import { normalize } from "../text.ts";
-import type { NormalizedStream } from "./normalize.ts";
-import { isBroadRegion, leadingFlag, regionForCode, regionForName } from "./regions.ts";
+import { categorySubject, type NormalizedStream } from "./normalize.ts";
+import { isBroadRegion, regionForName } from "./regions.ts";
 
 /** Finite category-label vocabulary. Whole words only; channel names never assign topics. */
 const CONTENT: Readonly<Partial<Record<BrowseTopic, readonly string[]>>> = {
@@ -109,32 +108,11 @@ const PLACES = new Set([
   "caribbean",
   "europe",
   "latin america",
-  "world",
   "ex-yugoslavia",
 ]);
-const QUALITY = /(?<![\p{L}\p{N}])(8k|4k|uhd|fhd|hd|sd|hevc|hdr|raw|\d{3,4}p)(?![\p{L}\p{N}])/giu;
-
-function subject(raw: string): string {
-  let text = raw.normalize("NFKC").trim();
-  const flag = leadingFlag(text);
-  if (flag) text = flag.rest;
-  else {
-    const prefix = /^[[(|┃│]?\s*([A-Z]{2,5})(?:\s*-\s*[A-Z]{2,3})?(?:\s*[\])|:┃│»]|\s+-\s)\s*/.exec(
-      text,
-    );
-    if (prefix?.[1] && regionForCode(prefix[1])) text = text.slice(prefix[0].length);
-    else {
-      const spelled = /^(\p{L}[\p{L} .'&-]{2,30}?)\s*[|:┃│»]\s*/u.exec(text);
-      if (spelled?.[1] && regionForName(spelled[1])) text = text.slice(spelled[0].length);
-    }
-  }
-  return normalize(text.replace(QUALITY, " "))
-    .replace(/^[\s|:.-]+|[\s|:.-]+$/g, "")
-    .trim();
-}
 
 export function categoryBrowseTopics(name: string): readonly BrowseTopic[] {
-  const label = subject(name);
+  const label = categorySubject(name);
   const tokens = label.split(/[^\p{L}\p{N}]+/u);
   const topics: BrowseTopic[] = [];
   for (const { topic, labels } of words) {

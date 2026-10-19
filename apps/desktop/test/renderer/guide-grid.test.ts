@@ -794,3 +794,25 @@ it("keeps an exact grid channel through a pending filter and selects the first w
   await page.press("Enter");
   expect(player.state().channel?.id).toBe("3");
 });
+
+it("opens a newly read list on the playing channel", async () => {
+  const page = await gridPage(THREE);
+  await ready(() => expect(page.rows()).toEqual(["One", "Two", "Three"]));
+  await page.press("ArrowDown");
+  await page.press("Enter");
+  expect(player.state().channel?.id).toBe("2");
+  await act(async () => useUi.setState({ watching: false }));
+  const held = ipc.hold("library.browse", (query) => query.filters.browseTopics.includes("news"));
+  await act(async () => useUi.setState({ list: { kind: "topic", topic: "news" } }));
+  await ready(() => expect(page.rows()).toEqual([]));
+  held.resolve(
+    browseResult([
+      { ...THREE[1]!, subscriptionId: "other", name: "Other Two", title: "Other Two" },
+      ...THREE,
+    ]),
+  );
+  await ready(() => expect(page.rows()).toEqual(["Other Two", "One", "Two", "Three"]));
+  expect(page.active()).toContain("Two");
+  await page.press("Enter");
+  expect(player.state().channel).toMatchObject({ subscriptionId: SUBSCRIPTION, id: "2" });
+});

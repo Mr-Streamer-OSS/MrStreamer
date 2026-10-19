@@ -41,8 +41,7 @@ export const numberEntry = {
 export function NumberEntry({ onChannel }: { onChannel: (channel: LiveChannel) => void }) {
   const digits = useDigits((state) => state.digits);
   const committing = useDigits((state) => state.committing);
-  const list = useUi((state) => state.list);
-  const all = useListChannels(list);
+  const all = useListChannels({ kind: "all" });
   const match = digits
     ? all.channels?.find((channel) => channel.number === Number(digits))
     : undefined;

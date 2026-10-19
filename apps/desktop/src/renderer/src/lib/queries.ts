@@ -3,6 +3,7 @@
 // both: a provider's ids mean nothing without their subscription.
 import {
   queryOptions,
+  replaceEqualDeep,
   useQueries,
   useQuery,
   useQueryClient,
@@ -41,6 +42,13 @@ const LISTINGS_REFRESH_MS = 60_000;
 
 const NO_SUBSCRIPTIONS: readonly SubscriptionSummary[] = [];
 
+// Acceptance context belongs to an in-flight reply, never to the saved viewing state. A read
+// can reach React Query's commit after a command acknowledgement even after cancellation.
+const viewingReads = new WeakMap<
+  object,
+  { client: QueryClient; before: Viewing | undefined; sequence: number }
+>();
+
 export const queries = {
   /** Every saved subscription, in the order added. Changed only by what Settings does to them. */
   subscriptions: () =>
@@ -78,9 +86,24 @@ export const queries = {
     queryOptions({
       queryKey: ["viewing"],
       queryFn: async ({ client }) => {
+        const before = client.getQueryData<Viewing>(["viewing"]);
         const viewing = await call("viewing.get");
-        const cached = client.getQueryData<Viewing>(["viewing"]);
-        return cached && cached.sequence > viewing.sequence ? cached : viewing;
+        viewingReads.set(viewing, { client, before, sequence: viewing.sequence });
+        return viewing;
+      },
+      structuralSharing: (previous, next) => {
+        if (typeof next === "object" && next !== null) {
+          const read = viewingReads.get(next);
+          if (read) {
+            viewingReads.delete(next);
+            const cached = read.client.getQueryData<Viewing>(["viewing"]);
+            // Removing an account can lower the combined sequence. Only a concurrent cache write
+            // can supersede this read, not the record it started with. Equal sequences may carry
+            // refreshed canonical channel IDs after a catalogue update.
+            if (cached !== read.before && cached && cached.sequence > read.sequence) return cached;
+          }
+        }
+        return replaceEqualDeep(previous, next);
       },
       staleTime: Infinity,
     }),
@@ -509,9 +532,13 @@ export function keepGuideStatus(client: QueryClient, status: GuideStatus): void 
 
 /** Keeps the latest viewing state: an answer can arrive after a later change's event. */
 export function keepViewing(client: QueryClient, viewing: Viewing): void {
-  client.setQueryData(queries.viewing().queryKey, (cached) =>
-    cached && cached.sequence > viewing.sequence ? cached : viewing,
-  );
+  const queryKey = queries.viewing().queryKey;
+  const cached = client.getQueryData(queryKey);
+  if (cached && cached.sequence > viewing.sequence) return;
+  // The query function can have returned while React Query has yet to commit its result.
+  // Cancel that commit before accepting the acknowledgement, including an initial read.
+  void client.cancelQueries({ queryKey, exact: true });
+  client.setQueryData(queryKey, viewing);
 }
 
 /** The saved subscriptions, in the order added; none until they are known. */

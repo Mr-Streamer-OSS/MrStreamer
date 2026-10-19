@@ -467,7 +467,15 @@ export function GuideGrid({
 
   // The grid opens on the playing channel, once its channels are in.
   useEffect(() => {
-    if (index > 0) virtualizer.scrollToIndex(index, { align: "center" });
+    let initial = index;
+    if (channels.length && cursor.channel === null && cursor.asked === 0) {
+      initial = Math.max(
+        channels.findIndex((channel) => ownedKey(channel) === playingKey),
+        0,
+      );
+      setCursor({ ...cursor, index: initial, channel: channels[initial] ?? null });
+    }
+    if (initial > 0) virtualizer.scrollToIndex(initial, { align: "center" });
   }, [channels.length > 0]);
 
   // A key that moved the cursor brings it into view, the row and then the programme.

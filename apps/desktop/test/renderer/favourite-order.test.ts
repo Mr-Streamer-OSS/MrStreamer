@@ -390,8 +390,21 @@ describe("putting the favourites in another order", () => {
     expect(page.rows()).toEqual(titles(["2", "3", "1", "4"]));
   });
 
-  it("asks to read the favourites again when they changed, and starts from the list as it is", async () => {
+  it("reloads and saves favourites after removing the source with the latest viewing sequence", async () => {
     const page = await favouritesPage(4);
+    const removed = { subscriptionId: "removed", id: "7" };
+    page.client.setQueryData(
+      browseChannelsOf([...page.viewing.favourites, removed]).queryKey,
+      browseResult(["1", "2", "3", "4"].map(channel)),
+    );
+    await act(async () =>
+      page.client.setQueryData(queries.viewing().queryKey, {
+        ...page.viewing,
+        sequence: 120,
+        favourites: [...page.viewing.favourites, removed],
+      }),
+    );
+    await settled();
     await page.click("Reorder");
     await page.click("Move Channel 1 down", { shift: true });
     const answer = ipc.hold("viewing.reorderFavourites");
@@ -404,7 +417,8 @@ describe("putting the favourites in another order", () => {
     await page.press("ArrowUp", { alt: true });
     expect(page.rows()).toEqual(titles(["2", "3", "4", "1"]));
 
-    // Channel 4 was unstarred somewhere this page never heard of: the main process is asked.
+    // Main has removed the source that changed last and Channel 4 was unstarred too.
+    // The combined sequence is now lower, and Reload must discard the removed favourite.
     const record = ipc.hold("viewing.get");
     const listed = ipc.hold("library.browse", (query) => query.scope.kind === "channels");
     await page.click("Reload");
@@ -413,7 +427,7 @@ describe("putting the favourites in another order", () => {
       recent: [],
       continueWatching: [],
       marked: [],
-      sequence: 3,
+      sequence: 100,
     };
     await act(async () => record.resolve(fresh));
     await act(async () => listed.resolve(browseResult(["1", "2", "3"].map(channel))));
