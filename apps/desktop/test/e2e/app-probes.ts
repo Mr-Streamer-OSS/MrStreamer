@@ -601,6 +601,8 @@ export async function runAppProbes(options: {
           ),
         );
         await key(page, "Escape", 27);
+        // The closing search dialog still owns keyboard focus until its popup is gone.
+        await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role="dialog"]')`));
         await click("Watch");
         await waitFor(() =>
           page.evaluate<boolean>(`!!document.querySelector('[data-view="watch"]')`),

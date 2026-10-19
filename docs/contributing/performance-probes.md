@@ -84,6 +84,7 @@ the counter floor nor a successful pulse establishes an idle regression threshol
 plus action timestamps and the busiest sampled frames. The selected UI path changes category,
 scrolls All channels, opens and scrolls the grid, searches programmes for `news`, opens Watch's
 channel overlay and returns to Live TV. It verifies UI readiness at the relevant transitions.
+Search closes fully before Watch opens, so its ending dialog cannot retain the keyboard.
 Returning from Watch waits for the channel overlay and then Watch itself to close before
 addressing the underlying page. Profiles stop and retain partial captures even when an action fails. These are V8 isolate self
 samples, including idle/program frames; they exclude other worker isolates, native stacks,
