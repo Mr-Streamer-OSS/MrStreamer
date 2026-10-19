@@ -971,44 +971,57 @@ function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
     subscriptions: new Map<string, number>(),
   };
   const counts = { browseTopics: 0, countries: 0, languages: 0, subscriptions: 0 };
+  const filtered =
+    filters.browseTopics.length > 0 ||
+    filters.countries.length > 0 ||
+    filters.languages.length > 0 ||
+    filters.subscriptions.length > 0;
   const selected: LiveChannel[] = [];
   let total = 0;
   for (const channel of channels) {
-    const values = {
-      browseTopics: channel.browse?.topics ?? ["other"],
-      countries: channel.browse?.country ? [channel.browse.country] : [],
-      languages: channel.browse?.language ? [channel.browse.language] : [],
-      subscriptions: [channel.subscriptionId],
-    };
-    const matches = {
-      browseTopics:
-        filters.browseTopics.length === 0 ||
-        values.browseTopics.some((id) => filters.browseTopics.some((asked) => asked === id)),
-      countries:
-        filters.countries.length === 0 ||
-        values.countries.some((id) => filters.countries.includes(id)),
-      languages:
-        filters.languages.length === 0 ||
-        values.languages.some((id) => filters.languages.includes(id)),
-      subscriptions:
-        filters.subscriptions.length === 0 ||
-        filters.subscriptions.includes(channel.subscriptionId),
-    };
-    if (matches.browseTopics) total++;
-    if (Object.values(matches).every(Boolean)) selected.push(channel);
-    for (const dimension of ["browseTopics", "countries", "languages", "subscriptions"] as const) {
-      if (Object.entries(matches).some(([key, match]) => key !== dimension && !match)) continue;
-      counts[dimension]++;
-      for (const value of values[dimension]) {
-        const counts = facets[dimension];
-        counts.set(value, (counts.get(value) ?? 0) + 1);
-      }
+    const topics = channel.browse?.topics ?? ["other"];
+    const country = channel.browse?.country;
+    const language = channel.browse?.language;
+    const topicMatches =
+      filters.browseTopics.length === 0 ||
+      topics.some((id) => filters.browseTopics.some((asked) => asked === id));
+    const countryMatches =
+      filters.countries.length === 0 || (!!country && filters.countries.includes(country));
+    const languageMatches =
+      filters.languages.length === 0 || (!!language && filters.languages.includes(language));
+    const sourceMatches =
+      filters.subscriptions.length === 0 || filters.subscriptions.includes(channel.subscriptionId);
+    if (topicMatches) total++;
+    if (filtered && topicMatches && countryMatches && languageMatches && sourceMatches)
+      selected.push(channel);
+    // Each facet applies the other three filters. Keep the finite dimensions explicit rather
+    // than allocating an object and four entry arrays for every channel.
+    if (countryMatches && languageMatches && sourceMatches) {
+      counts.browseTopics++;
+      for (const topic of topics)
+        facets.browseTopics.set(topic, (facets.browseTopics.get(topic) ?? 0) + 1);
+    }
+    if (topicMatches && languageMatches && sourceMatches) {
+      counts.countries++;
+      if (country) facets.countries.set(country, (facets.countries.get(country) ?? 0) + 1);
+    }
+    if (topicMatches && countryMatches && sourceMatches) {
+      counts.languages++;
+      if (language) facets.languages.set(language, (facets.languages.get(language) ?? 0) + 1);
+    }
+    if (topicMatches && countryMatches && languageMatches) {
+      counts.subscriptions++;
+      facets.subscriptions.set(
+        channel.subscriptionId,
+        (facets.subscriptions.get(channel.subscriptionId) ?? 0) + 1,
+      );
     }
   }
   const counted = (values: ReadonlyMap<string, number>): readonly BrowseFacet[] =>
     [...values].map(([value, count]) => ({ value, count }));
   return {
-    channels: plainChannels(selected),
+    // An unfiltered accepted list also reuses its existing plain-response cache.
+    channels: plainChannels(filtered ? selected : channels),
     total,
     counts,
     facets: {
