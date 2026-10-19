@@ -112,15 +112,19 @@ Each responsibility has one owner, a plain module with a store the screens read:
   again after a relaunch and offline. React Native's Image only gets a file: its own loader would
   fetch through iOS's shared URL cache, which keeps answers on disk under their address. Pictures
   are fetched by expo-file-system's `DownloadTask` on its foreground session, which keeps no URL
-  cache, four at a time and one per address, for at most 15 seconds and 5 MiB each; a picture no
-  one shows any more before its turn isn't fetched. The cache holds 160 MiB and 6,000 pictures,
-  the least recently shown going first; one unseen for 60 days goes, and one fetched over 30 days
+  cache (`src/picture-transfer.ts`, which Downloads uses for a copy's pictures too), four at a
+  time and one per address, for at most 15 seconds and 5 MiB each; a picture no one shows any more
+  before its turn isn't fetched. The cache owns 160 MiB and 6,000 files, counting any it couldn't
+  delete yet: a picture is let in once it fits, the least recently shown going first but never one
+  showing, else it shows the fallback. One unseen for 60 days goes, and one fetched over 30 days
   ago is fetched again while it shows. A failed fetch, or a file that won't draw, shows the
-  monogram or the title's name, and is tried again after five minutes or a relaunch. An address
-  carrying a current login (`login-safety.ts`) is kept only for the session, in a folder the
-  index never names and the next launch empties; its file goes as soon as that login is replaced
-  or removed, and a fetch of it that ends after is thrown away. A download's own pictures stay
-  in its folder.
+  monogram or the title's name, and is tried again after five minutes or a relaunch. Only an
+  address that gives away none of the logins signed in (`login-safety.ts`), while every login
+  this process signed in still is, enters the index, which is checked again against each login
+  signed in later. Any other picture is kept only for the session, in a folder the index never
+  names and the next launch empties: an address carrying a login goes as soon as that login is
+  replaced or removed, and after such a change, lists of the earlier login may still show, so new
+  pictures wait for a relaunch to be kept. A download's own pictures stay in its folder.
 - `src/subscriptions.ts`: the registry, `subscriptions.json`, and how private beta 2's one
   subscription in `state.json` becomes its first entry under the same id. Accounts removed with
   their history kept are remembered, so adding one again takes its id, and its history, back. Ids

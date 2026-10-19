@@ -2,7 +2,7 @@ import type * as ReactModule from "react";
 import { Window } from "happy-dom";
 import { readdirSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Source } from "../src/sources.ts";
 import { native } from "./native-files.ts";
@@ -62,11 +62,14 @@ let origin = "";
 const asked = (path: string) => hits.get(path) ?? 0;
 const totalAsked = () => [...hits.values()].reduce((sum, each) => sum + each, 0);
 const at = (path: string, query = "") => `${origin}${path}${query}`;
-/** Holds a path's answers until each is released. */
+/** Holds a path's answers until each is released; `ended` counts the answers sent whole. */
 function hold(path: string) {
-  const held: (() => void)[] = [];
+  const held: (() => void)[] & { ended: number } = Object.assign([], { ended: 0 });
   routes.set(path, (response) =>
-    held.push(() => response.writeHead(200, { "Content-Type": "image/png" }).end("late")),
+    held.push(() => {
+      response.on("finish", () => held.ended++);
+      response.writeHead(200, { "Content-Type": "image/png" }).end("late");
+    }),
   );
   return held;
 }
@@ -209,6 +212,7 @@ beforeEach(async () => {
   drawn.clear();
   native.tasks.length = 0;
   native.sizeOf = null;
+  native.undeletable = null;
   app = await launch();
 });
 afterEach(() => {
@@ -493,6 +497,69 @@ describe("pictures whose address carries a login", () => {
     expect(stored().every(({ text }) => !text.includes("private"))).toBe(true);
   });
 
+  it("throw away a fetch of a replaced login that ends once nothing shows it", async () => {
+    const held = hold("/logo/private.png");
+    app.signIn("a", 1, [USER, PASS]);
+    app.logos([withLogin("/logo/private.png")]);
+    await settled(() => expect(held).toHaveLength(1));
+    app.logos([]);
+    await settled(() => expect(app.shown()).toEqual([]));
+    app.signIn("a", 2, ["another-user", "another-password"]);
+    held[0]?.();
+    await settled(() => expect(held.ended).toBe(1));
+    await vi.advanceTimersByTimeAsync(5_500);
+    expect(pictureFiles(sessionFolder)).toEqual([]);
+    expect(pictureFiles(kept)).toEqual([]);
+  });
+
+  it("keep a password-only address of a replaced login out of the index, though first shown after", async () => {
+    let current = app;
+    current.signIn("a", 1, [USER, PASS]);
+    current.signIn("a", 2, [USER, "new-password"]);
+    // Lists of the first login may still show: neither address is known to be free of it.
+    const old = at("/logo/token.png", `?token=${encodeURIComponent(PASS)}`);
+    current.logos([old, at("/logo/after.png")]);
+    await settled(() => expect(current.shown().filter(isFile)).toHaveLength(2));
+    for (const uri of current.shown())
+      expect(uri.startsWith(`file://${sessionFolder}/`)).toBe(true);
+    await vi.advanceTimersByTimeAsync(5_500);
+    for (const { path, text } of stored()) {
+      expect(path).not.toContain(PASS);
+      expect(text).not.toContain(PASS);
+    }
+
+    // After a relaunch, only lists of the logins signed in can show: kept again.
+    current = await relaunch();
+    current.signIn("a", 1, [USER, "new-password"]);
+    current.logos([at("/logo/after.png")]);
+    await settled(() => expect(isFile(current.shown()[0])).toBe(true));
+    expect(current.shown()[0]?.startsWith(`file://${kept}/`)).toBe(true);
+    expect(pictureFiles(sessionFolder)).toEqual([]);
+  });
+
+  it("drop a kept address that gives away a login signed in later, shown or only in the index", async () => {
+    let current = app;
+    const named = at("/logo/named.png", "?user=later-user");
+    const listed = at("/logo/listed.png", "?user=later-user");
+    current.logos([named, listed]);
+    await settled(() => expect(current.shown().filter(isFile)).toHaveLength(2));
+    current = await relaunch();
+    current.logos([named]);
+    await settled(() => expect(isFile(current.shown()[0])).toBe(true));
+    const keptFile = current.shown()[0];
+    expect(asked("/logo/named.png")).toBe(1);
+
+    current.signIn("b", 1, ["later-user", "later-pass"]);
+    await settled(() =>
+      expect(current.shown()[0]?.startsWith(`file://${sessionFolder}/`)).toBe(true),
+    );
+    expect(exists(keptFile)).toBe(false);
+    expect(asked("/logo/named.png")).toBe(2);
+    await vi.advanceTimersByTimeAsync(5_500);
+    expect(readFileSync(join(kept, "index.json"), "utf8")).not.toContain("later-user");
+    expect(pictureFiles(kept)).toEqual([]);
+  });
+
   it("go when their subscription is removed, leaving pictures without a login", async () => {
     app.signIn("a", 1, [USER, PASS]);
     app.logos([withLogin("/logo/private.png"), at("/logo/public.png")]);
@@ -502,5 +569,57 @@ describe("pictures whose address carries a login", () => {
     await settled(() => expect(app.shown()).toEqual(["CF", publicFile]));
     expect(exists(privateFile)).toBe(false);
     expect(exists(publicFile)).toBe(true);
+  });
+});
+
+describe("the disk budget", () => {
+  /** Every picture the cache keeps reports 5 MiB: 32 fill it. */
+  const fiveMib = (path: string) =>
+    path.startsWith(kept) && !basename(path).startsWith("index") ? 5 * MIB : undefined;
+  const indexed = () =>
+    (
+      JSON.parse(readFileSync(join(kept, "index.json"), "utf8")) as {
+        entries: [string, string, number][];
+      }
+    ).entries;
+
+  it("never holds more than 160 MiB, even while every picture shows, and makes room once they go", async () => {
+    native.sizeOf = fiveMib;
+    app.logos(Array.from({ length: 36 }, (_, n) => at(`/logo/big${n}.png`)));
+    await settled(() => {
+      expect(app.shown().filter(isFile)).toHaveLength(32);
+      expect(app.shown().filter((each) => each === "CF")).toHaveLength(4);
+    });
+    expect(pictureFiles(kept)).toHaveLength(32);
+
+    app.logos([]);
+    await settled(() => expect(app.shown()).toEqual([]));
+    app.logos(Array.from({ length: 4 }, (_, n) => at(`/logo/next${n}.png`)));
+    await settled(() => expect(app.shown().filter(isFile)).toHaveLength(4));
+    expect(pictureFiles(kept)).toHaveLength(32);
+    await vi.advanceTimersByTimeAsync(5_500);
+    expect(indexed()).toHaveLength(32);
+    expect(indexed().reduce((sum, [, , bytes]) => sum + bytes, 0)).toBe(160 * MIB);
+  });
+
+  it("counts a file the disk won't delete until it goes", async () => {
+    native.sizeOf = fiveMib;
+    app.logos(Array.from({ length: 32 }, (_, n) => at(`/logo/full${n}.png`)));
+    await settled(() => expect(app.shown().filter(isFile)).toHaveLength(32));
+    app.logos([]);
+    await settled(() => expect(app.shown()).toEqual([]));
+    const full = new Set(pictureFiles(kept));
+    native.undeletable = (path) => full.has(basename(path));
+
+    app.logos([at("/logo/one-more.png")]);
+    await settled(() => expect(app.shown()).toEqual(["CF"]));
+    expect(pictureFiles(kept)).toHaveLength(32);
+    await vi.advanceTimersByTimeAsync(5_500);
+    expect(indexed()).toHaveLength(31);
+
+    native.undeletable = null;
+    app.logos([at("/logo/another.png")]);
+    await settled(() => expect(isFile(app.shown()[0])).toBe(true));
+    expect(pictureFiles(kept)).toHaveLength(32);
   });
 });

@@ -1,27 +1,36 @@
-import { Directory, DownloadTask, File, Paths } from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { exposes, URL_LENGTH } from "./login-safety.ts";
-import { onSignedIn, signedIn, type Source } from "./sources.ts";
+import { fetchPicture } from "./picture-transfer.ts";
+import { onSignedIn, retiredLogins, signedIn, type Source } from "./sources.ts";
 
 // Channel logos and title pictures on disk, so they show again after a relaunch and offline.
 // React Native's Image only ever gets a file here: its own loader would fetch through iOS's shared
 // URL cache, which keeps answers on disk under their address, login and all.
 //
-// Each picture is fetched by expo-file-system's DownloadTask on its foreground session, which
-// keeps no URL cache, into a file of a fresh random name; one too big, cut short or answered with
-// an error leaves no file. An address that carries no current login (login-safety.ts `exposes`)
-// goes to Caches/artwork and into its index, `index.json`, written beside itself and then moved
-// over itself, a moment after a change. One that carries a login goes to Caches/artwork-session,
-// which the index never names and the first use after a launch empties, and its file goes as soon
-// as that login is replaced or removed. An address of a login that went is never asked for again
-// in this process, and a fetch of it that ends after is thrown away.
+// Each picture is fetched on the session that keeps no URL cache (picture-transfer.ts) into a file
+// of a fresh random name; one too big, cut short or answered with an error leaves no file. Which
+// folder it goes to depends on where its address could have come from:
+// - Caches/artwork and its index, `index.json` (written beside itself, then moved over itself, a
+//   moment after a change): an address that gives away no signed-in login (login-safety.ts
+//   `exposes`), while every login this process signed in still is. The index is checked against
+//   each login signed in later: a row that now gives one away goes before the index is written
+//   again, and before its picture shows.
+// - Caches/artwork-session, which the index never names and each launch empties: an address that
+//   gives a login away, which goes as soon as that login is replaced or removed, and, once any
+//   login was replaced or removed in this process, every new picture. Lists of the earlier login
+//   may still show then, and its password is no longer here to check them against; after a
+//   relaunch, none of them can show (the lists saved on the phone are checked when written, and
+//   deleted before a new password lands). A fetch of a login that went meanwhile is thrown away.
 //
-// The cache holds 160 MiB and 6,000 pictures, of at most 5 MiB each, the least recently shown
-// going first; one unseen for 60 days goes at the next launch, and one shown after 30 days is
-// fetched again while the old file shows. Four fetches run at once, one per address, each for at
-// most 15 seconds; a picture no one shows any more before its fetch starts isn't fetched. A failed
-// fetch, or a fetched file that won't draw, shows the fallback, and the address is asked for again
-// after five minutes or a relaunch. A download's own file (`file://`) shows as it is.
+// The cache owns 160 MiB and 6,000 files, of at most 5 MiB each, counting every file it hasn't
+// been able to delete yet. A finished picture is let in only once it fits, the least recently
+// shown going first, but never one that shows now; one that doesn't fit shows the fallback until
+// it is shown again. One unseen for 60 days goes at the next launch, and one shown after 30 days
+// is fetched again while the old file shows. Four fetches run at once, one per address, each for
+// at most 15 seconds; a picture no one shows any more before its fetch starts isn't fetched. A
+// failed fetch, or a fetched file that won't draw, shows the fallback, and the address is asked
+// for again after five minutes or a relaunch. A download's own file (`file://`) shows as it is.
 
 const MAX_BYTES = 160 * 1024 * 1024;
 const MAX_FILES = 6000;
@@ -37,9 +46,9 @@ const FAILED_MS = 5 * 60_000;
 const SAVE_MS = 5_000;
 /** How stale a kept picture's last showing may be before showing it again rewrites the index. */
 const TOUCH_MS = 60 * 60_000;
-/** How long after the first use files the index doesn't name are deleted, and how many a task. */
-const SWEEP_MS = 10_000;
-const SWEEP_SLICE = 32;
+/** How many index rows are checked and written a task, and files deleted a task. */
+const WRITE_SLICE = 500;
+const DELETE_SLICE = 32;
 const VERSION = 1;
 /** A picture's file name, as `fresh` makes them. */
 const NAME = /^[a-z0-9]+-[a-z0-9]+$/;
@@ -62,25 +71,30 @@ const PENDING = { kind: "pending" } as const;
 const FAILED = { kind: "failed" } as const;
 
 interface Entry {
-  /** Its file's name, in Caches/artwork, or Caches/artwork-session when `exposed` has any. */
+  /** Its file's name, in Caches/artwork-session when `session`, else in Caches/artwork. */
   readonly name: string;
+  readonly session: boolean;
   readonly bytes: number;
   readonly fetchedAt: number;
   usedAt: number;
-  /** The sources whose login its address carries; none for a picture the index keeps. */
+  /** The sources whose login its address gives away. */
   readonly exposed: readonly Source[];
   /** Fetched by this process: a file that won't draw fails the address rather than refetching. */
   readonly fresh: boolean;
   /** What shows, once its file was found whole in this process. */
   shown: Kept | null;
+  /** The `generation` its address was last found to give no signed-in login away in. */
+  checked: number;
 }
 
 /** One address shown somewhere, while anything shows it. */
 interface Slot {
   state: ArtworkState;
   readonly listeners: Set<() => void>;
-  /** The sources whose login its address carries, worked out once it needs fetching. */
+  /** The sources whose login its address gave away when its fetch started. */
   exposed: readonly Source[] | null;
+  /** Shows the fallback until it is shown again: its login went, or its picture didn't fit. */
+  blocked: boolean;
 }
 
 const kept = () => new Directory(Paths.cache, "artwork");
@@ -89,7 +103,11 @@ const session = () => new Directory(Paths.cache, "artwork-session");
 let phase: "idle" | "loading" | "ready" = "idle";
 /** Every picture on disk by its address, least recently shown first. */
 const entries = new Map<string, Entry>();
+/** The bytes of `entries`. */
 let total = 0;
+/** Files of either folder not deleted yet, by address, with their bytes: they count too. */
+const stuck = new Map<string, number>();
+let stuckBytes = 0;
 const slots = new Map<string, Slot>();
 /** Addresses to fetch, in the order asked. */
 const queue = new Set<string>();
@@ -97,8 +115,8 @@ const queue = new Set<string>();
 const running = new Map<string, string>();
 /** When each address last failed. */
 const failures = new Map<string, number>();
-/** Addresses of logins replaced or removed: none is asked for again in this process. */
-const retired = new Set<string>();
+/** Rises with each login set or dropped: an address checked in an earlier one is checked again. */
+let generation = 0;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let saving = Promise.resolve();
 let made = 0;
@@ -107,8 +125,8 @@ let made = 0;
 const fresh = () =>
   `${Date.now().toString(36)}-${(made++).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-const fileOf = ({ name, exposed }: Entry) =>
-  new File(exposed.length > 0 ? session() : kept(), name);
+const fileOf = ({ name, session: inSession }: Entry) =>
+  new File(inSession ? session() : kept(), name);
 
 /** Whether the cache may ask for `url`: a plain http(s) address of at most 2048 characters. */
 function fetchable(url: string): boolean {
@@ -145,31 +163,66 @@ function fail(url: string) {
   }
 }
 
-/** Deletes a file, or leaves it to the sweep or the session folder's emptying when it won't go. */
-function discard(file: File) {
+/** Whether the file is gone, deleting it now if it is there. */
+function deleted(file: File): boolean {
   try {
     if (file.exists) file.delete();
+    return true;
   } catch {
-    // Left for later.
+    return false;
   }
 }
 
-/** The entry of `url` whose file is whole, checked once a process; a missing one is forgotten. */
+/**
+ * Deletes a file; one the disk won't let go of counts against the budget until it does. Answers
+ * whether it went.
+ */
+function release(file: File): boolean {
+  if (stuck.has(file.uri)) return false;
+  if (deleted(file)) return true;
+  const bytes = file.size;
+  stuck.set(file.uri, bytes);
+  stuckBytes += bytes;
+  return false;
+}
+
+/** Tries again to delete files that wouldn't go. */
+function unstick() {
+  for (const [uri, bytes] of stuck) {
+    if (!deleted(new File(uri))) continue;
+    stuck.delete(uri);
+    stuckBytes -= bytes;
+  }
+}
+
+/**
+ * The entry of `url` whose file is whole and whose address gives no signed-in login away, checked
+ * once a process and once a login change; one that fails either is forgotten.
+ */
 function usable(url: string): Entry | undefined {
   const entry = entries.get(url);
-  if (!entry || entry.shown) return entry;
-  const file = fileOf(entry);
-  if (file.exists && file.size === entry.bytes) {
+  if (!entry) return undefined;
+  if (!entry.shown) {
+    const file = fileOf(entry);
+    if (!file.exists || file.size !== entry.bytes) {
+      forget(url, entry);
+      return undefined;
+    }
     entry.shown = { kind: "shown", uri: file.uri };
-    return entry;
   }
-  forget(url, entry);
-  return undefined;
+  if (!entry.session && entry.checked !== generation) {
+    if (exposersOf(url).length > 0) {
+      forget(url, entry);
+      return undefined;
+    }
+    entry.checked = generation;
+  }
+  return entry;
 }
 
-/** What `url` shows, with nothing fetched or changed but a missing file forgotten. */
+/** What `url` shows, with nothing fetched or changed but an entry that fails `usable` forgotten. */
 function judge(url: string): ArtworkState {
-  if (retired.has(url) || !fetchable(url)) return FAILED;
+  if (slots.get(url)?.blocked || !fetchable(url)) return FAILED;
   const shown = phase === "ready" ? usable(url)?.shown : null;
   if (shown) return shown;
   return failedLately(url) ? FAILED : PENDING;
@@ -181,28 +234,37 @@ function update(slot: Slot, state: ArtworkState) {
   for (const listener of slot.listeners) listener();
 }
 
-function forget(url: string, entry: Entry) {
+/** Answers whether its file went, so the room it took is free. */
+function forget(url: string, entry: Entry): boolean {
   entries.delete(url);
   total -= entry.bytes;
-  discard(fileOf(entry));
-  if (entry.exposed.length === 0) save();
+  if (!entry.session) save();
+  return release(fileOf(entry));
 }
 
 /** Moves the entry last in line; the index learns of it with the next write, or within an hour. */
 function touch(url: string, entry: Entry) {
   const now = Date.now();
-  if (entry.exposed.length === 0 && now - entry.usedAt > TOUCH_MS) save();
+  if (!entry.session && now - entry.usedAt > TOUCH_MS) save();
   entry.usedAt = now;
   entries.delete(url);
   entries.set(url, entry);
 }
 
-/** Least recently shown first, past the budget, leaving what shows now. */
-function evict() {
+/**
+ * Makes room for `bytes` more in a new file, least recently shown first, never one that shows
+ * now; it stops at a file the disk won't delete. Answers whether it fits.
+ */
+function evict(bytes = 0, files = 0): boolean {
+  const over = () =>
+    total + stuckBytes + bytes > MAX_BYTES || entries.size + stuck.size + files > MAX_FILES;
+  if (!over()) return true;
+  unstick();
   for (const [url, entry] of entries) {
-    if (total <= MAX_BYTES && entries.size <= MAX_FILES) return;
-    if (!slots.has(url)) forget(url, entry);
+    if (!over()) break;
+    if (!slots.has(url) && !forget(url, entry)) break;
   }
+  return !over();
 }
 
 /** Shows what `url` has now, and queues its fetch when it has nothing, or a picture to refresh. */
@@ -210,9 +272,8 @@ function want(url: string, slot: Slot) {
   update(slot, judge(url));
   if (phase !== "ready" || slot.state === FAILED || running.has(url)) return;
   const entry = entries.get(url);
-  if (entry && (entry.exposed.length > 0 || Date.now() - entry.fetchedAt < REFRESH_MS)) return;
+  if (entry && (entry.session || Date.now() - entry.fetchedAt < REFRESH_MS)) return;
   if (entry && failedLately(url)) return;
-  slot.exposed ??= exposersOf(url);
   queue.add(url);
   pump();
 }
@@ -222,60 +283,51 @@ function pump() {
     if (running.size >= TRANSFERS) return;
     queue.delete(url);
     const slot = slots.get(url);
-    if (slot?.exposed && !running.has(url)) void fetchArt(url, slot.exposed);
+    if (slot && !running.has(url)) void fetchArt(url, slot);
   }
 }
 
-/** The file's size once it is whole; throws when it failed, timed out or grew past 5 MiB. */
-async function download(url: string, file: File): Promise<number> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  const task = new DownloadTask(url, file, {
-    sessionType: "foreground",
-    signal: controller.signal,
-    onProgress: ({ bytesWritten, totalBytes }) => {
-      if (bytesWritten > MAX_FILE || totalBytes > MAX_FILE) controller.abort();
-    },
-  });
-  try {
-    const done = await task.downloadAsync();
-    const bytes = done?.size ?? 0;
-    if (bytes < 1 || bytes > MAX_FILE) throw new Error("Not a picture the cache keeps");
-    return bytes;
-  } finally {
-    clearTimeout(timer);
-  }
+/** What a fetch was started as: whose login its address gave away, and whether the index may keep it. */
+interface Started {
+  readonly exposed: readonly Source[];
+  readonly durable: boolean;
+  readonly generation: number;
 }
 
-async function fetchArt(url: string, exposed: readonly Source[]) {
-  const folder = exposed.length > 0 ? session() : kept();
+async function fetchArt(url: string, slot: Slot) {
+  const exposed = exposersOf(url);
+  slot.exposed = exposed;
+  const started = { exposed, durable: exposed.length === 0 && retiredLogins() === 0, generation };
+  const folder = started.durable ? kept() : session();
   const file = new File(folder, fresh());
   running.set(url, file.name);
   let bytes: number | null = null;
   try {
     folder.create({ intermediates: true, idempotent: true });
-    bytes = await download(url, file);
+    bytes = await fetchPicture(url, file, { timeoutMs: TIMEOUT_MS, maxBytes: MAX_FILE });
   } catch {
     // Failed: nothing kept.
   }
   running.delete(url);
-  settle(url, exposed, file, bytes);
+  settle(url, started, file, bytes);
   pump();
 }
 
 /**
- * Keeps a finished fetch, unless the login its address carried went meanwhile, or its address
- * now carries one it was fetched without.
+ * Keeps a finished fetch once it fits, unless the login its address gave away went meanwhile, or
+ * an address the index would keep now gives away a login signed in since.
  */
-function settle(url: string, exposed: readonly Source[], file: File, bytes: number | null) {
+function settle(url: string, started: Started, file: File, bytes: number | null) {
   const current = signedIn();
-  const gone = retired.has(url) || exposed.some((source) => !current.includes(source));
-  if (gone || bytes === null || (exposed.length === 0 && exposersOf(url).length > 0)) {
-    discard(file);
-    if (gone && exposed.length > 0) retired.add(url);
-    else if (bytes === null) fail(url);
-    const slot = slots.get(url);
+  const gone = started.exposed.some((source) => !current.includes(source));
+  const exposesNow =
+    started.durable && started.generation !== generation && exposersOf(url).length > 0;
+  const slot = slots.get(url);
+  if (gone || exposesNow || bytes === null) {
+    release(file);
+    if (bytes === null && !gone) fail(url);
     if (slot) {
+      if (gone) slot.blocked = true;
       slot.exposed = null;
       want(url, slot);
     }
@@ -283,21 +335,29 @@ function settle(url: string, exposed: readonly Source[], file: File, bytes: numb
   }
   const previous = entries.get(url);
   if (previous) forget(url, previous);
+  if (!evict(bytes, 1)) {
+    release(file);
+    if (slot) {
+      slot.blocked = true;
+      update(slot, FAILED);
+    }
+    return;
+  }
   const now = Date.now();
   entries.set(url, {
     name: file.name,
+    session: !started.durable,
     bytes,
     fetchedAt: now,
     usedAt: now,
-    exposed,
+    exposed: started.exposed,
     fresh: true,
     shown: { kind: "shown", uri: file.uri },
+    checked: started.generation,
   });
   total += bytes;
   failures.delete(url);
-  evict();
-  if (exposed.length === 0) save();
-  const slot = slots.get(url);
+  if (started.durable) save();
   if (slot) update(slot, judge(url));
 }
 
@@ -310,10 +370,28 @@ function save() {
   }, SAVE_MS);
 }
 
+/**
+ * Writes the index's rows, a slice a task, each checked against the logins signed in; one that
+ * gives one away is forgotten instead. A login change meanwhile leaves it to the next write.
+ */
 async function write() {
+  const at = generation;
+  const all = [...entries];
   const rows: Row[] = [];
-  for (const [url, { name, bytes, fetchedAt, usedAt, exposed }] of entries) {
-    if (exposed.length === 0) rows.push([url, name, bytes, fetchedAt, usedAt]);
+  for (let from = 0; from < all.length; from += WRITE_SLICE) {
+    if (from > 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    if (generation !== at) return;
+    for (const [url, entry] of all.slice(from, from + WRITE_SLICE)) {
+      if (entry.session || entries.get(url) !== entry) continue;
+      if (entry.checked !== at) {
+        if (exposersOf(url).length > 0) {
+          forget(url, entry);
+          continue;
+        }
+        entry.checked = at;
+      }
+      rows.push([url, entry.name, entry.bytes, entry.fetchedAt, entry.usedAt]);
+    }
   }
   try {
     kept().create({ intermediates: true, idempotent: true });
@@ -370,74 +448,94 @@ async function load() {
   const rows = await readIndex();
   const now = Date.now();
   for (const [url, name, bytes, fetchedAt, usedAt] of rows) {
-    // Unseen too long: left out, and its file to the sweep.
+    // Unseen too long: left out, and its file to `adopt`.
     if (now - usedAt > UNUSED_MS) continue;
     const previous = entries.get(url);
     if (previous) total -= previous.bytes;
     entries.delete(url);
-    entries.set(url, { name, bytes, fetchedAt, usedAt, exposed: [], fresh: false, shown: null });
+    entries.set(url, {
+      name,
+      session: false,
+      bytes,
+      fetchedAt,
+      usedAt,
+      exposed: [],
+      fresh: false,
+      shown: null,
+      checked: -1,
+    });
     total += bytes;
   }
   if (rows.length !== entries.size) save();
-  evict();
 }
 
-/** Deletes files of Caches/artwork the index doesn't name, a few a task. */
-function sweep() {
-  let names: string[];
-  try {
-    names = kept().exists
-      ? kept()
-          .list()
-          .map((each) => each.name)
-      : [];
-  } catch {
-    return;
-  }
+/**
+ * Counts every file the index doesn't name, an earlier launch's session pictures among them,
+ * against the budget, then deletes them a few a task; one that won't go is tried again whenever
+ * the cache is full.
+ */
+function adopt() {
   const known = new Set([INDEX, PENDING_INDEX, ...running.values()]);
   for (const entry of entries.values()) known.add(entry.name);
-  const stale = names.filter((name) => !known.has(name));
+  const orphans: File[] = [];
+  for (const folder of [kept(), session()]) {
+    try {
+      if (!folder.exists) continue;
+      for (const each of folder.list()) {
+        if (!(each instanceof File) || known.has(each.name) || stuck.has(each.uri)) continue;
+        const bytes = each.size;
+        stuck.set(each.uri, bytes);
+        stuckBytes += bytes;
+        orphans.push(each);
+      }
+    } catch {
+      // Not listed: what it holds stays until a later launch.
+    }
+  }
   const step = () => {
-    for (const name of stale.splice(0, SWEEP_SLICE)) discard(new File(kept(), name));
-    if (stale.length > 0) setTimeout(step, 0);
+    for (const file of orphans.splice(0, DELETE_SLICE)) {
+      const bytes = stuck.get(file.uri);
+      if (bytes === undefined || !deleted(file)) continue;
+      stuck.delete(file.uri);
+      stuckBytes -= bytes;
+    }
+    if (orphans.length > 0) setTimeout(step, 0);
   };
   step();
 }
 
-/** A login replaced or removed: its pictures go now, and its addresses aren't asked for again. */
-function retire() {
+/**
+ * A login set or dropped: pictures whose address gave away one that went go now, an address
+ * shown that gave one away shows the fallback, and kept addresses are checked again.
+ */
+function loginsChanged() {
+  generation++;
   const current = signedIn();
   const went = (exposed: readonly Source[] | null) =>
     exposed?.some((source) => !current.includes(source)) ?? false;
   for (const [url, entry] of entries) {
-    if (!went(entry.exposed)) continue;
-    retired.add(url);
-    forget(url, entry);
+    if (entry.session && went(entry.exposed)) forget(url, entry);
   }
   for (const [url, slot] of slots) {
     if (went(slot.exposed)) {
-      retired.add(url);
+      slot.blocked = true;
+      slot.exposed = null;
       queue.delete(url);
     }
-    if (retired.has(url)) update(slot, FAILED);
+    want(url, slot);
   }
+  save();
 }
 
-/** Once a process: empties the session folder, reads the index, and starts what waited for it. */
+/** Once a process: reads the index, takes stock of the folders, and starts what waited. */
 function start() {
   if (phase !== "idle") return;
   phase = "loading";
-  try {
-    const folder = session();
-    if (folder.exists) folder.delete();
-  } catch {
-    // Left for the next launch.
-  }
-  onSignedIn(retire);
+  onSignedIn(loginsChanged);
   const ready = () => {
     phase = "ready";
+    adopt();
     for (const [url, slot] of slots) want(url, slot);
-    setTimeout(sweep, SWEEP_MS);
   };
   void load().then(ready, ready);
 }
@@ -446,8 +544,9 @@ function watch(url: string, listener: () => void): () => void {
   start();
   let slot = slots.get(url);
   if (!slot) {
-    slot = { state: judge(url), listeners: new Set(), exposed: null };
+    slot = { state: PENDING, listeners: new Set(), exposed: null, blocked: false };
     slots.set(url, slot);
+    slot.state = judge(url);
   }
   const own = slot;
   own.listeners.add(listener);
@@ -459,6 +558,8 @@ function watch(url: string, listener: () => void): () => void {
     if (own.listeners.size > 0 || slots.get(url) !== own) return;
     slots.delete(url);
     queue.delete(url);
+    // What showed may now make room.
+    if (phase === "ready") evict();
   };
 }
 
