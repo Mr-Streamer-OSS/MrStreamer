@@ -291,16 +291,27 @@ async function clearSaved(id: string): Promise<void> {
  * signed in, `before` is no longer savable, though it may still be the login: signs the
  * subscription in again with the password the Keychain holds now, whichever that is, under a new
  * revision, so it answers again while nothing saved of `before` comes back. With no password to
- * read back, it asks for one (`needsSecret`). Nothing when the new password already signed in.
+ * read back, it asks for one (`needsSecret`): loads begun for `before` stop, and a list still
+ * loading fails for want of the password, what it showed last staying. Nothing when the new
+ * password already signed in.
  */
 async function recoverLogin(id: string, before: Source | undefined): Promise<void> {
   if (currentSource(id) !== before) return;
   const password = await keychainSecrets.read(id).catch(() => null);
   const entry = registry.subscriptions.find((each) => each.id === id);
   if (!entry || currentSource(id) !== before) return;
-  if (password) return signIn(entry, password, null);
+  if (password) return signIn(entry, password, "again");
   dropSource(id);
-  setMember(id, (member) => ({ ...member, needsSecret: true }));
+  for (const kind of ["live", "titles"] as const) loads.get(`${kind}|${id}`)?.abort();
+  const error: AppError = { kind: "needs-secret", subscriptionId: id };
+  const settled = <A>(now: Loadable<A>): Loadable<A> =>
+    now.kind === "loading" ? { kind: "failed", error, last: now.last, since: Date.now() } : now;
+  setMember(id, (member) => ({
+    ...member,
+    needsSecret: true,
+    live: settled(member.live),
+    titles: settled(member.titles),
+  }));
 }
 
 /**
@@ -428,8 +439,15 @@ function check(id: string, source: Source, load: Promise<boolean> = Promise.reso
  * Signs a saved subscription in with `password` and loads its lists: channels at once, movies
  * and series once the login is known to be good (`checked`). At launch, with `checked` null, the
  * login is checked again, and each list shows its saved copy, which may stand for the provider's.
+ * "again", after a change that failed (`recoverLogin`): the login is checked again and both lists
+ * asked of the provider, as Retry does, those last loaded showing meanwhile; loads begun for the
+ * login before are dropped, and its copies are gone.
  */
-function signIn(entry: SubscriptionEntry, password: string, checked: AccountStatus | null) {
+function signIn(
+  entry: SubscriptionEntry,
+  password: string,
+  checked: AccountStatus | null | "again",
+) {
   const { id } = entry;
   const source: Source = {
     revision: ++revisions,
@@ -437,7 +455,16 @@ function signIn(entry: SubscriptionEntry, password: string, checked: AccountStat
     login: [entry.username, password],
   };
   setSource(id, source);
-  setMember(id, (member) => ({ ...member, needsSecret: false, account: checked }));
+  setMember(id, (member) => ({
+    ...member,
+    needsSecret: false,
+    account: checked === "again" ? null : checked,
+  }));
+  if (checked === "again") {
+    reloadChannels(id);
+    check(id, source);
+    return;
+  }
   if (checked) {
     reloadChannels(id);
     reloadTitles(id);

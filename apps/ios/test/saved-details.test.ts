@@ -31,6 +31,9 @@ const memory = vi.hoisted(() => ({
   secretFailure: null as null | "before" | "after" | "lost",
   /** Each request to a panel: its `action`, or "login" for the login check. */
   requests: [] as string[],
+  /** Channel, movie and series list requests held until a test lets them through. */
+  heldLists: [] as Array<() => void>,
+  holdLists: false,
   /** Details requests held until a test lets them through. */
   heldDetails: [] as Array<() => void>,
   holdDetails: false,
@@ -75,6 +78,7 @@ vi.mock("expo-secure-store", () => ({
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 
 const DETAILS = new Set(["get_vod_info", "get_series_info"]);
+const LISTS = new Set(["get_live_streams", "get_vod_streams", "get_series"]);
 const passThrough = globalThis.fetch;
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   if (memory.tmdb && input.startsWith(memory.tmdb)) return passThrough(input, init);
@@ -85,6 +89,9 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   );
   const action = new URL(url).searchParams.get("action") ?? "login";
   memory.requests.push(action);
+  if (LISTS.has(action) && memory.holdLists) {
+    await new Promise<void>((go) => memory.heldLists.push(go));
+  }
   if (!DETAILS.has(action)) return passThrough(url, init);
   if (memory.holdDetails) await new Promise<void>((go) => memory.heldDetails.push(go));
   if (memory.failing && input.includes(memory.failing)) return new Response(null, { status: 503 });
@@ -248,6 +255,7 @@ beforeEach(() => {
   memory.secretFailure = null;
   memory.requests.length = 0;
   memory.holdDetails = false;
+  memory.holdLists = false;
   memory.details = null;
   memory.failing = null;
   memory.tmdb = tmdb.url;
@@ -262,7 +270,12 @@ beforeEach(async () => {
     new Directory(each).create({ idempotent: true });
 });
 afterEach(() => {
-  for (const go of [...memory.heldDetails.splice(0), ...memory.heldSecrets.splice(0)]) go();
+  for (const go of [
+    ...memory.heldDetails.splice(0),
+    ...memory.heldSecrets.splice(0),
+    ...memory.heldLists.splice(0),
+  ])
+    go();
   tmdb.holdAbout(false);
   tmdb.failSeasons(null);
   vi.useRealTimers();
@@ -670,6 +683,50 @@ describe("a login replaced or removed", () => {
       const file = await episodeFile(app, series);
       expect(file.url).toContain(encodeURIComponent(ONE.password));
       expect(file.url).not.toContain(NEW);
+    });
+  }
+
+  for (const failure of ["before", "lost"] as const) {
+    it(`settles channels loading when the Keychain refused a new password, ${failure === "lost" ? "losing the old one" : "keeping the old one"}`, async () => {
+      const NEW = "canaryNew9";
+      memory.aliases = [[NEW, ONE.password]];
+      const app = await launch();
+      const id = await added(app);
+      await until(() => app.members()[0]?.live.kind === "ready", "the channels");
+      const member = () => app.members().find((each) => each.entry.id === id);
+
+      // A Reload is under way when the new password is refused.
+      memory.holdLists = true;
+      app.reloadChannels(id);
+      await until(() => memory.heldLists.length === 1, "the channel request");
+      memory.secretFailure = failure;
+      await expect(app.update(id, { password: NEW })).rejects.toMatchObject({
+        error: { kind: "keychain-refused" },
+      });
+      const recovered = Date.now();
+
+      // The old login's answer shows nothing; the last channels stay.
+      memory.heldLists.shift()?.();
+      await settle();
+      const last = { channels: expect.any(Array) };
+      if (failure === "lost") {
+        expect(member()).toMatchObject({
+          needsSecret: true,
+          live: { kind: "failed", error: { kind: "needs-secret" }, last },
+        });
+        return;
+      }
+      expect(member()?.live).toMatchObject({ kind: "loading", last });
+      memory.holdLists = false;
+      for (const go of memory.heldLists.splice(0)) go();
+      await until(
+        () => member()?.live.kind === "ready",
+        "the channels under the login that stands",
+      );
+      const live = member()?.live;
+      expect(live).toMatchObject({ kind: "ready", from: "provider" });
+      expect(live?.kind === "ready" && live.fetchedAt >= recovered).toBe(true);
+      expect(member()?.account).toMatchObject({ state: "active" });
     });
   }
 
