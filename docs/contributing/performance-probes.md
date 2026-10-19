@@ -45,7 +45,8 @@ each process. Main PID must match the launched child; renderer PID comes from th
 BrowserWindow, not the first process with a matching name. Inspector profile and renderer
 build URL must match the owned instance. Boundary snapshots include window focus and visibility.
 Before login, the main PID/profile and the browser's actual profile/debug-port arguments must
-match the launched child. Probes add `--enable-automation` for that public CDP command. A URL
+match the launched child. Probes add `--enable-automation` for that public CDP command. The disposable profile is resolved to its real path before launch, so macOS `/var` aliases
+do not fail the same exact ownership checks. A URL
 match alone cannot prove ownership when two checkouts load the same renderer. An unverified
 page is closed without a failure screenshot or DOM capture.
 

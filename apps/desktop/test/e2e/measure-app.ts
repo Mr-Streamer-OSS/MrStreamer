@@ -8,7 +8,15 @@
 // Raw samples default to .local/measurements; --json chooses a path. Needs ffmpeg on PATH
 // (or MR_STREAMER_FFMPEG). On macOS pass --use-mock-keychain.
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
@@ -132,7 +140,8 @@ const observations: { [key: string]: number | string | boolean }[] = [];
 const searchSamples: Record<string, number[]> = {};
 const coldSearchSamples: number[] = [];
 
-const profile = mkdtempSync(join(tmpdir(), "mr-streamer-measure-"));
+// Electron canonicalizes macOS /var paths; use the same actual profile path at launch and proof.
+const profile = realpathSync(mkdtempSync(join(tmpdir(), "mr-streamer-measure-")));
 let app: ChildProcess | null = null;
 let activePage: Page | undefined;
 let probeOwnershipVerified = false;
