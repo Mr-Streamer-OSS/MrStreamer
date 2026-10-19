@@ -7,7 +7,7 @@ import { loadavg } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProcessMetric } from "electron";
-import { delay, key, waitFor, type Page } from "./app.ts";
+import { delay, key, revealFixtureList, waitFor, type Page } from "./app.ts";
 
 const WINDOW_MS = 60_000;
 const SAMPLE_MS = 5_000;
@@ -375,6 +375,9 @@ export async function runAppProbes(options: {
     };
   };
   const click = async (text: string) => {
+    if (text === "All channels" || text === "TEST | Formats and failures") {
+      if (await revealFixtureList(page, text)) action(`Reveal fixture list ${text}`);
+    }
     action(`Click ${text}`);
     await page.evaluate(
       `(() => { const buttons = [...document.querySelectorAll('button, [role=button]')]; const b = buttons.find(b => b.title === ${JSON.stringify(text)} || b.textContent.trim() === ${JSON.stringify(text)}) ?? buttons.find(b => b.textContent.trim().startsWith(${JSON.stringify(text)})); if (!b) throw new Error('Missing button ' + ${JSON.stringify(text)}); b.click(); })()`,

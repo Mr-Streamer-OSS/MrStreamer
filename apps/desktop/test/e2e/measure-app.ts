@@ -24,6 +24,7 @@ import {
   login,
   observe,
   observeAcrossLoad,
+  revealFixtureList,
   waitFor,
   type Page,
 } from "./app.ts";
@@ -288,6 +289,9 @@ try {
       await timed("guide open", page, buttonClick("Live TV"), ROWS_SHOWN);
       await clickText(page, "TEST | Formats and failures");
       await delay(1000);
+      // Opening the rail branch is setup; this existing metric starts at the All click.
+      if (await revealFixtureList(page, "All channels"))
+        observations.push({ name: "Reveal fixture list", list: "All channels" });
       await timed(
         "guide list of 13,000",
         page,
@@ -703,7 +707,11 @@ function buttonClick(text: string): string {
     target.click();
   })()`;
 }
-function clickText(page: Page, text: string): Promise<unknown> {
+async function clickText(page: Page, text: string): Promise<unknown> {
+  if (text === "All channels" || text === "TEST | Formats and failures") {
+    if (await revealFixtureList(page, text))
+      observations.push({ name: "Reveal fixture list", list: text });
+  }
   return page.evaluate(buttonClick(text));
 }
 
