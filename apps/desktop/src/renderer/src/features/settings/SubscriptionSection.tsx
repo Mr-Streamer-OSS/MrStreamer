@@ -732,8 +732,18 @@ function Remove({
       if (player.current()?.subscriptionId === id) player.reset();
     },
     onError: () => {
-      // Reads made during logical removal must see the source restored after a refusal.
+      // A first read during logical removal can outlive the refusal. Invalidation reuses it
+      // without cached data, so mark it stale again after settlement for the restored source.
+      const underWay = client
+        .getQueryCache()
+        .findAll({ fetchStatus: "fetching" })
+        .flatMap(({ queryKey, promise }) => (promise ? [{ queryKey, promise }] : []));
       void client.invalidateQueries();
+      for (const { queryKey, promise } of underWay)
+        void promise.then(
+          () => client.invalidateQueries({ queryKey, exact: true }, { cancelRefetch: false }),
+          () => {},
+        );
     },
   });
   const stays = others.map(subscriptionName);
