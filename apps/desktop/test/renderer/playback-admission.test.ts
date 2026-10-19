@@ -333,6 +333,25 @@ it("ignores obsolete begin replies and preferences without admitting an older ch
 });
 
 describe("switching between live and title playback", () => {
+  it("leaves a receiver title playing when catch-up is refused there", async () => {
+    await emit(remote());
+    await titlePlayer.open(now, 0);
+    await settle();
+    player.playArchive(channel, {
+      start: Date.now() - 60_000,
+      stop: Date.now() + 60_000,
+      title: "Earlier programme",
+      description: null,
+    });
+    await settle();
+    expect(titlePlayer.state().now).toEqual(now);
+    expect(titlePlayer.onReceiver()).toBe(true);
+    expect(ipc.argsOf("output.playTitle")).toHaveLength(1);
+    expect(ipc.argsOf("output.playChannel")).toHaveLength(0);
+    expect(ipc.argsOf("output.command")).toHaveLength(0);
+    expect(ipc.argsOf("playback.open")).toHaveLength(0);
+  });
+
   it.each(["preview", "retry", "reopen"] as const)(
     "does not let a stale live %s interrupt an open title",
     async (action) => {
