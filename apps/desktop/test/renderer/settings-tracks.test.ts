@@ -2,6 +2,7 @@
 // Settings > General shows the languages as last saved, though a player saved them since the UI
 // last read the preferences, as picking a sound or subtitle track does.
 import { ipc } from "./support.ts";
+import { acceptPreferences, syncPreferences } from "../../src/renderer/src/lib/preferences.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -20,21 +21,29 @@ afterEach(() => {
 });
 
 describe("Settings > General", () => {
-  it("shows the languages saved since the UI last read them", async () => {
+  it("shows a player language snapshot when Settings opens, without another read", async () => {
     ipc.reset();
     const client = new QueryClient();
-    // What the UI read before: Español. The main process now holds the defaults, as after a pick.
-    client.setQueryData(["preferences"], { ...defaultPreferences, audioLanguage: "es" });
+    const detach = syncPreferences(client, () => {});
+    acceptPreferences(client, {
+      revision: 0,
+      preferences: { ...defaultPreferences, audioLanguage: "es" },
+    });
+    ipc.emit("preferences.changed", { revision: 1, preferences: defaultPreferences });
     const container = document.createElement("div");
     const root = createRoot(container);
     await act(async () =>
       root.render(createElement(QueryClientProvider, { client }, createElement(GeneralSection))),
     );
-    unmount = () => act(() => root.unmount());
+    unmount = () => {
+      detach();
+      act(() => root.unmount());
+    };
     await act(() => vi.advanceTimersByTimeAsync(20));
 
     const audio = container.querySelector<HTMLSelectElement>('select[aria-label="Audio in"]');
     expect(audio?.value).toBe("en");
+    expect(ipc.argsOf("preferences.get")).toEqual([]);
   });
 
   it("comes into view on Online subtitles when a title's CC panel opened it, once", async () => {

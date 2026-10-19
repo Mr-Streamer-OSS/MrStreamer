@@ -33,14 +33,6 @@ export function App() {
   const updateOffer = !!useQuery(queries.updates()).data?.offer;
   const left = useSubscriptionPreferences();
 
-  // Restore the volume once, before anything plays.
-  const hydrated = useRef(false);
-  useEffect(() => {
-    if (!preferences.data || hydrated.current) return;
-    hydrated.current = true;
-    player.hydrate(preferences.data);
-  }, [preferences.data]);
-
   // Live TV opens on the category the viewer left it at, once per start with subscriptions:
   // reading their preferences again later changes no list. A category is kept by one of them.
   const restored = useRef(false);

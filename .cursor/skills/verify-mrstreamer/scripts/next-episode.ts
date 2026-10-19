@@ -27,7 +27,7 @@ export async function nextEpisodeScenario(
     d.evaluate<Preferences>(`(async () => {
       const reply = await window.mrStreamer.invoke('preferences.get');
       if (!reply.ok) throw new Error('Preferences read failed');
-      return reply.value;
+      return reply.value.preferences;
     })()`);
   const endText = () => d.evaluate<string>("document.body.innerText");
   const media = () =>

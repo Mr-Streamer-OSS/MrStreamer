@@ -1,3 +1,5 @@
+import { readPreferences, updatePreferences } from "../lib/preferences.ts";
+import { t } from "@mrstreamer/core/i18n";
 import { appDiagnostic, streamDiagnostic } from "@mrstreamer/contracts/analytics";
 import {
   PlaybackObservation,
@@ -63,6 +65,7 @@ import {
   DEFAULT_SUBTITLE_LOOK,
   ORIGINAL_SOUND,
   type Preferences,
+  type SubtitleLook,
 } from "@mrstreamer/contracts/preferences";
 import type {
   ChannelTracks,
@@ -76,7 +79,8 @@ import { subtitleDecoder, type SubtitleDecoder } from "@mrstreamer/core/subtitle
 import { teletextPagePresent } from "@mrstreamer/core/subtitles/teletext";
 import { dvbPagePresent } from "@mrstreamer/core/subtitles/dvb";
 import type { Cue } from "@mrstreamer/core/subtitles/webvtt";
-import { appError } from "../lib/errors.ts";
+import { appError, describeError } from "../lib/errors.ts";
+import { flashNote } from "../features/watch/flash-state.ts";
 import { call, listen } from "../lib/ipc.ts";
 import { decoders } from "./decoders.ts";
 import {
@@ -297,6 +301,10 @@ let current: {
   } | null;
 } | null = null;
 let volumeSave: ReturnType<typeof setTimeout> | null = null;
+/** Immediate local sound choices survive unrelated committed snapshots and older save replies. */
+let pendingVolume: Pick<Preferences, "volume" | "muted"> | null = null;
+let savedSound: Pick<Preferences, "volume" | "muted"> = { volume: 1, muted: false };
+let savedLook: SubtitleLook | undefined;
 let zapTimer: ReturnType<typeof setTimeout> | null = null;
 /** The channel the last stream was opened for. It becomes `previous` when another channel tunes. */
 let tuned: LiveChannel | null = null;
@@ -462,7 +470,7 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   let sound: SoundChoice;
   let subtitleLanguage: string | null = null;
   try {
-    const preferences = await call("preferences.get").catch(() => null);
+    const preferences = await readPreferences().catch(() => null);
     const preferred = preferences?.audioLanguage;
     subtitleLanguage = preferences?.subtitleLanguage ?? null;
     sound = {
@@ -609,7 +617,7 @@ async function startOnReceiver(channel: LiveChannel): Promise<void> {
   });
   try {
     const { audioId } = store.getState();
-    const preferred = (await call("preferences.get").catch(() => null))?.audioLanguage;
+    const preferred = (await readPreferences().catch(() => null))?.audioLanguage;
     if (mine !== selection) return;
     observation.remote();
     const media = await call("output.playChannel", {
@@ -943,7 +951,7 @@ async function applyTracks(mine: number, tracks: ChannelTracks): Promise<void> {
   const revision = ++tracksRevision;
   store.setState({ tracks: available });
   const chosen = () => subtitlesOff || store.getState().subtitle !== null || lastSubtitle !== null;
-  const wanted = (await call("preferences.get").catch(() => null))?.subtitleLanguage ?? null;
+  const wanted = (await readPreferences().catch(() => null))?.subtitleLanguage ?? null;
   if (mine !== selection || revision !== tracksRevision) return;
   if (!chosen()) {
     const match = channelSubtitle(
@@ -1065,7 +1073,9 @@ function choose(track: SubtitleTrack | null): void {
 export function rememberSubtitles(track: SubtitleTrack | null): void {
   const language = track ? track.language : "off";
   if (language === null) return;
-  void call("preferences.update", { subtitleLanguage: language }).catch(() => {});
+  void updatePreferences({ subtitleLanguage: language }).catch((error: unknown) => {
+    flashNote(`${t("Subtitles")}: ${describeError(appError(error))}`, true);
+  });
 }
 
 /** The receiver's volume, when one has playback and it can be set from here. */
@@ -1081,10 +1091,26 @@ function applyVolume(): void {
 }
 
 function saveVolume(): void {
+  const { volume, muted } = store.getState();
+  const draft = { volume, muted };
+  pendingVolume = draft;
   if (volumeSave) clearTimeout(volumeSave);
   volumeSave = setTimeout(() => {
-    const { volume, muted } = store.getState();
-    void call("preferences.update", { volume, muted }).catch(() => {});
+    volumeSave = null;
+    void updatePreferences(draft)
+      .then((preferences) => {
+        if (pendingVolume === draft)
+          savedSound = { volume: preferences.volume, muted: preferences.muted };
+      })
+      .catch((error: unknown) => {
+        flashNote(`${t("Volume")}: ${describeError(appError(error))}`, true);
+      })
+      .finally(() => {
+        if (pendingVolume !== draft) return;
+        pendingVolume = null;
+        store.setState(savedSound);
+        applyVolume();
+      });
   }, VOLUME_SAVE_DELAY_MS);
 }
 
@@ -1092,11 +1118,23 @@ export const player = {
   /** The video element every view shows the picture in. */
   element: video,
 
-  /** Restores the saved volume and subtitle look. Call once before the first `play`. */
+  /** Applies accepted committed preferences without disturbing a pending local volume choice. */
   hydrate(preferences: Preferences): void {
-    store.setState({ volume: preferences.volume, muted: preferences.muted });
-    applyVolume();
-    setSubtitleLook(preferences.subtitleLook ?? DEFAULT_SUBTITLE_LOOK);
+    savedSound = { volume: preferences.volume, muted: preferences.muted };
+    if (!pendingVolume) {
+      store.setState(savedSound);
+      applyVolume();
+    }
+    const look = preferences.subtitleLook ?? DEFAULT_SUBTITLE_LOOK;
+    if (
+      !savedLook ||
+      savedLook.size !== look.size ||
+      savedLook.background !== look.background ||
+      savedLook.position !== look.position
+    ) {
+      setSubtitleLook(look);
+    }
+    savedLook = look;
   },
 
   /** Plays a channel live. */
@@ -1363,7 +1401,9 @@ export const player = {
     if (!channel || !track) return;
     store.setState({ audioId: id });
     if (track.language) {
-      void call("preferences.update", { audioLanguage: track.language }).catch(() => {});
+      void updatePreferences({ audioLanguage: track.language }).catch((error: unknown) => {
+        flashNote(`${t("Sound")}: ${describeError(appError(error))}`, true);
+      });
     }
     const own = current?.engine.tracks;
     if (own) own.setAudio(id);

@@ -1,3 +1,4 @@
+import { readPreferences, updatePreferences } from "../lib/preferences.ts";
 import { appDiagnostic, streamDiagnostic } from "@mrstreamer/contracts/analytics";
 import {
   PlaybackObservation,
@@ -66,7 +67,9 @@ import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { chooseTracks } from "@mrstreamer/core/ondemand/tracks";
 import { finishes, nextUnwatched } from "@mrstreamer/core/viewing/episodes";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
-import { appError } from "../lib/errors.ts";
+import { appError, describeError } from "../lib/errors.ts";
+import { t } from "@mrstreamer/core/i18n";
+import { flashNote } from "../features/watch/flash-state.ts";
 import { call, listen } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
 import type { EngineError } from "./engine.ts";
@@ -525,7 +528,7 @@ function countDown(mine: number): Promise<void> {
     const known = await refreshNext();
     if (countdownRun !== pending || mine !== generation) return;
     if (!known || !store.getState().next) return stopCountdown();
-    const preferences = await call("preferences.get").catch(() => null);
+    const preferences = await readPreferences().catch(() => null);
     if (countdownRun !== pending || mine !== generation) return;
     if (!preferences || store.getState().phase.kind !== "ended") return stopCountdown();
     store.setState({
@@ -546,7 +549,7 @@ async function resumeCountdown(): Promise<void> {
   const request = ++nextRequest;
   await pending.ready;
   if (countdownRun !== pending || request !== nextRequest) return;
-  const preferences = await call("preferences.get").catch(() => null);
+  const preferences = await readPreferences().catch(() => null);
   if (
     countdownRun !== pending ||
     pending.generation !== generation ||
@@ -822,7 +825,7 @@ async function openOnReceiver(
         since: openedAt,
         ...(measurement ? { measurement } : {}),
       }),
-      call("preferences.get").catch((): Preferences | null => null),
+      readPreferences().catch((): Preferences | null => null),
     ]);
     if (mine !== generation || !receiver) return;
     receiver.sessionId = opened.sessionId;
@@ -1274,7 +1277,7 @@ export const titlePlayer = {
               decoders: [...titleDecoders],
               ...(measurement ? { measurement } : {}),
             }),
-        call("preferences.get").catch((): Preferences | null => null),
+        readPreferences().catch((): Preferences | null => null),
       ]);
       if (mine !== generation) {
         void call("playback.close", { sessionId: opened.sessionId }).catch(() => {});
@@ -1466,7 +1469,9 @@ export const titlePlayer = {
     if (!track || (!session && !receiver)) return;
     store.setState({ audioId: id });
     if (track.language) {
-      void call("preferences.update", { audioLanguage: track.language }).catch(() => {});
+      void updatePreferences({ audioLanguage: track.language }).catch((error: unknown) => {
+        flashNote(`${t("Sound")}: ${describeError(appError(error))}`, true);
+      });
     }
     // Another sound track is another load on a receiver, from where it is.
     if (receiver) return void loadOnReceiver(position, receiver.paused);

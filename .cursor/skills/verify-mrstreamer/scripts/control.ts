@@ -24,6 +24,7 @@ import { startGuideHost, type GuideHost } from "../../../../apps/desktop/test/fa
 import { homeScenario } from "./home.ts";
 import { liveCategoriesScenario, LONG_CATEGORY } from "./live-categories.ts";
 import { languageScenario } from "./language.ts";
+import { preferencesScenario } from "./preferences.ts";
 import { movedGuideScenario } from "./moved-guide.ts";
 import { nextEpisodeScenario } from "./next-episode.ts";
 import { removeDuringGuideScenario } from "./remove-during-guide.ts";
@@ -67,6 +68,7 @@ const scenarios = [
   "watchlist",
   "downloads",
   "language",
+  "preferences",
 ] as const;
 type Scenario = (typeof scenarios)[number];
 const [command, selected] = process.argv.slice(2);
@@ -650,8 +652,8 @@ async function run(scenario: Scenario) {
       observed["subscriptionRows"] = await livePage.evaluate<number>(
         "[...document.querySelectorAll('li')].filter(row => row.querySelector('button')?.textContent.includes(' · ')).length",
       );
-    } else if (scenario === "language") {
-      await languageScenario({
+    } else if (scenario === "language" || scenario === "preferences") {
+      await (scenario === "language" ? languageScenario : preferencesScenario)({
         profile: ownedProfile,
         observed,
         evaluate: (expression) => livePage.evaluate(expression),

@@ -1,3 +1,4 @@
+import { acceptPreferences } from "../../src/renderer/src/lib/preferences.ts";
 // @vitest-environment happy-dom
 // Live TV's guide grid: the switch from the list and back, kept as a preference, the keys and
 // clicks that move between programmes and channels and open a programme's details, what Enter,
@@ -128,7 +129,7 @@ async function gridPage(
         all(channel.id).find((programme) => programme.start === start)) ||
       null,
   );
-  ipc.answer("preferences.update", (patch) => ({ ...defaultPreferences, ...patch }));
+  ipc.answer("preferences.update", (patch) => ipc.snapshot({ ...defaultPreferences, ...patch }));
   ipc.always("guide.status", [
     {
       subscriptionId: SUBSCRIPTION,
@@ -294,6 +295,42 @@ describe("the guide grid", () => {
     await page.press("G");
     await ready(() => expect(page.grid()).toBeNull());
     expect(ipc.argsOf("preferences.update").at(-1)).toEqual({ liveView: "list" });
+  });
+
+  it("retains a pending view through unrelated snapshots and lets only its own failed save resolve it", async () => {
+    const page = await gridPage(THREE, "list");
+    await ready(() => expect(page.grid()).toBeNull());
+    const first = ipc.hold("preferences.update");
+    await page.click("Guide");
+    await ready(() => expect(page.grid()).not.toBeNull());
+    await act(async () =>
+      acceptPreferences(
+        page.client,
+        ipc.snapshot({ ...defaultPreferences, liveView: "list", audioLanguage: "nl" }),
+      ),
+    );
+    await ready(() => expect(page.grid()).not.toBeNull());
+    const second = ipc.hold("preferences.update");
+    await page.click("List");
+    await act(async () => first.reject({ kind: "unexpected", detail: "first view save failed" }));
+    await ready(() => expect(page.grid()).toBeNull());
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    await act(async () =>
+      second.resolve(
+        ipc.snapshot({ ...defaultPreferences, liveView: "list", audioLanguage: "nl" }),
+      ),
+    );
+    const third = ipc.hold("preferences.update");
+    await page.click("Guide");
+    await ready(() => expect(page.grid()).not.toBeNull());
+    await act(async () => third.reject({ kind: "unexpected", detail: "latest view save failed" }));
+    await ready(() => expect(page.grid()).toBeNull());
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+      "latest view save failed",
+    );
+    expect(
+      page.client.getQueryData(queries.preferences().queryKey)?.preferences.audioLanguage,
+    ).toBe("nl");
   });
 
   it("opens in the grid when that is the view kept, and Escape goes to the list before Home", async () => {

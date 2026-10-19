@@ -712,7 +712,8 @@ try {
     if (ticked !== String(shown)) await click(page, FOR_ADULTS);
     await waitFor(
       async () =>
-        (await invoke<{ adultTitles?: boolean }>(page, "preferences.get")).adultTitles === shown,
+        (await invoke<{ preferences: { adultTitles?: boolean } }>(page, "preferences.get"))
+          .preferences.adultTitles === shown,
       10_000,
     );
   };

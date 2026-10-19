@@ -573,7 +573,9 @@ describe("a saved title the provider no longer lists", () => {
     ipc.prefer({ adultTitles: false });
     ipc.hold("ondemand.status").resolve(status());
     for (let asked = 0; asked < 3; asked++) ipc.hold("watchlist.list").resolve(page([harbour]));
-    await act(async () => stored.resolve({ ...defaultPreferences, adultTitles: false }));
+    await act(async () =>
+      stored.resolve(ipc.snapshot({ ...defaultPreferences, adultTitles: false })),
+    );
     await settle();
 
     expect(document.body.textContent).not.toContain("After Dark");

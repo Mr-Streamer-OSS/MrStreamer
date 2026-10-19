@@ -33,6 +33,7 @@ import type { TitleFilters } from "@mrstreamer/contracts/title-filters";
 import { player } from "../player/player.ts";
 import { hostOf } from "./format.ts";
 import { call, listen, searchCall } from "./ipc.ts";
+import { preferenceQuery } from "./preferences.ts";
 
 /** Listings move on as programmes end; asking again each minute is enough for progress. */
 const LISTINGS_REFRESH_MS = 60_000;
@@ -60,12 +61,7 @@ export const queries = {
       queryFn: () => call("language.get"),
       staleTime: Infinity,
     }),
-  preferences: () =>
-    queryOptions({
-      queryKey: ["preferences"],
-      queryFn: () => call("preferences.get"),
-      staleTime: Infinity,
-    }),
+  preferences: preferenceQuery,
   /**
    * What the viewer left a subscription at: the last channel and category, and the versions and
    * streams picked in it.

@@ -1,3 +1,5 @@
+import { preferenceValues } from "./preference-reply.ts";
+import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
 // Built-app proof through the actual Settings control, with an isolated profile and loopback only.
 import { watch } from "node:fs";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
@@ -688,11 +690,11 @@ async function verifyAbout() {
 
 const checkbox = '[role="checkbox"][aria-label="Share basic usage statistics"]';
 async function preference() {
-  const result = await live().evaluate<Result<Preferences>>(
+  const result = await live().evaluate<Result<Preferences | PreferenceSnapshot>>(
     "window.mrStreamer.invoke('preferences.get')",
   );
   if (!result.ok) throw new Error("Preferences unavailable.");
-  return result.value;
+  return preferenceValues(result.value);
 }
 
 async function snapshot(name: string) {

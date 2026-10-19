@@ -1,11 +1,11 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
 import { ArrowDown, ArrowUp, Check } from "lucide-react";
 import { t, type PlainKey } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
-import { call } from "../../lib/ipc.ts";
+import { updatePreferences } from "../../lib/preferences.ts";
 import { cn } from "../../lib/utils.ts";
 import { queries } from "../../lib/queries.ts";
 import { homeRows, type HomeRowId, type HomeRow } from "./rows.ts";
@@ -27,15 +27,16 @@ const HOME_ROW_WRITE = ["preferences", "home-rows"] as const;
 export function CustomizeHome() {
   const preferences = useQuery(queries.preferences());
   const client = useQueryClient();
-  const rows = homeRows(preferences.data?.homeRows);
+  const [pendingHomeRows, setPendingHomeRows] = useState<Preferences["homeRows"]>();
+  const rows = homeRows(pendingHomeRows ?? preferences.data?.homeRows);
   const writing = useRef(false);
   const save = useMutation({
     mutationKey: HOME_ROW_WRITE,
     mutationFn: (homeRows: NonNullable<Preferences["homeRows"]>) =>
-      call("preferences.update", { homeRows }),
-    onSuccess: (saved) => client.setQueryData(queries.preferences().queryKey, saved),
+      updatePreferences({ homeRows }, client),
     onSettled: () => {
       writing.current = false;
+      setPendingHomeRows(undefined);
     },
   });
   // Switching Settings tabs or closing Settings does not release an outstanding preference write.
@@ -48,7 +49,7 @@ export function CustomizeHome() {
     // The ref covers repeated presses; rendered pending state covers the completion/render gap.
     if (writing.current || busy || client.isMutating({ mutationKey: HOME_ROW_WRITE, exact: true }))
       return;
-    const saved = client.getQueryData(queries.preferences().queryKey);
+    const saved = client.getQueryData(queries.preferences().queryKey)?.preferences;
     if (!saved) return;
     const settledRows = homeRows(saved.homeRows);
     const changed = change === null ? homeRows(undefined) : change(settledRows);
@@ -57,6 +58,7 @@ export function CustomizeHome() {
       ...changed,
       ...(saved.homeRows ?? []).filter((row) => !settledRows.some((known) => known.id === row.id)),
     ];
+    setPendingHomeRows(next);
     writing.current = true;
     save.mutate(next);
   };

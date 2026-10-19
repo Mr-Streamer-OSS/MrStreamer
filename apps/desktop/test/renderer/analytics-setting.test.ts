@@ -66,7 +66,9 @@ describe("Settings statistics preference", () => {
     await settle();
     await act(() => checkbox.click());
     expect(ipc.argsOf("preferences.update")).toEqual([{ analyticsEnabled: false }]);
-    await act(async () => changed.resolve({ ...defaultPreferences, analyticsEnabled: false }));
+    await act(async () =>
+      changed.resolve(ipc.snapshot({ ...defaultPreferences, analyticsEnabled: false })),
+    );
     await settle();
     expect(checkbox.getAttribute("aria-checked")).toBe("false");
   });

@@ -43,8 +43,8 @@ export async function languageScenario(d: Driver): Promise<void> {
   const contentLanguages = async () =>
     d.evaluate<{ titles?: string; audio?: string; subtitles?: string }>(`(async () => {
       const read = await window.mrStreamer.invoke('preferences.get');
-      return read.ok ? { titles: read.value.titleLanguage, audio: read.value.audioLanguage,
-        subtitles: read.value.subtitleLanguage } : {};
+      return read.ok ? { titles: read.value.preferences.titleLanguage, audio: read.value.preferences.audioLanguage,
+        subtitles: read.value.preferences.subtitleLanguage } : {};
     })()`);
   const openSettings = async () => {
     await d.click("Open Settings", SETTINGS);

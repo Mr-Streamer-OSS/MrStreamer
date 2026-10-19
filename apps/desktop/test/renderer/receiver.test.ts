@@ -1366,7 +1366,7 @@ describe("a preview", () => {
     const opened = ipc.hold("playback.open");
     player.preview(channel("a"));
     await emit(connected());
-    await act(async () => preferences.resolve(defaultPreferences));
+    await act(async () => preferences.resolve(ipc.snapshot(defaultPreferences)));
 
     expect(ipc.argsOf("playback.open")).toMatchObject([
       { channel: { subscriptionId: SUBSCRIPTION, id: "a" }, preview: true },

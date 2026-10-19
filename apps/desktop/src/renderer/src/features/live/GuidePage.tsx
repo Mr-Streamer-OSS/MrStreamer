@@ -1,3 +1,4 @@
+import { updatePreferences } from "../../lib/preferences.ts";
 import { useSearchUsage } from "../../app/analytics.ts";
 // Live TV: the lists on the left, the chosen list's channels with what's on now and next, and the
 // current stream, muted, on top. A click on a channel opens Watch; Back returns here unchanged.
@@ -46,7 +47,7 @@ import { Progress } from "../../components/Progress.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { WindowBar } from "../../components/WindowBar.tsx";
 import { useNow } from "../../lib/clock.ts";
-import { describeError } from "../../lib/errors.ts";
+import { appError, describeError } from "../../lib/errors.ts";
 import { clockTime, pastTime, progressOf, timeLeft } from "../../lib/format.ts";
 import { Message } from "../../lib/message.tsx";
 import { call } from "../../lib/ipc.ts";
@@ -103,7 +104,7 @@ function watchLive(channel: LiveChannel): void {
 
 export function GuidePage({ active }: { active: boolean }) {
   const list = useUi((state) => state.list);
-  const [liveView, setLiveView] = useLiveView();
+  const [liveView, setLiveView, viewError] = useLiveView();
   const grid = useRef<GridKeys>(null);
   const categories = useQuery(queries.categories());
   const categoryMap = useCategoryMap();
@@ -561,6 +562,11 @@ export function GuidePage({ active }: { active: boolean }) {
     // Until an order being saved is answered, the page takes no input: nothing leaves it.
     <div ref={page} className="flex h-full flex-col" inert={waiting ? true : undefined}>
       <WindowBar className="bg-black" />
+      {viewError && (
+        <p role="alert" className="px-9 py-2 text-sm text-destructive">
+          {t("Guide")}: {viewError}
+        </p>
+      )}
       {notice ? (
         <div className="flex flex-1 items-center justify-center pb-14">
           <CatalogueNotice state={notice} />
@@ -1001,15 +1007,22 @@ function NowStrip({ active, viewSwitch }: { active: boolean; viewSwitch: ReactNo
  * How Live TV shows its lists, the list or the grid, as the preferences keep it, and a way to
  * change it: at once on screen, then saved. The list until the preferences are read.
  */
-function useLiveView(): [LiveView, (view: LiveView) => void] {
+function useLiveView(): [LiveView, (view: LiveView) => void, string | null] {
   const client = useQueryClient();
-  const view = useQuery(queries.preferences()).data?.liveView ?? "list";
+  const saved = useQuery(queries.preferences()).data?.liveView ?? "list";
+  const [pendingView, setPendingView] = useState<{ value: LiveView } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const latestView = useRef<object | null>(null);
   const set = (liveView: LiveView) => {
-    const key = queries.preferences().queryKey;
-    client.setQueryData(key, (saved) => saved && { ...saved, liveView });
-    void call("preferences.update", { liveView })
-      .then((saved) => client.setQueryData(key, saved))
-      .catch(() => {});
+    const draft = { value: liveView };
+    latestView.current = draft;
+    setError(null);
+    setPendingView(draft);
+    void updatePreferences({ liveView }, client)
+      .catch((error: unknown) => {
+        if (latestView.current === draft) setError(describeError(appError(error)));
+      })
+      .finally(() => setPendingView((current) => (current === draft ? null : current)));
   };
-  return [view, set];
+  return [pendingView?.value ?? saved, set, error];
 }

@@ -26,7 +26,7 @@ import { changeLanguage } from "../../app/language.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
-import { call } from "../../lib/ipc.ts";
+import { updatePreferences } from "../../lib/preferences.ts";
 import { preferenceName } from "../../lib/quality.ts";
 import {
   queries,
@@ -40,38 +40,16 @@ import { Row, Section, Select } from "./Rows.tsx";
 /** The Subtitles choice for only the subtitles a file marks as forced: no language stored. */
 const FORCED = "forced";
 
-/** Changes that alter what the lists show, which are asked for again. */
-const LIST_CHANGES = ["titleLanguage", "adultTitles", "tmdbKey"] as const;
-
 export function GeneralSection() {
   const client = useQueryClient();
-  // Read afresh each time Settings opens: the players save the languages picked in them without
-  // going through this cache.
-  const preferences = useQuery({ ...queries.preferences(), refetchOnMount: "always" });
+  const preferences = useQuery(queries.preferences());
   const update = useMutation({
-    mutationFn: (patch: Partial<Preferences>) => call("preferences.update", patch),
+    mutationFn: (patch: Partial<Preferences>) => updatePreferences(patch, client),
     // The sheet of a saved title the provider dropped stays open under Settings, and holds the
     // entry as it was read while titles for adults showed. It closes as the viewer hides them,
     // before anything is waited for, so leaving Settings never shows it again.
     onMutate: (patch) => {
       if (patch.adultTitles === false) useUi.setState({ savedEntry: null });
-    },
-    onSuccess: async (saved, patch) => {
-      client.setQueryData(queries.preferences().queryKey, saved);
-      // Saved titles for adults follow the setting first, with nothing waited for before. Reset
-      // rather than read again, so one now hidden doesn't stay on from before.
-      if ("adultTitles" in patch) await client.resetQueries({ queryKey: ["watchlist"] });
-      if (LIST_CHANGES.some((key) => key in patch)) {
-        await client.invalidateQueries({ queryKey: ["ondemand"] });
-        // The watchlist shows the same titles, under the same names.
-        await client.invalidateQueries({ queryKey: ["watchlist"] });
-      }
-      // Live TV's channels for adults, and their programmes, follow the same setting. Reset
-      // rather than read again, for the same reason.
-      if ("adultTitles" in patch) {
-        await client.resetQueries({ queryKey: ["library"] });
-        await client.resetQueries({ queryKey: ["guide"] });
-      }
     },
   });
   const language = useQuery(queries.language());

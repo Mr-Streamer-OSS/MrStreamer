@@ -96,7 +96,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
     );
   const preferences = () =>
     d.evaluate<{ id: string; visible: boolean }[]>(
-      "(async () => { const read = await window.mrStreamer.invoke('preferences.get'); return read.ok ? read.value.homeRows ?? [] : []; })()",
+      "(async () => { const read = await window.mrStreamer.invoke('preferences.get'); return read.ok ? read.value.preferences.homeRows ?? [] : []; })()",
     );
   const customize = async () => {
     await d.click(
@@ -548,7 +548,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
   );
   await d.wait(() =>
     d.evaluate<boolean>(
-      "(async () => { const p=await window.mrStreamer.invoke('preferences.get'); return p.ok && p.value.adultTitles; })()",
+      "(async () => { const p=await window.mrStreamer.invoke('preferences.get'); return p.ok && p.value.preferences.adultTitles; })()",
     ),
   );
   await d.capture("adult-setting-settled");

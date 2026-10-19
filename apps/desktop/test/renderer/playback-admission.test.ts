@@ -322,7 +322,7 @@ it("ignores obsolete begin replies and preferences without admitting an older ch
   await settle();
   const current = ipc.argsOf("analytics.playbackBegin").at(-1)!.measurement;
   oldReply.resolve("99999999-9999-4999-8999-999999999999");
-  oldPreferences.resolve(defaultPreferences);
+  oldPreferences.resolve(ipc.snapshot(defaultPreferences));
   await settle();
   expect(ipc.argsOf("playback.open")).toHaveLength(1);
   expect(ipc.argsOf("playback.open")[0]).toMatchObject({

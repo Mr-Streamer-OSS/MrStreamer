@@ -292,8 +292,10 @@ describe("the end of an episode", () => {
 
   it("offers the next episode without a countdown when it is turned off, and N plays it", async () => {
     // Read as the episode opens, then again at its end, after the viewer turned it off.
-    ipc.hold("preferences.get").resolve(defaultPreferences);
-    ipc.hold("preferences.get").resolve({ ...defaultPreferences, autoplayNext: false });
+    ipc.hold("preferences.get").resolve(ipc.snapshot(defaultPreferences));
+    ipc
+      .hold("preferences.get")
+      .resolve(ipc.snapshot({ ...defaultPreferences, autoplayNext: false }));
     await playToEnd(pilotHouse, "s1");
 
     await wait(15_000);

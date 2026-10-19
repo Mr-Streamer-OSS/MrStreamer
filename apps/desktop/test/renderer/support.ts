@@ -12,6 +12,7 @@ import type { AppError, Result } from "@mrstreamer/contracts/errors";
 import {
   ipcInputs,
   type BridgeApi,
+  type PreferenceSnapshot,
   type IpcEvent,
   type IpcEvents,
   type IpcInput,
@@ -45,8 +46,13 @@ const replies = new Map<IpcMethod, (args: unknown) => unknown>();
 const listeners = new Map<string, Set<(payload: unknown) => void>>();
 const calls: { readonly method: IpcMethod; readonly args: unknown }[] = [];
 let preferences = defaultPreferences;
+let preferenceRevision = 1;
 
 export const ipc = {
+  snapshot(saved: Preferences): PreferenceSnapshot {
+    preferences = saved;
+    return { revision: ++preferenceRevision, preferences: saved };
+  },
   /** The arguments of each call to `method` so far, which its contract allowed. */
   argsOf: <M extends IpcMethod>(method: M): IpcInput<M>[] =>
     calls.filter((each) => each.method === method).map((each) => each.args as IpcInput<M>),
@@ -87,6 +93,7 @@ export const ipc = {
   /** Answers the preferences with `saved` over the defaults, as after the viewer set them. */
   prefer(saved: Partial<Preferences>): void {
     preferences = { ...defaultPreferences, ...saved };
+    preferenceRevision++;
   },
   /** Forgets the calls, held answers and saved preferences of the test before. */
   reset(): void {
@@ -95,6 +102,7 @@ export const ipc = {
     standing.clear();
     replies.clear();
     preferences = defaultPreferences;
+    preferenceRevision = 1;
   },
 };
 
@@ -131,7 +139,7 @@ const bridge = {
       return Promise.resolve({ ok: true, value: { progress: [], marks: [], undoable: null } });
     }
     if (method === "preferences.get") {
-      return Promise.resolve({ ok: true, value: preferences });
+      return Promise.resolve({ ok: true, value: { revision: preferenceRevision, preferences } });
     }
     if (method === "subscription.preferences") {
       return Promise.resolve({ ok: true, value: defaultSubscriptionPreferences });

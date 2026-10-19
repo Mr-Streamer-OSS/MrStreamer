@@ -4,11 +4,12 @@
 // position. The player keeps both, so they hold after a seek or another track, and changing them
 // never turns subtitles on or picks another track.
 //   On the look's rows, Left and Right pick.
-import type { KeyboardEvent, ReactNode } from "react";
+import { useRef, type KeyboardEvent, type ReactNode } from "react";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
-import type { SubtitleLook } from "@mrstreamer/contracts/preferences";
+import { DEFAULT_SUBTITLE_LOOK, type SubtitleLook } from "@mrstreamer/contracts/preferences";
 import { formatDecimal, type PlainKey, t } from "@mrstreamer/core/i18n";
-import { call } from "../../lib/ipc.ts";
+import { readPreferences, updatePreferences } from "../../lib/preferences.ts";
+import { appError, describeError } from "../../lib/errors.ts";
 import { cn } from "../../lib/utils.ts";
 import { player } from "../../player/player.ts";
 import {
@@ -18,7 +19,7 @@ import {
   TIMING_STEP_S,
   useSubtitleSettings,
 } from "../../player/subtitles.ts";
-import { flash } from "./Flash.tsx";
+import { flash, flashNote } from "./Flash.tsx";
 
 /** Each choice's word on its button, and its whole name for assistive technology. */
 const SIZES = [
@@ -129,9 +130,17 @@ export function TrackTiming() {
 /** Size, background and position, saved for every title and channel. */
 export function LookRows({ text }: { text: boolean }) {
   const look = useSubtitleSettings((state) => state.look);
+  const pendingLook = useRef<SubtitleLook | null>(null);
   const pick = (next: SubtitleLook) => {
+    pendingLook.current = next;
     setSubtitleLook(next);
-    void call("preferences.update", { subtitleLook: next }).catch(() => {});
+    void updatePreferences({ subtitleLook: next }).catch(async (error: unknown) => {
+      flashNote(`${t("Subtitle look")}: ${describeError(appError(error))}`, true);
+      const saved = await readPreferences().catch(() => null);
+      if (pendingLook.current === next) {
+        setSubtitleLook(saved ? (saved.subtitleLook ?? DEFAULT_SUBTITLE_LOOK) : look);
+      }
+    });
   };
   return (
     <>
