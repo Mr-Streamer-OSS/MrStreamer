@@ -418,12 +418,12 @@ export function metadataStore(deps: MetadataDeps) {
     unanswered = 0;
     // A new list or language is told of quickly again, however long the last run went on.
     contentGap = CONTENT_FIRST_MS;
-    // A newer list, as after a refresh or for another account, takes over at once, ahead of
+    // A changed list or language takes over at once, ahead of
     // the services, a crawl of minutes.
     await fetchTitles(client, list, asked, signal);
     // The services take minutes to crawl; the titles' names needn't wait for them.
     if (untold) changed("status", true);
-    if (!refused && !signal.aborted) await fetchServices(client, signal);
+    if (!refused && !signal.aborted && !unreachable()) await fetchServices(client, signal);
     changed("status", true);
     await save();
   }

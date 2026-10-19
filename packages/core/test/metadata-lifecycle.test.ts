@@ -270,30 +270,48 @@ describe("metadata request ownership", () => {
     await store.close();
   });
 
-  it("honours an equal refresh while an offline run finishes its retries", async () => {
+  it("retries titles before the service crawl after refreshing during offline retry completion", async () => {
     vi.useFakeTimers();
     let offline = true;
-    const details = vi.fn<Tmdb["details"]>(async () => {
-      if (offline) throw new TmdbError({ kind: "unavailable", detail: "offline" });
+    const lastRetry = Promise.withResolvers<ReturnType<typeof answer>>();
+    const attempts = new Map<string, number>();
+    const exhausted = new Set<string>();
+    let knownAtCrawl: number | undefined;
+    const details = vi.fn<Tmdb["details"]>(async (_kind, id) => {
+      const attempt = (attempts.get(id) ?? 0) + 1;
+      attempts.set(id, attempt);
+      if (id === "40" && attempt === 3) return lastRetry.promise;
+      if (offline) {
+        if (attempt === 3) exhausted.add(id);
+        throw new TmdbError({ kind: "unavailable", detail: "offline" });
+      }
       return answer();
     });
-    const services = vi.fn<Tmdb["services"]>(async () => {
-      if (offline) throw new TmdbError({ kind: "unavailable", detail: "offline" });
-      return [];
+    const { store } = open({
+      ...clientWith(details),
+      services: async (kind) => (kind === "movie" ? [{ id: 8, name: "Service", priority: 1 }] : []),
+      onService: async () => {
+        knownAtCrawl = store.status().known;
+        return { ids: [], pages: 1 };
+      },
     });
-    const { store } = open({ ...clientWith(details), services });
     const wanted = Array.from({ length: 40 }, (_, i) => title(String(i + 1)));
     store.want(wanted);
-    for (let turn = 0; turn < 2000 && services.mock.calls.length === 0; turn++)
+    for (let turn = 0; turn < 2000 && exhausted.size < 24; turn++)
       await vi.advanceTimersByTimeAsync(10);
-    expect(services).toHaveBeenCalled();
+    expect(exhausted.size).toBeGreaterThanOrEqual(24);
+    for (let turn = 0; turn < 100 && vi.getTimerCount() > 0; turn++)
+      await vi.runOnlyPendingTimersAsync();
+    expect(attempts.get("40")).toBe(3);
     expect(store.status()).toMatchObject({ known: 0, fetching: true, refused: false });
     const failedCalls = details.mock.calls.length;
 
     offline = false;
     store.want(wanted.map((item) => ({ ...item })));
+    lastRetry.reject(new TmdbError({ kind: "unavailable", detail: "offline" }));
     await finish(store);
     expect(store.status()).toMatchObject({ known: 40, fetching: false, refused: false });
+    expect(knownAtCrawl).toBe(40);
     expect(details.mock.calls.length - failedCalls).toBe(40);
     await store.close();
   });
