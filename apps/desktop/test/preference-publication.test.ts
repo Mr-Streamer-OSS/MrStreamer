@@ -114,7 +114,12 @@ describe("composed preference publication", () => {
     expect(failed).toEqual(await Effect.runPromiseExit(Effect.die(original)));
     expect(events.at(-1)).toEqual({
       revision: 2,
-      preferences: { volume: 1, muted: false, analyticsEnabled: false },
+      preferences: {
+        volume: 1,
+        muted: false,
+        nextEpisodeDelaySeconds: 10,
+        analyticsEnabled: false,
+      },
     });
   });
 

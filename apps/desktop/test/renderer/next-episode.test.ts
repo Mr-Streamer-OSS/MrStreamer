@@ -683,7 +683,10 @@ describe("the saved countdown policy", () => {
   it.each([0, 1, 10, 37, 60])(
     "opens once after exactly %i seconds",
     async (nextEpisodeDelaySeconds) => {
-      ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelaySeconds });
+      ipc.always(
+        "preferences.get",
+        ipc.snapshot({ ...defaultPreferences, nextEpisodeDelaySeconds }),
+      );
       await playToEnd(pilotHouse, "s1");
       if (nextEpisodeDelaySeconds > 0) {
         expect(text()).toContain(`Plays in ${nextEpisodeDelaySeconds}`);
@@ -699,7 +702,10 @@ describe("the saved countdown policy", () => {
   );
 
   it("keeps Instant held with Next episode shown, then opens without a tick on release", async () => {
-    ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelaySeconds: 0 });
+    ipc.always(
+      "preferences.get",
+      ipc.snapshot({ ...defaultPreferences, nextEpisodeDelaySeconds: 0 }),
+    );
     await playToEnd(pilotHouse, "s1", () =>
       act(async () => useUi.setState({ settings: "general" })),
     );
@@ -712,21 +718,30 @@ describe("the saved countdown policy", () => {
   });
 
   it("resumes the saved remainder after off/on while held, and uses an edited delay next time", async () => {
-    ipc.always("preferences.get", { ...defaultPreferences, nextEpisodeDelaySeconds: 37 });
+    ipc.always(
+      "preferences.get",
+      ipc.snapshot({ ...defaultPreferences, nextEpisodeDelaySeconds: 37 }),
+    );
     await playToEnd(pilotHouse, "s1");
     await wait(3000);
     await act(async () => useUi.setState({ settings: "general" }));
-    ipc.always("preferences.get", {
-      ...defaultPreferences,
-      nextEpisodeDelaySeconds: 60,
-      autoplayNext: false,
-    });
+    ipc.always(
+      "preferences.get",
+      ipc.snapshot({
+        ...defaultPreferences,
+        nextEpisodeDelaySeconds: 60,
+        autoplayNext: false,
+      }),
+    );
     await wait(5000);
-    ipc.always("preferences.get", {
-      ...defaultPreferences,
-      nextEpisodeDelaySeconds: 60,
-      autoplayNext: true,
-    });
+    ipc.always(
+      "preferences.get",
+      ipc.snapshot({
+        ...defaultPreferences,
+        nextEpisodeDelaySeconds: 60,
+        autoplayNext: true,
+      }),
+    );
     await act(async () => useUi.setState({ settings: null }));
     expect(titlePlayer.state().countdown).toBe(34);
     await wait(33_000);
@@ -740,10 +755,10 @@ describe("the saved countdown policy", () => {
   it("cancels on final Off, keeps manual Next, and never restarts on a later On", async () => {
     await playToEnd(pilotHouse, "s1");
     await act(async () => useUi.setState({ settings: "general" }));
-    ipc.always("preferences.get", { ...defaultPreferences, autoplayNext: false });
+    ipc.always("preferences.get", ipc.snapshot({ ...defaultPreferences, autoplayNext: false }));
     await act(async () => useUi.setState({ settings: null }));
     expect(titlePlayer.state().countdown).toBeNull();
-    ipc.always("preferences.get", { ...defaultPreferences, autoplayNext: true });
+    ipc.always("preferences.get", ipc.snapshot({ ...defaultPreferences, autoplayNext: true }));
     await act(async () => useUi.setState({ settings: "general" }));
     await act(async () => useUi.setState({ settings: null }));
     await wait(65_000);
@@ -753,19 +768,25 @@ describe("the saved countdown policy", () => {
   });
 
   it("uses the final saved On when an end behind Settings initially read Off", async () => {
-    ipc.always("preferences.get", {
-      ...defaultPreferences,
-      autoplayNext: false,
-      nextEpisodeDelaySeconds: 37,
-    });
+    ipc.always(
+      "preferences.get",
+      ipc.snapshot({
+        ...defaultPreferences,
+        autoplayNext: false,
+        nextEpisodeDelaySeconds: 37,
+      }),
+    );
     await playToEnd(pilotHouse, "s1", () =>
       act(async () => useUi.setState({ settings: "general" })),
     );
-    ipc.always("preferences.get", {
-      ...defaultPreferences,
-      autoplayNext: true,
-      nextEpisodeDelaySeconds: 0,
-    });
+    ipc.always(
+      "preferences.get",
+      ipc.snapshot({
+        ...defaultPreferences,
+        autoplayNext: true,
+        nextEpisodeDelaySeconds: 0,
+      }),
+    );
     await act(async () => useUi.setState({ settings: null }));
     expect(titlePlayer.state().countdown).toBe(37);
     await wait(37_000);
@@ -773,14 +794,16 @@ describe("the saved countdown policy", () => {
   });
 
   it("rechecks policy after releasing Settings while the initial policy read is pending", async () => {
-    ipc.hold("preferences.get").resolve(defaultPreferences);
+    ipc.hold("preferences.get").resolve(ipc.snapshot(defaultPreferences));
     const initial = ipc.hold("preferences.get");
     await playToEnd(pilotHouse, "s1", () =>
       act(async () => useUi.setState({ settings: "general" })),
     );
     await act(async () => useUi.setState({ settings: null }));
-    ipc.always("preferences.get", { ...defaultPreferences, autoplayNext: false });
-    await act(async () => initial.resolve({ ...defaultPreferences, nextEpisodeDelaySeconds: 0 }));
+    ipc.always("preferences.get", ipc.snapshot({ ...defaultPreferences, autoplayNext: false }));
+    await act(async () =>
+      initial.resolve(ipc.snapshot({ ...defaultPreferences, nextEpisodeDelaySeconds: 0 })),
+    );
     await wait(65_000);
     expect(opened()).toEqual(["e13"]);
     expect(titlePlayer.state().countdown).toBeNull();
@@ -789,7 +812,7 @@ describe("the saved countdown policy", () => {
   it.each(["cancel", "stop", "new title", "removed source"])(
     "discards a pending Instant policy on %s",
     async (action) => {
-      ipc.hold("preferences.get").resolve(defaultPreferences);
+      ipc.hold("preferences.get").resolve(ipc.snapshot(defaultPreferences));
       const pending = ipc.hold("preferences.get");
       await playToEnd(pilotHouse, "s1");
       await act(async () => {
@@ -799,7 +822,9 @@ describe("the saved countdown policy", () => {
           playTitle(movieNow({ ...series.title, kind: "movie", id: "m1" }, null), 0);
         if (action === "removed source") resetForAccount();
       });
-      await act(async () => pending.resolve({ ...defaultPreferences, nextEpisodeDelaySeconds: 0 }));
+      await act(async () =>
+        pending.resolve(ipc.snapshot({ ...defaultPreferences, nextEpisodeDelaySeconds: 0 })),
+      );
       await act(async () => useUi.setState({ settings: "general" }));
       await act(async () => useUi.setState({ settings: null }));
       await wait(65_000);
@@ -820,7 +845,9 @@ describe("the saved countdown policy", () => {
         if (action === "new title")
           playTitle(movieNow({ ...series.title, kind: "movie", id: "m1" }, null), 0);
       });
-      await act(async () => released.resolve({ ...defaultPreferences, autoplayNext: true }));
+      await act(async () =>
+        released.resolve(ipc.snapshot({ ...defaultPreferences, autoplayNext: true })),
+      );
       await wait(65_000);
       expect(opened()).not.toContain("e21");
     },
@@ -834,8 +861,12 @@ describe("the saved countdown policy", () => {
     await act(async () => useUi.setState({ settings: "general" }));
     const after = ipc.hold("preferences.get");
     await act(async () => useUi.setState({ settings: null }));
-    await act(async () => after.resolve({ ...defaultPreferences, autoplayNext: false }));
-    await act(async () => before.resolve({ ...defaultPreferences, autoplayNext: true }));
+    await act(async () =>
+      after.resolve(ipc.snapshot({ ...defaultPreferences, autoplayNext: false })),
+    );
+    await act(async () =>
+      before.resolve(ipc.snapshot({ ...defaultPreferences, autoplayNext: true })),
+    );
     await wait(65_000);
     expect(opened()).toEqual(["e13"]);
     expect(titlePlayer.state().countdown).toBeNull();
@@ -848,7 +879,7 @@ describe("the saved countdown policy", () => {
         await playToEnd(pilotHouse, "s1");
         await act(async () => useUi.setState({ settings: "general" }));
       } else {
-        ipc.hold("preferences.get").resolve(defaultPreferences);
+        ipc.hold("preferences.get").resolve(ipc.snapshot(defaultPreferences));
       }
       const policy = ipc.hold("preferences.get");
       if (atRelease) await act(async () => useUi.setState({ settings: null }));

@@ -125,7 +125,9 @@ describe("Settings > General", () => {
     const saving = ipc.hold("preferences.update");
     await enter("37");
     expect(ipc.argsOf("preferences.update")).toEqual([{ nextEpisodeDelaySeconds: 37 }]);
-    await act(async () => saving.resolve({ ...defaultPreferences, nextEpisodeDelaySeconds: 37 }));
+    await act(async () =>
+      saving.resolve(ipc.snapshot({ ...defaultPreferences, nextEpisodeDelaySeconds: 37 })),
+    );
     await act(() => vi.advanceTimersByTimeAsync(20));
     expect(field().value).toBe("37");
     const failed = ipc.hold("preferences.update");
@@ -137,7 +139,9 @@ describe("Settings > General", () => {
     expect(ipc.argsOf("preferences.update")).toHaveLength(2);
     const instant = ipc.hold("preferences.update");
     await enter("0");
-    await act(async () => instant.resolve({ ...defaultPreferences, nextEpisodeDelaySeconds: 0 }));
+    await act(async () =>
+      instant.resolve(ipc.snapshot({ ...defaultPreferences, nextEpisodeDelaySeconds: 0 })),
+    );
     await act(() => vi.advanceTimersByTimeAsync(20));
     expect(field().value).toBe("0");
     expect(container.textContent).toContain("Instant");
