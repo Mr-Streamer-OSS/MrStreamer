@@ -173,7 +173,7 @@ export function GuidePage({ active }: { active: boolean }) {
     rawSearch.current = text;
     setTyped({ key, text });
   };
-  const search = useListSearch(list, channels, text);
+  const search = useListSearch(channels, text);
   const searching = text.trim() !== "";
   const canUseSearch = () => search.actionable && rawSearch.current === text;
   useSearchUsage("live", search.query, active);

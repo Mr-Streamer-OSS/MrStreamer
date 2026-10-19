@@ -120,7 +120,6 @@ export function useHomeDiscovery(): ChannelList {
  * inert during typing. A pending, stale or failed grouping decision keeps current copies apart.
  */
 export function useListSearch(
-  _list: ChannelList,
   channels: readonly LiveChannel[],
   text: string,
 ): {

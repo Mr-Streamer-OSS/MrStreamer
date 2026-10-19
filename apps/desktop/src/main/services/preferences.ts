@@ -82,12 +82,11 @@ export class Settings extends Context.Service<
      * Forgets what the viewer left `subscription` at, for when it goes: what was watched last and
      * the versions and channel streams picked. For the original, lists not yet imported go too:
      * they belong to its account. Snapshot effective discovery before the folder is removed, so
-     * a prior stable category edit keeps precedence while the surviving baseline changes.
+     * a prior stable category edit keeps precedence while the surviving baseline changes. The
+     * returned effect runs after removal; a newer explicit choice wins over the captured one.
      */
-    forget(
-      subscription: SavedSubscription,
-      selectionBeforeRemoval: LiveDiscovery,
-    ): Effect.Effect<void>;
+    prepareForget(subscription: SavedSubscription): Effect.Effect<Effect.Effect<void>>;
+
     /** The favourites and recent channels of a file from before the viewing record, or null. */
     readonly legacyLists: Effect.Effect<{
       readonly favourites: readonly string[];
@@ -269,49 +268,55 @@ function make(dataDir: string, usage?: UsageObservers) {
                 return next;
               }),
         ),
-      forget: (subscription: SavedSubscription, selectionBeforeRemoval: LiveDiscovery) =>
+      prepareForget: (subscription: SavedSubscription) =>
         one.withPermits(1)(
           Effect.gen(function* () {
-            const previous = yield* stored;
-            const raw = previous.rememberedLiveBrowse;
-            const record = RememberedLiveBrowse()(raw);
-            const remaining = (yield* subscriptions.saved).filter(
-              (each) => each.id !== subscription.id,
+            const before = (yield* stored).rememberedLiveBrowse;
+            const selectionBeforeRemoval = yield* readBrowse;
+            return one.withPermits(1)(
+              Effect.gen(function* () {
+                const previous = yield* stored;
+                const raw = previous.rememberedLiveBrowse;
+                const record = RememberedLiveBrowse()(raw);
+                const remaining = (yield* subscriptions.saved).filter(
+                  (each) => each.id !== subscription.id,
+                );
+                // Unknown future records survive both removal paths verbatim.
+                let rememberedLiveBrowse = raw;
+                if (!(record instanceof type.errors)) {
+                  const selection = raw === before ? selectionBeforeRemoval : record.selection;
+                  const valid =
+                    remaining.length > 0 &&
+                    (selection.kind === "topic" ||
+                      remaining.some(
+                        (each) =>
+                          selection.kind === "category" &&
+                          each.id === selection.category.subscriptionId,
+                      ));
+                  rememberedLiveBrowse = valid
+                    ? { ...record, selection, legacy: yield* legacy(remaining) }
+                    : undefined;
+                }
+                if (subscription.original || !(record instanceof type.errors)) {
+                  yield* applied((file) => {
+                    const { rememberedLiveBrowse: _remembered, ...kept } = subscription.original
+                      ? {
+                          ...general(file),
+                          ...defaultSubscriptionPreferences,
+                          ...(file.interfaceLanguage === undefined
+                            ? {}
+                            : { interfaceLanguage: file.interfaceLanguage }),
+                        }
+                      : file;
+                    return {
+                      ...kept,
+                      ...(rememberedLiveBrowse === undefined ? {} : { rememberedLiveBrowse }),
+                    };
+                  });
+                }
+                added.delete(subscription.id);
+              }),
             );
-            // Unknown future records survive both removal paths verbatim.
-            let rememberedLiveBrowse = raw;
-            if (!(record instanceof type.errors)) {
-              const selection = selectionBeforeRemoval;
-              const valid =
-                remaining.length > 0 &&
-                (selection.kind === "topic" ||
-                  remaining.some(
-                    (each) =>
-                      selection.kind === "category" &&
-                      each.id === selection.category.subscriptionId,
-                  ));
-              rememberedLiveBrowse = valid
-                ? { ...record, selection, legacy: yield* legacy(remaining) }
-                : undefined;
-            }
-            if (subscription.original || !(record instanceof type.errors)) {
-              yield* applied((file) => {
-                const { rememberedLiveBrowse: _remembered, ...kept } = subscription.original
-                  ? {
-                      ...general(file),
-                      ...defaultSubscriptionPreferences,
-                      ...(file.interfaceLanguage === undefined
-                        ? {}
-                        : { interfaceLanguage: file.interfaceLanguage }),
-                    }
-                  : file;
-                return {
-                  ...kept,
-                  ...(rememberedLiveBrowse === undefined ? {} : { rememberedLiveBrowse }),
-                };
-              });
-            }
-            added.delete(subscription.id);
           }),
         ),
       legacyLists: one.withPermits(1)(
