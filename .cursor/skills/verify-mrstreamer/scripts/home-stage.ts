@@ -542,6 +542,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
     "Settings for adult channel exclusion",
     "document.querySelector('button[aria-label=Settings]')",
   );
+  await d.click("Open Movies and series settings", text("nav button", "Movies and series"));
   await d.click(
     "Enable adult titles",
     "document.querySelector('[role=checkbox][aria-label=\"For adults\"]')",

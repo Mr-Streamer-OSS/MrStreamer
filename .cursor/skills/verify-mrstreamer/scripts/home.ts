@@ -227,6 +227,7 @@ export async function homeScenario(d: Driver, counts: () => Record<string, numbe
     "Open Settings for adult safety",
     "document.querySelector('button[aria-label=\"Settings\"]')",
   );
+  await d.click("Open Movies and series settings", byText("nav button", "Movies and series"));
   await d.click(
     "Enable adult titles",
     "document.querySelector('[role=checkbox][aria-label=\"For adults\"]')",
