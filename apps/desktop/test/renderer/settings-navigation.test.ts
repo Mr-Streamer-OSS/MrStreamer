@@ -13,6 +13,7 @@ import { acceptPreferences } from "../../src/renderer/src/lib/preferences.ts";
 import { openOnlineSubtitleSettings, useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { SettingsPage } from "../../src/renderer/src/features/settings/SettingsPage.tsx";
 import { LiveSettingsSection } from "../../src/renderer/src/features/settings/GeneralSection.tsx";
+import { OnlineSubtitlesSection } from "../../src/renderer/src/features/settings/OnlineSubtitlesSection.tsx";
 import { findSettings } from "../../src/renderer/src/features/settings/catalogue.ts";
 
 let cleanup = () => {};
@@ -166,13 +167,69 @@ it("shows a preference read failure and recovers through Retry", async () => {
   const { view } = await render();
   expect(view.textContent).toContain("Settings could not be read.");
   ipc.always("preferences.get", ipc.snapshot(defaultPreferences));
-  await act(async () =>
-    [...view.querySelectorAll<HTMLButtonElement>("button")]
-      .find((b) => b.textContent === "Try again")!
-      .click(),
-  );
+  const read = ipc.hold("preferences.get");
+  const retry = [...view.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "Try again",
+  )!;
+  const current = view.querySelector('nav button[aria-current="page"]');
+  await act(async () => {
+    retry.focus();
+    retry.click();
+  });
+  expect(document.activeElement).toBe(current);
+  await act(async () => read.resolve(ipc.snapshot(defaultPreferences)));
   await settle();
   expect(view.textContent).not.toContain("Settings could not be read.");
+  expect(document.activeElement).toBe(current);
+});
+
+it("keeps the TMDB credential focused and blocks another submission while saving", async () => {
+  const { view } = await render();
+  await nav(view, "Movies and series");
+  await act(async () =>
+    view.querySelector<HTMLButtonElement>('[data-setting="tmdb"] button')!.click(),
+  );
+  const field = view.querySelector<HTMLInputElement>('[aria-label="Your own TMDB key"]')!;
+  await type(field, "test-key");
+  const save = ipc.hold("preferences.update");
+  await act(async () => field.closest("form")!.requestSubmit());
+  await settle();
+  expect(document.activeElement).toBe(field);
+  expect(field.matches(":disabled")).toBe(false);
+  await act(async () => field.closest("form")!.requestSubmit());
+  expect(ipc.argsOf("preferences.update")).toEqual([{ tmdbKey: "test-key" }]);
+  await act(async () => save.reject({ kind: "unexpected", detail: "key refused" }));
+  await settle();
+  expect(document.activeElement).toBe(field);
+  expect(field.value).toBe("test-key");
+  expect(view.textContent).toContain("key refused");
+});
+
+it("keeps online credentials focused and blocks another submission until refusal settles", async () => {
+  ipc.always("subtitles.settings", {
+    enabled: false,
+    service: "both",
+    languages: ["en"],
+    configured: { subdl: false, opensubtitles: false },
+  });
+  const { view } = await render(createElement(OnlineSubtitlesSection));
+  await act(async () =>
+    view.querySelector<HTMLButtonElement>('[data-setting="subdl"] button')!.click(),
+  );
+  const field = view.querySelector<HTMLInputElement>('[aria-label="SubDL API key"]')!;
+  await type(field, "test-key");
+  const save = ipc.hold("subtitles.configure");
+  await act(async () => field.closest("form")!.requestSubmit());
+  await settle();
+  expect(document.activeElement).toBe(field);
+  expect(field.matches(":disabled")).toBe(false);
+  await act(async () => field.closest("form")!.requestSubmit());
+  expect(ipc.argsOf("subtitles.configure")).toHaveLength(1);
+  await act(async () => save.reject({ kind: "unexpected", detail: "key refused" }));
+  await settle();
+  expect(document.activeElement).toBe(field);
+  expect(field.value).toBe("test-key");
+  expect(view.textContent).toContain("key refused");
 });
 
 it("keeps delay editing keys inside the field and clamps typed whole seconds", async () => {

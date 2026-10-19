@@ -558,6 +558,10 @@ function Tmdb() {
       setEditing(false);
     },
   });
+  const save = (tmdbKey: string) => {
+    if (!preferences.data || update.isPending) return;
+    update.mutate(tmdbKey);
+  };
   const metadata = status.data?.metadata;
   const progress = !metadata
     ? t("no key")
@@ -576,8 +580,8 @@ function Tmdb() {
           <Button
             variant="ghost"
             size="sm"
-            disabled={update.isPending}
-            onClick={() => update.mutate("")}
+            aria-disabled={update.isPending}
+            onClick={() => save("")}
           >
             {t("Use the app's key")}
           </Button>
@@ -586,8 +590,11 @@ function Tmdb() {
           <Button
             variant="secondary"
             size="sm"
-            disabled={!preferences.data || update.isPending}
-            onClick={() => setEditing(true)}
+            disabled={!preferences.data}
+            aria-disabled={update.isPending}
+            onClick={() => {
+              if (!update.isPending) setEditing(true);
+            }}
           >
             {t("Own key…")}
           </Button>
@@ -598,12 +605,13 @@ function Tmdb() {
           className="flex flex-wrap gap-3 border-b border-white/8 py-3"
           onSubmit={(event) => {
             event.preventDefault();
-            if (key.trim()) update.mutate(key.trim());
+            if (key.trim()) save(key.trim());
           }}
         >
           <Input
             autoFocus
-            disabled={update.isPending}
+            readOnly={update.isPending}
+            aria-disabled={update.isPending}
             type="password"
             value={key}
             onChange={(event) => setKey(event.target.value)}
@@ -622,7 +630,8 @@ function Tmdb() {
             type="submit"
             variant="secondary"
             size="sm"
-            disabled={!key.trim() || update.isPending}
+            disabled={!key.trim()}
+            aria-disabled={update.isPending}
           >
             {t("Use")}
           </Button>
@@ -634,7 +643,7 @@ function Tmdb() {
       <SaveFeedback
         pending={update.isPending}
         error={update.error}
-        retry={() => update.mutate(update.variables!)}
+        retry={() => save(update.variables!)}
       />
     </div>
   );

@@ -278,11 +278,12 @@ export function TitleWatch() {
     return (
       <div
         data-view="title"
+        tabIndex={-1}
         data-mini=""
         data-controls={controlsVisible ? "" : undefined}
         onMouseMove={wake}
         className={cn(
-          "fixed inset-0 z-30 overflow-hidden bg-black",
+          "fixed inset-0 z-30 overflow-hidden bg-black outline-none",
           !controlsVisible && "cursor-none",
         )}
       >
@@ -324,10 +325,11 @@ export function TitleWatch() {
   return (
     <div
       data-view="title"
+      tabIndex={-1}
       data-controls={controlsVisible ? "" : undefined}
       onMouseMove={wake}
       className={cn(
-        "fixed inset-0 z-30 overflow-hidden bg-black",
+        "fixed inset-0 z-30 overflow-hidden bg-black outline-none",
         !controlsVisible && "cursor-none",
       )}
     >

@@ -87,7 +87,8 @@ export function OnlineSubtitlesSection() {
           type="checkbox"
           aria-label={t("Online subtitle search")}
           checked={saved?.enabled ?? false}
-          disabled={!saved || update.isPending}
+          disabled={!saved}
+          aria-disabled={update.isPending}
           onChange={(event) => change({ enabled: event.currentTarget.checked })}
         />
       </Row>
@@ -95,6 +96,8 @@ export function OnlineSubtitlesSection() {
       <Row id="subtitle-services" label={t("Search services")}>
         <Select
           label={t("Subtitle search services")}
+          disabled={!saved}
+          busy={update.isPending}
           value={saved?.service ?? "both"}
           options={[
             { value: "both", label: t("Every service set up") },
@@ -107,7 +110,9 @@ export function OnlineSubtitlesSection() {
       {feedback("subtitle-services")}
       <fieldset
         data-setting="subtitle-languages"
-        disabled={!saved || update.isPending}
+        disabled={!saved}
+        aria-disabled={update.isPending}
+        aria-busy={update.isPending}
         className="border-b border-white/8 py-3"
       >
         <legend className="pt-3">{t("Languages")}</legend>
@@ -141,8 +146,10 @@ export function OnlineSubtitlesSection() {
             <Button
               size="sm"
               variant="secondary"
-              disabled={!saved || update.isPending}
+              disabled={!saved}
+              aria-disabled={update.isPending}
               onClick={() => {
+                if (update.isPending) return;
                 setEditing(editing === service ? null : service);
                 setApiKey("");
                 setUsername("");
@@ -155,7 +162,7 @@ export function OnlineSubtitlesSection() {
               <Button
                 size="sm"
                 variant="secondary"
-                disabled={update.isPending}
+                aria-disabled={update.isPending}
                 onClick={() => change({}, { [service]: null })}
               >
                 {t("Remove")}
@@ -193,7 +200,8 @@ export function OnlineSubtitlesSection() {
                     )}
               </p>
               <Input
-                disabled={update.isPending}
+                readOnly={update.isPending}
+                aria-disabled={update.isPending}
                 type="password"
                 aria-label={t("{service} API key", {
                   service: service === "subdl" ? "SubDL" : "OpenSubtitles",
@@ -206,14 +214,16 @@ export function OnlineSubtitlesSection() {
               {service === "opensubtitles" && (
                 <div className="mt-2 space-y-2">
                   <Input
-                    disabled={update.isPending}
+                    readOnly={update.isPending}
+                    aria-disabled={update.isPending}
                     aria-label={t("OpenSubtitles username")}
                     placeholder={t("Username")}
                     value={username}
                     onChange={(event) => setUsername(event.currentTarget.value)}
                   />
                   <Input
-                    disabled={update.isPending}
+                    readOnly={update.isPending}
+                    aria-disabled={update.isPending}
                     type="password"
                     aria-label={t("OpenSubtitles password")}
                     placeholder={t("Password")}
@@ -229,10 +239,9 @@ export function OnlineSubtitlesSection() {
                 variant="primary"
                 className="mt-3"
                 disabled={
-                  update.isPending ||
-                  !apiKey.trim() ||
-                  (service === "opensubtitles" && (!username.trim() || !password))
+                  !apiKey.trim() || (service === "opensubtitles" && (!username.trim() || !password))
                 }
+                aria-disabled={update.isPending}
               >
                 {t("Save")}
               </Button>

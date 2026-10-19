@@ -259,6 +259,21 @@ export async function settingsScenario(d: Driver): Promise<void> {
       await d.evaluate<boolean>(`document.activeElement === ${delay}`),
       "Delay refusal lost focus",
     );
+    await nav("Movies and series");
+    await d.click("Edit key for persistence refusal", shown("[data-setting=tmdb] button"));
+    const refusedKey = shown('input[aria-label="Your own TMDB key"]');
+    await type(refusedKey, "settings-refused-test-key");
+    await d.key("Enter", 13);
+    await d.wait(() => d.exists("document.querySelector('main:not([hidden]) [role=alert]')"));
+    expect(
+      await d.evaluate<boolean>(
+        `document.activeElement === ${refusedKey} && ${refusedKey}.value === 'settings-refused-test-key'`,
+      ),
+      "TMDB refusal lost focus or the credential draft",
+    );
+    await d.capture("tmdb-refused-focused");
+    d.observed["tmdbRefusalFocus"] = { focusRetained: true, draftRetained: true };
+    await d.key("Escape", 27);
     await nav("Live TV");
     await d.evaluate(`${quality}.focus()`);
     await d.key("ArrowDown", 40);
@@ -419,6 +434,10 @@ export async function settingsScenario(d: Driver): Promise<void> {
     d.evaluate<boolean>(
       "!document.querySelector('[data-view=settings]') && !!document.querySelector('[data-view=title]')",
     ),
+  );
+  expect(
+    await d.evaluate<boolean>("document.activeElement?.matches('[data-view=title]')"),
+    "Closing Settings after its opener disappeared lost player focus",
   );
   await d.capture("return-to-playing-title");
 }
