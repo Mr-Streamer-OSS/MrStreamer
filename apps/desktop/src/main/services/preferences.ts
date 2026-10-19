@@ -121,19 +121,19 @@ function make(dataDir: string, usage?: UsageObservers) {
     });
 
     /**
-     * Applies a change while holding `one`. A native write keeps its turn until it settles,
-     * even if its caller cancels.
+     * Applies a change while holding `one`. The native write and in-memory publication finish
+     * in that same turn even if the caller cancels.
      */
     const applied = (apply: (previous: Stored) => Stored) =>
       Effect.gen(function* () {
         const previous = yield* stored;
         const next = apply(previous);
         const changed = preferenceChanges(previous, next).map((key) => usage?.setting(key));
-        yield* Effect.uninterruptible(Effect.promise(() => writeJsonFile(path, next)));
+        yield* Effect.promise(() => writeJsonFile(path, next));
         current = next;
         for (const note of changed) note?.();
         return next;
-      });
+      }).pipe(Effect.uninterruptible);
 
     const change = (apply: (previous: Stored) => Stored) => one.withPermits(1)(applied(apply));
 
@@ -158,6 +158,14 @@ function make(dataDir: string, usage?: UsageObservers) {
 
     const addedPath = (subscription: SavedSubscription) =>
       join(subscription.dir, "preferences.json");
+
+    /** Commits the added source's file and cached value together while holding `one`. */
+    const saveAdded = (subscription: SavedSubscription, next: SubscriptionPreferences) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(() => writeJsonFile(addedPath(subscription), next));
+        added.set(subscription.id, next);
+        return next;
+      }).pipe(Effect.uninterruptible);
 
     /** What the viewer left an added subscription at. Only runs while holding `one`. */
     const ofAdded = (subscription: SavedSubscription) =>
@@ -207,11 +215,7 @@ function make(dataDir: string, usage?: UsageObservers) {
         if (previous.lastCategoryId === lastCategoryId) return;
         if (subscription.original) yield* applied((file) => ({ ...file, lastCategoryId }));
         else {
-          const next = { ...previous, lastCategoryId };
-          yield* Effect.uninterruptible(
-            Effect.promise(() => writeJsonFile(addedPath(subscription), next)),
-          );
-          added.set(subscription.id, next);
+          yield* saveAdded(subscription, { ...previous, lastCategoryId });
         }
       });
 
@@ -269,11 +273,7 @@ function make(dataDir: string, usage?: UsageObservers) {
               )
             : Effect.gen(function* () {
                 const next = { ...(yield* ofAdded(subscription)), ...patch };
-                yield* Effect.uninterruptible(
-                  Effect.promise(() => writeJsonFile(addedPath(subscription), next)),
-                );
-                added.set(subscription.id, next);
-                return next;
+                return yield* saveAdded(subscription, next);
               }),
         ),
       prepareForget: (subscription: SavedSubscription) =>

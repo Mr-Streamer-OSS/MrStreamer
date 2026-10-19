@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type } from "arktype";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Preferences, SubscriptionPreferences } from "@mrstreamer/contracts/preferences";
@@ -11,17 +12,23 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 
 /** What writes of preferences.json wait for before they reach the disk, as on a slow one. */
-const disk = vi.hoisted(() => ({ ready: Promise.resolve() }));
+const disk = vi.hoisted<{ ready: Promise<void>; arrived?: () => void }>(() => ({
+  ready: Promise.resolve(),
+}));
 vi.mock("../src/main/platform/json-file.ts", async (original) => {
   const actual = await original<typeof import("../src/main/platform/json-file.ts")>();
   const writeJsonFile: typeof actual.writeJsonFile = async (path, value) => {
-    if (path.endsWith("preferences.json")) await disk.ready;
+    if (path.endsWith("preferences.json")) {
+      disk.arrived?.();
+      await disk.ready;
+    }
     return actual.writeJsonFile(path, value);
   };
   return { ...actual, writeJsonFile };
 });
 afterEach(() => {
   disk.ready = Promise.resolve();
+  delete disk.arrived;
 });
 
 /** Settings and subscriptions on `dataDir`, as a new start of the app reads them. */
@@ -34,6 +41,7 @@ async function start(dataDir: string) {
     ),
   );
   return {
+    runtime,
     settings: await promised(runtime, Settings),
     subscriptions: await promised(runtime, Subscriptions),
   };
@@ -637,3 +645,56 @@ it("keeps a newer discovery choice made while source removal is in flight", asyn
   await Effect.runPromise(forgetSettings);
   expect(await (await settingsIn(dataDir)).liveBrowse()).toEqual({ kind: "topic", topic: "sport" });
 });
+
+// Cancelling an admitted native write cannot leave this process behind its saved file.
+it.each(["general", "added"] as const)(
+  "publishes a completed %s preference write even when its caller cancels",
+  async (kind) => {
+    const dataDir = await tempDir();
+    const { runtime, settings, subscriptions } = await start(dataDir);
+    let subscriptionId: string | null = null;
+    if (kind === "added") {
+      const original = await fakeProvider();
+      await subscriptions.add({ server: original.url, username: "demo", password: "demo" });
+      const added = await fakeProvider({ second: true });
+      subscriptionId = (
+        await subscriptions.add({ server: added.url, username: "demo", password: "demo" })
+      ).id;
+      await settings.ofSubscription(subscriptionId);
+    } else await settings.get();
+    const raw = await runtime.runPromise(Settings);
+    const arrived = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    disk.arrived = arrived.resolve;
+    disk.ready = released.promise;
+    const expected = subscriptionId ? { lastCategoryId: "kept" } : { muted: true };
+    const fiber = runtime.runFork(
+      subscriptionId
+        ? Effect.asVoid(raw.updateSubscription(subscriptionId, { lastCategoryId: "kept" }))
+        : Effect.asVoid(raw.update({ muted: true })),
+    );
+    let stopping: Promise<unknown> | undefined;
+    try {
+      await arrived.promise;
+      stopping = runtime.runPromise(Fiber.interrupt(fiber));
+      // Deliver cancellation while the real filesystem boundary is still held.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally {
+      released.resolve();
+      delete disk.arrived;
+    }
+    await stopping;
+    const file = subscriptionId
+      ? join(dataDir, "subscriptions", subscriptionId, "preferences.json")
+      : join(dataDir, "preferences.json");
+    const persisted: unknown = JSON.parse(await readFile(file, "utf8"));
+    expect(persisted).toMatchObject(expected);
+    expect(
+      subscriptionId ? await settings.ofSubscription(subscriptionId) : await settings.get(),
+    ).toMatchObject(expected);
+    const restarted = (await start(dataDir)).settings;
+    expect(
+      subscriptionId ? await restarted.ofSubscription(subscriptionId) : await restarted.get(),
+    ).toMatchObject(expected);
+  },
+);
