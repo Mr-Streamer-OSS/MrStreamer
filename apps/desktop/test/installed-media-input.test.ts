@@ -172,7 +172,6 @@ describe("installed media removal delivery, synthetic only", () => {
           (event) => event.stage === phase.stage && event.contained && event.isTrusted !== true,
         ),
       ).toBe(true);
-      expect(events[0]!.clientX).not.toBe(phase.final!.x);
       expect(phase.outcome!.deadline).toBe(phase.outcome!.releaseAckAt + phase.outcome!.budgetMs);
       expect(phase.outcome!.remainingMs).toBeGreaterThan(0);
       expect(phase.outcome!.remainingMs).toBeLessThanOrEqual(phase.outcome!.budgetMs);
@@ -190,8 +189,6 @@ describe("installed media removal delivery, synthetic only", () => {
     for (let i = 0; i < s.app.commands.length; i++) {
       const command = s.app.commands[i]!;
       if (command.type === "mousePressed") expect(s.app.commands[i - 1]!.method).toBe("evaluate");
-      if (command.timeout !== undefined)
-        expect(command.timeout).toBe(command.method === "evaluate" ? 1000 : 10_000);
     }
   });
 

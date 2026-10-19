@@ -65,7 +65,7 @@ interface MediaInputEvidence {
 const errorText = (error: unknown) =>
   error instanceof Error ? (error.stack ?? error.message) : String(error);
 
-/** Media removal only. Root checks Chromium isTrusted receipts on the actual Windows run. */
+/** Writes media-removal evidence after each stage and before listener cleanup. */
 export async function removeMediaSubscription(
   d: MediaDriver,
   writeEvidence: (evidence: MediaInputEvidence) => Promise<void>,
@@ -93,7 +93,7 @@ export async function removeMediaSubscription(
       throw new Error('Media removal target missing, ambiguous, disabled, replaced or in wrong row');`;
   const trace: MediaInputEvidence = {
     trust:
-      "Root requires one contained isTrusted=true mousedown/mouseup/click per executed stage on Windows. CDP delivery is not OS or hardware input; synthetic trust is false/unavailable.",
+      "Windows acceptance requires one contained isTrusted=true mousedown/mouseup/click per executed stage. CDP delivery is not OS or hardware input; synthetic trust is false/unavailable.",
     phases: [],
     diagnosticErrors: [],
   };
@@ -172,13 +172,9 @@ export async function removeMediaSubscription(
         {const targets=${resolveTarget}; p.target=targets.length===1?targets[0]:null;}
         ${validate}
         e.scrollIntoView({block:'center'}); ${geometry} return geometry;})()`,
-        1000,
       );
       await input(record, "mouseMoved", { x: record.initial.x, y: record.initial.y });
-      await d.page.evaluate(
-        "new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))",
-        1000,
-      );
+      await d.page.evaluate("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
       d.actions.push({ at: new Date().toISOString(), action: label });
       // This check also arms capture and is the last page command before the single press.
       record.final = await d.page.evaluate<Geometry>(
@@ -187,7 +183,6 @@ export async function removeMediaSubscription(
         ${validate} ${geometry}
         p.stage=stage;p.events=[];p.truncated=false;
         p.armed=!!r.width&&!!r.height&&geometry.contained;return geometry;})()`,
-        1000,
       );
       if (!record.final.rect.width || !record.final.rect.height || !record.final.contained)
         throw new Error("Media removal target not under pointer");
@@ -257,7 +252,6 @@ export async function removeMediaSubscription(
       globalThis[${boundary}]=p;
       for(const type of ['mousedown','mouseup','click'])document.addEventListener(type,p.listener,true);
       return headers[0].getAttribute('aria-expanded');})()`,
-      1000,
     );
     trace.rowState = { at: Date.now(), expanded };
     if (expanded !== "true" && expanded !== "false")
