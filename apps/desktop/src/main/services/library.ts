@@ -943,31 +943,24 @@ function searchIndex(channels: readonly LiveChannel[]): LiveSearchIndex {
   return index;
 }
 
-/** One lookup projection for each cached Combined, discarded when its catalogues change. */
-const browseProjections = new WeakMap<Combined, ReadonlyMap<string, LiveChannel>>();
 function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
-  let byId = browseProjections.get(lists);
-  if (!byId) {
-    byId = new Map(
-      lists.members.flatMap((member) =>
-        [...member.byId].map(
-          ([id, channel]) =>
-            [
-              ownedKey({ subscriptionId: member.subscriptionId, id }),
-              lists.shown(channel),
-            ] as const,
-        ),
-      ),
-    );
-    browseProjections.set(lists, byId);
-  }
   const { scope, filters } = query;
   const channels =
     scope.kind === "all"
       ? lists.channels
       : scope.kind === "category"
         ? (lists.byCategory.get(ownedKey(scope.category)) ?? [])
-        : [...new Set(scope.channels.flatMap((id) => byId.get(ownedKey(id)) ?? []))];
+        : [
+            ...new Set(
+              scope.channels.flatMap(({ subscriptionId, id }) => {
+                // Personal lists reuse the accepted source's lookup for just the requested ids.
+                const channel = lists.members
+                  .find((member) => member.subscriptionId === subscriptionId)
+                  ?.byId.get(id);
+                return channel ? lists.shown(channel) : [];
+              }),
+            ),
+          ];
   const facets = {
     browseTopics: new Map<string, number>(),
     countries: new Map<string, number>(),
