@@ -15,6 +15,7 @@ import { connect, type Page } from "./app.ts";
 import { closeNative } from "./analytics-exit.ts";
 import { installedTelemetryPair } from "./analytics-installed-pair.ts";
 import { installCatalogueWorkerProbe, type Evidence } from "./installed-catalogue-worker.ts";
+import { browserFacts, probe } from "./installed-media-observer.ts";
 import { catalogueWorkerScripts, installedMainScript } from "./installed-worker-scripts.ts";
 import { readReceipt } from "./installed-upgrade-packages.ts";
 import { disposableRunner, ownedTree, type Runner } from "./installed-upgrade-windows.ts";
@@ -556,13 +557,23 @@ interface MediaObservation {
   title: boolean;
   sameNode: boolean;
   caption: string;
+  readyState: number;
+  seeking: boolean;
+  stateShown: boolean;
+  position: number | null;
+  sequence: number;
+  window: number;
+  generation: number;
 }
 function media(d: Driver) {
-  return d.page.evaluate<MediaObservation>(`(()=>{const v=document.querySelector('video');return {
+  return d.page
+    .evaluate<MediaObservation>(`(()=>{const v=document.querySelector('video'),p=window.__installedMediaProbe,position=document.querySelector('[data-view=title] [role=slider][aria-label=Position]')?.getAttribute('aria-valuenow');return {
     time:v?.currentTime??0,width:v?.videoWidth??0,audio:v?.webkitAudioDecodedByteCount??0,
     frames:v?.getVideoPlaybackQuality().totalVideoFrames??0,paused:v?.paused??true,
     title:!!document.querySelector('[data-view=title]'),sameNode:!!v&&window.__installedMediaProbe?.node===v,
-    caption:document.querySelector('[data-subtitle-text]')?.textContent?.trim()??''};})()`);
+    caption:document.querySelector('[data-subtitle-text]')?.textContent?.trim()??'',
+    readyState:v?.readyState??0,seeking:v?.seeking??false,stateShown:!!document.querySelector('[data-view=title] h2'),
+    position:position===null||position===undefined?null:Number(position),sequence:p?.sequence??0,window:p?.window??0,generation:p?.generation??0};})()`);
 }
 async function moving(d: Driver) {
   const until = Date.now() + 45_000;
@@ -676,97 +687,8 @@ async function remove(d: Driver, record: Record<string, unknown>) {
   assert.equal((await d.read("subscription.list")).length, 0);
 }
 
-interface TypeCheck {
-  at: number;
-  type: string;
-  supported: boolean;
-}
-interface BrowserError {
-  at: number;
-  code: number | null;
-  message: string;
-  time: number;
-  generation: number;
-}
-interface BrowserFacts {
-  checks: TypeCheck[];
-  errors: BrowserError[];
-  generation: number;
-  buffers: { generation: number; at: number; type: string }[];
-}
-interface Delivery {
-  at: number;
-  url: string;
-  query: string;
-  status: number;
-  headers: Record<string, string>;
-  video: string | null;
-  audio: string | null;
-}
-function browserFacts(page: Page) {
-  return page.evaluate<BrowserFacts>(
-    `(()=>{const p=window.__installedMediaProbe;return p?{checks:p.checks,errors:p.errors,generation:p.generation,buffers:p.buffers}:{checks:[],errors:[],generation:0,buffers:[]};})()`,
-  );
-}
-async function probe(page: Page) {
-  const events: { at: number; kind: string; data: unknown }[] = [];
-  const deliveries: Delivery[] = [];
-  for (const method of [
-    "Media.playerPropertiesChanged",
-    "Media.playerEventsAdded",
-    "Media.playerMessagesLogged",
-    "Media.playerErrorsRaised",
-  ])
-    page.on(method, (data) => events.push({ at: Date.now(), kind: method, data }));
-  page.on("Network.responseReceived", (params) => {
-    const response = (
-      params as { response: { url: string; status: number; headers: Record<string, string> } }
-    ).response;
-    const url = new URL(response.url);
-    if (!url.pathname.startsWith("/title/") || url.searchParams.has("only")) return;
-    const header = (name: string) =>
-      Object.entries(response.headers)
-        .find(([key]) => key.toLowerCase() === name)?.[1]
-        .toLowerCase() ?? null;
-    deliveries.push({
-      at: Date.now(),
-      url: response.url,
-      query: url.search,
-      status: response.status,
-      headers: response.headers,
-      video: header("x-title-video"),
-      audio: header("x-title-audio"),
-    });
-  });
-  await page.send("Media.enable");
-  // Observe actual browser decisions and real SourceBuffers. Never replace a capability or error.
-  await page.evaluate(`(()=>{
-    const p=window.__installedMediaProbe={node:null,checks:[],errors:[],generation:0,buffers:[],buffer:null};
-    const support=MediaSource.isTypeSupported.bind(MediaSource);
-    MediaSource.isTypeSupported=function(type){const supported=support(type);p.checks.push({at:Date.now(),type,supported});return supported;};
-    const add=MediaSource.prototype.addSourceBuffer;
-    MediaSource.prototype.addSourceBuffer=function(type){const b=add.call(this,type);p.buffer=b;
-      p.buffers.push({generation:++p.generation,at:Date.now(),type});return b;};
-    document.addEventListener('error',e=>{if(e.target instanceof HTMLVideoElement)p.errors.push({at:Date.now(),code:e.target.error?.code??null,
-      message:e.target.error?.message??'',time:e.target.currentTime,generation:p.generation});},true);
-  })()`);
-  return { events, deliveries };
-}
 type Seen = Awaited<ReturnType<typeof probe>>;
-async function beginWindow(d: Driver, seen: Seen, name: string) {
-  await d.page.evaluate(
-    "window.__installedMediaProbe.node=null;window.__installedMediaProbe.progress=null",
-  );
-  const facts = await browserFacts(d.page);
-  return {
-    name,
-    at: Date.now(),
-    deliveryFrom: seen.deliveries.length,
-    checkFrom: facts.checks.length,
-    errorFrom: facts.errors.length,
-  };
-}
-type WindowStart = Awaited<ReturnType<typeof beginWindow>>;
+type WindowStart = Awaited<ReturnType<Seen["beginWindow"]>>;
 async function anchor(d: Driver) {
   await d.wait(
     () => d.page.evaluate<boolean>("!!document.querySelector('[data-view=title] video')"),
@@ -776,12 +698,8 @@ async function anchor(d: Driver) {
   await d.page.evaluate("window.__installedMediaProbe.node=document.querySelector('video')");
 }
 async function windowFacts(d: Driver, seen: Seen, window: WindowStart) {
-  const facts = await browserFacts(d.page);
   return {
-    ...window,
-    deliveries: seen.deliveries.slice(window.deliveryFrom),
-    checks: facts.checks.slice(window.checkFrom),
-    errors: facts.errors.slice(window.errorFrom),
+    ...(await seen.windowFacts(window)),
     decoded: await media(d),
     progress: await d.page.evaluate<{ before: MediaObservation; after: MediaObservation }>(
       "window.__installedMediaProbe.progress",
@@ -796,6 +714,57 @@ function requireVideoConversion(facts: Awaited<ReturnType<typeof windowFacts>>) 
   assert(facts.decoded.sameNode, `${facts.name}: media element changed`);
 }
 class Unresolved extends Error {}
+
+/** A track reload must deliver and decode anew before DOM clocks or old width can be evidence. */
+async function settledAfter(
+  d: Driver,
+  before: MediaObservation,
+  record: Record<string, unknown>,
+  timeout: number,
+  label: string,
+) {
+  record["before"] = before;
+  let decoded: MediaObservation | undefined;
+  await d.wait(
+    async () => {
+      const v = await media(d);
+      const facts = await browserFacts(d.page);
+      const buffer = facts.buffers.find((item) => item.generation === v.generation);
+      const delivery = facts.deliveries.find((item) => item.requestId === buffer?.requestId);
+      record["latest"] = { decoded: v, buffer, delivery };
+      if (
+        !delivery ||
+        delivery.requestSequence <= before.sequence ||
+        delivery.status !== 200 ||
+        delivery.window !== before.window ||
+        delivery.responseWindow !== before.window ||
+        !buffer ||
+        buffer.sequence <= delivery.sequence ||
+        buffer.generation <= before.generation ||
+        !v.title ||
+        !v.sameNode ||
+        v.readyState < 2 ||
+        v.seeking ||
+        v.stateShown ||
+        v.width <= 0 ||
+        v.frames <= 0 ||
+        v.position === null ||
+        Math.abs(v.time - v.position) >= 0.2 ||
+        v.paused !== before.paused
+      )
+        return false;
+      if (before.paused) return Math.abs(v.time - before.time) < 0.2;
+      if (!decoded || decoded.generation !== v.generation) {
+        decoded = v;
+        return false;
+      }
+      return v.time > decoded.time + 0.25 && v.frames > decoded.frames && v.audio > decoded.audio;
+    },
+    timeout,
+    label,
+  );
+  record["after"] = await media(d);
+}
 
 async function pauseSeekResume(
   d: Driver,
@@ -818,7 +787,15 @@ async function pauseSeekResume(
   await d.wait(
     async () => {
       const v = await media(d);
-      return v.paused && Math.abs(v.time - (held.time + 10)) < 2 && v.width > 0;
+      return (
+        v.paused &&
+        Math.abs(v.time - (held.time + 10)) < 2 &&
+        v.width > 0 &&
+        v.readyState >= 2 &&
+        !v.seeking &&
+        !v.stateShown &&
+        v.sameNode
+      );
     },
     15_000,
     "paused ten-second seek",
@@ -835,12 +812,23 @@ async function pauseSeekResume(
     const other =
       "[...document.querySelectorAll('[role=dialog] button[aria-pressed=false], [role=dialog] [role=menuitemradio][aria-checked=false]')][0]";
     const picked = await d.page.evaluate<string>(`(${other}).textContent.trim()`);
+    const soundBefore = await media(d);
+    const transition: Record<string, unknown> = {};
+    record["soundTransition"] = transition;
     await d.click("Other sound while paused", other);
     await d.wait(
       async () => !(await d.exists("document.querySelector('[role=dialog]')")),
       10_000,
       "sound menu closed",
     );
+    await settledAfter(
+      d,
+      soundBefore,
+      transition,
+      45_000,
+      "paused other sound decoded after reload",
+    );
+    record["pausedOtherSound"] = await media(d);
     await d.click("Read selected sound", labelled("Sound"));
     const selected = await d.page.evaluate<string>(
       "document.querySelector('[role=dialog] button[aria-pressed=true], [role=dialog] [role=menuitemradio][aria-checked=true]')?.textContent.trim()??''",
@@ -854,16 +842,6 @@ async function pauseSeekResume(
       10_000,
       "selected sound menu closed",
     );
-    const position = sought.time;
-    await d.wait(
-      async () => {
-        const v = await media(d);
-        return v.paused && Math.abs(v.time - position) < 0.2 && v.width > 0 && v.sameNode;
-      },
-      45_000,
-      "paused other sound",
-    );
-    record["pausedOtherSound"] = await media(d);
   }
   const resumeFrom = await media(d);
   assert(resumeFrom.sameNode);
@@ -885,53 +863,79 @@ async function pauseSeekResume(
   record["resumed"] = await media(d);
 }
 
-async function laterRejections(d: Driver, seen: Seen, record: Record<string, unknown>) {
+async function laterRejections(d: Driver, record: Record<string, unknown>) {
   const position = (await media(d)).time;
   const steps: Record<string, unknown>[] = [];
   record["actualLaterRejections"] = steps;
   let priorGeneration = 0;
-  let recoveryAt = 0;
+  let recoverySequence = 0;
+  let recoveryRequestId: number | null = null;
   for (const phase of ["audio", "video"] as const) {
     await d.wait(
       () =>
         d.page.evaluate<boolean>(
-          `(()=>{const p=window.__installedMediaProbe,b=p.buffers.at(-1);return !!p.buffer&&!p.buffer.updating&&p.generation>${priorGeneration}&&b.at>=${recoveryAt};})()`,
+          `(()=>{const p=window.__installedMediaProbe,b=p.buffers.at(-1);return !!p.buffer&&!p.buffer.updating&&p.generation>${priorGeneration}&&b.sequence>${recoverySequence}&&b.window===p.window&&(${recoveryRequestId}===null||b.requestId===${recoveryRequestId});})()`,
         ),
       10_000,
       "new idle real SourceBuffer after recovery",
     );
     const before = await browserFacts(d.page);
     priorGeneration = before.generation;
-    const from = seen.deliveries.length;
+    const window = before.window;
     const step: Record<string, unknown> = {
       phase,
       before,
-      deliveryFrom: from,
-      injectedAt: Date.now(),
+      window,
       generation: priorGeneration,
     };
     steps.push(step);
-    await d.page.evaluate(
-      "window.__installedMediaProbe.buffer.appendBuffer(new Uint8Array([0,0,0,4,109,111,111,102]))",
+    const injection = await d.page.evaluate<{ sequence: number }>(
+      `(()=>{const p=window.__installedMediaProbe,b=p.buffers.at(-1);
+        const injection={...p.stamp(),requestId:b.requestId,deliverySequence:b.deliverySequence,generation:p.generation};
+        p.injections.push(injection);p.buffer.appendBuffer(new Uint8Array([0,0,0,4,109,111,111,102]));return injection;})()`,
     );
+    step["injection"] = injection;
     await d.wait(
       async () =>
         (await browserFacts(d.page)).errors
           .slice(before.errors.length)
-          .some((error) => error.code === 3 && error.generation === priorGeneration),
+          .some(
+            (error) =>
+              error.code === 3 &&
+              error.generation === priorGeneration &&
+              error.window === window &&
+              error.sequence > injection.sequence,
+          ),
       30_000,
       "new actual browser code3 parser error",
     );
     const error = (await browserFacts(d.page)).errors
       .slice(before.errors.length)
-      .find((error) => error.code === 3 && error.generation === priorGeneration)!;
+      .find(
+        (error) =>
+          error.code === 3 &&
+          error.generation === priorGeneration &&
+          error.window === window &&
+          error.sequence > injection.sequence,
+      )!;
     step["error"] = error;
     await d.wait(
-      async () => seen.deliveries.slice(from).some((delivery) => delivery.at >= error.at),
+      async () =>
+        (await browserFacts(d.page)).deliveries.some(
+          (delivery) =>
+            delivery.window === window &&
+            delivery.responseWindow === window &&
+            delivery.requestSequence > error.sequence,
+        ),
       30_000,
       "response following actual parser error",
     );
-    const next = seen.deliveries.slice(from).find((delivery) => delivery.at >= error.at)!;
+    const next = (await browserFacts(d.page)).deliveries.find(
+      (delivery) =>
+        delivery.window === window &&
+        delivery.responseWindow === window &&
+        delivery.requestSequence > error.sequence,
+    )!;
     step["followingDelivery"] = next;
     assert.equal(next.status, 200);
     assert.equal(next.video, phase === "audio" ? "copy" : "convert");
@@ -940,12 +944,27 @@ async function laterRejections(d: Driver, seen: Seen, record: Record<string, unk
       new URL(next.url).searchParams.get(phase === "audio" ? "sound" : "picture"),
       "convert",
     );
-    recoveryAt = next.at;
+    recoverySequence = next.sequence;
+    recoveryRequestId = next.requestId;
     await d.wait(
       async () => {
         const v = await media(d);
+        const buffer = (await browserFacts(d.page)).buffers.find(
+          (item) => item.generation === v.generation,
+        );
+        step["recoveryBuffer"] = buffer;
         return (
-          v.paused && Math.abs(v.time - position) < 0.2 && v.width > 0 && v.frames > 1 && v.sameNode
+          !!buffer &&
+          buffer.sequence > next.sequence &&
+          buffer.requestId === next.requestId &&
+          v.paused &&
+          Math.abs(v.time - position) < 0.2 &&
+          v.width > 0 &&
+          v.frames > 1 &&
+          v.sameNode &&
+          v.readyState >= 2 &&
+          !v.seeking &&
+          !v.stateShown
         );
       },
       30_000,
@@ -956,25 +975,67 @@ async function laterRejections(d: Driver, seen: Seen, record: Record<string, unk
   }
 }
 
-async function embeddedFrench(d: Driver) {
+async function embeddedFrench(
+  d: Driver,
+  record: Record<string, unknown>,
+  save: () => Promise<void>,
+) {
+  const transition: Record<string, unknown> = {};
+  const attempts: Record<string, unknown>[] = [];
+  record["embeddedFrenchTransition"] = transition;
+  record["embeddedFrenchSeeks"] = attempts;
   await d.click("Open Subtitles", labelled("Subtitles"));
-  await d.click(
-    "Choose embedded French",
-    `[...document.querySelectorAll('aside[aria-label="Subtitle choices"] button[aria-pressed]')].find(b=>b.textContent.trim()==='Français')`,
-  );
-  await d.click("Close Subtitles", labelled("Close subtitles"));
-  // The committed long file's first French line is at 60 seconds. Seek through the real keys.
-  for (let attempt = 0; (await media(d)).time < 58 && attempt < 7; attempt++) {
-    const before = (await media(d)).time;
-    await d.key("ArrowRight", 39);
-    await d.wait(
-      async () => {
-        const v = await media(d);
-        return !v.paused && v.width > 0 && Math.abs(v.time - (before + 10)) < 2;
-      },
-      15_000,
-      "French cue seek",
+  const before = await media(d);
+  transition["before"] = before;
+  await save();
+  try {
+    await d.click(
+      "Choose embedded French",
+      `[...document.querySelectorAll('aside[aria-label="Subtitle choices"] button[aria-pressed]')].find(b=>b.textContent.trim()==='Français')`,
     );
+    await d.click("Close Subtitles", labelled("Close subtitles"));
+    transition["afterSelection"] = await media(d);
+    await settledAfter(d, before, transition, 15_000, "French selection decoded after reload");
+  } finally {
+    transition["after"] = await media(d);
+    transition["browser"] = await browserFacts(d.page);
+    await save();
+  }
+  // Stop below the two-second cue at 60, then play into it within the existing cue wait.
+  for (let attempt = 0; (await media(d)).time < 48 && attempt < 7; attempt++) {
+    const before = await media(d);
+    const observation: Record<string, unknown> = {
+      before,
+      key: { name: "ArrowRight", code: 39, nodeRequestedAt: Date.now() },
+    };
+    attempts.push(observation);
+    await save();
+    try {
+      await d.key("ArrowRight", 39);
+      await d.wait(
+        async () => {
+          const v = await media(d);
+          observation["latest"] = v;
+          return (
+            !v.paused &&
+            v.width > 0 &&
+            Math.abs(v.time - (before.time + 10)) < 2 &&
+            v.readyState >= 2 &&
+            !v.seeking &&
+            !v.stateShown &&
+            v.sameNode &&
+            v.position !== null &&
+            Math.abs(v.position - v.time) < 0.2
+          );
+        },
+        15_000,
+        "French cue seek",
+      );
+    } finally {
+      observation["after"] = await media(d);
+      observation["browser"] = await browserFacts(d.page);
+      await save();
+    }
   }
   await d.wait(
     async () => (await media(d)).caption === "Soixante",
@@ -1020,7 +1081,6 @@ async function runCase(
   let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
   let subtitles: Awaited<ReturnType<typeof startSubtitleFixture>> | undefined;
   let session: ReturnType<typeof launch> | undefined;
-  let observed: Seen | undefined;
   let laterCopyDecoded = false;
   let stopped = false;
   const stopFixtures = async () => {
@@ -1101,7 +1161,6 @@ async function runCase(
     );
     const d = await session.ready();
     const seen = await probe(d.page);
-    observed = seen;
     proof.facts["media"] = seen;
     await d.wait(() => d.exists('document.querySelector("form input")'), 30_000, "Connect");
     for (const [index, value] of [provider.url, "demo", "demo"].entries()) {
@@ -1123,7 +1182,7 @@ async function runCase(
       await configureSubtitleUi(d);
       await d.key("Escape", 27);
       await openMovie(d, "Long subtitles");
-      const window = await beginWindow(d, seen, "provider-long");
+      const window = await seen.beginWindow("provider-long");
       await d.click("Play long AV1", button("[role=dialog] button", "Play"));
       await anchor(d);
       await moving(d);
@@ -1138,7 +1197,7 @@ async function runCase(
     }
     await download(d, "Two sound tracks");
     await openMovie(d, "Two sound tracks");
-    const online = await beginWindow(d, seen, "provider-short");
+    const online = await seen.beginWindow("provider-short");
     await d.click("Play provider file", button("[role=dialog] button", "Play"));
     await anchor(d);
     await moving(d);
@@ -1174,7 +1233,7 @@ async function runCase(
       d,
       true,
       controls,
-      variant === "later-rejection" ? () => laterRejections(d, seen, proof.facts) : undefined,
+      variant === "later-rejection" ? () => laterRejections(d, proof.facts) : undefined,
     );
     const onlineFacts = await windowFacts(d, seen, online);
     windows.push(onlineFacts);
@@ -1183,13 +1242,22 @@ async function runCase(
       const first = onlineFacts.deliveries[0];
       assert(first && (first.video === "copy" || first.video === "convert"));
       const rejection = [
-        ...onlineFacts.checks.filter((check) => !check.supported).map((check) => check.at),
-        ...onlineFacts.errors.filter((error) => error.code === 3).map((error) => error.at),
-      ].find((at) => at >= first.at);
+        ...onlineFacts.checks.filter((check) => !check.supported),
+        ...onlineFacts.errors.filter((error) => error.code === 3),
+      ]
+        .sort((a, b) => a.sequence - b.sequence)
+        .find((item) =>
+          onlineFacts.deliveries.some(
+            (delivery) =>
+              delivery.video === "copy" &&
+              delivery.sequence < item.sequence &&
+              delivery.requestId === item.requestId,
+          ),
+        );
       const converted = onlineFacts.deliveries.find((delivery) => delivery.video === "convert");
       if (first.video === "copy" && converted)
         assert(
-          rejection !== undefined && converted.at >= rejection,
+          rejection !== undefined && converted.requestSequence > rejection.sequence,
           "Depth copy changed delivery without observed browser rejection",
         );
       proof.facts["depthBehavior"] = {
@@ -1235,7 +1303,7 @@ async function runCase(
       (copy) => copy.title.kind === "movie" && copy.title.id === String(short.id),
     );
     assert(shortCopy);
-    const offline = await beginWindow(d, seen, "offline-short");
+    const offline = await seen.beginWindow("offline-short");
     await d.click(
       "Watch short owned copy",
       `document.querySelector('[data-download="${shortCopy.id}"] button')`,
@@ -1253,7 +1321,11 @@ async function runCase(
           "Startup copied rejection unavailable: no initial video-copy delivery",
         );
       const rejected = offlineFacts.checks.find(
-        (check) => !check.supported && /avc1\.ff/i.test(check.type) && check.at >= copy.at,
+        (check) =>
+          !check.supported &&
+          /avc1\.ff/i.test(check.type) &&
+          check.sequence > copy.sequence &&
+          check.requestId === copy.requestId,
       );
       if (!rejected)
         throw new Unresolved(
@@ -1261,7 +1333,7 @@ async function runCase(
         );
       const converted = offlineFacts.deliveries.find(
         (delivery) =>
-          delivery.at >= rejected.at &&
+          delivery.requestSequence > rejected.sequence &&
           delivery.video === "convert" &&
           new URL(delivery.url).searchParams.get("picture") === "convert",
       );
@@ -1281,7 +1353,7 @@ async function runCase(
         (copy) => copy.title.kind === "movie" && copy.title.id === String(long.id),
       );
       assert(longCopy);
-      const window = await beginWindow(d, seen, "offline-long-first-open");
+      const window = await seen.beginWindow("offline-long-first-open");
       await d.click(
         "Watch long owned copy",
         `document.querySelector('[data-download="${longCopy.id}"] button')`,
@@ -1291,7 +1363,7 @@ async function runCase(
       const longControls: Record<string, unknown> = {};
       proof.facts["offlineLongControls"] = longControls;
       await pauseSeekResume(d, false, longControls);
-      proof.facts["embeddedFrench"] = await embeddedFrench(d);
+      proof.facts["embeddedFrench"] = await embeddedFrench(d, proof.facts, save);
       proof.facts["savedOfflineSubtitle"] = await observeSavedSubtitle(d, "copy");
       const longFacts = await windowFacts(d, seen, window);
       windows.push(longFacts);
@@ -1323,7 +1395,7 @@ async function runCase(
         Math.abs(parseFloat(percentage) - (100 * kept.position) / kept.duration) < 2,
         "Row progress differs from saved copy",
       );
-      const resume = await beginWindow(d, seen, "offline-long-resume");
+      const resume = await seen.beginWindow("offline-long-resume");
       await d.click("Resume long owned copy", `(${row})?.querySelector('button')`);
       await anchor(d);
       await moving(d);
@@ -1362,23 +1434,13 @@ async function runCase(
     });
     const initiallyConverted =
       variant === "later-rejection"
-        ? !laterCopyDecoded &&
-          !!observed?.deliveries.some((delivery) => delivery.video === "convert")
-        : observed?.deliveries[0]?.video === "convert";
+        ? !laterCopyDecoded && !!facts?.deliveries.some((delivery) => delivery.video === "convert")
+        : facts?.deliveries[0]?.video === "convert";
     const acceptedInvalidAvc = facts?.checks.some(
       (check) => check.supported && /avc1\.ff/i.test(check.type),
     );
-    if (
-      (variant === "startup-rejection" && (initiallyConverted || acceptedInvalidAvc)) ||
-      (variant === "later-rejection" && initiallyConverted)
-    ) {
-      proof.outcome = "unresolved";
-      proof.facts["unresolvedBranch"] = {
-        initiallyConverted,
-        acceptedInvalidAvc,
-        originalError: proof.error,
-      };
-    }
+    // Capability facts explain the failure; only an explicit branch decision is Unresolved.
+    proof.facts["capabilityAtFailure"] = { initiallyConverted, acceptedInvalidAvc };
   } finally {
     // Preserve the original case error even if any later cleanup fails.
     for (const cleanup of [async () => session?.stop(), stopFixtures]) {
@@ -1539,6 +1601,7 @@ export async function installedMedia(args: string[]) {
     // Write before preflight and before first spawn, so even a pin refusal retains its target.
     const helpers = [
       "app.ts",
+      "installed-media-observer.ts",
       "analytics-exit.ts",
       "analytics-installed-pair.ts",
       "installed-upgrade.ts",
