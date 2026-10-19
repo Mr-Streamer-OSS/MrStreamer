@@ -4,6 +4,8 @@ Live and title playback share one media claim. An explicit channel, archive or z
 
 ## Sub-features
 
+Source removal stops admitting work before its existing Library, catalogue-worker and Guide owners settle their writes. Only then does the registry delete the source folder. `roster.test.ts` holds the public guide boundary to check this lifetime; `guide-source.test.ts` covers late downloads and mappings during concurrent removals. Real-app source-removal proof must still show that the other source remains usable and discovery falls back correctly.
+
 Pick channels through global search, Live TV, its guide grid or favourites. Watch shares its live stream with the muted Home preview. Other paths include codec conversion, captions, recovery, favourite ordering and catch-up of programmes that aired.
 
 ## How to get to it (user POV)

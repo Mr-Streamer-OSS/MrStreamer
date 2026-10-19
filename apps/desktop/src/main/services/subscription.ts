@@ -236,13 +236,13 @@ export class Subscriptions extends Context.Service<
      * Forgets a subscription's login, and for one added beside the original, its folder. A folder
      * that kept the same account without showing it goes too.
      *
-     * `erase` deletes what else the app kept for its account. It runs once the subscription is
-     * saved no more and before its login goes, so nothing is kept for the account while it runs
-     * or after. When it fails the removal fails with it, and the subscription is saved as it was.
+     * `beforeDelete` erases optional account records and settles owned cache work. It runs once
+     * the subscription is saved no more and before its login or folder goes, so no new work is
+     * admitted while existing writes settle. If it fails, the subscription is saved as it was.
      */
     remove(
       subscriptionId: string,
-      erase?: Effect.Effect<void, Failed>,
+      beforeDelete?: Effect.Effect<void, Failed>,
     ): Effect.Effect<void, Failed>;
     playlistGroups(
       subscriptionId: string,
@@ -659,7 +659,7 @@ function make(deps: SubscriptionDeps) {
           );
         }),
 
-      remove: (subscriptionId: string, erase?: Effect.Effect<void, Failed>) =>
+      remove: (subscriptionId: string, beforeDelete?: Effect.Effect<void, Failed>) =>
         writeOne(
           Effect.gen(function* () {
             // Settled first, so nothing a start still writes comes after the removal.
@@ -670,10 +670,10 @@ function make(deps: SubscriptionDeps) {
             // Saved no more before anything of it is deleted: what is asked for it from here on
             // finds no subscription, and keeps nothing for its account.
             current = Promise.resolve(roster.filter((each) => each !== subscription));
-            if (erase) {
-              // Nothing of it went yet, so it is saved again as it was. No other change had
-              // its turn meanwhile.
-              yield* Effect.onError(erase, () =>
+            if (beforeDelete) {
+              // Its login and folder still exist. A failed preparation restores the registry;
+              // no other storage change had its turn meanwhile.
+              yield* Effect.onError(beforeDelete, () =>
                 Effect.sync(() => {
                   current = Promise.resolve(roster);
                 }),

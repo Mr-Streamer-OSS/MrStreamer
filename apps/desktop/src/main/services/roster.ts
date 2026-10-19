@@ -189,20 +189,24 @@ function make() {
           // is saved still, and what is starred or saved for it then has to go with the rest.
           yield* subscriptions.remove(
             subscriptionId,
-            eraseViewing ? viewing.erase(subscription.key) : undefined,
+            Effect.gen(function* () {
+              if (eraseViewing) yield* viewing.erase(subscription.key);
+              // It is saved no more, so new work is refused. Settle admitted writes before
+              // deleting their folder, including a guide mapping already being stored.
+              yield* Effect.all(
+                [
+                  library.forget(subscription),
+                  onDemand.forget(subscription),
+                  guide.forget({ id: subscriptionId, store: subscription.dir }),
+                ],
+                { concurrency: "unbounded", discard: true },
+              );
+            }),
           );
           // An open asked for as it went has had its turn by now, and found it saved still.
           yield* playback.closeOf(subscriptionId);
           // As has a download queued as it went.
           yield* downloads.subscriptionGone(subscriptionId);
-          yield* Effect.all(
-            [
-              library.forget(subscription),
-              onDemand.forget(subscription),
-              guide.forget({ id: subscriptionId, store: subscription.dir }),
-            ],
-            { concurrency: "unbounded" },
-          );
           yield* forgetSettings;
         }),
 
