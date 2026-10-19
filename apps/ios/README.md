@@ -108,6 +108,19 @@ Each responsibility has one owner, a plain module with a store the screens read:
   read. A new password or a removal deletes a subscription's records with its lists, and no write
   of the earlier login is saved after that. Launch reads no record: the budget is counted at the
   first write.
+- `src/artwork-cache.ts`: channel logos and title pictures as files in Caches, so they show
+  again after a relaunch and offline. React Native's Image only gets a file: its own loader would
+  fetch through iOS's shared URL cache, which keeps answers on disk under their address. Pictures
+  are fetched by expo-file-system's `DownloadTask` on its foreground session, which keeps no URL
+  cache, four at a time and one per address, for at most 15 seconds and 5 MiB each; a picture no
+  one shows any more before its turn isn't fetched. The cache holds 160 MiB and 6,000 pictures,
+  the least recently shown going first; one unseen for 60 days goes, and one fetched over 30 days
+  ago is fetched again while it shows. A failed fetch, or a file that won't draw, shows the
+  monogram or the title's name, and is tried again after five minutes or a relaunch. An address
+  carrying a current login (`login-safety.ts`) is kept only for the session, in a folder the
+  index never names and the next launch empties; its file goes as soon as that login is replaced
+  or removed, and a fetch of it that ends after is thrown away. A download's own pictures stay
+  in its folder.
 - `src/subscriptions.ts`: the registry, `subscriptions.json`, and how private beta 2's one
   subscription in `state.json` becomes its first entry under the same id. Accounts removed with
   their history kept are remembered, so adding one again takes its id, and its history, back. Ids
@@ -285,7 +298,9 @@ fake TMDB under `/tmdb/3`; log in to `http://127.0.0.1:8791` as `fixture` / `fix
 and makes the channel lists, the movie and series lists, a channel or title files fail, or holds
 movie and series details back to try what a slow panel does; see `scripts/fixture-server.ts`.
 For measurements, `FIXTURE_PROFILE=measure` serves lists with known 4K titles and additions dated
-from `FIXTURE_ANCHOR`, and `FIXTURE_LOGOS=png` lists raster channel logos. A second panel, for several
+from `FIXTURE_ANCHOR`, and `FIXTURE_LOGOS=png` lists raster channel logos; with it,
+`FIXTURE_ART_CACHEABLE=1` lets caches keep them and `FIXTURE_ART_LOGIN=1` puts the login in their
+addresses, for checking what the artwork cache keeps. A second panel, for several
 providers, runs beside it on other ports with `FIXTURE_SECOND=1` and its own login, such as
 `FIXTURE_SECOND=1 FIXTURE_USERNAME=second FIXTURE_PASSWORD=second-pass node scripts/fixture-server.ts 8793 8794`;
 add it in Settings > Add provider at `http://127.0.0.1:8793`. Its channels have the first's ids.
