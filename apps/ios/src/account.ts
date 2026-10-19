@@ -6,6 +6,7 @@ import type { LiveCatalogue, OnDemandCatalogue, Provider } from "@mrstreamer/cor
 import { parseLogin, xtreamProvider, type XtreamAccount } from "@mrstreamer/core/xtream";
 import Constants from "expo-constants";
 import { dropLists, pruneLists, readList, writeList, type Saved } from "./catalogue-cache.ts";
+import { dropTitles, pruneDetails } from "./details-cache.ts";
 import { appError, hostOf } from "./errors.ts";
 import {
   combine,
@@ -67,7 +68,8 @@ import { eraseWatchlist, setWatchlistOwners } from "./watchlist.ts";
 // under a removed one's id, is given to the Keychain only once its saved lists are gone; when
 // they can't be deleted, the change fails and the login stays as it was. A removal deletes them
 // as it can, leaving the rest to the next launch or the next add. No list of an earlier login is
-// saved after a deletion, and a write under way can't bring them back.
+// saved after a deletion, and a write under way can't bring them back. The details of titles
+// opened from it (details-cache.ts, which titles.ts saves while `savable` holds) go with its lists.
 
 /** A list one subscription loads; a failed or repeated load keeps the last one it had. */
 export type Loadable<A> =
@@ -233,8 +235,12 @@ export const shownOf = lastOf;
 
 type Kind = Saved["kind"];
 
-/** Whether lists of `source` may still be saved as `id`'s: its login, saved and not replaced. */
-const savable = (id: string, source: Source) =>
+/**
+ * Whether lists or details of `source` may still be saved or shown as `id`'s: its login, saved
+ * and not replaced. A login counts as replaced once its saved lists start to be deleted for a new
+ * password, though `source` stays the current one until the new password signs in.
+ */
+export const savable = (id: string, source: Source) =>
   currentSource(id) === source &&
   source.revision > (dropped.get(id) ?? 0) &&
   registry.subscriptions.some((entry) => entry.id === id);
@@ -245,18 +251,19 @@ function save(id: string, source: Source, saved: Saved) {
 }
 
 /**
- * Deletes `id`'s saved lists once what reads or writes them has finished; from now on none of a
- * login signed in before is saved again. Answers whether they are all gone.
+ * Deletes `id`'s saved lists and details once what reads or writes them has finished; from now on
+ * none of a login signed in before is saved again. Answers whether they are all gone.
  */
-function dropSaved(id: string): Promise<boolean> {
+async function dropSaved(id: string): Promise<boolean> {
   dropped.set(id, revisions);
-  return dropLists(id);
+  const gone = await Promise.all([dropLists(id), dropTitles(id)]);
+  return gone.every(Boolean);
 }
 
 /**
- * Deletes `id`'s saved lists before a new password or account takes its id, or throws when some
- * are left, which the next launch would show for the new login. The login then stays as it was,
- * and its lists may be saved again.
+ * Deletes `id`'s saved lists and details before a new password or account takes its id, or throws
+ * when some are left, which the next launch would show for the new login. The login then stays as
+ * it was, and its lists may be saved again.
  */
 async function clearSaved(id: string): Promise<void> {
   const before = dropped.get(id);
@@ -459,7 +466,9 @@ export function restore(): Promise<void> {
       registry.subscriptions.map((entry) => keychainSecrets.read(entry.id).catch(() => null)),
     );
     syncRoster();
-    pruneLists(registry.subscriptions.map((entry) => entry.id));
+    const ids = registry.subscriptions.map((entry) => entry.id);
+    pruneLists(ids);
+    pruneDetails(ids);
     registry.subscriptions.forEach((entry, at) => {
       const password = passwords[at];
       if (password) signIn(entry, password, null);
