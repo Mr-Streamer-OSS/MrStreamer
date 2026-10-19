@@ -13,6 +13,8 @@ every category as a tile that opens its channels; a country is an optional filte
 tabs (`src/live-screen.tsx`). Movies and Series browse the
 desktop's collections (For you, New, Genres, Services, 4K and All) and open details pushed on
 their tab, with seasons and episodes, the version menu, the watchlist and episodes marked by hand.
+A version chosen from the menu plays again whenever the title opens, until Automatic is chosen; a
+4K tile or Continue watching asks for its own version over it.
 A movie or an episode plays in Watch from where it stopped. Home leads with the preview, then
 channels to preview (On now: recent ones, else the country last chosen in Live), Continue watching, the watchlist
 and Movies for you, which falls back to the provider's own list without TMDB. Rows show a
@@ -185,8 +187,9 @@ Each responsibility has one owner, a plain module with a store the screens read:
   127.0.0.1, its picture and each sound track copied as they are. Nothing of a new play reaches
   the provider until the last session's request has ended.
 - `src/storage.ts`: what the app keeps between launches, apart from secrets and the registry, in
-  `state.json` in Documents: recent channels by subscription, the country last chosen in Live for Home, and beta 2's
-  subscription for an older build to show. `src/files.ts` writes every file whole, through a file
+  `state.json` in Documents: recent channels by subscription, the country last chosen in Live for Home, the
+  version picked in each title's details by subscription and TMDB id, as the desktop keeps them,
+  and beta 2's subscription for an older build to show. `src/files.ts` writes every file whole, through a file
   beside it. Removing a subscription keeps its history unless the viewer deletes it too.
 - `src/telemetry/`: product statistics, on until the viewer turns them off in Settings. One owner
   keeps the viewer's choice, a random installation id and a bounded outbox in `analytics.json`,

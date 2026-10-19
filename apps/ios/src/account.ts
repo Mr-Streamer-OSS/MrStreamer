@@ -27,6 +27,7 @@ import {
   migrateRecentChannels,
   readState,
   rememberChannel,
+  withoutVersions,
   writeState,
   type SavedState,
 } from "./storage.ts";
@@ -674,11 +675,14 @@ export function remove(id: string, { keepHistory }: { keepHistory: boolean }): P
   });
 }
 
-/** state.json without `id`: no longer an older build's subscription, its channels gone with it. */
+/**
+ * state.json without `id`: no longer an older build's subscription; with `erase`, its channels
+ * and version picks gone with it.
+ */
 function forgotten(state: SavedState, id: string, erase: boolean): SavedState {
   const original = state.subscription?.id === id;
   return {
-    ...state,
+    ...(erase ? withoutVersions(state, id) : state),
     subscription: original ? null : state.subscription,
     ...(erase
       ? {

@@ -46,6 +46,7 @@ import { members, retryTitles, useRoster } from "./account.ts";
 import { describeError } from "./errors.ts";
 import { Docked, loadingStatus, PlaceholderLines, Placeholders, Shape } from "./loading.tsx";
 import { openDetails, versionOf } from "./resume.ts";
+import { pickedVersion, pickVersion, useSavedState } from "./storage.ts";
 import {
   detailsOf,
   episodesOf,
@@ -78,8 +79,20 @@ function failureNote(failure: Failure | undefined): string | null {
       : null;
 }
 
-/** The details of the title whose version `version` (an `ownedKey`) names. */
-export function DetailsScreen({ kind, version }: { kind: TitleKind; version: string }) {
+/**
+ * The details of the title whose version `version` (an `ownedKey`) names. `asked` when that
+ * version itself was asked for, as a 4K tile or Continue watching asks: it shows over the
+ * version picked before.
+ */
+export function DetailsScreen({
+  kind,
+  version,
+  asked = false,
+}: {
+  kind: TitleKind;
+  version: string;
+  asked?: boolean;
+}) {
   const lists = useTitleLists();
   const metadata = useMetadataVersion();
   const opened = useMemo(() => versionOf(version), [version]);
@@ -109,13 +122,17 @@ export function DetailsScreen({ kind, version }: { kind: TitleKind; version: str
     );
   }
   if (!title || !opened) return <Message text="The provider no longer lists this title." />;
-  return <Details title={title} opened={opened} />;
+  return <Details title={title} opened={opened} asked={asked} />;
 }
 
-function Details({ title, opened }: { title: Title; opened: OwnedId }) {
+/** The version menu's choice of Automatic: progress and the title's own choice decide. */
+const AUTOMATIC = "automatic";
+
+function Details({ title, opened, asked }: { title: Title; opened: OwnedId; asked: boolean }) {
   const viewing = useViewing();
   const watchlist = useWatchlist();
-  const [picked, setPicked] = useState<OwnedId | null>(null);
+  const state = useSavedState();
+  const [picked, setPicked] = useState<OwnedId | typeof AUTOMATIC | null>(null);
   const sequence = viewing?.sequence ?? 0;
   const versions = useMemo(() => title.versions.map(ownedId), [title]);
 
@@ -131,10 +148,22 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
   const played = progress.kind === "ready" ? progress.value : NONE;
   // A version picked from a subscription removed since, or from a menu shown before then, is
   // forgotten: the title's own choice shows, and stays when that subscription is added again.
-  const listed = picked && title.versions.some((each) => sameOwned(each, picked)) ? picked : null;
+  const listed =
+    picked === AUTOMATIC || (picked && title.versions.some((each) => sameOwned(each, picked)))
+      ? picked
+      : null;
   if (picked !== listed) setPicked(null);
-  // Kept by its ids, so a render that works out the same version reads nothing again.
-  const chosen = listed ?? automaticVersion(title, played, opened);
+  // The menu's choice here first, then the version asked for, then the one picked before while
+  // it is listed (storage.ts), then the title's own choice. Kept by its ids, so a render that
+  // works out the same version reads nothing again.
+  const askedFor = asked && title.versions.some((each) => sameOwned(each, opened)) ? opened : null;
+  const chosen =
+    listed === AUTOMATIC
+      ? automaticVersion(title, played, title)
+      : (listed ??
+        askedFor ??
+        pickedVersion(title, state) ??
+        automaticVersion(title, played, opened));
   const version = useMemo(
     () => ({ subscriptionId: chosen.subscriptionId, id: chosen.id }),
     [chosen.subscriptionId, chosen.id],
@@ -181,15 +210,24 @@ function Details({ title, opened }: { title: Title; opened: OwnedId }) {
           .join(" · "),
       })),
     );
+    // Automatic first, as on the desktop. A choice is remembered for the title; Automatic
+    // forgets it.
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: "Version",
-        options: [...choices.map((choice) => choice.label), "Cancel"],
-        cancelButtonIndex: choices.length,
+        options: ["Automatic", ...choices.map((choice) => choice.label), "Cancel"],
+        cancelButtonIndex: choices.length + 1,
       },
       (index) => {
-        const choice = choices[index];
-        if (choice) setPicked(choice.version);
+        if (index === 0) {
+          setPicked(AUTOMATIC);
+          pickVersion(title, null);
+          return;
+        }
+        const choice = choices[index - 1];
+        if (!choice) return;
+        setPicked(choice.version);
+        pickVersion(title, choice.version);
       },
     );
   };

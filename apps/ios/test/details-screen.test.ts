@@ -5,6 +5,8 @@ import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { byIds, indexCatalogue, type IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { Window } from "happy-dom";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // A film's details while the providers listing it change: a version picked from a provider that
@@ -12,7 +14,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // version shown, a copy offers Play offline from its menu, and Play keeps streaming. The real
 // screen runs with React DOM on a happy-dom window, as provider-form.test.ts does; React Native's
 // views stand in as plain elements, menus answer as the test picks, Play records the version it
-// plays and the downloads owner records what it was asked.
+// plays and the downloads owner records what it was asked. The version picked is kept by the
+// app's own state owner (storage.ts) over real files (`native-files.ts`).
 
 const REACT_DOM = "react-dom/client";
 const window = new Window();
@@ -68,6 +71,7 @@ vi.mock("react-native", async () => {
   };
 });
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
   return {
@@ -174,6 +178,29 @@ vi.mock("../src/watchlist.ts", () => ({
 }));
 
 const { DetailsScreen } = await import("../src/details-screen.tsx");
+const storage = await import("../src/storage.ts");
+const { native } = await import("./native-files.ts");
+
+/** What draws the screen: as the test file imported it, or as a relaunch imports it again. */
+interface App {
+  readonly React: typeof React;
+  readonly createRoot: typeof createRoot;
+  readonly DetailsScreen: typeof DetailsScreen;
+}
+const launched: App = { React, createRoot, DetailsScreen };
+
+/** The app's modules as a relaunch starts them, over the same files, with state.json read. */
+async function relaunch(): Promise<App> {
+  vi.resetModules();
+  const fresh = (await import(REACT_DOM)) as { createRoot: typeof createRoot };
+  const app = {
+    React: await import("react"),
+    createRoot: fresh.createRoot,
+    DetailsScreen: (await import("../src/details-screen.tsx")).DetailsScreen,
+  };
+  (await import("../src/storage.ts")).readState();
+  return app;
+}
 
 /** One film, which both providers list under the same id and TMDB id. */
 const catalogue: OnDemandCatalogue = {
@@ -218,6 +245,7 @@ afterEach(() => {
   scenario.download = undefined;
   scenario.asked.length = 0;
   scenario.details = () => new Promise(() => undefined);
+  storage.writeState(() => ({ subscription: null, recent: [], region: null }));
 });
 
 /** A film's facts as the details owner answers them, with `plot`. */
@@ -231,12 +259,14 @@ const factsOf = (plot: string) => ({
   backdropUrl: null,
 });
 
-function mount() {
+/** The film's details as `version` opens them, `asked` for or not, drawn by `app`. */
+function mount({ version = "a:1", asked = false, app = launched } = {}) {
+  const { React, createRoot, DetailsScreen } = app;
   const container = document.createElement("div");
   const root = createRoot(container);
   const render = () =>
     React.act(() =>
-      root.render(React.createElement(DetailsScreen, { kind: "movie", version: "a:1" })),
+      root.render(React.createElement(DetailsScreen, { kind: "movie", version, asked })),
     );
   render();
   unmount = () => React.act(() => root.unmount());
@@ -268,7 +298,7 @@ function mount() {
 }
 
 describe("a film's version", () => {
-  it("plays from a provider still saved once the one picked is removed", () => {
+  it("plays from a provider still saved once the one picked is removed, and the pick once it is back", () => {
     providers("a", "b");
     const page = mount();
     expect(page.play()).toBe("a");
@@ -278,10 +308,10 @@ describe("a film's version", () => {
     providers("a");
     page.render();
     expect(page.play()).toBe("a");
-    // Added again, it isn't picked again by itself.
+    // Added again with its history, the pick it kept plays again.
     providers("a", "b");
     page.render();
-    expect(page.play()).toBe("a");
+    expect(page.play()).toBe("b");
   });
 
   it("ignores a pick from a menu shown before its provider was removed", () => {
@@ -311,6 +341,75 @@ const copy: Download = {
   status: { kind: "complete" },
   progress: null,
 };
+
+describe("a film's version picked", () => {
+  it("plays again when the film is opened again, and after a relaunch", async () => {
+    providers("a", "b");
+    const page = mount();
+    page.openVersions()("Cabin");
+    unmount();
+    expect(mount().play()).toBe("b");
+    unmount();
+
+    const again = await relaunch();
+    expect(mount({ app: again }).play()).toBe("b");
+  });
+
+  it("goes with Automatic, which plays the film's own choice from then on", () => {
+    providers("a", "b");
+    const page = mount();
+    page.openVersions()("Cabin");
+    expect(page.play()).toBe("b");
+    page.openVersions()("Automatic");
+    expect(page.play()).toBe("a");
+    unmount();
+    expect(mount().play()).toBe("a");
+  });
+
+  it("gives way to a version asked for, as a 4K tile asks, which doesn't replace it", () => {
+    providers("a", "b");
+    const page = mount();
+    page.openVersions()("Cabin");
+    unmount();
+
+    const asked = mount({ asked: true });
+    expect(asked.play()).toBe("a");
+    // A choice from the menu goes over what was asked.
+    asked.openVersions()("Cabin");
+    expect(asked.play()).toBe("b");
+    unmount();
+    expect(mount({ asked: true }).play()).toBe("a");
+    unmount();
+    expect(mount().play()).toBe("b");
+  });
+
+  it("goes with the film's own choice on Automatic, over the version asked for", () => {
+    providers("a", "b");
+    const page = mount({ version: "b:1", asked: true });
+    expect(page.play()).toBe("b");
+    page.openVersions()("Automatic");
+    expect(page.play()).toBe("a");
+  });
+
+  it("reads picks in a shape it doesn't know as none, keeping the rest of what was saved", async () => {
+    providers("a", "b");
+    const saved = { subscription: null, recent: [], region: "NL", titleVersions: { b: 7 } };
+    writeFileSync(join(native.root, "documents", "state.json"), JSON.stringify(saved));
+    const again = await relaunch();
+    expect(mount({ app: again }).play()).toBe("a");
+    expect((await import("../src/storage.ts")).readState()).toMatchObject({ region: "NL" });
+  });
+
+  it("plays the pick over another version a list names without asking for it", () => {
+    providers("a", "b");
+    expect(mount({ version: "b:1" }).play()).toBe("b");
+    unmount();
+    const page = mount();
+    page.openVersions()("Home");
+    unmount();
+    expect(mount({ version: "b:1" }).play()).toBe("a");
+  });
+});
 
 describe("a film's download", () => {
   it("queues the version shown at once", async () => {
