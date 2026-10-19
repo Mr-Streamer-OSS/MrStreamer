@@ -827,17 +827,20 @@ const GridRow = memo(function GridRow({
                 onClick={(event) => onPick(index, pointed(event, block))}
                 onDoubleClick={() => onPlay(channel, block)}
                 className={cn(
-                  "absolute inset-y-0 flex flex-col justify-center overflow-clip border-l border-white/12 px-2.5 whitespace-nowrap hover:bg-white/5",
+                  "absolute inset-y-0 flex flex-col justify-center overflow-clip whitespace-nowrap before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-white/12 hover:bg-white/5",
                   ended && !replay && "text-foreground/38",
                   replay && "bg-white/[0.035]",
                   !ended && !on && "text-foreground/85",
                   chosen &&
-                    "z-[1] rounded-lg border-l-transparent bg-white/10 text-white ring-2 ring-white/70 ring-inset hover:bg-white/10",
+                    "z-[1] rounded-lg bg-white/10 text-white ring-2 ring-white/70 ring-inset before:bg-transparent hover:bg-white/10",
                 )}
                 style={box}
               >
-                {/* Moved into view by the grid while the programme's start is scrolled past. */}
-                <span className={cn("truncate text-sm", on && "font-semibold")}>{slot.title}</span>
+                {/* Padding stays inside the clipped cell, so tiny slots keep their timeline width.
+                    The grid moves this title into view when the programme's start is scrolled past. */}
+                <span className={cn("truncate px-2.5 text-sm", on && "font-semibold")}>
+                  {slot.title}
+                </span>
               </div>
             );
           })}

@@ -15,7 +15,11 @@ import { guideLabelsScenario, labelledGuideId, serveLabelled } from "./guide-lab
 import { guidesScenario, serveGuides, sourcedGuideId } from "./guides.ts";
 import { homeStageScenario, stageChannel, stageLogo, stageStreams } from "./home-stage.ts";
 import { startFakePlaylist } from "../../../../apps/desktop/test/fake-playlist.ts";
-import { guideGridScenario, guideGridScrollScenario } from "./guide-grid.ts";
+import {
+  guideGridCellsScenario,
+  guideGridScenario,
+  guideGridScrollScenario,
+} from "./guide-grid.ts";
 import { startGuideHost, type GuideHost } from "../../../../apps/desktop/test/fake-guide-host.ts";
 import { homeScenario } from "./home.ts";
 import { liveCategoriesScenario, LONG_CATEGORY } from "./live-categories.ts";
@@ -55,6 +59,7 @@ const scenarios = [
   "hls-compatibility-catchup",
   "live-categories",
   "guide-grid",
+  "guide-grid-cells",
   "guide-grid-scroll",
   "titles",
   "watchlist",
@@ -154,9 +159,10 @@ async function run(scenario: Scenario) {
         scenario === "live-categories" ? 64000 : scenario === "guide-grid-scroll" ? 20000 : 60,
       titles: 30,
       live: true,
-      ...(scenario === "guide-grid"
+      ...(scenario === "guide-grid" || scenario === "guide-grid-cells"
         ? {
             guideHours: { past: 6, ahead: 24 },
+            ...(scenario === "guide-grid-cells" ? { guideLengths: [1, 2, 30] } : {}),
             // The playable test channels get guides of their own, but for the third.
             channelOf: (channel) =>
               channel.fixture && channel.streamId !== 1002
@@ -774,7 +780,11 @@ async function run(scenario: Scenario) {
         },
         playlist!,
       );
-    } else if (scenario === "guide-grid" || scenario === "guide-grid-scroll") {
+    } else if (
+      scenario === "guide-grid" ||
+      scenario === "guide-grid-cells" ||
+      scenario === "guide-grid-scroll"
+    ) {
       const driver = {
         profile,
         observed,
@@ -797,6 +807,7 @@ async function run(scenario: Scenario) {
           }),
           archiveRequests: () => provider!.archiveRequests(),
         });
+      else if (scenario === "guide-grid-cells") await guideGridCellsScenario(driver);
       else await guideGridScrollScenario(driver);
     } else if (scenario === "live-tv") {
       await click("Open global Search", "document.querySelector('button[aria-label=Search]')");
