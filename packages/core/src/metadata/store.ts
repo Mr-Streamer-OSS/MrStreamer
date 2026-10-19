@@ -446,13 +446,17 @@ export function metadataStore(deps: MetadataDeps) {
 
     /**
      * Fetches what the listed titles lack or hold too old. Equal titles in the same order and
-     * language keep a running request intact; an idle run can restart after an offline failure.
+     * language keep running requests intact and recheck missing answers afterwards; an idle
+     * run can restart after an offline failure.
      * Changed demand or language cancels the old run and is fetched next. Cached answers remain
      * reusable across temporary wants and source changes until TMDB's hard expiry.
      */
     want(titles: readonly Wanted[], viewerLanguage: string = language): void {
       if (closed) return;
-      if (running && language === viewerLanguage && sameWanted(wanted, titles)) return;
+      if (running && language === viewerLanguage && sameWanted(wanted, titles)) {
+        wanted = titles;
+        return;
+      }
       if (wanted !== titles || language !== viewerLanguage) controller?.abort();
       language = viewerLanguage;
       wanted = titles;
