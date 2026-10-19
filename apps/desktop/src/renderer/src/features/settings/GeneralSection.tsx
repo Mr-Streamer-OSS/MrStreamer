@@ -64,11 +64,13 @@ function PreferenceRow<K extends keyof Preferences>({
   const fieldBusy = useIsMutating({ mutationKey: ["settings", field] }) > 0;
   const update = useMutation({
     mutationKey: ["settings", field],
-    mutationFn: (value: Preferences[K]) => {
+    mutationFn: async (value: Preferences[K]) => {
       const look = value as Preferences["subtitleLook"];
-      if (field === "subtitleLook" && lookField && look)
-        return updateSubtitleLook({ [lookField]: look[lookField] }, { client });
-      return updatePreferences({ [field]: value }, client);
+      if (field === "subtitleLook" && lookField && look) {
+        await updateSubtitleLook({ [lookField]: look[lookField] }, { client });
+      } else {
+        await updatePreferences({ [field]: value }, client);
+      }
     },
     onSettled: () => {
       writing.current = false;

@@ -94,7 +94,7 @@ export async function nextEpisodeScenario(
     if (await d.exists(delay()))
       await d.click(
         "Close Settings with Back after cancelling delay editing",
-        named("header button", translate(locale, "Back")),
+        named('[data-view="settings"] header button', translate(locale, "Back")),
       );
     await d.wait(async () => !(await d.exists(delay())));
   };

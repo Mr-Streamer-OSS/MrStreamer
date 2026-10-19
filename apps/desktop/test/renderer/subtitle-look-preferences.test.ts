@@ -117,6 +117,28 @@ it("merges Settings and remounted CC edits against shared pending intent while s
   expect(host.textContent).not.toContain("obsolete Settings refusal");
 });
 
+it("keeps a mounted Settings row free of a superseded failure after CC saves its intent", async () => {
+  const { host, mount, pick } = await render();
+  await mount(true);
+  const first = ipc.hold("preferences.update");
+  const position = host.querySelector<HTMLSelectElement>('select[aria-label="Position"]')!;
+  await act(async () => {
+    position.value = "high";
+    position.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const second = ipc.hold("preferences.update");
+  await pick("Shadow");
+  await act(async () =>
+    second.resolve(snapshot(3, { size: "medium", background: "shadow", position: "high" })),
+  );
+  await act(async () =>
+    first.reject({ kind: "unexpected", detail: "obsolete mounted Settings refusal" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  expect(position.value).toBe("high");
+  expect(host.textContent).not.toContain("obsolete mounted Settings refusal");
+});
+
 it("a failed look readback cannot erase an edit made while that read was pending", async () => {
   const { host, pick } = await render();
   const first = ipc.hold("preferences.update");
