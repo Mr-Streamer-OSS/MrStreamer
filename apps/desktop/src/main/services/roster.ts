@@ -184,6 +184,7 @@ function make() {
           yield* playback.closeOf(subscriptionId);
           // Its unfinished downloads end with it, their requests over before its login goes.
           yield* downloads.subscriptionGone(subscriptionId);
+          const discovery = yield* settings.liveBrowse;
           // Erased as it goes, and not before: while the removal waits its turn the subscription
           // is saved still, and what is starred or saved for it then has to go with the rest.
           yield* subscriptions.remove(
@@ -202,7 +203,7 @@ function make() {
             ],
             { concurrency: "unbounded" },
           );
-          yield* settings.forget(subscription);
+          yield* settings.forget(subscription, discovery);
         }),
 
       refreshDue: Effect.flatMap(subscriptions.sources, (sources) =>

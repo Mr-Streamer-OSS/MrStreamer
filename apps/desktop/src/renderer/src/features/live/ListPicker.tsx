@@ -1,4 +1,4 @@
-// Shared by the guide sidebar and Watch's channel overlay. Countries open one level at a time.
+// Shared topic rail and Provider lists picker for the guide sidebar and Watch overlay.
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import { Fragment, useEffect, useRef } from "react";
 import { ownedKey } from "@mrstreamer/contracts/subscription";

@@ -74,7 +74,7 @@ describe("preferences", () => {
     await settings.update({ homeRows });
     await settings.update({ volume: 0.4 });
     expect((await (await settingsIn(dataDir)).get()).homeRows).toEqual(homeRows);
-    await settings.forget(await savedAs(subscriptions, id));
+    await settings.forget(await savedAs(subscriptions, id), await settings.liveBrowse());
     expect((await (await settingsIn(dataDir)).get()).homeRows).toEqual(homeRows);
   });
 
@@ -166,7 +166,7 @@ describe("preferences", () => {
 
     const gone = await savedAs(subscriptions, id);
     await subscriptions.remove(id);
-    await settings.forget(gone);
+    await settings.forget(gone, await settings.liveBrowse());
 
     expect(await stored(dataDir)).toEqual({
       volume: 0.4,
@@ -226,7 +226,7 @@ describe("preferences", () => {
     // It goes with its subscription, and the first one's stays.
     const gone = await savedAs(subscriptions, added.id);
     await subscriptions.remove(added.id);
-    await settings.forget(gone);
+    await settings.forget(gone, await settings.liveBrowse());
 
     await expect(settings.ofSubscription(added.id)).rejects.toMatchObject({
       error: { kind: "no-subscription" },
@@ -356,7 +356,7 @@ describe("the interface language", () => {
     await settings.setInterfaceLanguage("es-ES");
     const gone = await savedAs(subscriptions, id);
     await subscriptions.remove(id);
-    await settings.forget(gone);
+    await settings.forget(gone, await settings.liveBrowse());
 
     expect(await (await settingsIn(dataDir)).interfaceLanguage()).toBe("es-ES");
   });
@@ -525,8 +525,9 @@ describe("remembered Live TV discovery", () => {
         category: { subscriptionId: removed.id, id: "7" },
       });
       await settings.rememberLiveBrowse({ kind: "topic", topic: "music" });
+      const discoveryBeforeRemoval = await settings.liveBrowse();
       await subscriptions.remove(removed.id);
-      await settings.forget(removed);
+      await settings.forget(removed, discoveryBeforeRemoval);
       expect(await (await settingsIn(dataDir)).liveBrowse()).toEqual({
         kind: "topic",
         topic: "music",
@@ -537,8 +538,9 @@ describe("remembered Live TV discovery", () => {
         category: { subscriptionId: kept, id: "8" },
       });
       const last = await savedAs(subscriptions, kept);
+      const beforeLastRemoval = await settings.liveBrowse();
       await subscriptions.remove(kept);
-      await settings.forget(last);
+      await settings.forget(last, beforeLastRemoval);
       expect(await (await settingsIn(dataDir)).liveBrowse()).toEqual({ kind: "all" });
     },
   );
@@ -571,8 +573,9 @@ describe("remembered Live TV discovery", () => {
       await settings.setInterfaceLanguage("nl-NL");
       expect(await settings.get()).not.toHaveProperty("rememberedLiveBrowse");
       const removed = await savedAs(subscriptions, original ? id : second.id);
+      const discoveryBeforeRemoval = await settings.liveBrowse();
       await subscriptions.remove(removed.id);
-      await settings.forget(removed);
+      await settings.forget(removed, discoveryBeforeRemoval);
       expect(await stored(dataDir)).toMatchObject({
         rememberedLiveBrowse: future,
         muted: true,
@@ -581,3 +584,41 @@ describe("remembered Live TV discovery", () => {
     },
   );
 });
+
+it("keeps a prior-stable native edit authoritative when source removal rebases the remembered record", async () => {
+  const { dataDir, settings, subscriptions, id, login } = await connected();
+  const other = await fakeProvider();
+  const second = await subscriptions.add({ ...login, server: other.url });
+  await settings.updateSubscription(id, { lastCategoryId: "before" });
+  await settings.rememberLiveBrowse({ kind: "topic", topic: "news" });
+  const oldBuild = await settingsIn(dataDir);
+  await oldBuild.updateSubscription(id, { lastCategoryId: "changed" });
+  const upgraded = await settingsIn(dataDir);
+  const beforeRemoval = await upgraded.liveBrowse();
+  expect(beforeRemoval).toEqual({
+    kind: "category",
+    category: { subscriptionId: id, id: "changed" },
+  });
+  const removed = await savedAs(subscriptions, second.id);
+  await subscriptions.remove(second.id);
+  await upgraded.forget(removed, beforeRemoval);
+  expect(await (await settingsIn(dataDir)).liveBrowse()).toEqual(beforeRemoval);
+});
+
+it.each([true, false])(
+  "clears the removed native selection while another source remains, original=%s",
+  async (original) => {
+    const { dataDir, settings, subscriptions, id, login } = await connected();
+    const other = await fakeProvider();
+    const second = await subscriptions.add({ ...login, server: other.url });
+    const removed = await savedAs(subscriptions, original ? id : second.id);
+    await settings.rememberLiveBrowse({
+      kind: "category",
+      category: { subscriptionId: removed.id, id: "native" },
+    });
+    const beforeRemoval = await settings.liveBrowse();
+    await subscriptions.remove(removed.id);
+    await settings.forget(removed, beforeRemoval);
+    expect(await (await settingsIn(dataDir)).liveBrowse()).toEqual({ kind: "all" });
+  },
+);

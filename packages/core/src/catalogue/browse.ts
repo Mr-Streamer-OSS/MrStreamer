@@ -104,6 +104,13 @@ const PLACES = new Set([
   "catalunya",
   "catalonia",
   "quebec",
+  "africa",
+  "asia",
+  "caribbean",
+  "europe",
+  "latin america",
+  "world",
+  "ex-yugoslavia",
 ]);
 const QUALITY = /(?<![\p{L}\p{N}])(8k|4k|uhd|fhd|hd|sd|hevc|hdr|raw|\d{3,4}p)(?![\p{L}\p{N}])/giu;
 
@@ -134,7 +141,10 @@ export function categoryBrowseTopics(name: string): readonly BrowseTopic[] {
     if (tokens.some((word) => labels.has(word))) topics.push(topic);
   }
   if (topics.length) return topics;
-  return label && (PLACES.has(label) || regionForName(label) !== null) ? ["regional"] : ["other"];
+  const country = regionForName(label);
+  return label && (PLACES.has(label) || (country !== null && !isBroadRegion(country)))
+    ? ["regional"]
+    : ["other"];
 }
 
 /** Derive after joining variants. Contradictory/uncertain streams cannot assert filter facts. */

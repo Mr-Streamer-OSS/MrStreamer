@@ -20,6 +20,9 @@ describe("Live TV discovery labels", () => {
     ["BE | SPECIAL VIP", ["other"]],
     ["SPORTSMAN", ["other"]],
     ["Unknown", ["other"]],
+    ["Arabic", ["other"]],
+    ["Kurdish", ["other"]],
+    ["EU | Europe", ["regional"]],
   ])("classifies category %s without guessing a channel's identity", (label, topics) => {
     expect(categoryBrowseTopics(label)).toEqual(topics);
   });

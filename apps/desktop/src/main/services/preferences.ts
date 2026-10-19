@@ -81,9 +81,13 @@ export class Settings extends Context.Service<
     /**
      * Forgets what the viewer left `subscription` at, for when it goes: what was watched last and
      * the versions and channel streams picked. For the original, lists not yet imported go too:
-     * they belong to its account.
+     * they belong to its account. Snapshot effective discovery before the folder is removed, so
+     * a prior stable category edit keeps precedence while the surviving baseline changes.
      */
-    forget(subscription: SavedSubscription): Effect.Effect<void>;
+    forget(
+      subscription: SavedSubscription,
+      selectionBeforeRemoval: LiveDiscovery,
+    ): Effect.Effect<void>;
     /** The favourites and recent channels of a file from before the viewing record, or null. */
     readonly legacyLists: Effect.Effect<{
       readonly favourites: readonly string[];
@@ -265,7 +269,7 @@ function make(dataDir: string, usage?: UsageObservers) {
                 return next;
               }),
         ),
-      forget: (subscription: SavedSubscription) =>
+      forget: (subscription: SavedSubscription, selectionBeforeRemoval: LiveDiscovery) =>
         one.withPermits(1)(
           Effect.gen(function* () {
             const previous = yield* stored;
@@ -277,16 +281,17 @@ function make(dataDir: string, usage?: UsageObservers) {
             // Unknown future records survive both removal paths verbatim.
             let rememberedLiveBrowse = raw;
             if (!(record instanceof type.errors)) {
+              const selection = selectionBeforeRemoval;
               const valid =
                 remaining.length > 0 &&
-                (record.selection.kind === "topic" ||
+                (selection.kind === "topic" ||
                   remaining.some(
                     (each) =>
-                      record.selection.kind === "category" &&
-                      each.id === record.selection.category.subscriptionId,
+                      selection.kind === "category" &&
+                      each.id === selection.category.subscriptionId,
                   ));
               rememberedLiveBrowse = valid
-                ? { ...record, legacy: yield* legacy(remaining) }
+                ? { ...record, selection, legacy: yield* legacy(remaining) }
                 : undefined;
             }
             if (subscription.original || !(record instanceof type.errors)) {
@@ -328,7 +333,7 @@ function make(dataDir: string, usage?: UsageObservers) {
 
 /**
  * The file's preferences, without what belongs to its subscription or to the viewing record, or
- * the interface language.
+ * the interface language or remembered discovery.
  */
 function general({
   lastChannelId: _channel,

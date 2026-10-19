@@ -1,5 +1,5 @@
-// The channel lists the guide and Watch's channel list show: favourites, recently watched, every
-// channel, or one category. Categories group under their country, as the provider names them.
+// Shared semantic selections for Live TV, Watch and Home. Topics lead discovery; the provider
+// hierarchy stays available behind Provider lists. Library owns membership and facet policy.
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -322,7 +322,7 @@ export type ListEntry =
       readonly count: number;
     };
 
-/** One country at a time, or Find across the whole catalogue. Only the chosen list is saved. */
+/** Fixed topics first; Provider lists keeps native countries/categories and catalogue-wide Find. */
 export function useListPicker(selected: ChannelList) {
   const categories = useQuery(queries.categories()).data;
   const catalogue = useListChannels({ kind: "all" });
