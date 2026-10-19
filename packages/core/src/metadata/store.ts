@@ -25,10 +25,6 @@ const PARALLEL = 8;
 const PER_SECOND = 40;
 /** How often the store is written while fetching. */
 const SAVE_EVERY_MS = 30_000;
-/** UTF-8 serialized [key, entry] pairs for titles no catalogue currently wants, not heap size. */
-const INACTIVE_BYTES = 2 * 1024 * 1024;
-/** Yield between pruning batches; wanted titles are never removed by this budget. */
-const PRUNE_BATCH = 256;
 /** Streaming services followed per region and kind, most prominent first. */
 const SERVICES = 12;
 /** Pages read per service and kind, 20 titles each: its most popular 5,000. */
@@ -152,9 +148,6 @@ export function metadataStore(deps: MetadataDeps) {
   let wanted: readonly Wanted[] = [];
   /** The viewer's language, which names are asked for in. */
   let language = "en";
-  let wantedKeys: ReadonlySet<string> | null = null;
-  let retentionNeeded = false;
-  const encoder = new TextEncoder();
   /** Each entry's names, folded for search, worked out when first searched. */
   const searchNames = new Map<string, string>();
   let refused = false;
@@ -227,41 +220,10 @@ export function metadataStore(deps: MetadataDeps) {
     deps.onChange({ content });
   }
 
-  /** Keeps the newest inactive answers within the budget after the wanted catalogue changes. */
-  async function pruneInactive(): Promise<boolean> {
-    const knownWanted = wantedKeys;
-    if (knownWanted === null || closed) return false;
-    const inactive = Object.entries(file.entries)
-      .filter(([key]) => !knownWanted.has(key))
-      .sort((a, b) => b[1].at - a[1].at);
-    let bytes = 0;
-    let pruned = false;
-    for (const [index, [key, entry]] of inactive.entries()) {
-      if (index > 0 && index % PRUNE_BATCH === 0)
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      // Shutdown persists completed answers; optional cleanup can resume next time.
-      if (closed) return pruned;
-      // A new source can make an entry wanted while this pass yields.
-      if (wantedKeys?.has(key)) continue;
-      const size = encoder.encode(JSON.stringify([key, entry])).byteLength;
-      if (bytes + size <= INACTIVE_BYTES) bytes += size;
-      else {
-        delete file.entries[key];
-        searchNames.delete(key);
-        pruned = true;
-      }
-    }
-    return pruned;
-  }
-
   /** Writes what changed, one write at a time, leaving out what is past TMDB's limit. */
   function save(): Promise<void> {
     saving = saving.then(async () => {
       await loading;
-      if (retentionNeeded) {
-        retentionNeeded = false;
-        if (await pruneInactive()) dirty = true;
-      }
       if (!dirty) return;
       dirty = false;
       lastSave = now();
@@ -483,21 +445,17 @@ export function metadataStore(deps: MetadataDeps) {
     },
 
     /**
-     * The titles the catalogue lists; fetches what is missing or old, in the background. A list
-     * given while fetching is fetched next.
+     * Fetches what the listed titles lack or hold too old. Equal titles in the same order and
+     * language keep a running request intact; an idle run can restart after an offline failure.
+     * Changed demand or language cancels the old run and is fetched next. Cached answers remain
+     * reusable across temporary wants and source changes until TMDB's hard expiry.
      */
     want(titles: readonly Wanted[], viewerLanguage: string = language): void {
       if (closed) return;
-      const replaced = wanted !== titles;
+      if (running && language === viewerLanguage && sameWanted(wanted, titles)) return;
       if (wanted !== titles || language !== viewerLanguage) controller?.abort();
       language = viewerLanguage;
       wanted = titles;
-      if (replaced) {
-        wantedKeys = new Set(titles.map((title) => keyOf(title.kind, title.tmdbId)));
-        retentionNeeded = true;
-        // Retention also applies offline; flush/close await queued persistence.
-        void save().catch(() => {});
-      }
       const client = deps.client;
       // Nothing listed, as once the account goes, starts nothing; a run in progress stops.
       if (!client || refused || running || titles.length === 0) return;
@@ -618,6 +576,22 @@ export function metadataStore(deps: MetadataDeps) {
       return closing;
     },
   };
+}
+
+/** Equal ordered demand keeps an active run, including requests whose answers have not arrived. */
+function sameWanted(a: readonly Wanted[], b: readonly Wanted[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((title, index) => {
+      const other = b[index];
+      return (
+        other !== undefined &&
+        title.kind === other.kind &&
+        title.tmdbId === other.tmdbId &&
+        title.addedAt === other.addedAt
+      );
+    })
+  );
 }
 
 /** A run's pacing and retry waits end immediately on cancellation, releasing their timers. */

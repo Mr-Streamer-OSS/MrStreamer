@@ -216,6 +216,60 @@ describe("metadata request ownership", () => {
     await store.close();
   });
 
+  it("keeps equal-content demand running without aborting or repeating its 40 title requests", async () => {
+    vi.useFakeTimers();
+    const aborted = vi.fn();
+    const details = vi.fn<Tmdb["details"]>(
+      async (_kind, id, _language, signal) =>
+        new Promise((resolve, reject) => {
+          const cancel = () => {
+            clearTimeout(timer);
+            aborted();
+            reject(signal?.reason);
+          };
+          const timer = setTimeout(() => {
+            signal?.removeEventListener("abort", cancel);
+            resolve(answer(`Title ${id}`));
+          }, 200);
+          signal?.addEventListener("abort", cancel, { once: true });
+        }),
+    );
+    const { store } = open(clientWith(details));
+    const wanted = Array.from({ length: 40 }, (_, i) => title(String(i + 1)));
+    store.want(wanted);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(store.status().fetching).toBe(true);
+    store.want(wanted.map((item) => ({ ...item })));
+    await finish(store);
+    expect(aborted).not.toHaveBeenCalled();
+    expect(details).toHaveBeenCalledTimes(40);
+    expect(store.status().known).toBe(40);
+    await store.close();
+  });
+
+  it("restarts equal demand after an offline run gives up", async () => {
+    vi.useFakeTimers();
+    let offline = true;
+    const details = vi.fn<Tmdb["details"]>(async () => {
+      if (offline) throw new TmdbError({ kind: "unavailable", detail: "offline" });
+      return answer();
+    });
+    const { store } = open(clientWith(details));
+    const wanted = Array.from({ length: 40 }, (_, i) => title(String(i + 1)));
+    store.want(wanted);
+    await finish(store);
+    expect(store.status()).toMatchObject({ known: 0, fetching: false, refused: false });
+    const failedCalls = details.mock.calls.length;
+    expect(failedCalls).toBeGreaterThanOrEqual(24 * 3);
+    offline = false;
+    store.want(wanted.map((item) => ({ ...item })));
+    expect(store.status().fetching).toBe(true);
+    await finish(store);
+    expect(details.mock.calls.length - failedCalls).toBe(40);
+    expect(store.status().known).toBe(40);
+    await store.close();
+  });
+
   it("keeps a still-wanted shared TMDB id cached after a source replacement", async () => {
     vi.useFakeTimers();
     const details = vi.fn<Tmdb["details"]>(async () => answer());
@@ -286,54 +340,60 @@ describe("metadata request ownership", () => {
 });
 
 describe("metadata closure and replacement boundaries", () => {
-  it("bounds inactive cached titles while preserving an older wanted title and all its translations", async () => {
+  it("reuses every warm answer after narrow and empty wants, persistence and restart", async () => {
+    vi.useFakeTimers();
+    const wanted = Array.from({ length: 12_000 }, (_, index) => title(String(index + 1)));
     const initial: MetadataFile = {
       version: 1,
       entries: Object.fromEntries(
-        Array.from({ length: 12_000 }, (_, index) => [
-          `movie:${index + 1}`,
+        wanted.map(({ tmdbId }, index) => [
+          `movie:${tmdbId}`,
           {
             at: Date.now() - index * 1000,
             names: { en: `English ${index} `.repeat(8), nl: `Nederlands ${index} `.repeat(8) },
             genres: [35],
             rating: 7.5,
+            backdrop: `/picture-${tmdbId}.jpg`,
           },
         ]),
       ),
     };
-    const { store, saved } = open(
-      clientWith(async () => answer()),
-      initial,
-      { client: null },
-    );
+    const details = vi.fn<Tmdb["details"]>(async () => answer());
+    const { store, saved } = open(clientWith(details), initial);
+    store.want(wanted, "nl");
+    await finish(store);
     store.want([title("12000")], "nl");
-    await store.flush();
-    const kept = saved();
-    expect(kept?.entries["movie:12000"]).toEqual(initial.entries["movie:12000"]);
-    expect(kept?.entries["movie:1"]).toEqual(initial.entries["movie:1"]);
-    expect(kept?.entries["movie:11999"]).toBeUndefined();
-    // The inactive portion has a 2 MiB serialized-payload budget. Active data is separate.
-    const { ["movie:12000"]: active, ...inactive } = kept?.entries ?? {};
-    expect(active).toBeDefined();
-    expect(Buffer.byteLength(JSON.stringify(inactive))).toBeLessThanOrEqual(2 * 1024 * 1024);
-    const restarted = metadataStore({
-      read: async () => kept,
-      write: async () => {},
-      client: null,
-      region: "NL",
-      onChange: () => {},
-    });
-    restarted.want([title("12000")], "en");
-    await restarted.flush();
-    expect(restarted.name("movie", "12000", "nl")?.name).toBe(
-      initial.entries["movie:12000"]?.names?.nl,
+    await finish(store);
+    expect(store.name("movie", "11999", "nl")?.name).toBe(
+      initial.entries["movie:11999"]?.names?.nl,
     );
-    expect(restarted.get("movie", "12000")).toMatchObject({ genres: [35], rating: 7.5 });
-    await restarted.close();
+    store.want([]);
+    await finish(store);
+    store.want(wanted, "en");
+    await finish(store);
+    expect(store.status().known).toBe(wanted.length);
+    expect(details).not.toHaveBeenCalled();
     await store.close();
+
+    const restarted = open(clientWith(details), saved());
+    restarted.store.want(wanted, "nl");
+    await finish(restarted.store);
+    expect(details).not.toHaveBeenCalled();
+    expect(restarted.store.status().known).toBe(wanted.length);
+    for (const { tmdbId } of wanted) {
+      expect(restarted.store.name("movie", tmdbId, "nl")?.name).toBe(
+        initial.entries[`movie:${tmdbId}`]?.names?.nl,
+      );
+      expect(restarted.store.get("movie", tmdbId)).toMatchObject({
+        genres: [35],
+        rating: 7.5,
+        backdrop: `/picture-${tmdbId}.jpg`,
+      });
+    }
+    await restarted.store.close();
   });
 
-  it("closes before a delayed cache load without starting requests, pruning or dropping loaded data", async () => {
+  it("closes before a delayed cache load without starting requests or dropping loaded data", async () => {
     vi.useFakeTimers();
     const reading = Promise.withResolvers<unknown>();
     const details = vi.fn<Tmdb["details"]>(async () => answer());
