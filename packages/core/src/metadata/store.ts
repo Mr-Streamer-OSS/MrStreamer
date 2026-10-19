@@ -495,7 +495,7 @@ export function metadataStore(deps: MetadataDeps) {
       if (replaced) {
         wantedKeys = new Set(titles.map((title) => keyOf(title.kind, title.tmdbId)));
         retentionNeeded = true;
-        // Retention also applies offline. flush/close still expose a failed cache read.
+        // Retention also applies offline; flush/close await queued persistence.
         void save().catch(() => {});
       }
       const client = deps.client;
