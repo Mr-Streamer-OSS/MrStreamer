@@ -43,7 +43,7 @@ const LISTINGS_REFRESH_MS = 60_000;
 const NO_SUBSCRIPTIONS: readonly SubscriptionSummary[] = [];
 
 // Acceptance context belongs to an in-flight reply, never to the saved viewing state. A read
-// can reach React Query's commit after a command acknowledgement even after cancellation.
+// can reach React Query's commit after a command acknowledgement.
 const viewingReads = new WeakMap<
   object,
   { client: QueryClient; before: Viewing | undefined; sequence: number }
@@ -535,9 +535,6 @@ export function keepViewing(client: QueryClient, viewing: Viewing): void {
   const queryKey = queries.viewing().queryKey;
   const cached = client.getQueryData(queryKey);
   if (cached && cached.sequence > viewing.sequence) return;
-  // The query function can have returned while React Query has yet to commit its result.
-  // Cancel that commit before accepting the acknowledgement, including an initial read.
-  void client.cancelQueries({ queryKey, exact: true });
   client.setQueryData(queryKey, viewing);
 }
 

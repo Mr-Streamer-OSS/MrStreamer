@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { call } from "../../src/renderer/src/lib/ipc.ts";
 import { keepViewing, queries, syncViewing } from "../../src/renderer/src/lib/queries.ts";
@@ -121,4 +121,26 @@ it("refreshes canonical IDs at the same sequence and accepts the next lower read
   ipc.always("viewing.get", viewing(20, ["new-account"]));
   await client.fetchQuery({ ...queries.viewing(), staleTime: 0 });
   expect(client.getQueryData(queries.viewing().queryKey)).toEqual(viewing(20, ["new-account"]));
+});
+
+// A command can reply after a later watch/progress event has already started a read.
+it("keeps the newer event read when an older command acknowledgement arrives", async () => {
+  ipc.always("viewing.get", viewing(120));
+  const observer = new QueryObserver(client, queries.viewing());
+  const unsubscribe = observer.subscribe(() => {});
+  const stop = syncViewing(client);
+  try {
+    await client.fetchQuery(queries.viewing());
+    const reply = ipc.hold("viewing.get");
+    ipc.emit("viewing.changed", { sequence: 130 });
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    keepViewing(client, viewing(125));
+    reply.resolve(viewing(130, ["125", "130"]));
+    await vi.waitFor(() =>
+      expect(observer.getCurrentResult().data).toEqual(viewing(130, ["125", "130"])),
+    );
+  } finally {
+    stop();
+    unsubscribe();
+  }
 });
