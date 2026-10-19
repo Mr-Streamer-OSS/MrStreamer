@@ -65,6 +65,8 @@ export async function nextEpisodeScenario(
       key: "a",
       windowsVirtualKeyCode: 65,
       modifiers: process.platform === "darwin" ? 4 : 2,
+      // CDP's macOS key injection needs the native editing command as well as Command-A.
+      commands: ["selectAll"],
     });
     await d.send("Input.dispatchKeyEvent", {
       type: "keyUp",
