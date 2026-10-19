@@ -175,7 +175,7 @@ function queued<A>(queue: string, fallback: A, operation: () => Promise<A>) {
 let index: Map<string, { readonly bytes: number; readonly at: number }> | null = null;
 /** The bytes every record in `index` takes together. */
 let stored = 0;
-/** Bytes and records reserved by writes under way, and the records they will replace. */
+/** Bytes and records reserved by writes under way, one record each; and the records they write. */
 let reserved = { bytes: 0, records: 0 };
 const writing = new Set<string>();
 
@@ -271,21 +271,20 @@ function indexed() {
 interface Reservation {
   readonly uri: string;
   readonly bytes: number;
-  readonly records: number;
 }
 
 /**
  * Admits `bytes` as the record at `file`, against what is stored and what writes under way have
- * reserved. The record it replaces counts until the new one takes its place. When they don't fit,
+ * reserved. The record it replaces counts until the new one takes its place, and the file beside
+ * it, which the write fills first, takes a record of its own until then: a replacement too, as
+ * that file stays a record when it can't be moved or deleted (`abandon`). When they don't fit,
  * deletes up to a batch of the least recently written records, but none a write under way owns,
  * counting only those the disk actually deleted. Null when they still don't fit.
  */
 function admit(file: File, bytes: number): Reservation | null {
   const all = indexed();
-  const records = all.has(file.uri) ? 0 : 1;
   const fits = () =>
-    stored + reserved.bytes + bytes <= TOTAL_BYTES &&
-    all.size + reserved.records + records <= RECORDS;
+    stored + reserved.bytes + bytes <= TOTAL_BYTES && all.size + reserved.records + 1 <= RECORDS;
   if (!fits()) {
     const oldest = [...all]
       .filter(([uri]) => uri !== file.uri && !owned(uri))
@@ -297,16 +296,16 @@ function admit(file: File, bytes: number): Reservation | null {
     }
     if (!fits()) return null;
   }
-  reserved = { bytes: reserved.bytes + bytes, records: reserved.records + records };
+  reserved = { bytes: reserved.bytes + bytes, records: reserved.records + 1 };
   writing.add(file.uri);
-  return { uri: file.uri, bytes, records };
+  return { uri: file.uri, bytes };
 }
 
 /** Gives a reservation back: its write is in place (`placed`, its bytes now stored) or given up. */
 function release(reservation: Reservation, placed: boolean) {
   reserved = {
     bytes: reserved.bytes - reservation.bytes,
-    records: reserved.records - reservation.records,
+    records: reserved.records - 1,
   };
   writing.delete(reservation.uri);
   if (!placed || !index) return;

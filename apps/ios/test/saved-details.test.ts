@@ -788,4 +788,27 @@ describe("the records' budget", () => {
     expect(saved("after")).toBe(false);
     expect(bytesOnDisk()).toBeLessThanOrEqual(BUDGET);
   });
+
+  it("keeps to 2,048 records when replacements can't be moved or deleted, and their facts readable", async () => {
+    mkdirSync(tmdbFolder, { recursive: true });
+    const record = JSON.stringify({ version: 1, at: Date.now(), value: aboutOf("kept") });
+    for (let at = 0; at < 2048; at++) {
+      writeFileSync(join(tmdbFolder, `about.movie.seed${at}.en.json`), record);
+    }
+    native.gate = (operation) =>
+      operation === "move" ? Promise.reject(new Error("The move was refused")) : undefined;
+    native.undeletable = () => true;
+    const { readAbout, writeAbout } = await owner();
+    await writeAbout("movie", "new", "en", { at: Date.now(), value: aboutOf("new") });
+    expect(records().length).toBe(2048);
+
+    await Promise.all(
+      ["seed0", "seed1", "seed2", "seed3"].map((name) =>
+        writeAbout("movie", name, "en", { at: Date.now(), value: aboutOf("refreshed") }),
+      ),
+    );
+    expect(records().length).toBeLessThanOrEqual(2048);
+    native.gate = null;
+    expect((await readAbout("movie", "seed0", "en"))?.value?.overview).toBe("kept");
+  });
 });
