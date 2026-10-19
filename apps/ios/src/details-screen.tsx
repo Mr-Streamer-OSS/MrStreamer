@@ -155,8 +155,9 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
     sequence,
   );
   const played = progress.kind === "ready" ? progress.value : NONE;
-  // A version picked from a subscription removed since, or from a menu shown before then, is
-  // forgotten: the title's own choice shows, and stays when that subscription is added again.
+  // A version picked in this screen from a subscription removed since, or from a menu shown
+  // before then, is forgotten here. A pick saved with history kept plays again once that
+  // subscription is added back (storage.ts `pickedVersion`).
   const listed =
     picked === AUTOMATIC || (picked && title.versions.some((each) => sameOwned(each, picked)))
       ? picked
