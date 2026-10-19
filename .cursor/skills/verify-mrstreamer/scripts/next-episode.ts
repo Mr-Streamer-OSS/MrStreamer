@@ -334,7 +334,9 @@ export async function nextEpisodeScenario(
       windowsVirtualKeyCode: 75,
       modifiers: process.platform === "darwin" ? 4 : 2,
     });
-  await d.wait(() => d.exists("document.querySelector('[role=dialog] input')"));
+  await d.wait(() =>
+    d.evaluate<boolean>("document.activeElement?.getAttribute('role') === 'combobox'"),
+  );
   await d.send("Input.insertText", { text: "TEST | H.264 + AAC" });
   await d.wait(() =>
     d.evaluate<boolean>(
@@ -366,7 +368,9 @@ export async function nextEpisodeScenario(
     d.evaluate<boolean>(`document.querySelector('video')?.muted &&
       !document.querySelector('video').paused && document.querySelector('video').currentTime > 0.5`),
   );
-  expect(files().streams === handoffLive.streams, "Returning Home reopened the live stream");
+  // Escape returned to Series, where previews are suspended. Home starts the retained channel again.
+  const homePreview = files();
+  expect(homePreview.active === 1, "Home did not resume one preview reader");
   await d.capture("handoff-home-preview");
   await d.click("Open Movies from the preview", named("header button", "Movies"));
   await d.click("Open All movies", named("nav button", "All movies"));
@@ -413,6 +417,7 @@ export async function nextEpisodeScenario(
   d.observed["handoff"] = {
     held: handoffHeld,
     live: handoffLive,
+    homePreview,
     movieMedia,
     sameNodes,
     final: files(),
