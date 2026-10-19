@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { hasTitles, ownedKey } from "@mrstreamer/contracts/subscription";
 import { ConnectScreen } from "../features/connect/ConnectScreen.tsx";
 import { DownloadsPage } from "../features/downloads/DownloadsPage.tsx";
@@ -34,16 +34,16 @@ export function App() {
   const remembered = useQuery(queries.rememberedLiveBrowse());
 
   // Main resolves supported remembered discovery and legacy downgrade writes once per startup.
-  const restored = useRef(false);
+  const [restored, setRestored] = useState(false);
   useEffect(() => {
     if (!subscriptions.data?.length) {
-      restored.current = false;
+      setRestored(false);
       return;
     }
-    if (restored.current || !remembered.data) return;
-    restored.current = true;
-    useUi.setState({ list: remembered.data });
-  }, [subscriptions.data, remembered.data]);
+    if (restored || remembered.isPending) return;
+    useUi.setState({ list: remembered.data ?? { kind: "all" } });
+    setRestored(true);
+  }, [subscriptions.data, remembered.data, remembered.isPending, restored]);
 
   // Connect shows only with no subscription saved. One whose password or link can't be read
   // stays in the lists with what it loaded, and Settings is where it is entered again.
@@ -75,6 +75,8 @@ export function App() {
     );
   }
   if (connect) return offline ? <Offline /> : <ConnectScreen />;
+  // The first Home read belongs to restored discovery, not the temporary default All list.
+  if (!restored) return null;
   return <Shell liveOnly={!subscriptions.data.some(hasTitles)} />;
 }
 

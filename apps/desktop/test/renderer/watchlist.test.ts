@@ -532,6 +532,7 @@ describe("a saved title the provider no longer lists", () => {
     // A series for adults the provider dropped, saved while Settings shows such titles.
     const afterDark = entry("e4", "series", "After Dark", 2022, null);
     ipc.reset();
+    ipc.always("liveBrowse.get", { kind: "all" });
     ipc.prefer({ adultTitles: true });
     useUi.setState({ ...useUi.getInitialState(), view: "watchlist" }, true);
     const subscribed = ipc.hold("subscription.list");
