@@ -3,6 +3,33 @@
 import type { Translation } from "../i18n.ts";
 
 export const nl: Translation = {
+  "Find a setting": "Zoek een instelling",
+  "No settings found": "Geen instellingen gevonden",
+  "Settings could not be read.": "Instellingen konden niet worden gelezen.",
+  "settings.search.interface": "app weergave menu taal systeem",
+  "settings.search.audio": "geluid taal origineel",
+  "settings.search.autoplay": "automatisch afspelen volgende aflevering serie",
+  "settings.search.delay": "aftellen wachten seconden direct timer",
+  "settings.search.quality": "live televisie resolutie stream reset automatisch",
+  "settings.search.titles": "film serie titel taal metadata",
+  "settings.search.adult": "volwassen expliciet zichtbaarheid",
+  "settings.search.tmdb": "metadata databank sleutel token voortgang",
+  "settings.search.subtitles": "ondertiteling taal geforceerd uit",
+  "settings.search.look": "ondertiteling uiterlijk grootte achtergrond positie",
+  "settings.search.online":
+    "online ondertitels zoeken diensten talen inloggegevens wachtwoord API sleutel SubDL OpenSubtitles",
+  "settings.search.home": "start rijen volgorde zichtbaarheid reset",
+  "settings.search.subscriptions":
+    "aanbieder account afspeellijst aanmelden herstellen importeren vernieuwen verwijderen gids koppelen",
+  "settings.search.guides": "XMLTV EPG programma bronnen koppelen vernieuwen",
+  "settings.search.updates":
+    "versie update kanaal stabiel nightly controleren downloaden herstarten winkel uitgave",
+  "settings.search.privacy": "privacy analyse statistieken toestemming beleid volgen",
+  "settings.search.about": "over versie website bron licenties diagnostiek bug melden beoordeling",
+  TMDB: "TMDB",
+  SubDL: "SubDL",
+  OpenSubtitles: "OpenSubtitles",
+  Diagnostics: "Diagnostiek",
   Customize: "Aanpassen",
   "Customize Home": "Home aanpassen",
   Rows: "Rijen",

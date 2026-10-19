@@ -3,6 +3,34 @@
 import type { Translation } from "../i18n.ts";
 
 export const es: Translation = {
+  "Find a setting": "Buscar un ajuste",
+  "No settings found": "No se encontraron ajustes",
+  "Settings could not be read.": "No se pudieron leer los ajustes.",
+  "settings.search.interface": "aplicación pantalla menú idioma sistema",
+  "settings.search.audio": "sonido idioma original",
+  "settings.search.autoplay": "reproducción automática siguiente episodio serie",
+  "settings.search.delay": "cuenta atrás espera segundos instantáneo temporizador",
+  "settings.search.quality": "televisión directo resolución emisión restablecer automático",
+  "settings.search.titles": "película serie título idioma metadatos",
+  "settings.search.adult": "adultos explícito visibilidad",
+  "settings.search.tmdb": "metadatos base clave token progreso",
+  "settings.search.subtitles": "subtítulos idioma forzados desactivados",
+  "settings.search.look": "subtítulos aspecto tamaño fondo posición",
+  "settings.search.online":
+    "subtítulos en línea búsqueda servicios idiomas credenciales contraseña clave API SubDL OpenSubtitles",
+  "settings.search.home": "inicio filas orden visibilidad restablecer",
+  "settings.search.subscriptions":
+    "proveedor cuenta lista reproducción acceso reparar importar actualizar eliminar guía asignación",
+  "settings.search.guides": "XMLTV EPG programa fuentes asignación actualizar",
+  "settings.search.updates":
+    "versión actualización canal estable nightly comprobar descargar reiniciar tienda novedades",
+  "settings.search.privacy": "privacidad análisis estadísticas consentimiento política seguimiento",
+  "settings.search.about":
+    "acerca versión sitio fuente licencias diagnóstico informar error valoración",
+  TMDB: "TMDB",
+  SubDL: "SubDL",
+  OpenSubtitles: "OpenSubtitles",
+  Diagnostics: "Diagnóstico",
   Customize: "Personalizar",
   "Customize Home": "Personalizar Inicio",
   Rows: "Filas",

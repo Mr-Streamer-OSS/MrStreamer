@@ -129,9 +129,15 @@ export async function languageScenario(d: Driver): Promise<void> {
         settings.tabs.join() ===
           [
             translate(locale, "General"),
+            translate(locale, "Playback"),
+            translate(locale, "Live TV"),
+            translate(locale, "Movies and series"),
+            translate(locale, "Subtitles"),
             translate(locale, "Home"),
             translate(locale, "Subscriptions"),
             translate(locale, "Guides"),
+            translate(locale, "Updates"),
+            translate(locale, "Privacy"),
             translate(locale, "About"),
           ].join(),
       `Settings in ${locale}`,

@@ -50,16 +50,18 @@ type Form = { readonly kind: "add" } | { readonly kind: RowFormKind; readonly id
 export function SubscriptionSection() {
   const client = useQueryClient();
   const subscriptions = useSubscriptions();
+  const active = useUi((state) => state.settings === "subscriptions");
   // The connections in use change all the time: ask when the tab opens. Offline, the last
   // answer stays.
   useEffect(() => {
+    if (!active) return;
     for (const { id } of client.getQueryData(queries.subscriptions().queryKey) ?? []) {
       void call("subscription.recheck", { subscriptionId: id }).then(
         (fresh) => keep(client, fresh),
         () => {},
       );
     }
-  }, [client]);
+  }, [client, active]);
 
   /** The row whose details show; undefined until the viewer opened or closed one. */
   const [opened, setOpened] = useState<string | null | undefined>(undefined);

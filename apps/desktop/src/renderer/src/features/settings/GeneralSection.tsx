@@ -1,20 +1,13 @@
-// Settings > General: the app's language, the content preferences, then Updates. The interface
-// language changes only the app's own text, at once; titles, sound and subtitles keep their own.
-// Live channels start in a quality, Full HD unless chosen otherwise, and channels can keep their
-// own. Movies and series show in one language, play their sound in another, or in the language
-// they were made in, and show subtitles in a third, only forced ones or none; picking a track in
-// the player sets these too.
-// TMDB is where names, genres, popularity and streaming services come from. The app has its own
-// key; a viewer's own comes first, for when TMDB stops accepting the app's.
 import { Checkbox } from "@base-ui/react/checkbox";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { QUALITIES } from "@mrstreamer/contracts/library";
 import { LANGUAGE_NAMES, LOCALES, type LanguageChoice } from "@mrstreamer/contracts/language";
 import {
   DEFAULT_LIVE_QUALITY,
   DEFAULT_NEXT_EPISODE_DELAY,
+  DEFAULT_SUBTITLE_LOOK,
   ORIGINAL_SOUND,
   type Preferences,
 } from "@mrstreamer/contracts/preferences";
@@ -25,7 +18,6 @@ import { useUi } from "../../app/ui-store.ts";
 import { changeLanguage } from "../../app/language.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
-import { appError, describeError } from "../../lib/errors.ts";
 import { updatePreferences } from "../../lib/preferences.ts";
 import { preferenceName } from "../../lib/quality.ts";
 import {
@@ -33,229 +25,446 @@ import {
   updateSubscriptionPreferences,
   useSubscriptionPreferences,
 } from "../../lib/queries.ts";
-import { UpdatesSection } from "../updates/UpdatesSection.tsx";
+import {
+  SUBTITLE_SIZES,
+  SUBTITLE_BACKGROUNDS,
+  SUBTITLE_POSITIONS,
+} from "../watch/subtitle-choices.ts";
 import { OnlineSubtitlesSection } from "./OnlineSubtitlesSection.tsx";
 import { Row, Section, Select } from "./Rows.tsx";
+import { SaveFeedback } from "./SaveFeedback.tsx";
+import type { SettingsControl } from "./catalogue.ts";
 
-/** The Subtitles choice for only the subtitles a file marks as forced: no language stored. */
 const FORCED = "forced";
+
+/** Each row has its own pending/error state. Accepted snapshots alone supply saved values. */
+function PreferenceRow<K extends keyof Preferences>({
+  id,
+  field,
+  label,
+  note,
+  children,
+  lookField,
+}: {
+  id: SettingsControl;
+  field: K;
+  label: string;
+  note?: ReactNode;
+  lookField?: keyof NonNullable<Preferences["subtitleLook"]>;
+  children: (
+    saved: Preferences | undefined,
+    change: (value: Preferences[K]) => void,
+    disabled: boolean,
+  ) => ReactNode;
+}) {
+  const client = useQueryClient();
+  const read = useQuery(queries.preferences());
+  const writing = useRef(false);
+  const fieldBusy = useIsMutating({ mutationKey: ["settings", field] }) > 0;
+  const update = useMutation({
+    mutationKey: ["settings", field],
+    mutationFn: (value: Preferences[K]) => {
+      const look = value as Preferences["subtitleLook"];
+      const patch =
+        field === "subtitleLook" && lookField && look
+          ? {
+              subtitleLook: {
+                ...(client.getQueryData(queries.preferences().queryKey)?.preferences.subtitleLook ??
+                  DEFAULT_SUBTITLE_LOOK),
+                [lookField]: look[lookField],
+              },
+            }
+          : { [field]: value };
+      return updatePreferences(patch, client);
+    },
+    onSettled: () => {
+      writing.current = false;
+    },
+    onMutate: (value) => {
+      if (field === "adultTitles" && value === false) useUi.setState({ savedEntry: null });
+    },
+  });
+  return (
+    <div>
+      <fieldset
+        disabled={!read.data || fieldBusy || update.isPending}
+        aria-busy={update.isPending}
+        className="min-w-0"
+      >
+        <Row id={id} label={label} note={note}>
+          {children(
+            read.data,
+            (value) => {
+              if (
+                !read.data ||
+                writing.current ||
+                fieldBusy ||
+                update.isPending ||
+                client.isMutating({ mutationKey: ["settings", field] })
+              )
+                return;
+              writing.current = true;
+              update.mutate(value);
+            },
+            !read.data || fieldBusy || update.isPending,
+          )}
+        </Row>
+      </fieldset>
+      <SaveFeedback
+        pending={update.isPending}
+        error={update.error}
+        retryDisabled={fieldBusy}
+        retry={() => update.mutate(update.variables!)}
+      />
+    </div>
+  );
+}
 
 export function GeneralSection() {
   const client = useQueryClient();
-  const preferences = useQuery(queries.preferences());
-  const update = useMutation({
-    mutationFn: (patch: Partial<Preferences>) => updatePreferences(patch, client),
-    // The sheet of a saved title the provider dropped stays open under Settings, and holds the
-    // entry as it was read while titles for adults showed. It closes as the viewer hides them,
-    // before anything is waited for, so leaving Settings never shows it again.
-    onMutate: (patch) => {
-      if (patch.adultTitles === false) useUi.setState({ savedEntry: null });
-    },
-  });
   const language = useQuery(queries.language());
-  const changingLanguage = useMutation({
+  const update = useMutation({
     mutationFn: (choice: LanguageChoice) => changeLanguage(client, choice),
   });
-  const titles = preferences.data?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE;
-  const audio = preferences.data?.audioLanguage ?? titles;
-  const subtitles = preferences.data?.subtitleLanguage ?? FORCED;
-
-  // The streams picked are each subscription's own. Read afresh too: Watch picks them.
-  const left = useSubscriptionPreferences("always");
-  const picked = [...(left ?? [])].flatMap(([subscriptionId, { channelVariants }]) => {
-    const count = Object.keys(channelVariants ?? {}).length;
-    return count > 0 ? [{ subscriptionId, count }] : [];
-  });
-  const ownQualities = picked.reduce((sum, each) => sum + each.count, 0);
-
   return (
-    <>
-      <Section title={t("App")}>
-        <Row label={t("Interface language")}>
-          {language.data && (
+    <Section title={t("General")}>
+      <Row id="interface-language" label={t("Interface language")}>
+        {language.data && (
+          <Select
+            wide
+            disabled={update.isPending}
+            label={t("Interface language")}
+            value={language.data.choice}
+            options={[
+              {
+                value: "system",
+                label: t("System default ({language})", {
+                  language: LANGUAGE_NAMES[language.data.system],
+                }),
+              },
+              ...LOCALES.map((locale) => ({
+                value: locale,
+                label: LANGUAGE_NAMES[locale],
+                lang: locale,
+              })),
+            ]}
+            onChange={(choice) => update.mutate(choice)}
+          />
+        )}
+      </Row>
+      <SaveFeedback
+        pending={update.isPending}
+        error={update.error ?? language.error}
+        retry={() => (update.isError ? update.mutate(update.variables!) : void language.refetch())}
+      />
+    </Section>
+  );
+}
+
+function Toggle({
+  disabled,
+  label,
+  value,
+  change,
+}: {
+  label: string;
+  disabled: boolean;
+  value: boolean;
+  change: (value: boolean) => void;
+}) {
+  return (
+    <Checkbox.Root
+      aria-label={label}
+      disabled={disabled}
+      checked={value}
+      onCheckedChange={change}
+      className="grid size-4 flex-none place-items-center rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"
+    >
+      <Checkbox.Indicator>
+        <Check className="size-3 text-black" strokeWidth={3} />
+      </Checkbox.Indicator>
+    </Checkbox.Root>
+  );
+}
+
+export function PlaybackSection() {
+  return (
+    <Section title={t("Playback")}>
+      <PreferenceRow id="audio" field="audioLanguage" label={t("Audio in")}>
+        {(saved, change) => {
+          const value = saved?.audioLanguage ?? saved?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE;
+          return (
             <Select
-              wide
-              label={t("Interface language")}
-              value={language.data.choice}
+              label={t("Audio in")}
+              value={value}
               options={[
-                {
-                  value: "system",
-                  label: t("System default ({language})", {
-                    language: LANGUAGE_NAMES[language.data.system],
-                  }),
-                },
-                ...LOCALES.map((locale) => ({
-                  value: locale,
-                  label: LANGUAGE_NAMES[locale],
-                  lang: locale,
-                })),
+                { value: ORIGINAL_SOUND, label: t("Original language") },
+                ...languages(value),
               ]}
-              onChange={(choice) => changingLanguage.mutate(choice)}
+              onChange={change}
             />
-          )}
-        </Row>
-        {changingLanguage.error && (
-          <p className="mt-3 text-sm text-destructive">
-            {describeError(appError(changingLanguage.error))}
-          </p>
+          );
+        }}
+      </PreferenceRow>
+      <PreferenceRow
+        id="autoplay"
+        field="autoplayNext"
+        label={t("Next episode")}
+        note={t("plays automatically")}
+      >
+        {(saved, change, disabled) => (
+          <Toggle
+            disabled={disabled}
+            label={t("Next episode")}
+            value={saved?.autoplayNext ?? true}
+            change={change}
+          />
         )}
-      </Section>
-      <Section title={t("Privacy")}>
-        <Row label={t("Share basic usage statistics")}>
-          <Checkbox.Root
-            aria-label={t("Share basic usage statistics")}
-            checked={preferences.data?.analyticsEnabled ?? true}
-            disabled={!preferences.isSuccess || update.isPending}
-            onCheckedChange={(checked) => update.mutate({ analyticsEnabled: checked })}
-            className="grid size-4 flex-none place-items-center rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"
-          >
-            <Checkbox.Indicator>
-              <Check className="size-3 text-black" strokeWidth={3} />
-            </Checkbox.Indicator>
-          </Checkbox.Root>
-        </Row>
-        <p className="mt-3 text-sm">
-          {t(
-            "Counts app use, the features you open, whether playback, downloads and update checks work, and how often the window stops unexpectedly. No viewing history or provider details.",
-          )}
-        </p>
-        <a
-          href="https://mrstreamer.app/privacy"
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 inline-block text-sm underline underline-offset-4"
-        >
-          {t("Privacy policy")}
-        </a>
-        {update.error && update.variables?.analyticsEnabled !== undefined && (
-          <p className="mt-3 text-sm text-destructive">{describeError(appError(update.error))}</p>
+      </PreferenceRow>
+      <PreferenceRow id="delay" field="nextEpisodeDelaySeconds" label={t("Next episode delay")}>
+        {(saved, change) => (
+          <>
+            {saved?.nextEpisodeDelaySeconds === 0 && <span>{t("Instant")}</span>}
+            <EpisodeDelay
+              seconds={saved?.nextEpisodeDelaySeconds ?? DEFAULT_NEXT_EPISODE_DELAY}
+              onChange={change}
+            />
+            <span>{t("seconds")}</span>
+          </>
         )}
-      </Section>
-      <Section title={t("Live TV")}>
-        <Row label={t("Quality")} note={t("Automatic tries the nearest if one fails")}>
+      </PreferenceRow>
+    </Section>
+  );
+}
+
+export function LiveSettingsSection() {
+  const client = useQueryClient();
+  const subscriptions = useSubscriptionPreferences("always");
+  const picked = [...(subscriptions ?? [])].filter(
+    ([, saved]) => Object.keys(saved.channelVariants ?? {}).length > 0,
+  );
+  const count = picked.reduce(
+    (sum, [, saved]) => sum + Object.keys(saved.channelVariants ?? {}).length,
+    0,
+  );
+  const reset = useMutation({
+    mutationFn: async () => {
+      // Wait for every result, including partial success. Retry reads only overrides still present.
+      const results = await Promise.allSettled(
+        picked.map(([subscriptionId]) =>
+          updateSubscriptionPreferences(client, subscriptionId, { channelVariants: {} }),
+        ),
+      );
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
+    },
+  });
+  return (
+    <Section title={t("Live TV")}>
+      <PreferenceRow
+        id="quality"
+        field="liveQuality"
+        label={t("Quality")}
+        note={t("Automatic tries the nearest if one fails")}
+      >
+        {(saved, change) => (
           <Select
             label={t("Quality")}
-            value={preferences.data?.liveQuality ?? DEFAULT_LIVE_QUALITY}
+            value={saved?.liveQuality ?? DEFAULT_LIVE_QUALITY}
             options={QUALITIES.map((quality) => ({
               value: quality,
               label: preferenceName(quality),
             }))}
-            onChange={(liveQuality) => update.mutate({ liveQuality })}
+            onChange={change}
           />
-        </Row>
-        {ownQualities > 0 && (
-          <Row label={t("Channels with their own quality")} note={formatNumber(ownQualities)}>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                for (const { subscriptionId } of picked) {
-                  void updateSubscriptionPreferences(client, subscriptionId, {
-                    channelVariants: {},
-                  }).catch(() => {});
-                }
-              }}
-            >
-              {t("Reset")}
-            </Button>
-          </Row>
         )}
-      </Section>
-      <Section title={t("Movies and series")}>
-        <Row label={t("Titles in")}>
+      </PreferenceRow>
+      <Row id="own-quality" label={t("Channels with their own quality")} note={formatNumber(count)}>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={reset.isPending}
+          aria-disabled={count === 0}
+          onClick={() => {
+            if (count > 0) reset.mutate();
+          }}
+        >
+          {t("Reset")}
+        </Button>
+      </Row>
+      <SaveFeedback pending={reset.isPending} error={reset.error} retry={() => reset.mutate()} />
+    </Section>
+  );
+}
+
+export function MoviesSettingsSection() {
+  return (
+    <Section title={t("Movies and series")}>
+      <PreferenceRow id="titles" field="titleLanguage" label={t("Titles in")}>
+        {(saved, change) => (
           <Select
             label={t("Titles in")}
-            value={titles}
-            options={languages(titles)}
-            onChange={(titleLanguage) => update.mutate({ titleLanguage })}
+            value={saved?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE}
+            options={languages(saved?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE)}
+            onChange={change}
           />
-        </Row>
-        <Row label={t("Audio in")}>
-          <Select
-            label={t("Audio in")}
-            value={audio}
-            options={[
-              { value: ORIGINAL_SOUND, label: t("Original language") },
-              ...languages(audio),
-            ]}
-            onChange={(audioLanguage) => update.mutate({ audioLanguage })}
-          />
-        </Row>
-        <Row label={t("Subtitles")}>
-          <Select
-            label={t("Subtitles")}
-            value={subtitles}
-            options={[
-              { value: "off", label: t("Off") },
-              { value: FORCED, label: t("Only when forced") },
-              ...languages(subtitles),
-            ]}
-            onChange={(value) =>
-              update.mutate({ subtitleLanguage: value === FORCED ? null : value })
-            }
-          />
-        </Row>
-        <Row label={t("For adults")} note={t("titles in their own tab, channels only in Live TV")}>
-          <Checkbox.Root
-            aria-label={t("For adults")}
-            checked={preferences.data?.adultTitles ?? false}
-            onCheckedChange={(checked) => update.mutate({ adultTitles: checked })}
-            className="grid size-4 flex-none place-items-center rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none transition-shadow duration-150 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"
-          >
-            <Checkbox.Indicator>
-              <Check className="size-3 text-black" strokeWidth={3} />
-            </Checkbox.Indicator>
-          </Checkbox.Root>
-        </Row>
-        <Row label={t("Next episode")} note={t("plays automatically")}>
-          <Checkbox.Root
-            aria-label={t("Next episode")}
-            checked={preferences.data?.autoplayNext ?? true}
-            onCheckedChange={(checked) => update.mutate({ autoplayNext: checked })}
-            className="grid size-4 flex-none place-items-center rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none transition-shadow duration-150 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-white data-checked:shadow-none"
-          >
-            <Checkbox.Indicator>
-              <Check className="size-3 text-black" strokeWidth={3} />
-            </Checkbox.Indicator>
-          </Checkbox.Root>
-        </Row>
-        <Row
-          label={t("Next episode delay")}
-          note={preferences.data?.nextEpisodeDelaySeconds === 0 ? t("Instant") : undefined}
-        >
-          <EpisodeDelay
-            key={preferences.data?.nextEpisodeDelaySeconds ?? DEFAULT_NEXT_EPISODE_DELAY}
-            seconds={preferences.data?.nextEpisodeDelaySeconds ?? DEFAULT_NEXT_EPISODE_DELAY}
-            disabled={!preferences.data || update.isPending}
-            onChange={(nextEpisodeDelaySeconds) => update.mutate({ nextEpisodeDelaySeconds })}
-          />
-          <span className="text-muted-foreground">{t("seconds")}</span>
-        </Row>
-        <Tmdb
-          ownKey={Boolean(preferences.data?.tmdbKey)}
-          onKey={(tmdbKey, done) => update.mutate({ tmdbKey }, { onSuccess: done })}
-        />
-        {update.error && update.variables?.analyticsEnabled === undefined && (
-          <p className="mt-3 text-sm text-destructive">{describeError(appError(update.error))}</p>
         )}
+      </PreferenceRow>
+      <PreferenceRow
+        id="adult"
+        field="adultTitles"
+        label={t("For adults")}
+        note={t("titles in their own tab, channels only in Live TV")}
+      >
+        {(saved, change, disabled) => (
+          <Toggle
+            disabled={disabled}
+            label={t("For adults")}
+            value={saved?.adultTitles ?? false}
+            change={change}
+          />
+        )}
+      </PreferenceRow>
+      <Tmdb />
+    </Section>
+  );
+}
+
+export function SubtitlesSettingsSection() {
+  return (
+    <>
+      <Section title={t("Subtitles")}>
+        <PreferenceRow id="subtitle-language" field="subtitleLanguage" label={t("Subtitles")}>
+          {(saved, change) => {
+            const value = saved?.subtitleLanguage ?? FORCED;
+            return (
+              <Select
+                label={t("Subtitles")}
+                value={value}
+                options={[
+                  { value: "off", label: t("Off") },
+                  { value: FORCED, label: t("Only when forced") },
+                  ...languages(value),
+                ]}
+                onChange={(value) => change(value === FORCED ? null : value)}
+              />
+            );
+          }}
+        </PreferenceRow>
+      </Section>
+      <Section title={t("Subtitle look")}>
+        <PreferenceRow id="subtitle-size" field="subtitleLook" lookField="size" label={t("Size")}>
+          {(saved, change) => {
+            const look = saved?.subtitleLook ?? DEFAULT_SUBTITLE_LOOK;
+            return (
+              <Select
+                label={t("Size")}
+                value={look.size}
+                options={SUBTITLE_SIZES.map((option) => ({
+                  value: option.value,
+                  label: t(option.label),
+                }))}
+                onChange={(size) => change({ ...look, size })}
+              />
+            );
+          }}
+        </PreferenceRow>
+        <PreferenceRow
+          id="subtitle-background"
+          field="subtitleLook"
+          lookField="background"
+          label={t("Background")}
+        >
+          {(saved, change) => {
+            const look = saved?.subtitleLook ?? DEFAULT_SUBTITLE_LOOK;
+            return (
+              <Select
+                label={t("Background")}
+                value={look.background}
+                options={SUBTITLE_BACKGROUNDS.map((option) => ({
+                  value: option.value,
+                  label: t(option.label),
+                }))}
+                onChange={(background) => change({ ...look, background })}
+              />
+            );
+          }}
+        </PreferenceRow>
+        <PreferenceRow
+          id="subtitle-position"
+          field="subtitleLook"
+          lookField="position"
+          label={t("Position")}
+        >
+          {(saved, change) => {
+            const look = saved?.subtitleLook ?? DEFAULT_SUBTITLE_LOOK;
+            return (
+              <Select
+                label={t("Position")}
+                value={look.position}
+                options={SUBTITLE_POSITIONS.map((option) => ({
+                  value: option.value,
+                  label: t(option.label),
+                }))}
+                onChange={(position) => change({ ...look, position })}
+              />
+            );
+          }}
+        </PreferenceRow>
       </Section>
       <OnlineSubtitlesSection />
-      <UpdatesSection />
     </>
   );
 }
 
-/** Commit exact seconds on blur or Enter. Failed writes leave the acknowledged value intact. */
+export function PrivacySection() {
+  return (
+    <Section title={t("Privacy")}>
+      <PreferenceRow
+        id="statistics"
+        field="analyticsEnabled"
+        label={t("Share basic usage statistics")}
+      >
+        {(saved, change, disabled) => (
+          <Toggle
+            disabled={disabled}
+            label={t("Share basic usage statistics")}
+            value={saved?.analyticsEnabled ?? true}
+            change={change}
+          />
+        )}
+      </PreferenceRow>
+      <p className="mt-3 text-sm">
+        {t(
+          "Counts app use, the features you open, whether playback, downloads and update checks work, and how often the window stops unexpectedly. No viewing history or provider details.",
+        )}
+      </p>
+      <a
+        data-setting="privacy-policy"
+        href="https://mrstreamer.app/privacy"
+        target="_blank"
+        rel="noreferrer"
+        className="mt-2 inline-block text-sm underline underline-offset-4"
+      >
+        {t("Privacy policy")}
+      </a>
+    </Section>
+  );
+}
+
+/** Draft seconds survive unrelated snapshots. Blur/Enter clamps whole seconds; Escape cancels. */
 function EpisodeDelay({
   seconds,
-  disabled,
   onChange,
 }: {
   seconds: number;
-  disabled: boolean;
   onChange: (seconds: number) => void;
 }) {
   const [value, setValue] = useState(String(seconds));
+  const editing = useRef(false);
+  useEffect(() => {
+    if (!editing.current) setValue(String(seconds));
+  }, [seconds]);
   return (
     <Input
       aria-label={t("Next episode delay")}
@@ -264,24 +473,59 @@ function EpisodeDelay({
       max={60}
       step={1}
       value={value}
-      disabled={disabled}
       className="h-9 w-20 rounded-none px-2 text-right tabular-nums"
+      onFocus={() => {
+        editing.current = true;
+      }}
       onChange={(event) => setValue(event.target.value)}
       onKeyDown={(event) => {
-        if (event.key === "Enter") event.currentTarget.blur();
+        if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+          event.preventDefault();
+          event.stopPropagation();
+          const current = Number(value) || 0;
+          setValue(
+            String(
+              event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? 60
+                  : Math.max(
+                      0,
+                      Math.min(
+                        60,
+                        current + (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 5 : 1),
+                      ),
+                    ),
+            ),
+          );
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.blur();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setValue(String(seconds));
+          editing.current = false;
+          event.currentTarget.blur();
+        }
       }}
       onBlur={(event) => {
         const next = event.currentTarget.valueAsNumber;
+        const commit = editing.current;
+        editing.current = false;
         setValue(String(seconds));
-        if (Number.isInteger(next) && next >= 0 && next <= 60 && next !== seconds) onChange(next);
+        if (commit && Number.isInteger(next)) {
+          const bounded = Math.max(0, Math.min(60, next));
+          if (bounded !== seconds) onChange(bounded);
+        }
       }}
     />
   );
 }
 
-/** The languages to pick from, with `current` added when it is another, as picked in a player. */
 function languages(current: string): { value: string; label: string }[] {
-  const listed: { value: string; label: string }[] = TITLE_LANGUAGES.map((language) => ({
+  const listed = TITLE_LANGUAGES.map((language) => ({
     value: language.code,
     label: language.name,
   }));
@@ -291,17 +535,19 @@ function languages(current: string): { value: string; label: string }[] {
     : listed;
 }
 
-/** How far TMDB got, and the viewer's own key: pasted in a field that opens on asking. */
-function Tmdb({
-  ownKey,
-  onKey,
-}: {
-  ownKey: boolean;
-  onKey: (key: string, done: () => void) => void;
-}) {
+function Tmdb() {
+  const client = useQueryClient();
+  const preferences = useQuery(queries.preferences());
   const status = useQuery(queries.onDemandStatus());
   const [editing, setEditing] = useState(false);
   const [key, setKey] = useState("");
+  const update = useMutation({
+    mutationFn: (tmdbKey: string) => updatePreferences({ tmdbKey }, client),
+    onSuccess: () => {
+      setKey("");
+      setEditing(false);
+    },
+  });
   const metadata = status.data?.metadata;
   const progress = !metadata
     ? t("no key")
@@ -311,41 +557,63 @@ function Tmdb({
         ? t("{known} of {wanted} titles", { known: metadata.known, wanted: metadata.wanted })
         : t("{count} titles", { count: metadata.known });
   return (
-    <>
-      <Row label="TMDB" note={ownKey ? `${t("your key")} · ${progress}` : progress}>
-        {ownKey && (
-          <Button variant="ghost" size="sm" onClick={() => onKey("", () => {})}>
+    <div data-setting="tmdb">
+      <Row
+        label="TMDB"
+        note={preferences.data?.tmdbKey ? `${t("your key")} · ${progress}` : progress}
+      >
+        {preferences.data?.tmdbKey && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={update.isPending}
+            onClick={() => update.mutate("")}
+          >
             {t("Use the app's key")}
           </Button>
         )}
         {!editing && (
-          <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!preferences.data || update.isPending}
+            onClick={() => setEditing(true)}
+          >
             {t("Own key…")}
           </Button>
         )}
       </Row>
       {editing && (
         <form
-          className="flex gap-3 border-b border-white/8 py-3"
+          className="flex flex-wrap gap-3 border-b border-white/8 py-3"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!key.trim()) return;
-            onKey(key.trim(), () => {
-              setKey("");
-              setEditing(false);
-            });
+            if (key.trim()) update.mutate(key.trim());
           }}
         >
           <Input
             autoFocus
+            disabled={update.isPending}
             type="password"
             value={key}
             onChange={(event) => setKey(event.target.value)}
             placeholder={t("Your own key or read access token")}
             aria-label={t("Your own TMDB key")}
-            className="h-9 flex-1"
+            className="h-9 min-w-0 flex-1"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                setEditing(false);
+              }
+            }}
           />
-          <Button type="submit" variant="secondary" size="sm" disabled={!key.trim()}>
+          <Button
+            type="submit"
+            variant="secondary"
+            size="sm"
+            disabled={!key.trim() || update.isPending}
+          >
             {t("Use")}
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
@@ -353,6 +621,11 @@ function Tmdb({
           </Button>
         </form>
       )}
-    </>
+      <SaveFeedback
+        pending={update.isPending}
+        error={update.error}
+        retry={() => update.mutate(update.variables!)}
+      />
+    </div>
   );
 }

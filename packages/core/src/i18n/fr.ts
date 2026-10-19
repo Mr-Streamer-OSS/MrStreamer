@@ -3,6 +3,34 @@
 import type { Translation } from "../i18n.ts";
 
 export const fr: Translation = {
+  "Find a setting": "Rechercher un réglage",
+  "No settings found": "Aucun réglage trouvé",
+  "Settings could not be read.": "Impossible de lire les réglages.",
+  "settings.search.interface": "application affichage menu langue système",
+  "settings.search.audio": "son langue originale",
+  "settings.search.autoplay": "lecture automatique épisode suivant série",
+  "settings.search.delay": "compte à rebours attente secondes immédiat minuterie",
+  "settings.search.quality": "télévision direct résolution flux réinitialiser automatique",
+  "settings.search.titles": "film série titre langue métadonnées",
+  "settings.search.adult": "adulte explicite visibilité",
+  "settings.search.tmdb": "métadonnées base clé jeton progression",
+  "settings.search.subtitles": "sous-titres langue forcés désactivés",
+  "settings.search.look": "sous-titres apparence taille arrière-plan position",
+  "settings.search.online":
+    "sous-titres en ligne recherche services langues identifiants mot de passe clé API SubDL OpenSubtitles",
+  "settings.search.home": "accueil lignes ordre visibilité réinitialiser",
+  "settings.search.subscriptions":
+    "fournisseur compte liste lecture connexion réparer importer actualiser supprimer guide associer",
+  "settings.search.guides": "XMLTV EPG programme sources associer actualiser",
+  "settings.search.updates":
+    "version mise à jour canal stable nightly vérifier télécharger redémarrer boutique nouveautés",
+  "settings.search.privacy": "confidentialité analyse statistiques consentement politique suivi",
+  "settings.search.about":
+    "à propos version site source licences diagnostic signaler problème avis",
+  TMDB: "TMDB",
+  SubDL: "SubDL",
+  OpenSubtitles: "OpenSubtitles",
+  Diagnostics: "Diagnostic",
   Customize: "Personnaliser",
   "Customize Home": "Personnaliser l’accueil",
   Rows: "Rangées",

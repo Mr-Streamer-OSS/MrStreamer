@@ -42,7 +42,12 @@ export function CustomizeHome() {
   // Switching Settings tabs or closing Settings does not release an outstanding preference write.
   const latest = useMutationState({
     filters: { mutationKey: HOME_ROW_WRITE, exact: true },
-    select: (mutation) => ({ status: mutation.state.status, error: mutation.state.error }),
+    select: (mutation) => ({
+      status: mutation.state.status,
+      error: mutation.state.error,
+      // HOME_ROW_WRITE belongs to the save above, whose variables are always these rows.
+      rows: mutation.state.variables as NonNullable<Preferences["homeRows"]> | undefined,
+    }),
   }).at(-1);
   const busy = save.isPending || latest?.status === "pending";
   const persist = (change: ((rows: HomeRow[]) => HomeRow[]) | null) => {
@@ -79,6 +84,7 @@ export function CustomizeHome() {
           return (
             <li
               key={row.id}
+              data-setting={`home-${row.id}`}
               className={cn(
                 "flex min-h-13 items-center gap-3 border-b border-white/8 py-2 text-[0.9375rem]",
                 busy && "opacity-60",
@@ -142,10 +148,21 @@ export function CustomizeHome() {
       {latest?.error && (
         <p role="alert" className="mt-2 text-sm text-destructive">
           {describeError(appError(latest.error))}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy || !latest.rows}
+            onClick={() => {
+              if (latest.rows) save.mutate(latest.rows);
+            }}
+          >
+            {t("Try again")}
+          </Button>
         </p>
       )}
       <div className="mt-3 flex items-center gap-3">
         <Button
+          data-setting="home-reset"
           className="pl-0 aria-disabled:opacity-40"
           variant="ghost"
           disabled={!preferences.data || busy}

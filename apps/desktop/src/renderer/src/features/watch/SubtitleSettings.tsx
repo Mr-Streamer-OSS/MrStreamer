@@ -7,7 +7,7 @@
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
 import { DEFAULT_SUBTITLE_LOOK, type SubtitleLook } from "@mrstreamer/contracts/preferences";
-import { formatDecimal, type PlainKey, t } from "@mrstreamer/core/i18n";
+import { formatDecimal, t } from "@mrstreamer/core/i18n";
 import { readPreferences, updatePreferences } from "../../lib/preferences.ts";
 import { appError, describeError } from "../../lib/errors.ts";
 import { cn } from "../../lib/utils.ts";
@@ -21,26 +21,12 @@ import {
 } from "../../player/subtitles.ts";
 import { flash, flashNote } from "./Flash.tsx";
 
-/** Each choice's word on its button, and its whole name for assistive technology. */
-const SIZES = [
-  { value: "small", short: "S", label: "Small" },
-  { value: "medium", short: "M", label: "Medium" },
-  { value: "large", short: "L", label: "Large" },
-] as const satisfies readonly Segment<SubtitleLook["size"]>[];
-const BACKGROUNDS = [
-  { value: "box", short: "Box", label: "Box" },
-  { value: "shadow", short: "Shadow", label: "Shadow" },
-] as const satisfies readonly Segment<SubtitleLook["background"]>[];
-const POSITIONS = [
-  { value: "low", short: "Low", label: "Low" },
-  { value: "high", short: "Higher", label: "Higher" },
-] as const satisfies readonly Segment<SubtitleLook["position"]>[];
-
-interface Segment<V extends string> {
-  readonly value: V;
-  readonly short: PlainKey;
-  readonly label: PlainKey;
-}
+import {
+  SUBTITLE_SIZES,
+  SUBTITLE_BACKGROUNDS,
+  SUBTITLE_POSITIONS,
+  type Segment,
+} from "./subtitle-choices.ts";
 
 /** Subtitles drawn as text, which take timing and every look setting. */
 const isText = (track: SubtitleTrack) => track.format !== "picture";
@@ -146,21 +132,21 @@ export function LookRows({ text }: { text: boolean }) {
     <>
       <Segments
         label={t("Size")}
-        options={SIZES}
+        options={SUBTITLE_SIZES}
         value={look.size}
         onPick={(size) => pick({ ...look, size })}
       />
       {text && (
         <Segments
           label={t("Background")}
-          options={BACKGROUNDS}
+          options={SUBTITLE_BACKGROUNDS}
           value={look.background}
           onPick={(background) => pick({ ...look, background })}
         />
       )}
       <Segments
         label={t("Position")}
-        options={POSITIONS}
+        options={SUBTITLE_POSITIONS}
         value={look.position}
         onPick={(position) => pick({ ...look, position })}
       />

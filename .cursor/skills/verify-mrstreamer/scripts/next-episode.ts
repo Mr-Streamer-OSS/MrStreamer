@@ -53,6 +53,7 @@ export async function nextEpisodeScenario(
       windowsVirtualKeyCode: 188,
       modifiers,
     });
+    await d.click("Open Playback settings", named("nav button", translate(locale, "Playback")));
     await d.wait(() => d.exists(delay()));
   };
   const setDelay = async (seconds: number) => {
@@ -93,6 +94,7 @@ export async function nextEpisodeScenario(
     await d.wait(async () => !(await d.exists(delay())));
   };
   const pickLocale = async (next: Locale) => {
+    await d.click("Open General settings", named("nav button", translate(locale, "General")));
     d.action(`Pick ${next} through Interface language`);
     await d.evaluate(`${LANGUAGE}.focus()`);
     // Native select type-ahead commits a single choice without intermediate language writes.
@@ -104,6 +106,10 @@ export async function nextEpisodeScenario(
       d.evaluate<boolean>(`document.documentElement.lang === ${JSON.stringify(next)}`),
     );
     locale = next;
+    await d.click(
+      "Return to Playback settings",
+      named("nav button", translate(locale, "Playback")),
+    );
     await d.wait(() => d.exists(delay()));
   };
   const playEpisode = async (episode: string) => {

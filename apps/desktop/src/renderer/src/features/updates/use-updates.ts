@@ -26,6 +26,9 @@ export function useUpdates() {
   });
   return {
     status: status.data,
+    statusRead: status,
+    channelChange: setChannel,
+    actionState: action,
     check: () => action.mutate("updates.check"),
     download: () => action.mutate("updates.download"),
     setChannel: (channel: Channel) => setChannel.mutate(channel),
@@ -38,7 +41,8 @@ export function useUpdates() {
      * release was refused or the install couldn't start; Settings then shows why.
      */
     restart: () => {
-      const showSettings = () => useUi.setState({ settings: "general", updateDialog: null });
+      const showSettings = () =>
+        useUi.setState({ settings: "updates", settingsTarget: "update-check", updateDialog: null });
       call("updates.restart").then(showSettings, showSettings);
     },
   };

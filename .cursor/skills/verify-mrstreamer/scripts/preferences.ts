@@ -26,6 +26,7 @@ export async function preferencesScenario(d: Driver): Promise<void> {
       windowsVirtualKeyCode: 188,
       modifiers,
     });
+    await d.click("Open Playback", button("nav button", "Playback"));
     await d.wait(() => d.exists(audio));
   };
   const pick = async (select: string, name: string) => {
@@ -90,7 +91,9 @@ export async function preferencesScenario(d: Driver): Promise<void> {
   await d.capture("settings-player-track-current");
 
   // Independent controls use separate writes, without replacing the saved sound track.
+  await d.click("Open Subtitles", button("nav button", "Subtitles"));
   await pick(subtitles, "Français");
+  await d.click("Return to Playback", button("nav button", "Playback"));
   await d.click(
     "Turn next episode off",
     "document.querySelector('[role=checkbox][aria-label=\"Next episode\"]')",
@@ -105,6 +108,7 @@ export async function preferencesScenario(d: Driver): Promise<void> {
   await d.quit();
   await d.launch();
   await openSettings();
+  await d.click("Open Subtitles after restart", button("nav button", "Subtitles"));
   await d.wait(() =>
     d.evaluate<boolean>(
       `${audio}.value === 'es' && ${subtitles}.value === 'fr' && document.querySelector('[role=checkbox][aria-label="Next episode"]').getAttribute('aria-checked') === 'false'`,

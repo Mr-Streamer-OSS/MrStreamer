@@ -668,6 +668,8 @@ async function click(selector: string, index = 0, match?: { name: string; title:
 async function settings() {
   await waitFor(() => live().evaluate<boolean>("!!document.querySelector('header')"));
   await click('button[aria-label="Settings"]');
+  if (await live().evaluate<boolean>("!!document.querySelector('[data-view=settings]')"))
+    await namedButton("nav button", "Privacy");
   await waitFor(() =>
     live().evaluate<boolean>(
       "!!document.querySelector('[role=checkbox][aria-label=\"Share basic usage statistics\"]')",
@@ -1160,8 +1162,12 @@ async function productPaths() {
   await snapshot("search-entry");
   await keyEscape();
   await settings();
+  if (await live().evaluate<boolean>("!!document.querySelector('[data-view=settings]')"))
+    await namedButton("nav button", "Playback");
   await click('[role="checkbox"][aria-label="Next episode"]');
   await waitFor(async () => (await usageCount("setting_autoplay_next")) === 1);
+  if (await live().evaluate<boolean>("!!document.querySelector('[data-view=settings]')"))
+    await namedButton("nav button", "Updates");
   const updateStatus = await live().evaluate<Result<UpdateStatus>>(
     "window.mrStreamer.invoke('updates.status')",
   );
@@ -1193,6 +1199,8 @@ async function productPaths() {
     await waitFor(async () => (await usageCount("action_update_dismissed")) === 1);
     await snapshot("update-panel-dismissed");
     await settings();
+    if (await live().evaluate<boolean>("!!document.querySelector('[data-view=settings]')"))
+      await namedButton("nav button", "Updates");
     rejectUpdate = true;
     await namedButton("button", "Check now");
     await waitFor(

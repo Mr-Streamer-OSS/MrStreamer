@@ -3,6 +3,34 @@
 import type { Translation } from "../i18n.ts";
 
 export const de: Translation = {
+  "Find a setting": "Einstellung suchen",
+  "No settings found": "Keine Einstellungen gefunden",
+  "Settings could not be read.": "Einstellungen konnten nicht gelesen werden.",
+  "settings.search.interface": "App Anzeige Menü Sprache System",
+  "settings.search.audio": "Ton Sprache Original",
+  "settings.search.autoplay": "automatisch abspielen nächste Folge Serie",
+  "settings.search.delay": "Countdown warten Sekunden sofort Timer",
+  "settings.search.quality": "Live Fernsehen Auflösung Stream zurücksetzen automatisch",
+  "settings.search.titles": "Film Serie Titel Sprache Metadaten",
+  "settings.search.adult": "Erwachsene explizit Sichtbarkeit",
+  "settings.search.tmdb": "Metadaten Datenbank Schlüssel Token Fortschritt",
+  "settings.search.subtitles": "Untertitel Sprache erzwungen aus",
+  "settings.search.look": "Untertitel Aussehen Größe Hintergrund Position",
+  "settings.search.online":
+    "Online Untertitel Suche Dienste Sprachen Zugangsdaten Passwort API Schlüssel SubDL OpenSubtitles",
+  "settings.search.home": "Startseite Zeilen Reihenfolge Sichtbarkeit zurücksetzen",
+  "settings.search.subscriptions":
+    "Anbieter Konto Wiedergabeliste Anmeldung reparieren importieren aktualisieren entfernen Programm Zuordnung",
+  "settings.search.guides": "XMLTV EPG Programm Quellen Zuordnung aktualisieren",
+  "settings.search.updates":
+    "Version Update Kanal stabil Nightly prüfen herunterladen neu starten Store Versionshinweise",
+  "settings.search.privacy": "Datenschutz Analyse Statistik Einwilligung Richtlinie Tracking",
+  "settings.search.about":
+    "Info Version Webseite Quellcode Lizenzen Diagnose Fehler melden bewerten",
+  TMDB: "TMDB",
+  SubDL: "SubDL",
+  OpenSubtitles: "OpenSubtitles",
+  Diagnostics: "Diagnose",
   Customize: "Anpassen",
   "Customize Home": "Home anpassen",
   Rows: "Zeilen",

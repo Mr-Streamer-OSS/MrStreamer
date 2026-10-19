@@ -1,3 +1,4 @@
+import type { SettingsSection, SettingsControl } from "../features/settings/catalogue.ts";
 import { create } from "zustand";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
@@ -16,7 +17,7 @@ export function withoutTitles(view: View): boolean {
 }
 
 /** The tabs of the Settings page, and the licences About opens. */
-export type SettingsTab = "general" | "home" | "subscriptions" | "guides" | "about" | "licences";
+type SettingsTab = SettingsSection | "licences";
 
 /**
  * A subscription Settings > Subscriptions opens on, and what of it shows: its details, the form
@@ -68,7 +69,8 @@ interface UiState {
   readonly settings: SettingsTab | null;
   /** What Settings > Subscriptions opens on, once; null leaves its list as it is. */
   readonly subscription: SubscriptionTarget | null;
-  /** Settings > General opens on Online subtitles, once, rather than at its top. */
+  readonly settingsTarget: SettingsControl | null;
+  /** Settings opens on Online subtitles, once, rather than at its top. */
   readonly onlineSubtitles: boolean;
   /** The list the guide and Watch's channel list show. */
   readonly list: ChannelList;
@@ -88,6 +90,7 @@ export const useUi = create<UiState>(() => ({
   searchFrom: "",
   settings: null,
   subscription: null,
+  settingsTarget: null,
   onlineSubtitles: false,
   list: { kind: "all" },
   updateDialog: null,
@@ -147,7 +150,12 @@ export function openSubscription(id: string, show: SubscriptionTarget["show"]): 
 
 /** Opens Settings on Online subtitles, as from a title's CC panel: the title goes on underneath. */
 export function openOnlineSubtitleSettings(): void {
-  useUi.setState({ settings: "general", onlineSubtitles: true, searchOpen: false });
+  useUi.setState({
+    settings: "subtitles",
+    settingsTarget: "online-subtitles",
+    onlineSubtitles: true,
+    searchOpen: false,
+  });
 }
 
 /** Opens Watch over the current page. */

@@ -4,6 +4,33 @@
 import type { Plural } from "../i18n.ts";
 
 export const en = {
+  "Find a setting": "Find a setting",
+  "No settings found": "No settings found",
+  "Settings could not be read.": "Settings could not be read.",
+  "settings.search.interface": "app display menu language system",
+  "settings.search.audio": "sound language original",
+  "settings.search.autoplay": "automatic play next episode series",
+  "settings.search.delay": "countdown wait seconds instant timer",
+  "settings.search.quality": "live television resolution stream reset automatic",
+  "settings.search.titles": "movie series title language metadata",
+  "settings.search.adult": "adult mature explicit visibility",
+  "settings.search.tmdb": "metadata database key token progress",
+  "settings.search.subtitles": "captions language forced off",
+  "settings.search.look": "subtitle look appearance size background position",
+  "settings.search.online":
+    "online subtitles search services languages credentials password API key SubDL OpenSubtitles",
+  "settings.search.home": "home rows order visibility reset",
+  "settings.search.subscriptions":
+    "provider account playlist login repair import refresh remove guide mapping",
+  "settings.search.guides": "XMLTV EPG programme sources mapping refresh",
+  "settings.search.updates":
+    "version update channel stable nightly check download restart store release notes",
+  "settings.search.privacy": "privacy analytics statistics consent policy tracking",
+  "settings.search.about": "about version website source licences diagnostics report bug rating",
+  TMDB: "TMDB",
+  SubDL: "SubDL",
+  OpenSubtitles: "OpenSubtitles",
+  Diagnostics: "Diagnostics",
   Customize: "Customize",
   "Customize Home": "Customize Home",
   Rows: "Rows",
