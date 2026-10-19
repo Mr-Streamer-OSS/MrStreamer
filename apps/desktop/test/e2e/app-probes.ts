@@ -537,6 +537,7 @@ export async function runAppProbes(options: {
       }
       await main.evaluate(`${windowExpression}.show()`);
       await key(page, "Escape", 27);
+      await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[data-view="watch"]')`));
       await list();
     }
     if (options.liveProfile) {
@@ -619,7 +620,14 @@ export async function runAppProbes(options: {
         );
         action("Return from playback");
         await key(page, "Escape", 27);
+        // Let the overlay close before Escape addresses Watch, including on the native Mac.
+        await waitFor(() =>
+          page.evaluate<boolean>(`!document.querySelector('[data-view="watch"] [role=button]')`),
+        );
         await key(page, "Escape", 27);
+        await waitFor(() =>
+          page.evaluate<boolean>(`!document.querySelector('[data-view="watch"]')`),
+        );
         await list();
       } catch (error) {
         pathError = error;

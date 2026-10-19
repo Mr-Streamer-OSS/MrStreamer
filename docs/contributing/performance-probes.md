@@ -45,8 +45,9 @@ each process. Main PID must match the launched child; renderer PID comes from th
 BrowserWindow, not the first process with a matching name. Inspector profile and renderer
 build URL must match the owned instance. Boundary snapshots include window focus and visibility.
 Before login, the main PID/profile and the browser's actual profile/debug-port arguments must
-match the launched child. Probes add `--enable-automation` for that public CDP command. The disposable profile is resolved to its real path before launch, so macOS `/var` aliases
-do not fail the same exact ownership checks. A URL
+match the launched child. Probes add `--enable-automation` for that public CDP command. The
+disposable profile is resolved to its real path before launch, so macOS `/var` aliases do not fail
+the same exact ownership checks. A URL
 match alone cannot prove ownership when two checkouts load the same renderer. An unverified
 page is closed without a failure screenshot or DOM capture.
 
@@ -83,7 +84,8 @@ the counter floor nor a successful pulse establishes an idle regression threshol
 plus action timestamps and the busiest sampled frames. The selected UI path changes category,
 scrolls All channels, opens and scrolls the grid, searches programmes for `news`, opens Watch's
 channel overlay and returns to Live TV. It verifies UI readiness at the relevant transitions.
-Profiles stop and retain partial captures even when an action fails. These are V8 isolate self
+Returning from Watch waits for the channel overlay and then Watch itself to close before
+addressing the underlying page. Profiles stop and retain partial captures even when an action fails. These are V8 isolate self
 samples, including idle/program frames; they exclude other worker isolates, native stacks,
 GPU and painted frames. The existing `pnpm verify:desktop guide-grid-scroll` remains the deeper
 20k-channel/two-day renderer/frame diagnostic. Native scroll/paint acceptance stays separate.
