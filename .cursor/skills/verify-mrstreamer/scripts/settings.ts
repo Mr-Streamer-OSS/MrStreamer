@@ -66,7 +66,8 @@ export async function settingsScenario(d: Driver): Promise<void> {
     });
     await d.wait(() => d.evaluate<boolean>(`innerWidth === ${width} && innerHeight === ${height}`));
   };
-  const pick = async (field: string, name: string) => {
+  // Native select type-ahead commits on macOS too, where CDP ArrowDown does not commit a choice.
+  const choose = async (field: string, name: string) => {
     await d.wait(() => d.exists(field));
     await d.evaluate(`${field}.focus()`);
     for (const char of name.slice(0, 2)) {
@@ -82,7 +83,6 @@ export async function settingsScenario(d: Driver): Promise<void> {
       await d.evaluate<boolean>(`document.activeElement === ${field}`),
       "Select save lost keyboard focus",
     );
-    await d.key("Tab", 9);
   };
 
   await size(960, 600);
@@ -90,8 +90,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
   await nav("Live TV");
   const quality = shown('select[aria-label="Quality"]');
   d.action("Focus quality before keyboard save");
-  await d.evaluate(`${quality}.focus()`);
-  await d.key("ArrowDown", 40);
+  await choose(quality, "HD");
   await d.wait(async () => (await saved()).liveQuality === "hd");
   expect(
     await d.evaluate<boolean>(`document.activeElement === ${quality}`),
@@ -161,7 +160,8 @@ export async function settingsScenario(d: Driver): Promise<void> {
   for (const next of LOCALES) {
     await nav("General");
     if (locale !== next) {
-      await pick(shown('select:has(option[value="en-US"])'), LANGUAGE_NAMES[next]);
+      await choose(shown('select:has(option[value="en-US"])'), LANGUAGE_NAMES[next]);
+      await d.key("Tab", 9);
       await d.wait(() =>
         d.evaluate<boolean>(`document.documentElement.lang === ${JSON.stringify(next)}`),
       );
@@ -177,7 +177,8 @@ export async function settingsScenario(d: Driver): Promise<void> {
     await find(translate(locale, "Interface language"), "interface-language");
   }
   d.observed["translatedSearch"] = searches;
-  await pick(shown('select:has(option[value="en-US"])'), LANGUAGE_NAMES["en-US"]);
+  await choose(shown('select:has(option[value="en-US"])'), LANGUAGE_NAMES["en-US"]);
+  await d.key("Tab", 9);
   await d.wait(() => d.evaluate<boolean>("document.documentElement.lang === 'en-US'"));
   locale = "en-US";
   await type(search, "zzzz-setting-missing");
@@ -275,8 +276,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
     d.observed["tmdbRefusalFocus"] = { focusRetained: true, draftRetained: true };
     await d.key("Escape", 27);
     await nav("Live TV");
-    await d.evaluate(`${quality}.focus()`);
-    await d.key("ArrowDown", 40);
+    await choose(quality, "SD");
     await d.wait(() => d.exists("document.querySelector('main:not([hidden]) [role=alert]')"));
     expect(
       await d.evaluate<boolean>(
@@ -348,7 +348,8 @@ export async function settingsScenario(d: Driver): Promise<void> {
   const key = shown('input[aria-label="Your own TMDB key"]');
   await type(key, "independent-unsaved-draft");
   await nav("Subtitles");
-  await pick(shown("select[aria-label=Size]"), "Large");
+  await choose(shown("select[aria-label=Size]"), "Large");
+  await d.key("Tab", 9);
   await d.wait(async () => (await saved()).subtitleLook?.size === "large");
   await nav("Movies and series");
   expect(
