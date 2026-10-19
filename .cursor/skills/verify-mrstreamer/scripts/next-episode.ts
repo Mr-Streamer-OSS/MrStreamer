@@ -56,7 +56,9 @@ export async function nextEpisodeScenario(
     await d.wait(() => d.exists(delay()));
   };
   const setDelay = async (seconds: number) => {
+    await d.wait(() => d.evaluate<boolean>(`!!${delay()} && !${delay()}.disabled`));
     await d.click(`Edit the delay to ${seconds}`, delay());
+    await d.wait(() => d.evaluate<boolean>(`document.activeElement === ${delay()}`));
     // Select the field text through the native editing shortcut.
     await d.send("Input.dispatchKeyEvent", {
       type: "rawKeyDown",
@@ -71,6 +73,9 @@ export async function nextEpisodeScenario(
       modifiers: process.platform === "darwin" ? 4 : 2,
     });
     await d.send("Input.insertText", { text: String(seconds) });
+    d.observed[`delay-input-${seconds}`] = await d.evaluate(`({
+      value: ${delay()}.value, focused: document.activeElement === ${delay()}
+    })`);
     await d.key("Enter", 13);
     await d.wait(async () => (await preferences()).nextEpisodeDelaySeconds === seconds);
     await d.wait(() =>
