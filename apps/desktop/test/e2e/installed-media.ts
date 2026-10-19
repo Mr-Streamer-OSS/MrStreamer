@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, realpath, readlink, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { createConnection } from "node:net";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -16,6 +16,7 @@ import { closeNative } from "./analytics-exit.ts";
 import { installedTelemetryPair } from "./analytics-installed-pair.ts";
 import { installCatalogueWorkerProbe, type Evidence } from "./installed-catalogue-worker.ts";
 import { browserFacts, probe } from "./installed-media-observer.ts";
+import { ownedGroup, type OwnershipSample } from "./installed-media-posix.ts";
 import { catalogueWorkerScripts, installedMainScript } from "./installed-worker-scripts.ts";
 import { readReceipt } from "./installed-upgrade-packages.ts";
 import { disposableRunner, ownedTree, type Runner } from "./installed-upgrade-windows.ts";
@@ -198,60 +199,6 @@ async function refused(origin: string) {
   });
 }
 
-// POSIX groups are detached at spawn. Audit only that pinned group; leave survivors for diagnosis.
-function posixProcesses() {
-  return execFileSync("ps", ["-axo", "pid=,ppid=,pgid=,lstart=,args="], {
-    encoding: "utf8",
-    timeout: 5000,
-    env: { ...process.env, LC_ALL: "C" },
-  })
-    .split("\n")
-    .flatMap((line) => {
-      const match = line
-        .trim()
-        .match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})\s+(.*)$/);
-      if (!match) return [];
-      return [
-        {
-          pid: Number(match[1]),
-          parent: Number(match[2]),
-          group: Number(match[3]),
-          started: Date.parse(match[4]!),
-          args: match[5]!,
-        },
-      ];
-    });
-}
-async function ownedGroup(pid: number, target: Target, startedAt: number) {
-  const root = posixProcesses().find((row) => row.pid === pid);
-  assert(root && root.group === pid, "Spawned app does not own its detached process group");
-  assert(root.started >= Math.floor(startedAt / 1000) * 1000, "Process start predates spawn");
-  const executable =
-    process.platform === "linux"
-      ? await realpath(await readlink(`/proc/${pid}/exe`))
-      : await realpath(
-          execFileSync("ps", ["-p", String(pid), "-o", "comm="], {
-            encoding: "utf8",
-            timeout: 5000,
-          }).trim(),
-        );
-  assert(samePath(executable, target.executable), "Process group root executable differs");
-  return {
-    root: { ...root, executable },
-    sample() {
-      const all = posixProcesses();
-      const current = all.find((row) => row.pid === pid);
-      assert(!current || current.started === root.started, "Owned process group PID was reused");
-      const group = all.filter((row) => row.group === pid);
-      assert(
-        group.every((row) => row.started >= root.started),
-        "Group member predates owned app",
-      );
-      return group;
-    },
-  };
-}
-
 interface MainIdentity {
   pid: number;
   executable: string;
@@ -323,16 +270,22 @@ function launch(
   for (const stream of [app.stdout, app.stderr])
     stream.on("data", (bytes: Buffer) => log.push(bytes.toString()));
   spawned();
-  // Windows ownership is acquired immediately, before inspector or UI work.
+  // Pin either platform owner synchronously, before yielding to inspector or UI work.
+  let group: ReturnType<typeof ownedGroup> | undefined;
+  const ownershipSamples: OwnershipSample[] = [];
+  record["ownershipSamples"] = ownershipSamples;
   let tree: ReturnType<typeof ownedTree> | undefined;
   let ownerError: unknown;
   try {
     if (runner) tree = ownedTree(runner, app);
+    else
+      group = ownedGroup(app, target.executable, startedAt, (sample) =>
+        ownershipSamples.push(sample),
+      );
   } catch (error) {
     ownerError = error;
   }
 
-  let group: Awaited<ReturnType<typeof ownedGroup>> | undefined;
   let main: Page | undefined;
   let page: Page | undefined;
   let d: Driver | undefined;
@@ -347,7 +300,6 @@ function launch(
     async ready() {
       if (ownerError) throw ownerError;
       assert(app.pid, "No spawned app PID");
-      if (!runner) group = await ownedGroup(app.pid, target, startedAt);
       record["processOwner"] = tree?.root ?? group?.root;
       main = await connect(inspect, "node", { app });
       assert.equal(await inspectorOwner(inspect, [app.pid]), app.pid);
@@ -565,9 +517,9 @@ interface MediaObservation {
   window: number;
   generation: number;
 }
-function media(d: Driver) {
+export function media(d: { page: Pick<Page, "evaluate"> }) {
   return d.page
-    .evaluate<MediaObservation>(`(()=>{const v=document.querySelector('video'),p=window.__installedMediaProbe,position=document.querySelector('[data-view=title] [role=slider][aria-label=Position]')?.getAttribute('aria-valuenow');return {
+    .evaluate<MediaObservation>(`(()=>{const v=document.querySelector('video'),p=window.__installedMediaProbe,position=document.querySelector('[data-view=title] input[type=range][aria-label=Position]')?.getAttribute('aria-valuenow');return {
     time:v?.currentTime??0,width:v?.videoWidth??0,audio:v?.webkitAudioDecodedByteCount??0,
     frames:v?.getVideoPlaybackQuality().totalVideoFrames??0,paused:v?.paused??true,
     title:!!document.querySelector('[data-view=title]'),sameNode:!!v&&window.__installedMediaProbe?.node===v,
