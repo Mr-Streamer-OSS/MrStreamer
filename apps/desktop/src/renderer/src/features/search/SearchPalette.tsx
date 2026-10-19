@@ -1,6 +1,6 @@
 import { useSearchUsage } from "../../app/analytics.ts";
 import { Dialog } from "@base-ui/react/dialog";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { hashKey, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Search, Star } from "lucide-react";
 import {
   useEffect,
@@ -82,15 +82,13 @@ function Palette() {
   const visible = useUi((state) => state.searchOpen);
   // Mounted each time it opens.
   const [query, setQuery] = useState(() => useUi.getState().searchFrom);
-  const debounced = useDebounced(query, 120);
-  useSearchUsage("global", debounced, true);
   const client = useQueryClient();
   // Complete fresh answers need no typing delay. Other searches keep the existing debounce.
   const fresh =
     query.trim() !== "" &&
     [queries.search(query), queries.programmes(query), queries.titleSearch(query)].every(
       (options) => {
-        const cached = client.getQueryCache().find({ queryKey: options.queryKey, exact: true });
+        const cached = client.getQueryCache().get(hashKey(options.queryKey));
         return (
           cached?.state.status === "success" &&
           cached.state.fetchStatus === "idle" &&
@@ -99,7 +97,8 @@ function Palette() {
         );
       },
     );
-  const searched = fresh ? query : debounced;
+  const searched = useDebounced(query, fresh ? 0 : 120);
+  useSearchUsage("global", searched, true);
   // Share the Guide's catalogue read so the first name search builds during the typing delay.
   useQuery({ ...queries.searchGroups(), enabled: visible && query.trim() !== "" });
   const raw = useRef(query);

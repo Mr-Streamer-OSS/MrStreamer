@@ -17,7 +17,12 @@ import { useUi, type ChannelList } from "../../src/renderer/src/app/ui-store.ts"
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { SearchPalette } from "../../src/renderer/src/features/search/SearchPalette.tsx";
 import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
-import { queries, syncLibraryUpdates, syncViewing } from "../../src/renderer/src/lib/queries.ts";
+import {
+  queries,
+  syncGuideUpdates,
+  syncLibraryUpdates,
+  syncViewing,
+} from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 
 const GREEN = "3f6c1b5e-2a47-4d0e-9c1f-7b8a5d2e4f11";
@@ -249,8 +254,58 @@ describe("real search components with two subscriptions", () => {
     expect(p.field().getAttribute("aria-activedescendant")).toBeTruthy();
     await p.press("Enter", p.field());
     expect(p.watch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(ownedId(green[3]!)));
+    expect(
+      ipc.argsOf("analytics.action").filter((action) => action === "search_used"),
+    ).toHaveLength(1);
     for (const method of ["library.channels", "guide.search", "ondemand.search"] as const)
       expect(ipc.argsOf(method)).toEqual([]);
+  });
+
+  it("keeps the last fresh palette rows inactive while the next query waits", async () => {
+    const p = await page("palette", "");
+    p.client.setQueryData(queries.search("Canvas").queryKey, responses([green[3]!]));
+    p.client.setQueryData(queries.programmes("Canvas").queryKey, []);
+    p.client.setQueryData(queries.titleSearch("Canvas").queryKey, { movies: [], series: [] });
+    await p.type("Canvas");
+    await p.type("CanvasX");
+    expect(p.rows()).toHaveLength(1);
+    expect(p.scope().querySelector('[role="tree"]')?.getAttribute("aria-disabled")).toBe("true");
+    await p.press("Enter", p.field());
+    await p.click(p.rows()[0]!);
+    expect(p.watch).not.toHaveBeenCalled();
+    ipc.always("library.channels", []);
+    ipc.always("guide.search", []);
+    ipc.always("ondemand.search", { movies: [], series: [] });
+    await settled(150);
+    await settled();
+    expect(p.rows()).toHaveLength(0);
+    expect(p.scope().textContent).toContain("No matches");
+  });
+
+  it("keeps a fresh palette answer mounted while its guide refresh is in flight", async () => {
+    const p = await page("palette", "");
+    p.client.setQueryData(queries.search("Canvas").queryKey, responses([green[3]!]));
+    p.client.setQueryData(queries.programmes("Canvas").queryKey, []);
+    p.client.setQueryData(queries.titleSearch("Canvas").queryKey, { movies: [], series: [] });
+    const stopGuide = syncGuideUpdates(p.client);
+    try {
+      await p.type("Canvas");
+      const refresh = ipc.hold("guide.search");
+      await act(async () => ipc.emit("guide.updated", null));
+      await settled(10);
+      expect(p.rows()).toHaveLength(1);
+      expect(p.scope().querySelector('[role="tree"]')?.getAttribute("aria-disabled")).toBe("false");
+      expect(ipc.argsOf("guide.search")).toHaveLength(1);
+      expect(ipc.argsOf("guide.cancelSearch")).toHaveLength(0);
+      await settled(150);
+      expect(ipc.argsOf("guide.search")).toHaveLength(1);
+      refresh.resolve([]);
+      await settled();
+      await p.press("Enter", p.field());
+      expect(p.watch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining(ownedId(green[3]!)));
+    } finally {
+      stopGuide();
+    }
   });
 
   it.each(["missing programmes", "expired programmes", "changed catalogue"] as const)(
