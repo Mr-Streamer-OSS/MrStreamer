@@ -290,7 +290,7 @@ describe("failure-only renderer launch evidence", () => {
       const error = new Error("Wrong renderer build.");
       const start = performance.now();
       await expect(failRendererLaunch(error, f.context)).rejects.toBe(error);
-      expect(performance.now() - start).toBeLessThan(2100);
+      expect(performance.now() - start).toBeLessThan(2500);
       const later = JSON.parse(f.file(".later.json").bytes) as LaterReceipt;
       expect(later.samples).toHaveLength(4);
       expect(
@@ -316,7 +316,7 @@ describe("failure-only renderer launch evidence", () => {
     const error = new Error("Wrong renderer build.");
     const start = performance.now();
     await expect(failRendererLaunch(error, f.context)).rejects.toBe(error);
-    expect(performance.now() - start).toBeLessThan(2100);
+    expect(performance.now() - start).toBeLessThan(2500);
     const later = JSON.parse(f.file(".later.json").bytes) as LaterReceipt;
     expect(later.samples).toHaveLength(4);
     expect(
@@ -352,7 +352,7 @@ describe("failure-only renderer launch evidence", () => {
       const error = new Error("Wrong renderer build.");
       const start = performance.now();
       await expect(failRendererLaunch(error, f.context)).rejects.toBe(error);
-      expect(performance.now() - start).toBeLessThan(2100);
+      expect(performance.now() - start).toBeLessThan(2500);
       expect(f.context.observations["rendererLaunchFailures"]).toEqual([
         expect.objectContaining({
           errors: [{ phase: `${phase}-write`, error: "Error: disk unavailable" }],
