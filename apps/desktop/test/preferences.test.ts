@@ -426,7 +426,7 @@ describe("the next-episode delay", () => {
       await settings.setInterfaceLanguage("fr-FR");
       await settings.updateSubscription(id, { lastChannelId: "9" });
       await settings.dropLegacyLists();
-      await settings.forget(await savedAs(subscriptions, id));
+      await Effect.runPromise(await settings.prepareForget(await savedAs(subscriptions, id)));
       const expected = {
         volume: 0.6,
         muted: true,
