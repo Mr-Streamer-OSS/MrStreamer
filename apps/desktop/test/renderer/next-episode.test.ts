@@ -20,6 +20,7 @@ import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.ts
 import { movieNow, playTitle } from "../../src/renderer/src/lib/titles.ts";
 import type { TitleRun } from "../../src/renderer/src/player/title-engine.ts";
 import { episodeNow, titlePlayer } from "../../src/renderer/src/player/title-player.ts";
+import { player } from "../../src/renderer/src/player/player.ts";
 
 /** Runs as the title engine promises them, without a real stream: the test starts and ends each. */
 const runs = vi.hoisted(() => [] as { start(): void; end(): void }[]);
@@ -336,6 +337,42 @@ describe("the end of an episode", () => {
     await act(async () => useUi.setState({ settings: null }));
     await wait(10_000);
     expect(opened()).toEqual(["e13", "e21"]);
+  });
+
+  it("cancels a held next episode immediately when the viewer zaps to a channel", async () => {
+    await playToEnd(pilotHouse, "s1", () =>
+      act(async () => useUi.setState({ settings: "playback" })),
+    );
+    expect(titlePlayer.state().countdown).toBe(10);
+    const channel = {
+      subscriptionId: SUBSCRIPTION,
+      id: "live",
+      name: "Live channel",
+      title: "Live channel",
+      tags: [],
+      number: null,
+      logoUrl: null,
+      categoryIds: [],
+      catchupDays: null,
+      variants: [{ id: "live", name: "Live channel", tags: [], quality: null }],
+    };
+    ipc.always("playback.open", {
+      sessionId: "live-session",
+      channel: { subscriptionId: SUBSCRIPTION, id: "live" },
+      url: "http://127.0.0.1/live",
+      format: "hls",
+    });
+    try {
+      await act(async () => player.zap(channel));
+      expect(titlePlayer.state().now).toBeNull();
+      expect(titlePlayer.state().countdown).toBeNull();
+      await act(async () => useUi.setState({ settings: null }));
+      await wait(60_000);
+      expect(opened()).toEqual(["e13"]);
+      expect(ipc.argsOf("playback.open")).toHaveLength(1);
+    } finally {
+      player.reset();
+    }
   });
 
   it.each([
