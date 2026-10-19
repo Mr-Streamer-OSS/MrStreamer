@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { ipc } from "./support.ts";
+import { browseResult } from "./browse-support.ts";
 import { acceptPreferences } from "../../src/renderer/src/lib/preferences.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, Fragment } from "react";
@@ -316,7 +317,7 @@ it("promotes the first visible nonempty channel row once, across title rows, mov
       members: [{ subscriptionId: SUBSCRIPTION, id: "all" }],
     },
   ]);
-  ipc.always("library.channels", [channel]);
+  ipc.always("library.browse", browseResult([channel]));
   ipc.always("library.status", []);
   ipc.always("guide.listings", {});
   ipc.always("viewing.get", {
@@ -458,7 +459,7 @@ it("sparse saved titles keep their resolved owner and unavailable-entry action w
   useUi.setState(useUi.getInitialState(), true);
   ipc.always("subscription.list", [SAVED]);
   ipc.always("library.categories", []);
-  ipc.always("library.channels", []);
+  ipc.always("library.browse", browseResult([]));
   ipc.always("library.status", []);
   ipc.always("viewing.get", {
     favourites: [],
