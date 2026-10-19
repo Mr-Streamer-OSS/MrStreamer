@@ -385,6 +385,7 @@ export async function nextEpisodeScenario(
   );
   await d.capture("handoff-preview-to-movie");
   const movieMedia = await media();
+  const normalWidth = await d.evaluate<number>("innerWidth");
   await d.key("p", 80);
   await d.wait(() => d.exists("document.querySelector('[data-view=title][data-mini]')"));
   await d.capture("handoff-movie-mini");
@@ -392,11 +393,30 @@ export async function nextEpisodeScenario(
   await d.wait(
     async () => !(await d.exists("document.querySelector('[data-view=title][data-mini]')")),
   );
+  await d.wait(() => d.evaluate<boolean>(`innerWidth === ${normalWidth}`));
+  await d.evaluate(`(() => {
+    window.__handoffFullScreen = { value: false, events: [] };
+    window.__handoffStopFullScreen = window.mrStreamer.on('window.fullScreen', value => {
+      window.__handoffFullScreen.value = value;
+      window.__handoffFullScreen.events.push({ value, at: Date.now() });
+    });
+  })()`);
   await d.key("f", 70);
   await d.wait(() => d.evaluate<boolean>("!!document.fullscreenElement"));
+  // macOS reports DOM fullscreen before its native window transition has finished.
+  if (process.platform === "darwin")
+    await d.wait(() => d.evaluate<boolean>("window.__handoffFullScreen.value"));
   await d.capture("handoff-movie-fullscreen");
   await d.key("Escape", 27);
   await d.wait(() => d.evaluate<boolean>("!document.fullscreenElement"));
+  if (process.platform === "darwin")
+    await d.wait(() => d.evaluate<boolean>("!window.__handoffFullScreen.value"));
+  d.observed["handoff-fullscreen-events"] = await d.evaluate("window.__handoffFullScreen.events");
+  await d.evaluate(`(() => {
+    window.__handoffStopFullScreen();
+    delete window.__handoffStopFullScreen;
+    delete window.__handoffFullScreen;
+  })()`);
   const sameNodes =
     await d.evaluate<boolean>(`window.__handoffNodes.video === document.querySelector('video') &&
     window.__handoffNodes.subtitles === document.querySelector('[data-subtitles]')`);
