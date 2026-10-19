@@ -31,6 +31,7 @@ export const es: Translation = {
   SubDL: "SubDL",
   OpenSubtitles: "OpenSubtitles",
   Diagnostics: "Diagnóstico",
+  "Channel source": "Fuente",
   "Source unavailable": "Fuente no disponible",
   News: "Noticias",
   Sports: "Deportes",

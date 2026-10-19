@@ -487,10 +487,13 @@ export function useListPicker(selected: ChannelList) {
     setGroup(null);
     return true;
   };
-  const count = (categories ?? []).reduce(
-    (sum, category) => sum + (category.group === group ? category.channelCount : 0),
-    0,
-  );
+  const count =
+    providers && group === null
+      ? (catalogue.data?.total ?? 0)
+      : (categories ?? []).reduce(
+          (sum, category) => sum + (category.group === group ? category.channelCount : 0),
+          0,
+        );
   // A country removed by refresh never leaves an empty, unreachable branch.
   useEffect(() => {
     if (categories && group !== null && !categories.some((category) => category.group === group))

@@ -30,6 +30,7 @@ export const nl: Translation = {
   SubDL: "SubDL",
   OpenSubtitles: "OpenSubtitles",
   Diagnostics: "Diagnostiek",
+  "Channel source": "Bron",
   "Source unavailable": "Bron niet beschikbaar",
   News: "Nieuws",
   Sports: "Sport",

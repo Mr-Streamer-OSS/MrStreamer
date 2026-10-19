@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
+import { browseChannels, browseResult } from "./browse-support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -67,6 +68,7 @@ async function picker(
       failedAt: null,
     },
   ]);
+  client.setQueryData(browseChannels(null).queryKey, { ...browseResult([]), total: 63412 });
   const onPick = vi.fn();
   const onChannels = vi.fn();
   const container = document.createElement("div");
@@ -136,6 +138,9 @@ describe("fixed topics and Provider lists", () => {
       "Provider lists",
     ]);
     await p.click("Provider lists");
+    expect(document.querySelector('button[aria-label="Back to topics"]')?.textContent).toContain(
+      "63,412",
+    );
     expect(p.rows().map((row) => row.title)).toEqual(["Belgium", "Ungrouped", "United Kingdom"]);
     expect(p.rows()[0]?.textContent).toContain("188");
     await p.click("Belgium");

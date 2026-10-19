@@ -10,7 +10,11 @@ import { useUi, type ChannelList } from "../../app/ui-store.ts";
 import { subscriptionName, useSubscriptions } from "../../lib/queries.ts";
 
 const DIMENSIONS = ["countries", "languages", "subscriptions"] as const;
-const LABELS = { countries: "Country", languages: "Language", subscriptions: "Source" } as const;
+const LABELS = {
+  countries: "Country",
+  languages: "Language",
+  subscriptions: "Channel source",
+} as const;
 
 /** Session-only filters on the shared descriptor. Watch offers the same summary and reset. */
 export function BrowseFilters({
