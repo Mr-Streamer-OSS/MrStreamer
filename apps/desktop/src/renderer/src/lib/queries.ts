@@ -12,6 +12,7 @@ import {
 import { useCallback, useMemo } from "react";
 import type { GuideSlot, GuideStatus, MapFilter } from "@mrstreamer/contracts/guide";
 import type { IpcInput } from "@mrstreamer/contracts/ipc";
+import type { LiveBrowseQuery } from "@mrstreamer/contracts/live-browse";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import type {
   CollectionId,
@@ -76,7 +77,11 @@ export const queries = {
   viewing: () =>
     queryOptions({
       queryKey: ["viewing"],
-      queryFn: () => call("viewing.get"),
+      queryFn: async ({ client }) => {
+        const viewing = await call("viewing.get");
+        const cached = client.getQueryData<Viewing>(["viewing"]);
+        return cached && cached.sequence > viewing.sequence ? cached : viewing;
+      },
       staleTime: Infinity,
     }),
   /**
@@ -92,20 +97,28 @@ export const queries = {
    */
   guideSources: () =>
     queryOptions({ queryKey: ["guide", "sources"], queryFn: () => call("guide.sources") }),
+  rememberedLiveBrowse: () =>
+    queryOptions({
+      queryKey: ["live-browse"],
+      queryFn: () => call("liveBrowse.get"),
+      staleTime: Infinity,
+    }),
+  browse: (request: LiveBrowseQuery) =>
+    queryOptions({
+      queryKey: ["library", "browse", request],
+      queryFn: async ({ signal }) => {
+        const result = await call("library.browse", request);
+        signal.throwIfAborted();
+        return result;
+      },
+      staleTime: Infinity,
+    }),
   libraryStatus: () =>
     queryOptions({ queryKey: ["library", "status"], queryFn: () => call("library.status") }),
   categories: () =>
     queryOptions({
       queryKey: ["library", "categories"],
       queryFn: () => call("library.categories"),
-      staleTime: Infinity,
-    }),
-  /** All channels when `category` is null. */
-  channels: (category: OwnedId | null) =>
-    queryOptions({
-      queryKey: ["library", "channels", category && ownedKey(category)],
-      queryFn: () =>
-        call("library.channels", category === null ? {} : { category: ownedId(category) }),
       staleTime: Infinity,
     }),
   channel: (channel: OwnedId) =>
@@ -629,25 +642,6 @@ export function useCategoryMap(): ReadonlyMap<string, Category> {
 }
 
 /**
- * Remembers the category Live TV opens on next time, or every channel with null: kept for the
- * category's own subscription, and taken from any other that had one.
- */
-export async function rememberCategory(
-  client: QueryClient,
-  subscriptions: readonly SubscriptionSummary[],
-  category: OwnedId | null,
-): Promise<void> {
-  await Promise.all(
-    subscriptions.map(async ({ id }) => {
-      const lastCategoryId = category?.subscriptionId === id ? category.id : null;
-      const left = await client.ensureQueryData(queries.subscriptionPreferences(id));
-      if (left.lastCategoryId === lastCategoryId) return;
-      await updateSubscriptionPreferences(client, id, { lastCategoryId });
-    }),
-  );
-}
-
-/**
  * Refetches library data whenever the main process reports a new catalogue. A read already under
  * way may answer from the catalogue before, and settling clears the invalidation: once it settles,
  * its query is marked stale again. Whoever awaits that read still gets its answer.
@@ -734,8 +728,18 @@ export function syncViewing(client: QueryClient): () => void {
   return listen("viewing.changed", ({ sequence }) => {
     const cached = client.getQueryData(queries.viewing().queryKey);
     if (cached && cached.sequence >= sequence) return;
-    // The prefix covers the progress queries too.
+    // The prefix covers progress too. A first read under way can still answer an older sequence.
+    const pending = client
+      .getQueryCache()
+      .find({ queryKey: queries.viewing().queryKey, exact: true })?.promise;
     void client.invalidateQueries({ queryKey: queries.viewing().queryKey });
+    void pending?.then(
+      () => {
+        if ((client.getQueryData(queries.viewing().queryKey)?.sequence ?? -1) < sequence)
+          void client.invalidateQueries({ queryKey: queries.viewing().queryKey });
+      },
+      () => {},
+    );
   });
 }
 

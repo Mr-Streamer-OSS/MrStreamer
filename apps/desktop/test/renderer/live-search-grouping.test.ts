@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { browseChannels, browseChannelsOf, browseResult } from "./browse-support.ts";
 import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, Fragment } from "react";
@@ -127,8 +128,8 @@ async function page(
     { ...SAVED, id: GREEN, name: "Green" },
   ]);
   if (kind === "guide") {
-    client.setQueryData(queries.channels(null).queryKey, plain(listed));
-    client.setQueryData(queries.channelsOf(listed).queryKey, plain(listed));
+    client.setQueryData(browseChannels(null).queryKey, browseResult(plain(listed)));
+    client.setQueryData(browseChannelsOf(listed).queryKey, browseResult(plain(listed)));
   }
   ipc.always("library.searchGroups", stamps(all));
   client.setQueryData(
@@ -296,7 +297,13 @@ describe("real search components with two subscriptions", () => {
       await act(async () => copy.focus());
       expect(document.activeElement).toBe(copy);
       const groups = ipc.hold("library.searchGroups");
-      const channels = ipc.hold("library.channels");
+      const channels = ipc.hold(
+        "library.browse",
+        (query) =>
+          query.scope.kind === useUi.getState().list.kind ||
+          (query.scope.kind === "channels" &&
+            ["favourites", "recent"].includes(useUi.getState().list.kind)),
+      );
       await act(async () =>
         ipc.emit("library.updated", {
           subscriptionId: GREEN,
@@ -306,7 +313,7 @@ describe("real search components with two subscriptions", () => {
           failedAt: null,
         }),
       );
-      channels.resolve(plain(listed));
+      channels.resolve(browseResult(plain(listed)));
       await settled();
       const singleton = p
         .rows()
@@ -347,7 +354,13 @@ describe("real search components with two subscriptions", () => {
     await act(async () => chosenRow().focus());
     expect(chosenRow().className).toContain("ring-2");
     const groups = ipc.hold("library.searchGroups");
-    const channels = ipc.hold("library.channels");
+    const channels = ipc.hold(
+      "library.browse",
+      (query) =>
+        query.scope.kind === useUi.getState().list.kind ||
+        (query.scope.kind === "channels" &&
+          ["favourites", "recent"].includes(useUi.getState().list.kind)),
+    );
     await act(async () =>
       ipc.emit("library.updated", {
         subscriptionId: GREEN,
@@ -357,7 +370,7 @@ describe("real search components with two subscriptions", () => {
         failedAt: null,
       }),
     );
-    channels.resolve(plain(all));
+    channels.resolve(browseResult(plain(all)));
     await settled();
     expect(p.rows()).toHaveLength(1);
     expect(document.activeElement).toBe(p.rows()[0]);
@@ -411,7 +424,13 @@ describe("real search components with two subscriptions", () => {
         ? { ...channel, searchIdentity: { ...channel.searchIdentity!, guideId: "different.be" } }
         : channel,
     );
-    const listed = ipc.hold("library.channels");
+    const listed = ipc.hold(
+      "library.browse",
+      (query) =>
+        query.scope.kind === useUi.getState().list.kind ||
+        (query.scope.kind === "channels" &&
+          ["favourites", "recent"].includes(useUi.getState().list.kind)),
+    );
     const fresh = ipc.hold("library.searchGroups");
     await act(async () =>
       ipc.emit("library.updated", {
@@ -422,7 +441,7 @@ describe("real search components with two subscriptions", () => {
         failedAt: null,
       }),
     );
-    listed.resolve(plain(current));
+    listed.resolve(browseResult(plain(current)));
     old.resolve(stamps(all));
     await settled();
     expect(p.rows()).toHaveLength(8);
@@ -458,6 +477,7 @@ describe("real search components with two subscriptions", () => {
     expect(ipc.argsOf("guide.searchList")).toEqual([
       {
         query: "VRT",
+        channels: all.map(ownedId),
         until: expect.any(Number),
         request: { view: "live", id: expect.any(String) },
       },
@@ -466,7 +486,9 @@ describe("real search components with two subscriptions", () => {
 
   it("keeps Search all channels filtered without a second grouping read", async () => {
     const p = await page("guide", "", false, [blue[2]!], { kind: "favourites" });
-    await act(async () => p.client.setQueryData(queries.channels(null).queryKey, plain(all)));
+    await act(async () =>
+      p.client.setQueryData(browseChannels(null).queryKey, browseResult(plain(all))),
+    );
     await p.search("VRT 1");
     expect(p.rows()).toHaveLength(0);
     const programmes = ipc.hold("guide.searchList");
@@ -489,11 +511,17 @@ describe("real search components with two subscriptions", () => {
     await p.search("Canvas");
     const viewing = p.client.getQueryData(queries.viewing().queryKey)!;
     const changed = ipc.hold("viewing.get");
-    const listed = ipc.hold("library.channels");
+    const listed = ipc.hold(
+      "library.browse",
+      (query) =>
+        query.scope.kind === useUi.getState().list.kind ||
+        (query.scope.kind === "channels" &&
+          ["favourites", "recent"].includes(useUi.getState().list.kind)),
+    );
     await act(async () => ipc.emit("viewing.changed", { sequence: viewing.sequence + 1 }));
     changed.resolve({ ...viewing, recent: [blue[0]!, blue[2]!], sequence: viewing.sequence + 1 });
     await settled();
-    listed.resolve(plain([blue[0]!, blue[2]!]));
+    listed.resolve(browseResult(plain([blue[0]!, blue[2]!])));
     await settled();
     expect(p.field().value).toBe("Canvas");
     expect(p.rows()).toHaveLength(1);
@@ -519,7 +547,13 @@ describe("real search components with two subscriptions", () => {
     ipc.always("library.searchGroups", stamps(subset));
     await p.search("VRT");
     expect(p.rows()).toHaveLength(1);
-    const listed = ipc.hold("library.channels");
+    const listed = ipc.hold(
+      "library.browse",
+      (query) =>
+        query.scope.kind === useUi.getState().list.kind ||
+        (query.scope.kind === "channels" &&
+          ["favourites", "recent"].includes(useUi.getState().list.kind)),
+    );
     const groups = ipc.hold("library.searchGroups");
     await act(async () =>
       ipc.emit("library.updated", {
@@ -530,7 +564,7 @@ describe("real search components with two subscriptions", () => {
         failedAt: null,
       }),
     );
-    listed.resolve(plain(subset));
+    listed.resolve(browseResult(plain(subset)));
     await settled();
     expect(p.rows()).toHaveLength(2);
     expect(p.button("Show copies")).toBeUndefined();
@@ -544,7 +578,7 @@ describe("real search components with two subscriptions", () => {
     const category = { subscriptionId: SUBSCRIPTION, id: "0" };
     const p = await page("guide");
     await act(async () => {
-      p.client.setQueryData(queries.channels(category).queryKey, plain([blue[0]!]));
+      p.client.setQueryData(browseChannels(category).queryKey, browseResult(plain([blue[0]!])));
       useUi.setState({ list: { kind: "category", category } });
     });
     const old = ipc.hold("guide.searchList");
@@ -586,7 +620,13 @@ describe("real search components with two subscriptions", () => {
       variants: [{ id: "extra", name: "VRT Extra", quality: null, tags: [] }],
     };
     const current = [...blue, added];
-    const listed = ipc.hold("library.channels");
+    const listed = ipc.hold(
+      "library.browse",
+      (query) =>
+        query.scope.kind === useUi.getState().list.kind ||
+        (query.scope.kind === "channels" &&
+          ["favourites", "recent"].includes(useUi.getState().list.kind)),
+    );
     const groups = ipc.hold("library.searchGroups");
     await act(async () =>
       ipc.emit("library.updated", {
@@ -597,7 +637,7 @@ describe("real search components with two subscriptions", () => {
         failedAt: null,
       }),
     );
-    listed.resolve(plain(current));
+    listed.resolve(browseResult(plain(current)));
     await settled();
     expect(p.rows()).toHaveLength(5);
     expect(p.scope().textContent).toContain("5 channels · 6 streams");
@@ -619,7 +659,13 @@ describe("real search components with two subscriptions", () => {
         ? { ...channel, searchIdentity: { ...channel.searchIdentity!, guideId: "different.be" } }
         : channel,
     );
-    const listed = ipc.hold("library.channels");
+    const listed = ipc.hold(
+      "library.browse",
+      (query) =>
+        query.scope.kind === useUi.getState().list.kind ||
+        (query.scope.kind === "channels" &&
+          ["favourites", "recent"].includes(useUi.getState().list.kind)),
+    );
     await act(async () =>
       ipc.emit("library.updated", {
         subscriptionId: GREEN,
@@ -629,7 +675,7 @@ describe("real search components with two subscriptions", () => {
         failedAt: null,
       }),
     );
-    listed.resolve(plain(current));
+    listed.resolve(browseResult(plain(current)));
     await settled();
     const groups = ipc.hold("library.searchGroups");
     await p.search("VRT");
@@ -651,7 +697,13 @@ describe("real search components with two subscriptions", () => {
     const viewing = p.client.getQueryData(queries.viewing().queryKey)!;
     const remaining = favourites.slice(0, 2);
     const changed = ipc.hold("viewing.setFavourite");
-    const listed = ipc.hold("library.channels");
+    const listed = ipc.hold(
+      "library.browse",
+      (query) =>
+        query.scope.kind === useUi.getState().list.kind ||
+        (query.scope.kind === "channels" &&
+          ["favourites", "recent"].includes(useUi.getState().list.kind)),
+    );
     await p.click(p.button("Show copies", p.rows()[0]));
     await p.click(p.button("Remove from favourites", p.rows()[2]));
     changed.resolve({
@@ -660,7 +712,7 @@ describe("real search components with two subscriptions", () => {
       sequence: viewing.sequence + 1,
     });
     await settled();
-    listed.resolve(plain(remaining));
+    listed.resolve(browseResult(plain(remaining)));
     await settled();
     expect(p.field().value).toBe("Canvas");
     expect(p.rows()).toHaveLength(1);

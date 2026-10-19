@@ -681,6 +681,9 @@ async function start(): Promise<void> {
       "subscription.preferences": ({ subscriptionId }) => settings.ofSubscription(subscriptionId),
       "subscription.updatePreferences": ({ subscriptionId, patch }) =>
         settings.updateSubscription(subscriptionId, patch),
+      "liveBrowse.get": () => settings.liveBrowse,
+      "liveBrowse.remember": (selection) => settings.rememberLiveBrowse(selection),
+      "library.browse": (query) => library.browse(query),
       "library.status": () => library.status,
       "library.categories": () => library.categories,
       "library.channels": (filter) => library.channels(filter),

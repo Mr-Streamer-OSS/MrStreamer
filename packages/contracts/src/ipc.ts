@@ -19,6 +19,7 @@ import {
   type SavedSubtitle,
 } from "./online-subtitles.ts";
 import { TitleFilters, type FilterOptions } from "./title-filters.ts";
+import { LiveBrowseQuery, LiveDiscovery, type LiveBrowseResult } from "./live-browse.ts";
 import type { Result } from "./errors.ts";
 import type { DiagnosticsPreview } from "./diagnostics.ts";
 import type { CopySession, Download, DownloadList } from "./downloads.ts";
@@ -149,6 +150,9 @@ export const ipcInputs = {
   "subscription.preferences": () => type({ subscriptionId: "string > 0" }),
   "subscription.updatePreferences": () =>
     type({ subscriptionId: "string > 0", patch: SubscriptionPreferences().partial() }),
+  "library.browse": LiveBrowseQuery,
+  "liveBrowse.get": none,
+  "liveBrowse.remember": LiveDiscovery,
   "library.status": none,
   "library.categories": none,
   /** Display-only full-catalogue joins. Unlisted owned channel keys stand alone. */
@@ -539,6 +543,9 @@ export interface IpcOutputs {
   "subscription.preferences": SubscriptionPreferences;
   "subscription.updatePreferences": SubscriptionPreferences;
   /** Each saved subscription's catalogue, in the subscriptions' order. */
+  "library.browse": LiveBrowseResult;
+  "liveBrowse.get": LiveDiscovery;
+  "liveBrowse.remember": LiveDiscovery;
   "library.status": readonly CatalogueStatus[];
   /** The categories of every subscription, those that show as one joined. */
   "library.categories": readonly Category[];

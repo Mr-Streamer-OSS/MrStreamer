@@ -4,6 +4,7 @@ import { acceptPreferences } from "../../src/renderer/src/lib/preferences.ts";
 // clicks that move between programmes and channels and open a programme's details, what Enter,
 // Watch live and Play from start play on channels with and without catch-up, how far back and
 // ahead it reaches, and the pages of the guide it reads, only those around what is in view.
+import { browseChannels, browseResult } from "./browse-support.ts";
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -169,7 +170,7 @@ async function gridPage(
       channelCount: channels.length,
     },
   ]);
-  client.setQueryData(queries.channels(null).queryKey, channels);
+  client.setQueryData(browseChannels(null).queryKey, browseResult(channels));
   client.setQueryData(
     ["library", "status"],
     [
@@ -669,7 +670,10 @@ describe("the guide grid", () => {
     const two = titleAt("2", Date.now())!;
     expect(page.details()).toContain(two);
     await act(async () =>
-      page.client.setQueryData(queries.channels(null).queryKey, [THREE[2]!, THREE[1]!, THREE[0]!]),
+      page.client.setQueryData(
+        browseChannels(null).queryKey,
+        browseResult([THREE[2]!, THREE[1]!, THREE[0]!]),
+      ),
     );
     await ready(() => expect(page.rows()).toEqual(["Three", "Two", "One"]));
     expect(page.details()).toContain(two);
@@ -762,4 +766,31 @@ describe("the guide grid", () => {
     const pages = reads().map((read) => `${read.rows[0]} ${read.from}`);
     expect(new Set(pages).size).toBe(pages.length);
   });
+});
+
+it("keeps an exact grid channel through a pending filter and selects the first when that channel is filtered out", async () => {
+  const page = await gridPage(THREE);
+  await ready(() => expect(page.rows()).toEqual(["One", "Two", "Three"]));
+  await page.press("ArrowDown");
+  expect(page.active()).toContain("Two");
+  const first = ipc.hold("library.browse", (query) => query.filters.countries.includes("Belgium"));
+  await act(async () =>
+    useUi.setState({
+      list: { kind: "all", filters: { countries: ["Belgium"], languages: [], subscriptions: [] } },
+    }),
+  );
+  await ready(() => expect(page.rows()).toEqual([]));
+  first.resolve(browseResult([THREE[1]!, THREE[2]!]));
+  await ready(() => expect(page.rows()).toEqual(["Two", "Three"]));
+  expect(page.active()).toContain("Two");
+  const next = ipc.hold("library.browse", (query) => query.filters.countries.includes("France"));
+  await act(async () =>
+    useUi.setState({
+      list: { kind: "all", filters: { countries: ["France"], languages: [], subscriptions: [] } },
+    }),
+  );
+  next.resolve(browseResult([THREE[2]!, THREE[0]!]));
+  await ready(() => expect(page.rows()).toEqual(["Three", "One"]));
+  await page.press("Enter");
+  expect(player.state().channel?.id).toBe("3");
 });

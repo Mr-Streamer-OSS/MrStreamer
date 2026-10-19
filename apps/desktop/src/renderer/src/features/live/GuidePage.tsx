@@ -34,10 +34,11 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { EMPTY_LIVE_FILTERS } from "@mrstreamer/contracts/live-browse";
 import { automaticSearchCopy } from "@mrstreamer/core/catalogue/search";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { LiveView } from "@mrstreamer/contracts/preferences";
-import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
 import { openView, openWatch, useUi } from "../../app/ui-store.ts";
@@ -66,10 +67,18 @@ import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { numberEntry, NumberEntry } from "../watch/NumberEntry.tsx";
 import { rowPlays, searchChannelRows } from "./search-rows.ts";
+import { BrowseFilters } from "./BrowseFilters.tsx";
 import { ChannelTable } from "./ChannelTable.tsx";
 import { GuideGrid, type GridKeys } from "./GuideGrid.tsx";
 import { ListPicker, listKey } from "./ListPicker.tsx";
-import { listTitle, useListChannels, useListPicker, useListSearch, useShowList } from "./lists.ts";
+import {
+  resolveDiscovery,
+  listTitle,
+  useListChannels,
+  useListPicker,
+  useListSearch,
+  useShowList,
+} from "./lists.ts";
 import { orderKey, useFavouriteOrder, waits } from "./reorder.ts";
 
 const PAGE_ROWS = 10;
@@ -108,7 +117,7 @@ export function GuidePage({ active }: { active: boolean }) {
   const grid = useRef<GridKeys>(null);
   const categories = useQuery(queries.categories());
   const categoryMap = useCategoryMap();
-  const { channels: listed, error } = useListChannels(list);
+  const { channels: listed, error, data: browse } = useListChannels(list);
   const channels = listed ?? NO_CHANNELS;
   const playingKey = usePlayer((state) => (state.channel ? ownedKey(state.channel) : null));
   const favourites = useFavouriteKeys();
@@ -142,14 +151,14 @@ export function GuidePage({ active }: { active: boolean }) {
       if (list.kind !== "all") setRemovedCategory(null);
       return;
     }
-    const shown = categoryMap.get(ownedKey(list.category));
-    if (!shown) {
+    const resolved = resolveDiscovery(list, categories.data);
+    if (resolved.kind !== "category") {
       setRemovedCategory(lastCategoryTitle.current || t("Current category"));
       showList({ kind: "all" });
-    } else if (!sameOwned(shown, list.category)) {
-      useUi.setState({ list: { kind: "category", category: ownedId(shown) } });
+    } else {
+      if (!sameOwned(resolved.category, list.category)) useUi.setState({ list: resolved });
+      setRemovedCategory(null);
     }
-    if (shown) setRemovedCategory(null);
   }, [list, categories.data, categoryMap, showList]);
 
   // What the field holds belongs to the list it was typed in: another list starts without a
@@ -289,7 +298,11 @@ export function GuidePage({ active }: { active: boolean }) {
 
   // A new list, or another search of it, selects its playing channel, or its first.
   const loaded = listed !== undefined;
+  const selectionScope = `${key}\n${text}`;
+  const initializedSelection = useRef<string | null>(null);
   useEffect(() => {
+    if (!loaded || initializedSelection.current === selectionScope) return;
+    initializedSelection.current = selectionScope;
     const playing = player.current();
     const index = Math.max(
       rows.findIndex((channel, at) =>
@@ -300,7 +313,32 @@ export function GuidePage({ active }: { active: boolean }) {
     setChosen({ index: searching ? 0 : index, channel: searching ? null : (rows[index] ?? null) });
     setExpandedKey(null);
     setExpandedCopies(new Set());
-  }, [key, loaded, text]);
+  }, [selectionScope, loaded]);
+
+  // A filter keeps the exact selected channel, or selects the first remaining row.
+  const filtersKey = JSON.stringify(list.filters ?? EMPTY_LIVE_FILTERS);
+  const filterChoice = useRef<{ key: string; channel: OwnedId | null }>({
+    key: filtersKey,
+    channel: null,
+  });
+  if (filterChoice.current.key !== filtersKey)
+    filterChoice.current = {
+      key: filtersKey,
+      channel: liveView === "grid" ? (grid.current?.channel() ?? null) : chosen.channel,
+    };
+  const appliedFilters = useRef(filtersKey);
+  useLayoutEffect(() => {
+    if (!loaded || appliedFilters.current === filtersKey) return;
+    appliedFilters.current = filtersKey;
+    const channel = filterChoice.current.channel;
+    const index = Math.max(
+      0,
+      rows.findIndex((each) => sameOwned(each, channel)),
+    );
+    setChosen({ index, channel: rows[index] ?? null });
+    if (liveView === "grid" && !gridRows.some((each) => sameOwned(each, channel)))
+      grid.current?.key("Home");
+  }, [loaded, filtersKey, rows, gridRows, liveView]);
 
   useLayoutEffect(() => {
     if (!searching || !search.actionable || chosen.channel !== null || rows.length === 0) return;
@@ -515,6 +553,10 @@ export function GuidePage({ active }: { active: boolean }) {
           field.current.focus();
           field.current.select();
           break;
+        case "f":
+        case "F":
+          page.current?.querySelector<HTMLButtonElement>("[data-browse-filter]")?.click();
+          break;
         case "s":
         case "S": {
           if (now.liveView === "grid") {
@@ -649,7 +691,7 @@ export function GuidePage({ active }: { active: boolean }) {
                         {t("Reorder")}
                       </Button>
                     )}
-                    {channels.length > 0 && (
+                    {(channels.length > 0 || searching) && (
                       <SearchField
                         field={field}
                         list={title}
@@ -666,6 +708,7 @@ export function GuidePage({ active }: { active: boolean }) {
                 </>
               )}
             </div>
+            <BrowseFilters list={list} result={browse} />
             <SourceNotices />
             {refused && (
               <p className="px-9 pb-2.5 text-sm text-muted-foreground">
@@ -719,24 +762,22 @@ export function GuidePage({ active }: { active: boolean }) {
                   />
                 )
               ) : liveView === "grid" ? (
-                listed && (
-                  <GuideGrid
-                    key={`${key}\n${search.query}`}
-                    ref={grid}
-                    channels={gridRows}
-                    playingKey={playingKey}
-                    showCursor={keyboard && focus === "channels"}
-                    onWatch={(channel) => {
-                      if (canUseSearch()) watchLive(channel);
-                    }}
-                    onKeys={() => setFocus("channels")}
-                    onPlayArchive={(channel, programme) => {
-                      if (!canUseSearch()) return;
-                      player.playArchive(channel, programme);
-                      openWatch();
-                    }}
-                  />
-                )
+                <GuideGrid
+                  key={`${key}\n${search.query}`}
+                  ref={grid}
+                  channels={gridRows}
+                  playingKey={playingKey}
+                  showCursor={keyboard && focus === "channels"}
+                  onWatch={(channel) => {
+                    if (canUseSearch()) watchLive(channel);
+                  }}
+                  onKeys={() => setFocus("channels")}
+                  onPlayArchive={(channel, programme) => {
+                    if (!canUseSearch()) return;
+                    player.playArchive(channel, programme);
+                    openWatch();
+                  }}
+                />
               ) : (
                 <ChannelTable
                   categories={categoryMap}

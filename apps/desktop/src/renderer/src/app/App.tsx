@@ -16,7 +16,7 @@ import { ReceiverBar, useReceiverBar } from "../features/watch/ReceiverBar.tsx";
 import { WatchScreen } from "../features/watch/WatchScreen.tsx";
 import { downloadsQuery } from "../lib/downloads.ts";
 import { appError, describeError } from "../lib/errors.ts";
-import { queries, useLastChannel, useSubscriptionPreferences } from "../lib/queries.ts";
+import { queries, useLastChannel } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
 import { PresentationVisible } from "../lib/presentation.ts";
 import { outputs, useOutput } from "../player/output.ts";
@@ -31,27 +31,19 @@ export function App() {
   const subscriptions = useQuery(queries.subscriptions());
   const preferences = useQuery(queries.preferences());
   const updateOffer = !!useQuery(queries.updates()).data?.offer;
-  const left = useSubscriptionPreferences();
+  const remembered = useQuery(queries.rememberedLiveBrowse());
 
-  // Live TV opens on the category the viewer left it at, once per start with subscriptions:
-  // reading their preferences again later changes no list. A category is kept by one of them.
+  // Main resolves supported remembered discovery and legacy downgrade writes once per startup.
   const restored = useRef(false);
   useEffect(() => {
-    if (!left) return;
-    if (left.size === 0) {
+    if (!subscriptions.data?.length) {
       restored.current = false;
       return;
     }
-    if (restored.current) return;
+    if (restored.current || !remembered.data) return;
     restored.current = true;
-    for (const [subscriptionId, { lastCategoryId }] of left) {
-      if (lastCategoryId === null) continue;
-      useUi.setState({
-        list: { kind: "category", category: { subscriptionId, id: lastCategoryId } },
-      });
-      return;
-    }
-  }, [left]);
+    useUi.setState({ list: remembered.data });
+  }, [subscriptions.data, remembered.data]);
 
   // Connect shows only with no subscription saved. One whose password or link can't be read
   // stays in the lists with what it loaded, and Settings is where it is entered again.

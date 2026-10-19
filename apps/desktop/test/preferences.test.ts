@@ -482,3 +482,102 @@ describe("the next-episode delay", () => {
     });
   });
 });
+
+describe("remembered Live TV discovery", () => {
+  it("restores topics globally, honors changed old-build legacy choice, and keeps All after restart", async () => {
+    const { dataDir, settings, id } = await connected();
+    await settings.updateSubscription(id, { lastCategoryId: "news" });
+    await settings.rememberLiveBrowse({ kind: "topic", topic: "sport" });
+    expect(await (await settingsIn(dataDir)).liveBrowse()).toEqual({
+      kind: "topic",
+      topic: "sport",
+    });
+    expect(await settings.get()).not.toHaveProperty("rememberedLiveBrowse");
+    // A prior stable build knows only lastCategoryId and retains the optional raw leaf.
+    const old = await settingsIn(dataDir);
+    await old.updateSubscription(id, { lastCategoryId: "kids" });
+    expect(await (await settingsIn(dataDir)).liveBrowse()).toEqual({
+      kind: "category",
+      category: { subscriptionId: id, id: "kids" },
+    });
+    const upgraded = await settingsIn(dataDir);
+    await upgraded.rememberLiveBrowse({
+      kind: "category",
+      category: { subscriptionId: id, id: "films" },
+    });
+    expect((await (await settingsIn(dataDir)).ofSubscription(id)).lastCategoryId).toBe("films");
+    await upgraded.rememberLiveBrowse({ kind: "all" });
+    const afterAll = await settingsIn(dataDir);
+    expect(await afterAll.liveBrowse()).toEqual({ kind: "all" });
+    expect((await afterAll.ofSubscription(id)).lastCategoryId).toBeNull();
+    expect(await stored(dataDir)).not.toHaveProperty("rememberedLiveBrowse");
+  });
+
+  it.each([true, false])(
+    "preserves global topics and clears removed native choices for original=%s",
+    async (original) => {
+      const { dataDir, settings, subscriptions, id, login } = await connected();
+      const provider = await fakeProvider();
+      const second = await subscriptions.add({ ...login, server: provider.url });
+      const removed = await savedAs(subscriptions, original ? id : second.id);
+      await settings.rememberLiveBrowse({
+        kind: "category",
+        category: { subscriptionId: removed.id, id: "7" },
+      });
+      await settings.rememberLiveBrowse({ kind: "topic", topic: "music" });
+      await subscriptions.remove(removed.id);
+      await settings.forget(removed);
+      expect(await (await settingsIn(dataDir)).liveBrowse()).toEqual({
+        kind: "topic",
+        topic: "music",
+      });
+      const kept = original ? second.id : id;
+      await settings.rememberLiveBrowse({
+        kind: "category",
+        category: { subscriptionId: kept, id: "8" },
+      });
+      const last = await savedAs(subscriptions, kept);
+      await subscriptions.remove(kept);
+      await settings.forget(last);
+      expect(await (await settingsIn(dataDir)).liveBrowse()).toEqual({ kind: "all" });
+    },
+  );
+
+  it.each([true, false])(
+    "preserves an unknown raw leaf through saves and removal for original=%s",
+    async (original) => {
+      const { dataDir, subscriptions, id, login } = await connected();
+      const provider = await fakeProvider();
+      const second = await subscriptions.add({ ...login, server: provider.url });
+      const future = {
+        version: 98,
+        selection: { kind: "future", opaque: [1, 2] },
+        legacy: "future",
+      };
+      const path = join(dataDir, "preferences.json");
+      await writeFile(
+        path,
+        JSON.stringify({
+          volume: 0.6,
+          muted: false,
+          lastChannelId: null,
+          lastCategoryId: null,
+          rememberedLiveBrowse: future,
+        }),
+      );
+      const settings = await settingsIn(dataDir);
+      expect(await settings.liveBrowse()).toEqual({ kind: "all" });
+      await settings.update({ muted: true });
+      await settings.setInterfaceLanguage("nl-NL");
+      expect(await settings.get()).not.toHaveProperty("rememberedLiveBrowse");
+      const removed = await savedAs(subscriptions, original ? id : second.id);
+      await subscriptions.remove(removed.id);
+      await settings.forget(removed);
+      expect(await stored(dataDir)).toMatchObject({
+        rememberedLiveBrowse: future,
+        muted: true,
+        interfaceLanguage: "nl-NL",
+      });
+    },
+  );
+});

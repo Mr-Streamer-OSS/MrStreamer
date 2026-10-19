@@ -724,6 +724,7 @@ function Remove({
         savedEntry: state.savedEntry?.sources.includes(id) ? null : state.savedEntry,
       }));
       client.setQueryData(queries.subscriptions().queryKey, others);
+      await client.resetQueries({ queryKey: ["library", "browse"] });
       onKeep();
       await client.invalidateQueries();
       // The page under Settings may have tried its channel again meanwhile, as the one watched

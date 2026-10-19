@@ -40,7 +40,10 @@ export const SAVED: SubscriptionSummary = {
   needsSecret: false,
 };
 
-const held = new Map<IpcMethod, Promise<Result<unknown>>[]>();
+const held = new Map<
+  IpcMethod,
+  { matches: (args: unknown) => boolean; answer: Promise<Result<unknown>> }[]
+>();
 const standing = new Map<IpcMethod, Result<unknown>>();
 const replies = new Map<IpcMethod, (args: unknown) => unknown>();
 const listeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -59,10 +62,13 @@ export const ipc = {
   /** The methods called so far, in order. */
   methods: (): IpcMethod[] => calls.map((each) => each.method),
   /** Holds the next call to `method` until the test answers it. */
-  hold<M extends IpcMethod>(method: M) {
+  hold<M extends IpcMethod>(method: M, matches?: (args: IpcInput<M>) => boolean) {
     let settle: (result: Result<unknown>) => void = () => {};
     const answer = new Promise<Result<unknown>>((resolve) => (settle = resolve));
-    held.set(method, [...(held.get(method) ?? []), answer]);
+    held.set(method, [
+      ...(held.get(method) ?? []),
+      { matches: (args) => !matches || matches(args as IpcInput<M>), answer },
+    ]);
     return {
       resolve: (value: IpcOutput<M>) => settle({ ok: true, value }),
       reject: (error: AppError) => settle({ ok: false, error }),
@@ -127,8 +133,10 @@ const bridge = {
       });
     }
     calls.push({ method, args });
-    const answer = held.get(method)?.shift();
-    if (answer) return answer;
+    const pending = held.get(method);
+    const next = pending?.findIndex((each) => each.matches(args)) ?? -1;
+    const answer = next >= 0 ? pending?.splice(next, 1)[0] : undefined;
+    if (answer) return answer.answer;
     const always = standing.get(method);
     if (always) return Promise.resolve(always);
     const reply = replies.get(method);

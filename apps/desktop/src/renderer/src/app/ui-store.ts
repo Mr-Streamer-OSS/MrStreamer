@@ -1,5 +1,6 @@
 import type { SettingsSection, SettingsControl } from "../features/settings/catalogue.ts";
 import { create } from "zustand";
+import type { LiveDiscovery, LiveFilters } from "@mrstreamer/contracts/live-browse";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistEntry } from "@mrstreamer/contracts/watchlist";
@@ -29,11 +30,9 @@ export interface SubscriptionTarget {
 }
 
 /** A list of channels the guide and Watch's channel list show. */
-export type ChannelList =
-  | { readonly kind: "favourites" }
-  | { readonly kind: "recent" }
-  | { readonly kind: "all" }
-  | { readonly kind: "category"; readonly category: OwnedId };
+export type ChannelList = (
+  LiveDiscovery | { readonly kind: "favourites" } | { readonly kind: "recent" }
+) & { readonly filters?: LiveFilters };
 
 /** A movie or series whose details are on screen: one of its versions. */
 export interface DetailsTarget extends OwnedId {
@@ -188,6 +187,7 @@ export function openSavedEntry(entry: WatchlistEntry): void {
 export function sameList(a: ChannelList, b: ChannelList): boolean {
   return (
     a.kind === b.kind &&
-    (a.kind !== "category" || (b.kind === "category" && sameOwned(a.category, b.category)))
+    (a.kind !== "category" || (b.kind === "category" && sameOwned(a.category, b.category))) &&
+    (a.kind !== "topic" || (b.kind === "topic" && a.topic === b.topic))
   );
 }

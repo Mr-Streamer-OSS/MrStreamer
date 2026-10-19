@@ -28,6 +28,12 @@ import {
   matchingSearchGroups,
   type LiveSearchIndex,
 } from "@mrstreamer/core/catalogue/search";
+import { browseCategories, browseMetadata } from "@mrstreamer/core/catalogue/browse";
+import type {
+  LiveBrowseQuery,
+  LiveBrowseResult,
+  BrowseFacet,
+} from "@mrstreamer/contracts/live-browse";
 import { liveChannels } from "@mrstreamer/core/catalogue/variants";
 import { diagnosed } from "@mrstreamer/core/diagnostics";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
@@ -210,6 +216,8 @@ export class Library extends Context.Service<
      * shows once.
      */
     channels(filter: ChannelFilter): Effect.Effect<readonly LiveChannel[], Failed>;
+    /** Exact membership and facets from one visibility-filtered accepted catalogue. */
+    browse(query: LiveBrowseQuery): Effect.Effect<LiveBrowseResult, Failed>;
     /** Lazy, full-catalogue joins shared by every searched list. An absent key stands alone. */
     readonly searchGroups: Effect.Effect<LiveSearchGroups, Failed>;
     /**
@@ -560,6 +568,11 @@ function make(options: LibraryOptions) {
 
       categories: Effect.map(visible, ({ lists }) => lists.categories),
 
+      browse: (query: LiveBrowseQuery) =>
+        Effect.map(visible, ({ lists, search }) =>
+          browse(query.visibility === "ordinary" ? search : lists, query),
+        ),
+
       searchGroups: Effect.map(visible, ({ search }) => searchGroupCache(search.channels).groups),
 
       channels: (filter: ChannelFilter) =>
@@ -643,11 +656,17 @@ function index(file: CatalogueFile, subscriptionId: string, outdated: boolean): 
   // A channel is for adults when one of its streams is.
   const isAdult = adultIn(file.categories);
   const adultStreams = new Set(file.channels.filter(isAdult).map((channel) => channel.id));
-  const channels = logical.channels.map((channel): LiveChannel =>
+  const joinedChannels = logical.channels.map((channel): LiveChannel =>
     channel.variants.some((variant) => adultStreams.has(variant.id))
       ? { subscriptionId, ...channel, adult: true }
       : { subscriptionId, ...channel },
   );
+  const topics = browseCategories(file.categories);
+  const streamById = new Map(streams.map((stream) => [stream.id, stream]));
+  const channels = joinedChannels.map((channel) => ({
+    ...channel,
+    browse: browseMetadata(channel, topics, streamById),
+  }));
   const byId = new Map<string, LiveChannel>();
   for (const channel of channels) {
     byId.set(channel.id, channel);
@@ -902,4 +921,85 @@ function searchIndex(channels: readonly LiveChannel[]): LiveSearchIndex {
     searchIndexes.set(channels, index);
   }
   return index;
+}
+
+/** One lookup projection for each cached Combined, discarded when its catalogues change. */
+const browseProjections = new WeakMap<Combined, ReadonlyMap<string, LiveChannel>>();
+function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
+  let byId = browseProjections.get(lists);
+  if (!byId) {
+    byId = new Map(
+      lists.members.flatMap((member) =>
+        [...member.byId].map(
+          ([id, channel]) =>
+            [
+              ownedKey({ subscriptionId: member.subscriptionId, id }),
+              lists.shown(channel),
+            ] as const,
+        ),
+      ),
+    );
+    browseProjections.set(lists, byId);
+  }
+  const { scope, filters } = query;
+  const channels =
+    scope.kind === "all"
+      ? lists.channels
+      : scope.kind === "category"
+        ? (lists.byCategory.get(ownedKey(scope.category)) ?? [])
+        : [...new Set(scope.channels.flatMap((id) => byId.get(ownedKey(id)) ?? []))];
+  const facets = {
+    browseTopics: new Map<string, number>(),
+    countries: new Map<string, number>(),
+    languages: new Map<string, number>(),
+    subscriptions: new Map<string, number>(),
+  };
+  const counts = { browseTopics: 0, countries: 0, languages: 0, subscriptions: 0 };
+  const selected: LiveChannel[] = [];
+  let total = 0;
+  for (const channel of channels) {
+    const values = {
+      browseTopics: channel.browse?.topics ?? ["other"],
+      countries: channel.browse?.country ? [channel.browse.country] : [],
+      languages: channel.browse?.language ? [channel.browse.language] : [],
+      subscriptions: [channel.subscriptionId],
+    };
+    const matches = {
+      browseTopics:
+        filters.browseTopics.length === 0 ||
+        values.browseTopics.some((id) => filters.browseTopics.some((asked) => asked === id)),
+      countries:
+        filters.countries.length === 0 ||
+        values.countries.some((id) => filters.countries.includes(id)),
+      languages:
+        filters.languages.length === 0 ||
+        values.languages.some((id) => filters.languages.includes(id)),
+      subscriptions:
+        filters.subscriptions.length === 0 ||
+        filters.subscriptions.includes(channel.subscriptionId),
+    };
+    if (matches.browseTopics) total++;
+    if (Object.values(matches).every(Boolean)) selected.push(channel);
+    for (const dimension of ["browseTopics", "countries", "languages", "subscriptions"] as const) {
+      if (Object.entries(matches).some(([key, match]) => key !== dimension && !match)) continue;
+      counts[dimension]++;
+      for (const value of values[dimension]) {
+        const counts = facets[dimension];
+        counts.set(value, (counts.get(value) ?? 0) + 1);
+      }
+    }
+  }
+  const counted = (values: ReadonlyMap<string, number>): readonly BrowseFacet[] =>
+    [...values].map(([value, count]) => ({ value, count }));
+  return {
+    channels: plainChannels(selected),
+    total,
+    counts,
+    facets: {
+      browseTopics: counted(facets.browseTopics),
+      countries: counted(facets.countries),
+      languages: counted(facets.languages),
+      subscriptions: counted(facets.subscriptions),
+    },
+  };
 }

@@ -1,3 +1,6 @@
+import { type } from "arktype";
+import { LiveDiscovery, RememberedLiveBrowse } from "@mrstreamer/contracts/live-browse";
+import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { homeRows } from "@mrstreamer/core/home/rows";
 import { isDeepStrictEqual } from "node:util";
 import type { UsageObservers } from "../analytics/observers.ts";
@@ -50,6 +53,7 @@ const Stored = lazy(() =>
      * a later release adds doesn't make this one drop the file. System default when absent.
      */
     "interfaceLanguage?": "string",
+    "rememberedLiveBrowse?": "unknown",
   }),
 );
 type Stored = Infer<typeof Stored>;
@@ -58,6 +62,9 @@ export class Settings extends Context.Service<
   Settings,
   {
     readonly get: Effect.Effect<Preferences>;
+    /** Discovery only. Personal lists and session filters never reach this file. */
+    readonly liveBrowse: Effect.Effect<LiveDiscovery>;
+    rememberLiveBrowse(selection: LiveDiscovery): Effect.Effect<LiveDiscovery, Failed>;
     update(patch: Partial<Preferences>): Effect.Effect<Preferences>;
     /** The interface language as saved, which may be one this release doesn't know. */
     readonly interfaceLanguage: Effect.Effect<string | undefined>;
@@ -156,8 +163,82 @@ function make(dataDir: string, usage?: UsageObservers) {
         return kept;
       });
 
+    const leftAt = (subscription: SavedSubscription) =>
+      subscription.original ? Effect.map(stored, ofOriginal) : ofAdded(subscription);
+
+    /** The one pair startup in prior stable would restore, not every subscription's history. */
+    const legacy = (saved: readonly SavedSubscription[]) =>
+      Effect.gen(function* () {
+        for (const subscription of saved) {
+          const { lastCategoryId } = yield* leftAt(subscription);
+          if (lastCategoryId !== null)
+            return { subscriptionId: subscription.id, id: lastCategoryId };
+        }
+        return null;
+      });
+    const readBrowse = Effect.gen(function* () {
+      const saved = yield* subscriptions.saved;
+      const baseline = yield* legacy(saved);
+      const raw = RememberedLiveBrowse()((yield* stored).rememberedLiveBrowse);
+      if (!(raw instanceof type.errors) && sameBaseline(raw.legacy, baseline)) {
+        if (raw.selection.kind === "topic" && saved.length > 0)
+          return discoverySelection(raw.selection);
+        const selection = raw.selection;
+        if (
+          selection.kind === "category" &&
+          saved.some((each) => each.id === selection.category.subscriptionId)
+        )
+          return discoverySelection(selection);
+      }
+      return baseline
+        ? { kind: "category" as const, category: baseline }
+        : { kind: "all" as const };
+    });
+    const writeLeft = (subscription: SavedSubscription, lastCategoryId: string | null) =>
+      Effect.gen(function* () {
+        const previous = yield* leftAt(subscription);
+        if (previous.lastCategoryId === lastCategoryId) return;
+        if (subscription.original) yield* applied((file) => ({ ...file, lastCategoryId }));
+        else {
+          const next = { ...previous, lastCategoryId };
+          yield* Effect.promise(() => writeJsonFile(addedPath(subscription), next));
+          added.set(subscription.id, next);
+        }
+      });
+
     return {
       get: one.withPermits(1)(Effect.map(stored, effective)),
+      liveBrowse: one.withPermits(1)(readBrowse),
+      rememberLiveBrowse: (input: LiveDiscovery) =>
+        one.withPermits(1)(
+          Effect.gen(function* () {
+            const selection = discoverySelection(input);
+            const all = yield* subscriptions.saved;
+            if (all.length === 0 && selection.kind !== "all")
+              return yield* new Failed({ error: { kind: "no-subscription" } });
+            if (selection.kind === "category") yield* saved(selection.category.subscriptionId);
+            if (selection.kind !== "topic") {
+              for (const subscription of all)
+                yield* writeLeft(
+                  subscription,
+                  selection.kind === "category" &&
+                    selection.category.subscriptionId === subscription.id
+                    ? selection.category.id
+                    : null,
+                );
+            }
+            const baseline = yield* legacy(all);
+            yield* applied(({ rememberedLiveBrowse: _old, ...file }) =>
+              selection.kind === "all"
+                ? file
+                : {
+                    ...file,
+                    rememberedLiveBrowse: { version: 1, selection, legacy: baseline },
+                  },
+            );
+            return discoverySelection(selection);
+          }),
+        ),
       update: (patch: Partial<Preferences>) =>
         Effect.map(
           change((previous) => ({ ...previous, ...patch })),
@@ -185,17 +266,49 @@ function make(dataDir: string, usage?: UsageObservers) {
               }),
         ),
       forget: (subscription: SavedSubscription) =>
-        subscription.original
-          ? Effect.asVoid(
-              // The interface language is the viewer's, not the subscription's: it stays.
-              change(({ interfaceLanguage, ...previous }) => ({
-                ...general(previous),
-                ...defaultSubscriptionPreferences,
-                ...(interfaceLanguage === undefined ? {} : { interfaceLanguage }),
-              })),
-            )
-          : // Its folder went with it: only what was read of it is left to forget.
-            one.withPermits(1)(Effect.sync(() => void added.delete(subscription.id))),
+        one.withPermits(1)(
+          Effect.gen(function* () {
+            const previous = yield* stored;
+            const raw = previous.rememberedLiveBrowse;
+            const record = RememberedLiveBrowse()(raw);
+            const remaining = (yield* subscriptions.saved).filter(
+              (each) => each.id !== subscription.id,
+            );
+            // Unknown future records survive both removal paths verbatim.
+            let rememberedLiveBrowse = raw;
+            if (!(record instanceof type.errors)) {
+              const valid =
+                remaining.length > 0 &&
+                (record.selection.kind === "topic" ||
+                  remaining.some(
+                    (each) =>
+                      record.selection.kind === "category" &&
+                      each.id === record.selection.category.subscriptionId,
+                  ));
+              rememberedLiveBrowse = valid
+                ? { ...record, legacy: yield* legacy(remaining) }
+                : undefined;
+            }
+            if (subscription.original || !(record instanceof type.errors)) {
+              yield* applied((file) => {
+                const { rememberedLiveBrowse: _remembered, ...kept } = subscription.original
+                  ? {
+                      ...general(file),
+                      ...defaultSubscriptionPreferences,
+                      ...(file.interfaceLanguage === undefined
+                        ? {}
+                        : { interfaceLanguage: file.interfaceLanguage }),
+                    }
+                  : file;
+                return {
+                  ...kept,
+                  ...(rememberedLiveBrowse === undefined ? {} : { rememberedLiveBrowse }),
+                };
+              });
+            }
+            added.delete(subscription.id);
+          }),
+        ),
       legacyLists: one.withPermits(1)(
         Effect.map(stored, ({ favouriteChannelIds, recentChannelIds }) =>
           favouriteChannelIds || recentChannelIds
@@ -225,6 +338,7 @@ function general({
   favouriteChannelIds: _favourites,
   recentChannelIds: _recent,
   interfaceLanguage: _language,
+  rememberedLiveBrowse: _browse,
   ...preferences
 }: Stored) {
   return preferences;
@@ -287,4 +401,17 @@ function preferenceChanges(before: Stored, after: Stored) {
   return keys
     .filter(([, previous, next]) => !isDeepStrictEqual(previous, next))
     .map(([key]) => key);
+}
+
+function sameBaseline(a: OwnedId | null, b: OwnedId | null): boolean {
+  return a === null ? b === null : b !== null && sameOwned(a, b);
+}
+
+/** Only supported discovery fields are effective; raw future extras stay in the stored leaf. */
+function discoverySelection(selection: LiveDiscovery): LiveDiscovery {
+  return selection.kind === "topic"
+    ? { kind: "topic", topic: selection.topic }
+    : selection.kind === "category"
+      ? { kind: "category", category: ownedId(selection.category) }
+      : { kind: "all" };
 }

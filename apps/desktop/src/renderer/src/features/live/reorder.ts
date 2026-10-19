@@ -19,6 +19,8 @@ import type { Viewing } from "@mrstreamer/contracts/viewing";
 import { t } from "@mrstreamer/core/i18n";
 import { appError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
+import { browseQuery } from "./lists.ts";
+import { useUi } from "../../app/ui-store.ts";
 import { keepViewing, queries, useSubscriptions } from "../../lib/queries.ts";
 
 /** What of a row holds the focus: the row itself, or one of its two buttons. */
@@ -202,11 +204,10 @@ export function useFavouriteOrder(
    * Reads `channels` from the main process, as it lists them now, into the lists' cache, and
    * gives the array the list gets for them from then on.
    */
-  const read = async (channels: readonly OwnedId[]) => {
-    if (channels.length === 0) return undefined;
-    const listed = queries.channelsOf(channels);
+  const read = async (viewing: Viewing) => {
+    const listed = queries.browse(browseQuery(useUi.getState().list, viewing, "viewer"));
     await client.fetchQuery({ ...listed, staleTime: 0 });
-    return client.getQueryData(listed.queryKey);
+    return client.getQueryData(listed.queryKey)?.channels;
   };
 
   /**
@@ -220,7 +221,7 @@ export function useFavouriteOrder(
     const later = client.getQueryData(queries.viewing().queryKey)?.sequence ?? 0;
     if (!connected(from) || later > viewing.sequence) return;
     // A list that can't be read says so itself, once it shows.
-    await read(viewing.favourites).catch(() => {});
+    await read(viewing).catch(() => {});
     if (connected(from)) keepViewing(client, viewing);
   };
 
@@ -259,7 +260,7 @@ export function useFavouriteOrder(
     setDraft({ ...from, status: "reading", commandId: token });
     void (async () => {
       const viewing = await client.fetchQuery({ ...queries.viewing(), staleTime: 0 });
-      const listed = await read(viewing.favourites);
+      const listed = await read(viewing);
       if (!listed || !connected(from.saved)) return null;
       const { channel, asked } = from.focus;
       return drafted(from.saved, viewing.favourites, listed, channel, asked + 1);
