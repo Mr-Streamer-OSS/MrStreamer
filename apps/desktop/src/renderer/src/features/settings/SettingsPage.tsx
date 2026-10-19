@@ -74,6 +74,7 @@ export function SettingsPage() {
       setQuery("");
       root.current?.querySelector<HTMLButtonElement>('nav button[aria-current="page"]')?.focus();
     } else if (!tab && opened.current) {
+      useUi.setState({ settingsTarget: null });
       opened.current = false;
       setVisited(new Set());
       const previous = returnFocus.current;

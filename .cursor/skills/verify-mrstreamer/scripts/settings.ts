@@ -37,6 +37,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
       key: "a",
       windowsVirtualKeyCode: 65,
       modifiers,
+      commands: ["selectAll"],
     });
     await d.send("Input.dispatchKeyEvent", {
       type: "keyUp",
@@ -66,16 +67,57 @@ export async function settingsScenario(d: Driver): Promise<void> {
     await d.wait(() => d.evaluate<boolean>(`innerWidth === ${width} && innerHeight === ${height}`));
   };
   const pick = async (field: string, name: string) => {
+    await d.wait(() => d.exists(field));
     await d.evaluate(`${field}.focus()`);
     for (const char of name.slice(0, 2)) {
       await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
       await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
     }
+    await d.wait(() =>
+      d.evaluate<boolean>(
+        `${field}?.getAttribute('aria-busy') !== 'true' && ${field}?.closest('fieldset')?.getAttribute('aria-busy') !== 'true'`,
+      ),
+    );
+    expect(
+      await d.evaluate<boolean>(`document.activeElement === ${field}`),
+      "Select save lost keyboard focus",
+    );
     await d.key("Tab", 9);
   };
 
   await size(960, 600);
   await settings();
+  await nav("Live TV");
+  const quality = shown('select[aria-label="Quality"]');
+  d.action("Focus quality before keyboard save");
+  await d.evaluate(`${quality}.focus()`);
+  await d.key("ArrowDown", 40);
+  await d.wait(async () => (await saved()).liveQuality === "hd");
+  expect(
+    await d.evaluate<boolean>(`document.activeElement === ${quality}`),
+    "Quality save lost keyboard focus",
+  );
+  await d.capture("quality-saved-focused");
+  await d.key("Tab", 9);
+  expect(
+    await d.evaluate<boolean>(
+      "document.activeElement?.closest('[data-setting]')?.getAttribute('data-setting') === 'own-quality'",
+    ),
+    "Tab after quality save lost its row order",
+  );
+  await d.key("Escape", 27);
+  await d.wait(() => d.evaluate<boolean>("!document.querySelector('[data-view=settings]')"));
+  expect(
+    await d.evaluate<boolean>("document.activeElement?.getAttribute('aria-label') === 'Settings'"),
+    "Closing Settings did not restore its opener",
+  );
+  await settings();
+  d.observed["qualityKeyboardSave"] = {
+    saved: "hd",
+    focusRetained: true,
+    tabTo: "own-quality",
+    escapeRestoredOpener: true,
+  };
   const order = [
     "General",
     "Playback",
@@ -152,6 +194,18 @@ export async function settingsScenario(d: Driver): Promise<void> {
   await type(delay, "37");
   await d.key("Enter", 13);
   await d.wait(async () => (await saved()).nextEpisodeDelaySeconds === 37);
+  expect(
+    await d.evaluate<boolean>(`document.activeElement === ${delay}`),
+    "Delay Enter lost focus",
+  );
+  await type(delay, "19");
+  await d.key("Escape", 27);
+  expect(
+    await d.evaluate<boolean>(
+      `${delay}.value === '37' && !!document.querySelector('[data-view=settings]')`,
+    ),
+    "Delay Escape failed to cancel its draft inside Settings",
+  );
   await d.click("Focus exact seconds", delay);
   await d.send("Input.dispatchKeyEvent", {
     type: "rawKeyDown",
@@ -170,6 +224,10 @@ export async function settingsScenario(d: Driver): Promise<void> {
   await type(delay, "999");
   await d.key("Enter", 13);
   await d.wait(async () => (await saved()).nextEpisodeDelaySeconds === 60);
+  expect(
+    await d.evaluate<boolean>(`document.activeElement === ${delay}`),
+    "Clamped delay Enter lost focus",
+  );
   await d.capture("delay-clamped-60");
 
   // An actual rename failure on this run's disposable profile. No IPC setter is injected.
@@ -197,15 +255,56 @@ export async function settingsScenario(d: Driver): Promise<void> {
       "Failed save changed acknowledged preferences",
     );
     await d.capture("delay-persistence-failure");
+    expect(
+      await d.evaluate<boolean>(`document.activeElement === ${delay}`),
+      "Delay refusal lost focus",
+    );
+    await nav("Live TV");
+    await d.evaluate(`${quality}.focus()`);
+    await d.key("ArrowDown", 40);
+    await d.wait(() => d.exists("document.querySelector('main:not([hidden]) [role=alert]')"));
+    expect(
+      await d.evaluate<boolean>(
+        `${quality}.value === 'hd' && document.activeElement === ${quality}`,
+      ),
+      "Select refusal lost focus or claimed an unsaved value",
+    );
+    await d.capture("quality-refused-focused");
+    await d.key("Tab", 9);
+    expect(
+      await d.evaluate<boolean>("document.activeElement?.textContent.trim() === 'Try again'"),
+      "Tab after refused quality missed Retry",
+    );
+    await d.key("Enter", 13);
+    await d.wait(() => d.exists("document.querySelector('main:not([hidden]) [role=alert]')"));
+    expect(
+      await d.evaluate<boolean>(`document.activeElement === ${quality}`),
+      "Failed retry lost the quality position",
+    );
     await rm(path, { recursive: true });
     await rename(backup, path);
     restored = true;
     expect((await readFile(path, "utf8")) === original, "Failed save damaged the previous file");
-    await d.click(
-      "Retry failed delay row",
-      button("main:not([hidden]) [role=alert] button", "Try again"),
+    await d.key("Tab", 9);
+    await d.key("Enter", 13);
+    await d.wait(async () => (await saved()).liveQuality === "sd");
+    expect(
+      await d.evaluate<boolean>(`document.activeElement === ${quality}`),
+      "Successful retry lost the quality position",
     );
+    await d.capture("quality-retry-saved-focused");
+    await nav("Playback");
+    await d.evaluate(`${delay}.focus()`);
+    await d.key("Tab", 9);
+    expect(
+      await d.evaluate<boolean>("document.activeElement?.textContent.trim() === 'Try again'"),
+      "Tab after delay Enter missed its Retry",
+    );
+    await d.key("Enter", 13);
     await d.wait(async () => (await saved()).nextEpisodeDelaySeconds === 29);
+    await d.wait(() =>
+      d.evaluate<boolean>(`${delay}.value === '29' && document.activeElement === ${delay}`),
+    );
     await d.capture("delay-row-retry-saved");
   } finally {
     if (!restored) {
@@ -219,6 +318,14 @@ export async function settingsScenario(d: Driver): Promise<void> {
     refused: 29,
     retrySaved: 29,
     oldFileIntact: true,
+    select: {
+      before: "hd",
+      refused: "sd",
+      retried: "sd",
+      focusRetained: true,
+      keyboardRetry: true,
+    },
+    delayFocusRetained: true,
   };
 
   await nav("Movies and series");

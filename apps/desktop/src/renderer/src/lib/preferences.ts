@@ -97,13 +97,18 @@ export const preferenceQuery = () =>
     staleTime: Infinity,
   });
 
+/** Reads the committed cache without starting another request. Pending editors keep only intent. */
+export function currentPreferences(client = connected): Preferences | undefined {
+  return client?.getQueryData<PreferenceSnapshot>(key)?.preferences;
+}
+
 /** Players can read/save outside React; composition attaches their renderer cache once. */
-export async function readPreferences(): Promise<Preferences> {
+export async function readPreferences(client = connected): Promise<Preferences> {
   try {
     const snapshot = await call("preferences.get");
-    return (connected ? acceptPreferences(connected, snapshot) : snapshot).preferences;
+    return (client ? acceptPreferences(client, snapshot) : snapshot).preferences;
   } catch (error) {
-    if (connected) void connected.invalidateQueries({ queryKey: key, refetchType: "none" });
+    if (client) void client.invalidateQueries({ queryKey: key, refetchType: "none" });
     throw error;
   }
 }

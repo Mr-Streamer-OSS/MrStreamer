@@ -70,7 +70,7 @@ export function UpdatesSection() {
       >
         <Select
           label={t("Channel")}
-          disabled={channelChange.isPending}
+          busy={channelChange.isPending}
           value={status.channel}
           options={channels}
           onChange={setChannel}
@@ -79,7 +79,7 @@ export function UpdatesSection() {
       <SaveFeedback
         pending={channelChange.isPending}
         error={channelChange.error}
-        retry={() => channelChange.mutate(channelChange.variables!)}
+        retry={() => setChannel(channelChange.variables!)}
       />
       <Notes status={status} />
     </Section>

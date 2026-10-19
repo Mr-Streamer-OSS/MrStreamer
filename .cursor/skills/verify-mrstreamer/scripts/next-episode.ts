@@ -91,6 +91,11 @@ export async function nextEpisodeScenario(
   };
   const closeSettings = async () => {
     await d.key("Escape", 27);
+    if (await d.exists(delay()))
+      await d.click(
+        "Close Settings with Back after cancelling delay editing",
+        named("header button", translate(locale, "Back")),
+      );
     await d.wait(async () => !(await d.exists(delay())));
   };
   const pickLocale = async (next: Locale) => {

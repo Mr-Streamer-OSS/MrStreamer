@@ -81,9 +81,11 @@ export function Select<T extends string>({
   onChange,
   wide = false,
   disabled = false,
+  busy = false,
 }: {
   label: string;
   disabled?: boolean;
+  busy?: boolean;
   value: T;
   /** Each choice, with the language its label is in when that isn't the interface's. */
   options: readonly { readonly value: T; readonly label: string; readonly lang?: string }[];
@@ -95,6 +97,8 @@ export function Select<T extends string>({
     <select
       aria-label={label}
       disabled={disabled}
+      aria-disabled={busy || undefined}
+      aria-busy={busy || undefined}
       value={value}
       onChange={(event) => {
         const picked = options.find((option) => option.value === event.target.value);

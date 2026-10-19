@@ -211,7 +211,7 @@ it("blocks reopened controls until a held save settles, then retains both edits"
   const reordered = ipc.argsOf("preferences.update")[0]!;
   await act(async () => button("General").click());
   await act(async () => button("Home").click());
-  expect(checkbox("Watchlist").disabled).toBe(true);
+  expect(checkbox("Watchlist").getAttribute("aria-disabled")).toBe("true");
   expect(button("Move Watchlist down").getAttribute("aria-disabled")).toBe("true");
   await act(async () => {
     button("Move Watchlist down").click();

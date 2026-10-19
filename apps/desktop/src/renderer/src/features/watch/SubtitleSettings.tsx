@@ -4,17 +4,16 @@
 // position. The player keeps both, so they hold after a seek or another track, and changing them
 // never turns subtitles on or picks another track.
 //   On the look's rows, Left and Right pick.
-import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { type KeyboardEvent, type ReactNode } from "react";
 import type { SubtitleTrack } from "@mrstreamer/contracts/playback";
-import { DEFAULT_SUBTITLE_LOOK, type SubtitleLook } from "@mrstreamer/contracts/preferences";
+import type { SubtitleLook } from "@mrstreamer/contracts/preferences";
 import { formatDecimal, t } from "@mrstreamer/core/i18n";
-import { readPreferences, updatePreferences } from "../../lib/preferences.ts";
+import { updateSubtitleLook } from "../../player/subtitle-look.ts";
 import { appError, describeError } from "../../lib/errors.ts";
 import { cn } from "../../lib/utils.ts";
 import { player } from "../../player/player.ts";
 import {
   setSubtitleDelay,
-  setSubtitleLook,
   subtitleDelay,
   TIMING_STEP_S,
   useSubtitleSettings,
@@ -116,17 +115,11 @@ export function TrackTiming() {
 /** Size, background and position, saved for every title and channel. */
 export function LookRows({ text }: { text: boolean }) {
   const look = useSubtitleSettings((state) => state.look);
-  const pendingLook = useRef<SubtitleLook | null>(null);
-  const pick = (next: SubtitleLook) => {
-    pendingLook.current = next;
-    setSubtitleLook(next);
-    void updatePreferences({ subtitleLook: next }).catch(async (error: unknown) => {
-      flashNote(`${t("Subtitle look")}: ${describeError(appError(error))}`, true);
-      const saved = await readPreferences().catch(() => null);
-      if (pendingLook.current === next) {
-        setSubtitleLook(saved ? (saved.subtitleLook ?? DEFAULT_SUBTITLE_LOOK) : look);
-      }
-    });
+  const pick = (patch: Partial<SubtitleLook>) => {
+    void updateSubtitleLook(patch, {
+      onError: (error) =>
+        flashNote(`${t("Subtitle look")}: ${describeError(appError(error))}`, true),
+    }).catch(() => {});
   };
   return (
     <>
@@ -134,21 +127,21 @@ export function LookRows({ text }: { text: boolean }) {
         label={t("Size")}
         options={SUBTITLE_SIZES}
         value={look.size}
-        onPick={(size) => pick({ ...look, size })}
+        onPick={(size) => pick({ size })}
       />
       {text && (
         <Segments
           label={t("Background")}
           options={SUBTITLE_BACKGROUNDS}
           value={look.background}
-          onPick={(background) => pick({ ...look, background })}
+          onPick={(background) => pick({ background })}
         />
       )}
       <Segments
         label={t("Position")}
         options={SUBTITLE_POSITIONS}
         value={look.position}
-        onPick={(position) => pick({ ...look, position })}
+        onPick={(position) => pick({ position })}
       />
     </>
   );

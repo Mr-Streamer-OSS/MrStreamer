@@ -19,6 +19,7 @@ import { changeLanguage } from "../../app/language.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { updatePreferences } from "../../lib/preferences.ts";
+import { updateSubtitleLook } from "../../player/subtitle-look.ts";
 import { preferenceName } from "../../lib/quality.ts";
 import {
   queries,
@@ -65,17 +66,9 @@ function PreferenceRow<K extends keyof Preferences>({
     mutationKey: ["settings", field],
     mutationFn: (value: Preferences[K]) => {
       const look = value as Preferences["subtitleLook"];
-      const patch =
-        field === "subtitleLook" && lookField && look
-          ? {
-              subtitleLook: {
-                ...(client.getQueryData(queries.preferences().queryKey)?.preferences.subtitleLook ??
-                  DEFAULT_SUBTITLE_LOOK),
-                [lookField]: look[lookField],
-              },
-            }
-          : { [field]: value };
-      return updatePreferences(patch, client);
+      if (field === "subtitleLook" && lookField && look)
+        return updateSubtitleLook({ [lookField]: look[lookField] }, { client });
+      return updatePreferences({ [field]: value }, client);
     },
     onSettled: () => {
       writing.current = false;
@@ -84,37 +77,35 @@ function PreferenceRow<K extends keyof Preferences>({
       if (field === "adultTitles" && value === false) useUi.setState({ savedEntry: null });
     },
   });
+  const change = (value: Preferences[K]) => {
+    if (
+      !read.data ||
+      writing.current ||
+      fieldBusy ||
+      update.isPending ||
+      client.isMutating({ mutationKey: ["settings", field] })
+    )
+      return;
+    writing.current = true;
+    update.mutate(value);
+  };
   return (
     <div>
       <fieldset
-        disabled={!read.data || fieldBusy || update.isPending}
+        disabled={!read.data}
+        aria-disabled={fieldBusy || update.isPending}
         aria-busy={update.isPending}
         className="min-w-0"
       >
         <Row id={id} label={label} note={note}>
-          {children(
-            read.data,
-            (value) => {
-              if (
-                !read.data ||
-                writing.current ||
-                fieldBusy ||
-                update.isPending ||
-                client.isMutating({ mutationKey: ["settings", field] })
-              )
-                return;
-              writing.current = true;
-              update.mutate(value);
-            },
-            !read.data || fieldBusy || update.isPending,
-          )}
+          {children(read.data, change, !read.data)}
         </Row>
       </fieldset>
       <SaveFeedback
         pending={update.isPending}
         error={update.error}
         retryDisabled={fieldBusy}
-        retry={() => update.mutate(update.variables!)}
+        retry={() => change(update.variables!)}
       />
     </div>
   );
@@ -123,16 +114,25 @@ function PreferenceRow<K extends keyof Preferences>({
 export function GeneralSection() {
   const client = useQueryClient();
   const language = useQuery(queries.language());
+  const writing = useRef(false);
   const update = useMutation({
     mutationFn: (choice: LanguageChoice) => changeLanguage(client, choice),
+    onSettled: () => {
+      writing.current = false;
+    },
   });
+  const choose = (choice: LanguageChoice) => {
+    if (writing.current || update.isPending) return;
+    writing.current = true;
+    update.mutate(choice);
+  };
   return (
     <Section title={t("General")}>
       <Row id="interface-language" label={t("Interface language")}>
         {language.data && (
           <Select
             wide
-            disabled={update.isPending}
+            busy={update.isPending}
             label={t("Interface language")}
             value={language.data.choice}
             options={[
@@ -148,14 +148,14 @@ export function GeneralSection() {
                 lang: locale,
               })),
             ]}
-            onChange={(choice) => update.mutate(choice)}
+            onChange={choose}
           />
         )}
       </Row>
       <SaveFeedback
         pending={update.isPending}
         error={update.error ?? language.error}
-        retry={() => (update.isError ? update.mutate(update.variables!) : void language.refetch())}
+        retry={() => (update.isError ? choose(update.variables!) : void language.refetch())}
       />
     </Section>
   );
@@ -247,6 +247,7 @@ export function LiveSettingsSection() {
     (sum, [, saved]) => sum + Object.keys(saved.channelVariants ?? {}).length,
     0,
   );
+  const writing = useRef(false);
   const reset = useMutation({
     mutationFn: async () => {
       // Wait for every result, including partial success. Retry reads only overrides still present.
@@ -258,7 +259,15 @@ export function LiveSettingsSection() {
       const failure = results.find((result) => result.status === "rejected");
       if (failure?.status === "rejected") throw failure.reason;
     },
+    onSettled: () => {
+      writing.current = false;
+    },
   });
+  const resetQualities = () => {
+    if (count === 0 || writing.current || reset.isPending) return;
+    writing.current = true;
+    reset.mutate();
+  };
   return (
     <Section title={t("Live TV")}>
       <PreferenceRow
@@ -283,16 +292,13 @@ export function LiveSettingsSection() {
         <Button
           variant="secondary"
           size="sm"
-          disabled={reset.isPending}
-          aria-disabled={count === 0}
-          onClick={() => {
-            if (count > 0) reset.mutate();
-          }}
+          aria-disabled={count === 0 || reset.isPending}
+          onClick={resetQualities}
         >
           {t("Reset")}
         </Button>
       </Row>
-      <SaveFeedback pending={reset.isPending} error={reset.error} retry={() => reset.mutate()} />
+      <SaveFeedback pending={reset.isPending} error={reset.error} retry={resetQualities} />
     </Section>
   );
 }
@@ -465,6 +471,16 @@ function EpisodeDelay({
   useEffect(() => {
     if (!editing.current) setValue(String(seconds));
   }, [seconds]);
+  const commit = (input: HTMLInputElement) => {
+    const next = input.valueAsNumber;
+    const changed = editing.current;
+    editing.current = false;
+    setValue(String(seconds));
+    if (changed && Number.isInteger(next)) {
+      const bounded = Math.max(0, Math.min(60, next));
+      if (bounded !== seconds) onChange(bounded);
+    }
+  };
   return (
     <Input
       aria-label={t("Next episode delay")}
@@ -474,14 +490,15 @@ function EpisodeDelay({
       step={1}
       value={value}
       className="h-9 w-20 rounded-none px-2 text-right tabular-nums"
-      onFocus={() => {
+      onChange={(event) => {
         editing.current = true;
+        setValue(event.target.value);
       }}
-      onChange={(event) => setValue(event.target.value)}
       onKeyDown={(event) => {
         if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
           event.preventDefault();
           event.stopPropagation();
+          editing.current = true;
           const current = Number(value) || 0;
           setValue(
             String(
@@ -501,7 +518,7 @@ function EpisodeDelay({
         } else if (event.key === "Enter") {
           event.preventDefault();
           event.stopPropagation();
-          event.currentTarget.blur();
+          commit(event.currentTarget);
         } else if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
@@ -510,16 +527,7 @@ function EpisodeDelay({
           event.currentTarget.blur();
         }
       }}
-      onBlur={(event) => {
-        const next = event.currentTarget.valueAsNumber;
-        const commit = editing.current;
-        editing.current = false;
-        setValue(String(seconds));
-        if (commit && Number.isInteger(next)) {
-          const bounded = Math.max(0, Math.min(60, next));
-          if (bounded !== seconds) onChange(bounded);
-        }
-      }}
+      onBlur={(event) => commit(event.currentTarget)}
     />
   );
 }

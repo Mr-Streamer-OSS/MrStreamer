@@ -202,12 +202,18 @@ it("keeps delay editing keys inside the field and clamps typed whole seconds", a
   const save = ipc.hold("preferences.update");
   await type(delay, "999");
   await press("Enter");
+  expect(document.activeElement).toBe(delay);
   expect(ipc.argsOf("preferences.update")).toEqual([{ nextEpisodeDelaySeconds: 60 }]);
   await act(async () =>
     save.resolve(ipc.snapshot({ ...defaultPreferences, nextEpisodeDelaySeconds: 60 })),
   );
   await settle();
   expect(delay.value).toBe("60");
+  expect(document.activeElement).toBe(delay);
+  await type(delay, "12");
+  await press("Escape");
+  expect(delay.value).toBe("60");
+  expect(useUi.getState().settings).toBe("playback");
 });
 
 it("the metadata progress opener focuses the TMDB control", async () => {
@@ -239,4 +245,111 @@ it("returns focus to the visible player when the original opener has gone", asyn
   await settle();
   expect(document.activeElement).toBe(player);
   player.remove();
+});
+
+it("closing with Back discards an unavailable destination before a later reopen", async () => {
+  const read = ipc.hold("updates.status");
+  useUi.setState({ settings: "updates", settingsTarget: "update-channel" });
+  const { view } = await render();
+  expect(useUi.getState().settingsTarget).toBe("update-channel");
+  await act(async () =>
+    [...view.querySelectorAll<HTMLButtonElement>("header button")]
+      .find((button) => button.textContent?.trim() === "Back")!
+      .click(),
+  );
+  expect(useUi.getState().settingsTarget).toBeNull();
+  await act(async () => useUi.setState({ settings: "updates" }));
+  await settle();
+  const focused = document.activeElement;
+  await act(async () =>
+    read.resolve({
+      version: "0.0.15",
+      distribution: "direct",
+      channel: "stable",
+      update: { kind: "idle" },
+      offer: null,
+      checked: null,
+      nextCheckAt: null,
+      dismissed: null,
+    }),
+  );
+  await settle();
+  expect(document.activeElement).toBe(focused);
+  expect(document.activeElement).not.toBe(view.querySelector('[aria-label="Channel"]'));
+});
+
+it("blocks repeated quality writes while pending, preserves acknowledgement on refusal and moves retry focus back to its select", async () => {
+  const first = ipc.hold("preferences.update");
+  const { view } = await render();
+  await nav(view, "Live TV");
+  const quality = view.querySelector<HTMLSelectElement>('select[aria-label="Quality"]')!;
+  const choose = async (value: string) =>
+    act(async () => {
+      quality.focus();
+      quality.value = value;
+      quality.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  await choose("hd");
+  await settle();
+  await choose("sd");
+  expect(ipc.argsOf("preferences.update")).toEqual([{ liveQuality: "hd" }]);
+  expect(quality.value).toBe("fhd");
+  await act(async () => first.reject({ kind: "unexpected", detail: "quality refused" }));
+  await settle();
+  const retry = [...view.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "Try again",
+  )!;
+  const save = ipc.hold("preferences.update");
+  await act(async () => {
+    retry.focus();
+    retry.click();
+  });
+  expect(document.activeElement).toBe(quality);
+  await act(async () => save.resolve(ipc.snapshot({ ...defaultPreferences, liveQuality: "hd" })));
+  await settle();
+  expect(quality.value).toBe("hd");
+  expect(view.textContent).not.toContain("quality refused");
+});
+
+it("keeps the acknowledged interface language and update channel while rejecting repeated pending choices", async () => {
+  const status = {
+    version: "0.0.15",
+    distribution: "direct",
+    channel: "stable",
+    update: { kind: "idle" },
+    offer: null,
+    checked: null,
+    nextCheckAt: null,
+    dismissed: null,
+  } as const;
+  ipc.always("updates.status", status);
+  const { view } = await render();
+  const change = async (label: string, value: string) =>
+    act(async () => {
+      const control = view.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+      control.value = value;
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  const language = ipc.hold("language.set");
+  await change("Interface language", "en-US");
+  await settle();
+  await change("Interface language", "nl-NL");
+  expect(ipc.argsOf("language.set")).toEqual([{ choice: "en-US" }]);
+  expect(view.querySelector<HTMLSelectElement>('[aria-label="Interface language"]')?.value).toBe(
+    "system",
+  );
+  await act(async () =>
+    language.resolve({ choice: "en-US", locale: "en-US", system: "en-US", formats: "en-US" }),
+  );
+  await settle();
+  await nav(view, "Updates");
+  const channel = ipc.hold("updates.setChannel");
+  await change("Channel", "nightly");
+  await settle();
+  await change("Channel", "stable");
+  expect(ipc.argsOf("updates.setChannel")).toEqual([{ channel: "nightly" }]);
+  expect(view.querySelector<HTMLSelectElement>('[aria-label="Channel"]')?.value).toBe("stable");
+  await act(async () => channel.resolve({ ...status, channel: "nightly" }));
+  await settle();
+  expect(view.querySelector<HTMLSelectElement>('[aria-label="Channel"]')?.value).toBe("nightly");
 });

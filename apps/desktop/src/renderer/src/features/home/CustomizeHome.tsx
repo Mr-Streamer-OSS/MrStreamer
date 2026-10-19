@@ -9,6 +9,7 @@ import { updatePreferences } from "../../lib/preferences.ts";
 import { cn } from "../../lib/utils.ts";
 import { queries } from "../../lib/queries.ts";
 import { homeRows, type HomeRowId, type HomeRow } from "./rows.ts";
+import { focusSettingControl } from "../settings/SaveFeedback.tsx";
 
 const LABELS = {
   continue: "Continue watching",
@@ -102,7 +103,8 @@ export function CustomizeHome() {
                     type="checkbox"
                     className="peer size-4 appearance-none rounded-[0.25rem] shadow-[inset_0_0_0_1.5px_rgb(255_255_255/45%)] outline-none checked:bg-white checked:shadow-none focus-visible:ring-2 focus-visible:ring-ring"
                     checked={row.visible}
-                    disabled={!preferences.data || busy}
+                    disabled={!preferences.data}
+                    aria-disabled={busy}
                     onChange={(event) =>
                       persist((rows) =>
                         rows.map((each) =>
@@ -151,9 +153,18 @@ export function CustomizeHome() {
           <Button
             variant="ghost"
             size="sm"
-            disabled={busy || !latest.rows}
-            onClick={() => {
-              if (latest.rows) save.mutate(latest.rows);
+            aria-disabled={busy || !latest.rows}
+            onClick={(event) => {
+              if (
+                !latest.rows ||
+                busy ||
+                writing.current ||
+                client.isMutating({ mutationKey: HOME_ROW_WRITE, exact: true })
+              )
+                return;
+              focusSettingControl(event.currentTarget);
+              writing.current = true;
+              save.mutate(latest.rows);
             }}
           >
             {t("Try again")}
@@ -165,7 +176,8 @@ export function CustomizeHome() {
           data-setting="home-reset"
           className="pl-0 aria-disabled:opacity-40"
           variant="ghost"
-          disabled={!preferences.data || busy}
+          disabled={!preferences.data}
+          aria-disabled={busy}
           onClick={() => persist(null)}
         >
           {t("Reset to defaults")}

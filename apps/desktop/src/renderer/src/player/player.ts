@@ -65,7 +65,6 @@ import {
   DEFAULT_SUBTITLE_LOOK,
   ORIGINAL_SOUND,
   type Preferences,
-  type SubtitleLook,
 } from "@mrstreamer/contracts/preferences";
 import type {
   ChannelTracks,
@@ -97,6 +96,7 @@ import { outputs } from "./output.ts";
 import { mediaClaim, video } from "./shared-media.ts";
 import { RECONNECT_DELAYS_MS, STABLE_PLAYBACK_MS } from "./recovery-policy.ts";
 import { rememberSubtitles } from "./subtitle-preferences.ts";
+import { hydrateSubtitleLook } from "./subtitle-look.ts";
 export { STABLE_PLAYBACK_MS } from "./recovery-policy.ts";
 export { rememberSubtitles } from "./subtitle-preferences.ts";
 import {
@@ -104,7 +104,6 @@ import {
   clearSubtitles,
   forgetShownSubtitles,
   setSubtitleDelay,
-  setSubtitleLook,
   subtitlePresenter,
 } from "./subtitles.ts";
 
@@ -300,7 +299,6 @@ let volumeSave: ReturnType<typeof setTimeout> | null = null;
 /** Immediate local sound choices survive unrelated committed snapshots and older save replies. */
 let pendingVolume: Pick<Preferences, "volume" | "muted"> | null = null;
 let savedSound: Pick<Preferences, "volume" | "muted"> = { volume: 1, muted: false };
-let savedLook: SubtitleLook | undefined;
 let zapTimer: ReturnType<typeof setTimeout> | null = null;
 /** The channel the last stream was opened for. It becomes `previous` when another channel tunes. */
 let tuned: LiveChannel | null = null;
@@ -1080,7 +1078,8 @@ function saveVolume(): void {
           savedSound = { volume: preferences.volume, muted: preferences.muted };
       })
       .catch((error: unknown) => {
-        flashNote(`${t("Volume")}: ${describeError(appError(error))}`, true);
+        if (pendingVolume === draft)
+          flashNote(`${t("Volume")}: ${describeError(appError(error))}`, true);
       })
       .finally(() => {
         if (pendingVolume !== draft) return;
@@ -1095,23 +1094,14 @@ export const player = {
   /** The video element every view shows the picture in. */
   element: video,
 
-  /** Applies accepted committed preferences without disturbing a pending local volume choice. */
+  /** Applies committed preferences without disturbing pending local sound or subtitle choices. */
   hydrate(preferences: Preferences): void {
     savedSound = { volume: preferences.volume, muted: preferences.muted };
     if (!pendingVolume) {
       store.setState(savedSound);
       applyVolume();
     }
-    const look = preferences.subtitleLook ?? DEFAULT_SUBTITLE_LOOK;
-    if (
-      !savedLook ||
-      savedLook.size !== look.size ||
-      savedLook.background !== look.background ||
-      savedLook.position !== look.position
-    ) {
-      setSubtitleLook(look);
-    }
-    savedLook = look;
+    hydrateSubtitleLook(preferences.subtitleLook ?? DEFAULT_SUBTITLE_LOOK);
   },
 
   /** Plays a channel live. */
