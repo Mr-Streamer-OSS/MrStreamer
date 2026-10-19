@@ -323,6 +323,49 @@ describe("a film's version", () => {
     pick("Cabin");
     expect(page.play()).toBe("a");
   });
+
+  it("keeps the pick saved when a menu shown before the lists changed offers a version they dropped", () => {
+    providers("a", "b", "c");
+    mount().openVersions()("Cabin");
+    unmount();
+    const page = mount();
+    expect(page.play()).toBe("b");
+    const pick = page.openVersions();
+    // Provider c, still saved, no longer lists the film.
+    providers("a", "b");
+    scenario.members.push({ entry: { id: "c" }, label: "c" });
+    page.render();
+    pick("c");
+    expect(page.play()).toBe("b");
+    unmount();
+    expect(mount().play()).toBe("b");
+  });
+
+  it("keeps the pick saved on Automatic from a menu shown for a title the lists no longer have", () => {
+    providers("a", "b");
+    const page = mount();
+    page.openVersions()("Cabin");
+    const automatic = page.openVersions();
+    // The lists now gather the film's versions under another TMDB id: another title.
+    scenario.lists = {
+      kind: "ready",
+      index: indexCatalogue(
+        ["a", "b"].map((subscriptionId) => ({
+          subscriptionId,
+          catalogue: {
+            ...catalogue,
+            movies: catalogue.movies.map((movie) => ({ ...movie, tmdbId: "100002" })),
+          },
+        })),
+        "en",
+      ),
+    };
+    page.render();
+    automatic("Automatic");
+    unmount();
+    providers("a", "b");
+    expect(mount().play()).toBe("b");
+  });
 });
 
 /** The film of provider "a", downloaded. */

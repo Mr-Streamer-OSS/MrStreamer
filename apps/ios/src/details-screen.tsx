@@ -20,7 +20,7 @@ import {
 import { continuation, episodeStates } from "@mrstreamer/core/viewing/episodes";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { SymbolView, type SFSymbol } from "expo-symbols";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionSheetIOS,
   Pressable,
@@ -133,6 +133,11 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
   const watchlist = useWatchlist();
   const state = useSavedState();
   const [picked, setPicked] = useState<OwnedId | typeof AUTOMATIC | null>(null);
+  // The title as listed now, for a version menu answered after the lists changed.
+  const listedNow = useRef(title);
+  useEffect(() => {
+    listedNow.current = title;
+  }, [title]);
   const sequence = viewing?.sequence ?? 0;
   const versions = useMemo(() => title.versions.map(ownedId), [title]);
 
@@ -219,15 +224,19 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
         cancelButtonIndex: choices.length + 1,
       },
       (index) => {
+        // A menu shown before the lists changed answers only for the same title, and only with a
+        // version still listed: what it offers otherwise changes nothing, the pick saved included.
+        const now = listedNow.current;
+        if (now.key !== title.key) return;
         if (index === 0) {
           setPicked(AUTOMATIC);
-          pickVersion(title, null);
+          pickVersion(now, null);
           return;
         }
         const choice = choices[index - 1];
-        if (!choice) return;
+        if (!choice || !now.versions.some((each) => sameOwned(each, choice.version))) return;
         setPicked(choice.version);
-        pickVersion(title, choice.version);
+        pickVersion(now, choice.version);
       },
     );
   };
