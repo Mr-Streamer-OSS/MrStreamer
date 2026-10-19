@@ -14,8 +14,8 @@ import { onSignedIn, retiredLogins, signedIn, type Source } from "./sources.ts";
 // - Caches/artwork and its index, `index.json` (written beside itself, then moved over itself, a
 //   moment after a change): an address that gives away no signed-in login (login-safety.ts
 //   `exposes`), while every login this process signed in still is. The index is checked against
-//   each login signed in later: a row that now gives one away goes before the index is written
-//   again, and before its picture shows.
+//   each login signed in later, and written again at once: a row that now gives one away goes
+//   before its picture shows, and a write a login change overtakes isn't put in place.
 // - Caches/artwork-session, which the index never names and each launch empties: an address that
 //   gives a login away, which goes as soon as that login is replaced or removed, and, once any
 //   login was replaced or removed in this process, every new picture. Lists of the earlier login
@@ -24,9 +24,10 @@ import { onSignedIn, retiredLogins, signedIn, type Source } from "./sources.ts";
 //   deleted before a new password lands). A fetch of a login that went meanwhile is thrown away.
 //
 // The cache owns 160 MiB and 6,000 files, of at most 5 MiB each, counting every file it hasn't
-// been able to delete yet. A finished picture is let in only once it fits, the least recently
-// shown going first, but never one that shows now; one that doesn't fit shows the fallback until
-// it is shown again. One unseen for 60 days goes at the next launch, and one shown after 30 days
+// been able to delete yet and room for each fetch under way to land at its largest. A fetch starts
+// only once that room is made, the least recently shown going first, but never one that shows
+// now, and none while the disk refuses a deletion; one without room shows the fallback until it is
+// shown again. One unseen for 60 days goes at the next launch, and one shown after 30 days
 // is fetched again while the old file shows. Four fetches run at once, one per address, each for
 // at most 15 seconds; a picture no one shows any more before its fetch starts isn't fetched. A
 // failed fetch, or a fetched file that won't draw, shows the fallback, and the address is asked
@@ -186,13 +187,14 @@ function release(file: File): boolean {
   return false;
 }
 
-/** Tries again to delete files that wouldn't go. */
-function unstick() {
+/** Tries again to delete files that wouldn't go; answers whether all went. */
+function unstick(): boolean {
   for (const [uri, bytes] of stuck) {
     if (!deleted(new File(uri))) continue;
     stuck.delete(uri);
     stuckBytes -= bytes;
   }
+  return stuck.size === 0;
 }
 
 /**
@@ -252,14 +254,16 @@ function touch(url: string, entry: Entry) {
 }
 
 /**
- * Makes room for `bytes` more in a new file, least recently shown first, never one that shows
- * now; it stops at a file the disk won't delete. Answers whether it fits.
+ * Makes room for `bytes` more in `files` new files, beside room for each fetch under way to land
+ * at its largest, least recently shown first, never one that shows now. While the disk refuses a
+ * deletion it makes none: nothing more is forgotten. Answers whether it fits.
  */
 function evict(bytes = 0, files = 0): boolean {
   const over = () =>
-    total + stuckBytes + bytes > MAX_BYTES || entries.size + stuck.size + files > MAX_FILES;
+    total + stuckBytes + running.size * MAX_FILE + bytes > MAX_BYTES ||
+    entries.size + stuck.size + running.size + files > MAX_FILES;
   if (!over()) return true;
-  unstick();
+  if (!unstick()) return false;
   for (const [url, entry] of entries) {
     if (!over()) break;
     if (!slots.has(url) && !forget(url, entry)) break;
@@ -278,12 +282,22 @@ function want(url: string, slot: Slot) {
   pump();
 }
 
+/**
+ * Starts what is queued, each only once there is room for it to land at its largest; one there
+ * is no room for shows the fallback until it is shown again, or keeps its old file.
+ */
 function pump() {
   for (const url of queue) {
     if (running.size >= TRANSFERS) return;
     queue.delete(url);
     const slot = slots.get(url);
-    if (slot && !running.has(url)) void fetchArt(url, slot);
+    if (!slot || running.has(url)) continue;
+    if (evict(MAX_FILE, 1)) {
+      void fetchArt(url, slot);
+    } else if (!entries.has(url)) {
+      slot.blocked = true;
+      update(slot, FAILED);
+    }
   }
 }
 
@@ -361,13 +375,16 @@ function settle(url: string, started: Started, file: File, bytes: number | null)
   if (slot) update(slot, judge(url));
 }
 
-/** Writes the index a moment after a change, one write at a time. */
-function save() {
-  if (saveTimer !== null) return;
+/** Writes the index a moment after a change, or at once, one write at a time. */
+function save(delay = SAVE_MS) {
+  if (saveTimer !== null) {
+    if (delay >= SAVE_MS) return;
+    clearTimeout(saveTimer);
+  }
   saveTimer = setTimeout(() => {
     saveTimer = null;
     saving = saving.then(write);
-  }, SAVE_MS);
+  }, delay);
 }
 
 /**
@@ -398,6 +415,12 @@ async function write() {
     const pending = new File(kept(), PENDING_INDEX);
     pending.create({ overwrite: true });
     await pending.write(JSON.stringify({ version: VERSION, entries: rows }));
+    // A login signed in while it was written may make a row give it away: it isn't put in place,
+    // and the write the change asked for checks every row again.
+    if (generation !== at) {
+      deleted(pending);
+      return;
+    }
     await pending.move(new File(kept(), INDEX), { overwrite: true });
   } catch {
     // The next change writes it again; a launch without it starts over.
@@ -466,7 +489,9 @@ async function load() {
     });
     total += bytes;
   }
-  if (rows.length !== entries.size) save();
+  // The index is checked against the logins signed in now, and written again without what gives
+  // one away.
+  if (rows.length > 0) save(0);
 }
 
 /**
@@ -524,7 +549,8 @@ function loginsChanged() {
     }
     want(url, slot);
   }
-  save();
+  // The index on disk may hold an address that gives the new login away: written again at once.
+  save(0);
 }
 
 /** Once a process: reads the index, takes stock of the folders, and starts what waited. */

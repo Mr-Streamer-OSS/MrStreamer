@@ -560,6 +560,35 @@ describe("pictures whose address carries a login", () => {
     expect(pictureFiles(kept)).toEqual([]);
   });
 
+  it("never put an index in place that a login signed in while it was written gives away", async () => {
+    app.signIn("a", 1, ["different-user", "different-pass"]);
+    app.logos([at("/logo/snapshot.png", `?token=${PASS}`)]);
+    await settled(() => expect(app.shown().filter(isFile)).toHaveLength(1));
+    app.logos([]);
+    let go: (() => void) | undefined;
+    native.gate = (operation, path) =>
+      operation === "write" && path.endsWith("index.json.next")
+        ? new Promise<void>((resolve) => {
+            go = resolve;
+          })
+        : undefined;
+    await vi.advanceTimersByTimeAsync(5_500);
+    await settled(() => expect(go).toBeDefined());
+    app.signIn("b", 1, [USER, PASS]);
+    native.gate = null;
+    go?.();
+    // Right after the write that was under way ends, before any later write could repair it.
+    for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setImmediate(resolve));
+    for (const { text } of stored()) expect(text).not.toContain(PASS);
+    await settled(() =>
+      expect(readFileSync(join(kept, "index.json"), "utf8")).toContain('"entries":[]'),
+    );
+    for (const { path, text } of stored()) {
+      expect(path).not.toContain(PASS);
+      expect(text).not.toContain(PASS);
+    }
+  });
+
   it("go when their subscription is removed, leaving pictures without a login", async () => {
     app.signIn("a", 1, [USER, PASS]);
     app.logos([withLogin("/logo/private.png"), at("/logo/public.png")]);
@@ -600,6 +629,28 @@ describe("the disk budget", () => {
     await vi.advanceTimersByTimeAsync(5_500);
     expect(indexed()).toHaveLength(32);
     expect(indexed().reduce((sum, [, , bytes]) => sum + bytes, 0)).toBe(160 * MIB);
+  });
+
+  it("starts no fetch it has no room for while the disk refuses deletions, so the disk stops growing", async () => {
+    native.sizeOf = fiveMib;
+    app.logos(Array.from({ length: 32 }, (_, n) => at(`/logo/base${n}.png`)));
+    await settled(() => expect(app.shown().filter(isFile)).toHaveLength(32));
+    app.logos([]);
+    await settled(() => expect(app.shown()).toEqual([]));
+    native.undeletable = (path) => !basename(path).startsWith("index");
+
+    app.logos(Array.from({ length: 12 }, (_, n) => at(`/logo/pressure${n}.png`)));
+    await settled(() => expect(app.shown()).toEqual(Array<string>(12).fill("CF")));
+    expect(totalAsked()).toBe(32);
+    expect(pictureFiles(kept)).toHaveLength(32);
+
+    // Deletions work again: a picture shown again is fetched, in the room one made.
+    native.undeletable = null;
+    app.logos([]);
+    await settled(() => expect(app.shown()).toEqual([]));
+    app.logos([at("/logo/pressure0.png")]);
+    await settled(() => expect(isFile(app.shown()[0])).toBe(true));
+    expect(pictureFiles(kept)).toHaveLength(32);
   });
 
   it("counts a file the disk won't delete until it goes", async () => {
