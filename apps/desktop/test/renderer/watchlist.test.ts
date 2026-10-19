@@ -555,6 +555,12 @@ describe("a saved title the provider no longer lists", () => {
     // Settings opens over the sheet with its shortcut, and the viewer unticks For adults.
     await key(",", { ctrlKey: true, metaKey: true });
     await settle();
+    await act(async () =>
+      [...document.querySelectorAll<HTMLButtonElement>('[data-view="settings"] nav button')]
+        .find((button) => button.textContent === "Movies and series")!
+        .click(),
+    );
+    await settle();
     const stored = ipc.hold("preferences.update");
     await act(async () =>
       document.body
