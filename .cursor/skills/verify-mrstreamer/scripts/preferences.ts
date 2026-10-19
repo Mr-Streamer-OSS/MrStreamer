@@ -79,6 +79,11 @@ export async function preferencesScenario(d: Driver): Promise<void> {
     "[...document.querySelectorAll('button[data-item]')].find(b => b.textContent.includes('Español'))",
   );
   await d.wait(async () => (await saved()).audio === "es");
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      "(() => { const v = document.querySelector('video'); return !!v && !v.paused && v.readyState >= 2 && v.videoWidth > 0 && v.currentTime > 0.5 && v.getVideoPlaybackQuality().totalVideoFrames > 2; })()",
+    ),
+  );
   await d.capture("player-spanish-track");
   await openSettings();
   await d.wait(() => d.evaluate<boolean>(`${audio}.value === 'es'`));
