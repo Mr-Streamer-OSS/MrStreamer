@@ -46,7 +46,7 @@ export function lastLine(
   errors: string,
   code: number | null,
   signal: NodeJS.Signals | null,
-  start: number | null = null,
+  start?: number | null,
 ): string {
   const line = errors.trim().split("\n").at(-1);
   if (line) return line;
