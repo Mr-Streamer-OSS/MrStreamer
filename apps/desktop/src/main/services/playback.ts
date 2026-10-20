@@ -58,6 +58,7 @@
 // aborts its upstream requests, which ends their ffmpeg processes; the proxy closes with the
 // service.
 import { execFile, spawn } from "node:child_process";
+import { arrives } from "../playback/signals.ts";
 import type { PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import { liveDiagnostic, titleDiagnostic, lastLine } from "../playback/diagnostic.ts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -256,8 +257,6 @@ const PART_BYTES = { least: 512 * 1024, most: 4 * 1024 * 1024, first: 1024 * 102
  * has enough buffered or is paused.
  */
 const REST_MS = 300;
-/** How long the proxy waits for what an ffmpeg that has ended sent it over loopback. */
-const REPORT_WAIT_MS = 2000;
 /** How much of what a run reads of its subtitle track is kept for a feed that becomes ready. */
 const LIVE_BYTES = 2 * 1024 * 1024;
 /** How much of a feed may wait for a player that doesn't read it. */
@@ -3876,13 +3875,6 @@ function sizeOf(entry: SubtitleEntry): number {
  */
 function gone(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
-}
-
-/** Resolves once what an ffmpeg that has ended `sent` over loopback is here, or has had its time. */
-function arrives(sent: Promise<unknown>): Promise<unknown> {
-  const { promise: late, resolve } = Promise.withResolvers<void>();
-  const timer = setTimeout(resolve, REPORT_WAIT_MS);
-  return Promise.race([sent, late]).finally(() => clearTimeout(timer));
 }
 
 /** Resolves once a response takes more, or its reader has left. */

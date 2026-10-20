@@ -36,7 +36,7 @@ import {
   type SegmentLimits,
   type SegmentStore,
 } from "./segment-store.ts";
-import { tell, until, unlessAborted } from "./signals.ts";
+import { arrives, tell, until, unlessAborted } from "./signals.ts";
 import type { SubtitleEntry, SubtitleHistory } from "./subtitle-history.ts";
 import {
   endOf,
@@ -869,6 +869,8 @@ export async function titleReceiverDelivery(
 
     void exited.then(async (code) => {
       signal.removeEventListener("abort", stop);
+      // Process exit can precede delivery of its final loopback report.
+      if (code === 0 && subtitles) await arrives(subtitles.arrived);
       const whole = (await subtitles?.whole()) === true;
       // ffmpeg exits cleanly after its input broke off too; the source knows better.
       reading?.end(whole && code === 0 && !signal.aborted && !source.failure());
