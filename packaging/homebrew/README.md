@@ -18,8 +18,8 @@ fully qualified name is `Mr-Streamer-OSS/tap/mr-streamer`.
 | `{{SHA256}}`  | Lowercase 64-character SHA-256 of the exact released arm64 DMG        |
 
 The download origin, tag and filename are fixed by the template. Keep the
-signed/notarized DMG and app bundle unchanged. Only the shared package-update
-preparation tool renders production metadata. It must check successful verified
+signed/notarized DMG and app bundle unchanged. The planned shared package-update
+preparation tool must render production metadata and check successful verified
 release provenance, stable channel, exact assets and downloaded bytes against
 `SHA256SUMS.txt`, and fail on any mismatch or unresolved marker. It must not push,
 publish or activate automation. A livecheck result is update discovery, not that
@@ -32,8 +32,9 @@ user-confirmed updater stays available. There are no install scripts, signed
 resource changes, package-manager detection, credential changes or zap stanza.
 Normal uninstall keeps the profile, Keychain credentials and downloaded copies.
 
-Historical 0.0.16/0.0.17 baseline casks are hand-pinned local fixtures outside
-production output. The shared renderer deliberately refuses those versions.
+Historical 0.0.16/0.0.17 and non-candidate nightly reconciliation casks are
+hand-pinned local fixtures outside production output, using the canonical versioned
+asset URL. The planned shared renderer must refuse those historical stable versions.
 Candidate-test rendering belongs to that same tool and accepts only a pinned,
 tested 0.0.18 nightly manifest with source/origin/digests verified. Mark its output
 non-publishable and keep it separate from stable metadata. Never copy a fixture
@@ -55,7 +56,7 @@ shell configuration.
    `HOMEBREW_CACHE`, `HOMEBREW_LOGS`, `HOMEBREW_TEMP`, `BUNDLE_USER_HOME`,
    `XDG_CACHE_HOME` and `XDG_CONFIG_HOME` to task-local paths. Set
    `HOMEBREW_CASK_OPTS="--appdir=<task-local Applications directory>"`.
-   The fully qualified local tap is loaded locally. Allow Homebrew's normal API
+   The local test tap is read from disk. Allow Homebrew's normal API
    reads into the task-local cache for catalogue checks; setting
    `HOMEBREW_NO_INSTALL_FROM_API=1` can make audit clone all of `homebrew/core`.
 2. Record `brew --version`, `brew config`, the Homebrew source SHA and the actual
@@ -92,7 +93,7 @@ shell configuration.
    /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' '<app>/Contents/Info.plist'
    ```
 
-6. Run the repository's installed-package smoke against the installed executable
+6. Run `apps/desktop/test/e2e/packaged-app.ts` against the installed executable
    with `--use-mock-keychain`, never the development Electron executable. Use only
    fixture provider/TMDB data and an explicit disposable profile. Record executable
    and resource hashes. Verify Live TV, VOD, subtitles and bundled ffmpeg/ffprobe
@@ -147,39 +148,47 @@ needs a separate decision about profile compatibility and a retained data backup
 Retry failed preparation from the same verified inputs; leave successful direct
 release downloads available. Keep automation disabled until separately authorized.
 
-## Release gates still required
+## Release validation
 
-Record raw commands, exit statuses, hashes, screenshots, exact app/tap versions,
-both plist fields and Caskroom metadata before/after each transition.
+Track completion on the [Homebrew project card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=276992982).
+The list below is the validation recipe, not a second progress checklist. The
+initial signed 0.0.17 baseline is recorded there; candidate-specific checks still
+need their own receipts.
 
-- [ ] Existing signed stable baseline: checksum, signature, Gatekeeper, native
-      style/audit, isolated install and fixture smoke.
-- [ ] Exact tested 0.0.18 nightly candidate: repeat full native validation with a
-      non-publishable cask, source and artifact identity pinned to that candidate.
-- [ ] Same-shape nightly A < B < C behind case: Caskroom/app at B, local tap at C,
-      app quit, plain `brew upgrade` actually installs C.
-- [ ] Same-shape nightly ahead case: Caskroom at A, app updated through its updater
-      to C, local tap at B, app quit, plain `brew upgrade` skips. Tap B must differ
-      from Caskroom A so the skip exercises bundle comparison.
-- [ ] App-led and brew-led upgrade plus explicit reinstall retain settings,
-      favourites, watchlist, progress, credentials, completed copies, details and
-      subtitles. Offline playback works after restart and subscription removal.
-      A mock-keychain run does not establish native Keychain retention.
-- [ ] Running-app guard and deliberate quit path, existing direct-install refusal,
-      normal uninstall keeping user data. No force overwrite or zap.
-- [ ] After stable publication, regenerate from exact verified 0.0.18 stable
-      assets and repeat checksum/signature/style/audit plus installed
-      launch/version/resources/retained-state checks on those bytes.
-- [ ] Stable-only behind case with real DMGs: Caskroom/app 0.0.17, local tap 0.0.18,
-      app quit, plain `brew upgrade` installs 0.0.18.
-- [ ] Stable-only ahead case with real DMGs: Caskroom 0.0.16, app updated through
-      its stable updater to 0.0.18, local tap advanced only to 0.0.17, app quit,
-      plain `brew upgrade` skips. No plist edits or manually copied bundle can
-      substitute for the app-led update.
-- [ ] Confirm proposed tap repository/token availability, authorized publication,
-      and the exact fully qualified public command/artifact before enabling the
-      website route. Keep the route inactive on failure and release acceptance
-      pending. Main-catalogue acceptance is separate optional work.
+Record raw commands, explicit exit statuses beside each log, local artifact hash
+output, screenshots and exact app/tap versions before/after each transition.
+Record both plist fields, Caskroom INSTALL_RECEIPT source.version, the metadata
+version directory and brew info --json=v2 installed/outdated fields. A local cask's
+saved JSON definition can be empty and cannot establish version identity.
+
+- Existing signed stable baseline: checksum, signature, Gatekeeper, native
+  style/audit, isolated install and fixture smoke.
+- Exact tested 0.0.18 nightly candidate: repeat full native validation with a
+  non-publishable cask, source and artifact identity pinned to that candidate.
+- Same-shape nightly A < B < C behind case: Caskroom/app at B, local tap at C,
+  app quit, plain `brew upgrade` actually installs C.
+- Same-shape nightly ahead case: Caskroom at A, app updated through its updater
+  to C, local tap at B, app quit, plain `brew upgrade` skips. Tap B must differ
+  from Caskroom A so the skip exercises bundle comparison.
+- App-led and brew-led upgrade plus explicit reinstall retain settings,
+  favourites, watchlist, progress, credentials, completed copies, details and
+  subtitles. Offline playback works after restart and subscription removal.
+  A mock-keychain run does not establish native Keychain retention.
+- Running-app guard and deliberate quit path, existing direct-install refusal,
+  normal uninstall keeping user data. No force overwrite or zap.
+- After stable publication, regenerate from exact verified 0.0.18 stable
+  assets and repeat checksum/signature/style/audit plus installed
+  launch/version/resources/retained-state checks on those bytes.
+- Stable-only behind case with real DMGs: Caskroom/app 0.0.17, local tap 0.0.18,
+  app quit, plain `brew upgrade` installs 0.0.18.
+- Stable-only ahead case with real DMGs: Caskroom 0.0.16, app updated through
+  its stable updater to 0.0.18, local tap advanced only to 0.0.17, app quit,
+  plain `brew upgrade` skips. No plist edits or manually copied bundle can
+  substitute for the app-led update.
+- Confirm proposed tap repository/token availability, authorized publication,
+  and the exact fully qualified public command/artifact before enabling the
+  website route. Keep the route inactive on failure and release acceptance
+  pending. Main-catalogue acceptance is separate optional work.
 
 ## Official references
 
