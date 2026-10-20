@@ -6,7 +6,6 @@
 // build/appx: the Microsoft Store package's logos, drawn from the bare mark rather than the macOS
 //   squircle. electron-builder's appx target packs every file there and indexes the scaled ones.
 // ../ios/assets/icon.png: the iOS app's icon, the Store tiles' artwork at 1024 px.
-// ../ios/assets/splash.png: the iOS launch screen's mark and name.
 // Usage: pnpm icons:export
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -172,32 +171,8 @@ await sharp(
   .removeAlpha()
   .png()
   .toFile(`${root}../ios/assets/icon.png`);
-
-// The iOS launch screen's artwork, which iOS shows centred on true black at SPLASH points square
-// (app.json's expo-splash-screen) and the app's own launch screen draws again, at the same place
-// and size, until the saved lists show (src/startup-screen.tsx): the white mark over the name, as
-// the app's header has them. The name is set in whichever of SF Pro Display and Inter the machine
-// has, so the drawing depends on its fonts: the committed file, drawn in Inter, is the accepted
-// artwork, and one drawn with other fonts differs. It is drawn at three times its size, iOS's
-// largest scale.
-const SPLASH = 240;
-const splashMark = 80;
-const splashName = 28;
-const splashGap = 8;
-const splashTop = (SPLASH - (splashMark + splashGap + splashName)) / 2;
-await sharp(
-  Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${SPLASH * 3}" height="${SPLASH * 3}" viewBox="0 0 ${SPLASH} ${SPLASH}">` +
-      placedMark("#fff", splashMark * 0.8, SPLASH / 2, splashTop + splashMark / 2) +
-      `<text x="${SPLASH / 2}" y="${splashTop + splashMark + splashGap + splashName * 0.8}" text-anchor="middle" fill="#fff" font-family="SF Pro Display, Inter" font-weight="700" font-size="${splashName}" letter-spacing="-0.8">Mr. Streamer</text>` +
-      `</svg>`,
-  ),
-  { density: 72 },
-)
-  .png()
-  .toFile(`${root}../ios/assets/splash.png`);
 console.log(
-  "Wrote build/icon.png, build/icon.icns, build/icon.ico, build/appx, ../ios/assets/icon.png and ../ios/assets/splash.png",
+  "Wrote build/icon.png, build/icon.icns, build/icon.ico, build/appx and ../ios/assets/icon.png",
 );
 
 /** An ICNS file: a big-endian "icns" header followed by one PNG per element type. */
