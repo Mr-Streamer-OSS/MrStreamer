@@ -84,7 +84,7 @@ shell configuration.
 
    ```sh
    shasum -a 256 <dmg>
-   codesign --verify --verbose=2 <dmg>
+   codesign --verify --strict --verbose=2 <dmg>
    spctl --assess --type open --context context:primary-signature -vv <dmg>
    xcrun stapler validate <dmg>
    codesign --verify --deep --strict --verbose=2 '<app>'
