@@ -509,6 +509,9 @@ h1 {
 .package-route pre {
   margin: 0.4em 0 0;
   white-space: pre-wrap;
+}
+
+.policy .package-route pre code {
   overflow-wrap: anywhere;
 }
 
