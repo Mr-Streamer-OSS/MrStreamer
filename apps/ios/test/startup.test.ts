@@ -17,8 +17,6 @@ const memory = vi.hoisted(() => ({
   held: [] as Array<() => void>,
   holdLogins: false,
   holdLists: false,
-  /** Login checks a panel has answered, to the app. */
-  loginsAnswered: 0,
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -59,9 +57,7 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   if ((list && memory.holdLists) || (!list && action === "login" && memory.holdLogins)) {
     await new Promise<void>((go) => memory.held.push(go));
   }
-  const response = await passThrough(input, init);
-  if (action === "login") memory.loginsAnswered++;
-  return response;
+  return passThrough(input, init);
 });
 
 const { native } = await import("./native-files.ts");
@@ -121,7 +117,6 @@ interface Opened {
   readonly movies: boolean;
   readonly series: boolean;
   readonly listsShown: number;
-  readonly logins: number;
 }
 
 /** The app as a launch starts it: fresh modules over the same files and Keychain. */
@@ -148,7 +143,6 @@ async function launch() {
         : [],
     );
   };
-  const loginsFrom = memory.loginsAnswered;
   startup.onStartup(() => {
     const catalogue = account.currentCatalogue();
     seen.opened = {
@@ -161,7 +155,6 @@ async function launch() {
       movies: titles.collectionsOf("movie") !== null,
       series: titles.collectionsOf("series") !== null,
       listsShown: seen.listsShown,
-      logins: memory.loginsAnswered - loginsFrom,
     };
   });
   void startup.startUp();
@@ -218,9 +211,20 @@ describe("opening after a launch", () => {
     const { a, b } = await savedBoth();
     memory.holdLogins = true;
     const from = memory.requests.length;
+    // The app's own clock, so it opens with time to spare before the 8 seconds after which it
+    // would open anyway, while both login checks are still held.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const app = await launch();
     expect(app.currentStartup().kind).toBe("opening");
-    await until(() => app.currentStartup().kind === "open", "the app to open");
+    let waited = 0;
+    for (; waited < 7_000 && app.currentStartup().kind !== "open"; waited += 10) {
+      await vi.advanceTimersByTimeAsync(10);
+    }
+    expect(app.currentStartup().kind).toBe("open");
+    expect(waited).toBeLessThan(7_000);
+    expect(memory.requests.slice(from).filter((action) => action === "login")).toHaveLength(2);
+    expect(memory.held).toHaveLength(2);
+    vi.useRealTimers();
 
     expect(app.seen.opened).toEqual({
       channelsFrom: new Set([a, b]),
@@ -229,7 +233,6 @@ describe("opening after a launch", () => {
       series: true,
       // Indexed once, with both providers' lists: not again as the second's arrived.
       listsShown: 1,
-      logins: 0,
     });
     for (const id of [a, b]) {
       expect(member(app, id).account).toBeNull();

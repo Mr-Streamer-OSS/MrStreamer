@@ -149,8 +149,9 @@ export function onTitleLists(listener: () => void): () => void {
  * while the lists that show hold `id`'s, or `id` has none to give them. While `id`'s lists are
  * still to join them, as while a launch reads its saved lists or they are indexed with the
  * others', or after another subscription's removal, once they do. Rejects at once with
- * `signal`'s reason once it aborts, and when `id` can't have its titles listed: no longer saved,
- * not signed in, or with no lists, its failure when they failed.
+ * `signal`'s reason once it aborts. While no lists show, it rejects too when `id` can't have its
+ * titles listed: no longer saved, not signed in, or with no lists, its failure when they failed;
+ * once some show, such a lookup answers with those, which don't hold `id`'s titles.
  */
 export function listedIndex(id: string, signal: AbortSignal): Promise<IndexedCatalogue> {
   return new Promise((resolve, reject) => {
