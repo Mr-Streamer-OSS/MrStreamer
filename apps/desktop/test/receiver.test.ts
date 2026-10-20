@@ -460,7 +460,8 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     expect(Math.abs(made.from - video.segments[last]!.at)).toBeLessThan(0.21);
   });
 
-  it.each([true, false])(
+  // Like the local-title controlled converter, this executable uses a Unix shebang.
+  it.skipIf(process.platform === "win32").each([true, false])(
     "settles a completed converter with a late subtitle report: %s",
     async (sent) => {
       const directory = await tempDir();
