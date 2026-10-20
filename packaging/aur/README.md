@@ -38,8 +38,8 @@ no embedded signature and the release exposes no detached Linux signature. Do no
 signature check where only HTTPS and SHA-256 were available.
 
 Candidate-test input requires a successful published `0.0.18-nightly.YYYYMMDD.RUN` prerelease
-run, verified release assets and checksums, and an immutable source commit containing the
-managed-update implementation. The version string alone does not prove marker awareness.
+run, verified release assets and checksums, and the nightly tag's exact source commit, which
+must contain the managed-update implementation. The version string alone does not prove marker awareness.
 Unpublished dry-run workflow artifacts cannot use this template's canonical release URLs.
 Render the candidate before running Arch installed-package acceptance on that render; full
 Arch acceptance is not a prerequisite for building its input. Use a separate ignored output

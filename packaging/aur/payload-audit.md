@@ -152,18 +152,19 @@ both pinned to source `53b8e5aadfe56666f4faa042d22429da53476eb9`. The nightly ar
 matching its canonical `SHA256SUMS.txt` and API digest. Its checksum file SHA-256 is
 `06018a6a4a40d2c5b685ab11c2d414b697288f221c32fe4773655e747ca08f4b`.
 Actual control versions are `0.0.17` and `0.0.17~nightly.20261020.394`; the expected Debian
-version now uses the pinned builder's hyphen-to-tilde normalization. Upstream release URLs,
+version uses the pinned builder's hyphen-to-tilde normalization. Upstream release URLs,
 asset filenames and Arch's separate alpha ordering remain unchanged.
 
-Both new renders use `mrstreamer-recipe-inspection-t3-ba301d31` and an explicit NEVER PUBLISH
+Both renders use an inspection-only package name and an explicit NEVER PUBLISH
 notice. They retain the template's actual `package()`, marker and provides/conflicts branches.
 Native makepkg source checks, clean builds, `.SRCINFO` regeneration, Bash syntax, ShellCheck
 and namcap recipe lint pass. Archive inspection verifies every retained upstream file hash,
 root ownership, directory modes, sandbox 4755, launcher/license links and package metadata.
 The marker has exact bytes `{"schema":1,"updates":"pacman"}` followed by a newline, mode 0644
 and root ownership. Native mismatched-version and wrong-architecture checks abort before
-packaging. Raw commands, exits, input/output manifests and archives remain in ignored
-`.local/aur-candidate-fix/`. These historical inspection packages were neither installed nor
+packaging. Validation and receipt details are recorded on the
+[AUR card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=262338894).
+These historical inspection packages were neither installed nor
 launched. Their marker proves packaging execution only; actual marker-aware .18 archive,
 installed managed-runtime and full native GUI acceptance remain open.
 
