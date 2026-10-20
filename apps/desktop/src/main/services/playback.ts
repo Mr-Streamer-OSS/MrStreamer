@@ -3692,9 +3692,8 @@ function make(deps: PlaybackDeps) {
           Effect.gen(function* () {
             yield* coordination.reclaim(channel.subscriptionId);
             const session = yield* liveSession(channel, receiver.decoders, options, receiver);
-            // The provider's stream starts now, so the receiver finds segments when it asks.
-            if (session.receiver && (!session.hls || session.delivery === "mpegts"))
-              void session.receiver.run();
+            // Delivery starts any segmenting run now, so the receiver finds segments when it asks.
+            void session.receiver?.run();
             return {
               sessionId: session.id,
               channel,

@@ -359,6 +359,8 @@ export function liveReceiverDelivery(
    * UI's player; it starts when the session opens, so the receiver finds segments when it asks.
    */
   async function runLive(): Promise<void> {
+    const stream = source.stream;
+    if (stream.kind === "hls") return;
     const started = performance.now();
     const report = (
       delivery: "direct" | "converted" | "none",
@@ -380,8 +382,6 @@ export function liveReceiverDelivery(
       tell(receiver.changed);
     };
 
-    const stream = source.stream;
-    if (stream.kind === "hls") return;
     const hls = stream.kind === "converted-hls";
     const opened =
       stream.kind === "converted-hls"
@@ -648,10 +648,6 @@ export async function titleReceiverDelivery(
   ): Promise<void> {
     const [, , playlist, video, cues] = route;
     const probe = source.probe;
-    if (!probe) {
-      response.writeHead(410).end();
-      return;
-    }
     // A receiver that asks is still there: the run may go on, and does while a request waits.
     const idle = () => {
       clearTimeout(load.idle);
@@ -756,7 +752,7 @@ export async function titleReceiverDelivery(
   function startRun(load: TitleLoad, from: number, mismatch = false): void {
     const probe = source.probe;
     const ffmpeg = tools.ffmpeg;
-    if (!probe || !ffmpeg) return;
+    if (!ffmpeg) return;
     const started = performance.now();
     load.run?.stop();
     // Requests that wait for a segment this run doesn't bring first get none.
