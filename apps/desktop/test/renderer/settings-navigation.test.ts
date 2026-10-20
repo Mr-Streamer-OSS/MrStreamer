@@ -442,3 +442,15 @@ it("keeps the acknowledged interface language and update channel while rejecting
   await settle();
   expect(view.querySelector<HTMLSelectElement>('[aria-label="Channel"]')?.value).toBe("nightly");
 });
+
+it.each(["en-US", "nl-NL", "fr-FR", "de-DE", "es-ES"] as const)(
+  "finds the Arch upgrade route without offering direct channels in %s",
+  (locale) => {
+    setLanguage({ locale, formats: locale });
+    expect(findSettings("pacman", "pacman").map((control) => control.id)).toEqual(["update-check"]);
+    expect(findSettings("nightly", "pacman")).toEqual([]);
+    expect(findSettings("makepkg", "pacman").map((control) => control.id)).toEqual([
+      "update-check",
+    ]);
+  },
+);

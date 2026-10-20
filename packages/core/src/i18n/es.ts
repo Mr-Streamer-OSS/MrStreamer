@@ -136,6 +136,10 @@ export const es: Translation = {
     "El servidor de actualizaciones envió algo inesperado.",
   Updates: "Actualizaciones",
   "updated by the Microsoft Store": "actualizada por Microsoft Store",
+  "Updates come from the AUR. Use an AUR helper or makepkg.":
+    "Las actualizaciones vienen de AUR. Usa un asistente de AUR o makepkg.",
+  "settings.search.pacman":
+    "AUR pacman paquete makepkg asistente instalación actualización versión",
   "Open Store": "Abrir Store",
   Channel: "Canal",
   "newest builds": "versiones más recientes",

@@ -137,6 +137,9 @@ export const fr: Translation = {
     "Le serveur de mises à jour a envoyé une réponse inattendue.",
   Updates: "Mises à jour",
   "updated by the Microsoft Store": "mise à jour par le Microsoft Store",
+  "Updates come from the AUR. Use an AUR helper or makepkg.":
+    "Les mises à jour viennent de l’AUR. Utilisez un assistant AUR ou makepkg.",
+  "settings.search.pacman": "AUR pacman paquet makepkg assistant installation mise à jour version",
   "Open Store": "Ouvrir le Store",
   Channel: "Canal",
   "newest builds": "versions les plus récentes",

@@ -134,6 +134,9 @@ export const nl: Translation = {
   "The update server sent something unexpected.": "De updateserver stuurde iets onverwachts.",
   Updates: "Updates",
   "updated by the Microsoft Store": "bijgewerkt door de Microsoft Store",
+  "Updates come from the AUR. Use an AUR helper or makepkg.":
+    "Updates komen uit de AUR. Gebruik een AUR-helper of makepkg.",
+  "settings.search.pacman": "AUR pacman pakket makepkg helper installatie bijwerken versie",
   "Open Store": "Store openen",
   Channel: "Kanaal",
   "newest builds": "nieuwste builds",

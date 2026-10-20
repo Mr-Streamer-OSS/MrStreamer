@@ -1,3 +1,5 @@
+import { updatesInApp } from "@mrstreamer/contracts/updates";
+import { distributionLabel } from "../updates/distribution.ts";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { t } from "@mrstreamer/core/i18n";
@@ -154,11 +156,7 @@ export function SettingsPage() {
       settingsTarget: control ?? null,
     });
   };
-  const results = query.trim()
-    ? findSettings(query).filter(
-        (control) => control.id !== "update-channel" || updates.data?.distribution !== "store",
-      )
-    : null;
+  const results = query.trim() ? findSettings(query, updates.data?.distribution) : null;
   const panels = {
     general: <GeneralSection />,
     playback: <PlaybackSection />,
@@ -318,7 +316,7 @@ function About() {
         ? [
             status.version,
             status.channel === "nightly" ? t("Nightly") : t("Stable"),
-            ...(status.distribution === "store" ? ["Microsoft Store"] : []),
+            ...(!updatesInApp(status.distribution) ? [distributionLabel(status.distribution)] : []),
           ].join(" · ")
         : "",
     ],

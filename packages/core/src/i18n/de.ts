@@ -135,6 +135,9 @@ export const de: Translation = {
     "Der Update-Server hat etwas Unerwartetes gesendet.",
   Updates: "Updates",
   "updated by the Microsoft Store": "aktualisiert vom Microsoft Store",
+  "Updates come from the AUR. Use an AUR helper or makepkg.":
+    "Updates kommen aus dem AUR. Verwende einen AUR-Helfer oder makepkg.",
+  "settings.search.pacman": "AUR pacman Paket makepkg Helfer Installation Update Version",
   "Open Store": "Store öffnen",
   Channel: "Kanal",
   "newest builds": "neueste Builds",
