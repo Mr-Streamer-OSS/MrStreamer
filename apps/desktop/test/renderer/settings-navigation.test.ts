@@ -134,7 +134,7 @@ it("focuses the AUR guidance after choosing its informational search result", as
   );
   await settle();
   expect(document.activeElement?.getAttribute("aria-label")).toBe(
-    "Updates come from the AUR. Use an AUR helper or makepkg.",
+    "0.0.17: Updates come from the AUR. Use an AUR helper or makepkg.",
   );
   expect(document.activeElement?.textContent).toContain("Updates come from the AUR.");
 });

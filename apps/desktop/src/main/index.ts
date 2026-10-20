@@ -20,6 +20,7 @@ import { ARTWORK_SCHEME, DOWNLOAD_ARTWORK } from "@mrstreamer/contracts/download
 import type { IpcEvent, IpcEvents, IpcInput } from "@mrstreamer/contracts/ipc";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed } from "@mrstreamer/core/failure";
+import { t } from "@mrstreamer/core/i18n";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { updatesInApp } from "@mrstreamer/contracts/updates";
 import { discovery, metadataFileFor } from "@mrstreamer/core/updates/feed";
@@ -372,6 +373,9 @@ async function start(): Promise<void> {
     // login then uses a fixed key: it still saves, but other programs of the same user can read it.
     safeStorage.setUsePlainTextEncryption(true);
   }
+  const dataDir = app.getPath("userData");
+  // Installation validation can fail before the runtime loads Settings.
+  applyLanguage(languageFor(await Settings.readInterfaceLanguage(dataDir).catch(() => undefined)));
   const distribution = await installedDistribution({
     platform: process.platform,
     packaged: app.isPackaged,
@@ -379,7 +383,6 @@ async function start(): Promise<void> {
     resources: process.resourcesPath,
   });
   const appUpdates = updatesInApp(distribution);
-  const dataDir = app.getPath("userData");
   await removeUnfinishedWrites(dataDir);
   // And in the folder of the guides of Settings > Guides.
   await removeUnfinishedWrites(join(dataDir, "guides"));
@@ -914,7 +917,7 @@ if (app.requestSingleInstanceLock()) {
   void start().catch((error: unknown) => {
     console.error("[startup]", error);
     dialog.showErrorBox(
-      "Mr. Streamer could not start",
+      t("Mr. Streamer could not start"),
       error instanceof Error ? error.message : String(error),
     );
     app.exit(1);

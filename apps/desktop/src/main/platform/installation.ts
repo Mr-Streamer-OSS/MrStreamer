@@ -1,5 +1,6 @@
 import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { t } from "@mrstreamer/core/i18n";
 import {
   INSTALLATION_MARKER,
   PACMAN_INSTALLATION,
@@ -20,17 +21,23 @@ export async function installedDistribution(options: {
     await lstat(path);
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return "direct";
-    throw new Error(`Cannot inspect ${path}. Reinstall Mr. Streamer with your package manager.`, {
-      cause: error,
-    });
+    throw new Error(
+      t("Cannot inspect {path}. Reinstall Mr. Streamer with your package manager.", { path }),
+      {
+        cause: error,
+      },
+    );
   }
   let text: string;
   try {
     text = await readFile(path, "utf8");
   } catch (error) {
-    throw new Error(`Cannot read ${path}. Reinstall Mr. Streamer with your package manager.`, {
-      cause: error,
-    });
+    throw new Error(
+      t("Cannot read {path}. Reinstall Mr. Streamer with your package manager.", { path }),
+      {
+        cause: error,
+      },
+    );
   }
   try {
     const value: unknown = JSON.parse(text);
@@ -46,5 +53,5 @@ export async function installedDistribution(options: {
   } catch {
     // A present marker is authoritative; damage must never enable direct updating.
   }
-  throw new Error(`Invalid ${path}. Reinstall Mr. Streamer with your package manager.`);
+  throw new Error(t("Invalid {path}. Reinstall Mr. Streamer with your package manager.", { path }));
 }

@@ -68,7 +68,7 @@ export function UpdatesSection() {
           id="update-check"
           label={status.version}
           note={instructions}
-          focusLabel={instructions}
+          focusLabel={`${status.version}: ${instructions}`}
         />
       </Section>
     );

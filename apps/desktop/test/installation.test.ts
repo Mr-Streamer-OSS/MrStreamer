@@ -1,11 +1,22 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { resolveLanguage, setLanguage } from "@mrstreamer/core/i18n";
 import { INSTALLATION_MARKER, PACMAN_INSTALLATION } from "@mrstreamer/contracts/updates";
 import { installedDistribution } from "../src/main/platform/installation.ts";
 import { tempDir } from "./support.ts";
 
+afterEach(() => setLanguage(resolveLanguage("en-US", ["en-US"])));
+
 describe("installation-owned updates", () => {
+  it("explains marker recovery in the chosen interface language", async () => {
+    const resources = await tempDir();
+    await writeFile(join(resources, INSTALLATION_MARKER), "broken");
+    setLanguage(resolveLanguage("nl-NL", ["en-US"]));
+    await expect(
+      installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
+    ).rejects.toThrow("Installeer Mr. Streamer opnieuw met je pakketbeheerder.");
+  });
   it("keeps an ordinary packaged Linux install direct, including electron-builder's package-type", async () => {
     const resources = await tempDir();
     await writeFile(join(resources, "package-type"), "deb");
