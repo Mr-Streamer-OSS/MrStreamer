@@ -112,8 +112,8 @@ Each responsibility has one owner, a plain module with a store the screens read:
   views still hold the opening. With no subscription saved it opens at once. No login check or
   provider answer is waited for; a list a provider already gave is worked out with the rest.
   Until the app opens, `titles.ts` indexes no saved titles while others are still read, so two
-  providers' saved lists are indexed once. A read the disk doesn't answer within 8 seconds opens
-  the app without it: the lists read by then are indexed and show, and the late one joins them
+  providers' saved lists are indexed once. If a disk read has not finished after 8 seconds, the
+  app opens without it: the lists read by then are indexed and show, and the late one joins them
   when it answers. `src/startup-screen.tsx` covers the screens until then: iOS's launch screen
   (`expo-splash-screen`) and then the app's own copy of it at the same place, both drawing
   `assets/splash.png`, the approved artwork, kept as it is (nothing generates it), with "Opening
