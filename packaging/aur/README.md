@@ -25,6 +25,8 @@ Render by literal replacement after validation, never shell evaluation of input.
 unexpanded/unknown tokens. URLs are constructed by the template from the version and commit;
 do not accept arbitrary asset hosts, moving tags such as `latest`, or arbitrary shell text.
 The deb asset uses the upstream `linux-amd64.deb` name, while Arch's architecture is `x86_64`.
+The pinned builder replaces `-` with `~` only in the embedded Debian control version; release
+tags, asset filenames and download URLs keep the upstream hyphens.
 `mrstreamer-LICENSE` is a download alias so it cannot collide with this recipe's 0BSD `LICENSE`.
 The packaged application's license remains GPL-3.0-only; the bundled components keep their notices.
 
@@ -35,10 +37,13 @@ downloaded bytes; an API digest alone is not release acceptance. The inspected L
 no embedded signature and the release exposes no detached Linux signature. Do not claim a
 signature check where only HTTPS and SHA-256 were available.
 
-Candidate-test mode requires an exact tested `0.0.18-nightly.YYYYMMDD.RUN` or its pinned dry-run
-manifest, with successful acceptance and a source commit containing the managed-update
-implementation. The version string alone does not prove marker awareness. Use a separate
-ignored output directory, the explicit candidate notice, no credentials and no publishing path.
+Candidate-test input requires a successful published `0.0.18-nightly.YYYYMMDD.RUN` prerelease
+run, verified release assets and checksums, and an immutable source commit containing the
+managed-update implementation. The version string alone does not prove marker awareness.
+Unpublished dry-run workflow artifacts cannot use this template's canonical release URLs.
+Render the candidate before running Arch installed-package acceptance on that render; full
+Arch acceptance is not a prerequisite for building its input. Use a separate ignored output
+directory, the explicit candidate notice, no credentials and no publishing path.
 Keep the upstream version unchanged in its download URL; only Arch `pkgver` changes to
 `0.0.18alphaYYYYMMDD.RUN`. Native `vercmp` must show candidate < stable and increasing candidate
 runs in order. Never use the usual underscore conversion without checking its ordering.
@@ -46,7 +51,10 @@ runs in order. Never use the usual underscore conversion without checking its or
 No actual marker-aware candidate was available for this recipe slice. The local 0.0.17
 **payload inspection** render has a different package name, no `provides`/`conflicts` and no
 managed marker. It is neither a production render nor a candidate-test render, and must never
-be published or used to claim managed behavior. See [payload audit](payload-audit.md).
+be published or used to claim managed behavior. A separate historical nightly 394 recipe
+inspection exercises `package()`, including the marker and `provides`/`conflicts`, under a
+different non-publishable package name. Those old bytes cannot prove managed runtime behavior
+and were not launched. See [payload audit](payload-audit.md).
 
 ## Native layout and updater contract
 
@@ -128,6 +136,8 @@ keyring, audio or GPU proof.
 1. Install the exact candidate with `pacman -U` in an owned Arch GUI VM/machine. Check `pacman -Qkk`,
    owned launcher/desktop/icons/licenses, bundled executable/tool hashes and sandbox owner/mode.
    Launch through the installed desktop entry and directly through `/usr/bin/mrstreamer`.
+   Check the actual menu and dock icon; the retained upstream 1024px icon may not be found by
+   the desktop theme. If it fails, fix the upstream icon set rather than resizing in this recipe.
 2. Prove packaged identity and pacman update mode through actual app UI/status/diagnostics. Check
    stale direct-update state is unchanged, updater IPC is inert, and no direct update requests or
    package writes occur beyond the normal check delay. Do not use an environment override as proof.

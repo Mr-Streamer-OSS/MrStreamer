@@ -145,7 +145,27 @@ The owned Arch container used official image digest
 Native makepkg 7.1.0, namcap 3.6.0, Bash syntax, ShellCheck, desktop-file validation and `.SRCINFO`
 regeneration ran against the hand-pinned payload-inspection render. It deliberately renames the
 package to `mrstreamer-payload-inspection`, removes provides/conflicts and omits the managed marker.
-The template's marker-placement branch remains pending an actual .18 candidate.
+
+A follow-up recipe-execution probe uses complete official stable .17 and nightly 394 debs,
+both pinned to source `53b8e5aadfe56666f4faa042d22429da53476eb9`. The nightly artifact is
+107003748 bytes, SHA-256 `c124c69f87f2ff0c164d663de34b394301ea96db857ac8d54c6d247b5b3f15db`,
+matching its canonical `SHA256SUMS.txt` and API digest. Its checksum file SHA-256 is
+`06018a6a4a40d2c5b685ab11c2d414b697288f221c32fe4773655e747ca08f4b`.
+Actual control versions are `0.0.17` and `0.0.17~nightly.20261020.394`; the expected Debian
+version now uses the pinned builder's hyphen-to-tilde normalization. Upstream release URLs,
+asset filenames and Arch's separate alpha ordering remain unchanged.
+
+Both new renders use `mrstreamer-recipe-inspection-t3-ba301d31` and an explicit NEVER PUBLISH
+notice. They retain the template's actual `package()`, marker and provides/conflicts branches.
+Native makepkg source checks, clean builds, `.SRCINFO` regeneration, Bash syntax, ShellCheck
+and namcap recipe lint pass. Archive inspection verifies every retained upstream file hash,
+root ownership, directory modes, sandbox 4755, launcher/license links and package metadata.
+The marker has exact bytes `{"schema":1,"updates":"pacman"}` followed by a newline, mode 0644
+and root ownership. Native mismatched-version and wrong-architecture checks abort before
+packaging. Raw commands, exits, input/output manifests and archives remain in ignored
+`.local/aur-candidate-fix/`. These historical inspection packages were neither installed nor
+launched. Their marker proves packaging execution only; actual marker-aware .18 archive,
+installed managed-runtime and full native GUI acceptance remain open.
 
 Namcap's process exited zero but reported an `/opt` ELF error, unstripped Vulkan, the intentional
 SUID helper, unused upstream libdl/libpthread links, and possibly-unused libsecret/xdg-utils.

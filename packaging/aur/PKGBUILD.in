@@ -14,7 +14,7 @@ depends=('alsa-lib' 'at-spi2-core' 'cairo' 'dbus' 'expat' 'glib2' 'glibc' 'gtk3'
          'libcups' 'libgcc' 'libsecret' 'libx11' 'libxcb' 'libxcomposite' 'libxdamage'
          'libxext' 'libxfixes' 'libxkbcommon' 'libxrandr' 'mesa' 'nspr' 'nss' 'pango'
          'systemd-libs' 'xdg-utils')
-makedepends=('desktop-file-utils')
+checkdepends=('desktop-file-utils')
 optdepends=('libnotify: desktop notifications'
             'libpulse: PulseAudio or PipeWire audio'
             'org.freedesktop.secrets: credential storage in the desktop keyring')
@@ -37,7 +37,7 @@ prepare() {
 }
 
 check() {
-  bsdtar -xOf control.tar.xz ./control | grep -Fx "Version: $_upstream_version"
+  bsdtar -xOf control.tar.xz ./control | grep -Fx "Version: ${_upstream_version//-/\~}"
   bsdtar -xOf control.tar.xz ./control | grep -Fx 'Architecture: amd64'
   test -f 'payload/opt/Mr. Streamer/resources/app.asar'
   local tool
