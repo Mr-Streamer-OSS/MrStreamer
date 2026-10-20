@@ -230,10 +230,11 @@ The unprivileged clean Arch builder needs `makepkg`, `vercmp`, the
 checkout prepared with `pnpm install --frozen-lockfile`. The builder user must be
 able to read the checkout and its installed dependencies and write to the rendered
 directory. Copying only the rendered folder into a `base-devel` environment is
-insufficient. From the checkout root inside that builder, run:
+insufficient. From the checkout root inside that builder, replace
+`/path/to/rendered-directory` with your rendered directory and run:
 
 ```sh
-node apps/desktop/scripts/package-updates.ts srcinfo --dir <rendered-directory>
+node apps/desktop/scripts/package-updates.ts srcinfo --dir "/path/to/rendered-directory"
 ```
 
 This needs no token or network. It validates `preparation.json`, checks the recorded

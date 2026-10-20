@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -468,7 +468,14 @@ export async function generateSrcinfo(dir: string, env: NodeJS.ProcessEnv = proc
     );
   }
   receipt.native = { makepkg, srcinfo: hash(srcinfo), vercmp };
-  await writeFile(join(dir, "preparation.json"), `${JSON.stringify(receipt, null, 2)}\n`);
+  const temporary = await mkdtemp(join(dir, ".preparation-"));
+  try {
+    const staged = join(temporary, "preparation.json");
+    await writeFile(staged, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
+    await rename(staged, join(dir, "preparation.json"));
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
   return receipt.native;
 }
 

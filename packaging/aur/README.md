@@ -21,10 +21,11 @@ The offline `srcinfo` step needs an unprivileged clean Arch builder with `makepk
 and a checkout prepared with `pnpm install --frozen-lockfile`. The builder user must
 be able to read that checkout and its installed dependencies and write to the
 rendered directory. Copying only the rendered folder into a `base-devel` environment
-is insufficient. From the checkout root inside that builder, run:
+is insufficient. From the checkout root inside that builder, replace
+`/path/to/rendered-directory` with your rendered directory and run:
 
 ```sh
-node apps/desktop/scripts/package-updates.ts srcinfo --dir <rendered-directory>
+node apps/desktop/scripts/package-updates.ts srcinfo --dir "/path/to/rendered-directory"
 ```
 
 See [package updates](../../docs/maintainers/releasing.md#package-updates) for

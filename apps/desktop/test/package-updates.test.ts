@@ -728,6 +728,110 @@ describe("package preparation", () => {
     }
   });
 
+  // These executable shell stand-ins test the protocol, not native Arch acceptance.
+  it.skipIf(process.platform === "win32").each(["write", "replace"] as const)(
+    "preserves the receipt after a failed native receipt %s and permits a rerun",
+    async (failure) => {
+      const world = await fixture("candidate");
+      const preparation = await world.prepare();
+      const templates = await readTemplates();
+      const root = await mkdtemp(join(tmpdir(), "package-updates-receipt-"));
+      const dir = join(root, "rendered directory");
+      try {
+        const receipt = await writePreparation(
+          dir,
+          preparation,
+          renderRecipes(preparation, 1, templates),
+          templates,
+        );
+        const srcinfo = [
+          "pkgbase = mrstreamer-bin",
+          `\tpkgver = ${receipt.arch.pkgver}`,
+          "\tpkgrel = 1",
+          `\tsource = ${receipt.assets.deb.url}`,
+          `\tsha256sums = ${receipt.assets.deb.sha256}`,
+          "",
+        ].join("\n");
+        await writeFile(
+          join(root, "makepkg"),
+          '#!/bin/sh\ncase "$1" in\n--version) printf "%s\\n" "makepkg protocol stand-in" ;;\n--printsrcinfo) printf "%s" "$SRCINFO_PROTOCOL_FIXTURE" ;;\n*) exit 2 ;;\nesac\n',
+          { mode: 0o755 },
+        );
+        await writeFile(join(root, "vercmp"), '#!/bin/sh\nprintf "%s\\n" -1\n', {
+          mode: 0o755,
+        });
+        const env = { ...process.env, PATH: root, SRCINFO_PROTOCOL_FIXTURE: srcinfo };
+        const injector = join(root, "receipt-failure.mjs");
+        await writeFile(
+          injector,
+          `import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { basename } from "node:path";
+const { writeFile, rename } = fs;
+if (${JSON.stringify(failure)} === "write") {
+  fs.writeFile = async (path, data, options) => {
+    if (basename(path) === "preparation.json") {
+      await writeFile(path, data.slice(0, 17), options);
+      throw new Error("Injected receipt write failure");
+    }
+    return writeFile(path, data, options);
+  };
+} else {
+  fs.rename = async (source, target) => {
+    if (basename(target) === "preparation.json")
+      throw new Error("Injected receipt replace failure");
+    return rename(source, target);
+  };
+}
+syncBuiltinESMExports();
+`,
+        );
+        // An unrelated temporary-looking entry must survive failed cleanup and the rerun.
+        await mkdir(join(dir, ".preparation-unrelated"));
+        await writeFile(join(dir, ".preparation-unrelated", "keep"), "unrelated bytes");
+        const before = await readFile(join(dir, "preparation.json"));
+        const names = [...(await readdir(dir)), ".SRCINFO"].sort();
+        const failed = spawnSync(
+          process.execPath,
+          ["--import", injector, CLI, "srcinfo", "--dir", dir],
+          { cwd: root, env, encoding: "utf8" },
+        );
+        expect(failed.status, failed.stdout + failed.stderr).toBe(1);
+        expect(failed.stdout).toContain(`::error::Injected receipt ${failure} failure`);
+        expect(await readFile(join(dir, "preparation.json"))).toEqual(before);
+        expect(await readFile(join(dir, ".SRCINFO"), "utf8")).toBe(srcinfo);
+        expect((await readdir(dir)).sort()).toEqual(names);
+
+        const native = await generateSrcinfo(dir, env);
+        expect(native).toEqual({
+          makepkg: "makepkg protocol stand-in",
+          srcinfo: sha256(srcinfo),
+          vercmp: { candidate: receipt.arch.pkgver, stable: "0.0.18", result: -1 },
+        });
+        const completed = { ...receipt, native };
+        expect(await readFile(join(dir, "preparation.json"), "utf8")).toBe(
+          `${JSON.stringify(completed, null, 2)}\n`,
+        );
+        const rerun = spawnSync(process.execPath, [CLI, "srcinfo", "--dir", dir], {
+          cwd: root,
+          env,
+          encoding: "utf8",
+        });
+        expect(rerun.status, rerun.stdout + rerun.stderr).toBe(0);
+        expect(rerun.stdout).toContain(`.SRCINFO ${native.srcinfo} from ${native.makepkg}.`);
+        expect(await readFile(join(dir, "preparation.json"), "utf8")).toBe(
+          `${JSON.stringify(completed, null, 2)}\n`,
+        );
+        expect((await readdir(dir)).sort()).toEqual(names);
+        expect(await readFile(join(dir, ".preparation-unrelated", "keep"), "utf8")).toBe(
+          "unrelated bytes",
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("rejects malformed CLI inputs and existing outputs before authentication or network, from any working directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "package-updates-cli-"));
     try {
