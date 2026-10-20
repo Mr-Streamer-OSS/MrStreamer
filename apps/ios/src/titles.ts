@@ -146,10 +146,11 @@ export function onTitleLists(listener: () => void): () => void {
 /**
  * The index of the lists that show, for a request about subscription `id`'s titles that doesn't
  * draw, such as a title's file, a download's details or the viewing record's series: at once
- * while lists show, and while they are made again with `id`'s in them, as after another
- * subscription's removal, or while a launch still reads `id`'s saved lists, once they show. Rejects at once with `signal`'s reason once it aborts,
- * and when `id` can't have its titles listed: no longer saved, not signed in, or with no lists,
- * its failure when they failed.
+ * while the lists that show hold `id`'s, or `id` has none to give them. While `id`'s lists are
+ * still to join them, as while a launch reads its saved lists or they are indexed with the
+ * others', or after another subscription's removal, once they do. Rejects at once with
+ * `signal`'s reason once it aborts, and when `id` can't have its titles listed: no longer saved,
+ * not signed in, or with no lists, its failure when they failed.
  */
 export function listedIndex(id: string, signal: AbortSignal): Promise<IndexedCatalogue> {
   return new Promise((resolve, reject) => {
@@ -160,14 +161,21 @@ export function listedIndex(id: string, signal: AbortSignal): Promise<IndexedCat
     };
     const settle = () => {
       if (signal.aborted) return done(() => reject(signal.reason));
-      const now = titleLists();
-      if (now.kind === "ready") return done(() => resolve(now.index));
+      const now = shown.get();
       const member = members().find((each) => each.entry.id === id);
+      const coming =
+        member !== undefined &&
+        currentSource(id) !== undefined &&
+        (shownOf(member.titles) !== null || readingSaved("titles", id));
+      if (now.made && (!coming || now.listed.some((each) => each.subscriptionId === id))) {
+        const { index } = now.lists;
+        return done(() => resolve(index));
+      }
       if (!member) return done(() => reject(new AppFailure({ kind: "no-subscription" })));
       if (!currentSource(id)) {
         return done(() => reject(new AppFailure({ kind: "needs-secret", subscriptionId: id })));
       }
-      if (shownOf(member.titles) || readingSaved("titles", id)) return;
+      if (coming) return;
       const error: AppError =
         member.titles.kind === "failed" ? member.titles.error : { kind: "no-subscription" };
       done(() => reject(new AppFailure(error)));
@@ -222,6 +230,19 @@ const metadata = metadataStore({
 /** The lists the index was made of, or is being made of. */
 let indexed: readonly Listed[] = [];
 let indexing: AbortController | null = null;
+/**
+ * Whether saved titles a launch reads wait for each other to be indexed together (`relist`): until
+ * the app opens (startup.ts), however long a read takes; from then on lists are indexed as they
+ * show, one read later joining those indexed before it.
+ */
+let batching = true;
+
+/** Ends the launch's batch: the lists that show are indexed now, without reads still under way. */
+export function endLaunchBatch() {
+  if (!batching) return;
+  batching = false;
+  relist();
+}
 
 const sameLists = (a: readonly Listed[], b: readonly Listed[]) =>
   a.length === b.length &&
@@ -273,7 +294,8 @@ export function titlesWorkedOut(): boolean {
  * failed or load again keep what they had. Until one has lists, the state says whether any is
  * still loading or why they failed, after every change of the subscriptions. A subscription the
  * lists that show were made of and that lists none now takes them with it at once. While a launch
- * still reads saved titles (`readingSaved`) nothing is indexed, so they are indexed once.
+ * still reads saved titles (`readingSaved`), until the app opens (`batching`), nothing is indexed,
+ * so they are indexed once.
  */
 function relist() {
   const all = members();
@@ -300,7 +322,7 @@ function relist() {
   else if (sameLists(listed, indexed)) return;
   // While a launch still reads saved titles, those already read wait for them: all are indexed
   // together once, not again as each subscription's arrive.
-  if (readingSaved("titles")) {
+  if (batching && readingSaved("titles")) {
     indexed = [];
     indexing?.abort();
     indexing = null;

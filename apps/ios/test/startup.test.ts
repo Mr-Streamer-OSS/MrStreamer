@@ -17,6 +17,8 @@ const memory = vi.hoisted(() => ({
   held: [] as Array<() => void>,
   holdLogins: false,
   holdLists: false,
+  /** Login checks a panel has answered, to the app. */
+  loginsAnswered: 0,
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -57,7 +59,9 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   if ((list && memory.holdLists) || (!list && action === "login" && memory.holdLogins)) {
     await new Promise<void>((go) => memory.held.push(go));
   }
-  return passThrough(input, init);
+  const response = await passThrough(input, init);
+  if (action === "login") memory.loginsAnswered++;
+  return response;
 });
 
 const { native } = await import("./native-files.ts");
@@ -131,35 +135,37 @@ async function launch() {
   titles.onTitleLists(() => {
     if (titles.titleLists().kind === "ready") seen.listsShown++;
   });
-  const loginsFrom = memory.requests.length;
+  /** The subscriptions whose movies and series the published lists hold. */
+  const titlesFrom = () => {
+    const lists = titles.titleLists();
+    return new Set(
+      lists.kind === "ready"
+        ? (["movie", "series"] as const).flatMap((kind) =>
+            kindOf(lists.index, kind).titles.flatMap((title) =>
+              title.versions.map((version) => version.subscriptionId),
+            ),
+          )
+        : [],
+    );
+  };
+  const loginsFrom = memory.loginsAnswered;
   startup.onStartup(() => {
     const catalogue = account.currentCatalogue();
-    const lists = titles.titleLists();
     seen.opened = {
       channelsFrom: new Set(
         catalogue.kind === "ready"
           ? catalogue.library.channels.map((channel) => channel.subscriptionId)
           : [],
       ),
-      titlesFrom: new Set(
-        lists.kind === "ready"
-          ? (["movie", "series"] as const).flatMap((kind) =>
-              kindOf(lists.index, kind).titles.flatMap((title) =>
-                title.versions.map((version) => version.subscriptionId),
-              ),
-            )
-          : [],
-      ),
+      titlesFrom: titlesFrom(),
       movies: titles.collectionsOf("movie") !== null,
       series: titles.collectionsOf("series") !== null,
       listsShown: seen.listsShown,
-      logins: memory.requests
-        .slice(loginsFrom)
-        .filter((action) => action === "login" && !memory.holdLogins).length,
+      logins: memory.loginsAnswered - loginsFrom,
     };
   });
   void startup.startUp();
-  return { ...account, ...titles, ...startup, seen };
+  return { ...account, ...titles, ...startup, seen, titlesFrom };
 }
 type App = Awaited<ReturnType<typeof launch>>;
 
@@ -401,7 +407,7 @@ describe("opening after a launch", () => {
     ).toBe(true);
   });
 
-  it("opens without the rest once a saved list's read hasn't answered within 8 seconds", async () => {
+  it("opens without the rest once a saved list's read hasn't answered within 8 seconds, showing what was read until it joins", async () => {
     const { a, b } = await savedBoth();
     const holds: Array<() => void> = [];
     native.gate = (operation, path) =>
@@ -416,12 +422,36 @@ describe("opening after a launch", () => {
     expect(app.currentStartup().kind).toBe("opening");
     await vi.advanceTimersByTimeAsync(1_000);
     expect(app.currentStartup().kind).toBe("open");
-    // What had shown stays; the rest shows when it comes.
+
+    // Two's read still hangs: one's movies and series are indexed and their collections made.
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(holds.length).toBeGreaterThan(0);
+    expect(app.titleLists().kind).toBe("ready");
+    expect(app.titlesFrom()).toEqual(new Set([a]));
+    expect(app.collectionsOf("movie")).not.toBeNull();
+    expect(app.collectionsOf("series")).not.toBeNull();
     expect(member(app, b).live).toMatchObject({ kind: "ready", from: "cache" });
+    const lookups = { b: "waiting" };
+    const forOne = await app.listedIndex(a, AbortSignal.timeout(5_000));
+    expect(forOne).toBe((app.titleLists() as { index: unknown }).index);
+    const forTwo = app.listedIndex(b, AbortSignal.timeout(5_000)).then(
+      (index) => ((lookups.b = "answered"), index),
+      () => ((lookups.b = "failed"), null),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(lookups.b).toBe("waiting");
+
+    // Two's read answers late: its titles join one's in the lists that show.
     vi.useRealTimers();
     native.gate = null;
     for (const go of holds.splice(0)) go();
-    await until(() => member(app, b).titles.kind === "ready", "two's saved titles");
+    await until(() => app.titlesFrom().size === 2, "two's titles joining");
+    expect(app.titlesFrom()).toEqual(new Set([a, b]));
+    expect(app.collectionsOf("movie")).not.toBeNull();
+    expect(app.collectionsOf("series")).not.toBeNull();
+    // Answered with the lists that hold two's.
+    expect(await forTwo).toBe((app.titleLists() as { index: unknown }).index);
+    expect(lookups.b).toBe("answered");
     expect(app.currentStartup().kind).toBe("open");
   });
 });

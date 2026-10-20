@@ -142,7 +142,7 @@ export const useCatalogue = () => useStore(catalogue);
 export const currentCatalogue = () => catalogue.get();
 /** Calls `listener` whenever every subscription's channels change. */
 export const onCatalogue = (listener: () => void) => catalogue.subscribe(listener);
-/** Whether a launch is still reading a saved list from the phone: of `kind`, and `id`'s, when given. */
+/** Whether a launch still reads a saved list from the phone: of `kind` and `id`, when given. */
 export const readingSaved = (kind?: Kind, id?: string) =>
   [...reading.get().keys()].some((key) => {
     const at = key.indexOf("|");

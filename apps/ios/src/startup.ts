@@ -8,7 +8,7 @@ import {
   restore,
 } from "./account.ts";
 import { store, useStore } from "./store.ts";
-import { onTitleLists, titlesWorkedOut } from "./titles.ts";
+import { endLaunchBatch, onTitleLists, titlesWorkedOut } from "./titles.ts";
 
 // Whether the app is still opening: from launch until what the phone saved shows, which the launch
 // screen covers (`StartupScreen`). It opens once the saved subscriptions are read (account.ts
@@ -16,8 +16,10 @@ import { onTitleLists, titlesWorkedOut } from "./titles.ts";
 // the login's, and the channels and the movie and series collections are worked out of the lists
 // that show. With none saved, or none whose password the Keychain gives back, that is at once.
 // Only what is on the phone counts: no login check or provider's answer is waited for, and a
-// list that wasn't saved loads after, as screens show it. Once open it stays open. A read the
-// disk never answers doesn't keep it opening past `LONGEST`.
+// list that wasn't saved loads after, as screens show it; one a provider answered while it opens is
+// worked out with the rest. Once open it stays open. A read the disk never answers doesn't keep it
+// opening past `LONGEST`: the lists read by then are worked out and show, and the late one joins
+// them when it answers.
 
 export type Startup =
   /** What the phone saved doesn't show yet. */
@@ -42,6 +44,8 @@ const stops: Array<() => void> = [];
 
 function open() {
   for (const stop of stops.splice(0)) stop();
+  // Opened before a read answered: the titles read so far show without it, which joins them later.
+  endLaunchBatch();
   startup.set({ kind: "open" });
 }
 

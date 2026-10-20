@@ -176,8 +176,10 @@ await sharp(
 // The iOS launch screen's artwork, which iOS shows centred on true black at SPLASH points square
 // (app.json's expo-splash-screen) and the app's own launch screen draws again, at the same place
 // and size, until the saved lists show (src/startup-screen.tsx): the white mark over the name, as
-// the app's header has them. The name is set in the system's font where it is installed, as
-// on a Mac, else in Inter; the file is drawn at three times its size, iOS's largest scale.
+// the app's header has them. The name is set in whichever of SF Pro Display and Inter the machine
+// has, so the drawing depends on its fonts: the committed file, drawn in Inter, is the accepted
+// artwork, and one drawn with other fonts differs. It is drawn at three times its size, iOS's
+// largest scale.
 const SPLASH = 240;
 const splashMark = 80;
 const splashName = 28;
