@@ -225,7 +225,12 @@ the offline native metadata step succeeds. Existing output directories refuse;
 use a fresh one to repeat preparation. For a recipe-only fix, pass `--pkgrel 2`
 or the next positive revision. Reset it to 1 for a new upstream version.
 
-In an unprivileged clean Arch builder, run:
+The unprivileged clean Arch builder needs `makepkg`, `vercmp`, the
+[repository-supported Node/pnpm toolchain](../contributing/development.md) and a
+checkout prepared with `pnpm install --frozen-lockfile`. The builder user must be
+able to read the checkout and its installed dependencies and write to the rendered
+directory. Copying only the rendered folder into a `base-devel` environment is
+insufficient. From the checkout root inside that builder, run:
 
 ```sh
 node apps/desktop/scripts/package-updates.ts srcinfo --dir <rendered-directory>

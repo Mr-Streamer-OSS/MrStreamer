@@ -1,6 +1,7 @@
 // Read-only release preparation. Publication and installed acceptance belong to the runbooks.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { lstatSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -515,6 +516,10 @@ async function main() {
       : { mode: "stable", version: values.version! };
   requestVersion(request);
   const pkgrel = positive(values.pkgrel ?? "1", "--pkgrel");
+  check(
+    !lstatSync(values.out, { throwIfNoEntry: false }),
+    "Output directory already exists. Use a new --out directory.",
+  );
   const token =
     process.env["GH_TOKEN"] ??
     execFileSync("gh", ["auth", "token"], {

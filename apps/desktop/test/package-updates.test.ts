@@ -151,6 +151,7 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
     );
     const receiptArtifact = {
       ...artifact,
+      workflow_run: { ...artifact.workflow_run },
       id: artifact.id + 1,
       name: `package-receipt-${platform}-direct-${version}-attempt-${attempt}`,
     };
@@ -480,60 +481,70 @@ describe("package preparation", () => {
       (w: World) => {
         w.run.path = ".github/workflows/other.yml";
       },
+      /Candidate run/,
     ],
     [
       "foreign repository",
       (w: World) => {
         w.run.head_repository.full_name = "fork/player";
       },
+      /Candidate run/,
     ],
     [
       "pull request",
       (w: World) => {
         w.run.event = "pull_request";
       },
+      /event must be/,
     ],
     [
       "branch",
       (w: World) => {
         w.run.head_branch = "feature";
       },
+      /Candidate run/,
     ],
     [
       "failed run",
       (w: World) => {
         w.run.conclusion = "failure";
       },
+      /Candidate run/,
     ],
     [
       "incomplete run",
       (w: World) => {
         w.run.status = "in_progress";
       },
+      /Candidate run/,
     ],
     [
       "source",
       (w: World) => {
         w.run.head_sha = "b".repeat(40);
       },
+      /Candidate run/,
     ],
     [
       "run number",
       (w: World) => {
         w.run.run_number = 398;
       },
+      /Candidate run/,
     ],
     [
       "run id",
       (w: World) => {
         w.run.id = 901;
       },
+      /Candidate run/,
     ],
     [
       "missing receipt",
       (w: World) => {
         w.artifacts.splice(w.artifacts.indexOf(w.builds[1]!.receiptArtifact), 1);
       },
+      /unambiguous linux-x64 receipt/,
     ],
     [
       "ambiguous attempt",
@@ -544,12 +555,14 @@ describe("package preparation", () => {
           name: `package-receipt-mac-arm64-direct-${w.version}-attempt-4`,
         });
       },
+      /unambiguous mac-arm64 receipt/,
     ],
     [
       "invalid attempt",
       (w: World) => {
         w.builds[0]!.receiptArtifact.name = `package-receipt-mac-arm64-direct-${w.version}-attempt-0`;
       },
+      /unambiguous mac-arm64 receipt/,
     ],
     [
       "wrong version in receipt name",
@@ -559,30 +572,37 @@ describe("package preparation", () => {
           "0x0x18-nightlyx20261020x397",
         );
       },
+      /unambiguous mac-arm64 receipt/,
     ],
     [
       "expired artifact",
       (w: World) => {
         w.builds[0]!.artifact.expires_at = "2026-10-20T11:00:00Z";
       },
+      /release-mac-arm64-\S+ has expired/,
     ],
     [
       "wrong artifact run",
       (w: World) => {
         w.builds[0]!.artifact.workflow_run.id = 901;
       },
+      /Package receipt: release-mac-arm64-\S+ belongs to another run/,
     ],
     [
       "altered ZIP",
       (w: World) => {
         w.archives.set(w.builds[0]!.artifact.id, strToU8("wrong"));
       },
+      /release-mac-arm64-\S+ does not match its digest/,
     ],
-  ] satisfies [string, (w: World) => void][])("refuses candidate %s", async (_, spoil) => {
-    const world = await fixture("candidate");
-    spoil(world);
-    await expect(world.prepare()).rejects.toThrow();
-  });
+  ] satisfies [string, (w: World) => void, RegExp][])(
+    "refuses candidate %s",
+    async (_, spoil, message) => {
+      const world = await fixture("candidate");
+      spoil(world);
+      await expect(world.prepare()).rejects.toThrow(message);
+    },
+  );
 
   it.each([
     [
@@ -590,38 +610,46 @@ describe("package preparation", () => {
       (r: PackageReceipt) => {
         r.sourceCommit = "b".repeat(40);
       },
+      /sourceCommit is .* expected/,
     ],
     [
       "receipt workflow",
       (r: PackageReceipt) => {
         r.workflowCommit = "b".repeat(40);
       },
+      /workflowCommit is .* expected/,
     ],
     [
       "receipt version",
       (r: PackageReceipt) => {
         r.appVersion = "0.0.18";
       },
+      /packageVersion does not match the distribution/,
     ],
     [
       "receipt attempt",
       (r: PackageReceipt) => {
         r.run.attempt = 8;
       },
+      /run\.attempt does not match the request/,
     ],
     [
       "receipt file bytes",
       (r: PackageReceipt) => {
         r.files[0]!.sha256 = "0".repeat(64);
       },
+      /\.dmg SHA-256 does not match the receipt/,
     ],
-  ] satisfies [string, (r: PackageReceipt) => void][])("refuses candidate %s", async (_, spoil) => {
-    const world = await fixture("candidate");
-    const build = world.builds[0]!;
-    spoil(build.receipt);
-    build.updateReceipt(build.receipt);
-    await expect(world.prepare()).rejects.toThrow();
-  });
+  ] satisfies [string, (r: PackageReceipt) => void, RegExp][])(
+    "refuses candidate %s",
+    async (_, spoil, message) => {
+      const world = await fixture("candidate");
+      const build = world.builds[0]!;
+      spoil(build.receipt);
+      build.updateReceipt(build.receipt);
+      await expect(world.prepare()).rejects.toThrow(message);
+    },
+  );
 
   it("binds published DMG bytes to the independently valid CI receipt", async () => {
     const world = await fixture("candidate");
@@ -634,20 +662,23 @@ describe("package preparation", () => {
   });
 
   it.each([
-    { mode: "stable", version: "0.0.17" },
-    { mode: "stable", version: NIGHTLY },
-    { mode: "stable", version: "v0.0.18" },
-    { mode: "stable", version: "00.0.18" },
-    { mode: "stable", version: "latest" },
-    { mode: "stable", version: "0.0.18 " },
-    { mode: "candidate", version: "0.0.18", run: 900 },
-    { mode: "candidate", version: "0.0.19-nightly.20261020.397", run: 900 },
-    { mode: "candidate", version: NIGHTLY, run: Number.MAX_SAFE_INTEGER + 1 },
-  ] satisfies PreparationRequest[])(
-    "refuses invalid request $mode $version before GitHub",
-    async (request) => {
+    [{ mode: "stable", version: "0.0.17" }, /Requires 0\.0\.18 or newer/],
+    [{ mode: "stable", version: NIGHTLY }, /Version channel does not match mode/],
+    [{ mode: "stable", version: "v0.0.18" }, /bare canonical version/],
+    [{ mode: "stable", version: "00.0.18" }, /bare canonical version/],
+    [{ mode: "stable", version: "latest" }, /bare canonical version/],
+    [{ mode: "stable", version: "0.0.18 " }, /bare canonical version/],
+    [{ mode: "candidate", version: "0.0.18", run: 900 }, /Version channel does not match mode/],
+    [
+      { mode: "candidate", version: "0.0.19-nightly.20261020.397", run: 900 },
+      /Candidate tests require a 0\.0\.18 nightly/,
+    ],
+    [{ mode: "candidate", version: NIGHTLY, run: Number.MAX_SAFE_INTEGER + 1 }, /isSafeInteger/],
+  ] satisfies [PreparationRequest, RegExp][])(
+    "refuses invalid request %j before GitHub",
+    async (request, message) => {
       const world = await fixture();
-      await expect(preparePackages(world.github, request, NOW)).rejects.toThrow();
+      await expect(preparePackages(world.github, request, NOW)).rejects.toThrow(message);
       expect(world.reads).toEqual([]);
     },
   );
@@ -697,7 +728,7 @@ describe("package preparation", () => {
     }
   });
 
-  it("rejects malformed CLI inputs before token lookup, from any working directory", async () => {
+  it("rejects malformed CLI inputs and existing outputs before authentication or network, from any working directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "package-updates-cli-"));
     try {
       const cases = [
@@ -751,6 +782,35 @@ describe("package preparation", () => {
         { cwd: root, encoding: "utf8" },
       );
       expect(text).toContain('cask "mr-streamer"');
+      const blockNetwork = join(root, "block-network.mjs");
+      await writeFile(
+        blockNetwork,
+        'globalThis.fetch = () => { throw new Error("Network blocked by CLI test"); };\n',
+      );
+      for (const populated of [false, true]) {
+        const dir = join(root, populated ? "populated" : "empty");
+        await mkdir(dir);
+        if (populated) await writeFile(join(dir, "PKGBUILD"), "Existing recipe\n");
+        for (const token of [undefined, "blocked-network-test"]) {
+          const result = spawnSync(
+            process.execPath,
+            ["--import", blockNetwork, CLI, "render", "--version", "0.0.18", "--out", dir],
+            {
+              cwd: root,
+              env: token === undefined ? { PATH: root } : { PATH: root, GH_TOKEN: token },
+              encoding: "utf8",
+            },
+          );
+          expect(result.status, result.stdout + result.stderr).toBe(1);
+          expect(result.stdout).toMatch(/::error::Refused: Output directory already exists/);
+          expect(result.stdout + result.stderr).not.toMatch(
+            /spawnSync gh|ENOENT|GitHub|Network blocked/,
+          );
+        }
+        expect(await readdir(dir)).toEqual(populated ? ["PKGBUILD"] : []);
+        if (populated)
+          expect(await readFile(join(dir, "PKGBUILD"), "utf8")).toBe("Existing recipe\n");
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
