@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   app,
+  dialog,
   powerMonitor,
   autoUpdater,
   BrowserWindow,
@@ -912,6 +913,10 @@ if (app.requestSingleInstanceLock()) {
   app.on("before-quit", () => app.releaseSingleInstanceLock());
   void start().catch((error: unknown) => {
     console.error("[startup]", error);
+    dialog.showErrorBox(
+      "Mr. Streamer could not start",
+      error instanceof Error ? error.message : String(error),
+    );
     app.exit(1);
   });
 } else {

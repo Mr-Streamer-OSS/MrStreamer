@@ -61,12 +61,14 @@ export function UpdatesSection() {
     );
   }
   if (status.distribution === "pacman") {
+    const instructions = t("Updates come from the AUR. Use an AUR helper or makepkg.");
     return (
       <Section title={t("Updates")}>
         <Row
           id="update-check"
           label={status.version}
-          note={t("Updates come from the AUR. Use an AUR helper or makepkg.")}
+          note={instructions}
+          focusLabel={instructions}
         />
       </Section>
     );
