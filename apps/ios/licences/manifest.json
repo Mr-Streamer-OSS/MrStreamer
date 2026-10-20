@@ -1,11 +1,11 @@
 {
-  "$comment": "What scripts/licences.ts can't read from the installed packages: native components that aren't npm packages, and texts packages ship without. Each pin is a line the file that really pins the component must hold; texts are fetched once by `node scripts/licences.ts --fetch` into licences/texts. See scripts/licences.ts.",
+  "$comment": "What scripts/licences.ts can't read from the installed packages: native components that aren't npm packages, and texts packages ship without. Each pin is a line the file that really pins the component must hold, and one holds its {version}, which its source and text refs take too; texts are fetched once by `node scripts/licences.ts --fetch` into licences/texts. See scripts/licences.ts.",
   "components": [
     {
       "name": "FFmpeg",
       "version": "9.0.2",
       "licence": "LGPL-2.1-or-later",
-      "source": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v0.0.14/ffmpeg-9.0.2.tar.xz",
+      "source": "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download/v0.0.14/ffmpeg-{version}.tar.xz",
       "facts": [
         {
           "label": "SHA-256",
@@ -19,7 +19,7 @@
       "pins": [
         {
           "file": "scripts/build-ffmpeg.sh",
-          "text": "FFMPEG_VERSION=9.0.2"
+          "text": "FFMPEG_VERSION={version}"
         },
         {
           "file": "scripts/build-ffmpeg.sh",
@@ -43,12 +43,12 @@
       "texts": [
         {
           "repo": "FFmpeg/FFmpeg",
-          "ref": "n9.0.2",
+          "ref": "n{version}",
           "path": "LICENSE.md"
         },
         {
           "repo": "FFmpeg/FFmpeg",
-          "ref": "n9.0.2",
+          "ref": "n{version}",
           "path": "COPYING.LGPLv2.1"
         }
       ]
@@ -57,60 +57,60 @@
       "name": "Hermes",
       "version": "260318099.0.4",
       "licence": "MIT",
-      "source": "https://github.com/facebook/hermes/tree/hermes-v260318099.0.4",
+      "source": "https://github.com/facebook/hermes/tree/hermes-v{version}",
       "pins": [
         {
           "file": "node_modules/react-native/sdks/hermes-engine/version.properties",
-          "text": "HERMES_VERSION_NAME=260318099.0.4"
+          "text": "HERMES_VERSION_NAME={version}"
         }
       ],
       "pods": ["hermes-engine"],
       "texts": [
         {
           "repo": "facebook/hermes",
-          "ref": "hermes-v260318099.0.4",
+          "ref": "hermes-v{version}",
           "path": "LICENSE"
         },
         {
           "repo": "facebook/hermes",
-          "ref": "hermes-v260318099.0.4",
+          "ref": "hermes-v{version}",
           "path": "external/llvh/LICENSE.txt"
         },
         {
           "repo": "facebook/hermes",
-          "ref": "hermes-v260318099.0.4",
+          "ref": "hermes-v{version}",
           "path": "external/llvh/include/llvh/Support/LICENSE.TXT"
         },
         {
           "repo": "facebook/hermes",
-          "ref": "hermes-v260318099.0.4",
+          "ref": "hermes-v{version}",
           "path": "include/hermes/Regex/LICENSE.TXT"
         },
         {
           "repo": "facebook/hermes",
-          "ref": "hermes-v260318099.0.4",
+          "ref": "hermes-v{version}",
           "path": "external/dtoa/dtoa.c",
           "lines": [1, 18]
         },
         {
           "repo": "facebook/hermes",
-          "ref": "hermes-v260318099.0.4",
+          "ref": "hermes-v{version}",
           "path": "external/zip/UNLICENSE"
         },
         {
           "repo": "facebook/hermes",
-          "ref": "hermes-v260318099.0.4",
+          "ref": "hermes-v{version}",
           "path": "external/boost/boost_1_86_0/LICENSE_1_0.txt"
         },
         {
           "repo": "facebook/hermes",
-          "ref": "hermes-v260318099.0.4",
+          "ref": "hermes-v{version}",
           "path": "external/dragonbox/dragonbox/dragonbox.h",
           "lines": [1, 16]
         },
         {
           "repo": "facebook/hermes",
-          "ref": "hermes-v260318099.0.4",
+          "ref": "hermes-v{version}",
           "path": "external/fast_float/fast_float/fast_float.h",
           "lines": [1, 92]
         }
@@ -120,18 +120,18 @@
       "name": "boost",
       "version": "1.84.0",
       "licence": "BSL-1.0",
-      "source": "https://github.com/react-native-community/boost-for-react-native/tree/v1.84.0",
+      "source": "https://github.com/react-native-community/boost-for-react-native/tree/v{version}",
       "pins": [
         {
           "file": "node_modules/react-native/third-party-podspecs/boost.podspec",
-          "text": "spec.version = '1.84.0'"
+          "text": "spec.version = '{version}'"
         }
       ],
       "pods": ["boost"],
       "texts": [
         {
           "repo": "react-native-community/boost-for-react-native",
-          "ref": "v1.84.0",
+          "ref": "v{version}",
           "path": "LICENSE_1_0.txt"
         }
       ]
@@ -140,18 +140,18 @@
       "name": "double-conversion",
       "version": "1.1.6",
       "licence": "BSD-3-Clause",
-      "source": "https://github.com/google/double-conversion/tree/v1.1.6",
+      "source": "https://github.com/google/double-conversion/tree/v{version}",
       "pins": [
         {
           "file": "node_modules/react-native/third-party-podspecs/DoubleConversion.podspec",
-          "text": "spec.version = '1.1.6'"
+          "text": "spec.version = '{version}'"
         }
       ],
       "pods": ["DoubleConversion"],
       "texts": [
         {
           "repo": "google/double-conversion",
-          "ref": "v1.1.6",
+          "ref": "v{version}",
           "path": "LICENSE"
         }
       ]
@@ -160,28 +160,28 @@
       "name": "fast_float",
       "version": "8.0.0",
       "licence": "Apache-2.0 OR MIT OR BSL-1.0",
-      "source": "https://github.com/fastfloat/fast_float/tree/v8.0.0",
+      "source": "https://github.com/fastfloat/fast_float/tree/v{version}",
       "pins": [
         {
           "file": "node_modules/react-native/third-party-podspecs/fast_float.podspec",
-          "text": "spec.version = \"8.0.0\""
+          "text": "spec.version = \"{version}\""
         }
       ],
       "pods": ["fast_float"],
       "texts": [
         {
           "repo": "fastfloat/fast_float",
-          "ref": "v8.0.0",
+          "ref": "v{version}",
           "path": "LICENSE-MIT"
         },
         {
           "repo": "fastfloat/fast_float",
-          "ref": "v8.0.0",
+          "ref": "v{version}",
           "path": "LICENSE-APACHE"
         },
         {
           "repo": "fastfloat/fast_float",
-          "ref": "v8.0.0",
+          "ref": "v{version}",
           "path": "LICENSE-BOOST"
         }
       ]
@@ -190,18 +190,18 @@
       "name": "fmt",
       "version": "12.1.0",
       "licence": "MIT",
-      "source": "https://github.com/fmtlib/fmt/tree/12.1.0",
+      "source": "https://github.com/fmtlib/fmt/tree/{version}",
       "pins": [
         {
           "file": "node_modules/react-native/third-party-podspecs/fmt.podspec",
-          "text": "spec.version = \"12.1.0\""
+          "text": "spec.version = \"{version}\""
         }
       ],
       "pods": ["fmt"],
       "texts": [
         {
           "repo": "fmtlib/fmt",
-          "ref": "12.1.0",
+          "ref": "{version}",
           "path": "LICENSE"
         }
       ]
@@ -210,18 +210,18 @@
       "name": "folly",
       "version": "2024.11.18.00",
       "licence": "Apache-2.0",
-      "source": "https://github.com/facebook/folly/tree/v2024.11.18.00",
+      "source": "https://github.com/facebook/folly/tree/v{version}",
       "pins": [
         {
           "file": "node_modules/react-native/scripts/cocoapods/helpers.rb",
-          "text": ":version => '2024.11.18.00'"
+          "text": ":version => '{version}'"
         }
       ],
       "pods": ["RCT-Folly"],
       "texts": [
         {
           "repo": "facebook/folly",
-          "ref": "v2024.11.18.00",
+          "ref": "v{version}",
           "path": "LICENSE"
         }
       ]
@@ -230,18 +230,18 @@
       "name": "glog",
       "version": "0.3.5",
       "licence": "BSD-3-Clause",
-      "source": "https://github.com/google/glog/tree/v0.3.5",
+      "source": "https://github.com/google/glog/tree/v{version}",
       "pins": [
         {
           "file": "node_modules/react-native/third-party-podspecs/glog.podspec",
-          "text": "spec.version = '0.3.5'"
+          "text": "spec.version = '{version}'"
         }
       ],
       "pods": ["glog"],
       "texts": [
         {
           "repo": "google/glog",
-          "ref": "v0.3.5",
+          "ref": "v{version}",
           "path": "COPYING"
         }
       ]
@@ -250,23 +250,23 @@
       "name": "SocketRocket",
       "version": "0.7.1",
       "licence": "BSD-3-Clause",
-      "source": "https://github.com/facebookincubator/SocketRocket/tree/0.7.1",
+      "source": "https://github.com/facebookincubator/SocketRocket/tree/{version}",
       "pins": [
         {
           "file": "node_modules/react-native/scripts/cocoapods/helpers.rb",
-          "text": ":version => '0.7.1'"
+          "text": ":version => '{version}'"
         }
       ],
       "pods": ["SocketRocket"],
       "texts": [
         {
           "repo": "facebookincubator/SocketRocket",
-          "ref": "0.7.1",
+          "ref": "{version}",
           "path": "LICENSE"
         },
         {
           "repo": "facebookincubator/SocketRocket",
-          "ref": "0.7.1",
+          "ref": "{version}",
           "path": "PATENTS"
         }
       ]

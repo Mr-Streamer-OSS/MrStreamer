@@ -389,7 +389,13 @@ async function fetchTexts(manifest: Manifest) {
 const { values } = parseArgs({
   options: { check: { type: "boolean" }, pods: { type: "string" }, fetch: { type: "boolean" } },
 });
-const manifest = readManifest();
+const manifest = (() => {
+  try {
+    return readManifest();
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+})();
 if (values.fetch) {
   await fetchTexts(manifest);
 } else {

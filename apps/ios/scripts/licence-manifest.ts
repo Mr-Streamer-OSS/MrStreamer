@@ -57,8 +57,38 @@ export const PackageJson = type({
   "license?": "unknown",
 });
 
-export const readManifest = (): Manifest =>
-  Manifest.assert(JSON.parse(readFileSync(join(app, "licences/manifest.json"), "utf8")));
+/** Where a component's version goes in its pins, source and text refs. */
+const VERSION = "{version}";
+
+/**
+ * The manifest (licences/manifest.json unless `file` names another), with each component's
+ * `{version}` filled in from its `version`. The version is written once: every component needs a
+ * pin with `{version}`, so a version the file that really pins it doesn't hold fails that pin, and
+ * its source and texts follow it. Throws when a component has no such pin.
+ */
+export function readManifest(file = join(app, "licences/manifest.json")): Manifest {
+  const manifest = Manifest.assert(JSON.parse(readFileSync(file, "utf8")));
+  const unpinned = manifest.components.filter(
+    ({ pins }) => !pins.some(({ text }) => text.includes(VERSION)),
+  );
+  if (unpinned.length) {
+    throw new Error(
+      `${unpinned.map(({ name }) => name).join(", ")} in ${file} pin no version: give a pin "${VERSION}" where its version is set`,
+    );
+  }
+  return {
+    ...manifest,
+    components: manifest.components.map((entry) => {
+      const at = (text: string) => text.replaceAll(VERSION, entry.version);
+      return {
+        ...entry,
+        source: at(entry.source),
+        pins: entry.pins.map((pin) => ({ ...pin, text: at(pin.text) })),
+        texts: entry.texts.map((text) => ({ ...text, ref: at(text.ref) })),
+      };
+    }),
+  };
+}
 
 /** What of `pins` no longer holds, as a line each. */
 export const pinProblems = (owner: string, pins: readonly Pin[]): string[] =>

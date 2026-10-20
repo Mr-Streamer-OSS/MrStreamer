@@ -35,12 +35,16 @@ const PREBUILT: readonly Pod[] = [
   ["TitleFormats", "1.0.0", join(app, "modules/title-formats/ios")],
 ];
 
-let root = "";
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+/** Every project a test wrote: one test can write several. */
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 /** Writes a native project linking `pods`, making their sources but those named `missing`. */
 function project(pods: readonly Pod[], missing: readonly string[] = []) {
-  root = mkdtempSync(join(tmpdir(), "native-pods-"));
+  const root = mkdtempSync(join(tmpdir(), "native-pods-"));
+  roots.push(root);
   const ios = join(root, "ios");
   for (const [name, version] of [
     ["react-native", RN],
