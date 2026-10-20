@@ -136,7 +136,7 @@ export function profileSummary(profile: CpuProfile, top = 25) {
   >();
   for (const [id, us] of self) {
     const { functionName, url, lineNumber } = byId.get(id)!.callFrame;
-    if (functionName in special && url === "") {
+    if (Object.hasOwn(special, functionName) && url === "") {
       special[functionName as keyof typeof special] += us;
       continue;
     }
@@ -480,12 +480,33 @@ export async function steadyProfiles(
         await command(target, "Profiler.start");
       }
       await delay(STEADY_PROFILE_MS);
+      const captured: {
+        role: string;
+        target: Page;
+        path: string;
+        endedAt: string;
+        profile: CpuProfile;
+      }[] = [];
+      const captureErrors: unknown[] = [];
       for (const [role, target] of targets) {
-        const { profile } = await command<{ profile: CpuProfile }>(target, "Profiler.stop");
-        const endedAt = new Date().toISOString();
-        await command(target, "Profiler.disable");
-        const path = `${output}.steady-${state}.${role}.cpuprofile`;
-        writeFileSync(path, JSON.stringify(profile));
+        try {
+          const { profile } = await command<{ profile: CpuProfile }>(target, "Profiler.stop");
+          const endedAt = new Date().toISOString();
+          const path = `${output}.steady-${state}.${role}.cpuprofile`;
+          writeFileSync(path, JSON.stringify(profile));
+          captured.push({ role, target, path, endedAt, profile });
+        } catch (error) {
+          captureErrors.push(error);
+        }
+        try {
+          await command(target, "Profiler.disable");
+        } catch (error) {
+          captureErrors.push(error);
+        }
+      }
+      if (captureErrors.length)
+        throw new AggregateError(captureErrors, captureErrors.map(String).join("; "));
+      for (const { role, target, path, endedAt, profile } of captured)
         profiles.push({
           role,
           path,
@@ -494,7 +515,6 @@ export async function steadyProfiles(
           intervalUs: 1_000,
           summary: profileSummary(profile),
         });
-      }
       const endedAt = new Date().toISOString();
       const ipc = await takeIpc(main);
       context.action(`Trace ${state} for ${STEADY_TRACE_MS / 1000} seconds`);
@@ -787,23 +807,24 @@ export async function queryRetention(
     await entry("All channels");
     await settled();
     const filter = `document.querySelector('[data-browse-filter=countries]')`;
-    if (await page.evaluate<boolean>(`!!${filter}`)) {
-      for (const pass of ["Apply", "Clear"]) {
-        context.action(`${pass} the first country filter`);
-        await page.evaluate(`${filter}.click()`);
-        await waitFor(() =>
-          page.evaluate<boolean>(`!!document.querySelector('[role=menu] [role=menuitemcheckbox]')`),
-        );
-        await page.evaluate(
-          `document.querySelector('[role=menu] [role=menuitemcheckbox]').click()`,
-        );
-        await delay(300);
-        // Escape on the page itself would leave Live TV; close only a menu still open.
-        if (await page.evaluate<boolean>(`!!document.querySelector('[role=menu]')`))
-          await key(page, "Escape", 27);
-        await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role=menu]')`));
-        await settled();
-      }
+    if (!(await page.evaluate<boolean>(`!!${filter}`))) throw new Error("No country filter");
+    for (const pass of ["Apply", "Clear"]) {
+      context.action(`${pass} the first country filter`);
+      await page.evaluate(`${filter}.click()`);
+      await waitFor(() =>
+        page.evaluate<boolean>(`!!document.querySelector('[role=menu] [role=menuitemcheckbox]')`),
+      );
+      await page.evaluate(`(() => {
+        const option = document.querySelectorAll('[role=menu] [role=menuitemcheckbox]')[${pass === "Apply" ? 1 : 0}];
+        if (!option) throw new Error("No country option");
+        option.click();
+      })()`);
+      await delay(300);
+      // Escape on the page itself would leave Live TV; close only a menu still open.
+      if (await page.evaluate<boolean>(`!!document.querySelector('[role=menu]')`))
+        await key(page, "Escape", 27);
+      await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role=menu]')`));
+      await settled();
     }
     await point("after-live-churn");
     for (const [kind, tab, title] of [

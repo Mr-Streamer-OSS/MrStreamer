@@ -1,7 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import type { ChildProcess } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createContext, runInContext } from "node:vm";
+import { pathToFileURL } from "node:url";
+import { Window } from "happy-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   profileSummary,
@@ -15,6 +18,7 @@ import {
   type TraceEvent,
 } from "./app-attribution.ts";
 import { connect, type Page } from "./app.ts";
+import { runAppProbes } from "./app-probes.ts";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -89,6 +93,44 @@ const metadata: TraceEvent = {
   args: { name: "CrRendererMain" },
 };
 const task: TraceEvent = { name: "RunTask", ph: "X", pid: 7, tid: 1, ts: 0, dur: 4000, tdur: 3000 };
+
+it("counts empty-URL prototype names as ordinary function self time", () => {
+  const names = [
+    "toString",
+    "valueOf",
+    "constructor",
+    "(idle)",
+    "(program)",
+    "(garbage collector)",
+    "(root)",
+    "(idle)",
+  ];
+  const result = profileSummary({
+    nodes: names.map((functionName, index) => ({
+      id: index + 1,
+      callFrame: { functionName, url: index === 7 ? "app.js" : "", lineNumber: 0 },
+    })),
+    samples: [1, 2, 3, 4, 5, 6, 7, 8],
+    timeDeltas: [1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800],
+    startTime: 0,
+    endTime: 11600,
+  });
+  expect(result).toMatchObject({
+    sampledUs: 11600,
+    idleUs: 1400,
+    programUs: 1500,
+    garbageCollectorUs: 1600,
+    javascriptUs: 5400,
+  });
+  expect(
+    result.top.map(({ functionName, url, sampledUs }) => ({ functionName, url, sampledUs })),
+  ).toEqual([
+    { functionName: "(idle)", url: "app.js", sampledUs: 1800 },
+    { functionName: "constructor", url: "", sampledUs: 1300 },
+    { functionName: "valueOf", url: "", sampledUs: 1200 },
+    { functionName: "toString", url: "", sampledUs: 1100 },
+  ]);
+});
 
 it.each<[string, (value: CpuProfile) => void]>([
   [
@@ -363,18 +405,103 @@ it.each([
   },
 );
 
-it("retains failed raw profiles and rejects incomplete captures", async () => {
+it("retains both raw profiles and disables both targets before rejecting a malformed main profile", async () => {
   const invalid = profile();
   invalid.timeDeltas = [];
-  const peer = capture("success", invalid);
-  const result = expect(steadyProfiles(peer.context, steadyRecord())).rejects.toThrow(
-    /CPU profile/,
+  const peer = capture();
+  const ipc = ipcPeer(peer);
+  const send = peer.context.main.send;
+  peer.context.main.send = vi.fn(async (method, params, timeoutMs) =>
+    method === "Profiler.stop" ? { result: { profile: invalid } } : send(method, params, timeoutMs),
   );
+  peer.page.send = vi.fn(peer.page.send);
+  const record = steadyRecord();
+  const result = expect(steadyProfiles(peer.context, record)).rejects.toThrow(/CPU profile/);
   await vi.runAllTimersAsync();
   await result;
   expect(
     JSON.parse(readFileSync(`${peer.context.output}.steady-live.main.cpuprofile`, "utf8")),
   ).toEqual(invalid);
+  expect(
+    JSON.parse(readFileSync(`${peer.context.output}.steady-live.renderer.cpuprofile`, "utf8")),
+  ).toEqual(profile());
+  for (const target of [peer.context.main, peer.page])
+    expect(vi.mocked(target.send).mock.calls.map(([method]) => method)).toEqual(
+      expect.arrayContaining(["Profiler.stop", "Profiler.disable"]),
+    );
+  expect(record.windows).toEqual([]);
+  expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each(["stop", "disable", "write"])(
+  "retains renderer data and cleans up both targets after main %s fails",
+  async (failure) => {
+    const peer = capture();
+    const ipc = ipcPeer(peer);
+    const mainPath = `${peer.context.output}.steady-live.main.cpuprofile`;
+    if (failure === "write") mkdirSync(mainPath);
+    const primary = new Error(`main ${failure} failed`);
+    const send = peer.context.main.send;
+    peer.context.main.send = vi.fn(async (method, params, timeoutMs) => {
+      if (method === `Profiler.${failure}`) throw primary;
+      return send(method, params, timeoutMs);
+    });
+    peer.page.send = vi.fn(peer.page.send);
+    const record = steadyRecord();
+    const result = steadyProfiles(peer.context, record).catch((error: unknown) => error);
+    await vi.runAllTimersAsync();
+    const error = await result;
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(String(error)).toContain(failure === "write" ? "EISDIR" : primary.message);
+    expect(
+      JSON.parse(readFileSync(`${peer.context.output}.steady-live.renderer.cpuprofile`, "utf8")),
+    ).toEqual(profile());
+    if (failure === "disable")
+      expect(JSON.parse(readFileSync(mainPath, "utf8"))).toEqual(profile());
+    for (const target of [peer.context.main, peer.page])
+      expect(vi.mocked(target.send).mock.calls.map(([method]) => method)).toEqual(
+        expect.arrayContaining(["Profiler.stop", "Profiler.disable"]),
+      );
+    expect(record.windows).toEqual([]);
+    expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
+it("preserves both targets' stop and disable failures alongside IPC restoration failure", async () => {
+  const peer = capture();
+  ipcPeer(peer);
+  const failures = new Map<string, Error>();
+  for (const [role, target] of [
+    ["main", peer.context.main],
+    ["renderer", peer.page],
+  ] as const) {
+    const send = target.send;
+    target.send = vi.fn(async (method, params, timeoutMs) => {
+      if (method === "Profiler.stop" || method === "Profiler.disable") {
+        const error = new Error(`${role} ${method} failed`);
+        failures.set(`${role} ${method}`, error);
+        if (method === "Profiler.stop")
+          peer.context.main.evaluate = async () => {
+            throw new Error("IPC restore failed");
+          };
+        throw error;
+      }
+      return send(method, params, timeoutMs);
+    });
+  }
+  const result = steadyProfiles(peer.context, steadyRecord()).catch((error: unknown) => error);
+  await vi.runAllTimersAsync();
+  const error = await result;
+  expect(error).toBeInstanceOf(AggregateError);
+  expect(failures.size).toBe(4);
+  for (const failure of failures.values()) expect(String(error)).toContain(failure.message);
+  const causes = (error: unknown): unknown[] =>
+    error instanceof AggregateError ? error.errors.flatMap(causes) : [error];
+  expect(causes(error)).toEqual(expect.arrayContaining([...failures.values()]));
+  expect(String(error)).toContain("IPC restore failed");
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 it("rejects a captured empty trace and retains its raw file", async () => {
@@ -513,66 +640,179 @@ it("records ISO wall-clock brackets for each profile and the separate trace", as
   expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
 });
 
-it("records calibrated renderer-observed retention returns", async () => {
+it("runs the live-profile workflow after steady profiles end on Home without retention", async () => {
   const peer = capture();
-  const ipc = ipcPeer(peer);
-  const timedSizings: number[] = [];
-  peer.context.list = async () => {
-    await ipc.handlers.get("library.browse")!();
-  };
-  peer.page.evaluate = async <T>(expression: string): Promise<T> => {
-    let result: unknown = true;
-    if (expression.includes("new Promise")) {
-      if (expression.includes('=== "Live TV"')) {
-        const before = ipc.sizings();
-        await ipc.handlers.get("library.browse")!();
-        timedSizings.push(ipc.sizings() - before);
-        result = 17;
-      } else result = 10;
-    } else if (expression === "window.__calibrationActual") result = 10;
-    else if (expression.includes("getQueryCache().getAll()")) result = [];
-    else if (expression.includes("Object.fromEntries")) result = {};
-    else if (expression.includes("main h1")) result = "All channels";
-    else if (expression.includes(".map(b => b.title)")) result = ["All channels", "United Kingdom"];
-    else if (
-      expression.includes("[role=menu]") ||
-      expression.includes("!!document.querySelector('[data-browse-filter=countries]')")
-    )
-      result = false;
+  ipcPeer(peer);
+  const appDirectory = join(peer.directory, "app");
+  const runtime = join(peer.directory, "runtime");
+  mkdirSync(join(appDirectory, "out", "renderer"), { recursive: true });
+  mkdirSync(runtime);
+  writeFileSync(join(appDirectory, "package.json"), "{}");
+  const executable = join(runtime, "fake-electron");
+  writeFileSync(executable, "protocol fixture only");
+  const url = pathToFileURL(join(appDirectory, "out", "renderer", "index.html")).href;
+  const metrics = [process.pid, 7].map((pid) => ({
+    pid,
+    creationTime: 1,
+    type: "fixture",
+    cpu: { cumulativeCPUUsage: 0 },
+    memory: { workingSetSize: 0 },
+  }));
+  const mainEvaluate = peer.context.main.evaluate;
+  peer.context.main.evaluate = async <T>(expression: string): Promise<T> => {
+    let result: unknown;
+    if (expression.includes("return { pid: process.pid"))
+      result = { pid: process.pid, rendererPid: 7, userData: peer.directory, metrics };
+    else if (expression.includes("return { mainPid: process.pid"))
+      result = { mainPid: process.pid, rendererPid: 7, window: {}, metrics };
+    else if (expression.includes("while (performance.now() - start < 150)")) result = 150;
+    else return mainEvaluate<T>(expression);
     return result as T;
   };
-  const record = retentionRecord();
-  const result = expect(queryRetention(peer.context, record)).resolves.toBeUndefined();
+  const browser = new Window();
+  const picked: string[] = [];
+  const show = (view: string) => {
+    browser.document.body.innerHTML = `<header><button>Live TV</button><button>Home</button><button>Watch</button></header>
+      ${view === "Live TV" ? '<nav role="navigation" aria-label="Channel categories"><button title="All channels">All channels</button><button title="TEST | Formats and failures">TEST | Formats and failures</button></nav>' : ""}`;
+    for (const button of browser.document.querySelectorAll("header button"))
+      button.addEventListener("click", () => show(button.textContent!));
+    for (const button of browser.document.querySelectorAll("nav button"))
+      button.addEventListener("click", () => picked.push(button.textContent!));
+  };
+  show("Live TV");
+  const evaluate = peer.page.evaluate;
+  peer.page.evaluate = async <T>(expression: string): Promise<T> => {
+    if (expression === "location.href") return url as T;
+    if (expression.includes("Channel categories") || expression.includes("const buttons"))
+      return browser.eval(expression) as T;
+    return evaluate<T>(expression);
+  };
+  const result = runAppProbes({
+    page: peer.page,
+    main: peer.context.main,
+    app: { pid: process.pid } as ChildProcess,
+    executable,
+    appDirectory,
+    profile: peer.directory,
+    output: peer.context.output,
+    idle: false,
+    liveProfile: true,
+    steadyProfile: true,
+    queryRetention: false,
+    hostCondition: "fixture",
+  }).catch((error: unknown) => error);
   await vi.runAllTimersAsync();
-  await result;
-  expect(record.returnTiming).toMatchObject({
-    method: "renderer-mutation-and-probe",
-    configuredResolutionMs: 5,
-    ipcReplySizing: false,
-  });
-  expect(record.returnTiming.calibration).toHaveLength(24);
-  expect(record.returns).toEqual([
-    {
-      name: "warm return to Live TV",
-      rowsShownMs: 17,
-      ipc: { "library.browse": expect.objectContaining({ calls: 1, replyBytes: 0 }) },
-    },
-    {
-      name: "cold return to Live TV",
-      rowsShownMs: 17,
-      ipc: { "library.browse": expect.objectContaining({ calls: 1, replyBytes: 0 }) },
-    },
-  ]);
-  expect(timedSizings).toEqual([0, 0]);
-  expect(ipc.sizings()).toBe(1);
-  expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
-  await ipc.handlers.get("library.browse")!();
-  expect(ipc.sizings()).toBe(1);
-  const following = retentionRecord();
-  const again = queryRetention(peer.context, following);
-  await vi.runAllTimersAsync();
-  await again;
-  expect(following.returns).toEqual(record.returns);
-  expect(timedSizings).toEqual([0, 0, 0, 0]);
-  expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
+  expect(await result).toBeUndefined();
+  const report = JSON.parse(readFileSync(peer.context.output, "utf8"));
+  expect(report.status).toBe("diagnostic-complete");
+  expect(report.steady.windows).toHaveLength(3);
+  expect(report.profiles).toHaveLength(2);
+  expect(picked).toContain("TEST | Formats and failures");
 });
+
+it.each(["available", "empty", "missing"])(
+  "records truthful country-filter work and calibrated returns with %s options",
+  async (countryFilter) => {
+    const peer = capture();
+    const ipc = ipcPeer(peer);
+    const timedSizings: number[] = [];
+    const browser = new Window();
+    browser.document.body.innerHTML =
+      countryFilter === "missing"
+        ? ""
+        : `<button data-browse-filter="countries">Countries</button>`;
+    const filters: string[][] = [];
+    const trigger = browser.document.querySelector("button");
+    if (trigger)
+      trigger.onclick = () => {
+        const menu = browser.document.createElement("div");
+        menu.setAttribute("role", "menu");
+        for (const country of [
+          "Any",
+          ...(countryFilter === "available" ? ["United Kingdom"] : []),
+        ]) {
+          const option = browser.document.createElement("button");
+          option.setAttribute("role", "menuitemcheckbox");
+          option.textContent = country;
+          option.onclick = () => {
+            filters.push(country === "Any" ? [] : [country]);
+            menu.remove();
+          };
+          menu.append(option);
+        }
+        browser.document.body.append(menu);
+      };
+    peer.context.list = async () => {
+      await ipc.handlers.get("library.browse")!();
+    };
+    peer.page.evaluate = async <T>(expression: string): Promise<T> => {
+      let result: unknown = true;
+      if (expression.includes("new Promise")) {
+        if (expression.includes('=== "Live TV"')) {
+          const before = ipc.sizings();
+          await ipc.handlers.get("library.browse")!();
+          timedSizings.push(ipc.sizings() - before);
+          result = 17;
+        } else result = 10;
+      } else if (expression === "window.__calibrationActual") result = 10;
+      else if (expression.includes("getQueryCache().getAll()")) result = [];
+      else if (expression.includes("Object.fromEntries")) result = {};
+      else if (expression.includes("main h1")) result = "All channels";
+      else if (expression.includes(".map(b => b.title)"))
+        result = ["All channels", "United Kingdom"];
+      else if (
+        expression.includes("[role=menu]") ||
+        expression.includes("[data-browse-filter=countries]")
+      )
+        result = browser.eval(expression);
+      return result as T;
+    };
+    const record = retentionRecord();
+    const result = queryRetention(peer.context, record).catch((error: unknown) => error);
+    await vi.runAllTimersAsync();
+    const error = await result;
+    if (countryFilter !== "available") {
+      expect(error).toBeInstanceOf(Error);
+      expect(String(error)).toContain(
+        countryFilter === "empty" ? "No country option" : "No country filter",
+      );
+      expect(filters).toEqual([]);
+      expect(record.workload).toBeNull();
+      expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
+      expect(vi.getTimerCount()).toBe(0);
+      return;
+    }
+    expect(error).toBeUndefined();
+    expect(filters).toEqual([["United Kingdom"], []]);
+    expect(record.returnTiming).toMatchObject({
+      method: "renderer-mutation-and-probe",
+      configuredResolutionMs: 5,
+      ipcReplySizing: false,
+    });
+    expect(record.returnTiming.calibration).toHaveLength(24);
+    expect(record.returns).toEqual([
+      {
+        name: "warm return to Live TV",
+        rowsShownMs: 17,
+        ipc: { "library.browse": expect.objectContaining({ calls: 1, replyBytes: 0 }) },
+      },
+      {
+        name: "cold return to Live TV",
+        rowsShownMs: 17,
+        ipc: { "library.browse": expect.objectContaining({ calls: 1, replyBytes: 0 }) },
+      },
+    ]);
+    expect(timedSizings).toEqual([0, 0]);
+    expect(ipc.sizings()).toBe(1);
+    expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
+    await ipc.handlers.get("library.browse")!();
+    expect(ipc.sizings()).toBe(1);
+    const following = retentionRecord();
+    const again = queryRetention(peer.context, following);
+    await vi.runAllTimersAsync();
+    await again;
+    expect(following.returns).toEqual(record.returns);
+    expect(timedSizings).toEqual([0, 0, 0, 0]);
+    expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
+  },
+);

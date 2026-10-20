@@ -565,6 +565,7 @@ export async function runAppProbes(options: {
       await queryRetention(attribution, retention);
     }
     if (options.liveProfile) {
+      await list();
       const targets = [
         ["main", main],
         ["renderer", page],

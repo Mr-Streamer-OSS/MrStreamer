@@ -95,9 +95,9 @@ GPU and painted frames. The existing `pnpm verify:desktop guide-grid-scroll` rem
 
 The idle windows say how much CPU each process uses; they cannot say what runs. Two optional
 probes attribute recurring work and retained query data in the same instance, after any idle
-windows and before `--live-profile`. Both read private runtime structures for diagnosis only,
-Electron's `ipcMain` invoke registry and React's root container fiber, as `--covered-idle` does.
-A missing structure fails the capture instead of reporting zero.
+windows and before `--live-profile`. Both read Electron's private `ipcMain` invoke registry
+for diagnosis only, as `--covered-idle` does. Only `--query-retention` also reads React's root
+container fiber. A missing required structure fails that capture instead of reporting zero.
 Both probes restore the original invoke handlers on success or failure. If the session prevents
 restoration, its cleanup error is retained alongside any capture failure.
 
