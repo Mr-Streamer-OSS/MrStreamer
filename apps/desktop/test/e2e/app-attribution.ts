@@ -185,8 +185,8 @@ export function profileSummary(profile: CpuProfile, top = 25) {
 
 /**
  * Thread time of each thread's outermost tasks, and the window's main-thread timeline events.
- * `tdur` is the thread's CPU time inside traced tasks; work outside them is not attributed, and a
- * thread whose tasks lack `tdur` is unsupported rather than zero.
+ * `tdur` is the thread's CPU time inside traced tasks; work outside them is not attributed.
+ * Missing durations leave an explicit partial or unsupported CPU observation.
  */
 export function traceSummary(events: readonly TraceEvent[], rendererPid: number, top = 25) {
   if (!Array.isArray(events) || !events.length) throw new Error("Empty or missing renderer trace");
@@ -212,14 +212,17 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
       count = 0,
       wallUs = 0,
       cpuUs = 0,
-      unsupported = false;
+      missingTasks = 0,
+      missingWallUs = 0;
     for (const task of list) {
       if (task.ts < end) continue;
       end = task.ts + (task.dur ?? 0);
       count++;
       wallUs += task.dur ?? 0;
-      if (!Number.isFinite(task.tdur) || task.tdur! < 0) unsupported = true;
-      else cpuUs += task.tdur!;
+      if (!Number.isFinite(task.tdur) || task.tdur! < 0) {
+        missingTasks++;
+        missingWallUs += task.dur!;
+      } else cpuUs += task.tdur!;
     }
     const [pid] = thread.split(":").map(Number);
     return {
@@ -229,8 +232,14 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
       renderer: pid === rendererPid,
       tasks: count,
       wallMs: wallUs / 1000,
-      cpu: unsupported
-        ? { status: "unsupported" as const, reason: "Outer task without thread duration" }
+      cpu: missingTasks
+        ? {
+            status: missingTasks === count ? ("unsupported" as const) : ("partial" as const),
+            observedMs: cpuUs / 1000,
+            observedTasks: count - missingTasks,
+            missingTasks,
+            missingWallMs: missingWallUs / 1000,
+          }
         : { status: "supported" as const, ms: cpuUs / 1000 },
     };
   });
@@ -297,8 +306,10 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
     timelineRanking: "Complete CPU totals first; incomplete aggregates follow by wall time",
     threads: perThread.sort(
       (a, b) =>
-        (b.cpu.status === "supported" ? b.cpu.ms : -1) -
-        (a.cpu.status === "supported" ? a.cpu.ms : -1),
+        Number(b.cpu.status === "supported") - Number(a.cpu.status === "supported") ||
+        (a.cpu.status === "supported" && b.cpu.status === "supported"
+          ? b.cpu.ms - a.cpu.ms
+          : b.wallMs - a.wallMs),
     ),
     rendererMainThread: mainThread ?? null,
     rendererMainTimeline: ranked(timeline),
@@ -307,14 +318,21 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
 }
 
 /** Counts every invoke handler call, and with `bytes` the JSON size of its replies. */
-async function countIpc(main: Page, bytes: boolean): Promise<void> {
+async function countIpc(main: Page, bytes: boolean) {
   await main.evaluate(`(() => {
     const { ipcMain } = ${electron};
     const handlers = ipcMain._invokeHandlers;
     if (!(handlers instanceof Map)) throw new Error("Electron IPC diagnostic registry unavailable");
+    if (globalThis.__probeIpc) throw new Error("IPC attribution probe already active");
     globalThis.__probeIpcBytes = ${bytes};
-    if (globalThis.__probeIpc) return;
     const calls = globalThis.__probeIpc = new Map();
+    const originals = new Map(handlers);
+    globalThis.__probeIpcRestore = () => {
+      for (const [method, handler] of originals) handlers.set(method, handler);
+      delete globalThis.__probeIpc;
+      delete globalThis.__probeIpcBytes;
+      delete globalThis.__probeIpcRestore;
+    };
     for (const [method, handler] of handlers) handlers.set(method, async (event, ...args) => {
       const entry = calls.get(method) ?? { calls: 0, failures: 0, requestChannels: 0, replyBytes: 0, unsized: 0 };
       calls.set(method, entry);
@@ -329,6 +347,7 @@ async function countIpc(main: Page, bytes: boolean): Promise<void> {
       } catch (error) { entry.failures++; throw error; }
     });
   })()`);
+  return () => main.evaluate<void>(`globalThis.__probeIpcRestore()`);
 }
 
 /** The calls counted since the last read, by method. */
@@ -355,15 +374,20 @@ async function traceTo(page: Page, path: string, ms: number) {
   let removeClose = () => {};
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stream: string | undefined;
+  let dataLossOccurred = false;
+  let endedAt: string | undefined;
+  const errors: unknown[] = [];
   const complete = new Promise<void>((resolve, reject) => {
     timer = setTimeout(() => reject(new Error("Trace completion timed out after 30 s")), 30_000);
     removeComplete = page.on("Tracing.tracingComplete", (params) => {
-      const handle = (params as { stream?: unknown } | undefined)?.stream;
+      const completion = params as { stream?: unknown; dataLossOccurred?: boolean } | undefined;
+      const handle = completion?.stream;
       if (typeof handle !== "string" || !handle) {
         reject(new Error("Trace completion has no IO stream"));
         return;
       }
       stream = handle;
+      dataLossOccurred = completion?.dataLossOccurred === true;
       resolve();
     });
     removeClose = page.onClose(() =>
@@ -373,7 +397,7 @@ async function traceTo(page: Page, path: string, ms: number) {
   try {
     // Consume both failures immediately, including closure before Tracing.end answers.
     await Promise.all([command(page, "Tracing.end"), complete]);
-    const endedAt = new Date().toISOString();
+    endedAt = new Date().toISOString();
     writeFileSync(path, "");
     const until = performance.now() + 120_000;
     for (;;) {
@@ -385,13 +409,23 @@ async function traceTo(page: Page, path: string, ms: number) {
       appendFileSync(path, chunk.base64Encoded ? Buffer.from(chunk.data, "base64") : chunk.data);
       if (chunk.eof) break;
     }
-    return { startedAt, endedAt };
+    if (dataLossOccurred) throw new Error("Trace completion reported data loss");
+  } catch (error) {
+    errors.push(error);
   } finally {
     clearTimeout(timer);
     removeComplete();
     removeClose();
-    if (stream) await command(page, "IO.close", { handle: stream }, 10_000);
   }
+  if (stream) {
+    try {
+      await command(page, "IO.close", { handle: stream }, 10_000);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length) throw new AggregateError(errors, errors.map(String).join("; "));
+  return { startedAt, endedAt: endedAt! };
 }
 
 /**
@@ -405,89 +439,102 @@ export async function steadyProfiles(
   record: ReturnType<typeof steadyRecord>,
 ): Promise<void> {
   const { page, main, output } = context;
-  await countIpc(main, false);
-  for (const state of ["live", "watch", "home"] as const) {
-    if (state === "live") await context.list();
-    if (state === "watch") {
-      await context.click("Watch");
-      await waitFor(() =>
-        page.evaluate<boolean>(`!!document.querySelector('[data-view="watch"]')`),
-      );
-    }
-    if (state === "home") {
-      await key(page, "Escape", 27);
-      await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[data-view="watch"]')`));
-      await context.click("Home");
-      await waitFor(() =>
-        page.evaluate<boolean>(`!!document.querySelector("[data-home-preview] h2")`),
-      );
-    }
-    await delay(2_000);
-    const before = await playing(page);
-    if (!before.some((video) => !video.paused && video.width > 0))
-      throw new Error(`No playing picture before the ${state} steady profile`);
-    await takeIpc(main);
-    context.action(`Begin ${state} steady profile`);
-    const targets = [
-      ["main", main],
-      ["renderer", page],
-    ] as const;
-    const profiles: unknown[] = [];
-    const startedAt = new Date().toISOString();
-    const profileStarts = new Map<Page, string>();
-    for (const [, target] of targets) {
-      await command(target, "Profiler.enable");
-      await command(target, "Profiler.setSamplingInterval", { interval: 1_000 });
-      profileStarts.set(target, new Date().toISOString());
-      await command(target, "Profiler.start");
-    }
-    await delay(STEADY_PROFILE_MS);
-    for (const [role, target] of targets) {
-      const { profile } = await command<{ profile: CpuProfile }>(target, "Profiler.stop");
+  const restoreIpc = await countIpc(main, false);
+  const errors: unknown[] = [];
+  try {
+    for (const state of ["live", "watch", "home"] as const) {
+      if (state === "live") await context.list();
+      if (state === "watch") {
+        await context.click("Watch");
+        await waitFor(() =>
+          page.evaluate<boolean>(`!!document.querySelector('[data-view="watch"]')`),
+        );
+      }
+      if (state === "home") {
+        await key(page, "Escape", 27);
+        await waitFor(() =>
+          page.evaluate<boolean>(`!document.querySelector('[data-view="watch"]')`),
+        );
+        await context.click("Home");
+        await waitFor(() =>
+          page.evaluate<boolean>(`!!document.querySelector("[data-home-preview] h2")`),
+        );
+      }
+      await delay(2_000);
+      const before = await playing(page);
+      if (!before.some((video) => !video.paused && video.width > 0))
+        throw new Error(`No playing picture before the ${state} steady profile`);
+      await takeIpc(main);
+      context.action(`Begin ${state} steady profile`);
+      const targets = [
+        ["main", main],
+        ["renderer", page],
+      ] as const;
+      const profiles: unknown[] = [];
+      const startedAt = new Date().toISOString();
+      const profileStarts = new Map<Page, string>();
+      for (const [, target] of targets) {
+        await command(target, "Profiler.enable");
+        await command(target, "Profiler.setSamplingInterval", { interval: 1_000 });
+        profileStarts.set(target, new Date().toISOString());
+        await command(target, "Profiler.start");
+      }
+      await delay(STEADY_PROFILE_MS);
+      for (const [role, target] of targets) {
+        const { profile } = await command<{ profile: CpuProfile }>(target, "Profiler.stop");
+        const endedAt = new Date().toISOString();
+        await command(target, "Profiler.disable");
+        const path = `${output}.steady-${state}.${role}.cpuprofile`;
+        writeFileSync(path, JSON.stringify(profile));
+        profiles.push({
+          role,
+          path,
+          startedAt: profileStarts.get(target),
+          endedAt,
+          intervalUs: 1_000,
+          summary: profileSummary(profile),
+        });
+      }
       const endedAt = new Date().toISOString();
-      await command(target, "Profiler.disable");
-      const path = `${output}.steady-${state}.${role}.cpuprofile`;
-      writeFileSync(path, JSON.stringify(profile));
-      profiles.push({
-        role,
-        path,
-        startedAt: profileStarts.get(target),
-        endedAt,
-        intervalUs: 1_000,
-        summary: profileSummary(profile),
-      });
-    }
-    const endedAt = new Date().toISOString();
-    const ipc = await takeIpc(main);
-    context.action(`Trace ${state} for ${STEADY_TRACE_MS / 1000} seconds`);
-    const tracePath = `${output}.steady-${state}.trace.json`;
-    const traceTimes = await traceTo(page, tracePath, STEADY_TRACE_MS);
-    const trace = JSON.parse(readFileSync(tracePath, "utf8")) as { traceEvents: TraceEvent[] };
-    const after = await playing(page);
-    if (
-      !after.some(
-        (video, index) =>
-          !video.paused && video.currentTime > (before[index]?.currentTime ?? Infinity),
+      const ipc = await takeIpc(main);
+      context.action(`Trace ${state} for ${STEADY_TRACE_MS / 1000} seconds`);
+      const tracePath = `${output}.steady-${state}.trace.json`;
+      const traceTimes = await traceTo(page, tracePath, STEADY_TRACE_MS);
+      const trace = JSON.parse(readFileSync(tracePath, "utf8")) as { traceEvents: TraceEvent[] };
+      const after = await playing(page);
+      if (
+        !after.some(
+          (video, index) =>
+            !video.paused && video.currentTime > (before[index]?.currentTime ?? Infinity),
+        )
       )
-    )
-      throw new Error(`Playback stopped during the ${state} steady profile`);
-    record.windows.push({
-      state,
-      startedAt,
-      endedAt,
-      profileMs: STEADY_PROFILE_MS,
-      profiles,
-      ipcDuringProfile: ipc,
-      trace: {
-        ...traceTimes,
-        path: tracePath,
-        ms: STEADY_TRACE_MS,
-        categories: TRACE_CATEGORIES,
-        summary: traceSummary(trace.traceEvents, context.rendererPid),
-      },
-    });
-    context.save();
+        throw new Error(`Playback stopped during the ${state} steady profile`);
+      record.windows.push({
+        state,
+        startedAt,
+        endedAt,
+        profileMs: STEADY_PROFILE_MS,
+        profiles,
+        ipcDuringProfile: ipc,
+        trace: {
+          ...traceTimes,
+          path: tracePath,
+          ms: STEADY_TRACE_MS,
+          categories: TRACE_CATEGORIES,
+          summary: traceSummary(trace.traceEvents, context.rendererPid),
+        },
+      });
+      context.save();
+    }
+  } catch (error) {
+    errors.push(error);
   }
+  try {
+    await restoreIpc();
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length) throw new AggregateError(errors, errors.map(String).join("; "));
 }
 
 /** The steady windows so far, saved with the probe file as each completes. */
@@ -620,189 +667,208 @@ export async function queryRetention(
   context.save();
   const { page, main, output } = context;
   const { points, returns } = record;
-  await countIpc(main, true);
-  await takeIpc(main);
-  const picker = `document.querySelector('[role=navigation][aria-label="Channel categories"]')`;
-  const header = (text: string) =>
-    page.evaluate(
-      `[...document.querySelectorAll("header button")].find(b => b.textContent.trim() === ${JSON.stringify(text)}).click()`,
-    );
-  const heading = () =>
-    page.evaluate<string>(`document.querySelector('main h1')?.textContent ?? ''`);
-  const rows = () =>
-    page.evaluate<boolean>(`document.querySelectorAll('main [data-index]').length > 0`);
-  const entry = async (title: string) => {
-    context.action(`Pick ${title}`);
-    await page.evaluate(
-      `(() => { const b = ${picker}.querySelector('button[title=' + ${JSON.stringify(JSON.stringify(title))} + ']'); if (!b) throw new Error('Missing list ' + ${JSON.stringify(title)}); b.click(); })()`,
-    );
-  };
-  // A list has settled once no browse read is under way and it shows rows or says it has none.
-  const settled = async () => {
-    await waitFor(() =>
-      page.evaluate<boolean>(
-        `${QUERY_CLIENT}.isFetching({ queryKey: ['library', 'browse'] }) === 0 && (document.querySelectorAll('main [data-index]').length > 0 || document.querySelector('main')?.innerText.includes('No channels.'))`,
-      ),
-    );
-    await delay(500);
-  };
-  const point = async (name: string) => {
-    const entries = await page.evaluate<QueryEntry[]>(QUERY_INVENTORY, 60_000);
-    const renderer = await collectedHeap(page);
-    const mainHeap = await collectedHeap(main);
-    const mainMemory = await main.evaluate<NodeJS.MemoryUsage>(`process.memoryUsage()`);
-    const workingSets = (await context.metrics()).map((metric) => ({
-      pid: metric.pid,
-      type: metric.type,
-      renderer: metric.pid === context.rendererPid,
-      workingSetKB: metric.memory.workingSetSize,
-      privateKB: metric.memory.privateBytes ?? null,
-    }));
-    points.push({
-      name,
-      at: new Date().toISOString(),
-      queries: inventorySummary(entries),
-      entries,
-      rendererHeap: renderer,
-      mainHeap,
-      mainMemory,
-      workingSets,
-      ipcSincePrevious: await takeIpc(main),
-    });
-    context.action(`Inventory ${name}`);
-  };
-  const timedReturn = async (name: string) => {
-    await header("Home");
-    await waitFor(() => page.evaluate<boolean>(`!!document.querySelector("[data-home-preview]")`));
-    await delay(1_000);
+  const restoreIpc = await countIpc(main, true);
+  const errors: unknown[] = [];
+  try {
     await takeIpc(main);
-    const rowsShownMs = await observe(
-      page,
-      `document.querySelectorAll('main [data-index]').length > 0`,
-      `[...document.querySelectorAll("header button")].find(b => b.textContent.trim() === "Live TV").click()`,
-    );
-    returns.push({ name, rowsShownMs, ipc: await takeIpc(main) });
-    context.save();
-  };
-
-  await context.list();
-  await entry("All channels");
-  await waitFor(async () => (await heading()) === "All channels" && (await rows()));
-  await point("live-all");
-  const root = await page.evaluate<string[]>(
-    `[...${picker}.querySelectorAll('[data-entry]')].map(b => b.title)`,
-  );
-  const topics = root
-    .slice(root.indexOf("All channels") + 1)
-    .filter((title) => !["Favourites", "Recently watched", "Provider lists"].includes(title));
-  for (const topic of topics) {
-    await entry(topic);
-    await settled();
-  }
-  await entry("Provider lists");
-  await waitFor(() =>
-    page.evaluate<boolean>(`!!${picker}.querySelector('button[aria-label="Back to topics"]')`),
-  );
-  // Groups open with a chevron; categories outside any country list sit beside them.
-  const [country] = await page.evaluate<string[]>(
-    `[...${picker}.querySelectorAll('[data-entry]')].filter(b => b.querySelector('svg.lucide-chevron-right')).map(b => b.title)`,
-  );
-  if (!country) throw new Error("No provider list groups");
-  await entry(country);
-  await waitFor(() =>
-    page.evaluate<boolean>(`!!${picker}.querySelector('button[aria-label="Back to countries"]')`),
-  );
-  const categories = (
-    await page.evaluate<string[]>(
-      `[...${picker}.querySelectorAll('[data-entry]')].map(b => b.title)`,
-    )
-  ).slice(0, 4);
-  for (const category of categories) {
-    await entry(category);
-    await settled();
-  }
-  context.action("Open and close the guide grid");
-  await key(page, "g", 71);
-  await waitFor(() => page.evaluate<boolean>(`!!document.querySelector('[role="grid"]')`));
-  await delay(1_000);
-  await key(page, "g", 71);
-  await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role="grid"]')`));
-  await page.evaluate(`${picker}.querySelector('button[aria-label="Back to countries"]').click()`);
-  await page.evaluate(`${picker}.querySelector('button[aria-label="Back to topics"]').click()`);
-  await entry("All channels");
-  await settled();
-  const filter = `document.querySelector('[data-browse-filter=countries]')`;
-  if (await page.evaluate<boolean>(`!!${filter}`)) {
-    for (const pass of ["Apply", "Clear"]) {
-      context.action(`${pass} the first country filter`);
-      await page.evaluate(`${filter}.click()`);
-      await waitFor(() =>
-        page.evaluate<boolean>(`!!document.querySelector('[role=menu] [role=menuitemcheckbox]')`),
+    const picker = `document.querySelector('[role=navigation][aria-label="Channel categories"]')`;
+    const header = (text: string) =>
+      page.evaluate(
+        `[...document.querySelectorAll("header button")].find(b => b.textContent.trim() === ${JSON.stringify(text)}).click()`,
       );
-      await page.evaluate(`document.querySelector('[role=menu] [role=menuitemcheckbox]').click()`);
-      await delay(300);
-      // Escape on the page itself would leave Live TV; close only a menu still open.
-      if (await page.evaluate<boolean>(`!!document.querySelector('[role=menu]')`))
-        await key(page, "Escape", 27);
-      await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role=menu]')`));
+    const heading = () =>
+      page.evaluate<string>(`document.querySelector('main h1')?.textContent ?? ''`);
+    const rows = () =>
+      page.evaluate<boolean>(`document.querySelectorAll('main [data-index]').length > 0`);
+    const entry = async (title: string) => {
+      context.action(`Pick ${title}`);
+      await page.evaluate(
+        `(() => { const b = ${picker}.querySelector('button[title=' + ${JSON.stringify(JSON.stringify(title))} + ']'); if (!b) throw new Error('Missing list ' + ${JSON.stringify(title)}); b.click(); })()`,
+      );
+    };
+    // A list has settled once no browse read is under way and it shows rows or says it has none.
+    const settled = async () => {
+      await waitFor(() =>
+        page.evaluate<boolean>(
+          `${QUERY_CLIENT}.isFetching({ queryKey: ['library', 'browse'] }) === 0 && (document.querySelectorAll('main [data-index]').length > 0 || document.querySelector('main')?.innerText.includes('No channels.'))`,
+        ),
+      );
+      await delay(500);
+    };
+    const point = async (name: string) => {
+      const entries = await page.evaluate<QueryEntry[]>(QUERY_INVENTORY, 60_000);
+      const renderer = await collectedHeap(page);
+      const mainHeap = await collectedHeap(main);
+      const mainMemory = await main.evaluate<NodeJS.MemoryUsage>(`process.memoryUsage()`);
+      const workingSets = (await context.metrics()).map((metric) => ({
+        pid: metric.pid,
+        type: metric.type,
+        renderer: metric.pid === context.rendererPid,
+        workingSetKB: metric.memory.workingSetSize,
+        privateKB: metric.memory.privateBytes ?? null,
+      }));
+      points.push({
+        name,
+        at: new Date().toISOString(),
+        queries: inventorySummary(entries),
+        entries,
+        rendererHeap: renderer,
+        mainHeap,
+        mainMemory,
+        workingSets,
+        ipcSincePrevious: await takeIpc(main),
+      });
+      context.action(`Inventory ${name}`);
+    };
+    const timedReturn = async (name: string) => {
+      await header("Home");
+      await waitFor(() =>
+        page.evaluate<boolean>(`!!document.querySelector("[data-home-preview]")`),
+      );
+      await delay(1_000);
+      await takeIpc(main);
+      await main.evaluate(`globalThis.__probeIpcBytes = false`);
+      const rowsShownMs = await observe(
+        page,
+        `document.querySelectorAll('main [data-index]').length > 0`,
+        `[...document.querySelectorAll("header button")].find(b => b.textContent.trim() === "Live TV").click()`,
+      );
+      returns.push({ name, rowsShownMs, ipc: await takeIpc(main) });
+      await main.evaluate(`globalThis.__probeIpcBytes = true`);
+      context.save();
+    };
+
+    await context.list();
+    await entry("All channels");
+    await waitFor(async () => (await heading()) === "All channels" && (await rows()));
+    await point("live-all");
+    const root = await page.evaluate<string[]>(
+      `[...${picker}.querySelectorAll('[data-entry]')].map(b => b.title)`,
+    );
+    const topics = root
+      .slice(root.indexOf("All channels") + 1)
+      .filter((title) => !["Favourites", "Recently watched", "Provider lists"].includes(title));
+    for (const topic of topics) {
+      await entry(topic);
       await settled();
     }
-  }
-  await point("after-live-churn");
-  for (const [kind, tab, title] of [
-    ["Movies", "All movies", "TEST | Index at the end"],
-    ["Series", "All series", "Long-running"],
-  ] as const) {
-    await header(kind);
-    const all = `[...document.querySelectorAll("nav button")].find(b => b.textContent.trim() === ${JSON.stringify(tab)})`;
-    await waitFor(() => page.evaluate<boolean>(`!!${all}`), 30_000);
-    await page.evaluate(`${all}.click()`);
-    const poster = `[...document.querySelectorAll("button[title]")].find(b => b.title.includes(${JSON.stringify(title)}))`;
-    await waitFor(() => page.evaluate<boolean>(`!!${poster}`), 30_000);
-    await delay(1_000);
-    context.action(`Open ${kind} details`);
-    await page.evaluate(`${poster}.click()`);
-    await waitFor(
-      () => page.evaluate<boolean>(`!!document.querySelector('[role=dialog] h2')`),
-      30_000,
+    await entry("Provider lists");
+    await waitFor(() =>
+      page.evaluate<boolean>(`!!${picker}.querySelector('button[aria-label="Back to topics"]')`),
     );
+    // Groups open with a chevron; categories outside any country list sit beside them.
+    const [country] = await page.evaluate<string[]>(
+      `[...${picker}.querySelectorAll('[data-entry]')].filter(b => b.querySelector('svg.lucide-chevron-right')).map(b => b.title)`,
+    );
+    if (!country) throw new Error("No provider list groups");
+    await entry(country);
+    await waitFor(() =>
+      page.evaluate<boolean>(`!!${picker}.querySelector('button[aria-label="Back to countries"]')`),
+    );
+    const categories = (
+      await page.evaluate<string[]>(
+        `[...${picker}.querySelectorAll('[data-entry]')].map(b => b.title)`,
+      )
+    ).slice(0, 4);
+    for (const category of categories) {
+      await entry(category);
+      await settled();
+    }
+    context.action("Open and close the guide grid");
+    await key(page, "g", 71);
+    await waitFor(() => page.evaluate<boolean>(`!!document.querySelector('[role="grid"]')`));
+    await delay(1_000);
+    await key(page, "g", 71);
+    await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role="grid"]')`));
+    await page.evaluate(
+      `${picker}.querySelector('button[aria-label="Back to countries"]').click()`,
+    );
+    await page.evaluate(`${picker}.querySelector('button[aria-label="Back to topics"]').click()`);
+    await entry("All channels");
+    await settled();
+    const filter = `document.querySelector('[data-browse-filter=countries]')`;
+    if (await page.evaluate<boolean>(`!!${filter}`)) {
+      for (const pass of ["Apply", "Clear"]) {
+        context.action(`${pass} the first country filter`);
+        await page.evaluate(`${filter}.click()`);
+        await waitFor(() =>
+          page.evaluate<boolean>(`!!document.querySelector('[role=menu] [role=menuitemcheckbox]')`),
+        );
+        await page.evaluate(
+          `document.querySelector('[role=menu] [role=menuitemcheckbox]').click()`,
+        );
+        await delay(300);
+        // Escape on the page itself would leave Live TV; close only a menu still open.
+        if (await page.evaluate<boolean>(`!!document.querySelector('[role=menu]')`))
+          await key(page, "Escape", 27);
+        await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role=menu]')`));
+        await settled();
+      }
+    }
+    await point("after-live-churn");
+    for (const [kind, tab, title] of [
+      ["Movies", "All movies", "TEST | Index at the end"],
+      ["Series", "All series", "Long-running"],
+    ] as const) {
+      await header(kind);
+      const all = `[...document.querySelectorAll("nav button")].find(b => b.textContent.trim() === ${JSON.stringify(tab)})`;
+      await waitFor(() => page.evaluate<boolean>(`!!${all}`), 30_000);
+      await page.evaluate(`${all}.click()`);
+      const poster = `[...document.querySelectorAll("button[title]")].find(b => b.title.includes(${JSON.stringify(title)}))`;
+      await waitFor(() => page.evaluate<boolean>(`!!${poster}`), 30_000);
+      await delay(1_000);
+      context.action(`Open ${kind} details`);
+      await page.evaluate(`${poster}.click()`);
+      await waitFor(
+        () => page.evaluate<boolean>(`!!document.querySelector('[role=dialog] h2')`),
+        30_000,
+      );
+      await delay(2_000);
+      await key(page, "Escape", 27);
+      await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role=dialog]')`));
+    }
+    await point("after-ondemand-churn");
+    await header("Home");
+    await waitFor(() => page.evaluate<boolean>(`!!document.querySelector("[data-home-preview]")`));
     await delay(2_000);
-    await key(page, "Escape", 27);
-    await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role=dialog]')`));
+    await point("home");
+    await timedReturn("warm return to Live TV");
+    await header("Home");
+    await waitFor(() => page.evaluate<boolean>(`!!document.querySelector("[data-home-preview]")`));
+    await delay(2_000);
+    await point("home-after-warm-return");
+    record.workload = {
+      topics,
+      country,
+      categories,
+      filters: "first country option applied, then cleared",
+    };
+    const snapshot = `${output}.retention.heapsnapshot`;
+    context.action("Renderer heap snapshot");
+    await heapSnapshotTo(page, snapshot);
+    record.heapSnapshot = snapshot;
+    // React Query's own gcTime decides when inactive data goes; wait for the longest one seen.
+    const gcTimeMs = Math.max(
+      ...(await page.evaluate<QueryEntry[]>(QUERY_INVENTORY, 60_000))
+        .filter((query) => !query.active && Number.isFinite(query.gcTimeMs))
+        .map((query) => query.gcTimeMs),
+      0,
+    );
+    record.gcWaitMs = gcTimeMs + 15_000;
+    context.action(`Wait ${record.gcWaitMs} ms for query garbage collection`);
+    await delay(gcTimeMs + 15_000);
+    await point("home-after-query-gc");
+    await timedReturn("cold return to Live TV");
+    await point("live-after-cold-return");
+  } catch (error) {
+    errors.push(error);
   }
-  await point("after-ondemand-churn");
-  await header("Home");
-  await waitFor(() => page.evaluate<boolean>(`!!document.querySelector("[data-home-preview]")`));
-  await delay(2_000);
-  await point("home");
-  await timedReturn("warm return to Live TV");
-  await header("Home");
-  await waitFor(() => page.evaluate<boolean>(`!!document.querySelector("[data-home-preview]")`));
-  await delay(2_000);
-  await point("home-after-warm-return");
-  record.workload = {
-    topics,
-    country,
-    categories,
-    filters: "first country option applied, then cleared",
-  };
-  const snapshot = `${output}.retention.heapsnapshot`;
-  context.action("Renderer heap snapshot");
-  await heapSnapshotTo(page, snapshot);
-  record.heapSnapshot = snapshot;
-  // React Query's own gcTime decides when inactive data goes; wait for the longest one seen.
-  const gcTimeMs = Math.max(
-    ...(await page.evaluate<QueryEntry[]>(QUERY_INVENTORY, 60_000))
-      .filter((query) => !query.active && Number.isFinite(query.gcTimeMs))
-      .map((query) => query.gcTimeMs),
-    0,
-  );
-  record.gcWaitMs = gcTimeMs + 15_000;
-  context.action(`Wait ${record.gcWaitMs} ms for query garbage collection`);
-  await delay(gcTimeMs + 15_000);
-  await point("home-after-query-gc");
-  await timedReturn("cold return to Live TV");
-  await point("live-after-cold-return");
+  try {
+    await restoreIpc();
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length) throw new AggregateError(errors, errors.map(String).join("; "));
 }
 
 /** The retention points so far, saved with the probe file as each is taken. */
@@ -815,6 +881,7 @@ export const retentionRecord = () => ({
   returnTiming: {
     method: "renderer-mutation-and-probe",
     configuredResolutionMs: 5,
+    ipcReplySizing: false,
     calibration: [] as Awaited<ReturnType<typeof calibrate>>,
     scope:
       "Renderer click to rows ready; calibration measures simple idle predicates, not loaded list work",

@@ -91,6 +91,10 @@ export async function connect(
   });
   const send = (method: string, params: Record<string, unknown> = {}, timeoutMs = 10_000) =>
     new Promise<{ result?: unknown; error?: unknown }>((resolve) => {
+      if (closed) {
+        resolve({ error: "DevTools connection closed" });
+        return;
+      }
       const id = nextId++;
       const timer = setTimeout(() => {
         pending.delete(id);

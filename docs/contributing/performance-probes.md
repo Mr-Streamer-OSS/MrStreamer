@@ -98,6 +98,8 @@ probes attribute recurring work and retained query data in the same instance, af
 windows and before `--live-profile`. Both read private runtime structures for diagnosis only,
 Electron's `ipcMain` invoke registry and React's root container fiber, as `--covered-idle` does.
 A missing structure fails the capture instead of reporting zero.
+Both probes restore the original invoke handlers on success or failure. If the session prevents
+restoration, its cleanup error is retained alongside any capture failure.
 
 `--steady-profile` keeps a channel playing and observes three states in turn: Live TV All
 channels with its compact preview, Watch over that page, and Home's muted preview. Each gets a
@@ -109,14 +111,18 @@ a native CPU owner. Invalid intervals, missing nodes/sample references, or empty
 non-finite time deltas fail the capture. Traces
 report each thread's outer-task thread time and the renderer main thread's inclusive timeline
 events and script entry points. Thread time covers traced tasks only; work outside them is not
-attributed, and a task without thread time makes its thread unsupported. Timeline/script
+attributed. A thread with missing task durations reports partial or unsupported CPU, retaining
+observed time, observed/missing task counts and the missing tasks' wall time. Only a thread with
+all outer-task durations has a complete CPU total. Timeline/script
 aggregates retain wall time and count when thread durations are missing. Their `cpuMs` is null,
 with an explicit unsupported/partial CPU observation and its observed/missing event counts.
 Complete CPU totals rank first; incomplete aggregates follow by wall time. Equal-start nested
 tasks count their outermost interval once, independent of input order. A trace without a unique
 expected renderer main thread and task observations fails, as does an empty trace. Completion
-has a 30-second deadline and rejects session closure; listeners and IO streams are released in
-`finally`. Stream reads have a separate 120-second total deadline. The profiler and
+has a 30-second deadline and rejects session closure. Explicit CDP data loss fails the capture
+after retaining the supplied raw stream. Listeners are removed on success or failure. Stream
+reads have a separate 120-second total deadline, and stream close has a 10-second bound. A close
+failure also fails the capture; if reading failed too, both errors are retained. The profiler and
 tracing add work, so these windows explain where time goes, not how much an idle window costs.
 
 Each steady window and individual profile has ISO `startedAt`/`endedAt` wall-clock brackets;
@@ -144,14 +150,26 @@ native allocations and are not heap. The fixture holds only synthetic data.
 Timed returns use the existing renderer mutation observer and bounded 5 ms probe, with the
 click and rows-ready predicate in the same renderer observation. `retention.returnTiming`
 retains that configured resolution and the known-delay calibration samples. Calibration of an
-idle simple predicate does not establish observation error under load. Historical returns
-without this metadata used a harness clock and a 250 ms `waitFor` poll; keep them labeled
+idle simple predicate does not establish observation error under load. Reply sizing is disabled
+during timed returns, while call counting stays on; `ipcReplySizing: false` records that choice.
+Zero reply bytes in those counts mean sizing was disabled. Other retention intervals size replies.
+Historical returns without renderer timing metadata used a harness clock and a 250 ms `waitFor`
+poll; keep them labeled
 quantized and recollect unchanged-parent timings before applying R3. Its existing timing rule
 and floor remain unchanged.
 
 Query inventory hashes are truncated to 240 characters. A full-catalogue count requires a
 complete parseable All key, all four filters empty, and successful populated data. Truncated
 or unparseable keys cannot establish that count. These counts do not prove content identity.
+Local aggregates retain unavailable observations and their capture IDs. A rule range is
+unavailable if any required completed capture lacks the observation; its sample count cannot
+silently shrink. Partial and unsupported trace threads stay in the inventory, with no complete
+CPU total for a group containing either. Missing load logs retain every affected window as
+ineligible and list the missing input. These reducers select no exclusions or thresholds.
+
+Future stream-filter bench outputs carry no historical numerical floor. The v1 recipe keeps
+output hashing and byte counting inside the timed loop. Preserve historical receipts with their
+original identities; current-parent floors require fresh unchanged-parent calibration.
 
 Run them separately from the idle calibration when CPU windows matter, for example:
 

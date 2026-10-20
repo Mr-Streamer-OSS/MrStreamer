@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createContext, runInContext } from "node:vm";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   profileSummary,
@@ -62,6 +63,11 @@ it("reports CDP session closure, supports listener disposal and settles pending 
   const late = vi.fn();
   page.onClose(late)();
   expect(late).toHaveBeenCalledOnce();
+  const afterClose = page.send("IO.close");
+  await vi.advanceTimersByTimeAsync(10_000);
+  await expect(afterClose).resolves.toMatchObject({
+    error: "DevTools connection closed",
+  });
   expect(vi.getTimerCount()).toBe(0);
 });
 
@@ -232,6 +238,29 @@ it("counts equal-start nested tasks outermost first regardless of event order", 
   });
 });
 
+it("keeps observed outer-task CPU and missing wall time separate from complete totals", () => {
+  const missing = { ...task };
+  delete missing.tdur;
+  const result = traceSummary(
+    [
+      metadata,
+      task,
+      { ...missing, ts: 5000, dur: 2000 },
+      { ...task, tid: 2, dur: 9000, tdur: 8000 },
+      { ...missing, tid: 2, ts: 10000 },
+      { ...missing, tid: 3 },
+      { ...task, tid: 4, tdur: 100 },
+    ],
+    7,
+  );
+  expect(result.threads.map((t) => t.cpu)).toEqual([
+    { status: "supported", ms: 0.1 },
+    { status: "partial", observedMs: 8, observedTasks: 1, missingTasks: 1, missingWallMs: 4 },
+    { status: "partial", observedMs: 3, observedTasks: 1, missingTasks: 1, missingWallMs: 2 },
+    { status: "unsupported", observedMs: 0, observedTasks: 0, missingTasks: 1, missingWallMs: 4 },
+  ]);
+});
+
 it.each([[], [metadata], [task], [{ ...metadata, pid: 8 }, task]].map((events) => ({ events })))(
   "rejects a trace without the expected renderer's main-thread tasks %#",
   ({ events }) => {
@@ -247,26 +276,33 @@ function capture(mode = "success", capturedProfile = profile(), events = [metada
   const listeners = new Map<string, (params: unknown) => void>();
   const closes = new Set<() => void>();
   const calls: string[] = [];
+  const closeTimeouts: number[] = [];
   let clock = 0;
   const page: Page = {
-    async send(method) {
+    async send(method, _params, timeoutMs) {
       calls.push(method);
+      if (method === "IO.close") closeTimeouts.push(timeoutMs!);
       if (method === "Profiler.stop") return { result: { profile: capturedProfile } };
       if (method === "Tracing.end") {
         if (mode === "end-error") return { error: "end refused" };
         if (mode === "invalid-completion") listeners.get("Tracing.tracingComplete")?.({});
         else if (mode === "closed") for (const listener of closes) listener();
         else if (mode !== "missing-completion")
-          listeners.get("Tracing.tracingComplete")?.({ stream: "trace-stream" });
+          listeners.get("Tracing.tracingComplete")?.({
+            stream: "trace-stream",
+            dataLossOccurred: mode === "data-loss",
+          });
       }
       if (method === "IO.read") {
-        if (mode === "read-error") return { error: "read refused" };
+        if (mode === "read-error" || mode === "read-and-close-error")
+          return { error: "read refused" };
         if (mode === "stream-deadline") {
           vi.advanceTimersByTime(60_001);
           return { result: { data: "partial", eof: false } };
         }
         return { result: { data: JSON.stringify({ traceEvents: events }), eof: true } };
       }
+      if (method === "IO.close" && mode.includes("close-error")) return { error: "close refused" };
       return { result: {} };
     },
     on(method, listener) {
@@ -301,7 +337,7 @@ function capture(mode = "success", capturedProfile = profile(), events = [metada
     list: vi.fn(),
     metrics: async () => [],
   };
-  return { context, page, directory, calls, listeners, closes };
+  return { context, page, directory, calls, closeTimeouts, listeners, closes };
 }
 
 it.each([
@@ -352,8 +388,108 @@ it("rejects a captured empty trace and retains its raw file", async () => {
   expect(peer.calls).toContain("IO.close");
 });
 
+it.each(["data-loss", "close-error", "read-and-close-error"])(
+  "rejects %s without losing capture or cleanup evidence",
+  async (mode) => {
+    const peer = capture(mode);
+    const record = steadyRecord();
+    const error = steadyProfiles(peer.context, record).catch((error: unknown) => error);
+    await vi.runAllTimersAsync();
+    const rejected = await error;
+    expect(rejected).toBeInstanceOf(Error);
+    if (mode === "data-loss") expect(String(rejected)).toContain("data loss");
+    if (mode.includes("close-error")) expect(String(rejected)).toContain("close refused");
+    if (mode === "read-and-close-error") expect(String(rejected)).toContain("read refused");
+    else
+      expect(
+        JSON.parse(readFileSync(`${peer.context.output}.steady-live.trace.json`, "utf8")),
+      ).toEqual({ traceEvents: [metadata, task] });
+    expect(record.windows).toEqual([]);
+    expect(peer.calls).toContain("IO.close");
+    expect(peer.closeTimeouts).toEqual([10_000]);
+    expect(peer.listeners.size + peer.closes.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
+/** Executes the probe's actual main-process expressions against an owned IPC registry. */
+function ipcPeer(peer: ReturnType<typeof capture>) {
+  let sizings = 0;
+  const handler = async () => ({
+    toJSON() {
+      sizings++;
+      return ["channels"];
+    },
+  });
+  const handlers = new Map([["library.browse", handler]]);
+  const runtime = createContext({
+    Buffer,
+    Map,
+    process: {
+      getBuiltinModule: () => ({
+        createRequire: () => () => ({ ipcMain: { _invokeHandlers: handlers } }),
+      }),
+      memoryUsage: () => ({}),
+    },
+  });
+  peer.context.main = {
+    ...peer.page,
+    async evaluate<T>(expression: string): Promise<T> {
+      return (await runInContext(expression, runtime)) as T;
+    },
+  };
+  return { handlers, handler, sizings: () => sizings };
+}
+
+it.each(["steady", "retention"])(
+  "restores original IPC handlers after a failed %s probe",
+  async (kind) => {
+    const peer = capture();
+    const ipc = ipcPeer(peer);
+    peer.context.list = async () => {
+      await ipc.handlers.get("library.browse")!();
+      throw new Error("list failed");
+    };
+    const result = expect(
+      kind === "steady"
+        ? steadyProfiles(peer.context, steadyRecord())
+        : queryRetention(peer.context, retentionRecord()),
+    ).rejects.toThrow("list failed");
+    await vi.runAllTimersAsync();
+    await result;
+    expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
+    const before = ipc.sizings();
+    await ipc.handlers.get("library.browse")!();
+    expect(ipc.sizings()).toBe(before);
+  },
+);
+
+it.each(["steady", "retention"])(
+  "retains capture and IPC cleanup failures for %s",
+  async (kind) => {
+    const peer = capture();
+    ipcPeer(peer);
+    peer.context.list = async () => {
+      peer.context.main.evaluate = async () => {
+        throw new Error("IPC cleanup unavailable");
+      };
+      throw new Error("primary capture failed");
+    };
+    const result = (
+      kind === "steady"
+        ? steadyProfiles(peer.context, steadyRecord())
+        : queryRetention(peer.context, retentionRecord())
+    ).catch((error: unknown) => error);
+    await vi.runAllTimersAsync();
+    const error = String(await result);
+    expect(error).toContain("primary capture failed");
+    expect(error).toContain("IPC cleanup unavailable");
+  },
+);
+
 it("records ISO wall-clock brackets for each profile and the separate trace", async () => {
   const peer = capture();
+  const ipc = ipcPeer(peer);
   const record = steadyRecord();
   const result = steadyProfiles(peer.context, record);
   await vi.runAllTimersAsync();
@@ -374,14 +510,26 @@ it("records ISO wall-clock brackets for each profile and the separate trace", as
     expect(Date.parse(window.trace.endedAt) - Date.parse(window.trace.startedAt)).toBe(20_000);
   }
   expect(peer.listeners.size + peer.closes.size).toBe(0);
+  expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
 });
 
 it("records calibrated renderer-observed retention returns", async () => {
   const peer = capture();
+  const ipc = ipcPeer(peer);
+  const timedSizings: number[] = [];
+  peer.context.list = async () => {
+    await ipc.handlers.get("library.browse")!();
+  };
   peer.page.evaluate = async <T>(expression: string): Promise<T> => {
     let result: unknown = true;
-    if (expression.includes("new Promise")) result = expression.includes('=== "Live TV"') ? 17 : 10;
-    else if (expression === "window.__calibrationActual") result = 10;
+    if (expression.includes("new Promise")) {
+      if (expression.includes('=== "Live TV"')) {
+        const before = ipc.sizings();
+        await ipc.handlers.get("library.browse")!();
+        timedSizings.push(ipc.sizings() - before);
+        result = 17;
+      } else result = 10;
+    } else if (expression === "window.__calibrationActual") result = 10;
     else if (expression.includes("getQueryCache().getAll()")) result = [];
     else if (expression.includes("Object.fromEntries")) result = {};
     else if (expression.includes("main h1")) result = "All channels";
@@ -400,10 +548,31 @@ it("records calibrated renderer-observed retention returns", async () => {
   expect(record.returnTiming).toMatchObject({
     method: "renderer-mutation-and-probe",
     configuredResolutionMs: 5,
+    ipcReplySizing: false,
   });
   expect(record.returnTiming.calibration).toHaveLength(24);
   expect(record.returns).toEqual([
-    { name: "warm return to Live TV", rowsShownMs: 17, ipc: {} },
-    { name: "cold return to Live TV", rowsShownMs: 17, ipc: {} },
+    {
+      name: "warm return to Live TV",
+      rowsShownMs: 17,
+      ipc: { "library.browse": expect.objectContaining({ calls: 1, replyBytes: 0 }) },
+    },
+    {
+      name: "cold return to Live TV",
+      rowsShownMs: 17,
+      ipc: { "library.browse": expect.objectContaining({ calls: 1, replyBytes: 0 }) },
+    },
   ]);
+  expect(timedSizings).toEqual([0, 0]);
+  expect(ipc.sizings()).toBe(1);
+  expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
+  await ipc.handlers.get("library.browse")!();
+  expect(ipc.sizings()).toBe(1);
+  const following = retentionRecord();
+  const again = queryRetention(peer.context, following);
+  await vi.runAllTimersAsync();
+  await again;
+  expect(following.returns).toEqual(record.returns);
+  expect(timedSizings).toEqual([0, 0, 0, 0]);
+  expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
 });
