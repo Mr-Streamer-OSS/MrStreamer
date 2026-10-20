@@ -725,6 +725,9 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
       audio: null,
       subtitle: null,
     });
+    const preflight = await fetch(first!.url, { method: "OPTIONS" });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("Access-Control-Allow-Headers")).toBe("Range");
     const lan = new URL(first!.url);
     const token = lan.pathname.split("/")[2]!;
     const status = async (path: string, method = "GET") =>
