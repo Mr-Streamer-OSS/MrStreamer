@@ -37,7 +37,16 @@ import type { OnDemandCatalogue, ProviderDetails, ProviderFile } from "@mrstream
 import type { Steps } from "@mrstreamer/core/steps";
 import { File, Paths } from "expo-file-system";
 import { useEffect, useSyncExternalStore } from "react";
-import { accountChanges, members, onRoster, savable, shownOf, type Member } from "./account.ts";
+import {
+  accountChanges,
+  members,
+  onReadingSaved,
+  onRoster,
+  readingSaved,
+  savable,
+  shownOf,
+  type Member,
+} from "./account.ts";
 import {
   readAbout,
   readSeason,
@@ -138,7 +147,7 @@ export function onTitleLists(listener: () => void): () => void {
  * The index of the lists that show, for a request about subscription `id`'s titles that doesn't
  * draw, such as a title's file, a download's details or the viewing record's series: at once
  * while lists show, and while they are made again with `id`'s in them, as after another
- * subscription's removal, once they show. Rejects at once with `signal`'s reason once it aborts,
+ * subscription's removal, or while a launch still reads `id`'s saved lists, once they show. Rejects at once with `signal`'s reason once it aborts,
  * and when `id` can't have its titles listed: no longer saved, not signed in, or with no lists,
  * its failure when they failed.
  */
@@ -158,12 +167,12 @@ export function listedIndex(id: string, signal: AbortSignal): Promise<IndexedCat
       if (!currentSource(id)) {
         return done(() => reject(new AppFailure({ kind: "needs-secret", subscriptionId: id })));
       }
-      if (shownOf(member.titles)) return;
+      if (shownOf(member.titles) || readingSaved("titles", id)) return;
       const error: AppError =
         member.titles.kind === "failed" ? member.titles.error : { kind: "no-subscription" };
       done(() => reject(new AppFailure(error)));
     };
-    const stops = [shown.subscribe(settle), onRoster(settle)];
+    const stops = [shown.subscribe(settle), onRoster(settle), onReadingSaved(settle)];
     signal.addEventListener("abort", settle);
     settle();
   });
@@ -242,18 +251,33 @@ function standing(all: readonly Member[]): Unlisted {
   };
 }
 
+/** Each subscription's lists that show, in the roster's order. */
+const listedOf = (all: readonly Member[]): Listed[] =>
+  all.flatMap((member) => {
+    const catalogue = shownOf(member.titles);
+    return catalogue ? [{ subscriptionId: member.entry.id, catalogue }] : [];
+  });
+
+/**
+ * Whether the lists that show, with their collections, were indexed of every subscription's lists
+ * that show: none still to come.
+ */
+export function titlesWorkedOut(): boolean {
+  const listed = listedOf(members());
+  const now = shown.get();
+  return listed.length === 0 || (now.made !== null && sameLists(now.listed, listed));
+}
+
 /**
  * Indexes the lists of every subscription that has them, whenever one's change: those that
  * failed or load again keep what they had. Until one has lists, the state says whether any is
  * still loading or why they failed, after every change of the subscriptions. A subscription the
- * lists that show were made of and that lists none now takes them with it at once.
+ * lists that show were made of and that lists none now takes them with it at once. While a launch
+ * still reads saved titles (`readingSaved`) nothing is indexed, so they are indexed once.
  */
 function relist() {
   const all = members();
-  const listed = all.flatMap((member) => {
-    const catalogue = shownOf(member.titles);
-    return catalogue ? [{ subscriptionId: member.entry.id, catalogue }] : [];
-  });
+  const listed = listedOf(all);
   const now = shown.get();
   const gone =
     now.made !== null &&
@@ -274,6 +298,14 @@ function relist() {
   }
   if (gone) shown.set({ lists: { kind: "loading" }, made: null });
   else if (sameLists(listed, indexed)) return;
+  // While a launch still reads saved titles, those already read wait for them: all are indexed
+  // together once, not again as each subscription's arrive.
+  if (readingSaved("titles")) {
+    indexed = [];
+    indexing?.abort();
+    indexing = null;
+    return;
+  }
   indexed = listed;
   indexing?.abort();
   const controller = new AbortController();
@@ -815,6 +847,7 @@ function forgetLogins() {
 
 onRoster(forgetLogins);
 onRoster(relist);
+onReadingSaved(relist);
 relist();
 
 serveViewing({
