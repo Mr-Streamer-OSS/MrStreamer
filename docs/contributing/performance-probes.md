@@ -91,6 +91,52 @@ samples, including idle/program frames; they exclude other worker isolates, nati
 GPU and painted frames. The existing `pnpm verify:desktop guide-grid-scroll` remains the deeper
 20k-channel/two-day renderer/frame diagnostic. Native scroll/paint acceptance stays separate.
 
+## Attribution probes
+
+The idle windows say how much CPU each process uses; they cannot say what runs. Two optional
+probes attribute recurring work and retained query data in the same instance, after any idle
+windows and before `--live-profile`. Both read private runtime structures for diagnosis only,
+Electron's `ipcMain` invoke registry and React's root container fiber, as `--covered-idle` does.
+A missing structure fails the capture instead of reporting zero.
+
+`--steady-profile` keeps a channel playing and observes three states in turn: Live TV All
+channels with its compact preview, Watch over that page, and Home's muted preview. Each gets a
+60-second main and renderer V8 profile at 1,000 microseconds with the invoke calls made during it,
+then a separate 20-second Chromium trace with the profiler stopped. Profiles are summarized by
+function self time with their three heaviest stacks; `(idle)`, `(program)` and
+`(garbage collector)` stay separate, and program time is native renderer work outside JS. Traces
+report each thread's outer-task thread time and the renderer main thread's inclusive timeline
+events and script entry points. Thread time covers traced tasks only; work outside them is not
+attributed, and a task without thread time makes its thread unsupported. The profiler and
+tracing add work, so these windows explain where time goes, not how much an idle window costs.
+
+`--query-retention` browses All channels, every topic, the first four provider lists of the
+first country, the guide grid and one country filter applied and cleared, then opens one details
+sheet in Movies and in Series. At each lifecycle point it records the renderer's React Query
+entries with their observers, activity, `gcTime` and the JSON UTF-8 size of their data; renderer
+and main V8 heaps after two collections; main's `process.memoryUsage()`; Electron's per-process
+working sets; and the invoke calls and JSON reply sizes since the previous point. The points are
+the churn's start and end, Home, Home after a timed warm return to Live TV, Home once the longest
+inactive query's own `gcTime` plus 15 seconds has passed, and Live TV after a timed cold return.
+One renderer heap snapshot is retained at the point of most inactive data. JSON size is a
+serialization measure, not heap retention; heaps exclude worker isolates; working sets include
+native allocations and are not heap. The fixture holds only synthetic data.
+
+Run them separately from the idle calibration when CPU windows matter, for example:
+
+```sh
+xvfb-run -a node apps/desktop/test/e2e/measure-app.ts \
+  --runs 1 --subscriptions 2 --steady-profile --query-retention --diagnostics-only \
+  --revision <measured-build-sha> --json .local/measurements/attribution.json \
+  apps/desktop/node_modules/electron/dist/electron -- --no-sandbox <frozen-app-directory>
+```
+
+Profiles, traces and the snapshot sit beside the probe file as
+`<json>.probes.json.steady-<state>.<main|renderer>.cpuprofile`,
+`<json>.probes.json.steady-<state>.trace.json` and `<json>.probes.json.retention.heapsnapshot`.
+Each steady window and retention point is saved to the probe file as it completes, so a failed
+capture keeps what it observed.
+
 `<json>.probes.json` checkpoints every raw sample and retains full hashes for the runtime
 folder and the app's package/output files, process/runtime identity, calibration and failures.
 The hashes are rechecked after success. The main output retains host/tool/build metadata,
