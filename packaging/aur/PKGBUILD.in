@@ -37,8 +37,6 @@ prepare() {
 }
 
 check() {
-  bsdtar -xOf control.tar.xz ./control | grep -Fx "Version: ${_upstream_version//-/\~}"
-  bsdtar -xOf control.tar.xz ./control | grep -Fx 'Architecture: amd64'
   test -f 'payload/opt/Mr. Streamer/resources/app.asar'
   local tool
   for tool in mrstreamer chrome-sandbox resources/ffmpeg/ffmpeg resources/ffmpeg/ffprobe; do
@@ -48,6 +46,10 @@ check() {
 }
 
 package() {
+  # Metadata must match even when makepkg --nocheck skips check().
+  bsdtar -xOf control.tar.xz ./control | grep -Fx "Version: ${_upstream_version//-/\~}"
+  bsdtar -xOf control.tar.xz ./control | grep -Fx 'Architecture: amd64'
+
   local app="$pkgdir/opt/Mr. Streamer"
   install -dm755 "$pkgdir/opt" "$pkgdir/usr/bin"
   cp -a 'payload/opt/Mr. Streamer' "$app"

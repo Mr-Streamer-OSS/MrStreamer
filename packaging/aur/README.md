@@ -27,6 +27,8 @@ do not accept arbitrary asset hosts, moving tags such as `latest`, or arbitrary 
 The deb asset uses the upstream `linux-amd64.deb` name, while Arch's architecture is `x86_64`.
 The pinned builder replaces `-` with `~` only in the embedded Debian control version; release
 tags, asset filenames and download URLs keep the upstream hyphens.
+`package()` checks the embedded Debian version and architecture before copying payload files,
+including when `makepkg --nocheck` skips `check()`.
 `mrstreamer-LICENSE` is a download alias so it cannot collide with this recipe's 0BSD `LICENSE`.
 The packaged application's license remains GPL-3.0-only; the bundled components keep their notices.
 

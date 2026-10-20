@@ -162,7 +162,7 @@ and namcap recipe lint pass. Archive inspection verifies every retained upstream
 root ownership, directory modes, sandbox 4755, launcher/license links and package metadata.
 The marker has exact bytes `{"schema":1,"updates":"pacman"}` followed by a newline, mode 0644
 and root ownership. Native mismatched-version and wrong-architecture checks abort before
-packaging. Validation and receipt details are recorded on the
+payload copying, including with `--nocheck`. Validation and receipt details are recorded on the
 [AUR card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=262338894).
 These historical inspection packages were neither installed nor
 launched. Their marker proves packaging execution only; actual marker-aware .18 archive,
