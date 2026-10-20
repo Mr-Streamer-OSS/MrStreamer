@@ -9,7 +9,27 @@ Public user documentation and website activation wait for checked public availab
 `PKGBUILD.in` owns the native package layout. The package-update preparation card
 ([276993052](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=276993052))
 owns the **one shared renderer** for AUR and Homebrew. This directory adds no release discovery,
-publishing workflow or generic renderer. Its output contract is:
+publishing workflow or generic renderer. Run it from the checkout:
+
+```sh
+node apps/desktop/scripts/package-updates.ts render --version 0.0.18 \
+  --out .local/package-updates/stable-0.0.18
+# Offline, inside the unprivileged clean Arch builder:
+node apps/desktop/scripts/package-updates.ts srcinfo --dir <rendered-directory>
+```
+
+See [package updates](../../docs/maintainers/releasing.md#package-updates) for
+candidate `--candidate <nightly> --run <id>`, positive `--pkgrel`, exact input checks
+and the three-day candidate receipt window. Render needs only the existing
+read-only GitHub login, never AUR credentials. Each output leaf must be new.
+`preparation.json` is written last, with deterministic output hashes and
+`native: null`. The offline step validates it and the PKGBUILD digest for
+consistency, generates identical metadata twice, checks its version/revision/deb
+URL/hash and candidate ordering, then records native completion. Missing native
+tools leave it incomplete without writing `.SRCINFO`. makepkg sources the local
+PKGBUILD as usual; the digest comparison is not a security boundary.
+
+Its output contract is:
 
 | Literal token          | Required value                                                           |
 | ---------------------- | ------------------------------------------------------------------------ |
