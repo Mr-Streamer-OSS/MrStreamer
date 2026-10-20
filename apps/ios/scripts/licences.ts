@@ -17,8 +17,9 @@
 //   node scripts/licences.ts                writes src/licences.json
 //   node scripts/licences.ts --check        fails when src/licences.json isn't what it would write
 //   node scripts/licences.ts --check --pods ios/Podfile.lock
-//                                           also fails when a pod the native project links has
-//                                           no notice (testflight.sh, after prebuild)
+//                                           also fails when a pod the native project links isn't
+//                                           one Licences describes, at its version
+//                                           (scripts/native-pods.ts; testflight.sh, after prebuild)
 //   node scripts/licences.ts --fetch        downloads the manifest's texts into licences/texts
 //                                           at their pinned tags, after the manifest changed
 import { type } from "arktype";
@@ -38,8 +39,17 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import type { Component, Fact, Licences, Notice } from "../src/licences.ts";
+import {
+  app,
+  PackageJson,
+  packageRoot,
+  pinProblems,
+  readManifest,
+  type TextSource,
+  type Manifest,
+} from "./licence-manifest.ts";
+import { podProblems } from "./native-pods.ts";
 
-const app = resolve(import.meta.dirname, "..");
 const repository = resolve(app, "../..");
 const output = join(app, "src/licences.json");
 const texts = join(app, "licences/texts");
@@ -47,37 +57,6 @@ const APP_SOURCE = "https://github.com/Mr-Streamer-OSS/MrStreamer";
 
 /** A file named as a licence, notice or patent grant is: LICENSE, LICENSE.md, COPYING, NOTICE… */
 const LICENCE_FILE = /^(?:licen[cs]e|copying|notice|patents|unlicense)(?:[-._].*)?$/i;
-
-const TextSource = type({
-  repo: "string",
-  ref: "string",
-  path: "string",
-  "lines?": ["number", "number"],
-});
-type TextSource = typeof TextSource.infer;
-
-const Manifest = type({
-  "$comment?": "string",
-  components: type({
-    name: "string",
-    version: "string",
-    licence: "string",
-    source: "string",
-    "facts?": type({ label: "string", value: "string" }).array(),
-    pins: type({ file: "string", text: "string" }).array(),
-    "configuration?": { file: "string", from: "string", to: "string", without: "string[]" },
-    "pods?": "string[]",
-    texts: TextSource.array(),
-  }).array(),
-  packages: type({ "[string]": { reason: "string", texts: TextSource.array() } }),
-});
-type Manifest = typeof Manifest.infer;
-
-const PackageJson = type({
-  name: "string",
-  version: "string",
-  "license?": "unknown",
-});
 
 const SourceMap = type({ sections: type({ map: { sources: "string[]" } }).array() });
 
@@ -99,17 +78,6 @@ const ReactNativeConfig = type({
 function fail(message: string): never {
   console.error(`licences: ${message}`);
   process.exit(1);
-}
-
-/** The directory of the package a path inside node_modules belongs to. */
-function packageRoot(file: string): string | null {
-  const at = file.lastIndexOf(`node_modules${sep}`);
-  if (at < 0) return null;
-  const [scope, name] = file.slice(at + `node_modules${sep}`.length).split(sep);
-  if (!scope) return null;
-  return (
-    file.slice(0, at) + join("node_modules", scope.startsWith("@") ? `${scope}/${name}` : scope)
-  );
 }
 
 /** The licence files in `dir`, sorted. */
@@ -305,15 +273,8 @@ function packageComponent(
 
 /** A manifest component, once its pins hold. */
 function nativeComponent(store: TextStore, entry: Manifest["components"][number]): Component {
-  for (const pin of entry.pins) {
-    const file = join(app, pin.file);
-    if (!existsSync(file)) fail(`${entry.name}'s pin ${pin.file} is missing`);
-    if (!readFileSync(file, "utf8").includes(pin.text)) {
-      fail(
-        `${pin.file} no longer has "${pin.text}": ${entry.name} changed. Update licences/manifest.json and run with --fetch.`,
-      );
-    }
-  }
+  const drifted = pinProblems(entry.name, entry.pins);
+  if (drifted.length) fail(`${drifted.join("\n")} Then run with --fetch.`);
   const notices: Notice[] = [];
   if (entry.configuration) {
     const { file, from, to, without } = entry.configuration;
@@ -365,6 +326,16 @@ function appComponent(store: TextStore): Component {
 
 /** Everything Settings shows, in order. */
 function generate(manifest: Manifest): Licences {
+  const { aggregate, generated } = manifest;
+  const drifted = [
+    ...pinProblems(aggregate.pod, aggregate.pins),
+    ...pinProblems("React Native's generated pods", generated.pins),
+  ];
+  if (drifted.length) fail(drifted.join("\n"));
+  const unknown = aggregate.components.filter(
+    (name) => !manifest.components.some((entry) => entry.name === name),
+  );
+  if (unknown.length) fail(`${aggregate.pod} names unknown components: ${unknown.join(", ")}`);
   const store = new TextStore();
   const patched = patches();
   const used = new Set<string>();
@@ -388,64 +359,6 @@ function generate(manifest: Manifest): Licences {
     components: [appComponent(store), ...components],
     texts: Object.fromEntries([...store.byKey].sort(([a], [b]) => a.localeCompare(b, "en"))),
   };
-}
-
-/**
- * Fails when a pod in `lockfile` has no notice: each must be one of the manifest's pods, the app's
- * own modules, react-native's or a package Licences lists as native code. A pod's external source
- * says where it comes from; one without (from the CocoaPods specs) must be in the manifest.
- */
-function checkPods(lockfile: string, licences: Licences, manifest: Manifest) {
-  const text = `\n${readFileSync(lockfile, "utf8")}`;
-  const section = (name: string) => {
-    const start = text.indexOf(`\n${name}:\n`);
-    if (start < 0) return "";
-    const end = text.indexOf("\n\n", start + 1);
-    return text.slice(start, end < 0 ? undefined : end);
-  };
-  const pods = new Set(
-    [...section("PODS").matchAll(/^ {2}- "?([^\s"/]+)/gm)].map((match) => match[1] ?? ""),
-  );
-  if (pods.size === 0) fail(`${lockfile} lists no pods`);
-  const sources = new Map(
-    [
-      ...section("EXTERNAL SOURCES").matchAll(
-        /^ {2}"?([^:"\n]+)"?:\n {4}:(?:path|podspec): "?([^"\n]+)"?/gm,
-      ),
-    ].map((match) => [match[1] ?? "", match[2] ?? ""] as const),
-  );
-  const fromManifest = new Set(manifest.components.flatMap((entry) => entry.pods ?? []));
-  const native = new Set(
-    licences.components
-      .filter((each) =>
-        each.facts.some((fact) => fact.label === "In the app" && fact.value !== "JavaScript"),
-      )
-      .map((each) => each.name),
-  );
-  const project = dirname(resolve(lockfile));
-  const unowned: string[] = [];
-  for (const pod of [...pods].sort()) {
-    if (fromManifest.has(pod)) continue;
-    const source = sources.get(pod);
-    if (!source) {
-      unowned.push(`${pod} (from the CocoaPods specs)`);
-      continue;
-    }
-    const path = resolve(project, source);
-    // The app's modules, and what React Native's codegen generates into the native project.
-    if (!relative(join(app, "modules"), path).startsWith("..")) continue;
-    if (!relative(project, path).startsWith("..")) continue;
-    if (!existsSync(path)) fail(`${pod}'s source ${source} is missing`);
-    const root = packageRoot(realpathSync(path));
-    const name = root
-      ? PackageJson.assert(JSON.parse(readFileSync(join(root, "package.json"), "utf8"))).name
-      : null;
-    if (!name || !native.has(name)) unowned.push(`${pod} (${source})`);
-  }
-  if (unowned.length) {
-    fail(`the native project links pods Licences has no notice for:\n  ${unowned.join("\n  ")}`);
-  }
-  console.log(`licences: all ${pods.size} pods in ${lockfile} have their notices`);
 }
 
 /** Downloads every manifest text at its pinned ref. */
@@ -476,25 +389,25 @@ async function fetchTexts(manifest: Manifest) {
 const { values } = parseArgs({
   options: { check: { type: "boolean" }, pods: { type: "string" }, fetch: { type: "boolean" } },
 });
-const manifest = Manifest.assert(
-  JSON.parse(readFileSync(join(app, "licences/manifest.json"), "utf8")),
-);
+const manifest = readManifest();
 if (values.fetch) {
   await fetchTexts(manifest);
 } else {
-  // The bundle imports the file it is about to describe: give a first run something to import.
-  if (!existsSync(output))
-    writeFileSync(output, `${JSON.stringify({ components: [], texts: {} })}\n`);
-  const licences = generate(manifest);
-  const json = `${JSON.stringify(licences, null, 2)}\n`;
-  if (values.check) {
-    if (readFileSync(output, "utf8") !== json) {
+  if (values.check || !values.pods) {
+    // The bundle imports the file it is about to describe: give a first run something to import.
+    if (!existsSync(output))
+      writeFileSync(output, `${JSON.stringify({ components: [], texts: {} })}\n`);
+    const json = `${JSON.stringify(generate(manifest), null, 2)}\n`;
+    if (!values.check) writeFileSync(output, json);
+    else if (readFileSync(output, "utf8") !== json) {
       fail("src/licences.json is out of date: run node scripts/licences.ts and commit it");
     }
-    console.log(`licences: src/licences.json is current, ${licences.components.length} components`);
-  } else {
-    writeFileSync(output, json);
-    console.log(`licences: wrote ${licences.components.length} components to src/licences.json`);
+    console.log(`licences: src/licences.json is ${values.check ? "current" : "written"}`);
   }
-  if (values.pods) checkPods(values.pods, licences, manifest);
+  if (values.pods) {
+    const committed: Licences = JSON.parse(readFileSync(output, "utf8"));
+    const problems = podProblems(values.pods, committed, manifest);
+    if (problems.length) fail(`${values.pods} doesn't match Licences:\n  ${problems.join("\n  ")}`);
+    console.log(`licences: every pod in ${values.pods} has its notices`);
+  }
 }

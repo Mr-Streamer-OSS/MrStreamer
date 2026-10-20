@@ -296,7 +296,9 @@ and `licences/manifest.json`, which pins what isn't an npm package (FFmpeg with 
 flags, Hermes and React Native's third-party pods) and texts packages were published without. A
 package with no licence text, or a pin that no longer matches, fails it. Run it after a dependency,
 patch or FFmpeg change and commit the result; `testflight.sh archive` runs it with `--check`
-against the native project's `Podfile.lock` and refuses a stale file or a pod with no notice.
+against the native project's `Podfile.lock` (`scripts/native-pods.ts`) and refuses a stale file,
+a pod Licences doesn't describe, one at another version than Licences shows, or one inside the
+native project that React Native doesn't generate there.
 
 ## What Hermes lacks
 

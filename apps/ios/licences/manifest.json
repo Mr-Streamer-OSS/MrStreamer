@@ -17,7 +17,10 @@
         }
       ],
       "pins": [
-        { "file": "scripts/build-ffmpeg.sh", "text": "FFMPEG_VERSION=9.0.2" },
+        {
+          "file": "scripts/build-ffmpeg.sh",
+          "text": "FFMPEG_VERSION=9.0.2"
+        },
         {
           "file": "scripts/build-ffmpeg.sh",
           "text": "FFMPEG_SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
@@ -38,8 +41,16 @@
         "without": ["--enable-gpl", "--enable-version3", "--enable-nonfree"]
       },
       "texts": [
-        { "repo": "FFmpeg/FFmpeg", "ref": "n9.0.2", "path": "LICENSE.md" },
-        { "repo": "FFmpeg/FFmpeg", "ref": "n9.0.2", "path": "COPYING.LGPLv2.1" }
+        {
+          "repo": "FFmpeg/FFmpeg",
+          "ref": "n9.0.2",
+          "path": "LICENSE.md"
+        },
+        {
+          "repo": "FFmpeg/FFmpeg",
+          "ref": "n9.0.2",
+          "path": "COPYING.LGPLv2.1"
+        }
       ]
     },
     {
@@ -55,7 +66,11 @@
       ],
       "pods": ["hermes-engine"],
       "texts": [
-        { "repo": "facebook/hermes", "ref": "hermes-v260318099.0.4", "path": "LICENSE" },
+        {
+          "repo": "facebook/hermes",
+          "ref": "hermes-v260318099.0.4",
+          "path": "LICENSE"
+        },
         {
           "repo": "facebook/hermes",
           "ref": "hermes-v260318099.0.4",
@@ -86,6 +101,18 @@
           "repo": "facebook/hermes",
           "ref": "hermes-v260318099.0.4",
           "path": "external/boost/boost_1_86_0/LICENSE_1_0.txt"
+        },
+        {
+          "repo": "facebook/hermes",
+          "ref": "hermes-v260318099.0.4",
+          "path": "external/dragonbox/dragonbox/dragonbox.h",
+          "lines": [1, 16]
+        },
+        {
+          "repo": "facebook/hermes",
+          "ref": "hermes-v260318099.0.4",
+          "path": "external/fast_float/fast_float/fast_float.h",
+          "lines": [1, 92]
         }
       ]
     },
@@ -100,7 +127,7 @@
           "text": "spec.version = '1.84.0'"
         }
       ],
-      "pods": ["boost", "ReactNativeDependencies"],
+      "pods": ["boost"],
       "texts": [
         {
           "repo": "react-native-community/boost-for-react-native",
@@ -120,8 +147,14 @@
           "text": "spec.version = '1.1.6'"
         }
       ],
-      "pods": ["DoubleConversion", "ReactNativeDependencies"],
-      "texts": [{ "repo": "google/double-conversion", "ref": "v1.1.6", "path": "LICENSE" }]
+      "pods": ["DoubleConversion"],
+      "texts": [
+        {
+          "repo": "google/double-conversion",
+          "ref": "v1.1.6",
+          "path": "LICENSE"
+        }
+      ]
     },
     {
       "name": "fast_float",
@@ -134,11 +167,23 @@
           "text": "spec.version = \"8.0.0\""
         }
       ],
-      "pods": ["fast_float", "ReactNativeDependencies"],
+      "pods": ["fast_float"],
       "texts": [
-        { "repo": "fastfloat/fast_float", "ref": "v8.0.0", "path": "LICENSE-MIT" },
-        { "repo": "fastfloat/fast_float", "ref": "v8.0.0", "path": "LICENSE-APACHE" },
-        { "repo": "fastfloat/fast_float", "ref": "v8.0.0", "path": "LICENSE-BOOST" }
+        {
+          "repo": "fastfloat/fast_float",
+          "ref": "v8.0.0",
+          "path": "LICENSE-MIT"
+        },
+        {
+          "repo": "fastfloat/fast_float",
+          "ref": "v8.0.0",
+          "path": "LICENSE-APACHE"
+        },
+        {
+          "repo": "fastfloat/fast_float",
+          "ref": "v8.0.0",
+          "path": "LICENSE-BOOST"
+        }
       ]
     },
     {
@@ -152,8 +197,14 @@
           "text": "spec.version = \"12.1.0\""
         }
       ],
-      "pods": ["fmt", "ReactNativeDependencies"],
-      "texts": [{ "repo": "fmtlib/fmt", "ref": "12.1.0", "path": "LICENSE" }]
+      "pods": ["fmt"],
+      "texts": [
+        {
+          "repo": "fmtlib/fmt",
+          "ref": "12.1.0",
+          "path": "LICENSE"
+        }
+      ]
     },
     {
       "name": "folly",
@@ -166,8 +217,14 @@
           "text": ":version => '2024.11.18.00'"
         }
       ],
-      "pods": ["RCT-Folly", "ReactNativeDependencies"],
-      "texts": [{ "repo": "facebook/folly", "ref": "v2024.11.18.00", "path": "LICENSE" }]
+      "pods": ["RCT-Folly"],
+      "texts": [
+        {
+          "repo": "facebook/folly",
+          "ref": "v2024.11.18.00",
+          "path": "LICENSE"
+        }
+      ]
     },
     {
       "name": "glog",
@@ -180,8 +237,14 @@
           "text": "spec.version = '0.3.5'"
         }
       ],
-      "pods": ["glog", "ReactNativeDependencies"],
-      "texts": [{ "repo": "google/glog", "ref": "v0.3.5", "path": "COPYING" }]
+      "pods": ["glog"],
+      "texts": [
+        {
+          "repo": "google/glog",
+          "ref": "v0.3.5",
+          "path": "COPYING"
+        }
+      ]
     },
     {
       "name": "SocketRocket",
@@ -194,39 +257,169 @@
           "text": ":version => '0.7.1'"
         }
       ],
-      "pods": ["SocketRocket", "ReactNativeDependencies"],
+      "pods": ["SocketRocket"],
       "texts": [
-        { "repo": "facebookincubator/SocketRocket", "ref": "0.7.1", "path": "LICENSE" },
-        { "repo": "facebookincubator/SocketRocket", "ref": "0.7.1", "path": "PATENTS" }
+        {
+          "repo": "facebookincubator/SocketRocket",
+          "ref": "0.7.1",
+          "path": "LICENSE"
+        },
+        {
+          "repo": "facebookincubator/SocketRocket",
+          "ref": "0.7.1",
+          "path": "PATENTS"
+        }
       ]
     }
   ],
+  "aggregate": {
+    "$comment": "React Native's prebuilt dependencies: one pod carrying these components, versioned as react-native.",
+    "pod": "ReactNativeDependencies",
+    "versionOf": "react-native",
+    "components": [
+      "boost",
+      "double-conversion",
+      "fast_float",
+      "fmt",
+      "folly",
+      "glog",
+      "SocketRocket"
+    ],
+    "pins": [
+      {
+        "file": "node_modules/react-native/scripts/react_native_pods.rb",
+        "text": "pod 'ReactNativeDependencies', :podspec => \"#{prefix}/third-party-podspecs/ReactNativeDependencies.podspec\""
+      },
+      {
+        "file": "node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec",
+        "text": "version = package['version']"
+      }
+    ]
+  },
+  "generated": {
+    "$comment": "Pods React Native generates inside the native project, react-native's code: its codegen's and its prebuilt core's facades. Each is accepted only from this directory. The dependency facades (build/rndeps-facades) belong to the components above.",
+    "pods": {
+      "ReactCodegen": "build/generated/ios/ReactCodegen",
+      "ReactAppDependencyProvider": "build/generated/ios/ReactAppDependencyProvider",
+      "React-Core": "build/rncore-facades/React-Core",
+      "React-RCTFabric": "build/rncore-facades/React-RCTFabric",
+      "React-RCTRuntime": "build/rncore-facades/React-RCTRuntime",
+      "Yoga": "build/rncore-facades/Yoga",
+      "RCTDeprecation": "build/rncore-facades/RCTDeprecation",
+      "FBLazyVector": "build/rncore-facades/FBLazyVector",
+      "RCTRequired": "build/rncore-facades/RCTRequired"
+    },
+    "pins": [
+      {
+        "file": "node_modules/react-native/scripts/react_native_pods.rb",
+        "text": "$CODEGEN_OUTPUT_DIR = 'build/generated/ios/ReactCodegen'"
+      },
+      {
+        "file": "node_modules/react-native/scripts/react_native_pods.rb",
+        "text": "$APP_DEPENDENCY_PROVIDER_OUTPUT_DIR = 'build/generated/ios/ReactAppDependencyProvider'"
+      },
+      {
+        "file": "node_modules/react-native/scripts/cocoapods/rncore_facades.rb",
+        "text": "FACADE_RELDIR = File.join(\"build\", \"rncore-facades\")"
+      },
+      {
+        "file": "node_modules/react-native/scripts/cocoapods/rndeps_facades.rb",
+        "text": "FACADE_RELDIR = File.join(\"build\", \"rndeps-facades\")"
+      },
+      {
+        "file": "node_modules/react-native/scripts/cocoapods/rncore_facades.rb",
+        "text": "\"React-Core\"       => \"React-Core.podspec\""
+      },
+      {
+        "file": "node_modules/react-native/scripts/cocoapods/rncore_facades.rb",
+        "text": "\"React-RCTFabric\"  => \"React/React-RCTFabric.podspec\""
+      },
+      {
+        "file": "node_modules/react-native/scripts/cocoapods/rncore_facades.rb",
+        "text": "\"React-RCTRuntime\" => \"React/Runtime/React-RCTRuntime.podspec\""
+      },
+      {
+        "file": "node_modules/react-native/scripts/cocoapods/rncore_facades.rb",
+        "text": "\"Yoga\"             => \"ReactCommon/yoga/Yoga.podspec\""
+      },
+      {
+        "file": "node_modules/react-native/scripts/cocoapods/rncore_facades.rb",
+        "text": "\"RCTDeprecation\"   => \"ReactApple/Libraries/RCTFoundation/RCTDeprecation/RCTDeprecation.podspec\""
+      },
+      {
+        "file": "node_modules/react-native/scripts/cocoapods/rncore_facades.rb",
+        "text": "\"FBLazyVector\"     => \"Libraries/FBLazyVector/FBLazyVector.podspec\""
+      },
+      {
+        "file": "node_modules/react-native/scripts/cocoapods/rncore_facades.rb",
+        "text": "\"RCTRequired\"      => \"Libraries/Required/RCTRequired.podspec\""
+      }
+    ]
+  },
   "packages": {
     "@react-native/asset-utils@0.88.0-rc.4": {
       "reason": "Published without its repository's licence file.",
-      "texts": [{ "repo": "react/react-native", "ref": "v0.88.0-rc.4", "path": "LICENSE" }]
+      "texts": [
+        {
+          "repo": "react/react-native",
+          "ref": "v0.88.0-rc.4",
+          "path": "LICENSE"
+        }
+      ]
     },
     "@react-native/js-polyfills@0.88.0-rc.4": {
       "reason": "Published without its repository's licence file.",
-      "texts": [{ "repo": "react/react-native", "ref": "v0.88.0-rc.4", "path": "LICENSE" }]
+      "texts": [
+        {
+          "repo": "react/react-native",
+          "ref": "v0.88.0-rc.4",
+          "path": "LICENSE"
+        }
+      ]
     },
     "@react-native/normalize-colors@0.88.0-rc.4": {
       "reason": "Published without its repository's licence file.",
-      "texts": [{ "repo": "react/react-native", "ref": "v0.88.0-rc.4", "path": "LICENSE" }]
+      "texts": [
+        {
+          "repo": "react/react-native",
+          "ref": "v0.88.0-rc.4",
+          "path": "LICENSE"
+        }
+      ]
     },
     "@react-native/virtualized-lists@0.88.0-rc.4": {
       "reason": "Published without its repository's licence file.",
-      "texts": [{ "repo": "react/react-native", "ref": "v0.88.0-rc.4", "path": "LICENSE" }]
+      "texts": [
+        {
+          "repo": "react/react-native",
+          "ref": "v0.88.0-rc.4",
+          "path": "LICENSE"
+        }
+      ]
     },
     "expo-router@58.0.18": {
       "reason": "Published without its repository's licence file.",
-      "texts": [{ "repo": "expo/expo", "ref": "expo-router@58.0.18", "path": "LICENSE" }]
+      "texts": [
+        {
+          "repo": "expo/expo",
+          "ref": "expo-router@58.0.18",
+          "path": "LICENSE"
+        }
+      ]
     },
     "metro-runtime@0.87.1": {
       "reason": "Published without its repository's licence file; src/modules/vendor/eventemitter3.js is EventEmitter3, whose notice it leaves out.",
       "texts": [
-        { "repo": "react/metro", "ref": "v0.87.1", "path": "LICENSE" },
-        { "repo": "primus/eventemitter3", "ref": "5.0.1", "path": "LICENSE" }
+        {
+          "repo": "react/metro",
+          "ref": "v0.87.1",
+          "path": "LICENSE"
+        },
+        {
+          "repo": "primus/eventemitter3",
+          "ref": "5.0.1",
+          "path": "LICENSE"
+        }
       ]
     },
     "standard-navigation@0.0.5": {
