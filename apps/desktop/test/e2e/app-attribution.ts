@@ -5,7 +5,7 @@
 // internal invalidates the capture rather than reporting zero work or zero bytes.
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import type { ProcessMetric } from "electron";
-import { delay, key, waitFor, type Page } from "./app.ts";
+import { calibrate, delay, key, observe, waitFor, type Page } from "./app.ts";
 
 const STEADY_PROFILE_MS = 60_000;
 const STEADY_TRACE_MS = 20_000;
@@ -63,24 +63,64 @@ export type AttributionContext = {
   metrics(): Promise<ProcessMetric[]>;
 };
 
-async function command<T>(page: Page, method: string, params: Record<string, unknown> = {}) {
-  const reply = await page.send(method, params, 120_000);
+async function command<T>(
+  page: Page,
+  method: string,
+  params: Record<string, unknown> = {},
+  timeoutMs = 120_000,
+) {
+  const reply = await page.send(method, params, timeoutMs);
   if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
   return reply.result as T;
 }
 
 /**
  * V8 self time by function, with its heaviest stacks. `(idle)`, `(program)` and
- * `(garbage collector)` stay separate: program is native embedder work outside JS, not idle.
+ * `(garbage collector)` stay separate: program is outside attributed JS, not a native CPU owner.
  */
 export function profileSummary(profile: CpuProfile, top = 25) {
+  if (
+    !Number.isFinite(profile?.startTime) ||
+    !Number.isFinite(profile.endTime) ||
+    profile.endTime <= profile.startTime ||
+    !profile.nodes?.length ||
+    !profile.samples?.length ||
+    profile.timeDeltas?.length !== profile.samples.length ||
+    !profile.timeDeltas.every((us) => Number.isFinite(us) && us >= 0) ||
+    !Number.isFinite(profile.timeDeltas.reduce((sum, us) => sum + us, 0)) ||
+    !profile.timeDeltas.some((us) => us > 0)
+  )
+    throw new Error("Invalid CPU profile interval, nodes, samples or time deltas");
   const byId = new Map(profile.nodes.map((node) => [node.id, node]));
+  if (
+    byId.size !== profile.nodes.length ||
+    profile.nodes.some(
+      (node) =>
+        !Number.isInteger(node.id) ||
+        typeof node.callFrame?.functionName !== "string" ||
+        typeof node.callFrame.url !== "string" ||
+        !Number.isFinite(node.callFrame.lineNumber),
+    ) ||
+    profile.samples.some((id) => !byId.has(id))
+  )
+    throw new Error("Invalid CPU profile nodes or sample references");
   const parent = new Map<number, number>();
   for (const node of profile.nodes)
-    for (const child of node.children ?? []) parent.set(child, node.id);
+    for (const child of node.children ?? []) {
+      if (!byId.has(child) || parent.has(child))
+        throw new Error("Invalid CPU profile child reference");
+      parent.set(child, node.id);
+    }
+  for (const node of profile.nodes) {
+    const seen = new Set<number>();
+    for (let at: number | undefined = node.id; at !== undefined; at = parent.get(at)) {
+      if (seen.has(at)) throw new Error("Cyclic CPU profile ancestry");
+      seen.add(at);
+    }
+  }
   const self = new Map<number, number>();
   profile.samples.forEach((id, index) =>
-    self.set(id, (self.get(id) ?? 0) + (profile.timeDeltas[index] ?? 0)),
+    self.set(id, (self.get(id) ?? 0) + profile.timeDeltas[index]!),
   );
   const sampledUs = [...self.values()].reduce((sum, value) => sum + value, 0);
   const special = { "(idle)": 0, "(program)": 0, "(garbage collector)": 0, "(root)": 0 };
@@ -149,6 +189,7 @@ export function profileSummary(profile: CpuProfile, top = 25) {
  * thread whose tasks lack `tdur` is unsupported rather than zero.
  */
 export function traceSummary(events: readonly TraceEvent[], rendererPid: number, top = 25) {
+  if (!Array.isArray(events) || !events.length) throw new Error("Empty or missing renderer trace");
   const processes = new Map<number, string>();
   const threads = new Map<string, string>();
   for (const event of events) {
@@ -160,11 +201,13 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
   const tasks = new Map<string, TraceEvent[]>();
   for (const event of events)
     if (event.ph === "X" && TOP_LEVEL_TASKS.has(event.name)) {
+      if (!Number.isFinite(event.ts) || !Number.isFinite(event.dur) || event.dur! < 0)
+        throw new Error("Invalid trace task interval");
       const thread = `${event.pid}:${event.tid}`;
       tasks.set(thread, [...(tasks.get(thread) ?? []), event]);
     }
   const perThread = [...tasks].map(([thread, list]) => {
-    list.sort((a, b) => a.ts - b.ts);
+    list.sort((a, b) => a.ts - b.ts || b.dur! - a.dur!);
     let end = -Infinity,
       count = 0,
       wallUs = 0,
@@ -175,8 +218,8 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
       end = task.ts + (task.dur ?? 0);
       count++;
       wallUs += task.dur ?? 0;
-      if (task.tdur === undefined) unsupported = true;
-      else cpuUs += task.tdur;
+      if (!Number.isFinite(task.tdur) || task.tdur! < 0) unsupported = true;
+      else cpuUs += task.tdur!;
     }
     const [pid] = thread.split(":").map(Number);
     return {
@@ -191,20 +234,29 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
         : { status: "supported" as const, ms: cpuUs / 1000 },
     };
   });
-  const mainThread = [...threads].find(
+  const mainThreads = [...threads].filter(
     ([thread, name]) => name === "CrRendererMain" && thread.startsWith(`${rendererPid}:`),
-  )?.[0];
-  const timeline = new Map<string, { count: number; wallMs: number; cpuMs: number }>();
-  const scripts = new Map<string, { count: number; wallMs: number; cpuMs: number }>();
+  );
+  const mainThread = mainThreads[0]?.[0];
+  if (mainThreads.length !== 1 || !tasks.get(mainThread!)?.some((task) => task.dur! > 0))
+    throw new Error("Renderer trace has no unique main thread with task observations");
+  const timeline = new Map<
+    string,
+    { count: number; wallMs: number; observedCpuMs: number; observedEvents: number }
+  >();
+  const scripts: typeof timeline = new Map();
   for (const event of events) {
     if (`${event.pid}:${event.tid}` !== mainThread || event.ph !== "X") continue;
     if (!event.cat?.includes("devtools.timeline") || TOP_LEVEL_TASKS.has(event.name)) continue;
     const add = (map: typeof timeline, name: string) => {
-      const entry = map.get(name) ?? { count: 0, wallMs: 0, cpuMs: 0 };
+      const entry = map.get(name) ?? { count: 0, wallMs: 0, observedCpuMs: 0, observedEvents: 0 };
       map.set(name, entry);
       entry.count++;
       entry.wallMs += (event.dur ?? 0) / 1000;
-      entry.cpuMs += (event.tdur ?? 0) / 1000;
+      if (Number.isFinite(event.tdur) && event.tdur! >= 0) {
+        entry.observedCpuMs += event.tdur! / 1000;
+        entry.observedEvents++;
+      }
     };
     add(timeline, event.name);
     const data = event.args?.data;
@@ -216,12 +268,33 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
   }
   const ranked = (map: typeof timeline) =>
     [...map]
-      .map(([name, entry]) => ({ name, ...entry }))
-      .sort((a, b) => b.cpuMs - a.cpuMs)
+      .map(([name, { count, wallMs, observedCpuMs, observedEvents }]) => ({
+        name,
+        count,
+        wallMs,
+        cpuMs: observedEvents === count ? observedCpuMs : null,
+        ...(observedEvents === count
+          ? {}
+          : {
+              cpu: {
+                status: observedEvents === 0 ? ("unsupported" as const) : ("partial" as const),
+                observedMs: observedCpuMs,
+                observedEvents,
+                missingEvents: count - observedEvents,
+              },
+            }),
+      }))
+      .sort(
+        (a, b) =>
+          Number(b.cpuMs !== null) - Number(a.cpuMs !== null) ||
+          (b.cpuMs !== null && a.cpuMs !== null ? b.cpuMs - a.cpuMs : b.wallMs - a.wallMs) ||
+          a.name.localeCompare(b.name),
+      )
       .slice(0, top);
   return {
     scope:
       "Outer task thread time per traced thread; nested timeline events are inclusive, so their times overlap",
+    timelineRanking: "Complete CPU totals first; incomplete aggregates follow by wall time",
     threads: perThread.sort(
       (a, b) =>
         (b.cpu.status === "supported" ? b.cpu.ms : -1) -
@@ -272,27 +345,53 @@ async function playing(page: Page) {
 }
 
 async function traceTo(page: Page, path: string, ms: number) {
+  const startedAt = new Date().toISOString();
   await command(page, "Tracing.start", {
     transferMode: "ReturnAsStream",
     traceConfig: { recordMode: "recordAsMuchAsPossible", includedCategories: TRACE_CATEGORIES },
   });
   await delay(ms);
-  const complete = new Promise<{ stream: string }>((resolve) =>
-    page.on("Tracing.tracingComplete", (params) => resolve(params as { stream: string })),
-  );
-  await command(page, "Tracing.end");
-  const { stream } = await complete;
-  writeFileSync(path, "");
-  for (;;) {
-    const chunk = await command<{ data: string; eof: boolean; base64Encoded?: boolean }>(
-      page,
-      "IO.read",
-      { handle: stream, size: 4 << 20 },
+  let removeComplete = () => {};
+  let removeClose = () => {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stream: string | undefined;
+  const complete = new Promise<void>((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("Trace completion timed out after 30 s")), 30_000);
+    removeComplete = page.on("Tracing.tracingComplete", (params) => {
+      const handle = (params as { stream?: unknown } | undefined)?.stream;
+      if (typeof handle !== "string" || !handle) {
+        reject(new Error("Trace completion has no IO stream"));
+        return;
+      }
+      stream = handle;
+      resolve();
+    });
+    removeClose = page.onClose(() =>
+      reject(new Error("DevTools session closed before trace completion")),
     );
-    appendFileSync(path, chunk.base64Encoded ? Buffer.from(chunk.data, "base64") : chunk.data);
-    if (chunk.eof) break;
+  });
+  try {
+    // Consume both failures immediately, including closure before Tracing.end answers.
+    await Promise.all([command(page, "Tracing.end"), complete]);
+    const endedAt = new Date().toISOString();
+    writeFileSync(path, "");
+    const until = performance.now() + 120_000;
+    for (;;) {
+      const remaining = until - performance.now();
+      if (remaining <= 0) throw new Error("Trace IO stream exceeded 120 s");
+      const reply = await page.send("IO.read", { handle: stream, size: 4 << 20 }, remaining);
+      if (reply.error) throw new Error(`IO.read: ${JSON.stringify(reply.error)}`);
+      const chunk = reply.result as { data: string; eof: boolean; base64Encoded?: boolean };
+      appendFileSync(path, chunk.base64Encoded ? Buffer.from(chunk.data, "base64") : chunk.data);
+      if (chunk.eof) break;
+    }
+    return { startedAt, endedAt };
+  } finally {
+    clearTimeout(timer);
+    removeComplete();
+    removeClose();
+    if (stream) await command(page, "IO.close", { handle: stream }, 10_000);
   }
-  await command(page, "IO.close", { handle: stream });
 }
 
 /**
@@ -333,25 +432,36 @@ export async function steadyProfiles(
       ["main", main],
       ["renderer", page],
     ] as const;
+    const profiles: unknown[] = [];
+    const startedAt = new Date().toISOString();
+    const profileStarts = new Map<Page, string>();
     for (const [, target] of targets) {
       await command(target, "Profiler.enable");
       await command(target, "Profiler.setSamplingInterval", { interval: 1_000 });
+      profileStarts.set(target, new Date().toISOString());
       await command(target, "Profiler.start");
     }
     await delay(STEADY_PROFILE_MS);
-    const profiles: unknown[] = [];
     for (const [role, target] of targets) {
       const { profile } = await command<{ profile: CpuProfile }>(target, "Profiler.stop");
+      const endedAt = new Date().toISOString();
       await command(target, "Profiler.disable");
-      if (!profile?.samples?.length) throw new Error(`Empty ${state} ${role} CPU profile`);
       const path = `${output}.steady-${state}.${role}.cpuprofile`;
       writeFileSync(path, JSON.stringify(profile));
-      profiles.push({ role, path, intervalUs: 1_000, summary: profileSummary(profile) });
+      profiles.push({
+        role,
+        path,
+        startedAt: profileStarts.get(target),
+        endedAt,
+        intervalUs: 1_000,
+        summary: profileSummary(profile),
+      });
     }
+    const endedAt = new Date().toISOString();
     const ipc = await takeIpc(main);
     context.action(`Trace ${state} for ${STEADY_TRACE_MS / 1000} seconds`);
     const tracePath = `${output}.steady-${state}.trace.json`;
-    await traceTo(page, tracePath, STEADY_TRACE_MS);
+    const traceTimes = await traceTo(page, tracePath, STEADY_TRACE_MS);
     const trace = JSON.parse(readFileSync(tracePath, "utf8")) as { traceEvents: TraceEvent[] };
     const after = await playing(page);
     if (
@@ -363,10 +473,13 @@ export async function steadyProfiles(
       throw new Error(`Playback stopped during the ${state} steady profile`);
     record.windows.push({
       state,
+      startedAt,
+      endedAt,
       profileMs: STEADY_PROFILE_MS,
       profiles,
       ipcDuringProfile: ipc,
       trace: {
+        ...traceTimes,
         path: tracePath,
         ms: STEADY_TRACE_MS,
         categories: TRACE_CATEGORIES,
@@ -503,6 +616,8 @@ export async function queryRetention(
   context: AttributionContext,
   record: ReturnType<typeof retentionRecord>,
 ): Promise<void> {
+  record.returnTiming.calibration = await calibrate(context.page);
+  context.save();
   const { page, main, output } = context;
   const { points, returns } = record;
   await countIpc(main, true);
@@ -561,10 +676,12 @@ export async function queryRetention(
     await waitFor(() => page.evaluate<boolean>(`!!document.querySelector("[data-home-preview]")`));
     await delay(1_000);
     await takeIpc(main);
-    const started = performance.now();
-    await header("Live TV");
-    await waitFor(() => rows(), 60_000);
-    returns.push({ name, rowsShownMs: performance.now() - started, ipc: await takeIpc(main) });
+    const rowsShownMs = await observe(
+      page,
+      `document.querySelectorAll('main [data-index]').length > 0`,
+      `[...document.querySelectorAll("header button")].find(b => b.textContent.trim() === "Live TV").click()`,
+    );
+    returns.push({ name, rowsShownMs, ipc: await takeIpc(main) });
     context.save();
   };
 
@@ -695,6 +812,13 @@ export const retentionRecord = () => ({
   workload: null as unknown,
   gcWaitMs: null as number | null,
   heapSnapshot: null as string | null,
+  returnTiming: {
+    method: "renderer-mutation-and-probe",
+    configuredResolutionMs: 5,
+    calibration: [] as Awaited<ReturnType<typeof calibrate>>,
+    scope:
+      "Renderer click to rows ready; calibration measures simple idle predicates, not loaded list work",
+  },
   points: [] as unknown[],
   returns: [] as unknown[],
 });

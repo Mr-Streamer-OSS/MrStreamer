@@ -104,11 +104,30 @@ channels with its compact preview, Watch over that page, and Home's muted previe
 60-second main and renderer V8 profile at 1,000 microseconds with the invoke calls made during it,
 then a separate 20-second Chromium trace with the profiler stopped. Profiles are summarized by
 function self time with their three heaviest stacks; `(idle)`, `(program)` and
-`(garbage collector)` stay separate, and program time is native renderer work outside JS. Traces
+`(garbage collector)` stay separate. Program time is outside attributed JS and does not identify
+a native CPU owner. Invalid intervals, missing nodes/sample references, or empty, mismatched or
+non-finite time deltas fail the capture. Traces
 report each thread's outer-task thread time and the renderer main thread's inclusive timeline
 events and script entry points. Thread time covers traced tasks only; work outside them is not
-attributed, and a task without thread time makes its thread unsupported. The profiler and
+attributed, and a task without thread time makes its thread unsupported. Timeline/script
+aggregates retain wall time and count when thread durations are missing. Their `cpuMs` is null,
+with an explicit unsupported/partial CPU observation and its observed/missing event counts.
+Complete CPU totals rank first; incomplete aggregates follow by wall time. Equal-start nested
+tasks count their outermost interval once, independent of input order. A trace without a unique
+expected renderer main thread and task observations fails, as does an empty trace. Completion
+has a 30-second deadline and rejects session closure; listeners and IO streams are released in
+`finally`. Stream reads have a separate 120-second total deadline. The profiler and
 tracing add work, so these windows explain where time goes, not how much an idle window costs.
+
+Each steady window and individual profile has ISO `startedAt`/`endedAt` wall-clock brackets;
+the separate trace has its own brackets. These span the start/stop protocol commands, including
+their response latency. For main-profile load alignment use that profile's brackets. Select the
+nearest unique load-log sample at or before each boundary, at most 10 seconds old. Missing,
+stale or ambiguous samples make a window ineligible. Historical action timestamps around
+`Begin <state> steady profile` and `Trace <state> for 20 seconds` are stronger anchors than file
+mtimes; an mtime-derived interval is a labeled historical fallback only. Load alignment alone
+does not approve a clean reference set, exclusions or a floor. Freeze the unchanged-parent
+reference samples and twice-clean-median rule before candidate data; retain every rejection.
 
 `--query-retention` browses All channels, every topic, the first four provider lists of the
 first country, the guide grid and one country filter applied and cleared, then opens one details
@@ -121,6 +140,18 @@ inactive query's own `gcTime` plus 15 seconds has passed, and Live TV after a ti
 One renderer heap snapshot is retained at the point of most inactive data. JSON size is a
 serialization measure, not heap retention; heaps exclude worker isolates; working sets include
 native allocations and are not heap. The fixture holds only synthetic data.
+
+Timed returns use the existing renderer mutation observer and bounded 5 ms probe, with the
+click and rows-ready predicate in the same renderer observation. `retention.returnTiming`
+retains that configured resolution and the known-delay calibration samples. Calibration of an
+idle simple predicate does not establish observation error under load. Historical returns
+without this metadata used a harness clock and a 250 ms `waitFor` poll; keep them labeled
+quantized and recollect unchanged-parent timings before applying R3. Its existing timing rule
+and floor remain unchanged.
+
+Query inventory hashes are truncated to 240 characters. A full-catalogue count requires a
+complete parseable All key, all four filters empty, and successful populated data. Truncated
+or unparseable keys cannot establish that count. These counts do not prove content identity.
 
 Run them separately from the idle calibration when CPU windows matter, for example:
 
