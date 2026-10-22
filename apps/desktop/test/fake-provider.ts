@@ -107,6 +107,12 @@ export interface FakeProviderOptions {
   /** Exact series count, independent of movie count, including a requested long series. */
   readonly series?: number;
   /**
+   * The movies and series to list in place of the built ones, made from them, such as
+   * `browseTitles` adds: these have details and files like the built titles, which
+   * `serveTitles`' new ids lack.
+   */
+  readonly titlesOf?: (built: FakeTitles) => FakeTitles;
+  /**
    * Answers every request for a movie's or episode's file with the whole file, whatever range it
    * asks for, as a provider that knows no byte ranges does.
    */
@@ -323,9 +329,10 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     ? { ...built, channels: built.channels.map(options.channelOf) }
     : built;
   const listed = buildTitles(options.titles ?? 120, options.second ?? false, options.series);
-  const titles = options.longSeries
+  const withLong = options.longSeries
     ? { ...listed, series: [longSeries(), ...listed.series].slice(0, options.series) }
     : listed;
+  const titles = options.titlesOf ? options.titlesOf(withLong) : withLong;
   const movieFiles = new Map(titles.movies.map((movie) => [String(movie.id), movie]));
   const episodeFiles = new Map(
     titles.series
