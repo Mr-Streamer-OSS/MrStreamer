@@ -950,3 +950,71 @@ describe("a quality gone while another's row is listed twice", () => {
     expect(stored(a)).toEqual([]);
   });
 });
+
+describe("two channels of one id, one linking the others", () => {
+  const UHD = "1001";
+  /** The panel's channels in four qualities, without SD. */
+  const usual = (all: readonly FakeChannel[]) =>
+    withUhd(all).filter((each) => String(each.streamId) !== SD);
+  /**
+   * UHD's and FHD's rows in Kwaliteit, UHD's again and HD's in category 16, HD's again in 17,
+   * SD gone: two channels named 1001, one sharing UHD with the first and HD with the third.
+   */
+  const repeated = (all: readonly FakeChannel[]) => {
+    const rows = usual(all);
+    const row = (id: string) => rows.find((each) => String(each.streamId) === id);
+    const uhd = row(UHD);
+    const hd = row(HD);
+    if (!uhd || !hd) throw new Error("No UHD or HD row");
+    return [
+      ...rows.map((each) => (String(each.streamId) === HD ? { ...each, categoryId: "16" } : each)),
+      { ...uhd, categoryId: "16" },
+      { ...hd, categoryId: "17" },
+    ];
+  };
+  // Sorted as strings: "1001" after "100002".
+  const remembered = (a: string) =>
+    (file().favouriteMembership?.accounts?.[a] ?? []).map((cohort: string[]) => cohort.toSorted());
+  const streamsOf = (app: App, a: string, id: string) => {
+    const channel = channelOf(app, a, id);
+    return { id: channel.id, streams: channel.variants.map((each) => each.id).toSorted() };
+  };
+
+  it("keeps a quality gone with the favourite, so unstarring it then takes it out for good", async () => {
+    const { app, a, b } = await twoProviders();
+    await relistAs(app, a, one, withUhd);
+    await star(app, channelOf(app, a, FHD));
+    await star(app, channelOf(app, b, FHD));
+    expect(stored(a).toSorted()).toEqual([FHD, HD, SD, UHD]);
+    await relistAs(app, a, one, usual);
+    expect(remembered(a)).toEqual([[FHD, HD, SD, UHD]]);
+
+    // Seen twice, each a new list: SD stays with the favourite.
+    for (let pass = 0; pass < 2; pass++) {
+      await relistAs(app, a, one, repeated);
+      expect(streamsOf(app, a, FHD)).toEqual({ id: UHD, streams: [FHD, UHD] });
+      expect(streamsOf(app, a, UHD)).toEqual({ id: UHD, streams: [HD, UHD] });
+      expect(streamsOf(app, a, HD)).toEqual({ id: HD, streams: [HD] });
+      expect(remembered(a)).toEqual([[FHD, HD, SD, UHD]]);
+    }
+
+    // The usual list again, SD still gone, after a relaunch; unstarred there.
+    one.serveChannels(usual);
+    const again = await relaunch();
+    await relistAs(again, a, one, usual);
+    expect(remembered(a)).toEqual([[FHD, HD, SD, UHD]]);
+    expect(shown(again)).toEqual([`${a}:${UHD}`, `${b}:${FHD}`]);
+    await star(again, channelOf(again, a, FHD), false);
+    expect(stored(a)).toEqual([]);
+
+    // SD back, after a relaunch: nothing of it comes back, and the other provider's stays.
+    one.serveChannels(withUhd);
+    const back = await relaunch();
+    await relistAs(back, a, one, withUhd);
+    const last = await relaunch();
+    expect(shown(last)).toEqual([`${b}:${FHD}`]);
+    expect(stored(a)).toEqual([]);
+    expect(stored(b)).toEqual([FHD, HD, SD]);
+    expect(memory.played).toEqual([]);
+  });
+});

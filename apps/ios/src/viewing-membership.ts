@@ -109,8 +109,9 @@ function reconcileAccount(
     );
     if (hits.size === 0) next.push(cohort);
     // Its streams listed are one channel's, listed once or in channels sharing its streams: the
-    // others are that channel's too.
-    else if (connected([...hits.values()]))
+    // others are that channel's too. Asked of every channel found, two of one id included, as
+    // the one linking the others can be.
+    else if (connected([...new Set(cohort.flatMap((id) => channelOf(id) ?? []))]))
       for (const channel of hits.values()) join(channel, cohort);
     // Split between channels: listed ids follow theirs, the others go on their own.
     else for (const channel of hits.values()) join(channel, []);
