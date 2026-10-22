@@ -1,4 +1,6 @@
+import type { Episode } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
+import { kindOf } from "@mrstreamer/core/ondemand/catalogue";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Live favourites as the app's own owners keep them: account.ts with its registry and Keychain,
@@ -111,6 +113,9 @@ vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 /** What these tests use of the desktop tests' fake panel. */
 interface FakeChannel {
   readonly streamId: number;
+  readonly name: string;
+  readonly categoryId: string;
+  readonly guideId: string | null;
 }
 interface FakeProvider {
   readonly url: string;
@@ -154,6 +159,10 @@ beforeAll(async () => {
 afterAll(async () => {
   await Promise.all([one.close(), two.close()]);
 });
+// The app's modules compile once, here, rather than within the first test's own time.
+beforeAll(async () => {
+  await import("../src/account.ts");
+});
 
 const ONE = { username: "one", password: "one+Pw@1" };
 const TWO = { username: "two", password: "two+Pw@2" };
@@ -172,8 +181,10 @@ async function launch() {
   const account = await import("../src/account.ts");
   const viewing = await import("../src/viewing.ts");
   const favourites = await import("../src/favourites.ts");
+  const titles = await import("../src/titles.ts");
   await account.restore();
-  return { ...viewing, ...favourites, ...account };
+  // The account's names last: its `retry` is a subscription's.
+  return { ...titles, ...viewing, ...favourites, ...account };
 }
 type App = Awaited<ReturnType<typeof launch>>;
 
@@ -222,20 +233,68 @@ const libraryOf = (app: App) => {
   return now.kind === "ready" ? now.library : null;
 };
 
+/** The channel list saved on the phone for `id`, which a relaunch shows. */
+const cachedList = (id: string) => memory.files.get(`/cache/catalogues/${id}.live.json`);
+
 /**
- * Has `panel` list only the streams `listed` keeps, then reloads `id`'s channels and waits for
- * Live to show them.
+ * Reloads `id`'s channels as its panel lists them now, and waits for Live to show them and for
+ * the list to be saved on the phone, so a relaunch after shows it too.
  */
-async function relist(app: App, id: string, panel: FakeProvider, listed: (id: string) => boolean) {
-  panel.serveChannels((all) => all.filter((each) => listed(String(each.streamId))));
+async function reloaded(app: App, id: string) {
   const before = libraryOf(app);
+  const saved = cachedList(id);
   app.reloadChannels(id);
   await until(() => libraryOf(app) !== before && app.channelsWorkedOut(), "the new list");
+  await until(() => cachedList(id) !== saved, "the new list saved");
+}
+
+/** Has `panel` list only the streams `listed` keeps, then reloads `id`'s channels. */
+async function relist(app: App, id: string, panel: FakeProvider, listed: (id: string) => boolean) {
+  panel.serveChannels((all) => all.filter((each) => listed(String(each.streamId))));
+  await reloaded(app, id);
 }
 const without =
   (...ids: string[]) =>
   (id: string) =>
     !ids.includes(id);
+
+/** Has `panel` list the channels `select` makes of all it has, then reloads `id`'s channels. */
+async function relistAs(
+  app: App,
+  id: string,
+  panel: FakeProvider,
+  select: (all: readonly FakeChannel[]) => readonly FakeChannel[],
+) {
+  panel.serveChannels(select);
+  await reloaded(app, id);
+}
+/** A relaunch, once Live shows both providers' channels as saved on the phone, and the record. */
+async function relaunch(count = 2) {
+  const app = await launch();
+  await until(() => {
+    const now = app.currentCatalogue();
+    return (
+      now.kind === "ready" && now.library.labels.size === count && app.currentViewing() !== null
+    );
+  }, "the saved lists");
+  // The record is read again once the channels show.
+  await new Promise((done) => setTimeout(done, 50));
+  return app;
+}
+/** The panel's channels with stream 1001 another quality of the channel in three. */
+const withUhd = (all: readonly FakeChannel[]) => {
+  const fhd = all.find((each) => String(each.streamId) === FHD);
+  if (!fhd) throw new Error("No Full HD stream");
+  return all.map((each) =>
+    each.streamId === 1001
+      ? { ...each, name: "BE | KWALITEIT 1 UHD", categoryId: fhd.categoryId, guideId: fhd.guideId }
+      : each,
+  );
+};
+/** viewing.json as written. */
+const file = () => JSON.parse(memory.files.get("/documents/viewing.json") ?? "{}");
+const ids = (app: App) =>
+  app.currentViewing()?.favourites.map((each) => `${each.subscriptionId}:${each.id}`);
 
 beforeEach(() => {
   memory.files.clear();
@@ -309,11 +368,10 @@ describe("a provider listing its channels otherwise", () => {
     expect(shown(app)).toEqual([`${a}:${FHD}`]);
     expect(hidden(app)).toEqual([]);
 
-    // HD gone: the channel shows by its other streams, the stream saved stays saved.
+    // HD gone: the stream saved stays saved, still the same one favourite, nothing hidden.
     await relist(app, a, one, without(HD));
-    await until(() => (hidden(app)?.length ?? 0) > 0, "the stream not listed");
     expect(shown(app)).toEqual([`${a}:${FHD}`]);
-    expect(hidden(app)).toEqual([{ subscriptionId: a, why: "not-listed", count: null }]);
+    expect(hidden(app)).toEqual([]);
     expect(stored(a)).toEqual([HD, SD]);
   });
 
@@ -430,5 +488,363 @@ describe("a provider's favourites as it comes and goes", () => {
     if (!back) throw new Error("The add was cancelled");
     await until(() => listsBoth(app), "both lists");
     expect(shown(app)).toEqual([`${a}:1000`]);
+  });
+});
+
+describe("a favourite's streams, remembered", () => {
+  it("unstars a favourite whole while a quality is gone, before or after a relaunch, for good", async () => {
+    for (const relaunchFirst of [true, false]) {
+      memory.files.clear();
+      memory.keychain.clear();
+      one.serveChannels((all) => all);
+      const { app, a, b } = await twoProviders();
+      await star(app, channelOf(app, a, FHD));
+      await star(app, channelOf(app, b, FHD));
+      await relist(app, a, one, without(FHD));
+      await until(() => shown(app).length === 2, "both favourites");
+      expect(shown(app)).toEqual([`${a}:${HD}`, `${b}:${FHD}`]);
+
+      const then = relaunchFirst ? await relaunch() : app;
+      expect(shown(then)).toEqual([`${a}:${HD}`, `${b}:${FHD}`]);
+      await star(then, channelOf(then, a, HD), false);
+      expect(stored(a)).toEqual([]);
+      expect(stored(b)).toEqual([FHD, HD, SD]);
+
+      // Full HD back, after a relaunch: the favourite stays gone.
+      one.serveChannels((all) => all);
+      const later = await relaunch();
+      await relist(later, a, one, () => true);
+      expect(shown(later)).toEqual([`${b}:${FHD}`]);
+      expect(stored(a)).toEqual([]);
+      expect(memory.played).toEqual([]);
+    }
+  });
+
+  it("keeps an order made while a quality was gone, with every stream moving together", async () => {
+    const { app, a, b } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    await star(app, channelOf(app, b, FHD));
+    await relist(app, a, one, without(FHD));
+    const absent = await relaunch();
+    const list = absent.currentFavourites();
+    if (!list) throw new Error("No favourites");
+    expect(list.shown.map(({ channel }) => channel.key)).toEqual([`${a}:${HD}`, `${b}:${FHD}`]);
+    await absent.reorderFavourites({
+      original: list.original,
+      order: list.shown.map(({ saved }) => saved).toReversed(),
+    });
+    const still = await relaunch();
+    expect(shown(still)).toEqual([`${b}:${FHD}`, `${a}:${HD}`]);
+    await relist(still, a, one, () => true);
+    const restored = await relaunch();
+    // Exactly one of it, after the other, whichever quality names it now.
+    expect(ids(restored)).toEqual([`${b}:${FHD}`, `${a}:${FHD}`]);
+    expect(hidden(restored)).toEqual([]);
+  });
+
+  it("leaves every other favourite, hidden or not, unknown or the other provider's, in its place", async () => {
+    const { app, a, b } = await twoProviders();
+    await star(app, channelOf(app, a, "1000"));
+    await star(app, channelOf(app, a, FHD));
+    // A stream no list ever named, as an older build could have kept.
+    await star(app, { subscriptionId: a, id: "999999" });
+    await star(app, channelOf(app, b, "1000"));
+    await star(app, channelOf(app, b, FHD));
+    await relist(app, a, one, without(FHD, "1000"));
+    await relist(app, b, two, without("1000"));
+    const absent = await relaunch();
+    const list = absent.currentFavourites();
+    if (!list) throw new Error("No favourites");
+    expect(list.shown.map(({ channel }) => channel.key)).toEqual([`${a}:${HD}`, `${b}:${FHD}`]);
+    await absent.reorderFavourites({
+      original: list.original,
+      order: list.shown.map(({ saved }) => saved).toReversed(),
+    });
+    await star(absent, channelOf(absent, a, HD), false);
+
+    one.serveChannels((all) => all);
+    two.serveChannels((all) => all);
+    const back = await relaunch();
+    await relist(back, a, one, () => true);
+    await relist(back, b, two, () => true);
+    expect(ids(back)).toEqual([`${a}:1000`, `${b}:${FHD}`, `${a}:999999`, `${b}:1000`]);
+    // The other provider's channel moved ahead of its own hidden one, every stream of it.
+    expect(stored(b)).toEqual([FHD, HD, SD, "1000"]);
+  });
+
+  it("keeps a quality seen later as the favourite, once its first ones are gone", async () => {
+    const { app, a } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    // The provider lists another quality of it, stream 1001, which names the channel now.
+    await relistAs(app, a, one, withUhd);
+    expect(channelOf(app, a, FHD).id).toBe("1001");
+    const seen = await relaunch();
+    // Only the new quality is left.
+    await relistAs(seen, a, one, (all) =>
+      withUhd(all).filter((each) => ![FHD, HD, SD].includes(String(each.streamId))),
+    );
+    const left = await relaunch();
+    expect(shown(left)).toEqual([`${a}:1001`]);
+    await star(left, channelOf(left, a, "1001"), false);
+    expect(stored(a)).toEqual([]);
+    await relist(left, a, one, () => true);
+    expect(shown(left)).toEqual([]);
+  });
+
+  it("follows the channels listed now when they split, and joins only what one channel lists", async () => {
+    const { app, a } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    // HD becomes a channel of its own and SD goes.
+    const split = (all: readonly FakeChannel[]) =>
+      all.flatMap((each) =>
+        String(each.streamId) === SD
+          ? []
+          : String(each.streamId) === HD
+            ? [{ ...each, name: "BE | ANDERS 2 HD" }]
+            : [each],
+      );
+    await relistAs(app, a, one, split);
+    expect(shown(app)).toEqual([`${a}:${FHD}`, `${a}:${HD}`]);
+    expect(hidden(app)).toEqual([{ subscriptionId: a, why: "not-listed", count: null }]);
+    // Taking out the HD channel takes out its stream alone.
+    await star(app, channelOf(app, a, HD), false);
+    expect(stored(a)).toEqual([FHD, SD]);
+    // With only that other channel listed, after a relaunch, SD doesn't go with it.
+    await relistAs(app, a, one, (all) =>
+      split(all).filter((each) => String(each.streamId) !== FHD),
+    );
+    const apart = await relaunch();
+    expect(shown(apart)).toEqual([]);
+    expect(ids(apart)).toEqual([`${a}:${FHD}`, `${a}:${SD}`]);
+    // One channel listing them together again makes them one.
+    await relist(apart, a, one, () => true);
+    expect(ids(apart)).toEqual([`${a}:${FHD}`]);
+    expect(shown(apart)).toEqual([`${a}:${FHD}`]);
+  });
+});
+
+describe("two favourites one channel lists together", () => {
+  it("are one only once a channel joins them, never by a name alone", async () => {
+    const { app, a } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    await star(app, channelOf(app, a, "1001"));
+    // Its name alone: still a channel, and a favourite, of its own.
+    await relistAs(app, a, one, (all) =>
+      all.map((each) =>
+        each.streamId === 1001 ? { ...each, name: "BE | KWALITEIT 1 UHD" } : each,
+      ),
+    );
+    expect(shown(app)).toEqual([`${a}:${FHD}`, `${a}:1001`]);
+    // Listed as one channel: one favourite, whose star takes out every stream of both.
+    await relistAs(app, a, one, withUhd);
+    expect(shown(app)).toEqual([`${a}:1001`]);
+    const joined = await relaunch();
+    expect(shown(joined)).toEqual([`${a}:1001`]);
+    await star(joined, channelOf(joined, a, "1001"), false);
+    expect(stored(a)).toEqual([]);
+  });
+});
+
+describe("a favourite's change, written", () => {
+  it("is in the file when it answers, from the first change after a launch", async () => {
+    const { a } = await twoProviders();
+    const app = await relaunch();
+    const starring = app.setFavourite(channelOf(app, a, FHD), true);
+    expect(stored(a)).toEqual([FHD, HD, SD]);
+    await starring;
+    await star(app, channelOf(app, a, "1000"));
+    const list = app.currentFavourites();
+    if (!list) throw new Error("No favourites");
+    const moving = app.reorderFavourites({
+      original: list.original,
+      order: list.shown.map(({ saved }) => saved).toReversed(),
+    });
+    expect(stored(a)).toEqual(["1000", FHD, HD, SD]);
+    await moving;
+  });
+
+  it("rejects, changing nothing, when the file won't take it, and goes through when tried again", async () => {
+    const { app, a, b } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    await star(app, channelOf(app, b, FHD));
+    await relist(app, a, one, without(FHD));
+    const before = memory.files.get("/documents/viewing.json");
+    memory.full.add("viewing.json");
+    const list = app.currentFavourites();
+    if (!list) throw new Error("No favourites");
+    let adding: Promise<void> | null = null;
+    expect(() => (adding = app.setFavourite(channelOf(app, a, "1000"), true))).not.toThrow();
+    await expect(adding).rejects.toThrow();
+    await expect(app.setFavourite(channelOf(app, a, HD), false)).rejects.toThrow();
+    await expect(
+      app.reorderFavourites({
+        original: list.original,
+        order: list.shown.map(({ saved }) => saved).toReversed(),
+      }),
+    ).rejects.toThrow();
+    await expect(app.eraseViewing(b)).rejects.toThrow();
+    expect(memory.files.get("/documents/viewing.json")).toBe(before);
+
+    memory.full.clear();
+    const again = await relaunch();
+    expect(memory.files.get("/documents/viewing.json")).toBe(before);
+    expect(shown(again)).toEqual([`${a}:${HD}`, `${b}:${FHD}`]);
+    await star(again, channelOf(again, a, HD), false);
+    expect(stored(a)).toEqual([]);
+    await star(again, channelOf(again, a, "1000"));
+    expect(shown(again)).toEqual([`${b}:${FHD}`, `${a}:1000`]);
+  });
+
+  it("keeps what a refused change would have remembered out of later writes", async () => {
+    const { app, a } = await twoProviders();
+    memory.full.add("viewing.json");
+    await expect(app.setFavourite(channelOf(app, a, FHD), true)).rejects.toThrow();
+    memory.full.clear();
+    await app.recordProgress({ kind: "movie", subscriptionId: a, id: "1" }, 60, 600, Date.now());
+    expect(stored(a)).toEqual([]);
+    expect(file().favouriteMembership).toBeUndefined();
+  });
+
+  it("writes a grouping the catalogue shows with the next write when the file refused it", async () => {
+    const { app, a } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    memory.full.add("viewing.json");
+    await relistAs(app, a, one, withUhd);
+    const cohort = () => file().favouriteMembership?.accounts?.[a]?.[0] ?? [];
+    // Not in the file yet: a relaunch now wouldn't know it.
+    expect(cohort()).not.toContain("1001");
+    memory.full.clear();
+    await app.recordProgress({ kind: "movie", subscriptionId: a, id: "1" }, 60, 600, Date.now());
+    expect(cohort()).toContain("1001");
+  });
+});
+
+/** A series of `a`'s with an episode, as its details list it, for a mark. */
+async function episodeOf(app: App, a: string) {
+  await until(() => app.titleLists().kind === "ready", "the title lists");
+  const lists = app.titleLists();
+  if (lists.kind !== "ready") throw new Error("No lists");
+  for (const show of kindOf(lists.index, "series").titles) {
+    const version = show.versions.find((each) => each.subscriptionId === a);
+    if (!version) continue;
+    const title = { ...show, subscriptionId: a, id: version.id };
+    const details = await app.detailsOf(title);
+    if (details.kind !== "series") continue;
+    const episode: Episode | undefined = details.seasons.flatMap((season) => season.episodes)[0];
+    if (episode) return { title, episode };
+  }
+  throw new Error("No series with an episode");
+}
+
+describe("other writes of the record", () => {
+  it("keep the favourites' memory, and their own results", async () => {
+    const { app, a } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    await relist(app, a, one, without(FHD));
+    const memoryBefore = file().favouriteMembership;
+    const { title, episode } = await episodeOf(app, a);
+    const lists = app.titleLists();
+    if (lists.kind !== "ready") throw new Error("No lists");
+    const [first, second] = kindOf(lists.index, "movie").titles.filter((each) =>
+      each.versions.some((version) => version.subscriptionId === a),
+    );
+    if (!first || !second) throw new Error("Too few movies");
+    const versionOf = (movie: typeof first) => {
+      const version = movie.versions.find((each) => each.subscriptionId === a);
+      if (!version) throw new Error("No version of the first provider's");
+      return { kind: "movie" as const, subscriptionId: a, id: version.id };
+    };
+    const mark = await app.markEpisode(
+      {
+        kind: "episode",
+        subscriptionId: a,
+        id: episode.id,
+        seriesId: episode.seriesId,
+        season: episode.season,
+        episode: episode.number,
+      },
+      true,
+    );
+    await app.relist({ subscriptionId: a, id: title.id }, title);
+    await app.recordProgress(versionOf(first), 300, 600, Date.now());
+    await app.removeFromContinue(first);
+    await app.recordProgress(versionOf(second), 300, 600, Date.now());
+    expect(file().favouriteMembership).toEqual(memoryBefore);
+    const again = await relaunch();
+    const progress = await again.progressOf({ movies: [versionOf(second)] });
+    expect(progress.map((each) => each.position)).toEqual([300]);
+    expect(again.currentViewing()?.continueWatching.map((each) => each.title.id)).toEqual([
+      versionOf(second).id,
+    ]);
+    expect((await again.seriesViewing({ subscriptionId: a, id: title.id })).marks).toEqual([mark]);
+    await star(again, channelOf(again, a, HD), false);
+    expect(stored(a)).toEqual([]);
+  });
+});
+
+describe("a provider removed and added again", () => {
+  it("brings its favourite back whole with it, and erasing takes only its memory", async () => {
+    const { app, a, b } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    await star(app, channelOf(app, b, FHD));
+    await relist(app, a, one, without(FHD));
+    await app.remove(a, { keepHistory: true });
+    expect(file().favouriteMembership.accounts[a]).toBeDefined();
+    const later = await relaunch(1);
+    const back = await later.add({ server: one.url, ...ONE });
+    expect(back).toBe(a);
+    await until(() => listsBoth(later) && shown(later).length === 2, "its favourite back");
+    expect(shown(later)).toEqual([`${a}:${HD}`, `${b}:${FHD}`]);
+
+    // Erasing the other provider's history, refused once and done at the next launch.
+    memory.full.add("viewing.json");
+    await expect(later.remove(b, { keepHistory: false })).rejects.toThrow();
+    expect(stored(b)).toEqual([FHD, HD, SD]);
+    memory.full.clear();
+    const erased = await relaunch(1);
+    expect(stored(b)).toEqual([]);
+    expect(file().favouriteMembership.accounts[b]).toBeUndefined();
+    expect(file().favouriteMembership.accounts[a]).toBeDefined();
+    await star(erased, channelOf(erased, a, HD), false);
+    expect(stored(a)).toEqual([]);
+  });
+});
+
+describe("viewing.json from another build", () => {
+  it("captures only what the channels show of a file without the memory, keeping the rest", async () => {
+    const { app, a } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    await star(app, { subscriptionId: a, id: "999999" });
+    const written = file();
+    delete written.favouriteMembership;
+    memory.files.set("/documents/viewing.json", JSON.stringify(written));
+    const older = await relaunch();
+    expect(file().favouriteMembership.accounts[a]).toEqual([[FHD, HD, SD]]);
+    expect(ids(older)).toEqual([`${a}:${FHD}`, `${a}:999999`]);
+    expect(file().accounts[a].state).toEqual(written.accounts[a].state);
+  });
+
+  it("carries a memory it can't read as it is, going by the channels alone", async () => {
+    for (const unread of [
+      { version: 2, accounts: { anything: true } },
+      { version: 1, accounts: { someone: [["only-one"]] } },
+    ]) {
+      memory.files.clear();
+      memory.keychain.clear();
+      one.serveChannels((all) => all);
+      const { app, a } = await twoProviders();
+      await star(app, channelOf(app, a, FHD));
+      memory.files.set(
+        "/documents/viewing.json",
+        JSON.stringify({ ...file(), favouriteMembership: unread }),
+      );
+      const other = await relaunch();
+      await relist(other, a, one, without(FHD));
+      // As before this memory: the stream gone shows apart.
+      expect(hidden(other)).toEqual([{ subscriptionId: a, why: "not-listed", count: null }]);
+      await other.recordProgress({ kind: "movie", subscriptionId: a, id: "1" }, 60, 600, 1);
+      expect(file().favouriteMembership).toEqual(unread);
+      expect(stored(a)).toEqual([FHD, HD, SD]);
+    }
   });
 });

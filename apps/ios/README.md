@@ -208,7 +208,21 @@ Each responsibility has one owner, a plain module with a store the screens read:
   keep their places, as a new order moves only the rows shown. An order made from favourites that
   changed since is refused, and a write `viewing.json` won't take leaves the record as it was.
   A provider removed with its history kept keeps its favourites for its return; removed with its
-  history deleted, they go too.
+  history deleted, they go too. Beside the record, `viewing.json` keeps which of a provider's
+  stream ids were seen together in one channel (`favouriteMembership`, `src/viewing-membership.ts`),
+  given to core's record through its optional `favourite` port. So a favourite stays one
+  favourite while its provider lists only some of its qualities, across relaunches too: one star
+  takes out every stream of it, and a new order moves them all, so a quality listed again brings
+  back neither a removed favourite nor an old order. The channels listed now always win: streams
+  a list splits between channels follow theirs, and those no channel lists stay saved on their
+  own until one channel lists them together again; no name or other provider joins them. Every
+  write of the record writes this memory with it, and a regrouping the catalogue shows is written
+  as it shows; one the file refuses waits for the next write, so a relaunch before then doesn't
+  know it. Starring, unstarring and reordering are decided and written before their promise is
+  answered. A file without the memory, as earlier builds wrote, gains it from the channels shown
+  from then on; what they no longer show of an older favourite can't be known. A memory of
+  another version, or one this build can't trust, is written back as it is, and favourites then
+  go by the channels listed now alone. An older build that writes the file drops the memory.
 - `src/watchlist.ts`: saved movies and series, each subscription's record in `watchlists.json`,
   shown as one by core's watchlist rules. Beta 2's `watchlist.json` is read until the first change.
   It also gives the Watchlist screen its rows (`src/watchlist-screen.tsx`), newest saved or by
