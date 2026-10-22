@@ -576,8 +576,13 @@ describe("Every movie and series that matches", () => {
   const name = { movie: ["Movies", "movie", "movies"], series: ["Series", "series", "series"] };
   const moreOf = (kind: TitleKind, count: number) =>
     `text-Show ${count} more ${count === 1 ? name[kind][1] : name[kind][2]}`;
-  const hasButton = (testID: string) =>
-    container.querySelector(`[data-testid="${testID}"]`) !== null;
+  /** The Show more buttons of `kind` on screen, whatever count they offer. */
+  const moreButtons = (kind: TitleKind) =>
+    [...container.querySelectorAll('[data-testid^="text-Show "]')]
+      .map((button) => button.getAttribute("data-testid")!)
+      .filter((testID) =>
+        kind === "series" ? testID.endsWith(" series") : / movies?$/.test(testID),
+      );
 
   it.each([0, 20, 21, 61, 125])(
     "shows %i matches of each kind 20 at a time, best first, each kind on its own",
@@ -608,11 +613,12 @@ describe("Every movie and series that matches", () => {
             expect(text()).not.toContain(`${header} · ${count} of`);
           }
           const left = count - showing;
+          // One Show more while any are left, for the next 20 or the few left; none after.
+          expect(moreButtons(kind)).toEqual(left === 0 ? [] : [moreOf(kind, Math.min(20, left))]);
           if (left === 0) break;
           press(moreOf(kind, Math.min(20, left)));
           showing += Math.min(20, left);
         }
-        expect(hasButton(moreOf(kind, 20))).toBe(false);
       }
       if (count === 0) expect(text()).toContain('Nothing named "ocean".');
       // The last of them, ranked last, is there to open.
@@ -651,11 +657,39 @@ describe("Every movie and series that matches", () => {
     expect(scenario.did).toEqual([]);
   });
 
+  it("opens again on the text it closed with, at 20 of each", async () => {
+    await subscriptions([
+      member(
+        "a",
+        "Northwind",
+        {},
+        lists(titled("movie", "m", "Ocean", 125), titled("series", "s", "Ocean", 125)),
+      ),
+    ]);
+    open();
+    type("ocean");
+    press(moreOf("movie", 20));
+    press(moreOf("series", 20));
+    press(moreOf("series", 20));
+    expect(shownIds("movie")).toEqual(ids("m", 40));
+    expect(shownIds("series")).toEqual(ids("s", 60));
+    press("text-Cancel");
+    unmount();
+    open();
+    expect(field().value).toBe("ocean");
+    expect(shownIds("movie")).toEqual(ids("m", 20));
+    expect(shownIds("series")).toEqual(ids("s", 20));
+    expect(text()).toContain("Movies · 20 of 125");
+    expect(text()).toContain("Series · 20 of 125");
+    expect(scenario.did).toEqual(["back"]);
+  });
+
   it("finds them again in new lists and names, keeping how many show, never twice", async () => {
-    // Northwind lists 125 movies; Southwind 30 older ones, ranked after them.
+    // Northwind lists 125 movies; Southwind 30 newer than all of them, ranked first.
     const northwind = titled("movie", "m", "Ocean", 125);
-    const southwind = titled("movie", "mb", "Ocean deep", 30, 125);
-    // A movie no provider calls Ocean, but TMDB does: newer than every other.
+    const southwind = titled("movie", "mb", "Ocean deep", 30, -31);
+    // A movie no provider calls Ocean, but TMDB does: newer than Northwind's, older than
+    // Southwind's.
     const renamed: ProviderTitle = {
       ...titled("movie", "mz", "Zee", 1, -1)[0]!,
       tmdbId: "900",
@@ -668,29 +702,30 @@ describe("Every movie and series that matches", () => {
     type("ocean");
     press(moreOf("movie", 20));
     press(moreOf("movie", 20));
-    expect(shownIds("movie")).toEqual(ids("m", 60));
+    expect(shownIds("movie")).toEqual([...ids("mb", 30), ...ids("m", 30)]);
     expect(text()).toContain("Movies · 60 of 155");
 
     // TMDB's name arrives: the movie it names Ocean is found, still 60 showing, each once.
     scenario.tmdbNames.set("900", "Ocean Blue");
     React.act(() => scenario.notify?.({ content: true }));
     expect(text()).toContain("Movies · 60 of 156");
-    expect(shownIds("movie")).toEqual(["mz1", ...ids("m", 59)]);
+    expect(shownIds("movie")).toEqual([...ids("mb", 30), "mz1", ...ids("m", 29)]);
     expect(text()).toContain("Ocean Blue");
 
     // Showing more goes on from there.
     press(moreOf("movie", 20));
-    expect(shownIds("movie")).toEqual(["mz1", ...ids("m", 79)]);
+    expect(shownIds("movie")).toEqual([...ids("mb", 30), "mz1", ...ids("m", 49)]);
 
-    // Southwind is removed: none of its movies show, though more of Northwind's do.
-    press(moreOf("movie", 20));
-    press(moreOf("movie", 20));
-    expect(shownIds("movie")).toEqual(["mz1", ...ids("m", 119)]);
+    // Southwind is removed: its 30 shown movies go, and the next of Northwind's take their
+    // places, still 80 showing.
     await subscriptions([member("a", "Northwind", {}, lists([renamed, ...northwind]))]);
-    expect(text()).toContain("Movies · 120 of 126");
-    expect(shownIds("movie")).toEqual(["mz1", ...ids("m", 119)]);
+    expect(text()).toContain("Movies · 80 of 126");
+    expect(shownIds("movie")).toEqual(["mz1", ...ids("m", 79)]);
+    press(moreOf("movie", 20));
+    press(moreOf("movie", 20));
     press(moreOf("movie", 6));
     expect(shownIds("movie")).toEqual(["mz1", ...ids("m", 125)]);
+    expect(moreButtons("movie")).toEqual([]);
 
     // Northwind's lists come again with fewer movies: those show, all of them.
     await subscriptions([
@@ -698,7 +733,7 @@ describe("Every movie and series that matches", () => {
     ]);
     expect(shownIds("movie")).toEqual(["mz1", ...ids("m", 40)]);
     expect(text()).toContain("Movies · 41");
-    expect(hasButton(moreOf("movie", 20))).toBe(false);
+    expect(moreButtons("movie")).toEqual([]);
     expect(scenario.did).toEqual([]);
   });
 });
