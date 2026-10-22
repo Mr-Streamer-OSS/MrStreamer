@@ -127,7 +127,13 @@ export function CategoryScreen({ region, name }: { region: string; name: string 
       {(library) => {
         const found = library.regions.find((each) => each.name === region);
         const shelf = found?.shelves.find((each) => each.title === name);
-        if (!found || !shelf) return <Message text="This category isn't listed any more." />;
+        if (!found || !shelf) {
+          return (
+            <Still>
+              <Message text="This category isn't listed any more." />
+            </Still>
+          );
+        }
         return (
           <ChannelList
             library={library}
@@ -145,6 +151,8 @@ export function CategoryScreen({ region, name }: { region: string; name: string 
  * Live's screens with the channels there are, under the status line; still rows while the first
  * list loads, the failure when no provider's list came, or that the providers list no channels.
  * `lead` goes first in those three, as the screen with channels leads with it in its own list.
+ * Each of the three is in a `Still`, as the channels are in their list, so it starts below the
+ * header.
  */
 function Channels({
   lead,
@@ -167,15 +175,17 @@ function Channels({
   if (catalogue.kind === "loading") {
     return (
       <Docked status={status ?? loadingStatus("channels")}>
-        {lead}
-        <PlaceholderRows height={height} />
+        <Still>
+          {lead}
+          <PlaceholderRows height={height} />
+        </Still>
       </Docked>
     );
   }
   if (catalogue.kind === "failed") {
     const failure = failureOf(catalogue.error, catalogue.member.entry.server);
     return (
-      <View style={styles.screen}>
+      <Still>
         {lead}
         <Notice
           failure={{
@@ -187,24 +197,44 @@ function Channels({
             { label: "Provider settings", onPress: openSettings },
           ]}
         />
-      </View>
+      </Still>
     );
   }
   if (catalogue.library.regions.length === 0) {
     return (
       <Docked status={status}>
-        {lead}
-        <Notice
-          failure={{
-            headline: "No live channels",
-            advice: `${host || "Your providers"} ${host ? "lists" : "list"} no live channels.`,
-          }}
-          actions={[{ label: "Reload", onPress: reloadAllChannels }]}
-        />
+        <Still>
+          {lead}
+          <Notice
+            failure={{
+              headline: "No live channels",
+              advice: `${host || "Your providers"} ${host ? "lists" : "list"} no live channels.`,
+            }}
+            actions={[{ label: "Reload", onPress: reloadAllChannels }]}
+          />
+        </Still>
       </Docked>
     );
   }
   return <Docked status={status}>{children(catalogue.library)}</Docked>;
+}
+
+/**
+ * What a Live screen shows in place of channels, as the screen's own scrolling content: the
+ * header's and status bar's insets keep it below them, as the channels' list is, and its end
+ * clears the status line.
+ */
+function Still({ children }: { children: ReactNode }) {
+  const inset = useDockInset();
+  return (
+    <ScrollView
+      style={styles.screen}
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={{ paddingBottom: inset }}
+    >
+      {children}
+    </ScrollView>
+  );
 }
 
 function Browse({ library }: { library: Library }) {
