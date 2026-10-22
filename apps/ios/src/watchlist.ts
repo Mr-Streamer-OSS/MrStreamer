@@ -70,16 +70,26 @@ const saved = store<Accounts>({ accounts: {} });
 /** The saved subscriptions in their order: only their records show. */
 const owners = store<readonly string[]>([]);
 let loaded = false;
+/**
+ * The highest `sequence` this run read or gave, whatever was removed, erased or refused since. A
+ * record's id is its time and sequence, so a new record never takes the id of one this run gave
+ * before, even when the clock repeats: an action left open on a removed record can't name it.
+ */
+let given = 0;
+
+const highest = (accounts: Accounts["accounts"]) =>
+  Math.max(0, ...Object.values(accounts).flatMap((list) => list.map((entry) => entry.sequence)));
 
 function load() {
   if (loaded) return;
   loaded = true;
   const current = Watchlists()(readJson(FILE));
-  if (!(current instanceof type.errors)) return saved.set({ accounts: current.accounts });
-  const legacy = Legacy()(readJson(LEGACY));
-  if (!(legacy instanceof type.errors)) {
+  const legacy = current instanceof type.errors ? Legacy()(readJson(LEGACY)) : null;
+  if (!(current instanceof type.errors)) saved.set({ accounts: current.accounts });
+  else if (legacy && !(legacy instanceof type.errors)) {
     saved.set({ accounts: { [legacy.subscriptionId]: legacy.entries } });
   }
+  given = highest(saved.get().accounts);
 }
 
 function write(accounts: Accounts["accounts"]) {
@@ -150,10 +160,7 @@ export function saveTitle(title: Title) {
   const ids = owners.get();
   if (savedEntry(entries(accounts, ids), title)) return;
   const savedAt = Date.now();
-  let sequence = Math.max(
-    0,
-    ...Object.values(accounts).flatMap((list) => list.map((entry) => entry.sequence)),
-  );
+  let sequence = Math.max(given, highest(accounts));
   const next = { ...accounts };
   for (const subscriptionId of ids) {
     const facts = factsOf(title, subscriptionId);
@@ -164,6 +171,8 @@ export function saveTitle(title: Title) {
       { ...facts, id: `${savedAt.toString(36)}-${sequence}`, savedAt, sequence },
     ];
   }
+  // Given, even if the file refuses them.
+  given = sequence;
   write(next);
 }
 
@@ -179,9 +188,9 @@ export type SavedRef = Pick<SavedMember, "subscriptionId" | "id">;
 /**
  * Takes out the entry that holds one of `refs`, as the watchlist stands now, with what every
  * saved subscription saved of it: records the entry gained since go too. Nothing goes when no
- * entry holds them any more, as once it was removed, or saved again as new records. What a
- * removed subscription kept stays for when it is added again. Throws when the file won't take the
- * change, and the watchlist stays as it was.
+ * entry holds them any more, as once it was removed, or saved again as new records, whose ids
+ * differ (`given`). What a removed subscription kept stays for when it is added again. Throws
+ * when the file won't take the change, and the watchlist stays as it was.
  */
 export function removeEntry(refs: readonly SavedRef[]) {
   const { accounts } = saved.get();

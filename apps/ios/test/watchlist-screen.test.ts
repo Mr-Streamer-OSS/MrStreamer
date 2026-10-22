@@ -230,11 +230,11 @@ function press(testID: string) {
   if (!button) throw new Error(`No ${testID} on screen`);
   React.act(() => button.click());
 }
-/** The row named `name`'s test id. */
-function rowOf(name: string) {
-  const row = [...container.querySelectorAll('[data-testid^="watchlist-"]')].find((each) =>
-    each.getAttribute("aria-label")?.startsWith(`${name},`),
-  );
+/** The test id of the row named `name`, or of the one `at` that place among those so named. */
+function rowOf(name: string, at = 0) {
+  const row = [...container.querySelectorAll('[data-testid^="watchlist-"]')]
+    .filter((each) => each.getAttribute("aria-label")?.startsWith(`${name},`))
+    .at(at);
   if (!row) throw new Error(`No row for ${name}`);
   return row.getAttribute("data-testid")!;
 }
@@ -443,6 +443,85 @@ describe("the whole watchlist", () => {
     scenario.refuse = false;
     React.act(() => alert?.buttons[1]?.onPress?.());
     expect(rows()).toEqual(["Arrival, Movie · 2021"]);
+  });
+
+  it("never lets a sheet left open on a removed title remove one saved in the same millisecond", () => {
+    const index = providers({
+      id: "a",
+      titles: ready(lists([movie("7", "Dune"), movie("8", "Arrival")])),
+    });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2027, 0, 15));
+    try {
+      save(titled(index, "Dune"));
+      open();
+      press(`${rowOf("Dune")}-more`);
+      const stale = lastSheet();
+      React.act(() => watchlist.removeTitle(titled(index, "Dune")));
+      // The clock hasn't moved: Arrival is saved at the very same millisecond.
+      save(titled(index, "Arrival"));
+      stale.choose("Remove from Watchlist");
+      expect(rows()).toEqual(["Arrival, Movie · 2021"]);
+      expect(savedOwners()).toEqual([["a"]]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("waits for another provider only for a title the lists know by its TMDB id", () => {
+    const index = providers(
+      { id: "a", titles: ready(lists([movie("7", "Dune", "100"), movie("8", "Heat")])) },
+      { id: "b", titles: ready(lists([])) },
+    );
+    save(titled(index, "Dune"));
+    save(titled(index, "Heat"));
+    open();
+    // The first's lists come again without either; the second's failed, and may list Dune.
+    const failed = { kind: "failed", error: failure, last: null, since: 0 } as Standing;
+    providers({ id: "a", titles: ready(lists([])) }, { id: "b", titles: failed });
+    expect(rows()).toEqual([
+      "Heat, Movie · 2021, No longer listed",
+      "Dune, Movie · 2021, Lists didn't load",
+    ]);
+    providers({ id: "a", titles: ready(lists([])) }, { id: "b", titles: ready(lists([])) });
+    expect(rows()).toEqual([
+      "Heat, Movie · 2021, No longer listed",
+      "Dune, Movie · 2021, No longer listed",
+    ]);
+  });
+
+  it("removes, from a sheet left open, the entry its record joined since, and nothing for one dropped", () => {
+    // The first lists Dune without a TMDB id, and Dune again; the second lists Dune by its id.
+    const before = providers(
+      { id: "a", titles: ready(lists([movie("7", "Dune"), movie("8", "Dune again")])) },
+      { id: "b", titles: ready(lists([movie("70", "Dune", "100")])) },
+    );
+    save(titled(before, "Dune"));
+    save(titled(before, "Dune again"));
+    save(kindOf(before, "movie").titles.find((title) => title.tmdbId === "100")!);
+    open();
+    expect(savedOwners()).toEqual([["b"], ["a"], ["a"]]);
+    press(`${rowOf("Dune again")}-more`);
+    const dropped = lastSheet();
+    // The first's own Dune, saved first, is the last row of that name.
+    press(`${rowOf("Dune", -1)}-more`);
+    const joined = lastSheet();
+
+    // The first now lists both under TMDB's id: its two saves are one, joined with the second's.
+    const after = providers(
+      {
+        id: "a",
+        titles: ready(lists([movie("7", "Dune", "100"), movie("8", "Dune", "100")])),
+      },
+      { id: "b", titles: ready(lists([movie("70", "Dune", "100")])) },
+    );
+    React.act(() => watchlist.alignWatchlist(after));
+    expect(savedOwners()).toEqual([["a", "b"]]);
+
+    dropped.choose("Remove from Watchlist");
+    expect(savedOwners()).toEqual([["a", "b"]]);
+    joined.choose("Remove from Watchlist");
+    expect(savedOwners()).toEqual([]);
+    expect(rows()).toEqual([]);
   });
 });
 
