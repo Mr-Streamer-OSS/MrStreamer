@@ -17,7 +17,8 @@
 //   POST /hold-title-lists?ms=60000      movie and series lists wait unanswered until released, or
 //                                        for `ms`, at most ten minutes; one hold at a time
 //   POST /release-title-lists            answers the held lists
-//   GET  /profile                        what it declares, with the state of these controls
+//   GET  /profile                        what it declares of the lists it started with, unchanged
+//                                        by /shared, and the state of these controls
 import { createHash } from "node:crypto";
 import type { FakeProvider, FakeTitles } from "../../desktop/test/fake-provider.ts";
 
@@ -133,7 +134,10 @@ export function browseTitles(built: FakeTitles, second: boolean): FakeTitles {
 /** Where Search's pages of 20 begin and end, and the last few: the ranks the profile declares. */
 const CHECKED = [1, 20, 21, 40, 41, 60, 61, 80, 81, 100, 101, 120, 121, 125];
 
-/** What the profile declares about the lists a provider serves with it. */
+/**
+ * What the profile declares about the lists a provider starts with: their counts and a hash of the
+ * titles as built, not of the HTTP answers, and not of later lists `/shared` changes.
+ */
 function browseDeclared(titles: FakeTitles, second: boolean) {
   return {
     name: "browse" as const,

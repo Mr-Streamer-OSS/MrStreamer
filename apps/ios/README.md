@@ -341,11 +341,13 @@ movie and series details back to try what a slow panel does; see `scripts/fixtur
 For measurements, `FIXTURE_PROFILE=measure` serves lists with known 4K titles and additions dated
 from `FIXTURE_ANCHOR`, and `FIXTURE_LOGOS=png` lists raster channel logos; with it,
 `FIXTURE_ART_CACHEABLE=1` lets caches keep them and `FIXTURE_ART_LOGIN=1` puts the login in their
-addresses, for checking what the artwork cache keeps. For Search and the watchlist,
-`FIXTURE_PROFILE=browse` on both panels adds 125 movies and 125 series Search finds for "Ocean"
-and a title the two share beside one of the same name, with controls to unlist the shared one
-and hold the lists; see `scripts/browse-profile.ts`. A second panel, for several
-providers, runs beside it on other ports with `FIXTURE_SECOND=1` and its own login, such as
+addresses, for checking what the artwork cache keeps. For Search and the watchlist, run both
+panels with `FIXTURE_PROFILE=browse`: the first adds 125 movies and 125 series Search finds for
+"Ocean" and two titles of one name, the second lists one of those too, so the two share it. Its
+controls unlist the shared one and hold the lists; `/profile` declares the lists each panel
+started with, which an unlisted title doesn't change. See `scripts/browse-profile.ts`. A second
+panel, for several providers, runs beside it on other ports with `FIXTURE_SECOND=1` and its own
+login, such as
 `FIXTURE_SECOND=1 FIXTURE_USERNAME=second FIXTURE_PASSWORD=second-pass node scripts/fixture-server.ts 8793 8794`;
 add it in Settings > Add provider at `http://127.0.0.1:8793`. Its channels have the first's ids.
 
