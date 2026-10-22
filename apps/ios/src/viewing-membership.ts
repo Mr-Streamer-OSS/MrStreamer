@@ -14,7 +14,8 @@ import { type } from "arktype";
 // always win: a cohort whose ids one channel lists takes that channel's other streams in; one the
 // lists split between channels goes, its listed ids following their channels and the others left
 // on their own until one channel lists them together again. Two of a provider's channels that
-// list one stream share it, so what they list is one cohort. A provider whose channels don't show
+// list one stream share it, so what they list is one cohort, and a cohort they alone list isn't
+// split, its streams no list shows staying in it. A provider whose channels don't show
 // tells nothing, so its cohorts stay as they are. No name, and no other provider, ever joins them.
 
 /** A group of one account's stream ids seen together in one channel. */
@@ -106,10 +107,11 @@ function reconcileAccount(
         return channel ? [[channel.id, channel] as const] : [];
       }),
     );
-    const [only, ...more] = hits.values();
-    if (!only) next.push(cohort);
-    // Its streams listed are in one channel: the others are that channel's too.
-    else if (more.length === 0) join(only, cohort);
+    if (hits.size === 0) next.push(cohort);
+    // Its streams listed are one channel's, listed once or in channels sharing its streams: the
+    // others are that channel's too.
+    else if (connected([...hits.values()]))
+      for (const channel of hits.values()) join(channel, cohort);
     // Split between channels: listed ids follow theirs, the others go on their own.
     else for (const channel of hits.values()) join(channel, []);
   }
@@ -122,6 +124,23 @@ function reconcileAccount(
   return disjoint([...next, ...[...joined.values()].map((group) => [...group])]).filter(
     (cohort) => cohort.length > 1 && cohort.some((id) => backed.has(id)),
   );
+}
+
+/**
+ * Whether `channels` are all one channel's streams: each shares a stream with another, however
+ * they chain, as a panel listing a stream's row in two categories makes them.
+ */
+function connected(channels: readonly LiveChannel[]): boolean {
+  const [first, ...rest] = channels;
+  if (!first) return false;
+  const reached = new Set(idsOf(first));
+  let left = rest;
+  for (;;) {
+    const joining = left.filter((channel) => idsOf(channel).some((id) => reached.has(id)));
+    if (joining.length === 0) return left.length === 0;
+    for (const channel of joining) for (const id of idsOf(channel)) reached.add(id);
+    left = left.filter((channel) => !joining.includes(channel));
+  }
 }
 
 /**

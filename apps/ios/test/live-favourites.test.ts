@@ -885,3 +885,68 @@ describe("a stream a panel lists in two of its channels", () => {
     expect(memory.played).toEqual([]);
   });
 });
+
+describe("a quality gone while another's row is listed twice", () => {
+  /** The panel's channels with the rows of `ids` listed again in category `categoryId`. */
+  const repeating =
+    (categoryId: string, ...ids: string[]) =>
+    (all: readonly FakeChannel[]) => [
+      ...all,
+      ...all
+        .filter((each) => ids.includes(String(each.streamId)))
+        .map((each) => ({ ...each, categoryId })),
+    ];
+  const remembered = (a: string) =>
+    (file().favouriteMembership?.accounts?.[a] ?? []).map((cohort: string[]) => cohort.toSorted());
+
+  it("keeps the quality gone with the favourite, so unstarring it then takes it out for good", async () => {
+    const { app, a, b } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    await star(app, channelOf(app, b, FHD));
+    await relist(app, a, one, without(SD));
+    // SD still gone; HD's row listed again in another category.
+    await relistAs(app, a, one, (all) =>
+      repeating("16", HD)(all.filter((each) => String(each.streamId) !== SD)),
+    );
+    expect(channelOf(app, a, HD).id).not.toBe(channelOf(app, a, FHD).id);
+    expect(remembered(a)).toEqual([[FHD, HD, SD]]);
+
+    // The panel's usual list again, SD still gone, after a relaunch; unstarred there.
+    one.serveChannels((all) => all.filter((each) => String(each.streamId) !== SD));
+    const again = await relaunch();
+    await relist(again, a, one, without(SD));
+    expect(shown(again)).toEqual([`${a}:${FHD}`, `${b}:${FHD}`]);
+    await star(again, channelOf(again, a, FHD), false);
+    expect(stored(a)).toEqual([]);
+    // SD back, after a relaunch: nothing of it comes back, and the other provider's stays.
+    one.serveChannels((all) => all);
+    const back = await relaunch();
+    await relist(back, a, one, () => true);
+    const last = await relaunch();
+    expect(shown(last)).toEqual([`${b}:${FHD}`]);
+    expect(stored(a)).toEqual([]);
+    expect(stored(b)).toEqual([FHD, HD, SD]);
+    expect(memory.played).toEqual([]);
+  });
+
+  it("keeps it too when rows sharing its streams are listed in two more categories", async () => {
+    const { app, a } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    await relist(app, a, one, without(SD));
+    // FHD's and HD's rows in one category, HD's again in another: channels sharing HD.
+    await relistAs(app, a, one, (all) =>
+      repeating(
+        "17",
+        HD,
+      )(repeating("16", FHD, HD)(all.filter((each) => String(each.streamId) !== SD))),
+    );
+    expect(channelOf(app, a, HD).id).not.toBe(channelOf(app, a, FHD).id);
+    expect(remembered(a)).toEqual([[FHD, HD, SD]]);
+    one.serveChannels((all) => all);
+    const back = await relaunch();
+    await relist(back, a, one, () => true);
+    expect(shown(back)).toEqual([`${a}:${FHD}`]);
+    await star(back, channelOf(back, a, SD), false);
+    expect(stored(a)).toEqual([]);
+  });
+});
