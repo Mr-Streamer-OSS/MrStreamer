@@ -10,7 +10,10 @@ together, as the desktop does: there is no subscription to switch to. Live opens
 provider's channels of every country once, with their providers' logos; For you leads with the
 channel watched last behind Play, then recent channels and category shelves, and Categories has
 every category as a tile that opens its channels; a country is an optional filter before those
-tabs (`src/live-screen.tsx`). Movies and Series browse the
+tabs (`src/live-screen.tsx`). Above them, Favourites opens every favourite channel of every
+provider in one order (`src/favourites-screen.tsx`): a row plays in Watch, its star takes it out,
+and Edit moves rows with Move up and Move down until Save or Cancel. A Live row's star, and Watch's
+for the channel playing, star or unstar a channel without playing anything. Movies and Series browse the
 desktop's collections (For you, New, Genres, Services, 4K and All) and open details pushed on
 their tab, with seasons and episodes, the version menu, the watchlist and episodes marked by hand.
 A version chosen from the menu plays again whenever the title opens, until Automatic is chosen; a
@@ -19,7 +22,8 @@ password, the version remembered from it and how far its versions got are left o
 version details pick on their own, under Automatic too, and count again once the password is
 back; a version asked for, or chosen in the menu while the details show, keeps its precedence.
 A movie or an episode plays in Watch from where it stopped. Home leads with the preview, then
-channels to preview (On now: recent ones, else the country last chosen in Live), Continue watching, the watchlist
+channels to preview (On now: recent ones, else the country last chosen in Live), Favourites (its
+heading always there, opening the list on Home's stack: `favourites`), Continue watching, the watchlist
 (its heading always there, opening all of it on Home's stack: `watchlist`)
 and Movies for you, which falls back to the provider's own list without TMDB. Rows show a
 channel's category where the desktop shows its programme: iOS reads no guide yet. Search finds
@@ -183,9 +187,18 @@ Each responsibility has one owner, a plain module with a store the screens read:
   at the next open. The details screen shows what is saved at once, and the answers as they come
   (`read.ts`). Nothing of a login replaced or removed since shows. Where a title streams from is
   only ever asked of its provider under the current login, never read from a saved record.
-- `src/viewing.ts`: how far titles got, episode marks and Continue watching: core's
-  `ViewingRecord` service over core's in-memory store, its snapshot in `viewing.json`, one record
-  per subscription under its id.
+- `src/viewing.ts`: favourite channels, how far titles got, episode marks and Continue watching:
+  core's `ViewingRecord` service over core's in-memory store, its snapshot in `viewing.json`, one
+  record per subscription under its id. A favourite keeps its provider's stream ids of the channel
+  and shows by the channel Live lists now (`account.ts` hands it the library as it shows), so a
+  channel's qualities are one favourite and the same ids of two providers are two. `src/favourites.ts`
+  reads them for the screens: a favourite opens only as a channel its own provider lists while
+  that provider signs in. The others, of a provider that needs its password, whose channels
+  haven't come or no longer list them, are counted under the list by provider, open nothing and
+  keep their places, as a new order moves only the rows shown. An order made from favourites that
+  changed since is refused, and a write `viewing.json` won't take leaves the record as it was.
+  A provider removed with its history kept keeps its favourites for its return; removed with its
+  history deleted, they go too.
 - `src/watchlist.ts`: saved movies and series, each subscription's record in `watchlists.json`,
   shown as one by core's watchlist rules. Beta 2's `watchlist.json` is read until the first change.
   It also gives the Watchlist screen its rows (`src/watchlist-screen.tsx`), newest saved or by
@@ -361,7 +374,9 @@ started with, which an unlisted title doesn't change. See `scripts/browse-profil
 panel, for several providers, runs beside it on other ports with `FIXTURE_SECOND=1` and its own
 login, such as
 `FIXTURE_SECOND=1 FIXTURE_USERNAME=second FIXTURE_PASSWORD=second-pass node scripts/fixture-server.ts 8793 8794`;
-add it in Settings > Add provider at `http://127.0.0.1:8793`. Its channels have the first's ids.
+add it in Settings > Add provider at `http://127.0.0.1:8793`. Its channels have the first's ids. For favourites, the control port's `/live-lists` leaves streams
+the panel listed out of its later channel lists, as a provider dropping a quality or a channel
+does, and lists them again (`scripts/live-lists.ts`); Reload in Settings then reads it.
 
 ```sh
 node scripts/fixture-server.ts 8791 8792

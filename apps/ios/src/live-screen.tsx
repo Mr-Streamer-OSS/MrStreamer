@@ -20,6 +20,8 @@ import {
   useRoster,
 } from "./account.ts";
 import { failureOf } from "./errors.ts";
+import { starChannel, useFavouriteKeys } from "./favourites.ts";
+import { FavouritesEntry } from "./favourites-screen.tsx";
 import { Glass, IconButton } from "./glass.tsx";
 import { tabHref } from "./header.tsx";
 import type { Channel, Library, Region, Shelf } from "./library.ts";
@@ -30,13 +32,15 @@ import { store, useStore } from "./store.ts";
 import { ShelfHead, TextTabs } from "./titles-ui.tsx";
 import { ChannelLogo, ChannelRow, colors, Message, Notice, useRowHeight } from "./ui.tsx";
 
-// Live, in Movies' and Series' shape: a large title, then For you, Categories and All as text
-// tabs, with the country first in their row, reading All countries until one is chosen. All lists
+// Live, in Movies' and Series' shape: a large title, its Favourites row, which opens every
+// favourite (favourites-screen.tsx), then For you, Categories and All as text tabs, with the
+// country first in their row, reading All countries until one is chosen. All lists
 // every channel of every provider and country once, in a virtualised list of rows of one fixed
 // height, and is where Live opens at launch. For you leads with the channel watched last and Play,
 // then the recent channels and a few categories as shelves of logos; Categories is every category
 // as a tile. A category's shelf or tile opens all its channels, pushed on Live's stack. Nothing
-// plays until a tile, a row or Play is pressed, and each plays in Watch. A "country" is the
+// plays until a tile, a row or Play is pressed, and each plays in Watch; a row's star stars or
+// unstars its channel and plays nothing. A "country" is the
 // provider's group, which can be a language or a label. Rows and tiles show the channel's category
 // or quality until iOS reads a guide, which brings now and next. While channels first load, still
 // rows hold the list's place; what loads or failed by provider is the status line at the bottom,
@@ -194,22 +198,27 @@ function Browse({ library }: { library: Library }) {
     if (next) writeState((state) => ({ ...state, region: next.name }));
     place.set((current) => ({ ...current, region: next?.name ?? null }));
   }, []);
-  const header =
-    countries || tabs.length > 1 ? (
-      <>
-        {gone ? <Text style={styles.note}>{`${gone} isn't listed any more.`}</Text> : null}
-        <TextTabs
-          lead={
-            countries ? (
-              <Country regions={library.regions} chosen={region} onChoose={choose} />
-            ) : null
-          }
-          tabs={tabs}
-          value={tab}
-          onChange={(next) => place.set((current) => ({ ...current, tab: next }))}
-        />
-      </>
-    ) : null;
+  // Favourites always lead. The finding of countries and categories joins below them.
+  const header = (
+    <>
+      <FavouritesEntry />
+      {countries || tabs.length > 1 ? (
+        <>
+          {gone ? <Text style={styles.note}>{`${gone} isn't listed any more.`}</Text> : null}
+          <TextTabs
+            lead={
+              countries ? (
+                <Country regions={library.regions} chosen={region} onChoose={choose} />
+              ) : null
+            }
+            tabs={tabs}
+            value={tab}
+            onChange={(next) => place.set((current) => ({ ...current, tab: next }))}
+          />
+        </>
+      ) : null}
+    </>
+  );
 
   const key = `${tab}\n${region?.name ?? ""}`;
   if (tab === "for-you") {
@@ -251,14 +260,18 @@ function ChannelList({
   const height = useRowHeight();
   const inset = useDockInset();
   const playing = channelStatus(usePlayback().phase);
+  const favourites = useFavouriteKeys();
   const [top, setTop] = useState(0);
   const onPress = useCallback((channel: Channel) => watch(library, channel), [library]);
+  // Rows draw again when a star or what plays changes.
+  const playingNow = playing && `${playing.id} ${playing.word}`;
+  const extraData = useMemo(() => ({ favourites, playingNow }), [favourites, playingNow]);
   return (
     <FlatList
       style={styles.screen}
       data={channels}
       keyExtractor={(channel) => channel.key}
-      extraData={playing && `${playing.id} ${playing.word}`}
+      extraData={extraData}
       ListHeaderComponent={
         <View onLayout={(event) => setTop(event.nativeEvent.layout.height)}>{header}</View>
       }
@@ -269,6 +282,8 @@ function ChannelList({
           status={item.key === playing?.id ? playing.word : null}
           height={height}
           onPress={onPress}
+          favourite={favourites.has(item.key)}
+          onFavourite={starChannel}
         />
       )}
       getItemLayout={(_, index) => ({ length: height, offset: top + height * index, index })}

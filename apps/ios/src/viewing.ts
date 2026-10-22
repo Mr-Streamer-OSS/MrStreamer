@@ -1,8 +1,10 @@
 import { AppFailure } from "@mrstreamer/contracts/errors";
+import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Title, TitleDetails, TitleRef } from "@mrstreamer/contracts/ondemand";
-import type { OwnedId } from "@mrstreamer/contracts/subscription";
+import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type {
   EpisodeMark,
+  FavouriteOrder,
   SeriesViewing,
   TitleFilter,
   TitleProgress,
@@ -29,17 +31,26 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import { readJson, writeJson } from "./files.ts";
 import { store, useStore } from "./store.ts";
 
-// How far movies and episodes got, the episodes marked by hand and Continue watching: core's
-// viewing record service, the desktop's own rules, over core's in-memory store, whose snapshot is
-// kept in viewing.json in Documents and written whole after every change. Each saved subscription
-// has a record of its own, under its id (private beta 2's one already did): account.ts says which
-// are saved, and erases one's record when it is removed with its history. Live channels watched
-// lately stay in storage.ts.
+// Favourite channels, how far movies and episodes got, the episodes marked by hand and Continue
+// watching: core's viewing record service, the desktop's own rules, over core's in-memory store,
+// whose snapshot is kept in viewing.json in Documents and written whole after every change. Each
+// saved subscription has a record of its own, under its id (private beta 2's one already did):
+// account.ts says which are saved and which channels Live shows, and erases one's record when it
+// is removed with its history. A favourite keeps the provider's stream ids of its channel, and
+// shows by the channel that lists them now, so a channel's other qualities are the same favourite
+// and a stream no list names stays saved, in its place. Live channels watched lately stay in
+// storage.ts.
 
 const FILE = "viewing.json";
 
 /** The saved subscriptions' ids, in their order; set by account.ts. */
 let owners: readonly string[] = [];
+
+/**
+ * The channels Live shows, by the `ownedKey` of each channel and of each of its streams; set by
+ * account.ts. A subscription whose channels don't show has none here.
+ */
+let channels: ReadonlyMap<string, LiveChannel> = new Map();
 
 /** What the lists hold of a series, for which episodes it has; set by titles.ts. */
 export interface ViewingCatalogue {
@@ -58,6 +69,8 @@ let catalogue: ViewingCatalogue = {
 const viewing = store<Viewing | null>(null);
 /** The record as it stands; null before it was first read or without a subscription. */
 export const useViewing = () => useStore(viewing);
+/** The record as the screens have it, for handlers outside React. */
+export const currentViewing = () => viewing.get();
 
 function snapshot(): ViewingSnapshot | null {
   const read = readJson(FILE);
@@ -83,8 +96,14 @@ const layer = ViewingRecord.layer.pipe(
           })),
         ),
       }),
-      // Channels watched lately are kept apart, in storage.ts.
-      Layer.succeed(ViewingChannels, { lookup: () => Effect.succeed(() => undefined) }),
+      // Read when the record is: the channels shown then, so favourites show by them.
+      Layer.succeed(ViewingChannels, {
+        lookup: (subscriptionId) =>
+          Effect.sync(() => {
+            const shown = channels;
+            return (id: string) => shown.get(ownedKey({ subscriptionId, id }));
+          }),
+      }),
       Layer.succeed(ViewingSeries, {
         identity: (series) =>
           Effect.tryPromise({
@@ -120,7 +139,10 @@ async function run<A>(call: (record: ViewingRecord["Service"]) => Effect.Effect<
   throw cause instanceof Failed ? new AppFailure(cause.error) : cause;
 }
 
-/** Rises whenever the saved subscriptions change: a read made before then is dropped. */
+/**
+ * Rises whenever the saved subscriptions or the channels shown change: a read made before then is
+ * dropped, as the read that change starts follows it.
+ */
 let generation = 0;
 
 /** Reads the record again for the screens. */
@@ -148,6 +170,18 @@ export function setViewingOwners(ids: readonly string[]) {
   void refresh().catch(() => undefined);
 }
 
+/**
+ * The channels Live shows, by the `ownedKey` of each channel and stream (`Library.byKey`), or
+ * none while none show. The favourites are read again by them: a refresh that lists a channel's
+ * streams otherwise, or no longer lists it, shows in them at once.
+ */
+export function setViewingChannels(byKey: ReadonlyMap<string, LiveChannel>) {
+  if (byKey === channels) return;
+  channels = byKey;
+  generation++;
+  void refresh().catch(() => undefined);
+}
+
 /** titles.ts says what the lists hold, once, as it loads. */
 export function serveViewing(lists: ViewingCatalogue) {
   catalogue = lists;
@@ -156,6 +190,27 @@ export function serveViewing(lists: ViewingCatalogue) {
 /** Erases what a removed subscription recorded, when its history goes with it. */
 export function eraseViewing(subscriptionId: string): Promise<void> {
   return change((record) => record.erase(subscriptionId));
+}
+
+/**
+ * Stars a channel, with every stream of it Live lists now, or unstars it, whichever subscription
+ * it is from. Nothing plays. Rejects with nothing changed when viewing.json won't take it.
+ */
+export function setFavourite(channel: OwnedId, favourite: boolean): Promise<void> {
+  const { subscriptionId, id } = channel;
+  return change((record) =>
+    record.setFavourite(commandId(), { subscriptionId, id }, favourite),
+  ).then(() => undefined);
+}
+
+/**
+ * Puts the favourites in `order`. The ones it leaves out, those no list shows now or of a provider
+ * that needs its password, keep their places. Rejects with `favourites-changed`, and nothing
+ * changed, when the favourites no longer show as `order.original`, and with nothing changed when
+ * viewing.json won't take it.
+ */
+export function reorderFavourites(order: FavouriteOrder): Promise<void> {
+  return change((record) => record.reorderFavourites(commandId(), order)).then(() => undefined);
 }
 
 /** Saves how far a movie or episode played, in a play begun at `since`. */
