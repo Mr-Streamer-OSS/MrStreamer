@@ -27,11 +27,17 @@ import {
 } from "../../../playback.ts";
 import { openDetails, resume, useContinueWatching } from "../../../resume.ts";
 import { useSavedState } from "../../../storage.ts";
-import { named, useCollections, useMetadataVersion, useTitleLists } from "../../../titles.ts";
+import {
+  named,
+  titlesWorkedOut,
+  useCollections,
+  useMetadataVersion,
+  useTitleLists,
+} from "../../../titles.ts";
 import { PlaceholderShelf, Shelf, ShelfHead } from "../../../titles-ui.tsx";
 import { ChannelLogo, colors, Message, Notice } from "../../../ui.tsx";
 import { removeFromContinue } from "../../../viewing.ts";
-import { useWatchlist, watchlistTitles } from "../../../watchlist.ts";
+import { useWatchlist, watchlistRows } from "../../../watchlist.ts";
 
 /** How many channels On now shows. */
 const ON_NOW = 12;
@@ -254,21 +260,32 @@ function MoviesForYou() {
 
 /**
  * Continue watching and the watchlist, as rows of posters. The watchlist's row shows the saved
- * titles the lists have; its heading counts every entry and opens them all, and stays without
- * posters when the lists have none of them or nothing is saved.
+ * titles its screen opens (`watchlistRows`): those a provider that still signs in lists, through
+ * that provider. Its heading counts every entry and opens them all, and stays without posters
+ * when none can open or nothing is saved.
  */
 function TitleRows() {
   const continuing = useContinueWatching();
   const lists = useTitleLists();
+  const roster = useRoster();
   const saved = useWatchlist();
   const metadata = useMetadataVersion();
   const watchlist = useMemo(
     () =>
       lists.kind === "ready"
-        ? watchlistTitles(lists.index, saved).flatMap(({ title }) => (title ? [named(title)] : []))
+        ? watchlistRows(
+            saved,
+            {
+              index: lists.index,
+              complete: titlesWorkedOut(),
+              members: roster.kind === "ready" ? roster.members : [],
+              named,
+            },
+            "newest",
+          ).flatMap(({ title }) => (title ? [title] : []))
         : [],
-    // A new metadata version renames titles.
-    [lists, saved, metadata],
+    // A new metadata version renames titles; a provider losing its password drops its own.
+    [lists, saved, roster, metadata],
   );
   const entryOf = (key: string) => continuing.find((entry) => entry.title.key === key);
   return (

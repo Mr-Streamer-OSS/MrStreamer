@@ -27,7 +27,7 @@ const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: obje
 
 const scenario = vi.hoisted(() => ({
   lists: { kind: "idle" } as { kind: "idle" } | { kind: "ready"; index: unknown },
-  members: [] as Array<{ entry: { id: string }; label: string }>,
+  members: [] as Array<{ entry: { id: string }; label: string; needsSecret?: boolean }>,
   /** The version menu last shown: its options, and what picking one does. */
   menu: null as { options: readonly string[]; pick: (index: number) => void } | null,
   played: [] as OwnedId[],
@@ -235,6 +235,14 @@ function providers(...ids: string[]) {
     ),
   };
   scenario.members = ids.map((id) => ({ entry: { id }, label: LABELS[id] ?? id }));
+}
+
+/** The providers whose password the Keychain no longer gives back, their lists still showing. */
+function lost(...ids: string[]) {
+  scenario.members = scenario.members.map((member) => ({
+    ...member,
+    needsSecret: ids.includes(member.entry.id),
+  }));
 }
 
 let unmount = () => {};
@@ -479,6 +487,40 @@ describe("a film's version picked", () => {
     page.openVersions()("Home");
     unmount();
     expect(mount({ version: "b:1" }).play()).toBe("a");
+  });
+});
+
+describe("a film's version picked from a provider that lost its password", () => {
+  it("gives way to the version another provider opened, and comes back with the password", () => {
+    providers("a", "b");
+    const read: string[] = [];
+    scenario.details = (version) => {
+      read.push(version);
+      return new Promise(() => undefined);
+    };
+    mount().openVersions()("Home");
+    unmount();
+    // Opened through Cabin, as the Watchlist opens a title Home lists too: the pick still wins.
+    expect(mount({ version: "b:1" }).play()).toBe("a");
+    unmount();
+
+    lost("a");
+    read.length = 0;
+    const page = mount({ version: "b:1" });
+    expect(page.play()).toBe("b");
+    expect(read).toEqual(["b:1"]);
+    // Its password back, the pick saved plays again, picked once only.
+    lost();
+    page.render();
+    expect(page.play()).toBe("a");
+  });
+
+  it("still plays a version asked for, as a 4K tile asks, from that provider", () => {
+    providers("a", "b");
+    mount().openVersions()("Cabin");
+    unmount();
+    lost("a");
+    expect(mount({ version: "a:1", asked: true }).play()).toBe("a");
   });
 });
 
