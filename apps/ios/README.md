@@ -19,7 +19,8 @@ A movie or an episode plays in Watch from where it stopped. Home leads with the 
 channels to preview (On now: recent ones, else the country last chosen in Live), Continue watching, the watchlist
 and Movies for you, which falls back to the provider's own list without TMDB. Rows show a
 channel's category where the desktop shows its programme: iOS reads no guide yet. Search finds
-movies, series and channels. A movie's details and each episode row have a download button whose
+movies, series and channels: 20 movies and 20 series at first, each kind with its own Show more
+for the next 20 until every match shows. A movie's details and each episode row have a download button whose
 symbol is the download's state; Downloads lists the queue, then the copies on the phone, with
 Cancel, Retry, Remove, Play offline and Delete as each state allows (`src/downloads-screen.tsx`,
 `src/download-controls.tsx`). Play and Resume always stream; a copy plays offline from Downloads,
