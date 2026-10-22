@@ -192,8 +192,9 @@ Each responsibility has one owner, a plain module with a store the screens read:
   lists still loading, lists that didn't load or a password needed. "No longer listed" shows only
   once every provider that may list it answered and its lists are indexed. Nothing playable is
   made of what was saved. Remove takes out the entry as it stands then, for every provider
-  showing it, and nothing when a sheet left open names records gone since. A removed provider's
-  saves stay for its return. A refused write leaves the entry and says so.
+  showing it, and nothing when a sheet left open names records gone since. A provider removed
+  with its history kept keeps its saves for its return; removed with its history deleted, its
+  saves go too. A refused write leaves the entry and says so.
 - `src/downloads.ts`: movies and episodes downloaded to the phone, as the desktop's downloads:
   `downloads.json`, a folder per download in `Documents/downloads`, and nothing else. One
   transfers at a time through `src/download-task.ts`, the app's own native owner of a background

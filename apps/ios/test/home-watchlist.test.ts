@@ -233,6 +233,14 @@ afterEach(() => {
 });
 
 describe("Home's watchlist", () => {
+  it("shows its heading with nothing saved, opening the whole watchlist", () => {
+    providers({ id: "a", titles: ready(lists([movie("7", "Dune", "100")])) });
+    expect(posters()).toEqual([]);
+    expect(heading()?.textContent).toBe("Watchlist, all 0");
+    press("head-Watchlist");
+    expect(scenario.did).toEqual(["push /watchlist"]);
+  });
+
   it("drops a title only a provider that lost its password lists, keeping its heading", () => {
     const shown = lists([movie("7", "Dune", "100")]);
     const index = providers({ id: "a", titles: ready(shown) });
