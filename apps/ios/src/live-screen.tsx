@@ -221,8 +221,9 @@ function Browse({ library }: { library: Library }) {
       ),
     [library, region],
   );
-  // With one category or none, a shelf or tile would only repeat All.
-  const browsable = categories.length > 1;
+  // With one category or none in every country together, a shelf or tile would only repeat All.
+  // A country chosen with one keeps the tab Live showed, as Find countries or categories does.
+  const browsable = library.regions.reduce((count, each) => count + each.shelves.length, 0) > 1;
   const tabs: readonly { value: Tab; label: string }[] = browsable
     ? [
         { value: "for-you", label: "For you" },

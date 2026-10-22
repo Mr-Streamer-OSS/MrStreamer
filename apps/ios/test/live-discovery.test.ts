@@ -651,3 +651,54 @@ describe("a provider whose channels haven't come", () => {
     await relistBoth();
   });
 });
+
+describe("a country found with one category", () => {
+  // Home's panel names its second category as Iceland's only one.
+  beforeAll(async () => {
+    one.serveCategories((all) =>
+      all.map((each) => (each.id === "2" ? { ...each, name: "IS | Single" } : each)),
+    );
+    await relistBoth();
+  });
+  afterAll(async () => {
+    one.serveCategories((all) => all);
+    await relistBoth();
+  });
+  const tiles = () =>
+    [...top().querySelectorAll('[data-testid^="live-category-"]')].map((tile) =>
+      tile.getAttribute("data-testid"),
+    );
+  /** Finds Iceland and shows it in Live, as its result does. */
+  function iceland() {
+    press("live-discover");
+    type("iceland");
+    const [region] = libraryOf()!.regions.filter((each) => each.name === "Iceland");
+    expect(region?.shelves.map((shelf) => shelf.title)).toEqual(["Single"]);
+    expect(results()[0]).toBe(`Iceland, country, ${region!.channels.length} channels`);
+    press("discover-country-Iceland");
+    expect(stack).toHaveLength(1);
+    expect(find("live-country")?.textContent).toBe("Iceland");
+    return region!;
+  }
+
+  it("keeps Categories, showing its one category, and every category again once cleared", () => {
+    expect(find("live-categories")).not.toBeNull();
+    const all = tiles().length;
+    const region = iceland();
+    expect(find("live-categories")).not.toBeNull();
+    expect(tiles()).toEqual([`live-category-${region.shelves[0]!.id}`]);
+    press("live-country-clear");
+    expect(find("live-categories")).not.toBeNull();
+    expect(tiles()).toHaveLength(all);
+  });
+
+  it("keeps For you, with its one category as a shelf", () => {
+    press("tab-for-you");
+    expect(find("live-for-you")).not.toBeNull();
+    iceland();
+    expect(find("live-for-you")).not.toBeNull();
+    expect(find("live-for-you")?.textContent).toContain("Single");
+    press("live-country-clear");
+    expect(find("live-for-you")).not.toBeNull();
+  });
+});
