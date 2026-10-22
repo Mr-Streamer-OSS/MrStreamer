@@ -14,7 +14,9 @@ tabs (`src/live-screen.tsx`). Movies and Series browse the
 desktop's collections (For you, New, Genres, Services, 4K and All) and open details pushed on
 their tab, with seasons and episodes, the version menu, the watchlist and episodes marked by hand.
 A version chosen from the menu plays again whenever the title opens, until Automatic is chosen; a
-4K tile or Continue watching asks for its own version over it.
+4K tile or Continue watching asks for its own version over it. While a provider needs its
+password, its chosen version and how far its versions got give way to the version opened, and
+count again once the password is back.
 A movie or an episode plays in Watch from where it stopped. Home leads with the preview, then
 channels to preview (On now: recent ones, else the country last chosen in Live), Continue watching, the watchlist
 (its heading always there, opening all of it on Home's stack: `watchlist`)
