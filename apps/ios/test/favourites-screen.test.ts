@@ -90,6 +90,7 @@ vi.mock("react-native", async () => {
             ),
         node(ListFooterComponent),
       ),
+    TextInput: () => null,
     ActionSheetIOS: { showActionSheetWithOptions: () => undefined },
     Alert: {
       alert: (title: string, _message: string, buttons?: Shown["buttons"]) =>
@@ -140,7 +141,7 @@ vi.mock("../src/account.ts", () => ({
   playChannel: (channel: Channel, _place: string, { watch }: { watch: boolean }) =>
     void scenario.did.push(`play ${channel.key}${watch ? " in Watch" : ""}`),
   retry: () => undefined,
-  retryChannels: () => undefined,
+  retryChannels: () => void scenario.did.push("retry channels"),
   reloadAllChannels: () => undefined,
 }));
 vi.mock("../src/playback.ts", async (original) => ({
@@ -178,6 +179,7 @@ const viewing = await import("../src/viewing.ts");
 const { LiveHome, CategoryScreen } = await import("../src/live-screen.tsx");
 const { FavouritesScreen } = await import("../src/favourites-screen.tsx");
 const { default: Home } = await import("../src/app/(tabs)/(home)/index.tsx");
+const { DiscoverScreen } = await import("../src/live-discover.tsx");
 
 const channel = (id: string, name: string): ProviderChannel => ({
   id,
@@ -626,4 +628,57 @@ describe("a star whose channel changed", () => {
     expect(scenario.alerts).toEqual([]);
     expect(scenario.did).toEqual([]);
   });
+});
+
+describe("Home's Favourites heading", () => {
+  const heading = () => find("favourites-heading")?.getAttribute("aria-label");
+
+  it("counts every favourite, those of a provider that needs its password too", async () => {
+    await starred("a:10", "b:10", "b:11");
+    scenario.members = [member("a", "Home"), member("b", "Cabin", true)];
+    open(Home);
+    expect(container.querySelectorAll('[data-testid^="home-favourite-"]')).toHaveLength(1);
+    expect(heading()).toBe("Favourites, all 3");
+    press("favourites-heading");
+    expect(scenario.did).toEqual(["push /favourites"]);
+  });
+
+  it("counts them while no channel list shows", async () => {
+    await starred("a:10", "b:11");
+    const [home] = scenario.members;
+    scenario.catalogue = {
+      kind: "failed",
+      member: home!,
+      error: { kind: "unreachable", server: "http://example.test", detail: "" },
+    };
+    open(Home);
+    expect(container.querySelector('[data-testid^="home-favourite-"]')).toBeNull();
+    expect(heading()).toBe("Favourites, all 2");
+  });
+});
+
+describe("Find countries or categories with no channel list", () => {
+  for (const [error, why] of [
+    [
+      { kind: "unreachable", server: "http://example.test", detail: "" },
+      "Couldn't reach example.test. Check the address and that your iPhone is online.",
+    ],
+    [
+      { kind: "invalid-login" },
+      "example.test didn't accept this login. Check the username and password from your provider.",
+    ],
+  ] as const) {
+    it(`says why and what to do, for ${error.kind}, and tries again`, () => {
+      const [home] = scenario.members;
+      scenario.catalogue = { kind: "failed", member: home!, error };
+      open(DiscoverScreen);
+      expect(container.textContent).toContain(`Couldn't load channels${why}`);
+      const again = [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "Try again",
+      ) as { click(): void } | undefined;
+      if (!again) throw new Error("No Try again");
+      React.act(() => again.click());
+      expect(scenario.did).toEqual(["retry channels"]);
+    });
+  }
 });

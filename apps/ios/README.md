@@ -213,7 +213,11 @@ Each responsibility has one owner, a plain module with a store the screens read:
   given to core's record through its optional `favourite` port. So a favourite stays one
   favourite while its provider lists only some of its qualities, across relaunches too: one star
   takes out every stream of it, and a new order moves them all, so a quality listed again brings
-  back neither a removed favourite nor an old order. The channels listed now always win: streams
+  back neither a removed favourite nor an old order, as long as some stream still shows them
+  together. A panel listing qualities' rows again in other categories can leave nothing that
+  does, which looks like a real split: a stream no list shows then stays a favourite of its own,
+  an unstar can leave it saved, and the favourite comes back once it is listed again. The
+  channels listed now always win: streams
   a list splits between channels follow theirs, and those no channel lists stay saved on their
   own until one channel lists them together again; no name or other provider joins them. Every
   write of the record writes this memory with it, and a regrouping the catalogue shows is written

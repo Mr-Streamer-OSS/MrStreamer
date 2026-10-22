@@ -37,6 +37,9 @@ export function DiscoverScreen() {
           retry,
           settings: () => router.push(tabHref("live", "settings")),
         });
+  // As Live says it: why, and what to do.
+  const failure =
+    catalogue.kind === "failed" ? failureOf(catalogue.error, catalogue.member.entry.server) : null;
   return (
     <Docked status={status}>
       <View style={styles.screen}>
@@ -80,7 +83,7 @@ export function DiscoverScreen() {
           <Notice
             failure={{
               headline: "Couldn't load channels",
-              advice: failureOf(catalogue.error, catalogue.member.entry.server).headline,
+              advice: [failure?.headline, failure?.advice].filter(Boolean).join(". "),
             }}
             actions={[{ label: "Try again", onPress: retryChannels }]}
           />

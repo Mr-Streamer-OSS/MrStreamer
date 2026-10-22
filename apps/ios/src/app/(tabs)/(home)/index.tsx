@@ -219,7 +219,8 @@ function Favourites({
     <View style={styles.block}>
       <ShelfHead
         name="Favourites"
-        total={channels.length}
+        // Every favourite the list holds, as the Watchlist's heading counts what it saved.
+        total={favourites?.original.length ?? 0}
         onAll={openFavourites}
         testID="favourites-heading"
       />
