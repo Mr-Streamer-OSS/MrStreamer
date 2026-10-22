@@ -13,7 +13,8 @@ import { type } from "arktype";
 // cohort is kept while it holds a stream the record keeps as a favourite. The channels listed now
 // always win: a cohort whose ids one channel lists takes that channel's other streams in; one the
 // lists split between channels goes, its listed ids following their channels and the others left
-// on their own until one channel lists them together again. A provider whose channels don't show
+// on their own until one channel lists them together again. Two of a provider's channels that
+// list one stream share it, so what they list is one cohort. A provider whose channels don't show
 // tells nothing, so its cohorts stay as they are. No name, and no other provider, ever joins them.
 
 /** A group of one account's stream ids seen together in one channel. */
@@ -118,9 +119,24 @@ function reconcileAccount(
     if (channel) join(channel, []);
   }
   const backed = new Set(starred);
-  return [...next, ...[...joined.values()].map((group) => [...group])].filter(
+  return disjoint([...next, ...[...joined.values()].map((group) => [...group])]).filter(
     (cohort) => cohort.length > 1 && cohort.some((id) => backed.has(id)),
   );
+}
+
+/**
+ * `cohorts` with every two that share an id made one, however they chain: the same stream two
+ * of a provider's channels list, as a panel listing a stream's row in two categories does, is one
+ * favourite's either way. So each id is in one cohort at most, as `readMembership` requires.
+ */
+function disjoint(cohorts: readonly Cohort[]): Cohort[] {
+  const groups: Set<string>[] = [];
+  for (const cohort of cohorts) {
+    const sharing = groups.filter((group) => cohort.some((id) => group.has(id)));
+    const union = new Set([...sharing.flatMap((group) => [...group]), ...cohort]);
+    groups.splice(0, groups.length, ...groups.filter((group) => !sharing.includes(group)), union);
+  }
+  return groups.map((group) => [...group]);
 }
 
 /**

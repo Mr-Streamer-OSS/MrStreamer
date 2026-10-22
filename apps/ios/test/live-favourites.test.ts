@@ -848,3 +848,40 @@ describe("viewing.json from another build", () => {
     }
   });
 });
+
+describe("a stream a panel lists in two of its channels", () => {
+  it("stays one favourite's, so a quality gone and back across relaunches brings nothing back", async () => {
+    const { app, a } = await twoProviders();
+    await star(app, channelOf(app, a, FHD));
+    // HD's and SD's rows again in another category: two channels list those streams.
+    await relistAs(app, a, one, (all) => [
+      ...all,
+      ...all
+        .filter((each) => [HD, SD].includes(String(each.streamId)))
+        .map((each) => ({ ...each, categoryId: "16" })),
+    ]);
+    expect(channelOf(app, a, HD).id).not.toBe(channelOf(app, a, FHD).id);
+    /** The memory as written, each cohort's ids in order: every id in one of them only. */
+    const remembered = () =>
+      (file().favouriteMembership?.accounts?.[a] ?? []).map((cohort: string[]) =>
+        cohort.toSorted(),
+      );
+    expect(remembered()).toEqual([[FHD, HD, SD]]);
+    // An ordinary write after keeps it as it is.
+    await app.recordProgress({ kind: "movie", subscriptionId: a, id: "1" }, 300, 600, Date.now());
+    expect(remembered()).toEqual([[FHD, HD, SD]]);
+
+    // The panel's usual list again, without Full HD, after a relaunch with that file.
+    one.serveChannels((all) => all);
+    const again = await relaunch();
+    await relist(again, a, one, without(FHD));
+    expect(shown(again)).toEqual([`${a}:${HD}`]);
+    await star(again, channelOf(again, a, HD), false);
+    expect(stored(a)).toEqual([]);
+    await relist(again, a, one, () => true);
+    const last = await relaunch();
+    expect(shown(last)).toEqual([]);
+    expect(stored(a)).toEqual([]);
+    expect(memory.played).toEqual([]);
+  });
+});
