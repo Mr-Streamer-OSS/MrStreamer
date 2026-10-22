@@ -55,8 +55,10 @@ import {
 // only once the file took both does the app go by it. A catalogue that groups those ids otherwise
 // is written too, as it shows; one the file refuses is kept until the next write. A field another
 // build wrote, or one this build can't trust, is written back as it is, and favourites then go by
-// the channels listed now alone. Starring, unstarring and reordering are decided and written
-// before their promise is answered, so the screens' checks of a moment before still hold.
+// the channels listed now alone, until a provider's history is deleted: as this build can't tell
+// which part was that provider's, that write drops all of it. Starring, unstarring and reordering
+// are decided and written before their promise is answered, so the screens' checks of a moment
+// before still hold.
 
 const FILE = "viewing.json";
 
