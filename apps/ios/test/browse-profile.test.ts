@@ -175,38 +175,54 @@ describe("the browse profile", () => {
 
   it("holds the movie and series lists until released, at its limit or on stopping", async () => {
     const { provider, login } = first;
-    const movies = new URL("/player_api.php", provider.url);
-    movies.search = new URLSearchParams({ ...login, action: "get_vod_streams" }).toString();
     const state = () => first.controls.state().titleLists;
+    const endpoints = [
+      ["get_vod_streams", provider.titles.movies.length],
+      ["get_series", provider.titles.series.length],
+    ] as const;
 
-    for (const release of [
-      () => control(first.controls, "/release-title-lists"),
-      () => first.controls.stop(),
-    ]) {
+    for (const [action, rows] of endpoints) {
+      const list = new URL("/player_api.php", provider.url);
+      list.search = new URLSearchParams({ ...login, action }).toString();
+      for (const release of [
+        () => control(first.controls, "/release-title-lists"),
+        () => first.controls.stop(),
+      ]) {
+        control(first.controls, "/hold-title-lists?ms=60000");
+        let settled = false;
+        const answered = fetch(list).finally(() => {
+          settled = true;
+        });
+        await expect.poll(state).toMatchObject({ held: true, arrived: true });
+        // Holding again keeps the hold that request waits on.
+        control(first.controls, "/hold-title-lists?ms=60000");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(settled, action).toBe(false);
+        release();
+        const answer = await answered;
+        expect(answer.status).toBe(200);
+        expect(await answer.json()).toHaveLength(rows);
+      }
+      expect(state()).toEqual({ held: false, lastRelease: "stop" });
+      control(first.controls, "/hold-title-lists?ms=200");
+      const limited = await fetch(list);
+      expect(limited.status).toBe(200);
+      expect(await limited.json()).toHaveLength(rows);
+      expect(state()).toEqual({ held: false, lastRelease: "limit" });
+
+      // A held request the app gives up on leaves the list answering once released.
       control(first.controls, "/hold-title-lists?ms=60000");
-      const answered = fetch(movies);
-      await expect.poll(state).toMatchObject({ held: true, arrived: true });
-      // Holding again keeps the hold that request waits on.
-      control(first.controls, "/hold-title-lists?ms=60000");
-      release();
-      const answer = await answered;
-      expect(answer.status).toBe(200);
-      expect(await answer.json()).toHaveLength(provider.titles.movies.length);
+      const abandoned = new AbortController();
+      const given = fetch(list, { signal: abandoned.signal });
+      await expect.poll(state).toMatchObject({ arrived: true });
+      abandoned.abort();
+      await expect(given).rejects.toThrow();
+      control(first.controls, "/release-title-lists");
+      const after = await fetch(list);
+      expect(after.status).toBe(200);
+      expect(await after.json()).toHaveLength(rows);
+      expect(state()).toEqual({ held: false, lastRelease: "control" });
     }
-    expect(state()).toEqual({ held: false, lastRelease: "stop" });
-    control(first.controls, "/hold-title-lists?ms=200");
-    expect((await fetch(movies)).status).toBe(200);
-    expect(state()).toEqual({ held: false, lastRelease: "limit" });
-
-    // A held request the app gives up on leaves the lists answering once released.
-    control(first.controls, "/hold-title-lists?ms=60000");
-    const abandoned = new AbortController();
-    const given = fetch(movies, { signal: abandoned.signal });
-    await expect.poll(state).toMatchObject({ arrived: true });
-    abandoned.abort();
-    await expect(given).rejects.toThrow();
-    control(first.controls, "/release-title-lists");
-    expect((await fetch(movies)).status).toBe(200);
 
     for (const ms of ["0", "600001", "soon"]) {
       expect(control(first.controls, `/hold-title-lists?ms=${ms}`).status).toBe(400);
