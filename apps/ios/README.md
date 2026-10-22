@@ -21,7 +21,9 @@ state: loading, failed or none. Under Favourites, Find
 countries or categories (`src/live-discover.tsx`) finds them by name in every provider's
 channels, whatever country Live shows: a country goes back to Live showing it, on the same tab; a
 category opens all its channels, and Back finds the text and results again. Cancel leaves Live as
-it was, and nothing found or opened plays. Movies and Series browse the
+it was, and nothing found or opened plays. While a provider's channels are still to come, or
+didn't load with none of them showing, finding nothing says whose are missing rather than that no
+provider has the name. Movies and Series browse the
 desktop's collections (For you, New, Genres, Services, 4K and All) and open details pushed on
 their tab, with seasons and episodes, the version menu, the watchlist and episodes marked by hand.
 A version chosen from the menu plays again whenever the title opens, until Automatic is chosen; a

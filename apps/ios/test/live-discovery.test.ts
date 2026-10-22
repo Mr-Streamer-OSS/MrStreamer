@@ -182,10 +182,16 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
 
 interface FakeChannel {
   readonly streamId: number;
+  readonly categoryId: string;
+}
+interface FakeCategory {
+  readonly id: string;
+  readonly name: string;
 }
 interface FakeProvider {
   readonly url: string;
   serveChannels(select: (all: readonly FakeChannel[]) => readonly FakeChannel[]): void;
+  serveCategories(select: (all: readonly FakeCategory[]) => readonly FakeCategory[]): void;
   failCatalogue(status: number | null): void;
   hold(what: "channels"): { readonly arrived: Promise<void>; release(): void };
   close(): Promise<void>;
@@ -463,6 +469,9 @@ describe("as the providers' lists change", () => {
     // The status line names it, as Live's does (loading-feedback.test.ts): its list is the last.
     const now = account.currentCatalogue();
     expect(now.kind === "ready" && now.failing.map((member) => member.entry.id)).toEqual([a]);
+    // Its last list shows, so a name in none of the lists is in none of its channels either.
+    type("zzqx");
+    expect(top().textContent).toContain("No country or category is called “zzqx”.");
     one.failCatalogue(null);
     const before = libraryOf();
     account.reloadChannels(a);
@@ -504,5 +513,141 @@ describe("as the providers' lists change", () => {
       () => libraryOf() !== without && shelvesCalled("Kwaliteit").length === 1,
       "the lists with it again",
     );
+  });
+});
+
+/** Reloads both providers' channels with what their panels list now, and waits for Live. */
+async function relistBoth() {
+  const before = libraryOf();
+  account.reloadChannels(a);
+  account.reloadChannels(b);
+  await until(
+    () =>
+      libraryOf() !== before &&
+      account.channelsWorkedOut() &&
+      account.members().every((member) => member.live.kind === "ready"),
+    "both lists again",
+  );
+}
+
+describe("an Other channels region holding more than its category", () => {
+  it("is found as the country too, which shows every one of its channels", async () => {
+    // Home's panel names a category Other channels; both panels list channels in no category.
+    const unplaced = (all: readonly FakeChannel[]) =>
+      all.map((each) => (each.categoryId === "4" ? { ...each, categoryId: "999" } : each));
+    one.serveCategories((all) =>
+      all.map((each) => (each.id === "2" ? { ...each, name: "Other channels" } : each)),
+    );
+    one.serveChannels(unplaced);
+    two.serveChannels(unplaced);
+    await relistBoth();
+    const region = libraryOf()!.regions.find((each) => each.name === "Other channels")!;
+    const [shelf] = region.shelves;
+    const keys = region.channels.map((channel) => channel.key);
+    expect(region.shelves).toHaveLength(1);
+    expect(shelf!.channels.length).toBeLessThan(keys.length);
+    expect(new Set(region.channels.map((channel) => channel.subscriptionId))).toEqual(
+      new Set([a, b]),
+    );
+
+    press("live-discover");
+    type("other channels");
+    expect(results()).toEqual([
+      `Other channels, country, ${keys.length} channels`,
+      `Other channels, category, ${shelf!.channels.length} channels`,
+    ]);
+    press("discover-country-Other channels");
+    expect(stack).toHaveLength(1);
+    expect(find("live-country")?.textContent).toBe("Other channels");
+    press("tab-all");
+    expect(rows()).toEqual(keys);
+    press("live-country-clear");
+    press("tab-categories");
+
+    one.serveCategories((all) => all);
+    one.serveChannels((all) => all);
+    two.serveChannels((all) => all);
+    await relistBoth();
+    expect(scenario.requests.filter((each) => each.includes("/live/"))).toEqual([]);
+  });
+});
+
+describe("a provider whose channels haven't come", () => {
+  let three: FakeProvider;
+  let c = "";
+  beforeAll(async () => {
+    three = await startFakeProvider({
+      username: "three",
+      password: "three+Pw@3",
+      channels: 40,
+      titles: 4,
+    });
+    // A category only this panel lists.
+    three.serveCategories((all) =>
+      all.map((each) => (each.id === "2" ? { ...each, name: "UK | Harbour Lights" } : each)),
+    );
+  });
+  afterAll(() => three.close());
+  afterEach(async () => {
+    if (c) await account.remove(c, { keepHistory: false });
+    c = "";
+    await until(() => libraryOf()?.labels.size === 2, "two providers again");
+  });
+  const third = () => account.members().find((member) => member.entry.id === c);
+  const add = () =>
+    account
+      .add({ server: three.url, username: "three", password: "three+Pw@3", name: "Annex" })
+      .then((id) => void (c = id ?? ""));
+
+  it("is said to be loading, not missing, until its list comes with the name", async () => {
+    const held = three.hold("channels");
+    await add();
+    await held.arrived;
+    press("live-discover");
+    type("harbour");
+    expect(top().textContent).toContain(
+      "No country or category is called “harbour” yet. Channels from Annex are still loading.",
+    );
+    // What the others list shows meanwhile.
+    type("news");
+    expect(results().length).toBeGreaterThan(0);
+    type("harbour");
+    held.release();
+    await until(() => libraryOf()?.labels.size === 3 && account.channelsWorkedOut(), "its list");
+    // One channel, in the United Kingdom group the panel names its first category after.
+    expect(results()).toEqual(["Harbour Lights, category, United Kingdom · 1 channel"]);
+  });
+
+  it("says whose list didn't load, when none of it shows", async () => {
+    three.failCatalogue(503);
+    await add();
+    await until(() => third()?.live.kind === "failed", "its failure");
+    press("live-discover");
+    type("harbour");
+    expect(top().textContent).toContain(
+      "No country or category is called “harbour” in the channels that loaded. Couldn't load channels from Annex.",
+    );
+    three.failCatalogue(null);
+  });
+
+  it("says no providers list channels only once every one has answered", async () => {
+    one.serveChannels(() => []);
+    two.serveChannels(() => []);
+    await relistBoth();
+    const held = three.hold("channels");
+    three.serveChannels(() => []);
+    await add();
+    await held.arrived;
+    press("live-discover");
+    expect(top().textContent).toContain("Channels from Annex are still loading.");
+    expect(top().textContent).not.toContain("list no channels");
+    held.release();
+    await until(() => libraryOf()?.labels.size === 3, "its empty list");
+    expect(top().textContent).toContain("Your providers list no channels.");
+
+    three.serveChannels((all) => all);
+    one.serveChannels((all) => all);
+    two.serveChannels((all) => all);
+    await relistBoth();
   });
 });

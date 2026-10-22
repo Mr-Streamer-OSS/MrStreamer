@@ -2,7 +2,7 @@ import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useDeferredValue, useMemo, useState } from "react";
 import { Pressable, SectionList, StyleSheet, Text, TextInput, View } from "react-native";
-import { retry, retryChannels, useCatalogue, useRoster } from "./account.ts";
+import { retry, retryChannels, useCatalogue, useRoster, type Member } from "./account.ts";
 import { failureOf } from "./errors.ts";
 import { tabHref } from "./header.tsx";
 import { searchPlaces, type Library, type Place } from "./library.ts";
@@ -17,7 +17,9 @@ import { colors, Message, Notice, TextButton } from "./ui.tsx";
 // in it, on its own screen, and Back from there finds the text and results as they were. Cancel,
 // and Back, go to Live as it was; Clear empties the field and stays. Nothing here plays. Each
 // opening starts with an empty field. Results are of the channels as they show now: a reload or a
-// failure keeps the last ones, and says so in the status line, as Live does.
+// failure keeps the last ones, and says so in the status line, as Live does. While a provider's
+// channels are still to come, or didn't come and none of its show, what was found shows, and no
+// result or no channels say whose are missing, rather than that nothing anywhere has the name.
 
 /** Live's discovery screen. */
 export function DiscoverScreen() {
@@ -71,7 +73,7 @@ export function DiscoverScreen() {
           <TextButton label="Cancel" onPress={() => router.back()} testID="discover-cancel" />
         </View>
         {catalogue.kind === "ready" ? (
-          <Results library={catalogue.library} query={typed} />
+          <Results library={catalogue.library} providers={providers} query={typed} />
         ) : catalogue.kind === "loading" ? (
           <Message text="Channels are still loading." />
         ) : (
@@ -88,8 +90,44 @@ export function DiscoverScreen() {
   );
 }
 
+/** "Home", "Home and Cabin". */
+const named = (labels: readonly string[]) =>
+  new Intl.ListFormat("en", { type: "conjunction" }).format(labels);
+
+/**
+ * The providers none of whose channels `library` holds, as sentences of why, as Search says them:
+ * still loading, or failed or needing a password with no earlier list to show. Empty when every
+ * provider's channels are in. `pending` when some are still to come.
+ */
+function missingFrom(library: Library, providers: readonly Member[]) {
+  const pending: string[] = [];
+  const failed: string[] = [];
+  const passwords: string[] = [];
+  for (const { entry, label, live, needsSecret } of providers) {
+    if (library.labels.has(entry.id)) continue;
+    if (needsSecret) passwords.push(label);
+    else if (live.kind === "failed") failed.push(label);
+    // Loading, or come and still being worked out.
+    else pending.push(label);
+  }
+  const sentences = [
+    ...(pending.length > 0 ? [`Channels from ${named(pending)} are still loading.`] : []),
+    ...(failed.length > 0 ? [`Couldn't load channels from ${named(failed)}.`] : []),
+    ...(passwords.length > 0 ? [`Enter the password for ${named(passwords)} in Settings.`] : []),
+  ];
+  return { pending: pending.length > 0, text: sentences.join(" ") };
+}
+
 /** The countries, then the categories, `query` finds in `library`. */
-function Results({ library, query }: { library: Library; query: string }) {
+function Results({
+  library,
+  providers,
+  query,
+}: {
+  library: Library;
+  providers: readonly Member[];
+  query: string;
+}) {
   const inset = useDockInset();
   const sections = useMemo(() => {
     const found = searchPlaces(library, query);
@@ -100,10 +138,35 @@ function Results({ library, query }: { library: Library; query: string }) {
       ...(categories.length > 0 ? [{ title: "Categories", data: categories }] : []),
     ];
   }, [library, query]);
+  const missing = missingFrom(library, providers);
   const searched = query.trim();
-  if (library.regions.length === 0) return <Message text="Your providers list no channels." />;
+  // Nothing anywhere only once every provider's channels are in.
+  if (library.regions.length === 0) {
+    return (
+      <Message
+        text={
+          !missing.text
+            ? "Your providers list no channels."
+            : missing.pending
+              ? missing.text
+              : `The providers that loaded list no channels. ${missing.text}`
+        }
+      />
+    );
+  }
   if (searched && sections.length === 0) {
-    return <Message text={`No country or category is called “${searched}”.`} />;
+    const none = `No country or category is called “${searched}”`;
+    return (
+      <Message
+        text={
+          !missing.text
+            ? `${none}.`
+            : missing.pending
+              ? `${none} yet. ${missing.text}`
+              : `${none} in the channels that loaded. ${missing.text}`
+        }
+      />
+    );
   }
   return (
     <SectionList

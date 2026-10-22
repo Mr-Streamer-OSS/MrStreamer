@@ -109,4 +109,45 @@ describe("finding countries and categories", () => {
   it("finds a category that stands alone once, as the category", () => {
     expect(found("extra")).toEqual(["category News Extra in News Extra"]);
   });
+
+  it("finds an Other channels holding more than its category as the country too", () => {
+    // Home lists a category of that name and channels in none; Cabin has channels in none too.
+    const merged = buildLibrary([
+      {
+        subscriptionId: "a",
+        label: "Home",
+        catalogue: {
+          categories: [
+            { id: "1", name: "News" },
+            { id: "9", name: "Other channels" },
+          ],
+          channels: [
+            channel("1", "NOS", ["1"]),
+            channel("2", "Alpha", ["9"]),
+            channel("3", "Bravo", []),
+          ],
+        },
+      },
+      {
+        subscriptionId: "b",
+        label: "Cabin",
+        catalogue: {
+          categories: [{ id: "1", name: "Kids" }],
+          channels: [channel("1", "Zappelin", ["1"]), channel("9", "Charlie", [])],
+        },
+      },
+    ]);
+    const places = searchPlaces(merged, "other channels");
+    const keys = (channels: readonly { readonly key: string }[]) => channels.map(({ key }) => key);
+    expect(
+      places.map((place) =>
+        place.kind === "country"
+          ? ["country", keys(place.region.channels)]
+          : ["category", keys(place.shelf.channels)],
+      ),
+    ).toEqual([
+      ["country", ["a:2", "a:3", "b:9"]],
+      ["category", ["a:2"]],
+    ]);
+  });
 });

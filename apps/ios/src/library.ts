@@ -313,14 +313,21 @@ export type Place =
  * The countries and categories whose names hold every word of `query`, as `searchChannels` matches
  * channels: every country first, then every category, each in the library's order, whatever Live
  * shows of them. A "country" is the providers' group, which can be a language or a label. A
- * category that stands alone, as its own region, is found as the category only.
+ * category that stands alone, as its own region holding just its channels, is found as the
+ * category only; a region of its name holding more is found as the country too.
  */
 export function searchPlaces(library: Library, query: string): readonly Place[] {
   const words = searchWords(query);
   if (words.length === 0) return [];
   const matches = (name: string) => matchRanges(name, words).length > 0;
-  const alone = (region: Region) =>
-    region.shelves.length === 1 && region.shelves[0]?.title === region.name;
+  // A region that is one category of its own name and no more: Live may add channels in no
+  // category to a provider's own "Other channels", which its category then doesn't hold.
+  const alone = (region: Region) => {
+    const [shelf, ...more] = region.shelves;
+    if (!shelf || more.length > 0 || shelf.title !== region.name) return false;
+    const held = new Set(shelf.channels.map((channel) => channel.key));
+    return region.channels.every((channel) => held.has(channel.key));
+  };
   const countries = library.regions.flatMap((region): Place[] =>
     !alone(region) && matches(region.name) ? [{ kind: "country", region }] : [],
   );
