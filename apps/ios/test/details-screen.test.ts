@@ -594,6 +594,49 @@ describe("a film's version picked from a provider that lost its password", () =>
     expect(read.at(-1)).toBe("a:2");
   });
 
+  it("goes with Automatic to a provider that signs in when the film's own lost its password", async () => {
+    providers("a", "b", "c");
+    const read: string[] = [];
+    scenario.details = (version) => {
+      read.push(version);
+      return new Promise(() => undefined);
+    };
+    // Home's version is the film's own; Home lost its password. Opened through Cabin, as the
+    // watchlist opens it, then Automatic chosen.
+    lost("a");
+    const page = mount({ version: "b:1" });
+    await settled();
+    expect(page.play()).toBe("b");
+    page.openVersions()("Automatic");
+    await settled();
+    expect(page.play()).toBe("b");
+    expect(read.at(-1)).toBe("b:1");
+    // Its password back, Automatic goes with the film's own again.
+    lost();
+    page.render();
+    await settled();
+    expect(page.play()).toBe("a");
+    // Home chosen from the menu stays chosen with its password lost.
+    page.openVersions()("Home");
+    lost("a");
+    page.render();
+    await settled();
+    expect(page.play()).toBe("a");
+    unmount();
+
+    // How far c's version got still goes first under Automatic.
+    scenario.progress = [
+      {
+        title: { kind: "movie", subscriptionId: "c", id: "1" },
+        ...{ position: 600, duration: 6000, finished: false, at: 1, since: 1 },
+      },
+    ];
+    const resumed = mount({ version: "b:1" });
+    resumed.openVersions()("Automatic");
+    await settled();
+    expect(resumed.play()).toBe("c");
+  });
+
   it("goes with Automatic over progress on a provider that lost its password, and not a version chosen", async () => {
     providers("a", "b");
     const read: string[] = [];

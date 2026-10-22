@@ -179,9 +179,15 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
   );
   const remembered = pickedVersion(title, state);
   const usable = played.filter((each) => !lost.has(each.title.subscriptionId));
+  // Automatic falls back to the title's own version; while that one's provider needs its
+  // password, to the first version of a provider that signs in, if any.
+  const automatic = automaticVersion(title, usable, title);
+  const signedIn = title.versions.find((each) => !lost.has(each.subscriptionId));
   const chosen =
     listed === AUTOMATIC
-      ? automaticVersion(title, usable, title)
+      ? lost.has(automatic.subscriptionId) && signedIn
+        ? ownedId(signedIn)
+        : automatic
       : (listed ??
         askedFor ??
         (remembered && !lost.has(remembered.subscriptionId) ? remembered : null) ??
