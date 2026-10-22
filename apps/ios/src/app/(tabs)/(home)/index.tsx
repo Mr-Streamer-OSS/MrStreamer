@@ -28,7 +28,7 @@ import {
 import { openDetails, resume, useContinueWatching } from "../../../resume.ts";
 import { useSavedState } from "../../../storage.ts";
 import { named, useCollections, useMetadataVersion, useTitleLists } from "../../../titles.ts";
-import { PlaceholderShelf, Shelf } from "../../../titles-ui.tsx";
+import { PlaceholderShelf, Shelf, ShelfHead } from "../../../titles-ui.tsx";
 import { ChannelLogo, colors, Message, Notice } from "../../../ui.tsx";
 import { removeFromContinue } from "../../../viewing.ts";
 import { useWatchlist, watchlistTitles } from "../../../watchlist.ts";
@@ -40,7 +40,8 @@ const MOVIES = 20;
 
 /**
  * Home: the Stage, a muted preview of what plays or of the channel to play, then On now,
- * Continue watching, the watchlist and Movies for you. On now lists the channels watched lately,
+ * Continue watching, the watchlist and Movies for you. The watchlist's heading is always there,
+ * with nothing saved too, and opens all of it. On now lists the channels watched lately,
  * or the first of the country last chosen in Live until there are any; their programmes join
  * when iOS reads a guide, favourites when iOS has them. Downloads join Home as they come to iOS.
  * Until channels and movies first come, still shapes hold On now and Movies for you; what loads
@@ -142,6 +143,9 @@ function Content({ children }: { children: ReactNode }) {
 
 /** Settings, on Home's own stack. */
 const openSettings = () => router.push(tabHref("(home)", "settings"));
+
+/** The whole watchlist, on Home's own stack. */
+const openWatchlist = () => router.push("/watchlist");
 
 const placeOf = (library: Library, channel: Channel) => library.placeOf.get(channel.key) ?? "";
 
@@ -248,7 +252,11 @@ function MoviesForYou() {
   return <Shelf name={shelf.name} titles={shelf.titles} onPress={(title) => openDetails(title)} />;
 }
 
-/** Continue watching and the watchlist, as rows of posters. */
+/**
+ * Continue watching and the watchlist, as rows of posters. The watchlist's row shows the saved
+ * titles the lists have; its heading counts every entry and opens them all, and stays without
+ * posters when the lists have none of them or nothing is saved.
+ */
 function TitleRows() {
   const continuing = useContinueWatching();
   const lists = useTitleLists();
@@ -294,8 +302,18 @@ function TitleRows() {
         />
       ) : null}
       {watchlist.length > 0 ? (
-        <Shelf name="Watchlist" titles={watchlist} onPress={(title) => openDetails(title)} />
-      ) : null}
+        <Shelf
+          name="Watchlist"
+          titles={watchlist}
+          total={saved.length}
+          onAll={openWatchlist}
+          onPress={(title) => openDetails(title)}
+        />
+      ) : (
+        <View style={styles.block}>
+          <ShelfHead name="Watchlist" total={saved.length} onAll={openWatchlist} />
+        </View>
+      )}
     </>
   );
 }

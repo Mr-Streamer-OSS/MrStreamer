@@ -1,0 +1,468 @@
+import * as React from "react";
+import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import { indexCatalogue, kindOf, type IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
+import type { OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider";
+import { Window } from "happy-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Member } from "../src/account.ts";
+import type { TitleLists } from "../src/titles.ts";
+
+// The whole watchlist, pushed on Home: every saved movie and series as a row, newest first or by
+// name, a listed one opening its details, one the lists don't have saying why, and Remove taking
+// out the entry as it stands. The real screen runs with React DOM on a happy-dom window over the
+// real watchlist owner, whose file is written to the files stand-in (native-files.ts). The lists
+// are indexed by core as the app's are; how each provider's lists stand is set by each test.
+
+const REACT_DOM = "react-dom/client";
+const window = new Window();
+Object.assign(globalThis, { window, document: window.document });
+const { document } = window;
+type Root = { render(node: unknown): void; unmount(): void };
+const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+/** A system sheet that showed: its options, and what choosing one does. */
+interface Sheet {
+  readonly title: string | undefined;
+  readonly options: readonly string[];
+  choose(label: string): void;
+}
+
+const scenario = vi.hoisted(() => ({
+  members: [] as Member[],
+  lists: { kind: "loading" } as TitleLists,
+  /** Whether every provider's lists that show are indexed. */
+  complete: true,
+  /** The disk refuses to write the watchlist's file. */
+  refuse: false,
+  sheets: [] as Sheet[],
+  alerts: [] as {
+    title: string;
+    message: string;
+    buttons: { text: string; onPress?: () => void }[];
+  }[],
+  did: [] as string[],
+}));
+
+vi.mock("react-native", async () => {
+  const { createElement, Fragment } = await import("react");
+  type Props = { children?: React.ReactNode; testID?: string };
+  const box = ({ children, testID }: Props) =>
+    createElement("div", { "data-testid": testID }, children);
+  return {
+    View: box,
+    Text: ({ children }: Props) => createElement("span", null, children),
+    Pressable: ({
+      children,
+      testID,
+      onPress,
+      accessibilityLabel,
+    }: Props & { onPress?: () => void; accessibilityLabel?: string }) =>
+      createElement(
+        "button",
+        { "data-testid": testID, "aria-label": accessibilityLabel, onClick: onPress },
+        children,
+      ),
+    FlatList: <T>({
+      data,
+      renderItem,
+      keyExtractor,
+      ListHeaderComponent,
+      ListEmptyComponent,
+      testID,
+    }: {
+      data: readonly T[];
+      renderItem: (info: { item: T }) => React.ReactNode;
+      keyExtractor: (item: T) => string;
+      ListHeaderComponent?: React.ReactNode;
+      ListEmptyComponent?: React.ReactNode;
+      testID?: string;
+    }) =>
+      createElement(
+        "div",
+        { "data-testid": testID },
+        ListHeaderComponent,
+        data.length === 0
+          ? ListEmptyComponent
+          : data.map((item) =>
+              createElement(Fragment, { key: keyExtractor(item) }, renderItem({ item })),
+            ),
+      ),
+    ActionSheetIOS: {
+      showActionSheetWithOptions: (
+        { title, options }: { title?: string; options: string[] },
+        callback: (index: number) => void,
+      ) =>
+        scenario.sheets.push({
+          title,
+          options,
+          choose: (label) => React.act(() => callback(options.indexOf(label))),
+        }),
+    },
+    Alert: {
+      alert: (title: string, message: string, buttons: { text: string; onPress?: () => void }[]) =>
+        scenario.alerts.push({ title, message, buttons }),
+    },
+    StyleSheet: { create: <T>(styles: T) => styles, hairlineWidth: 1 },
+    useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }),
+  };
+});
+vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+vi.mock("expo-file-system", () => import("./native-files.ts"));
+vi.mock("../src/files.ts", async (original) => {
+  const files = await original<typeof import("../src/files.ts")>();
+  return {
+    ...files,
+    writeJson: (name: string, value: unknown) => {
+      if (scenario.refuse) throw new Error("The disk is full");
+      files.writeJson(name, value);
+    },
+  };
+});
+vi.mock("../src/account.ts", () => ({
+  useRoster: () => ({ kind: "ready", members: scenario.members }),
+}));
+vi.mock("../src/titles.ts", () => ({
+  useTitleLists: () => scenario.lists,
+  useMetadataVersion: () => 0,
+  titlesWorkedOut: () => scenario.complete,
+  named: (title: Title) => title,
+}));
+vi.mock("../src/resume.ts", () => ({
+  openDetails: (title: Title) =>
+    scenario.did.push(`details ${title.kind} ${title.subscriptionId}:${title.id}`),
+}));
+vi.mock("../src/titles-ui.tsx", () => ({ Artwork: () => null }));
+vi.mock("../src/ui.tsx", async () => {
+  const { createElement } = await import("react");
+  return {
+    colors: { text: "#FFFFFF", dim: "#A1A1A6", fill: "#1C1C1E", line: "#2C2C2E" },
+    Notice: ({ failure }: { failure: { headline: string; advice: string } }) =>
+      createElement("p", null, `${failure.headline} ${failure.advice}`),
+  };
+});
+
+const watchlist = await import("../src/watchlist.ts");
+const { WatchlistScreen } = await import("../src/watchlist-screen.tsx");
+const { readJson } = await import("../src/files.ts");
+
+/** A provider's movie, added `days` ago. */
+const movie = (
+  id: string,
+  name: string,
+  tmdbId: string | null = null,
+  days = 0,
+): ProviderTitle => ({
+  id,
+  name,
+  posterUrl: null,
+  backdropUrl: null,
+  rating: null,
+  addedAt: Date.UTC(2026, 9, 1) - days * 86_400_000,
+  releaseDate: "2021-09-15",
+  categoryIds: [],
+  adult: false,
+  container: "mp4",
+  tmdbId,
+});
+const lists = (movies: readonly ProviderTitle[]): OnDemandCatalogue => ({
+  movieCategories: [],
+  movies,
+  seriesCategories: [],
+  series: [],
+});
+
+type Standing = Member["titles"];
+const ready = (value: OnDemandCatalogue): Standing =>
+  ({ kind: "ready", value, from: "provider", fetchedAt: 0, took: 1 }) as Standing;
+const failure = { kind: "unexpected", detail: "" } as const;
+
+const member = (id: string, titles: Standing, needsSecret = false): Member =>
+  ({
+    entry: { id },
+    label: id,
+    account: null,
+    needsSecret,
+    live: { kind: "idle" },
+    titles,
+  }) as Member;
+
+/** The providers as they stand, their lists that show indexed together as the app does. */
+function providers(...each: { id: string; titles: Standing }[]) {
+  scenario.members = each.map(({ id, titles }) => member(id, titles));
+  const listed = each.flatMap(({ id, titles }) => {
+    const catalogue =
+      titles.kind === "ready" ? titles.value : "last" in titles ? titles.last : null;
+    return catalogue ? [{ subscriptionId: id, catalogue }] : [];
+  });
+  const index = indexCatalogue(listed, "en");
+  scenario.lists = listed.length > 0 ? { kind: "ready", index } : { kind: "loading" };
+  React.act(() => watchlist.setWatchlistOwners(each.map(({ id }) => id)));
+  rerender();
+  return index;
+}
+
+/** The title the lists give `name`. */
+function titled(index: IndexedCatalogue, name: string, kind: TitleKind = "movie"): Title {
+  const found = kindOf(index, kind).titles.find((title) => title.title === name);
+  if (!found) throw new Error(`No ${name} in the lists`);
+  return found;
+}
+const save = (title: Title) => React.act(() => watchlist.saveTitle(title));
+
+let container: ReturnType<typeof document.createElement>;
+let root: Root | null = null;
+function open() {
+  container = document.createElement("div");
+  root = createRoot(container);
+  React.act(() => root!.render(React.createElement(WatchlistScreen)));
+}
+const rerender = () => root && React.act(() => root!.render(React.createElement(WatchlistScreen)));
+/** The rows as VoiceOver reads them, in order. */
+const rows = () =>
+  [...container.querySelectorAll("button[aria-label]")]
+    .map((row) => row.getAttribute("aria-label")!)
+    .filter((label) => !label.startsWith("Sort, "));
+function press(testID: string) {
+  const button = container.querySelector(`[data-testid="${testID}"]`) as {
+    click(): void;
+  } | null;
+  if (!button) throw new Error(`No ${testID} on screen`);
+  React.act(() => button.click());
+}
+/** The row named `name`'s test id. */
+function rowOf(name: string) {
+  const row = [...container.querySelectorAll('[data-testid^="watchlist-"]')].find((each) =>
+    each.getAttribute("aria-label")?.startsWith(`${name},`),
+  );
+  if (!row) throw new Error(`No row for ${name}`);
+  return row.getAttribute("data-testid")!;
+}
+const lastSheet = () => scenario.sheets.at(-1)!;
+const savedOwners = () =>
+  watchlist.currentWatchlist().map((entry) => entry.map((each) => each.subscriptionId));
+
+beforeEach(() => {
+  Object.assign(scenario, { refuse: false, complete: true, sheets: [], alerts: [], did: [] });
+  // Every save of the test before goes, the providers' kept ones too.
+  for (const id of ["a", "b", "c"]) watchlist.eraseWatchlist(id);
+});
+afterEach(() => {
+  if (root) React.act(() => root!.unmount());
+  root = null;
+});
+
+describe("the whole watchlist", () => {
+  it("lists every saved title, newest first or by name, and keeps the order chosen", () => {
+    const names = [
+      "Film 10",
+      "alpha",
+      "Film 2",
+      "Beta",
+      ...Array.from({ length: 26 }, (_, at) => `Saga ${at + 1}`),
+    ];
+    const index = providers({
+      id: "a",
+      titles: ready(lists(names.map((name, at) => movie(`m${at}`, name)))),
+    });
+    for (const name of names) save(titled(index, name));
+    open();
+    expect(rows()).toHaveLength(30);
+    expect(rows()[0]).toBe("Saga 26, Movie · 2021");
+    expect(rows().at(-1)).toBe("Film 10, Movie · 2021");
+
+    press("watchlist-sort");
+    expect(lastSheet().options).toEqual(["Newest", "A–Z", "Cancel"]);
+    lastSheet().choose("A–Z");
+    expect(rows().slice(0, 5)).toEqual([
+      "alpha, Movie · 2021",
+      "Beta, Movie · 2021",
+      "Film 2, Movie · 2021",
+      "Film 10, Movie · 2021",
+      "Saga 1, Movie · 2021",
+    ]);
+    expect(rows().at(-1)).toBe("Saga 26, Movie · 2021");
+    // Opened again, it keeps the order chosen.
+    React.act(() => root!.unmount());
+    open();
+    expect(rows()[0]).toBe("alpha, Movie · 2021");
+    press("watchlist-sort");
+    lastSheet().choose("Newest");
+    expect(rows()[0]).toBe("Saga 26, Movie · 2021");
+  });
+
+  it("opens a listed title's details; its button offers Details and Remove instead", () => {
+    const index = providers({ id: "a", titles: ready(lists([movie("7", "Dune", "100")])) });
+    save(titled(index, "Dune"));
+    open();
+    press(rowOf("Dune"));
+    expect(scenario.did).toEqual(["details movie a:7"]);
+    press(`${rowOf("Dune")}-more`);
+    // The button opens its sheet, not the details.
+    expect(scenario.did).toEqual(["details movie a:7"]);
+    expect(lastSheet()).toMatchObject({
+      title: "Dune",
+      options: ["Details", "Remove from Watchlist", "Cancel"],
+    });
+    lastSheet().choose("Cancel");
+    expect(rows()).toEqual(["Dune, Movie · 2021"]);
+    lastSheet().choose("Details");
+    expect(scenario.did).toEqual(["details movie a:7", "details movie a:7"]);
+  });
+
+  it("says why a saved title isn't listed, and no longer listed only once its provider answered", () => {
+    const dune = lists([movie("7", "Dune")]);
+    const index = providers({ id: "a", titles: ready(dune) });
+    save(titled(index, "Dune"));
+    open();
+    const without = lists([movie("8", "Arrival")]);
+    const states: [Standing, boolean, string][] = [
+      [{ kind: "loading", last: null }, true, "Lists still loading"],
+      [
+        { kind: "failed", error: failure, last: null, since: 0 } as Standing,
+        true,
+        "Lists didn't load",
+      ],
+      // Lists that came but aren't indexed yet may still hold it.
+      [ready(without), false, "Lists still loading"],
+      [ready(without), true, "No longer listed"],
+    ];
+    for (const [titles, complete, said] of states) {
+      scenario.complete = complete;
+      providers({ id: "a", titles });
+      expect(rows()).toEqual([`Dune, Movie · 2021, ${said}`]);
+    }
+    scenario.members = [member("a", ready(without), true)];
+    rerender();
+    expect(rows()).toEqual(["Dune, Movie · 2021, Password needed in Settings"]);
+
+    // Opens nothing; its sheet offers only Remove.
+    press(rowOf("Dune"));
+    expect(scenario.did).toEqual([]);
+    press(`${rowOf("Dune")}-more`);
+    expect(lastSheet().options).toEqual(["Remove from Watchlist", "Cancel"]);
+
+    // Lists that failed to come again but still show it keep it listed.
+    providers({
+      id: "a",
+      titles: { kind: "failed", error: failure, last: dune, since: 0 } as Standing,
+    });
+    expect(rows()).toEqual(["Dune, Movie · 2021"]);
+    press(rowOf("Dune"));
+    expect(scenario.did).toEqual(["details movie a:7"]);
+  });
+
+  it("shows nothing saved, and lets every title the lists lack be removed", () => {
+    const index = providers({
+      id: "a",
+      titles: ready(lists([movie("7", "Dune"), movie("8", "Arrival")])),
+    });
+    open();
+    expect(container.textContent).toContain("Nothing saved yet.");
+    expect(container.querySelector('[data-testid="watchlist-sort"]')).toBeNull();
+    save(titled(index, "Dune"));
+    save(titled(index, "Arrival"));
+    providers({ id: "a", titles: ready(lists([movie("9", "Heat")])) });
+    expect(rows()).toEqual([
+      "Arrival, Movie · 2021, No longer listed",
+      "Dune, Movie · 2021, No longer listed",
+    ]);
+    for (const name of ["Arrival", "Dune"]) {
+      press(`${rowOf(name)}-more`);
+      lastSheet().choose("Remove from Watchlist");
+    }
+    expect(rows()).toEqual([]);
+    expect(container.textContent).toContain("Nothing saved yet.");
+  });
+
+  it("is one entry for a film two providers list under one TMDB id, opened while either has it, removed for both", () => {
+    const both = providers(
+      { id: "a", titles: ready(lists([movie("7", "Dune", "100")])) },
+      { id: "b", titles: ready(lists([movie("70", "Dune", "100"), movie("71", "Dune", null, 1)])) },
+    );
+    save(kindOf(both, "movie").titles.find((title) => title.tmdbId === "100")!);
+    open();
+    // The film without a TMDB id named the same is another title, not saved.
+    expect(rows()).toEqual(["Dune, Movie · 2021"]);
+    expect(savedOwners()).toEqual([["a", "b"]]);
+
+    // The first no longer lists it; the second does, and it opens there.
+    providers(
+      { id: "a", titles: ready(lists([])) },
+      { id: "b", titles: ready(lists([movie("70", "Dune", "100")])) },
+    );
+    press(rowOf("Dune"));
+    expect(scenario.did).toEqual(["details movie b:70"]);
+
+    press(`${rowOf("Dune")}-more`);
+    lastSheet().choose("Remove from Watchlist");
+    expect(rows()).toEqual([]);
+    expect(readJson("watchlists.json")).toEqual({ version: 1, accounts: { a: [], b: [] } });
+  });
+
+  it("removes, from a sheet left open, only the entry as it stands then", () => {
+    const index = providers({
+      id: "a",
+      titles: ready(lists([movie("7", "Dune"), movie("8", "Arrival")])),
+    });
+    save(titled(index, "Dune"));
+    open();
+    press(`${rowOf("Dune")}-more`);
+    const stale = lastSheet();
+    // Meanwhile Dune is removed and saved again, and Arrival saved.
+    React.act(() => watchlist.removeTitle(titled(index, "Dune")));
+    save(titled(index, "Dune"));
+    save(titled(index, "Arrival"));
+    stale.choose("Remove from Watchlist");
+    expect(rows()).toEqual(["Arrival, Movie · 2021", "Dune, Movie · 2021"]);
+
+    // A sheet of the entry as it stands removes it, and nothing else.
+    press(`${rowOf("Dune")}-more`);
+    lastSheet().choose("Remove from Watchlist");
+    expect(rows()).toEqual(["Arrival, Movie · 2021"]);
+  });
+
+  it("keeps the entry and says so when the file won't take its removal", () => {
+    const index = providers({
+      id: "a",
+      titles: ready(lists([movie("7", "Dune"), movie("8", "Arrival")])),
+    });
+    save(titled(index, "Dune"));
+    save(titled(index, "Arrival"));
+    open();
+    const before = readJson("watchlists.json");
+    scenario.refuse = true;
+    press(`${rowOf("Dune")}-more`);
+    lastSheet().choose("Remove from Watchlist");
+    expect(rows()).toEqual(["Arrival, Movie · 2021", "Dune, Movie · 2021"]);
+    expect(readJson("watchlists.json")).toEqual(before);
+    const [alert] = scenario.alerts;
+    expect(alert?.title).toBe("Couldn't remove Dune");
+    expect(alert?.buttons.map((button) => button.text)).toEqual(["Cancel", "Try again"]);
+
+    scenario.refuse = false;
+    React.act(() => alert?.buttons[1]?.onPress?.());
+    expect(rows()).toEqual(["Arrival, Movie · 2021"]);
+  });
+});
+
+describe("the watchlist's file", () => {
+  it("brings back every entry at the next launch, the kept ones of a removed provider too", async () => {
+    const index = providers(
+      { id: "a", titles: ready(lists([movie("7", "Dune", "100")])) },
+      { id: "b", titles: ready(lists([movie("70", "Dune", "100"), movie("9", "Heat")])) },
+    );
+    save(titled(index, "Dune"));
+    save(titled(index, "Heat"));
+    // The second is removed with its history kept.
+    React.act(() => watchlist.setWatchlistOwners(["a"]));
+    expect(savedOwners()).toEqual([["a"]]);
+
+    vi.resetModules();
+    const launched = await import("../src/watchlist.ts");
+    launched.setWatchlistOwners(["a", "b"]);
+    expect(
+      launched.currentWatchlist().map((entry) => entry.map((each) => each.subscriptionId)),
+    ).toEqual([["b"], ["a", "b"]]);
+  });
+});
