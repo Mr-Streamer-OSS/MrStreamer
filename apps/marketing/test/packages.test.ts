@@ -130,7 +130,7 @@ describe("independently published download routes", () => {
         const link = template.content.querySelector<HTMLAnchorElement>("[data-package]");
         if (state === "published") {
           expect(link?.href).toBe(PACKAGE_ROUTES.homebrew.url);
-          expect(link?.parentElement?.textContent).toBe("Also on Homebrew.");
+          expect(link?.parentElement?.textContent).toBe("Also on Homebrew · macOS, Apple silicon.");
         } else {
           expect(link).toBeNull();
           expect(template.content.textContent).not.toContain("Also on");

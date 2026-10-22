@@ -151,10 +151,7 @@ export function writePackages(html: string, routes: PackageRoutes = PACKAGE_ROUT
         !/^\d+\.\d+\.\d+$/.test(route.publication.lastVerifiedVersion)
       )
         return "";
-      const label =
-        part === "availability"
-          ? route.name
-          : `${route.name} · ${route.platform}, ${route.architecture}`;
+      const label = `${route.name} · ${route.platform}, ${route.architecture}`;
       const link = `<a data-package="${name}" href="${escapeHtml(route.url)}">${escapeHtml(label)}</a>`;
       if (part === "availability") return `<span>Also on ${link}.</span>`;
       if (part === "link") return link;

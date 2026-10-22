@@ -78,10 +78,7 @@ describe("the home page", () => {
         ["Download", "/download"],
       ]);
       expect(links(".hero .actions a")).toEqual([["Download", "/download"]]);
-      expect(links("#downloads a")).toEqual([
-        ["Download", "/download"],
-        ["Homebrew", "https://github.com/Mr-Streamer-OSS/homebrew-tap"],
-      ]);
+      expect(links("#downloads a")).toEqual([["Download", "/download"], HOMEBREW]);
       expect(
         document.querySelector(
           '[data-installer], [data-release-version], a[href^="https://apps."]',

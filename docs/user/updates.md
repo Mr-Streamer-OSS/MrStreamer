@@ -34,7 +34,7 @@ With Homebrew's default upgrade settings, plain `brew upgrade` compares the inst
 
 An explicitly named upgrade, `--greedy` or `brew reinstall` can replace a newer app with the tap's version. Before an intentional replacement, compare Settings > **About** with `brew info --cask mr-streamer-oss/tap/mr-streamer`.
 
-Homebrew replaces the app bundle. Your profile and downloaded copies live outside it, and normal Homebrew uninstall leaves them in place. Avoid `--zap` if you want to keep your data. If a direct install already occupies the destination, quit it and move only its app bundle aside before installing through Homebrew. Leave the profile and downloads alone.
+Homebrew replaces the app bundle. Your profile and downloaded copies live outside it, and Homebrew uninstall leaves them in place. If a direct install already occupies the destination, quit it and move only its app bundle aside before installing through Homebrew. Leave the profile and downloads alone.
 
 ## Installed from the Microsoft Store
 
