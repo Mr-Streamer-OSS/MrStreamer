@@ -106,6 +106,13 @@ const kept = readMembership(
 );
 /** Whether favourites may go by the memory: none read, or one this build reads. */
 const remembers = kept.kind !== "kept";
+/**
+ * The memory this build can't read, written back as it is, until a provider's history is erased:
+ * that write leaves it out, as it can't tell what of it was that provider's.
+ */
+let carried: unknown = kept.kind === "kept" ? kept.value : undefined;
+/** Set while a provider's history is erased, for that write alone. */
+let erasing = false;
 
 /** The record as the file holds it: what was read, then each snapshot written. */
 let base: ViewingSnapshot | null = snapshot();
@@ -123,7 +130,7 @@ const favouritesIn = (snapshot: ViewingSnapshot) =>
 /** The whole file for `snapshot` with the memory `next`, or the field read where it is carried. */
 const fileOf = (snapshot: ViewingSnapshot, next: Membership) => ({
   ...snapshot,
-  favouriteMembership: remembers ? membershipFile(next) : kept.value,
+  favouriteMembership: remembers ? membershipFile(next) : erasing ? undefined : carried,
 });
 
 /**
@@ -136,6 +143,7 @@ function save(next: ViewingSnapshot) {
   writeJson(FILE, fileOf(next, after));
   base = next;
   membership = after;
+  if (erasing) carried = undefined;
 }
 
 /**
@@ -275,9 +283,19 @@ export function serveViewing(lists: ViewingCatalogue) {
   catalogue = lists;
 }
 
-/** Erases what a removed subscription recorded, when its history goes with it. */
-export function eraseViewing(subscriptionId: string): Promise<void> {
-  return change((record) => record.erase(subscriptionId));
+/**
+ * Erases what a removed subscription recorded, when its history goes with it, in one write,
+ * which also drops a memory of the favourites this build can't read. Rejects, with nothing
+ * changed, when the file won't take it.
+ */
+export async function eraseViewing(subscriptionId: string): Promise<void> {
+  erasing = true;
+  try {
+    outcome(runtime.runSyncExit(withRecord((record) => record.erase(subscriptionId))));
+  } finally {
+    erasing = false;
+  }
+  await refresh();
 }
 
 /**

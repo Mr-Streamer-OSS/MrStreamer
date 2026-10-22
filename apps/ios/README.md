@@ -226,7 +226,9 @@ Each responsibility has one owner, a plain module with a store the screens read:
   answered. A file without the memory, as earlier builds wrote, gains it from the channels shown
   from then on; what they no longer show of an older favourite can't be known. A memory of
   another version, or one this build can't trust, is written back as it is, and favourites then
-  go by the channels listed now alone. An older build that writes the file drops the memory.
+  go by the channels listed now alone, until a provider's history is deleted: as it can't tell
+  what of it was that provider's, that deletion drops all of it. An older build that writes the
+  file drops the memory.
 - `src/watchlist.ts`: saved movies and series, each subscription's record in `watchlists.json`,
   shown as one by core's watchlist rules. Beta 2's `watchlist.json` is read until the first change.
   It also gives the Watchlist screen its rows (`src/watchlist-screen.tsx`), newest saved or by

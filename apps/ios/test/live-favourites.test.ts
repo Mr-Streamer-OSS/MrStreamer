@@ -1018,3 +1018,79 @@ describe("two channels of one id, one linking the others", () => {
     expect(memory.played).toEqual([]);
   });
 });
+
+describe("a memory this build can't read, when a provider's history is deleted", () => {
+  const registered = () => JSON.parse(memory.files.get("/documents/subscriptions.json") ?? "{}");
+  const unreadable = (a: string, b: string) => [
+    { version: 2, accounts: { [a]: [[FHD, HD, SD]], [b]: [[FHD, HD]] } },
+    { version: 1, accounts: { [a]: [[FHD]], [b]: [[FHD, HD, SD]] } },
+  ];
+  /** viewing.json with `unread` as its memory, then a relaunch with both providers. */
+  async function withUnread(unread: unknown) {
+    memory.files.set(
+      "/documents/viewing.json",
+      JSON.stringify({ ...file(), favouriteMembership: unread }),
+    );
+    return relaunch();
+  }
+
+  it("goes with it once the deletion is written, kept through other writes until then", async () => {
+    for (const at of [0, 1]) {
+      memory.files.clear();
+      memory.keychain.clear();
+      const { app, a, b } = await twoProviders();
+      await star(app, channelOf(app, a, FHD));
+      await star(app, channelOf(app, b, FHD));
+      await app.recordProgress({ kind: "movie", subscriptionId: b, id: "1" }, 300, 600, 1);
+      const unread = unreadable(a, b)[at];
+      const again = await withUnread(unread);
+      const bBefore = file().accounts[b];
+
+      // Other writes, and a removal keeping history, carry it as it is.
+      await again.recordProgress({ kind: "movie", subscriptionId: a, id: "1" }, 300, 600, 1);
+      expect(file().favouriteMembership).toEqual(unread);
+      await again.remove(b, { keepHistory: true });
+      expect(file().favouriteMembership).toEqual(unread);
+      expect(await again.add({ server: two.url, ...TWO, name: "Cabin" })).toBe(b);
+      await until(() => listsBoth(again), "both lists again");
+
+      // The deletion refused: nothing goes, and it is left to the next launch.
+      memory.full.add("viewing.json");
+      await expect(again.remove(a, { keepHistory: false })).rejects.toThrow();
+      expect(file().favouriteMembership).toEqual(unread);
+      expect(stored(a)).toEqual([FHD, HD, SD]);
+      expect(registered().erasing).toEqual([a]);
+
+      // The next launch deletes it: a's record and the whole memory, b's record as it was.
+      memory.full.clear();
+      const later = await relaunch(1);
+      expect(registered().erasing).toEqual([]);
+      expect(file().accounts[a]).toBeUndefined();
+      expect(file().favouriteMembership).toBeUndefined();
+      expect(file().accounts[b].state).toEqual(bBefore.state);
+      expect(file().accounts[b].rows).toEqual(bBefore.rows);
+
+      // Nothing brings it back: a later write, a favourite, or a relaunch.
+      await later.recordProgress({ kind: "movie", subscriptionId: b, id: "2" }, 300, 600, 1);
+      await star(later, channelOf(later, b, "1000"));
+      expect(file().favouriteMembership).toBeUndefined();
+      // Read with none, the next launch remembers again, from what its channels show.
+      await relaunch(1);
+      expect(JSON.stringify(file().favouriteMembership ?? null)).not.toContain(a);
+      expect(stored(b)).toEqual([FHD, HD, SD, "1000"]);
+      expect(memory.played).toEqual([]);
+    }
+  });
+
+  it("goes with a provider's history though the record holds nothing of it", async () => {
+    const { app, a, b } = await twoProviders();
+    await star(app, channelOf(app, b, FHD));
+    const unread = unreadable(a, b)[0];
+    const again = await withUnread(unread);
+    expect(file().accounts[a]).toBeUndefined();
+    await again.remove(a, { keepHistory: false });
+    expect(registered().erasing).toEqual([]);
+    expect(file().favouriteMembership).toBeUndefined();
+    expect(stored(b)).toEqual([FHD, HD, SD]);
+  });
+});
