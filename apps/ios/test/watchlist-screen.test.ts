@@ -121,9 +121,11 @@ vi.mock("../src/files.ts", async (original) => {
 });
 vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: scenario.members }),
+  members: () => scenario.members,
 }));
 vi.mock("../src/titles.ts", () => ({
   useTitleLists: () => scenario.lists,
+  titleLists: () => scenario.lists,
   useMetadataVersion: () => 0,
   titlesWorkedOut: () => scenario.complete,
   named: (title: Title) => title,
@@ -522,6 +524,76 @@ describe("the whole watchlist", () => {
     joined.choose("Remove from Watchlist");
     expect(savedOwners()).toEqual([]);
     expect(rows()).toEqual([]);
+  });
+});
+
+describe("a provider whose password the Keychain lost", () => {
+  /**
+   * The providers stand as `standing`, whose ids lost their password, while the lists that show
+   * stay as they were: a list already in when the Keychain no longer gave the password back
+   * stays, as account.ts leaves it (`recoverLogin`, `restore`).
+   */
+  function lost(ids: readonly string[]) {
+    scenario.members = scenario.members.map((each) =>
+      member(each.entry.id, each.titles, ids.includes(each.entry.id)),
+    );
+    rerender();
+  }
+
+  it("shows what was saved and that a password is needed, opens nothing, and still removes", () => {
+    const index = providers({ id: "a", titles: ready(lists([movie("7", "Dune", "100")])) });
+    save(titled(index, "Dune"));
+    open();
+    press(`${rowOf("Dune")}-more`);
+    const held = lastSheet();
+    lost(["a"]);
+    expect(rows()).toEqual(["Dune, Movie · 2021, Password needed in Settings"]);
+    press(rowOf("Dune"));
+    // Details left open in a sheet from before open nothing either.
+    held.choose("Details");
+    expect(scenario.did).toEqual([]);
+    press(`${rowOf("Dune")}-more`);
+    expect(lastSheet().options).toEqual(["Remove from Watchlist", "Cancel"]);
+    lastSheet().choose("Remove from Watchlist");
+    expect(rows()).toEqual([]);
+    expect(readJson("watchlists.json")).toEqual({ version: 1, accounts: { a: [] } });
+  });
+
+  it("opens a title another provider lists too through that one, and removes only its entry", () => {
+    const index = providers(
+      { id: "a", titles: ready(lists([movie("7", "Dune", "100")])) },
+      { id: "b", titles: ready(lists([movie("70", "Dune", "100"), movie("9", "Heat")])) },
+    );
+    save(kindOf(index, "movie").titles.find((title) => title.tmdbId === "100")!);
+    save(titled(index, "Heat"));
+    open();
+    press(rowOf("Dune"));
+    expect(scenario.did).toEqual(["details movie a:7"]);
+    lost(["a"]);
+    expect(rows()).toEqual(["Heat, Movie · 2021", "Dune, Movie · 2021"]);
+    press(rowOf("Dune"));
+    press(`${rowOf("Dune")}-more`);
+    lastSheet().choose("Details");
+    expect(scenario.did).toEqual(["details movie a:7", "details movie b:70", "details movie b:70"]);
+
+    press(`${rowOf("Dune")}-more`);
+    lastSheet().choose("Remove from Watchlist");
+    expect(rows()).toEqual(["Heat, Movie · 2021"]);
+    expect(savedOwners()).toEqual([["b"]]);
+  });
+
+  it("keeps a title listed from lists that failed to come again while the login holds", () => {
+    const dune = lists([movie("7", "Dune")]);
+    const index = providers({ id: "a", titles: ready(dune) });
+    save(titled(index, "Dune"));
+    open();
+    providers({
+      id: "a",
+      titles: { kind: "failed", error: failure, last: dune, since: 0 } as Standing,
+    });
+    expect(rows()).toEqual(["Dune, Movie · 2021"]);
+    press(rowOf("Dune"));
+    expect(scenario.did).toEqual(["details movie a:7"]);
   });
 });
 

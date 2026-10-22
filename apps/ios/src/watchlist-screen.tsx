@@ -11,13 +11,14 @@ import {
   View,
   type AccessibilityActionEvent,
 } from "react-native";
-import { useRoster } from "./account.ts";
+import { members, useRoster } from "./account.ts";
 import { appError, describeError } from "./errors.ts";
 import { openDetails } from "./resume.ts";
-import { named, titlesWorkedOut, useMetadataVersion, useTitleLists } from "./titles.ts";
+import { named, titleLists, titlesWorkedOut, useMetadataVersion, useTitleLists } from "./titles.ts";
 import { Artwork } from "./titles-ui.tsx";
 import { colors, Notice } from "./ui.tsx";
 import {
+  currentWatchlist,
   removeEntry,
   useWatchlist,
   watchlistRows,
@@ -181,10 +182,27 @@ function showActions(row: WatchlistRow) {
       cancelButtonIndex: options.length - 1,
     },
     (at) => {
-      if (options[at] === "Details" && title) openDetails(title);
+      // Answered later: the row as it stands then, which may have lost its provider meanwhile.
+      const now = options[at] === "Details" ? rowNow(row.key)?.title : null;
+      if (now) openDetails(now);
       if (options[at] === REMOVE) remove(row);
     },
   );
+}
+
+/** Row `key` as the watchlist, the lists and the providers stand now. */
+function rowNow(key: string): WatchlistRow | undefined {
+  const lists = titleLists();
+  return watchlistRows(
+    currentWatchlist(),
+    {
+      index: lists.kind === "ready" ? lists.index : null,
+      complete: titlesWorkedOut(),
+      members: members(),
+      named,
+    },
+    "newest",
+  ).find((row) => row.key === key);
 }
 
 /**

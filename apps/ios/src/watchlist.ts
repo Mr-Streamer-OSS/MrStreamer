@@ -1,6 +1,7 @@
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import { ownedId } from "@mrstreamer/contracts/subscription";
 import type { IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
 import {
   entriesOf,
@@ -28,9 +29,11 @@ import { store, useStore } from "./store.ts";
 // Its screen lists every entry (`watchlistRows`): the title it is in the lists, which opens its
 // details, or, while the lists hold none that is surely it, what was saved of it and why: a
 // provider whose lists are still to come, failed or need its password may still list it, so only
-// lists every provider of it gave in full say it is no longer listed. Nothing that plays is made
-// of what was saved. An entry is taken out by the records it was shown with (`removeEntry`), found
-// again in the watchlist as it stands then.
+// lists every provider of it gave in full say it is no longer listed. A title opens only through
+// a provider that still signs in: one whose password the Keychain lost keeps its last lists in
+// the index, but nothing of it opens. Nothing that plays is made of what was saved. An entry is
+// taken out by the records it was shown with (`removeEntry`), found again in the watchlist as it
+// stands then.
 //
 // Private beta 2 kept its one subscription's record in watchlist.json. Until the first change
 // writes watchlists.json, that record is read from there; the old file stays as it was for an
@@ -254,6 +257,9 @@ export function watchlistRows(
 ): readonly WatchlistRow[] {
   const newest = latestFirst(list);
   const { index } = sources;
+  const signedIn = new Set(
+    sources.members.flatMap((member) => (member.needsSecret ? [] : [member.entry.id])),
+  );
   const looked = index
     ? watchlistTitles(index, newest)
     : newest.map((entry) => ({ entry, title: null }));
@@ -261,8 +267,15 @@ export function watchlistRows(
     const [first] = entry;
     if (!first) return [];
     const shared = { entry, key: `${first.subscriptionId}:${first.id}`, kind: first.kind };
-    if (found) {
-      const title = sources.named(found);
+    // The version the title shows first, else another of a provider that still signs in, as
+    // details show a title with a version (`automaticVersion` keeps one opened that isn't first).
+    const version =
+      found &&
+      (signedIn.has(found.subscriptionId)
+        ? found
+        : found.versions.find((each) => signedIn.has(each.subscriptionId)));
+    if (found && version) {
+      const title = sources.named({ ...found, ...ownedId(version) });
       return [{ ...shared, name: title.title, year: title.year, title, unlisted: null }];
     }
     const unlisted = unlistedBy(entry, sources);
