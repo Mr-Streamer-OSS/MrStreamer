@@ -594,6 +594,44 @@ describe("a film's version picked from a provider that lost its password", () =>
     expect(read.at(-1)).toBe("a:2");
   });
 
+  it("goes with Automatic over progress on a provider that lost its password, and not a version chosen", async () => {
+    providers("a", "b");
+    const read: string[] = [];
+    scenario.details = (version) => {
+      read.push(version);
+      return new Promise(() => undefined);
+    };
+    scenario.progress = [
+      {
+        title: { kind: "movie", subscriptionId: "b", id: "1" },
+        ...{ position: 600, duration: 6000, finished: false, at: 1, since: 1 },
+      },
+    ];
+    const page = mount();
+    await settled();
+    page.openVersions()("Automatic");
+    expect(page.play()).toBe("b");
+
+    // Cabin's password lost while Automatic stands: the film's own version.
+    lost("b");
+    page.render();
+    await settled();
+    expect(page.play()).toBe("a");
+    expect(read.at(-1)).toBe("a:1");
+    // Its password back, the progress decides again.
+    lost();
+    page.render();
+    await settled();
+    expect(page.play()).toBe("b");
+
+    // Cabin chosen from the menu stays chosen, its password lost or not.
+    page.openVersions()("Cabin");
+    lost("b");
+    page.render();
+    await settled();
+    expect(page.play()).toBe("b");
+  });
+
   it("still plays a version asked for, as a 4K tile asks, from that provider", () => {
     providers("a", "b");
     mount().openVersions()("Cabin");

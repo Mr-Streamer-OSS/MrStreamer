@@ -169,7 +169,8 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
   const askedFor = asked && title.versions.some((each) => sameOwned(each, opened)) ? opened : null;
   // A pick remembered from a provider whose password the Keychain lost, or how far a version of
   // one got, gives way meanwhile to the version opened, as the watchlist opens one through another
-  // provider. Both stay saved, and count again once the password is back.
+  // provider; Automatic chosen here leaves out that progress too. Both stay saved, and count again
+  // once the password is back. A version chosen from the menu or asked for stays.
   const roster = useRoster();
   const lost = new Set(
     (roster.kind === "ready" ? roster.members : members()).flatMap((member) =>
@@ -177,17 +178,14 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
     ),
   );
   const remembered = pickedVersion(title, state);
+  const usable = played.filter((each) => !lost.has(each.title.subscriptionId));
   const chosen =
     listed === AUTOMATIC
-      ? automaticVersion(title, played, title)
+      ? automaticVersion(title, usable, title)
       : (listed ??
         askedFor ??
         (remembered && !lost.has(remembered.subscriptionId) ? remembered : null) ??
-        automaticVersion(
-          title,
-          played.filter((each) => !lost.has(each.title.subscriptionId)),
-          opened,
-        ));
+        automaticVersion(title, usable, opened));
   const version = useMemo(
     () => ({ subscriptionId: chosen.subscriptionId, id: chosen.id }),
     [chosen.subscriptionId, chosen.id],
