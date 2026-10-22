@@ -93,9 +93,31 @@ const openSettings = () => router.push(tabHref("live", "settings"));
 const watch = (library: Library, channel: Channel) =>
   playChannel(channel, library.placeOf.get(channel.key) ?? "", { watch: true });
 
-/** The Live tab. */
+/** The Live tab. Its Favourites and Find rows show whatever the channels' state. */
 export function LiveHome() {
-  return <Channels>{(library) => <Browse library={library} />}</Channels>;
+  return <Channels lead={<Entries />}>{(library) => <Browse library={library} />}</Channels>;
+}
+
+/**
+ * Live's own rows, before its tabs: Favourites, and Find countries or categories. On the tab only:
+ * a category's screen has neither.
+ */
+function Entries() {
+  return (
+    <>
+      <FavouritesEntry />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Find countries or categories"
+        onPress={() => router.push("/live/discover")}
+        style={({ pressed }) => [styles.find, pressed && styles.pressed]}
+        testID="live-discover"
+      >
+        <SymbolView name="magnifyingglass" size={15} tintColor={colors.dim} />
+        <Text style={styles.findText}>Find countries or categories</Text>
+      </Pressable>
+    </>
+  );
 }
 
 /** All of one category's channels, pushed over Live by its region and title. */
@@ -122,8 +144,15 @@ export function CategoryScreen({ region, name }: { region: string; name: string 
 /**
  * Live's screens with the channels there are, under the status line; still rows while the first
  * list loads, the failure when no provider's list came, or that the providers list no channels.
+ * `lead` goes first in those three, as the screen with channels leads with it in its own list.
  */
-function Channels({ children }: { children: (library: Library) => ReactNode }) {
+function Channels({
+  lead,
+  children,
+}: {
+  lead?: ReactNode;
+  children: (library: Library) => ReactNode;
+}) {
   const catalogue = useCatalogue();
   const roster = useRoster();
   const height = useRowHeight();
@@ -138,6 +167,7 @@ function Channels({ children }: { children: (library: Library) => ReactNode }) {
   if (catalogue.kind === "loading") {
     return (
       <Docked status={status ?? loadingStatus("channels")}>
+        {lead}
         <PlaceholderRows height={height} />
       </Docked>
     );
@@ -146,6 +176,7 @@ function Channels({ children }: { children: (library: Library) => ReactNode }) {
     const failure = failureOf(catalogue.error, catalogue.member.entry.server);
     return (
       <View style={styles.screen}>
+        {lead}
         <Notice
           failure={{
             headline: "Couldn't load channels",
@@ -162,6 +193,7 @@ function Channels({ children }: { children: (library: Library) => ReactNode }) {
   if (catalogue.library.regions.length === 0) {
     return (
       <Docked status={status}>
+        {lead}
         <Notice
           failure={{
             headline: "No live channels",
@@ -203,20 +235,10 @@ function Browse({ library }: { library: Library }) {
   const gone = kept.region !== null && region === null ? kept.region : null;
   const countries = library.regions.length > 1 || gone !== null;
 
-  // Favourites always lead, then the finding of countries and categories.
+  // Live's own rows lead, scrolling with the list, before the country and the tabs.
   const header = (
     <>
-      <FavouritesEntry />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Find countries or categories"
-        onPress={() => router.push("/live/discover")}
-        style={({ pressed }) => [styles.find, pressed && styles.pressed]}
-        testID="live-discover"
-      >
-        <SymbolView name="magnifyingglass" size={15} tintColor={colors.dim} />
-        <Text style={styles.findText}>Find countries or categories</Text>
-      </Pressable>
+      <Entries />
       {countries || tabs.length > 1 ? (
         <>
           {gone ? <Text style={styles.note}>{`${gone} isn't listed any more.`}</Text> : null}

@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { memo, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Alert,
@@ -14,6 +14,8 @@ import {
 import { playChannel, useCatalogue } from "./account.ts";
 import { appError, describeError } from "./errors.ts";
 import {
+  currentFavourites,
+  sameFavourites,
   starChannel,
   useFavourites,
   type Favourite,
@@ -32,8 +34,10 @@ import { reorderFavourites } from "./viewing.ts";
 // takes it out of the favourites and plays nothing. Edit arranges the rows with each one's Move up
 // and Move down, or VoiceOver's actions; Save sends the order, Cancel and leaving the list throw it
 // away. Favourites that don't show (favourites.ts) are counted under the rows by provider, keep
-// their places, and open nothing. An order made from favourites that changed meanwhile is refused
-// with nothing moved, and one viewing.json won't take keeps the draft to send again.
+// their places, and open nothing. Save, and Try again after a write viewing.json didn't take, send
+// the order only while the favourites show the rows it was arranged from, as the record, the
+// providers and their channels stand then: one a list or a password changed meanwhile is refused
+// with nothing moved, as is one whose list was closed. A refused write keeps the draft.
 
 /** What a provider's favourites that don't show say, after its name. */
 const WHY: Record<Unavailable, string> = {
@@ -46,6 +50,13 @@ const WHY: Record<Unavailable, string> = {
 /** "2 saved from Home: password needed in Settings", or "Saved from Home: …" without a count. */
 const hiddenLine = ({ label, why, count }: Hidden) =>
   `${count === null ? "Saved" : `${count} saved`} from ${label}: ${WHY[why]}`;
+
+/** Nothing was moved: the favourites no longer show the rows the order was made of. */
+const changedAlert = () =>
+  Alert.alert(
+    "Favourites changed",
+    "Nothing was moved. They changed while you arranged them: edit them as they are now.",
+  );
 
 /** The rows as being arranged, from the favourites they were arranged from. */
 interface Draft {
@@ -82,6 +93,12 @@ export function FavouritesScreen() {
   const height = useRowHeight();
   const playing = channelStatus(usePlayback().phase);
   const [draft, setDraft] = useState<Draft | null>(null);
+  // The draft on show, for an answer or a Try again that comes later; none once the list closed.
+  const open = useRef<Draft | null>(null);
+  useEffect(() => {
+    open.current = draft;
+  }, [draft]);
+  useEffect(() => () => void (open.current = null), []);
   if (!favourites) return <View style={styles.screen} />;
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const placeOf = (channel: Channel) => library?.placeOf.get(channel.key) ?? "";
@@ -106,25 +123,40 @@ export function FavouritesScreen() {
     );
   };
   const save = (from: Draft) => {
+    if (open.current !== from) {
+      Alert.alert("The order wasn't saved", "Nothing was moved: the list was closed.");
+      return;
+    }
     if (from.order.every((each, at) => each === from.listed[at])) return setDraft(null);
-    setDraft({ ...from, saving: true });
+    // As they stand now, not as this screen last drew them.
+    if (!sameFavourites({ original: from.original, shown: from.listed }, currentFavourites())) {
+      setDraft(null);
+      return changedAlert();
+    }
+    const sent = { ...from, saving: true };
+    setDraft(sent);
+    open.current = sent;
     reorderFavourites({
       original: from.original,
       order: from.order.map((each) => each.saved),
     }).then(
-      () => setDraft(null),
+      () => {
+        if (open.current === sent) setDraft(null);
+      },
       (cause: unknown) => {
         const error = appError(cause);
+        // The list closed meanwhile: there is no draft left to send again.
+        if (open.current !== sent) {
+          Alert.alert("The order wasn't saved", "Nothing was moved.");
+          return;
+        }
         if (error.kind === "favourites-changed") {
           setDraft(null);
-          Alert.alert(
-            "Favourites changed",
-            "Nothing was moved. They changed while you arranged them: edit them as they are now.",
-          );
-          return;
+          return changedAlert();
         }
         const kept = { ...from, saving: false };
         setDraft(kept);
+        open.current = kept;
         Alert.alert("Couldn't save the order", describeError(error), [
           { text: "Cancel", style: "cancel" },
           { text: "Try again", onPress: () => save(kept) },

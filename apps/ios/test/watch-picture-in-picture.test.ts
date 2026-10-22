@@ -183,7 +183,10 @@ vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } })
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("../src/account.ts", () => ({
   useCatalogue: () => native.catalogue,
+  currentCatalogue: () => native.catalogue,
   useRoster: () => ({ kind: "ready", members: [] }),
+  // The star stars a channel only of a provider still saved.
+  members: () => [{ entry: { id: "a" } }],
 }));
 
 const { closeWatch, openWatch, play, playbackState, retry, stop, togglePause } =

@@ -134,7 +134,9 @@ vi.mock("../src/header.tsx", () => ({
 }));
 vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: scenario.members }),
+  members: () => scenario.members,
   useCatalogue: () => scenario.catalogue,
+  currentCatalogue: () => scenario.catalogue,
   playChannel: (channel: Channel, _place: string, { watch }: { watch: boolean }) =>
     void scenario.did.push(`play ${channel.key}${watch ? " in Watch" : ""}`),
   retry: () => undefined,
@@ -161,6 +163,11 @@ vi.mock("../src/titles.ts", () => ({
   useCollections: () => null,
   named: <T>(title: T) => title,
 }));
+// The still rows while channels first load are decoration this window doesn't animate.
+vi.mock("../src/loading.tsx", async (original) => ({
+  ...(await original<typeof import("../src/loading.tsx")>()),
+  PlaceholderRows: () => null,
+}));
 vi.mock("../src/resume.ts", () => ({
   openDetails: () => undefined,
   resume: () => undefined,
@@ -168,7 +175,7 @@ vi.mock("../src/resume.ts", () => ({
 }));
 
 const viewing = await import("../src/viewing.ts");
-const { LiveHome } = await import("../src/live-screen.tsx");
+const { LiveHome, CategoryScreen } = await import("../src/live-screen.tsx");
 const { FavouritesScreen } = await import("../src/favourites-screen.tsx");
 const { default: Home } = await import("../src/app/(tabs)/(home)/index.tsx");
 
@@ -203,6 +210,27 @@ const library = buildLibrary([
   },
 ]);
 
+/** The library once a refresh: Home lists `home`, Cabin `cabin`. */
+const relisted = (home: ProviderChannel[], cabin: ProviderChannel[]) =>
+  buildLibrary([
+    { subscriptionId: "a", label: "Home", catalogue: listing(...home) },
+    { subscriptionId: "b", label: "Cabin", catalogue: listing(...cabin) },
+  ]);
+const NOS_HD = channel("10", "NL | NOS Journaal HD");
+const NOS_FHD = channel("14", "NL | NOS Journaal FHD");
+const ZIGGO = channel("11", "NL | Ziggo Sport");
+const RTL = channel("10", "NL | RTL Nieuws");
+const ZAPPELIN = channel("11", "NL | Zappelin");
+
+/** Live shows `next` from now on, as account.ts hands it to the record too. */
+async function refresh(next: ReturnType<typeof buildLibrary>) {
+  scenario.catalogue = { kind: "ready", library: next, failing: [] };
+  viewing.setViewingChannels(next.byKey);
+  if (root) React.act(() => root!.render(React.createElement(shown!)));
+  await settle();
+}
+let shown: React.ComponentType | null = null;
+
 const member = (id: string, label: string, needsSecret = false): Member =>
   ({
     entry: { id, server: "http://example.test" },
@@ -216,6 +244,7 @@ const member = (id: string, label: string, needsSecret = false): Member =>
 let container: ReturnType<typeof document.createElement>;
 let root: Root | null = null;
 function open(component: React.ComponentType) {
+  shown = component;
   if (root) React.act(() => root!.unmount());
   container = document.createElement("div");
   root = createRoot(container);
@@ -422,5 +451,179 @@ describe("Home", () => {
     expect(tiles).toEqual(["home-favourite-b:11", "home-favourite-a:10"]);
     press("home-favourite-a:10");
     expect(scenario.did).toEqual(["play a:10"]);
+  });
+});
+
+describe("Live's own rows", () => {
+  const empty = buildLibrary([]);
+  const once = () => ({
+    favourites: container.querySelectorAll('[data-testid="live-favourites"]').length,
+    find: container.querySelectorAll('[data-testid="live-discover"]').length,
+  });
+
+  it("lead Live once, whether its channels load, failed, need a password or are none", () => {
+    const [home] = scenario.members;
+    const states: Catalogue[] = [
+      { kind: "ready", library, failing: [] },
+      { kind: "loading" },
+      { kind: "failed", member: home!, error: { kind: "unexpected", detail: "" } },
+      { kind: "failed", member: home!, error: { kind: "needs-secret", subscriptionId: "a" } },
+      { kind: "ready", library: empty, failing: [] },
+    ];
+    for (const catalogue of states) {
+      scenario.catalogue = catalogue;
+      open(LiveHome);
+      expect(once()).toEqual({ favourites: 1, find: 1 });
+    }
+    // What each state says is still there with them.
+    expect(container.textContent).toContain("No live channels");
+    press("live-favourites");
+    expect(scenario.did).toEqual(["push /live/favourites"]);
+  });
+
+  it("aren't on a category's screen, in any state", () => {
+    for (const catalogue of [
+      { kind: "ready", library, failing: [] },
+      { kind: "loading" },
+    ] as Catalogue[]) {
+      scenario.catalogue = catalogue;
+      open(() => React.createElement(CategoryScreen, { region: "Netherlands", name: "News" }));
+      expect(once()).toEqual({ favourites: 0, find: 0 });
+    }
+  });
+});
+
+describe("an order arranged while the favourites change", () => {
+  /** Edits [a:10, b:10, a:11] and moves a:11 to the top. */
+  async function arranging() {
+    await starred("a:10", "b:10", "a:11");
+    open(FavouritesScreen);
+    press("favourites-edit");
+    press("arranged-a:11-up");
+    press("arranged-a:11-up");
+    expect(arranged()).toEqual(["a:11", "a:10", "b:10"]);
+  }
+  const titles = () => scenario.alerts.map((alert) => alert.title);
+
+  it("moves nothing once a provider shown needs its password", async () => {
+    await arranging();
+    scenario.members = [member("a", "Home"), member("b", "Cabin", true)];
+    press("favourites-save");
+    await settle();
+    expect(titles()).toEqual(["Favourites changed"]);
+    expect(saved()).toEqual(["a:10", "b:10", "a:11"]);
+    expect(find("favourites-save")).toBeNull();
+    expect(listed()).toEqual(["a:10", "a:11"]);
+  });
+
+  it("moves nothing once a refresh no longer lists a row", async () => {
+    await arranging();
+    await refresh(relisted([NOS_HD, NOS_FHD, ZIGGO], [ZAPPELIN]));
+    press("favourites-save");
+    await settle();
+    expect(titles()).toEqual(["Favourites changed"]);
+    expect(saved()).toEqual(["a:10", "b:10", "a:11"]);
+  });
+
+  it("saves it through a refresh that lists the same rows", async () => {
+    await arranging();
+    await refresh(relisted([NOS_HD, NOS_FHD, ZIGGO], [RTL, ZAPPELIN]));
+    press("favourites-save");
+    await holds(["a:11", "a:10", "b:10"]);
+    expect(titles()).toEqual([]);
+  });
+
+  it("checks again on Try again after a refused write, and moves nothing once it changed", async () => {
+    await arranging();
+    mkdirSync(join(native.root, "documents", "viewing.json.next"));
+    press("favourites-save");
+    await settle();
+    expect(titles()).toEqual(["Couldn't save the order"]);
+    rmSync(join(native.root, "documents", "viewing.json.next"), { recursive: true });
+    scenario.members = [member("a", "Home"), member("b", "Cabin", true)];
+    const again = scenario.alerts[0]?.buttons?.find((button) => button.text === "Try again");
+    React.act(() => again?.onPress?.());
+    await settle();
+    expect(titles()).toEqual(["Couldn't save the order", "Favourites changed"]);
+    expect(saved()).toEqual(["a:10", "b:10", "a:11"]);
+  });
+
+  it("sends nothing on a Try again once the list closed", async () => {
+    await arranging();
+    mkdirSync(join(native.root, "documents", "viewing.json.next"));
+    press("favourites-save");
+    await settle();
+    rmSync(join(native.root, "documents", "viewing.json.next"), { recursive: true });
+    React.act(() => root!.unmount());
+    root = null;
+    const again = scenario.alerts[0]?.buttons?.find((button) => button.text === "Try again");
+    React.act(() => again?.onPress?.());
+    await settle();
+    expect(titles()).toEqual(["Couldn't save the order", "The order wasn't saved"]);
+    expect(saved()).toEqual(["a:10", "b:10", "a:11"]);
+  });
+});
+
+describe("a star whose channel changed", () => {
+  /** Stars a:10 from Live while viewing.json won't take it, then lets writes through again. */
+  async function refusedStar() {
+    open(LiveHome);
+    mkdirSync(join(native.root, "documents", "viewing.json.next"));
+    press("star-a:10");
+    await settle();
+    expect(scenario.alerts.map((alert) => alert.title)).toEqual(["Couldn't add NOS Journaal"]);
+    rmSync(join(native.root, "documents", "viewing.json.next"), { recursive: true });
+  }
+  const tryAgain = async () => {
+    const again = scenario.alerts[0]?.buttons?.find((button) => button.text === "Try again");
+    React.act(() => again?.onPress?.());
+    await settle();
+  };
+  const said = () => scenario.alerts.slice(1).map((alert) => alert.title);
+
+  it("stars on Try again the channel its streams make now", async () => {
+    await refusedStar();
+    // Its HD stream went; Full HD is the channel now.
+    await refresh(relisted([NOS_FHD, ZIGGO], [RTL, ZAPPELIN]));
+    await tryAgain();
+    await holds(["a:14"]);
+    open(FavouritesScreen);
+    expect(listed()).toEqual(["a:14"]);
+    expect(find("favourites-hidden")).toBeNull();
+    expect(said()).toEqual([]);
+  });
+
+  it("changes nothing on Try again when its provider lists none of its streams", async () => {
+    await refusedStar();
+    await refresh(relisted([ZIGGO], [RTL, ZAPPELIN]));
+    await tryAgain();
+    expect(said()).toEqual(["Couldn't add NOS Journaal"]);
+    expect(saved()).toEqual([]);
+  });
+
+  it("changes nothing when its streams are in two channels now, nor for another provider's", async () => {
+    await refusedStar();
+    await refresh(relisted([NOS_HD, channel("14", "NL | Nieuws 24"), ZIGGO], [RTL, ZAPPELIN]));
+    await tryAgain();
+    expect(said()).toEqual(["Couldn't add NOS Journaal"]);
+    expect(saved()).toEqual([]);
+  });
+
+  it("changes nothing when its provider was removed", async () => {
+    await refusedStar();
+    scenario.members = [member("b", "Cabin")];
+    await tryAgain();
+    expect(said()).toEqual(["Couldn't add NOS Journaal"]);
+    expect(saved()).toEqual([]);
+  });
+
+  it("still unstars a channel of a provider that needs its password", async () => {
+    await starred("a:10");
+    scenario.members = [member("a", "Home", true), member("b", "Cabin")];
+    open(LiveHome);
+    press("star-a:10");
+    await holds([]);
+    expect(scenario.alerts).toEqual([]);
+    expect(scenario.did).toEqual([]);
   });
 });

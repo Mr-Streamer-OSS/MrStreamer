@@ -12,8 +12,12 @@ channel watched last behind Play, then recent channels and category shelves, and
 every category as a tile that opens its channels; a country is an optional filter before those
 tabs (`src/live-screen.tsx`). Above them, Favourites opens every favourite channel of every
 provider in one order (`src/favourites-screen.tsx`): a row plays in Watch, its star takes it out,
-and Edit moves rows with Move up and Move down until Save or Cancel. A Live row's star, and Watch's
-for the channel playing, star or unstar a channel without playing anything. Under Favourites, Find
+and Edit moves rows with Move up and Move down until Save or Cancel. Save sends the order only
+while the favourites still show the rows it was made of; a list or a password that changed them
+meanwhile moves nothing and says so. A Live row's star, and Watch's for the channel playing, star
+or unstar the channel its provider lists now for the streams pressed, without playing anything, and
+change nothing when that is no single channel any more. Both rows lead Live whatever its channels'
+state: loading, failed or none. Under Favourites, Find
 countries or categories (`src/live-discover.tsx`) finds them by name in every provider's
 channels, whatever country Live shows: a country goes back to Live showing it, on the same tab; a
 category opens all its channels, and Back finds the text and results again. Cancel leaves Live as
