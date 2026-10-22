@@ -33,8 +33,9 @@ import { ShelfHead, TextTabs } from "./titles-ui.tsx";
 import { ChannelLogo, ChannelRow, colors, Message, Notice, useRowHeight } from "./ui.tsx";
 
 // Live, in Movies' and Series' shape: a large title, its Favourites row, which opens every
-// favourite (favourites-screen.tsx), then For you, Categories and All as text tabs, with the
-// country first in their row, reading All countries until one is chosen. All lists
+// favourite (favourites-screen.tsx), and Find countries or categories, which finds them by name
+// in every provider's channels (live-discover.tsx), then For you, Categories and All as text
+// tabs, with the country first in their row, reading All countries until one is chosen. All lists
 // every channel of every provider and country once, in a virtualised list of rows of one fixed
 // height, and is where Live opens at launch. For you leads with the channel watched last and Play,
 // then the recent channels and a few categories as shelves of logos; Categories is every category
@@ -73,8 +74,17 @@ const nameOf = ({ region, shelf }: Category, chosen = false) =>
   chosen || shelf.title === region.name ? shelf.title : `${shelf.title} · ${region.name}`;
 
 /** Where a category's channels open, by its region and title, which name it across providers. */
-const categoryHref = ({ region, shelf }: Category) =>
+export const categoryHref = ({ region, shelf }: Category) =>
   `/live/category?region=${encodeURIComponent(region.name)}&name=${encodeURIComponent(shelf.title)}` as const;
+
+/**
+ * Live shows `region`'s channels from now on, every one again with null, on the tab it showed.
+ * Home's On now shows the country chosen last until channels are watched.
+ */
+export function chooseCountry(region: Region | null) {
+  if (region) writeState((state) => ({ ...state, region: region.name }));
+  place.set((current) => ({ ...current, region: region?.name ?? null }));
+}
 
 /** Settings, on Live's own stack. */
 const openSettings = () => router.push(tabHref("live", "settings"));
@@ -193,22 +203,27 @@ function Browse({ library }: { library: Library }) {
   const gone = kept.region !== null && region === null ? kept.region : null;
   const countries = library.regions.length > 1 || gone !== null;
 
-  const choose = useCallback((next: Region | null) => {
-    // Home's On now shows the country chosen last until channels are watched.
-    if (next) writeState((state) => ({ ...state, region: next.name }));
-    place.set((current) => ({ ...current, region: next?.name ?? null }));
-  }, []);
-  // Favourites always lead. The finding of countries and categories joins below them.
+  // Favourites always lead, then the finding of countries and categories.
   const header = (
     <>
       <FavouritesEntry />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Find countries or categories"
+        onPress={() => router.push("/live/discover")}
+        style={({ pressed }) => [styles.find, pressed && styles.pressed]}
+        testID="live-discover"
+      >
+        <SymbolView name="magnifyingglass" size={15} tintColor={colors.dim} />
+        <Text style={styles.findText}>Find countries or categories</Text>
+      </Pressable>
       {countries || tabs.length > 1 ? (
         <>
           {gone ? <Text style={styles.note}>{`${gone} isn't listed any more.`}</Text> : null}
           <TextTabs
             lead={
               countries ? (
-                <Country regions={library.regions} chosen={region} onChoose={choose} />
+                <Country regions={library.regions} chosen={region} onChoose={chooseCountry} />
               ) : null
             }
             tabs={tabs}
@@ -609,6 +624,14 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000000" },
   pressed: { opacity: 0.6 },
   note: { color: colors.text, fontSize: 15, marginHorizontal: 16, marginVertical: 12 },
+  find: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 16,
+  },
+  findText: { color: colors.dim, fontSize: 17 },
   categoryName: {
     color: colors.text,
     fontSize: 28,

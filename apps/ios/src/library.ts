@@ -303,3 +303,31 @@ export function searchChannels(library: Library, query: string): readonly Channe
   if (words.length === 0) return [];
   return library.channels.filter((channel) => matchRanges(channel.title, words).length > 0);
 }
+
+/** A country or a category Live's discovery found: a country opens in Live, a category whole. */
+export type Place =
+  | { readonly kind: "country"; readonly region: Region }
+  | { readonly kind: "category"; readonly region: Region; readonly shelf: Shelf };
+
+/**
+ * The countries and categories whose names hold every word of `query`, as `searchChannels` matches
+ * channels: every country first, then every category, each in the library's order, whatever Live
+ * shows of them. A "country" is the providers' group, which can be a language or a label. A
+ * category that stands alone, as its own region, is found as the category only.
+ */
+export function searchPlaces(library: Library, query: string): readonly Place[] {
+  const words = searchWords(query);
+  if (words.length === 0) return [];
+  const matches = (name: string) => matchRanges(name, words).length > 0;
+  const alone = (region: Region) =>
+    region.shelves.length === 1 && region.shelves[0]?.title === region.name;
+  const countries = library.regions.flatMap((region): Place[] =>
+    !alone(region) && matches(region.name) ? [{ kind: "country", region }] : [],
+  );
+  const categories = library.regions.flatMap((region) =>
+    region.shelves.flatMap((shelf): Place[] =>
+      matches(shelf.title) ? [{ kind: "category", region, shelf }] : [],
+    ),
+  );
+  return [...countries, ...categories];
+}

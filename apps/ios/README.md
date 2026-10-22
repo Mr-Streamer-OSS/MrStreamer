@@ -13,7 +13,11 @@ every category as a tile that opens its channels; a country is an optional filte
 tabs (`src/live-screen.tsx`). Above them, Favourites opens every favourite channel of every
 provider in one order (`src/favourites-screen.tsx`): a row plays in Watch, its star takes it out,
 and Edit moves rows with Move up and Move down until Save or Cancel. A Live row's star, and Watch's
-for the channel playing, star or unstar a channel without playing anything. Movies and Series browse the
+for the channel playing, star or unstar a channel without playing anything. Under Favourites, Find
+countries or categories (`src/live-discover.tsx`) finds them by name in every provider's
+channels, whatever country Live shows: a country goes back to Live showing it, on the same tab; a
+category opens all its channels, and Back finds the text and results again. Cancel leaves Live as
+it was, and nothing found or opened plays. Movies and Series browse the
 desktop's collections (For you, New, Genres, Services, 4K and All) and open details pushed on
 their tab, with seasons and episodes, the version menu, the watchlist and episodes marked by hand.
 A version chosen from the menu plays again whenever the title opens, until Automatic is chosen; a
@@ -376,7 +380,9 @@ login, such as
 `FIXTURE_SECOND=1 FIXTURE_USERNAME=second FIXTURE_PASSWORD=second-pass node scripts/fixture-server.ts 8793 8794`;
 add it in Settings > Add provider at `http://127.0.0.1:8793`. Its channels have the first's ids. For favourites, the control port's `/live-lists` leaves streams
 the panel listed out of its later channel lists, as a provider dropping a quality or a channel
-does, and lists them again (`scripts/live-lists.ts`); Reload in Settings then reads it.
+does, and lists them again (`scripts/live-lists.ts`); Reload in Settings then reads it. Leaving
+out 100000, 100001 and 100002, the one channel in three qualities, takes Belgium's Kwaliteit, the
+only category it is in, away from Find countries or categories as well.
 
 ```sh
 node scripts/fixture-server.ts 8791 8792
