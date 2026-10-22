@@ -702,3 +702,33 @@ describe("a country found with one category", () => {
     expect(find("live-for-you")).not.toBeNull();
   });
 });
+
+describe("a country found with no category", () => {
+  // Home's panel lists category 4's channels in no category: Other channels, with no shelf.
+  beforeAll(async () => {
+    one.serveChannels((all) =>
+      all.map((each) => (each.categoryId === "4" ? { ...each, categoryId: "999" } : each)),
+    );
+    await relistBoth();
+  });
+  afterAll(async () => {
+    one.serveChannels((all) => all);
+    await relistBoth();
+  });
+
+  it("shows its channels in All, and Categories again once cleared", () => {
+    expect(find("live-categories")).not.toBeNull();
+    press("live-discover");
+    type("other channels");
+    const region = libraryOf()!.regions.find((each) => each.name === "Other channels")!;
+    expect(region.shelves).toEqual([]);
+    expect(results()).toEqual([`Other channels, country, ${region.channels.length} channels`]);
+    press("discover-country-Other channels");
+    expect(stack).toHaveLength(1);
+    expect(find("live-country")?.textContent).toBe("Other channels");
+    expect(find("tab-for-you")).toBeNull();
+    expect(rows()).toEqual(region.channels.map((channel) => channel.key));
+    press("live-country-clear");
+    expect(find("live-categories")).not.toBeNull();
+  });
+});

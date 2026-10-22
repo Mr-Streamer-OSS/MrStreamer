@@ -398,6 +398,24 @@ describe("the country", () => {
     expect(text("live-lead")).toContain("Sporza");
   });
 
+  it("shows All for a country with no category, and the tab Live showed once cleared", () => {
+    for (const [tab, shown] of [
+      ["tab-categories", "live-categories"],
+      ["tab-for-you", "live-for-you"],
+    ] as const) {
+      open();
+      press(tab);
+      country("Other channels");
+      // Its channels are in no category: no shelf or tile to show them, so All lists them.
+      expect(text("live-country")).toBe("Other channels");
+      expect(has("tab-for-you")).toBe(false);
+      expect(rows()).toEqual(["a:13"]);
+      press("live-country-clear");
+      expect(has(shown)).toBe(true);
+    }
+    expect(scenario.did).toEqual([]);
+  });
+
   it("leaves only All when every country together has one category", () => {
     scenario.catalogue = ready(
       buildLibrary([
