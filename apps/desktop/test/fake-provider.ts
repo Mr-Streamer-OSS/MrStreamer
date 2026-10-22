@@ -25,6 +25,7 @@
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Readable, type Writable } from "node:stream";
+import { URL } from "node:url";
 import { crc32 as zlibCrc32, deflateSync } from "node:zlib";
 
 export interface FakeChannel {
