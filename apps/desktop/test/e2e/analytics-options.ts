@@ -7,9 +7,13 @@ export function analyticsOptions(args: string[]) {
   const positional: string[] = [];
   for (const arg of args) {
     if (
-      ["--native-telemetry", "--observe-rollover", "--volume-workload", "--slow-startup"].includes(
-        arg,
-      )
+      [
+        "--native-telemetry",
+        "--observe-rollover",
+        "--volume-workload",
+        "--slow-startup",
+        "--lifecycle",
+      ].includes(arg)
     )
       flags.add(arg);
     else if (
@@ -53,7 +57,8 @@ export function analyticsOptions(args: string[]) {
     native &&
     (flags.has("--observe-rollover") ||
       flags.has("--volume-workload") ||
-      flags.has("--slow-startup"))
+      flags.has("--slow-startup") ||
+      flags.has("--lifecycle"))
   )
     throw new Error("Native acceptance cannot change the ordinary workload");
   if (
@@ -87,5 +92,6 @@ export function analyticsOptions(args: string[]) {
     volume: flags.has("--volume-workload"),
     rollover: flags.has("--observe-rollover"),
     slowStartup: flags.has("--slow-startup"),
+    lifecycle: flags.has("--lifecycle"),
   };
 }

@@ -932,6 +932,7 @@ async function capturePrefixFailure() {
     prefixErrors.push(`failure capture: ${String(error)}`);
     return;
   }
+  await capture("fixture-guide-requests.json", async () => provider?.guideRequests());
   await capture("counter-samples.json", async () => prefixCounters);
   await capture("rename-measurements.json", async () => observations.guideFavouriteRenames);
   await capture("analytics.json.read.json", async () => {
@@ -954,7 +955,7 @@ async function capturePrefixFailure() {
     return temporary.map((file) => file.name);
   });
   if (page)
-    for (const method of ["preferences.get", "viewing.get"])
+    for (const method of ["preferences.get", "viewing.get", "guide.status", "guide.sources"])
       await capture(`${method}.json`, () =>
         live().evaluate(`window.mrStreamer.invoke(${JSON.stringify(method)})`),
       );
@@ -1350,6 +1351,122 @@ async function productPaths() {
   rejectUpdate = false;
 }
 
+/** Real app, local HTTP, owned profile. Seeded baseline is labelled, never an installed upgrade. */
+async function lifecyclePaths() {
+  await new Promise<void>((resolve) => capture.close(() => resolve()));
+  await launch();
+  await connectFixture();
+  await waitFor(async () => {
+    const state = await loadedAnalytics();
+    return (
+      state.pending.length === 2 &&
+      state.lifecycle?.legacyRetries.every((item) => item.failures >= 4) === true &&
+      state.lifecycle.legacyRetries.length === 2 &&
+      state.lifecycle.pending[0]?.failures === 4
+    );
+  });
+  await snapshot("lifecycle-offline");
+  await quit();
+  const before = await loadedAnalytics();
+  const original = [
+    ...before.pending.map((item) => item.event),
+    ...before.lifecycle!.pending.map((item) => item.event),
+  ];
+  if (
+    original.length !== 3 ||
+    before.pending.some((item) => item.attempts !== 0) ||
+    before.lifecycle!.pending.some((item) => item.attempts !== 0) ||
+    payloads.length
+  )
+    throw new Error("Offline first/day/version work lost or spent transmission attempts.");
+  await writeFile(join(evidence, "offline-before-restart.json"), JSON.stringify(before, null, 2));
+  await launch();
+  await settings();
+  const after = await loadedAnalytics();
+  if (
+    !isDeepStrictEqual(after.pending, before.pending) ||
+    !isDeepStrictEqual(after.lifecycle, before.lifecycle)
+  )
+    throw new Error("Offline restart changed retained lifecycle work or backoff.");
+  await new Promise<void>((resolve) =>
+    capture.listen(Number(new URL(endpoint).port), "127.0.0.1", resolve),
+  );
+  await waitFor(
+    async () =>
+      count("app_version_observed") === 1 &&
+      count("app_active_day") === 1 &&
+      count("installation_observed") === 1,
+  );
+  for (const event of original) {
+    const delivered = sent().find((item) => item.uuid === event.uuid);
+    if (!isDeepStrictEqual(delivered, event)) throw new Error("Recovered lifecycle event changed.");
+  }
+  await snapshot("lifecycle-recovered");
+  await click(checkbox);
+  await waitFor(async () => (await preference()).analyticsEnabled === false);
+  await quit();
+  const disabled = await loadedAnalytics();
+  if (disabled.lifecycle || disabled.summaries || disabled.pending.length)
+    throw new Error("Opt-out retained work.");
+  const offCount = payloads.length;
+  await launch();
+  await settings();
+  await delay(1200);
+  if ((await preference()).analyticsEnabled || payloads.length !== offCount)
+    throw new Error("Disabled restart captured.");
+  await snapshot("lifecycle-off");
+  await click(checkbox);
+  await waitFor(async () => count("app_version_observed") === 2);
+  const reenabled = sent()
+    .filter((event) => event.event === "app_version_observed")
+    .at(-1)!;
+  if (
+    reenabled.properties.observation_kind !== "unknown_history" ||
+    "previous_app_version" in reenabled.properties ||
+    count("installation_observed") !== 1 ||
+    count("app_active_day") !== 1
+  )
+    throw new Error("Re-enable invented prior history or repeated activity.");
+  await snapshot("lifecycle-reenabled");
+  await quit();
+  const retained = await loadedAnalytics();
+  retained.lifecycle!.baseline = { app_version: "0.0.17", build_channel: "stable" };
+  await writeFile(join(profile, "analytics.json"), JSON.stringify(retained));
+  await launch();
+  await settings();
+  await waitFor(async () => count("app_version_observed") === 3);
+  const transition = sent()
+    .filter((event) => event.event === "app_version_observed")
+    .at(-1)!;
+  if (
+    transition.properties.observation_kind !== "transition" ||
+    transition.properties.previous_app_version !== "0.0.17" ||
+    count("app_active_day") !== 1 ||
+    transition.distinct_id !== before.installationId
+  )
+    throw new Error("Seeded same-day transition lost identity or repeated activity.");
+  await snapshot("lifecycle-seeded-transition");
+  observations.lifecycle = {
+    offlineFailuresPerEvent: 4,
+    original,
+    before,
+    after,
+    reenabled,
+    transition,
+    unchangedEvents: true,
+    sameIdentity: true,
+    disabledRestartSilent: true,
+    seededBaseline:
+      "0.0.17 stable, written only after the owned app exited; not an installed upgrade",
+  };
+}
+
+async function loadedAnalytics(): Promise<AnalyticsRecord> {
+  const state = AnalyticsRecord()(await analyticsFile());
+  if (state instanceof type.errors) throw new Error("Invalid owned analytics record.");
+  return state;
+}
+
 try {
   profile = await mkdtemp(join(tmpdir(), "mrstreamer-analytics-"));
   profiles.push(profile);
@@ -1395,7 +1512,9 @@ try {
   if (!updateAddress || typeof updateAddress === "string")
     throw new Error("No local update endpoint.");
   updateEndpoint = `http://127.0.0.1:${updateAddress.port}`;
-  if (options.native) {
+  if (options.lifecycle) {
+    await lifecyclePaths();
+  } else if (options.native) {
     await runNativeTelemetry({
       options,
       evidence,
@@ -1574,8 +1693,13 @@ try {
     await waitFor(async () => (await preference()).analyticsEnabled === true);
     await snapshot("reenabled");
     await delay(1200);
-    if (payloads.length !== enabledCaptures)
-      throw new Error("Re-enable duplicated first-seen/day.");
+    if (
+      payloads.length !== enabledCaptures + 1 ||
+      count("installation_observed") !== 1 ||
+      count("app_active_day") !== 1 ||
+      count("app_version_observed") !== 2
+    )
+      throw new Error("Re-enable did not observe an unknown current version exactly once.");
     const diagnostics = await live().evaluate<unknown>(
       "window.mrStreamer.invoke('diagnostics.preview')",
     );
@@ -1602,7 +1726,7 @@ try {
     const legacyEnvelope = (event: string, extra: object) => ({
       uuid: randomUUID(),
       distinct_id: legacyId,
-      timestamp: "2026-10-12T09:00:00.000Z",
+      timestamp: new Date(Date.now() - 86_400_000).toISOString(),
       event,
       properties: { ...first.properties, profile_origin: "upgrading", ...extra },
     });

@@ -160,7 +160,11 @@ describe("optional analytics startup", () => {
       owner.setForeground(true);
       await owner.configure(true);
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(events).toEqual([installation]);
+      expect(events.map((event) => event.event)).toEqual([
+        "installation_observed",
+        "app_version_observed",
+      ]);
+      expect(events[1]?.properties).toMatchObject({ observation_kind: "unknown_history" });
     },
   );
 
@@ -176,14 +180,18 @@ describe("optional analytics startup", () => {
     origin.resolve("fresh");
     await vi.advanceTimersByTimeAsync(200);
     expect(await owner.settings()).toEqual({ enabled: true, transport: "local" });
-    expect(events.map((event) => event.event)).toEqual(["installation_observed", "app_active_day"]);
+    expect(events.map((event) => event.event)).toEqual([
+      "installation_observed",
+      "app_active_day",
+      "app_version_observed",
+    ]);
     expect(events.every((event) => event.properties.profile_origin === "fresh")).toBe(true);
     expect(new Set(events.map((event) => event.distinct_id)).size).toBe(1);
     expect(snapshot()).toMatchObject({ firstSeen: true, lastDay: "2026-10-23", pending: [] });
     owner.setForeground(false);
     owner.setForeground(true);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(3);
   });
 
   it.each(["store", "origin"] as const)(
@@ -239,8 +247,10 @@ describe("optional analytics startup", () => {
     expect(snapshot()).toEqual({ ...retained(), enabled: false, pending: [] });
     await owner.configure(true);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(events).toEqual([]);
-    expect(snapshot()).toEqual({ ...retained(), pending: [] });
+    expect(events.map((event) => event.event)).toEqual(["app_version_observed"]);
+    expect(events[0]?.properties).toMatchObject({ observation_kind: "unknown_history" });
+    expect(events[0]?.properties).not.toHaveProperty("previous_app_version");
+    expect(snapshot()).toMatchObject({ ...retained(), pending: [] });
   });
 
   it.each([
@@ -409,7 +419,7 @@ describe("optional analytics startup", () => {
             events.length === 1 && (await analyticsStore(dataDir).load())?.pending.length === 0,
         );
         expect(events).toEqual([installation]);
-        expect(await analyticsStore(dataDir).load()).toEqual({ ...retained(), pending: [] });
+        expect(await analyticsStore(dataDir).load()).toMatchObject({ ...retained(), pending: [] });
         expect(await owner.settings()).toEqual({ enabled: true, transport: "local" });
       } else if (outcome === "opt-out") {
         await until(async () => JSON.parse(await readFile(path, "utf8")).enabled === false);
