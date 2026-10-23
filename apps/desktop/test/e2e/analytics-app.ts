@@ -38,6 +38,7 @@ import { analyticsOptions } from "./analytics-options.ts";
 import { boundary } from "./analytics-boundary.ts";
 import { closeNative } from "./analytics-exit.ts";
 import { failRendererLaunch } from "./analytics-launch-diagnostic.ts";
+import { startupProbe } from "./analytics-startup.ts";
 import { runNativeTelemetry } from "./analytics-native.ts";
 import { disposableRunner, ownedTree } from "./installed-upgrade-windows.ts";
 import {
@@ -334,8 +335,40 @@ async function send(method: string, params: Record<string, unknown> = {}) {
 }
 
 let launchOrdinal = 0;
+let startupSample: Awaited<ReturnType<typeof startupProbe>>["read"] | undefined;
+let startupCaptureFrom = 0;
+const startupSamples: unknown[] = [];
+async function captureStartup() {
+  const sample = startupSample;
+  startupSample = undefined;
+  if (!sample) return;
+  const operations = await sample().catch(() => null);
+  const enabled = page
+    ? await page
+        .evaluate<boolean | null>(
+          `(async () => {
+        const reply = await window.mrStreamer.invoke('preferences.get');
+        if (!reply.ok) return null;
+        return (reply.value.preferences ?? reply.value).analyticsEnabled ?? null;
+      })()`,
+          2000,
+        )
+        .catch(() => null)
+    : null;
+  startupSamples.push({
+    launchOrdinal,
+    capturedAt: new Date().toISOString(),
+    injectedReadDelayMs: options.slowStartup ? 1700 : 0,
+    operations,
+    captureRefusing: rejectCapture,
+    receivedBodies: payloads.length - startupCaptureFrom,
+    enabled,
+  });
+  observations.startupIO = startupSamples;
+}
 async function launch() {
   const ordinal = ++launchOrdinal;
+  startupCaptureFrom = payloads.length;
   preparedExit = undefined;
   const port = await freePort();
   debuggingPort = port;
@@ -352,7 +385,7 @@ async function launch() {
     target.executable ?? (await electronExecutable()),
     [
       `--remote-debugging-port=${port}`,
-      `--inspect=${inspectorPort}`,
+      `${options.native ? "--inspect" : "--inspect-brk"}=${inspectorPort}`,
       "--remote-debugging-address=127.0.0.1",
       `--user-data-dir=${profile}`,
       "--enable-automation",
@@ -386,9 +419,18 @@ async function launch() {
   });
   for (const stream of [app.stdout, app.stderr])
     stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
-  page = await connect(port, "page", { app });
-  mainPage = await connect(inspectorPort, "node", { app });
-  const comparedMainPid = await mainPage.evaluate<number>("process.pid");
+  let comparedMainPid: number;
+  if (options.native) {
+    page = await connect(port, "page", { app });
+    mainPage = await connect(inspectorPort, "node", { app });
+    comparedMainPid = await mainPage.evaluate<number>("process.pid");
+  } else {
+    mainPage = await connect(inspectorPort, "node", { app });
+    const probe = await startupProbe(mainPage, profile, options.slowStartup, app.pid);
+    comparedMainPid = probe.pid;
+    startupSample = probe.read;
+    page = await connect(port, "page", { app });
+  }
   if (comparedMainPid !== app.pid) throw new Error("Wrong main inspector process.");
   const identity = await send("Browser.getBrowserCommandLine");
   const arguments_ = record(identity) ? identity["arguments"] : null;
@@ -547,6 +589,7 @@ async function launch() {
 async function quit() {
   if (app) {
     const closing = app;
+    await captureStartup();
     mainPage?.close();
     mainPage = undefined;
     if (options.native) {
@@ -1502,7 +1545,8 @@ try {
     observations["payloadAllowlist"] = Object.keys(first.properties).sort();
     observations["activityAllowlist"] = Object.keys(day.properties).sort();
     if (volumeWorkload) await volumePaths();
-    else await productPaths();
+    else if (!options.slowStartup) await productPaths();
+    else observations.startupPrivacyOnly = true;
     const enabledCaptures = payloads.length;
     if (new Set(sent().map((event) => event.uuid)).size !== enabledCaptures)
       throw new Error("A capture was delivered twice.");
@@ -1692,6 +1736,7 @@ try {
     "Transport accepts only this literal loopback endpoint; explicit isolated profile and automation also exclude configured production transport.";
 } catch (error) {
   failure = error;
+  await captureStartup();
   await restorePrefix();
   await capturePrefixFailure();
   if (page) await snapshot("failure").catch(() => {});

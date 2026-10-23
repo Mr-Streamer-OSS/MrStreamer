@@ -102,6 +102,7 @@ export class Analytics {
   private record: AnalyticsRecord | null = null;
   private serial: Promise<void>;
   private readonly initialized: Promise<void>;
+  private recoveryPending = true;
   private available = true;
   private paused = false;
   private revision = 0;
@@ -135,8 +136,9 @@ export class Analytics {
     // No raw values in errors or diagnostics, including invalid version strings.
     if (properties instanceof type.errors) throw new Error("Invalid analytics build properties.");
     this.properties = properties;
-    this.serial = deadline(
-      Promise.all([this.store.load(), options.origin]).then(([kept, origin]) => {
+    this.serial = Promise.all([this.store.load(), options.origin])
+      .then(([kept, origin]) => {
+        if (this.closing) return;
         this.record = kept ?? {
           format: 2,
           enabled: true,
@@ -146,28 +148,13 @@ export class Analytics {
           lastDay: null,
           pending: [],
         };
-      }),
-      IO_MS,
-    ).catch(() => this.unavailable());
-    this.initialized = this.serial;
+      })
+      .catch(() => this.unavailable());
+    // A slow read is still the serializer's owner. Only its actual failure disables capture;
+    // Settings can stop waiting without letting preference writes overtake load or migration.
+    this.initialized = deadline(this.serial, IO_MS).catch(() => {});
     // Base consent is readable before recovery performs any new disk write.
-    void this.exclusive(async () => {
-      if (!this.canCapture() || !this.record?.summaries) return;
-      const block = this.record.summaries;
-      const recovered = block.unfinished?.event;
-      await this.save({
-        ...this.record,
-        summaries: {
-          ...block,
-          usage: null,
-          unfinished: null,
-          pending: [
-            ...block.pending,
-            ...[block.usage, recovered].flatMap((event) => (event ? [queuedSummary(event)] : [])),
-          ],
-        },
-      });
-    })
+    void this.exclusive(() => this.recover())
       .catch(() => {})
       .finally(() => this.pump());
   }
@@ -178,7 +165,8 @@ export class Analytics {
     await this.initialized;
     return {
       enabled: this.record?.enabled ?? false,
-      transport: !this.available ? "unavailable" : (this.transport?.kind ?? "unconfigured"),
+      transport:
+        !this.available || !this.record ? "unavailable" : (this.transport?.kind ?? "unconfigured"),
     };
   }
 
@@ -203,7 +191,7 @@ export class Analytics {
     this.clearWindow();
     this.request?.abort();
     this.clearRetry();
-    return this.exclusive(async () => {
+    const changed = this.exclusive(async () => {
       if (!this.available || !this.record || this.closing)
         throw new Error("Analytics preference could not be saved.");
       const { summaries, ...base } = this.record;
@@ -214,11 +202,39 @@ export class Analytics {
         ...(enabled && summaries ? { summaries } : {}),
       });
       if (this.revision === revision) this.paused = !enabled;
+      // A preference requested during load paused startup recovery. Resume it only after the
+      // latest enabled preference is durable, so opt-out/re-enable cannot revive cleared work.
+      await this.recover();
     }).then(async () => {
       this.playbackReset?.();
       this.observe();
       this.pump();
       return this.settings();
+    });
+    // The requested preference stays queued if loading takes longer. Opt-out remains paused
+    // synchronously and will clear persisted work when the serializer becomes available.
+    return deadline(changed, IO_MS).catch(() => {
+      throw new Error("Analytics preference could not be saved.");
+    });
+  }
+
+  private async recover(): Promise<void> {
+    if (!this.recoveryPending || !this.canCapture() || this.closing || !this.record) return;
+    this.recoveryPending = false;
+    const block = this.record.summaries;
+    if (!block) return;
+    const recovered = block.unfinished?.event;
+    await this.save({
+      ...this.record,
+      summaries: {
+        ...block,
+        usage: null,
+        unfinished: null,
+        pending: [
+          ...block.pending,
+          ...[block.usage, recovered].flatMap((event) => (event ? [queuedSummary(event)] : [])),
+        ],
+      },
     });
   }
 

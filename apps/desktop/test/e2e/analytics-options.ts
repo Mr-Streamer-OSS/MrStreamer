@@ -6,7 +6,11 @@ export function analyticsOptions(args: string[]) {
   const values = new Map<string, string>();
   const positional: string[] = [];
   for (const arg of args) {
-    if (["--native-telemetry", "--observe-rollover", "--volume-workload"].includes(arg))
+    if (
+      ["--native-telemetry", "--observe-rollover", "--volume-workload", "--slow-startup"].includes(
+        arg,
+      )
+    )
       flags.add(arg);
     else if (
       /^--(built-desktop|expected-version|expected-source|native-case|prior-executable|prior-source|installed-pair)=/.test(
@@ -45,7 +49,12 @@ export function analyticsOptions(args: string[]) {
     if (source && !/^[a-f0-9]{40}$/.test(source)) throw new Error("Expected a full source SHA");
   if (executable && (!expectedVersion || !expectedSource))
     throw new Error("Packaged verification requires --expected-version= and --expected-source=");
-  if (native && (flags.has("--observe-rollover") || flags.has("--volume-workload")))
+  if (
+    native &&
+    (flags.has("--observe-rollover") ||
+      flags.has("--volume-workload") ||
+      flags.has("--slow-startup"))
+  )
     throw new Error("Native acceptance cannot change the ordinary workload");
   if (
     !native &&
@@ -77,5 +86,6 @@ export function analyticsOptions(args: string[]) {
     installedPair: values.get("--installed-pair"),
     volume: flags.has("--volume-workload"),
     rollover: flags.has("--observe-rollover"),
+    slowStartup: flags.has("--slow-startup"),
   };
 }
