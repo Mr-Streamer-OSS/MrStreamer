@@ -6,10 +6,11 @@ validation and remaining rollout checks. `changes.json` retains the original
 preconditions and rollback alongside the applied IDs. Existing playback reports and the project's Europe/Brussels
 timezone remain unchanged.
 
-`changes.json` contains exact proposed tool inputs, original definitions for
-rollback and concurrent-edit preconditions. Refresh those preconditions before
-applying it. New SQL variables and insights need their returned IDs recorded in
-the application receipt. Do not delete or overwrite unrelated dashboard content.
+`changes.json` retains the tool inputs, original definitions for rollback and
+the concurrent-edit preconditions used for this application. Before any further
+application or rollback, read the current definitions and refresh the relevant
+preconditions. Record returned IDs in the application receipt and preserve
+unrelated dashboard content.
 
 ## Definitions
 
@@ -24,7 +25,7 @@ the application receipt. Do not delete or overwrite unrelated dashboard content.
 - `headlines.sql` reports yesterday's DAU, exactly seven completed UTC dates
   ending yesterday, and partial today's DAU.
 - Initial `profile_origin` classifies the directory at first observation. It
-  does not identify later completed updates. The proposed rename corrects that
+  does not identify later completed updates. The rename corrects that
   claim while retaining the existing insight and query.
 
 The all-time new-profile total and SQL reports are standalone insights, linked
@@ -51,8 +52,9 @@ Read-only native Trends validation returned an all-time fresh-profile
 
 Read-only SQL with default variable literals and `filters=true` returned 33
 active profiles on 22 October, a union of 151 across 16 to 22 October, and nine
-on partial 23 October. These are diagnostic snapshots. Source/filter/variable
-readback after separately authorized saving remains required.
+on partial 23 October. These are diagnostic snapshots. Saved definitions,
+filters and variables were read back after the authorized application; see
+Applied reports below.
 
 The client event contract is documented in [telemetry](../../telemetry.md).
 `release-arrivals.sql` selects each identity's first target-version observation

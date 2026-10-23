@@ -1,6 +1,6 @@
 # Privacy policy
 
-Last updated 18 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
+Last updated 23 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
 
 Mr. Streamer is a free, open-source IPTV player for your computer. It has no account, shows no ads and doesn't sell data. Nothing you watch passes through us.
 
