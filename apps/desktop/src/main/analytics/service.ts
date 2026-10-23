@@ -103,6 +103,8 @@ export class Analytics {
   private properties: BuildProperties;
   private record: AnalyticsRecord | null = null;
   private serial: Promise<void>;
+  /** Settled initial consent read, including a late success after the public wait expires. */
+  readonly loaded: Promise<void>;
   private readonly initialized: Promise<void>;
   private recoveryPending = true;
   private available = true;
@@ -140,7 +142,7 @@ export class Analytics {
     // No raw values in errors or diagnostics, including invalid version strings.
     if (properties instanceof type.errors) throw new Error("Invalid analytics build properties.");
     this.properties = properties;
-    this.serial = Promise.all([this.store.load(), options.origin])
+    this.loaded = Promise.all([this.store.load(), options.origin])
       .then(([kept, origin]) => {
         if (this.closing) return;
         this.freshSession = kept === null && origin === "fresh" && this.revision === 0;
@@ -155,6 +157,7 @@ export class Analytics {
         };
       })
       .catch(() => this.unavailable());
+    this.serial = this.loaded;
     // A slow read is still the serializer's owner. Only its actual failure disables capture;
     // Settings can stop waiting without letting preference writes overtake load or migration.
     this.initialized = deadline(this.serial, IO_MS).catch(() => {});

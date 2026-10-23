@@ -586,6 +586,8 @@ async function start(): Promise<void> {
       },
     }),
   );
+  // A late consent read can recover after the renderer cached the bounded startup snapshot.
+  void analytics.loaded.then(() => runtime.runPromise(preferences.get)).catch(() => {});
   // The interface language, before the window asks for it.
   let language = languageFor(await runtime.runPromise(settings.interfaceLanguage));
   applyLanguage(language);

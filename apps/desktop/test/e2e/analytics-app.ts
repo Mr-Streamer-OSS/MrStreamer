@@ -443,6 +443,8 @@ async function launch() {
     ].every((arg) => arguments_.includes(arg))
   )
     throw new Error("Wrong app instance.");
+  // The owned BrowserWindow can be listed before its first loadFile navigation starts.
+  await waitFor(() => live().evaluate<boolean>("location.href !== 'about:blank'"), 4000);
   const url = await live().evaluate<string>("location.href");
   if (
     target.executable
@@ -1625,6 +1627,26 @@ try {
     )
       throw new Error("Default control is not checked.");
     await snapshot("on");
+    if (options.slowStartup) {
+      await quit();
+      await launch();
+      await settings();
+      // Inspect the cached control before any helper preferences.get can refresh it.
+      await waitFor(() =>
+        live().evaluate<boolean>(
+          `document.querySelector(${JSON.stringify(checkbox)})?.getAttribute('aria-checked') === 'true'`,
+        ),
+      );
+      const bootReads = await mainPage!.evaluate<{ startedMs: number; enabled: boolean | null }[]>(
+        "globalThis.__analyticsStartupIO.preferenceReads",
+      );
+      if (bootReads.length !== 1 || bootReads[0]?.enabled !== false)
+        throw new Error(
+          "Slow-startup cache proof needs one disabled boot reply and no refresh reads.",
+        );
+      observations.startupConsentCache = { bootReads, checkedAfterRecovery: true };
+      await snapshot("recovered-cached-consent");
+    }
     injectedFailure("analytics");
     actions.push({
       action: "Opened real General Privacy control, default checked",

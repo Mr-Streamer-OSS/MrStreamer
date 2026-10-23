@@ -82,6 +82,43 @@ function install(profile: string, delayMs: number) {
     format: 1 | 2 | null;
   }[] = [];
   const started = performance.now();
+  const preferenceReads: { startedMs: number; enabled: boolean | null }[] = [];
+  const { ipcMain } = process.getBuiltinModule("module").createRequire(process.execPath)(
+    "electron",
+  ) as typeof import("electron");
+  ipcMain.handle = new Proxy(ipcMain.handle, {
+    apply(target, receiver, [channel, listener]: Parameters<typeof ipcMain.handle>) {
+      if (channel !== "preferences.get")
+        return Reflect.apply(target, receiver, [channel, listener]);
+      return Reflect.apply(target, receiver, [
+        channel,
+        new Proxy(listener, {
+          async apply(handler, context, args) {
+            const sample = {
+              startedMs: performance.now() - started,
+              enabled: null as boolean | null,
+            };
+            if (preferenceReads.length < 32) preferenceReads.push(sample);
+            const reply: unknown = await Reflect.apply(handler, context, args);
+            if (
+              reply &&
+              typeof reply === "object" &&
+              "value" in reply &&
+              reply.value &&
+              typeof reply.value === "object" &&
+              "preferences" in reply.value &&
+              reply.value.preferences &&
+              typeof reply.value.preferences === "object" &&
+              "analyticsEnabled" in reply.value.preferences &&
+              typeof reply.value.preferences.analyticsEnabled === "boolean"
+            )
+              sample.enabled = reply.value.preferences.analyticsEnabled;
+            return reply;
+          },
+        }),
+      ]);
+    },
+  });
   let delayed = false;
   const observe = async (
     operation: "read" | "directory" | "replace",
@@ -147,7 +184,7 @@ function install(profile: string, delayMs: number) {
   fs.readdir = wrap(fs.readdir, "directory", 0);
   fs.rename = wrap(fs.rename, "replace", 1);
   process.getBuiltinModule("module").syncBuiltinESMExports();
-  const probe = { operations, pid: process.pid };
+  const probe = { operations, preferenceReads, pid: process.pid };
   Object.assign(globalThis, { __analyticsStartupIO: probe });
   return probe;
 }

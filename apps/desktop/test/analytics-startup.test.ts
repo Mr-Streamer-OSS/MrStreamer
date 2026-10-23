@@ -2,6 +2,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as Effect from "effect/Effect";
+import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
+import { preferencePublication } from "../src/main/preference-publication.ts";
 import { Analytics } from "../src/main/analytics/service.ts";
 import { analyticsStore } from "../src/main/analytics/storage.ts";
 import * as jsonFile from "../src/main/platform/json-file.ts";
@@ -136,6 +139,40 @@ async function until(check: () => boolean | Promise<boolean>) {
 }
 
 describe("optional analytics startup", () => {
+  it("publishes recovered consent after the renderer's initial bounded snapshot", async () => {
+    const { owner, load } = await start({ record: null });
+    const published: PreferenceSnapshot[] = [];
+    const publication = await Effect.runPromise(
+      preferencePublication({
+        read: Effect.promise(async () => ({
+          volume: 1,
+          muted: false,
+          nextEpisodeDelaySeconds: 10,
+          analyticsEnabled: (await owner.settings()).enabled,
+        })),
+        write: () => Effect.void,
+        consent: (enabled) => Effect.promise(() => owner.configure(enabled)),
+        reconfigure: Effect.void,
+        publish: (snapshot) => published.push(snapshot),
+        stale: () => {},
+      }),
+    );
+    const recovered = owner.loaded.then(() => Effect.runPromise(publication.get));
+    const boot = Effect.runPromise(publication.get);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect((await boot).preferences.analyticsEnabled).toBe(false);
+    expect(published).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(200);
+    load.resolve(null);
+    await recovered;
+    expect(
+      published.map(({ revision, preferences }) => [revision, preferences.analyticsEnabled]),
+    ).toEqual([
+      [1, false],
+      [2, true],
+    ]);
+  });
+
   it.each([200, 1700])(
     "delivers retained work after a %i ms store load without extending the settings deadline",
     async (ms) => {
