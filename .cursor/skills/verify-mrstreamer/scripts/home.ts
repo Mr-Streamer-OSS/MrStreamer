@@ -133,6 +133,9 @@ export async function homeScenario(d: Driver, counts: () => Record<string, numbe
   const movie =
     "[...document.querySelectorAll('button[title]')].find(b => b.title.includes('Index at the end'))";
   await d.click("Open fixture movie", movie);
+  // The loading sheet's Save control moves when the movie actions arrive.
+  await d.wait(() => d.exists(byText('[role="dialog"] button', "Play")));
+  await d.capture("movie-details-before-save");
   await d.click("Save fixture movie", byText('[role="dialog"] button', "Save"));
   await d.wait(() => d.exists(byText('[role="dialog"] button', "Saved")));
   await d.click(
