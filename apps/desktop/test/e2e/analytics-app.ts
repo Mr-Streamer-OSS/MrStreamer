@@ -1766,7 +1766,7 @@ try {
       await waitFor(
         () =>
           live().evaluate<boolean>(
-            `document.querySelector(${JSON.stringify(checkbox)})?.getAttribute('aria-checked') === 'true'`,
+            `document.querySelector(${JSON.stringify(checkbox)})?.getAttribute('aria-checked') === 'true' && !document.querySelector('[role=alert]')`,
           ),
         10_000,
       );
