@@ -5,26 +5,26 @@
       "file": "library.png",
       "width": 1000,
       "height": 700,
-      "bytes": 257073,
-      "sha256": "cbd371ae2634ee17ac634dab7e4b990a7d2360b5a6f8fc0e692fb37a31159031",
+      "bytes": 257772,
+      "sha256": "da52907fe90299549a367d73eb3519844cb0dfb4d05f2ad43afcc0d21ab5b73d",
       "videoBox": null,
       "provenance": {
-        "capturedAt": "2026-10-23T06:50:46.822Z",
-        "appSource": "e8767deb59e274347055e08a85da116efcf7dffd",
+        "capturedAt": "2026-10-23T07:20:15.258Z",
+        "appSource": "3a008d0fbb8cc33a9f7cf363080d0dd94eb48785",
         "appVersion": "0.0.18",
         "platform": "linux",
         "architecture": "x64",
         "system": "Linux workbench-01 6.8.0-147-generic #147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n",
-        "electron": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Mr.Streamer/0.0.18 Chrome/152.0.7977.130 Electron/44.4.5 Safari/537.36",
-        "mainSha256": "7fd3afb1c704aa8868fc201cdd3d03ecfa4ffec64039d90448730c8b1410aa75",
+        "electron": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Mr.Streamer/0.0.18 Chrome/152.0.7977.167 Electron/44.9.3 Safari/537.36",
+        "mainSha256": "4ad8b414ce0dd9cee96bb6763025ea698963a1dc7372fe5f972f5ba6d2859f25",
         "demoManifestSha256": "7ffc0d37fd28c5cc2bbced859fe97f6d2057368a8ddd1717b263ccd9b5a19f0c",
         "captureScriptSha256": "d162b88c1801f6b80927db055718b57693d488c7a776c3a347a75b2a53be2424",
         "status": "candidate, pending parent integration and final verification",
         "method": "Unedited whole X11 window, ImageMagick import -window <owned XID> -frame",
         "nativeSession": {
           "display": ":0",
-          "xvfbPid": 2175750,
-          "wmPid": 2175759,
+          "xvfbPid": 2206316,
+          "wmPid": 2206326,
           "windowManager": "Openbox 3.6.1\nCopyright (c) 2004   Mikael Magnusson\nCopyright (c) 2002   Dana Jansens\n\nThis program comes with ABSOLUTELY NO WARRANTY.\nThis is free software, and you are welcome to redistribute it\nunder certain conditions. See the file COPYING for details.",
           "screen": "1400x1000x24",
           "compositor": "none",
@@ -39,7 +39,7 @@
             "Openbox is noncomposited: no compositor shadow, transparent padding or rounded outer corners are supplied. Flathub quality acceptance remains open."
           ]
         },
-        "evidence": "/var/lib/t3code/live/worktrees/MrStreamer/t3-38bcc4f4/.local/verification/linux-listing/capture-mHmknC",
+        "evidence": "/var/lib/t3code/live/worktrees/MrStreamer/t3-25ae2221/.local/verification/linux-listing/capture-yaYiSp",
         "language": "en",
         "caption": "Series details and cast",
         "sources": [
@@ -103,10 +103,10 @@
           ]
         },
         "buildFiles": {
-          "out/main/index.js": "7fd3afb1c704aa8868fc201cdd3d03ecfa4ffec64039d90448730c8b1410aa75",
+          "out/main/index.js": "4ad8b414ce0dd9cee96bb6763025ea698963a1dc7372fe5f972f5ba6d2859f25",
           "out/preload/index.cjs": "63cb1905282657a47667543e01f5cf8e79722ad3fe1ed7e349c3e151d7120883",
-          "out/renderer/index.html": "f6dd1f6960861812c4617d8b7f314c98bce27337c1c6b65f0481f88fe51e641e",
-          "out/renderer/assets/index-BaO_D1w6.js": "0bced6107e9090604c9792106ce0e87b96c253534274101bbbed7f4cd417a315",
+          "out/renderer/index.html": "f88c1e44ba25790928c6c64f07723e56095bfbb022ac14c409383fdcfe02a103",
+          "out/renderer/assets/index-CJfonc-2.js": "431d14496f72b0a7b811db2e7c757a42a952607552c37ff8938457d7abcdf15a",
           "out/renderer/assets/index-Cs0pTt9U.css": "16c16b9eb6ce25830a2cc49592d8303c699df6d368e0d903e6cb684dc5242033"
         },
         "fixtureFiles": {
@@ -130,31 +130,31 @@
       "file": "watching.png",
       "width": 1000,
       "height": 700,
-      "bytes": 460912,
-      "sha256": "787b995068105e8a6561530e26ae8d889a2e3ec341a523f1b0c1b580b5459278",
+      "bytes": 476207,
+      "sha256": "c8c4c0750a557c0ec3a34e45bea6568169459be1b22d719f7e74a6e5394b9b11",
       "videoBox": {
         "left": 0,
         "top": 52,
-        "width": 992,
-        "height": 644
+        "width": 1000,
+        "height": 648
       },
       "provenance": {
-        "capturedAt": "2026-10-23T06:51:03.367Z",
-        "appSource": "e8767deb59e274347055e08a85da116efcf7dffd",
+        "capturedAt": "2026-10-23T07:20:32.214Z",
+        "appSource": "3a008d0fbb8cc33a9f7cf363080d0dd94eb48785",
         "appVersion": "0.0.18",
         "platform": "linux",
         "architecture": "x64",
         "system": "Linux workbench-01 6.8.0-147-generic #147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n",
-        "electron": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Mr.Streamer/0.0.18 Chrome/152.0.7977.130 Electron/44.4.5 Safari/537.36",
-        "mainSha256": "7fd3afb1c704aa8868fc201cdd3d03ecfa4ffec64039d90448730c8b1410aa75",
+        "electron": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Mr.Streamer/0.0.18 Chrome/152.0.7977.167 Electron/44.9.3 Safari/537.36",
+        "mainSha256": "4ad8b414ce0dd9cee96bb6763025ea698963a1dc7372fe5f972f5ba6d2859f25",
         "demoManifestSha256": "7ffc0d37fd28c5cc2bbced859fe97f6d2057368a8ddd1717b263ccd9b5a19f0c",
         "captureScriptSha256": "d162b88c1801f6b80927db055718b57693d488c7a776c3a347a75b2a53be2424",
         "status": "candidate, pending parent integration and final verification",
         "method": "Unedited whole X11 window, ImageMagick import -window <owned XID> -frame",
         "nativeSession": {
           "display": ":0",
-          "xvfbPid": 2175750,
-          "wmPid": 2175759,
+          "xvfbPid": 2206316,
+          "wmPid": 2206326,
           "windowManager": "Openbox 3.6.1\nCopyright (c) 2004   Mikael Magnusson\nCopyright (c) 2002   Dana Jansens\n\nThis program comes with ABSOLUTELY NO WARRANTY.\nThis is free software, and you are welcome to redistribute it\nunder certain conditions. See the file COPYING for details.",
           "screen": "1400x1000x24",
           "compositor": "none",
@@ -169,7 +169,7 @@
             "Openbox is noncomposited: no compositor shadow, transparent padding or rounded outer corners are supplied. Flathub quality acceptance remains open."
           ]
         },
-        "evidence": "/var/lib/t3code/live/worktrees/MrStreamer/t3-38bcc4f4/.local/verification/linux-listing/capture-mHmknC",
+        "evidence": "/var/lib/t3code/live/worktrees/MrStreamer/t3-25ae2221/.local/verification/linux-listing/capture-yaYiSp",
         "language": "en",
         "caption": "An episode with English subtitles and track selection",
         "sources": [
@@ -233,10 +233,10 @@
           ]
         },
         "buildFiles": {
-          "out/main/index.js": "7fd3afb1c704aa8868fc201cdd3d03ecfa4ffec64039d90448730c8b1410aa75",
+          "out/main/index.js": "4ad8b414ce0dd9cee96bb6763025ea698963a1dc7372fe5f972f5ba6d2859f25",
           "out/preload/index.cjs": "63cb1905282657a47667543e01f5cf8e79722ad3fe1ed7e349c3e151d7120883",
-          "out/renderer/index.html": "f6dd1f6960861812c4617d8b7f314c98bce27337c1c6b65f0481f88fe51e641e",
-          "out/renderer/assets/index-BaO_D1w6.js": "0bced6107e9090604c9792106ce0e87b96c253534274101bbbed7f4cd417a315",
+          "out/renderer/index.html": "f88c1e44ba25790928c6c64f07723e56095bfbb022ac14c409383fdcfe02a103",
+          "out/renderer/assets/index-CJfonc-2.js": "431d14496f72b0a7b811db2e7c757a42a952607552c37ff8938457d7abcdf15a",
           "out/renderer/assets/index-Cs0pTt9U.css": "16c16b9eb6ce25830a2cc49592d8303c699df6d368e0d903e6cb684dc5242033"
         },
         "fixtureFiles": {
@@ -260,26 +260,26 @@
       "file": "tv-guide.png",
       "width": 1000,
       "height": 700,
-      "bytes": 161434,
-      "sha256": "5012f5d3a23a93ac1d9fe285760fe6cf01df7aa189eac90777139614ed754c5b",
+      "bytes": 160099,
+      "sha256": "112d96629cb14f7db7d143bb92d2251d425b75105a3b4d6193fb4fe1b4167a08",
       "videoBox": null,
       "provenance": {
-        "capturedAt": "2026-10-23T06:51:07.184Z",
-        "appSource": "e8767deb59e274347055e08a85da116efcf7dffd",
+        "capturedAt": "2026-10-23T07:20:36.329Z",
+        "appSource": "3a008d0fbb8cc33a9f7cf363080d0dd94eb48785",
         "appVersion": "0.0.18",
         "platform": "linux",
         "architecture": "x64",
         "system": "Linux workbench-01 6.8.0-147-generic #147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n",
-        "electron": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Mr.Streamer/0.0.18 Chrome/152.0.7977.130 Electron/44.4.5 Safari/537.36",
-        "mainSha256": "7fd3afb1c704aa8868fc201cdd3d03ecfa4ffec64039d90448730c8b1410aa75",
+        "electron": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Mr.Streamer/0.0.18 Chrome/152.0.7977.167 Electron/44.9.3 Safari/537.36",
+        "mainSha256": "4ad8b414ce0dd9cee96bb6763025ea698963a1dc7372fe5f972f5ba6d2859f25",
         "demoManifestSha256": "7ffc0d37fd28c5cc2bbced859fe97f6d2057368a8ddd1717b263ccd9b5a19f0c",
         "captureScriptSha256": "d162b88c1801f6b80927db055718b57693d488c7a776c3a347a75b2a53be2424",
         "status": "candidate, pending parent integration and final verification",
         "method": "Unedited whole X11 window, ImageMagick import -window <owned XID> -frame",
         "nativeSession": {
           "display": ":0",
-          "xvfbPid": 2175750,
-          "wmPid": 2175759,
+          "xvfbPid": 2206316,
+          "wmPid": 2206326,
           "windowManager": "Openbox 3.6.1\nCopyright (c) 2004   Mikael Magnusson\nCopyright (c) 2002   Dana Jansens\n\nThis program comes with ABSOLUTELY NO WARRANTY.\nThis is free software, and you are welcome to redistribute it\nunder certain conditions. See the file COPYING for details.",
           "screen": "1400x1000x24",
           "compositor": "none",
@@ -294,7 +294,7 @@
             "Openbox is noncomposited: no compositor shadow, transparent padding or rounded outer corners are supplied. Flathub quality acceptance remains open."
           ]
         },
-        "evidence": "/var/lib/t3code/live/worktrees/MrStreamer/t3-38bcc4f4/.local/verification/linux-listing/capture-mHmknC",
+        "evidence": "/var/lib/t3code/live/worktrees/MrStreamer/t3-25ae2221/.local/verification/linux-listing/capture-yaYiSp",
         "language": "en",
         "caption": "Programme guide with catch-up controls",
         "sources": [
@@ -358,10 +358,10 @@
           ]
         },
         "buildFiles": {
-          "out/main/index.js": "7fd3afb1c704aa8868fc201cdd3d03ecfa4ffec64039d90448730c8b1410aa75",
+          "out/main/index.js": "4ad8b414ce0dd9cee96bb6763025ea698963a1dc7372fe5f972f5ba6d2859f25",
           "out/preload/index.cjs": "63cb1905282657a47667543e01f5cf8e79722ad3fe1ed7e349c3e151d7120883",
-          "out/renderer/index.html": "f6dd1f6960861812c4617d8b7f314c98bce27337c1c6b65f0481f88fe51e641e",
-          "out/renderer/assets/index-BaO_D1w6.js": "0bced6107e9090604c9792106ce0e87b96c253534274101bbbed7f4cd417a315",
+          "out/renderer/index.html": "f88c1e44ba25790928c6c64f07723e56095bfbb022ac14c409383fdcfe02a103",
+          "out/renderer/assets/index-CJfonc-2.js": "431d14496f72b0a7b811db2e7c757a42a952607552c37ff8938457d7abcdf15a",
           "out/renderer/assets/index-Cs0pTt9U.css": "16c16b9eb6ce25830a2cc49592d8303c699df6d368e0d903e6cb684dc5242033"
         },
         "fixtureFiles": {
@@ -385,31 +385,31 @@
       "file": "home.png",
       "width": 1000,
       "height": 700,
-      "bytes": 237350,
-      "sha256": "7b6efef2f3a0356966514366d4ef9e8d22f34d2d57a0184e06ccc6e92d7d8e1a",
+      "bytes": 237111,
+      "sha256": "f0661f6c28bc0ebc6ab927cc3d27d3edc43d7549907eccc9e611b7fd58a0f510",
       "videoBox": {
         "left": 35,
         "top": 111.5,
-        "width": 476.3125,
-        "height": 267.921875
+        "width": 480.46875,
+        "height": 270.25
       },
       "provenance": {
-        "capturedAt": "2026-10-23T06:51:11.056Z",
-        "appSource": "e8767deb59e274347055e08a85da116efcf7dffd",
+        "capturedAt": "2026-10-23T07:20:40.797Z",
+        "appSource": "3a008d0fbb8cc33a9f7cf363080d0dd94eb48785",
         "appVersion": "0.0.18",
         "platform": "linux",
         "architecture": "x64",
         "system": "Linux workbench-01 6.8.0-147-generic #147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n",
-        "electron": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Mr.Streamer/0.0.18 Chrome/152.0.7977.130 Electron/44.4.5 Safari/537.36",
-        "mainSha256": "7fd3afb1c704aa8868fc201cdd3d03ecfa4ffec64039d90448730c8b1410aa75",
+        "electron": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Mr.Streamer/0.0.18 Chrome/152.0.7977.167 Electron/44.9.3 Safari/537.36",
+        "mainSha256": "4ad8b414ce0dd9cee96bb6763025ea698963a1dc7372fe5f972f5ba6d2859f25",
         "demoManifestSha256": "7ffc0d37fd28c5cc2bbced859fe97f6d2057368a8ddd1717b263ccd9b5a19f0c",
         "captureScriptSha256": "d162b88c1801f6b80927db055718b57693d488c7a776c3a347a75b2a53be2424",
         "status": "candidate, pending parent integration and final verification",
         "method": "Unedited whole X11 window, ImageMagick import -window <owned XID> -frame",
         "nativeSession": {
           "display": ":0",
-          "xvfbPid": 2175750,
-          "wmPid": 2175759,
+          "xvfbPid": 2206316,
+          "wmPid": 2206326,
           "windowManager": "Openbox 3.6.1\nCopyright (c) 2004   Mikael Magnusson\nCopyright (c) 2002   Dana Jansens\n\nThis program comes with ABSOLUTELY NO WARRANTY.\nThis is free software, and you are welcome to redistribute it\nunder certain conditions. See the file COPYING for details.",
           "screen": "1400x1000x24",
           "compositor": "none",
@@ -424,7 +424,7 @@
             "Openbox is noncomposited: no compositor shadow, transparent padding or rounded outer corners are supplied. Flathub quality acceptance remains open."
           ]
         },
-        "evidence": "/var/lib/t3code/live/worktrees/MrStreamer/t3-38bcc4f4/.local/verification/linux-listing/capture-mHmknC",
+        "evidence": "/var/lib/t3code/live/worktrees/MrStreamer/t3-25ae2221/.local/verification/linux-listing/capture-yaYiSp",
         "language": "en",
         "caption": "Home with live preview and Continue watching",
         "sources": [
@@ -488,10 +488,10 @@
           ]
         },
         "buildFiles": {
-          "out/main/index.js": "7fd3afb1c704aa8868fc201cdd3d03ecfa4ffec64039d90448730c8b1410aa75",
+          "out/main/index.js": "4ad8b414ce0dd9cee96bb6763025ea698963a1dc7372fe5f972f5ba6d2859f25",
           "out/preload/index.cjs": "63cb1905282657a47667543e01f5cf8e79722ad3fe1ed7e349c3e151d7120883",
-          "out/renderer/index.html": "f6dd1f6960861812c4617d8b7f314c98bce27337c1c6b65f0481f88fe51e641e",
-          "out/renderer/assets/index-BaO_D1w6.js": "0bced6107e9090604c9792106ce0e87b96c253534274101bbbed7f4cd417a315",
+          "out/renderer/index.html": "f88c1e44ba25790928c6c64f07723e56095bfbb022ac14c409383fdcfe02a103",
+          "out/renderer/assets/index-CJfonc-2.js": "431d14496f72b0a7b811db2e7c757a42a952607552c37ff8938457d7abcdf15a",
           "out/renderer/assets/index-Cs0pTt9U.css": "16c16b9eb6ce25830a2cc49592d8303c699df6d368e0d903e6cb684dc5242033"
         },
         "fixtureFiles": {
