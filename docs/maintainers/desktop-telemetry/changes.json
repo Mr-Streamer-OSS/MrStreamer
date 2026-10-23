@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "Prepared for final review and separate production approval. No production write has been performed.",
+  "status": "Applied on 23 October 2026 with explicit approval. Original proposed inputs, preconditions and rollback are retained below; application records returned IDs.",
   "projectId": 178919,
   "dashboardId": 1013890,
   "projectTimezone": "Europe/Brussels, unchanged",
@@ -405,5 +405,24 @@
     "Add native insights and link-only report tile without replacing existing dashboard content.",
     "Read back every definition, verify boundary/filter cases and record applied revision."
   ],
-  "rollback": "Restore only these update inputs from rollback definitions. Delete only newly created IDs from the recorded application receipt. Preserve pre-existing dashboard content, project settings and all events."
+  "rollback": "Restore only these update inputs from rollback definitions. Delete only newly created IDs from the recorded application receipt. Preserve pre-existing dashboard content, project settings and all events.",
+  "application": {
+    "projectId": 178919,
+    "dashboardId": 1013890,
+    "insights": {
+      "fresh-total": "99UimzE0",
+      "fresh-period": "vWYgPceg",
+      "utc-headlines": "bphaOVG7",
+      "utc-activity": "TCRXpm4b",
+      "release-arrivals": "DAifasdI",
+      "release-upgrades": "5WvwlOYe"
+    },
+    "variables": {
+      "desktop_build_channel": "01a1687c-d33d-0000-ef39-98acc282f2c8",
+      "desktop_distribution": "01a1687c-d491-0000-6bba-3252d24bddf9",
+      "desktop_target_version": "01a1687c-d676-0000-6e5d-be8e14963798"
+    },
+    "newDashboardTileIds": [7784239, 7784240],
+    "readback": "Exact SQL and variable bindings/defaults, source filters, standalone membership, unchanged original queries and eleven dashboard layouts verified. Unmatched filter overrides returned zero. Production client ingestion remains a rollout check."
+  }
 }

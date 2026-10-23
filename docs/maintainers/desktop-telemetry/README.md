@@ -1,8 +1,9 @@
 # Desktop installation reports
 
-The files here prepare a PostHog definition change for desktop 0.0.19. They have
-not been applied. The release's project card holds approval, validation and any
-applied report IDs. Existing playback reports and the project's Europe/Brussels
+The reviewed PostHog definition change for desktop 0.0.19 was applied on
+23 October 2026 with Wout's approval. The release's project card holds approval,
+validation and remaining rollout checks. `changes.json` retains the original
+preconditions and rollback alongside the applied IDs. Existing playback reports and the project's Europe/Brussels
 timezone remain unchanged.
 
 `changes.json` contains exact proposed tool inputs, original definitions for
@@ -74,10 +75,35 @@ Filtering to stable returned ten arrivals and three unknown histories. The
 fixtures include duplicate UUIDs, delayed delivery, numeric version ordering,
 cleared profiles and downgrade/re-upgrade sequences. Nightly ordering compares the numeric base, date and run, matching the client release contract. Same-base nightly date/run upgrades and downgrades have separate fixtures; equal or unsupported pairs stay unknown. The drilldown returned
 exactly the two known-upgrade fixture UUIDs. No fixture entered event storage.
-Final independent review remains required.
+Final independent Claude and Codex reviews found no blocking source issues.
 
 These are installation/profile counts, not named people or devices. Retained
 reinstalls keep identity; clearing data can create another identity, and copied
 profiles share one. Optional collection, offline expiry and bounded delivery
 reduce coverage. Production ingestion and UUID deduplication need actual rollout
 evidence. Local fixtures never enter production.
+
+## Applied reports
+
+The [desktop dashboard](https://eu.posthog.com/project/178919/dashboard/1013890)
+retains its original eleven tiles and layouts. It adds the selected-period fresh
+profile count and links to the standalone reports:
+
+- [New profiles since tracking began](https://eu.posthog.com/project/178919/insights/99UimzE0)
+- [Completed UTC activity and partial today](https://eu.posthog.com/project/178919/insights/bphaOVG7)
+- [UTC daily and seven-day active profiles](https://eu.posthog.com/project/178919/insights/TCRXpm4b)
+- [Release arrivals](https://eu.posthog.com/project/178919/insights/DAifasdI)
+- [Profiles that upgraded](https://eu.posthog.com/project/178919/insights/5WvwlOYe)
+
+Saved SQL, variable bindings and defaults, source test exclusions and all-time
+filters were read back. Unmatched build-channel and distribution overrides
+returned zero counts; the activity report retained zero-date rows. Rename-only
+updates preserved both original queries. These are custom report definitions;
+the project has no approved Data Catalog metrics yet.
+
+With identical query bounds, both fresh-profile reports returned 199 on
+23 October. The first cached all-time read returned 197. UTC headlines returned
+33 for 22 October, 151 across 16 to 22 October and 12 for partial 23 October.
+These are changing snapshots, not rollout evidence. Version-arrival reports
+were empty before the new client event shipped. Production ingestion and UUID
+reconciliation remain release checks. No fixture events were captured.
