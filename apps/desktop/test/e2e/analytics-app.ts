@@ -336,6 +336,8 @@ async function send(method: string, params: Record<string, unknown> = {}) {
 
 let launchOrdinal = 0;
 let startupSample: Awaited<ReturnType<typeof startupProbe>>["read"] | undefined;
+let startupPreferences: Awaited<ReturnType<typeof startupProbe>>["preferences"] | undefined;
+let startupReadDelayMs = 0;
 let startupCaptureFrom = 0;
 const startupSamples: unknown[] = [];
 async function captureStartup() {
@@ -346,10 +348,9 @@ async function captureStartup() {
   const enabled = page
     ? await page
         .evaluate<boolean | null>(
-          `(async () => {
-        const reply = await window.mrStreamer.invoke('preferences.get');
-        if (!reply.ok) return null;
-        return (reply.value.preferences ?? reply.value).analyticsEnabled ?? null;
+          `(() => {
+        const checked = document.querySelector(${JSON.stringify(checkbox)})?.getAttribute('aria-checked');
+        return checked === 'true' ? true : checked === 'false' ? false : null;
       })()`,
           2000,
         )
@@ -358,16 +359,19 @@ async function captureStartup() {
   startupSamples.push({
     launchOrdinal,
     capturedAt: new Date().toISOString(),
-    injectedReadDelayMs: options.slowStartup ? 1700 : 0,
+    injectedReadDelayMs: startupReadDelayMs,
     operations,
+    preferences: await startupPreferences?.().catch(() => null),
     captureRefusing: rejectCapture,
     receivedBodies: payloads.length - startupCaptureFrom,
     enabled,
   });
   observations.startupIO = startupSamples;
 }
-async function launch() {
+async function launch(readDelayMs = options.slowStartup ? 1700 : 0) {
   const ordinal = ++launchOrdinal;
+  startupReadDelayMs = readDelayMs;
+  startupPreferences = undefined;
   startupCaptureFrom = payloads.length;
   preparedExit = undefined;
   const port = await freePort();
@@ -426,9 +430,10 @@ async function launch() {
     comparedMainPid = await mainPage.evaluate<number>("process.pid");
   } else {
     mainPage = await connect(inspectorPort, "node", { app });
-    const probe = await startupProbe(mainPage, profile, options.slowStartup, app.pid);
+    const probe = await startupProbe(mainPage, profile, readDelayMs, app.pid);
     comparedMainPid = probe.pid;
     startupSample = probe.read;
+    startupPreferences = probe.preferences;
     page = await connect(port, "page", { app });
   }
   if (comparedMainPid !== app.pid) throw new Error("Wrong main inspector process.");
@@ -443,15 +448,34 @@ async function launch() {
     ].every((arg) => arguments_.includes(arg))
   )
     throw new Error("Wrong app instance.");
-  // The owned BrowserWindow can be listed before its first loadFile navigation starts.
-  await waitFor(() => live().evaluate<boolean>("location.href !== 'about:blank'"), 4000);
-  const url = await live().evaluate<string>("location.href");
+  // Navigation can destroy a blank document's context. Keep sampling this same owned page
+  // within the existing allowance, then retain the ordinary launch receipt on failure.
+  const navigationStarted = performance.now();
+  const urlSamples: { elapsedMs: number; url?: string; error?: string }[] = [];
+  let url = "";
+  while (performance.now() - navigationStarted < 4000) {
+    const remaining = Math.floor(4000 - (performance.now() - navigationStarted));
+    if (remaining <= 0) break;
+    try {
+      url = await page.evaluate<string>("location.href", Math.min(500, remaining));
+      urlSamples.push({ elapsedMs: performance.now() - navigationStarted, url });
+      if (url !== "about:blank") break;
+    } catch (error) {
+      urlSamples.push({
+        elapsedMs: performance.now() - navigationStarted,
+        error: String(error).slice(0, 2048),
+      });
+    }
+    const pause = Math.min(150, 4000 - (performance.now() - navigationStarted));
+    if (pause > 0) await delay(pause);
+  }
   if (
     target.executable
       ? !url.startsWith("file:") ||
         !/\/(?:resources|Resources)\/app\.asar\/out\/renderer\//.test(url)
       : !url.startsWith(pathToFileURL(join(desktop, "out/renderer/")).href)
   ) {
+    observations.rendererLaunchWait = { launchOrdinal: ordinal, samples: urlSamples };
     await failRendererLaunch(new Error("Wrong renderer build."), {
       evidence,
       observations,
@@ -1688,7 +1712,7 @@ try {
     if (volumeWorkload) await volumePaths();
     else if (!options.slowStartup) await productPaths();
     else observations.startupPrivacyOnly = true;
-    const enabledCaptures = payloads.length;
+    let enabledCaptures = payloads.length;
     if (new Set(sent().map((event) => event.uuid)).size !== enabledCaptures)
       throw new Error("A capture was delivered twice.");
     await click(checkbox);
@@ -1699,6 +1723,94 @@ try {
       at: new Date().toISOString(),
     });
     await quit();
+    if (options.slowStartup) {
+      // The retained opt-out is loaded only after both boot and the UI enable call time out.
+      await launch(5000);
+      await settings();
+      await waitFor(() =>
+        live().evaluate<boolean>(
+          `document.querySelector(${JSON.stringify(checkbox)})?.getAttribute('aria-checked') === 'false' && !document.querySelector(${JSON.stringify(checkbox)})?.closest('fieldset')?.disabled`,
+        ),
+      );
+      const readReplies = startupPreferences!;
+      const beforeEnable = await readReplies();
+      if (
+        beforeEnable.preferenceReads.length !== 1 ||
+        beforeEnable.preferenceReads[0]?.enabled !== false
+      )
+        throw new Error("Late enable needs one disabled boot reply.");
+      await click(checkbox);
+      await waitFor(
+        async () => (await readReplies()).preferenceUpdates.some((reply) => reply.ok === false),
+        4000,
+      );
+      const failed = (await readReplies()).preferenceUpdates[0];
+      if (
+        failed?.requested !== true ||
+        failed.ok !== false ||
+        failed.error !== "Analytics preference could not be saved." ||
+        failed.endedMs === null ||
+        failed.endedMs - failed.startedMs < 1500
+      )
+        throw new Error("Late enable did not retain its bounded public save failure.");
+      const feedback = await live().evaluate<string | null>(
+        "document.querySelector('[role=alert]')?.textContent ?? null",
+      );
+      observations.lateConsentCommit = {
+        injectedReadDelayMs: 5000,
+        beforeEnable,
+        failed,
+        feedback,
+      };
+      await snapshot("late-enable-timeout");
+      await waitFor(
+        () =>
+          live().evaluate<boolean>(
+            `document.querySelector(${JSON.stringify(checkbox)})?.getAttribute('aria-checked') === 'true'`,
+          ),
+        10_000,
+      );
+      const afterEnable = await readReplies();
+      const read = (await startupSample!()).find((operation) => operation.operation === "read");
+      if (
+        afterEnable.preferenceReads.length !== 1 ||
+        read?.endedMs === null ||
+        read?.endedMs === undefined ||
+        read.endedMs <= failed.endedMs
+      )
+        throw new Error(
+          "Late enable cache proof was refreshed or did not outlast its failed update.",
+        );
+      await waitFor(async () => count("app_version_observed") === 2);
+      observations.lateConsentCommit = {
+        injectedReadDelayMs: 5000,
+        beforeEnable,
+        failed,
+        feedback,
+        afterEnable,
+        read,
+        checkedAfterCommit: true,
+        feedbackAfterCommit: await live().evaluate<string | null>(
+          "document.querySelector('[role=alert]')?.textContent ?? null",
+        ),
+        capturesAfterCommit: payloads.length,
+      };
+      await snapshot("late-enable-committed");
+      await click(checkbox);
+      await waitFor(async () =>
+        (await readReplies()).preferenceUpdates.some(
+          (reply) => reply.requested === false && reply.ok === true,
+        ),
+      );
+      await waitFor(() =>
+        live().evaluate<boolean>(
+          `document.querySelector(${JSON.stringify(checkbox)})?.getAttribute('aria-checked') === 'false'`,
+        ),
+      );
+      enabledCaptures = payloads.length;
+      await snapshot("late-enable-restored-off");
+      await quit();
+    }
     await launch();
     await settings();
     if ((await preference()).analyticsEnabled !== false)
@@ -1711,6 +1823,7 @@ try {
       action: "Restarted same profile, checkbox remains off and capture count unchanged",
       at: new Date().toISOString(),
     });
+    const versionsBeforeReenable = count("app_version_observed");
     await click(checkbox);
     await waitFor(async () => (await preference()).analyticsEnabled === true);
     await snapshot("reenabled");
@@ -1719,7 +1832,7 @@ try {
       payloads.length !== enabledCaptures + 1 ||
       count("installation_observed") !== 1 ||
       count("app_active_day") !== 1 ||
-      count("app_version_observed") !== 2
+      count("app_version_observed") !== versionsBeforeReenable + 1
     )
       throw new Error("Re-enable did not observe an unknown current version exactly once.");
     const diagnostics = await live().evaluate<unknown>(

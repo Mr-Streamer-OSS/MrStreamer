@@ -64,6 +64,8 @@ interface AnalyticsOptions {
   readonly transport: CaptureTransport | null;
   /** Replaces the persistence port for failure/deadline verification, not the owner. */
   readonly store?: ReturnType<typeof analyticsStore>;
+  /** Requests a fresh composed snapshot after a consent save, even if its caller timed out. */
+  readonly consentChanged?: () => void | Promise<void>;
   readonly playbackReset?: () => void;
   readonly monotonic?: () => number;
 }
@@ -72,6 +74,7 @@ interface AnalyticsOptions {
 export class Analytics {
   private readonly monotonic: () => number;
   private readonly playbackReset: (() => void) | undefined;
+  private readonly consentChanged: AnalyticsOptions["consentChanged"];
   private intent: PlaybackIntent | null = null;
   private run: {
     token: string;
@@ -136,6 +139,7 @@ export class Analytics {
   constructor(options: AnalyticsOptions) {
     this.monotonic = options.monotonic ?? (() => performance.now());
     this.playbackReset = options.playbackReset;
+    this.consentChanged = options.consentChanged;
     this.store = options.store ?? analyticsStore(options.dataDir);
     this.transport = options.transport;
     const properties = BuildProperties()(options.properties);
@@ -211,6 +215,14 @@ export class Analytics {
         ...(enabled && summaries ? { summaries } : {}),
         ...(enabled && lifecycle ? { lifecycle } : {}),
       });
+      // The consent commit is independent of both the bounded caller and later recovery.
+      // Publication reads current owners, so queued choices cannot replay an obsolete value.
+      if (this.consentChanged && !this.closing)
+        void Promise.resolve()
+          .then(() => {
+            if (!this.closing) return this.consentChanged?.();
+          })
+          .catch(() => {});
       if (this.revision === revision) this.paused = !enabled;
       // A preference requested during load paused startup recovery. Resume it only after the
       // latest enabled preference is durable, so opt-out/re-enable cannot revive cleared work.

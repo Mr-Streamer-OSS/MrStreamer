@@ -4,6 +4,7 @@ import { setTimeout as pause } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Effect from "effect/Effect";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
+import { Failed } from "@mrstreamer/core/failure";
 import { preferencePublication } from "../src/main/preference-publication.ts";
 import { Analytics } from "../src/main/analytics/service.ts";
 import { analyticsStore } from "../src/main/analytics/storage.ts";
@@ -98,6 +99,7 @@ async function start(
     record?: AnalyticsRecord | null;
     origin?: Promise<ProfileOrigin>;
     store?: ReturnType<typeof analyticsStore>;
+    consentChanged?: () => void | Promise<void>;
   } = {},
 ) {
   const dataDir = await tempDir();
@@ -117,6 +119,7 @@ async function start(
     origin: options.origin ?? Promise.resolve("fresh"),
     properties,
     store,
+    ...(options.consentChanged ? { consentChanged: options.consentChanged } : {}),
     transport: {
       kind: "local",
       async send(event) {
@@ -139,8 +142,10 @@ async function until(check: () => boolean | Promise<boolean>) {
 }
 
 describe("optional analytics startup", () => {
-  it("publishes recovered consent after the renderer's initial bounded snapshot", async () => {
-    const { owner, load } = await start({ record: null });
+  async function compose(options: Parameters<typeof start>[0] = {}) {
+    let refresh: (() => Promise<void>) | undefined;
+    const started = await start({ ...options, consentChanged: () => refresh?.() });
+    const { owner } = started;
     const published: PreferenceSnapshot[] = [];
     const publication = await Effect.runPromise(
       preferencePublication({
@@ -151,27 +156,179 @@ describe("optional analytics startup", () => {
           analyticsEnabled: (await owner.settings()).enabled,
         })),
         write: () => Effect.void,
-        consent: (enabled) => Effect.promise(() => owner.configure(enabled)),
+        consent: (enabled) =>
+          Effect.tryPromise({
+            try: () => owner.configure(enabled),
+            catch: () =>
+              new Failed({
+                error: { kind: "unexpected", detail: "Analytics preference could not be saved." },
+              }),
+          }),
         reconfigure: Effect.void,
         publish: (snapshot) => published.push(snapshot),
         stale: () => {},
       }),
     );
-    const recovered = owner.loaded.then(() => Effect.runPromise(publication.get));
+    refresh = async () => {
+      await Effect.runPromise(publication.get);
+    };
+    const recovered = owner.loaded.then(refresh);
+    return { ...started, publication, published, recovered };
+  }
+
+  it.each(["success", "rejection"] as const)(
+    "publishes settled initial consent after a bounded startup snapshot: %s",
+    async (outcome) => {
+      const { load, publication, published, recovered } = await compose({ record: null });
+      const boot = Effect.runPromise(publication.get);
+      await vi.advanceTimersByTimeAsync(1500);
+      expect((await boot).preferences.analyticsEnabled).toBe(false);
+      expect(published).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(200);
+      if (outcome === "success") load.resolve(null);
+      else load.reject(new Error("private load failure"));
+      await recovered;
+      expect(
+        published.map(({ revision, preferences }) => [revision, preferences.analyticsEnabled]),
+      ).toEqual(
+        outcome === "success"
+          ? [
+              [1, false],
+              [2, true],
+            ]
+          : [[1, false]],
+      );
+    },
+  );
+
+  it.each([
+    [false, [true]],
+    [true, [false]],
+    [false, [true, false, true]],
+    [true, [false, true, false]],
+  ] as const)(
+    "publishes actual queued consent commits after update deadlines, initial %s requests %j",
+    async (initial, requests) => {
+      const before = { ...retained(), enabled: initial, pending: [] };
+      const load = Promise.withResolvers<AnalyticsRecord | null>();
+      let durable: AnalyticsRecord = structuredClone(before);
+      const commits: boolean[] = [];
+      const { owner, events, publication, published, recovered } = await compose({
+        store: {
+          load: () => load.promise,
+          async save(next) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 30));
+            durable = structuredClone(next);
+            commits.push(next.enabled);
+          },
+        },
+      });
+      owner.setForeground(true);
+      const boot = Effect.runPromise(publication.get);
+      await vi.advanceTimersByTimeAsync(1500);
+      expect((await boot).preferences.analyticsEnabled).toBe(false);
+      const changes = requests.map((analyticsEnabled) =>
+        Effect.runPromiseExit(publication.update({ analyticsEnabled })),
+      );
+      await vi.advanceTimersByTimeAsync(1500);
+      for (const change of changes) expect((await change)._tag).toBe("Failure");
+      expect(commits).toEqual([]);
+      load.resolve(before);
+      await recovered;
+      await vi.advanceTimersByTimeAsync(500);
+      // No public get repairs the cached snapshot after the failed updates.
+      expect(published.at(-1)?.preferences.analyticsEnabled).toBe(requests.at(-1));
+      expect(published.at(-1)?.preferences.analyticsEnabled).toBe(durable.enabled);
+      expect((await owner.settings()).enabled).toBe(durable.enabled);
+      expect(commits.slice(0, requests.length)).toEqual(requests);
+      expect(published.map(({ revision }) => revision)).toEqual(
+        published.map((_, index) => index + 1),
+      );
+      expect(events.length > 0).toBe(requests.at(-1));
+    },
+  );
+
+  it.each([true, false])(
+    "publishes a queued choice after normal loading and two bounded saves, initial %s",
+    async (initial) => {
+      const before = { ...retained(), enabled: initial, pending: [] };
+      let durable: AnalyticsRecord = structuredClone(before);
+      const { owner, publication, published, recovered } = await compose({
+        store: {
+          load: async () => before,
+          async save(next) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 1200));
+            durable = structuredClone(next);
+          },
+        },
+      });
+      await recovered;
+      expect(published.at(-1)?.preferences.analyticsEnabled).toBe(initial);
+      const first = Effect.runPromiseExit(publication.update({ analyticsEnabled: initial }));
+      const queued = Effect.runPromiseExit(publication.update({ analyticsEnabled: !initial }));
+      await vi.advanceTimersByTimeAsync(1500);
+      expect((await first)._tag).toBe("Success");
+      expect((await queued)._tag).toBe("Failure");
+      expect(published.at(-1)?.preferences.analyticsEnabled).toBe(initial);
+      expect(durable.enabled).toBe(initial);
+      await vi.advanceTimersByTimeAsync(900);
+      // Both individual saves met their 1500 ms I/O deadline. Only queueing expired the caller.
+      expect(published.at(-1)?.preferences.analyticsEnabled).toBe(!initial);
+      expect(published.at(-1)?.preferences.analyticsEnabled).toBe(durable.enabled);
+      expect(await owner.settings()).toEqual({ enabled: !initial, transport: "local" });
+    },
+  );
+
+  it("publishes saved consent even when subsequent startup recovery fails", async () => {
+    const before: AnalyticsRecord = {
+      ...retained(),
+      enabled: false,
+      summaries: { version: 1, installationId: id, pending: [], usage, unfinished: null },
+    };
+    const load = Promise.withResolvers<AnalyticsRecord | null>();
+    let durable: AnalyticsRecord = structuredClone(before);
+    let saved = false;
+    const { owner, events, publication, published, recovered } = await compose({
+      store: {
+        load: () => load.promise,
+        async save(next) {
+          if (saved) throw new Error("private recovery failure");
+          saved = true;
+          durable = structuredClone(next);
+        },
+      },
+    });
     const boot = Effect.runPromise(publication.get);
     await vi.advanceTimersByTimeAsync(1500);
-    expect((await boot).preferences.analyticsEnabled).toBe(false);
-    expect(published).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(200);
-    load.resolve(null);
+    await boot;
+    const update = Effect.runPromiseExit(publication.update({ analyticsEnabled: true }));
+    await vi.advanceTimersByTimeAsync(1500);
+    expect((await update)._tag).toBe("Failure");
+    load.resolve(before);
     await recovered;
-    expect(
-      published.map(({ revision, preferences }) => [revision, preferences.analyticsEnabled]),
-    ).toEqual([
-      [1, false],
-      [2, true],
-    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(published.at(-1)?.preferences.analyticsEnabled).toBe(true);
+    expect(durable.enabled).toBe(true);
+    expect(await owner.settings()).toEqual({ enabled: true, transport: "unavailable" });
+    expect(events).toEqual([]);
   });
+
+  it.each(["throw", "reject"] as const)(
+    "keeps consent commits independent of a callback %s",
+    async (failure) => {
+      const consentChanged = vi.fn(() => {
+        if (failure === "throw") throw new Error("publication failed");
+        return Promise.reject(new Error("publication failed"));
+      });
+      const { owner, load, snapshot } = await start({ consentChanged });
+      load.resolve(retained());
+      await owner.loaded;
+      expect((await owner.configure(false)).enabled).toBe(false);
+      expect((await owner.configure(true)).enabled).toBe(true);
+      expect(snapshot()?.enabled).toBe(true);
+      expect(consentChanged).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it.each([200, 1700])(
     "delivers retained work after a %i ms store load without extending the settings deadline",
@@ -396,6 +553,55 @@ describe("optional analytics startup", () => {
     },
   );
 
+  it("does not notify composition for a consent save finishing during close", async () => {
+    const before = { ...retained(), enabled: false, pending: [] };
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const consentChanged = vi.fn();
+    let durable: AnalyticsRecord = structuredClone(before);
+    const { owner, events } = await start({
+      consentChanged,
+      store: {
+        load: async () => before,
+        async save(next) {
+          entered.resolve();
+          await release.promise;
+          durable = structuredClone(next);
+        },
+      },
+    });
+    await owner.loaded;
+    const changing = owner.configure(true);
+    await entered.promise;
+    const closing = owner.close();
+    await vi.advanceTimersByTimeAsync(500);
+    await closing;
+    release.resolve();
+    await changing;
+    expect(durable.enabled).toBe(true);
+    expect(consentChanged).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+  });
+
+  it("does not notify composition for a rejected consent save", async () => {
+    const consentChanged = vi.fn();
+    const { owner } = await start({
+      consentChanged,
+      store: {
+        load: async () => retained(),
+        save: async () => {
+          throw new Error("private save failure");
+        },
+      },
+    });
+    await owner.loaded;
+    await expect(owner.configure(false)).rejects.toThrow(
+      "Analytics preference could not be saved.",
+    );
+    expect(consentChanged).not.toHaveBeenCalled();
+    expect(await owner.settings()).toEqual({ enabled: true, transport: "unavailable" });
+  });
+
   it("does not apply a queued preference after quitting with initialization still pending", async () => {
     const { owner, load, events, writes } = await start();
     const disabled = expect(owner.configure(false)).rejects.toThrow(
@@ -459,7 +665,10 @@ describe("optional analytics startup", () => {
         expect(await analyticsStore(dataDir).load()).toMatchObject({ ...retained(), pending: [] });
         expect(await owner.settings()).toEqual({ enabled: true, transport: "local" });
       } else if (outcome === "opt-out") {
-        await until(async () => JSON.parse(await readFile(path, "utf8")).enabled === false);
+        await until(async () => {
+          const settings = await owner.settings();
+          return settings.enabled === false && settings.transport === "local";
+        });
         expect(events).toEqual([]);
         expect(await analyticsStore(dataDir).load()).toEqual({
           ...retained(),

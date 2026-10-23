@@ -4,7 +4,7 @@ import type { Page } from "./app.ts";
 export async function startupProbe(
   main: Page,
   profile: string,
-  slow: boolean,
+  delayMs: number,
   expectedPid: number | undefined,
 ) {
   const paused = Promise.withResolvers<void>();
@@ -29,7 +29,7 @@ export async function startupProbe(
   const reply = await main.send(
     "Runtime.evaluate",
     {
-      expression: `(${install.toString()})(${JSON.stringify(profile)},${slow ? 1700 : 0})`,
+      expression: `(${install.toString()})(${JSON.stringify(profile)},${delayMs})`,
       awaitPromise: false,
       returnByValue: true,
     },
@@ -49,6 +49,11 @@ export async function startupProbe(
     read: () =>
       main.evaluate<ReturnType<typeof install>["operations"]>(
         "globalThis.__analyticsStartupIO.operations",
+        2000,
+      ),
+    preferences: () =>
+      main.evaluate<Pick<ReturnType<typeof install>, "preferenceReads" | "preferenceUpdates">>(
+        "({preferenceReads:globalThis.__analyticsStartupIO.preferenceReads,preferenceUpdates:globalThis.__analyticsStartupIO.preferenceUpdates})",
         2000,
       ),
   };
@@ -83,12 +88,19 @@ function install(profile: string, delayMs: number) {
   }[] = [];
   const started = performance.now();
   const preferenceReads: { startedMs: number; enabled: boolean | null }[] = [];
+  const preferenceUpdates: {
+    startedMs: number;
+    endedMs: number | null;
+    requested: boolean | null;
+    ok: boolean | null;
+    error: string | null;
+  }[] = [];
   const { ipcMain } = process.getBuiltinModule("module").createRequire(process.execPath)(
     "electron",
   ) as typeof import("electron");
   ipcMain.handle = new Proxy(ipcMain.handle, {
     apply(target, receiver, [channel, listener]: Parameters<typeof ipcMain.handle>) {
-      if (channel !== "preferences.get")
+      if (channel !== "preferences.get" && channel !== "preferences.update")
         return Reflect.apply(target, receiver, [channel, listener]);
       return Reflect.apply(target, receiver, [
         channel,
@@ -98,8 +110,43 @@ function install(profile: string, delayMs: number) {
               startedMs: performance.now() - started,
               enabled: null as boolean | null,
             };
-            if (preferenceReads.length < 32) preferenceReads.push(sample);
+            const patch: unknown = args[1];
+            const update = {
+              startedMs: sample.startedMs,
+              endedMs: null as number | null,
+              requested:
+                patch &&
+                typeof patch === "object" &&
+                "analyticsEnabled" in patch &&
+                typeof patch.analyticsEnabled === "boolean"
+                  ? patch.analyticsEnabled
+                  : null,
+              ok: null as boolean | null,
+              error: null as string | null,
+            };
+            if (channel === "preferences.get" && preferenceReads.length < 32)
+              preferenceReads.push(sample);
+            if (channel === "preferences.update" && preferenceUpdates.length < 32)
+              preferenceUpdates.push(update);
             const reply: unknown = await Reflect.apply(handler, context, args);
+            update.endedMs = performance.now() - started;
+            if (
+              reply &&
+              typeof reply === "object" &&
+              "ok" in reply &&
+              typeof reply.ok === "boolean"
+            )
+              update.ok = reply.ok;
+            if (
+              reply &&
+              typeof reply === "object" &&
+              "error" in reply &&
+              reply.error &&
+              typeof reply.error === "object" &&
+              "detail" in reply.error &&
+              reply.error.detail === "Analytics preference could not be saved."
+            )
+              update.error = reply.error.detail;
             if (
               reply &&
               typeof reply === "object" &&
@@ -184,7 +231,7 @@ function install(profile: string, delayMs: number) {
   fs.readdir = wrap(fs.readdir, "directory", 0);
   fs.rename = wrap(fs.rename, "replace", 1);
   process.getBuiltinModule("module").syncBuiltinESMExports();
-  const probe = { operations, preferenceReads, pid: process.pid };
+  const probe = { operations, preferenceReads, preferenceUpdates, pid: process.pid };
   Object.assign(globalThis, { __analyticsStartupIO: probe });
   return probe;
 }
