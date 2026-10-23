@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "Prepared read-only. Version-arrival definitions and final review are pending. No production write is authorized.",
+  "status": "Prepared for final review and separate production approval. No production write has been performed.",
   "projectId": 178919,
   "dashboardId": 1013890,
   "projectTimezone": "Europe/Brussels, unchanged",
@@ -21,6 +21,15 @@
         "name": "Desktop distribution",
         "type": "String",
         "default_value": "all"
+      }
+    },
+    {
+      "key": "desktop_target_version",
+      "tool": "sql-variables-create",
+      "input": {
+        "name": "Desktop target version",
+        "type": "String",
+        "default_value": "0.0.19"
       }
     }
   ],
@@ -231,7 +240,8 @@
             }
           }
         }
-      }
+      },
+      "standalone": true
     },
     {
       "key": "fresh-period",
@@ -336,10 +346,56 @@
           }
         }
       }
+    },
+    {
+      "key": "release-arrivals",
+      "tool": "insight-create",
+      "standalone": true,
+      "input": {
+        "name": "Desktop / First observed arrivals by release",
+        "description": "One first arrival per installation UUID and version across retained history, split into new profile, known upgrade, downgrade, channel transition and unknown history. Original event time determines first arrival. Standalone all-time source; build channel and distribution controls apply after first arrival. Ratios use all arrivals, including unknown history.",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "display": "ActionsTable",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "WITH source AS (\nSELECT\n    toString(uuid) AS event_uuid,\n    distinct_id AS installation_id,\n    timestamp AS observed_at,\n    toString(properties.app_version) AS app_version,\n    toString(properties.build_channel) AS build_channel,\n    toString(properties.distribution) AS distribution,\n    toString(properties.os) AS os,\n    toString(properties.observation_kind) AS observation_kind,\n    coalesce(toString(properties.previous_app_version), '') AS previous_app_version,\n    coalesce(toString(properties.previous_build_channel), '') AS previous_build_channel\nFROM events\nWHERE event = 'app_version_observed'\n  AND timestamp >= toDateTime('2026-10-12 00:00:00', 'UTC')\n  AND timestamp < now() + INTERVAL 1 DAY\n  AND properties.os IN ('windows', 'macos', 'linux')\n  AND {filters}\n), deduplicated AS (\n    SELECT event_uuid,\n        argMin(tuple(installation_id, observed_at, app_version, build_channel, distribution, os,\n                     observation_kind, previous_app_version, previous_build_channel), observed_at) AS observation\n    FROM source\n    GROUP BY event_uuid\n), first_arrivals AS (\n    SELECT tupleElement(observation, 1) AS installation_id,\n        tupleElement(observation, 3) AS app_version,\n        argMin(observation, tuple(tupleElement(observation, 2), event_uuid)) AS first_observation\n    FROM deduplicated\n    GROUP BY installation_id, app_version\n), classified AS (\n    SELECT installation_id, app_version,\n        tupleElement(first_observation, 2) AS first_observed_at,\n        tupleElement(first_observation, 4) AS build_channel,\n        tupleElement(first_observation, 5) AS distribution,\n        tupleElement(first_observation, 6) AS os,\n        tupleElement(first_observation, 7) AS observation_kind,\n        tupleElement(first_observation, 8) AS previous_app_version,\n        tupleElement(first_observation, 9) AS previous_build_channel,\n        multiIf(\n            observation_kind = 'new_profile' AND app_version != 'unknown', 'new profile',\n            observation_kind != 'transition' OR app_version = 'unknown' OR previous_app_version IN ('', 'unknown')\n                OR build_channel = 'unknown' OR previous_build_channel IN ('', 'unknown'), 'unknown history',\n            build_channel != previous_build_channel, 'channel transition',\n            sortableSemVer(app_version) > sortableSemVer(if(previous_app_version IN ('', 'unknown'), '0.0.0', previous_app_version)), 'known upgrade',\n            sortableSemVer(app_version) < sortableSemVer(if(previous_app_version IN ('', 'unknown'), '0.0.0', previous_app_version)), 'downgrade',\n            'channel transition'\n        ) AS arrival_category\n    FROM first_arrivals\n)\nSELECT app_version AS release,\n    count() AS total_arrivals,\n    countIf(arrival_category = 'new profile') AS new_profiles,\n    countIf(arrival_category = 'known upgrade') AS known_upgrades,\n    countIf(arrival_category = 'downgrade') AS downgrades,\n    countIf(arrival_category = 'channel transition') AS channel_transitions,\n    countIf(arrival_category = 'unknown history') AS unknown_history,\n    countIf(arrival_category = 'known upgrade') / nullIf(count(), 0) AS known_upgrade_share,\n    countIf(arrival_category = 'unknown history') / nullIf(count(), 0) AS unknown_share\nFROM classified\nWHERE ({variables.desktop_build_channel} = 'all' OR build_channel = {variables.desktop_build_channel})\n  AND ({variables.desktop_distribution} = 'all' OR distribution = {variables.desktop_distribution})\nGROUP BY app_version\nORDER BY sortableSemVer(if(app_version = 'unknown', '0.0.0', app_version)) DESC\nLIMIT 100\n",
+            "filters": {
+              "dateRange": {
+                "date_from": "all"
+              },
+              "filterTestAccounts": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "key": "release-upgrades",
+      "tool": "insight-create",
+      "standalone": true,
+      "input": {
+        "name": "Desktop / Known upgrade installations for a target release",
+        "description": "Up to 100 anonymous installation UUIDs whose first arrival on the target version was an explicit same-build-channel version increase. Target version, build channel and distribution are standalone SQL controls. Ordered by original event time; no named people. Unknown-history and inferred historical changes are excluded.",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "display": "ActionsTable",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "WITH source AS (\nSELECT\n    toString(uuid) AS event_uuid,\n    distinct_id AS installation_id,\n    timestamp AS observed_at,\n    toString(properties.app_version) AS app_version,\n    toString(properties.build_channel) AS build_channel,\n    toString(properties.distribution) AS distribution,\n    toString(properties.os) AS os,\n    toString(properties.observation_kind) AS observation_kind,\n    coalesce(toString(properties.previous_app_version), '') AS previous_app_version,\n    coalesce(toString(properties.previous_build_channel), '') AS previous_build_channel\nFROM events\nWHERE event = 'app_version_observed'\n  AND timestamp >= toDateTime('2026-10-12 00:00:00', 'UTC')\n  AND timestamp < now() + INTERVAL 1 DAY\n  AND properties.os IN ('windows', 'macos', 'linux')\n  AND {filters}\n), deduplicated AS (\n    SELECT event_uuid,\n        argMin(tuple(installation_id, observed_at, app_version, build_channel, distribution, os,\n                     observation_kind, previous_app_version, previous_build_channel), observed_at) AS observation\n    FROM source\n    GROUP BY event_uuid\n), first_arrivals AS (\n    SELECT tupleElement(observation, 1) AS installation_id,\n        tupleElement(observation, 3) AS app_version,\n        argMin(observation, tuple(tupleElement(observation, 2), event_uuid)) AS first_observation\n    FROM deduplicated\n    GROUP BY installation_id, app_version\n), classified AS (\n    SELECT installation_id, app_version,\n        tupleElement(first_observation, 2) AS first_observed_at,\n        tupleElement(first_observation, 4) AS build_channel,\n        tupleElement(first_observation, 5) AS distribution,\n        tupleElement(first_observation, 6) AS os,\n        tupleElement(first_observation, 7) AS observation_kind,\n        tupleElement(first_observation, 8) AS previous_app_version,\n        tupleElement(first_observation, 9) AS previous_build_channel,\n        multiIf(\n            observation_kind = 'new_profile' AND app_version != 'unknown', 'new profile',\n            observation_kind != 'transition' OR app_version = 'unknown' OR previous_app_version IN ('', 'unknown')\n                OR build_channel = 'unknown' OR previous_build_channel IN ('', 'unknown'), 'unknown history',\n            build_channel != previous_build_channel, 'channel transition',\n            sortableSemVer(app_version) > sortableSemVer(if(previous_app_version IN ('', 'unknown'), '0.0.0', previous_app_version)), 'known upgrade',\n            sortableSemVer(app_version) < sortableSemVer(if(previous_app_version IN ('', 'unknown'), '0.0.0', previous_app_version)), 'downgrade',\n            'channel transition'\n        ) AS arrival_category\n    FROM first_arrivals\n)\nSELECT installation_id, app_version, first_observed_at, previous_app_version,\n    previous_build_channel, build_channel, distribution, os\nFROM classified\nWHERE arrival_category = 'known upgrade'\n  AND app_version = {variables.desktop_target_version}\n  AND ({variables.desktop_build_channel} = 'all' OR build_channel = {variables.desktop_build_channel})\n  AND ({variables.desktop_distribution} = 'all' OR distribution = {variables.desktop_distribution})\nORDER BY first_observed_at DESC, installation_id\nLIMIT 100\n",
+            "filters": {
+              "dateRange": {
+                "date_from": "all"
+              },
+              "filterTestAccounts": true
+            }
+          }
+        }
+      }
     }
   ],
-  "dashboardIntegration": "After approved creation, add the native observed-new insights and a text tile linking the standalone UTC and arrival reports. Preserve every existing playback/weekly report and existing layout. SQL reports are standalone to preserve warmup and UTC windows. Do not attach them to a dashboard date override without a supported ignore-date setting and a boundary test.",
-  "validation": "Native fresh-total Trends validated, aggregated_value197. SQL default-literal diagnostics validated: 22Oct DAU33 /16-22Oct WAU151 /23Oct partialDAU9. Project-filter/source-schema readback and variable controls require post-save verification.",
+  "dashboardIntegration": "After approved creation, attach the selected-period observed-new insight and add a text tile linking the standalone all-time total, UTC activity and release-arrival reports. Preserve every existing playback/weekly report and layout. Standalone reports must retain all-time source filters; do not attach them to a dashboard date override without a supported ignore-date setting and a boundary test.",
+  "validation": "Read-only native fresh total: aggregated_value 197. UTC default-literal diagnostic: 22 Oct DAU 33, 16\u201322 Oct WAU 151, 23 Oct partial DAU 9. Literal arrival fixtures: 0.0.19 total 11 = 2 new + 2 known upgrades + 2 downgrades + 1 channel transition + 4 unknown; stable-only total 10, unknown 3. Explicit upgrade drilldown returns exactly numeric and upgrade fixture UUIDs. No fixture was captured. Saved source/filter/variable readback remains a post-approval check.",
   "applyOrder": [
     "Refresh and compare preconditions; abort on concurrent changes.",
     "Obtain production approval for this exact definition diff.",

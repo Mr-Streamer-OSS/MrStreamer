@@ -26,7 +26,9 @@ the application receipt. Do not delete or overwrite unrelated dashboard content.
   does not identify later completed updates. The proposed rename corrects that
   claim while retaining the existing insight and query.
 
-The SQL reports are standalone insights, linked from the desktop dashboard.
+The all-time new-profile total and SQL reports are standalone insights, linked
+from the desktop dashboard. Only the selected-period new-profile total inherits
+the dashboard's date range.
 Their source date filter stays all-time so the explicit UTC windows retain their
 six-day warmup. Their advertised controls are `desktop_build_channel` and
 `desktop_distribution`, defaulting to `all`. Channel values are `stable`,
@@ -52,10 +54,27 @@ on partial 23 October. These are diagnostic snapshots. Source/filter/variable
 readback after separately authorized saving remains required.
 
 The client event contract is documented in [telemetry](../../telemetry.md).
-Release-arrival definitions, literal mixed-version/duplicate/delayed-delivery
-fixtures and final independent review are still being prepared. They must select
-each identity's first target-version arrival before applying report-period or
-build-channel filters. Unknown history must remain visible.
+`release-arrivals.sql` selects each identity's first target-version observation
+across retained history, using original event time and deduplicating event UUIDs.
+Build-channel and distribution controls apply after that selection. Each arrival
+belongs to exactly one category: new profile, known same-channel upgrade,
+downgrade, channel transition or unknown history. The denominator for the known
+upgrade share includes unknown history. This is adoption by release, not a count
+of installer executions or every repeated upgrade.
+
+`release-upgrades.sql` shows up to 100 anonymous installation UUIDs whose first
+arrival on `desktop_target_version` was a known upgrade. Its default is 0.0.19.
+Existing profiles without a version baseline remain unknown. Historical
+multi-version activity can suggest an upgrade but is excluded from this explicit
+report. Recorded profile origin never substitutes for a previous version.
+
+Read-only literal fixtures returned 11 arrivals on 0.0.19: two new profiles, two
+known upgrades, two downgrades, one channel transition and four unknown histories.
+Filtering to stable returned ten arrivals and three unknown histories. The
+fixtures include duplicate UUIDs, delayed delivery, numeric version ordering,
+cleared profiles and downgrade/re-upgrade sequences. The drilldown returned
+exactly the two known-upgrade fixture UUIDs. No fixture entered event storage.
+Final independent review remains required.
 
 These are installation/profile counts, not named people or devices. Retained
 reinstalls keep identity; clearing data can create another identity, and copied

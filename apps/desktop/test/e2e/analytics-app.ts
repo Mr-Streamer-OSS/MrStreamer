@@ -385,7 +385,7 @@ async function launch() {
     target.executable ?? (await electronExecutable()),
     [
       `--remote-debugging-port=${port}`,
-      `${options.native ? "--inspect" : "--inspect-brk"}=${inspectorPort}`,
+      `${options.slowStartup ? "--inspect-brk" : "--inspect"}=${inspectorPort}`,
       "--remote-debugging-address=127.0.0.1",
       `--user-data-dir=${profile}`,
       "--enable-automation",
@@ -420,7 +420,7 @@ async function launch() {
   for (const stream of [app.stdout, app.stderr])
     stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
   let comparedMainPid: number;
-  if (options.native) {
+  if (!options.slowStartup) {
     page = await connect(port, "page", { app });
     mainPage = await connect(inspectorPort, "node", { app });
     comparedMainPid = await mainPage.evaluate<number>("process.pid");
