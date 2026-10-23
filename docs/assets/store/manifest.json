@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "direction": "B: The signature, selected by Wout on 2026-10-23",
+  "acceptance": "Candidate exports. Final visual acceptance and listing publication are separate.",
+  "sourceRevision": "e1fd4f6f39ac0e3577b1df480d2e1e90e32f0a6e",
+  "provenance": {
+    "hat": "Existing Mr. Streamer launch-film model, derived from mark.svg. Static Blender 4.5 render, 3072px, 96 samples. No generative image model or product UI is used.",
+    "font": "Inter variable, SIL Open Font License 1.1. Licence included beside the font.",
+    "copy": ["mr. streamer", "Live TV, movies and series."],
+    "screenshots": "No screenshots in promotional exports. Genuine Linux captures are separate."
+  },
+  "rules": {
+    "checked": "2026-10-23",
+    "source": "https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/screenshots-and-images",
+    "thumbnail": "1920x1080 PNG, less than 50 MB.",
+    "hero": "3840x2160 PNG, text-free, no UI/devices, important details centred above the bottom third.",
+    "creativeMasters": "Portrait and square are ratio-specific masters, not confirmed Microsoft app slots."
+  },
+  "sources": [
+    {
+      "file": "apps/desktop/assets/brand/hat.py",
+      "sha256": "c8f32981e83ca454ac0281ae208983bd949a52c29eb2dddba7610d1973e3260c"
+    },
+    {
+      "file": "apps/desktop/assets/brand/hat.png",
+      "sha256": "5c4ec513e2bdc82e9e78e304076233eb91fad2475ccd48b328010948fe8d3e2b"
+    },
+    {
+      "file": "apps/desktop/assets/brand/mark.svg",
+      "sha256": "f8ad748ef0afd24e7c224fe7ee176fe0098400b1c1f930c3e5fdb18938c7e0b2"
+    },
+    {
+      "file": "apps/desktop/assets/brand/fonts/Inter.ttf",
+      "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031"
+    },
+    {
+      "file": "apps/desktop/assets/brand/fonts/Inter-LICENSE.txt",
+      "sha256": "3b0a5fca3d17942cde889069889dedbbbd075e9b599968c82a95f4d944e9b345"
+    }
+  ],
+  "exports": [
+    {
+      "file": "signature-landscape.png",
+      "width": 3840,
+      "height": 2160,
+      "format": "PNG",
+      "alpha": false,
+      "placement": "Landscape creative master; source for the trailer thumbnail.",
+      "layout": {
+        "name": "signature-landscape",
+        "width": 3840,
+        "height": 2160,
+        "hat": {
+          "left": 300,
+          "top": 260,
+          "width": 1580,
+          "height": 1640
+        },
+        "title": {
+          "left": 1960,
+          "top": 880,
+          "size": 180
+        },
+        "caption": {
+          "left": 1968,
+          "top": 1120,
+          "size": 88,
+          "text": "Live TV, movies and series."
+        },
+        "placement": "Landscape creative master; source for the trailer thumbnail."
+      },
+      "bytes": 1691009,
+      "sha256": "e4cb35d9791bdba940e423e169337a6a2259923e13687fd4b06a7960217e7cc8"
+    },
+    {
+      "file": "signature-portrait.png",
+      "width": 1080,
+      "height": 1920,
+      "format": "PNG",
+      "alpha": false,
+      "placement": "9:16 creative master. No Microsoft app poster slot is claimed.",
+      "layout": {
+        "name": "signature-portrait",
+        "width": 1080,
+        "height": 1920,
+        "hat": {
+          "left": 100,
+          "top": 310,
+          "width": 880,
+          "height": 940
+        },
+        "title": {
+          "top": 1390,
+          "size": 116
+        },
+        "caption": {
+          "top": 1560,
+          "size": 38,
+          "text": "Live TV, movies and series."
+        },
+        "placement": "9:16 creative master. No Microsoft app poster slot is claimed."
+      },
+      "bytes": 462792,
+      "sha256": "23eb3657a5783e2825ef36ae9f068b9b1542ec28efaa84e71868209dc7b1da94"
+    },
+    {
+      "file": "signature-square.png",
+      "width": 2160,
+      "height": 2160,
+      "format": "PNG",
+      "alpha": false,
+      "placement": "Square creative master. This is not a Microsoft game box or app icon.",
+      "layout": {
+        "name": "signature-square",
+        "width": 2160,
+        "height": 2160,
+        "hat": {
+          "left": 500,
+          "top": 180,
+          "width": 1160,
+          "height": 1260
+        },
+        "title": {
+          "top": 1590,
+          "size": 196
+        },
+        "caption": {
+          "top": 1850,
+          "size": 64,
+          "text": "Live TV, movies and series."
+        },
+        "placement": "Square creative master. This is not a Microsoft game box or app icon."
+      },
+      "bytes": 902723,
+      "sha256": "6810f5540326d7954eef8b17f0259ae585e9a64fb3290f67d3bf411b340837af"
+    },
+    {
+      "file": "store-hero.png",
+      "width": 3840,
+      "height": 2160,
+      "format": "PNG",
+      "alpha": false,
+      "placement": "Microsoft Store 16:9 hero candidate. Text-free, detail in the upper two thirds.",
+      "layout": {
+        "name": "store-hero",
+        "width": 3840,
+        "height": 2160,
+        "hat": {
+          "left": 1240,
+          "top": 70,
+          "width": 1360,
+          "height": 1320
+        },
+        "placement": "Microsoft Store 16:9 hero candidate. Text-free, detail in the upper two thirds."
+      },
+      "bytes": 1194399,
+      "sha256": "ce609268cc748abe99f45faa0ac9ddc85e2e601c5659add9d3a458898496211d"
+    },
+    {
+      "file": "store-trailer-thumbnail.png",
+      "width": 1920,
+      "height": 1080,
+      "format": "PNG",
+      "alpha": false,
+      "placement": "Microsoft Store trailer thumbnail candidate. Final acceptance and upload are separate.",
+      "bytes": 472079,
+      "sha256": "0fa48056e3f9447faf4b90d2c076991834e4aa910c3b2da30374716f3b840343"
+    }
+  ]
+}
