@@ -1,6 +1,6 @@
 # Linux listing screenshot candidates
 
-These are source-build candidates for the artwork card's desktop 0.0.19 work. They were recaptured after integration at `3a008d0fbb8cc33a9f7cf363080d0dd94eb48785`, using Electron 44.9.3. The development manifest still reports **0.0.18**. They need final artwork acceptance before listing use and do not establish an installed Flatpak, native GPU, audible audio or compositor acceptance.
+These are source-build candidates for the artwork card's desktop 0.0.19 work. They were recaptured after integration at `384840f83b4be4fd6fd8d8693a8578d426418279`, using Electron 44.9.3. The development manifest still reports **0.0.18**. They need final artwork acceptance before listing use and do not establish an installed Flatpak, native GPU, audible audio or compositor acceptance.
 
 The [Flathub quality guidelines](https://docs.flathub.org/docs/for-app-authors/metainfo-guidelines/quality-guidelines#screenshots), checked 23 October 2026, ask for unedited Linux app windows with native decoration, shadow and corners, default settings, English language tags, useful content and brief external captions. The suggested window limit is 1000 × 700, or twice that for HiDPI. Do not crop, add text, graphics or decoration after capture.
 
@@ -51,13 +51,15 @@ Captions and credits stay outside the images. Credit **NASA** for the Earth foot
 
 ## Baseline candidates, 23 October 2026
 
-The integrated run is `.local/verification/linux-listing/capture-yaYiSp/`. All four PNGs are 1000 × 700, with no alpha, and total 1,131,189 bytes. Their hashes equal the raw native captures. The manifest records source `3a008d0f`, Electron 44.9.3, fixture/media/build hashes and external captions. Both original download hashes matched. Each full-size image was inspected. Cleanup passed for the app, profile, fixture servers, window manager and X server; the owned CDP port was closed. Earlier failed attempts remain evidence.
+The integrated run is `.local/verification/linux-listing/capture-9m9nVu/`. All four PNGs are 1000 × 700, with no alpha, and total 1,121,427 bytes. Their hashes equal the raw native captures. The manifest records source `384840f8`, Electron 44.9.3, fixture/media/build hashes and external captions. Both original download hashes matched. Each full-size image was inspected. Cleanup passed for the app, profile, fixture servers, window manager and X server; the owned CDP port was closed. Earlier failed attempts remain evidence.
 
 | Candidate      |   Bytes | Visible content                                                        |
 | -------------- | ------: | ---------------------------------------------------------------------- |
-| `home.png`     | 237,111 | Earth preview, favourites, Continue watching and recommendation reason |
-| `tv-guide.png` | 160,099 | Live Earth preview, selected aired programme and Play from start       |
+| `home.png`     | 236,815 | Earth preview, favourites, Continue watching and recommendation reason |
+| `tv-guide.png` | 159,980 | Live Earth preview, selected aired programme and Play from start       |
 | `library.png`  | 257,772 | Canyon Hours details, Play/Download/Save and invented cast             |
-| `watching.png` | 476,207 | Canyon footage, active English subtitle and subtitle panel             |
+| `watching.png` | 466,860 | Canyon footage, active English subtitle and subtitle panel             |
 
 The compact views retain the app's real scrolling and ellipsis. In Watching, the full-window subtitle extends across the subtitle panel's boundary; the image preserves that current rendering. Details offers another candidate if that makes Watching unsuitable. The missing compositor shadow/padding/rounding still requires native desktop recapture. The integrated candidates await listing acceptance. Prefer Home, Guide and details while the existing Watching subtitle overlap remains visible.
+
+The public manifest uses portable media basenames, a repository-relative evidence reference and OS/kernel/architecture without a host name. Full local paths remain only in the ignored raw receipts.
