@@ -1,0 +1,353 @@
+{
+  "schemaVersion": 1,
+  "status": "Prepared read-only. Version-arrival definitions and final review are pending. No production write is authorized.",
+  "projectId": 178919,
+  "dashboardId": 1013890,
+  "projectTimezone": "Europe/Brussels, unchanged",
+  "variables": [
+    {
+      "key": "desktop_build_channel",
+      "tool": "sql-variables-create",
+      "input": {
+        "name": "Desktop build channel",
+        "type": "String",
+        "default_value": "all"
+      }
+    },
+    {
+      "key": "desktop_distribution",
+      "tool": "sql-variables-create",
+      "input": {
+        "name": "Desktop distribution",
+        "type": "String",
+        "default_value": "all"
+      }
+    }
+  ],
+  "updates": [
+    {
+      "tool": "insight-update",
+      "precondition": {
+        "id": "EIcg9B7w",
+        "last_modified_at": "2026-10-16T14:13:20.510994Z",
+        "definition_sha256": "568ec80de881654f1e934f22cd653e4ab9021d36705ffed8cb53ebb3cf02ac88"
+      },
+      "input": {
+        "id": "EIcg9B7w",
+        "name": "Desktop / Initial profile origins over time",
+        "description": "Distinct desktop profiles first observed in each project-calendar week, split by the permanent initial profile origin. Existing-profile origin is not a completed upgrade. Fresh profiles can include cleared data; unopened or opted-out installs are absent."
+      },
+      "rollback": {
+        "id": "EIcg9B7w",
+        "name": "Desktop / Fresh installs vs upgrades over time",
+        "description": "Trend of new (fresh) vs upgrading installations over time, broken down by profile_origin.",
+        "query": {
+          "kind": "InsightVizNode",
+          "source": {
+            "kind": "TrendsQuery",
+            "series": [
+              {
+                "kind": "EventsNode",
+                "math": "dau",
+                "event": "installation_observed",
+                "custom_name": "Installs by origin"
+              }
+            ],
+            "version": 4,
+            "interval": "week",
+            "dateRange": {
+              "date_from": "-90d",
+              "explicitDate": false,
+              "excludeIncompletePeriods": false
+            },
+            "properties": [
+              {
+                "key": "app_version",
+                "type": "event",
+                "value": "is_set",
+                "operator": "is_set"
+              },
+              {
+                "key": "os",
+                "type": "event",
+                "value": ["windows", "linux", "macos"],
+                "operator": "exact"
+              }
+            ],
+            "trendsFilter": {
+              "display": "ActionsBar",
+              "showLegend": true,
+              "hideWeekends": false,
+              "metricSummary": "total",
+              "legendPosition": "bottom",
+              "yAxisScaleType": "linear",
+              "showAnnotations": true,
+              "metricShowChange": true,
+              "yAxisStartAtZero": true,
+              "showMultipleYAxes": false,
+              "showLabelsOnSeries": false,
+              "showValuesOnSeries": true,
+              "smoothingIntervals": 1,
+              "showPercentStackView": false,
+              "stackBreakdownValues": false,
+              "aggregationAxisFormat": "numeric",
+              "resultCustomizationBy": "value",
+              "excludeBoxPlotOutliers": true,
+              "metricColorByDirection": false,
+              "showAlertThresholdLines": false
+            },
+            "breakdownFilter": {
+              "breakdowns": [
+                {
+                  "type": "event",
+                  "property": "profile_origin"
+                }
+              ],
+              "breakdown_type": "event",
+              "breakdown_limit": 10
+            },
+            "filterTestAccounts": true
+          }
+        }
+      }
+    },
+    {
+      "tool": "insight-update",
+      "precondition": {
+        "id": "oUEkrHlD",
+        "last_modified_at": "2026-10-16T14:13:23.159615Z",
+        "definition_sha256": "29a1bdeab11dfa9d9689838468c704b1498c17b8c1f42b9923082c3694610428"
+      },
+      "input": {
+        "id": "oUEkrHlD",
+        "name": "Desktop / Active installations in the selected period",
+        "description": "Distinct foreground-active desktop installations across the selected project-calendar period. The default -7d includes partial today and can span eight calendar dates. Use the linked UTC reports for exactly seven completed UTC dates. These are retained profile UUIDs, not people."
+      },
+      "rollback": {
+        "id": "oUEkrHlD",
+        "name": "Desktop / Rolling 7-day active installations",
+        "description": "Unique active installations in the last 7 days.",
+        "query": {
+          "kind": "InsightVizNode",
+          "source": {
+            "kind": "TrendsQuery",
+            "series": [
+              {
+                "kind": "EventsNode",
+                "math": "dau",
+                "event": "app_active_day",
+                "custom_name": "Active installations"
+              }
+            ],
+            "version": 4,
+            "interval": "day",
+            "dateRange": {
+              "date_from": "-7d",
+              "explicitDate": false,
+              "excludeIncompletePeriods": false
+            },
+            "properties": [
+              {
+                "key": "app_version",
+                "type": "event",
+                "value": "is_set",
+                "operator": "is_set"
+              },
+              {
+                "key": "os",
+                "type": "event",
+                "value": ["windows", "linux", "macos"],
+                "operator": "exact"
+              }
+            ],
+            "trendsFilter": {
+              "display": "BoldNumber",
+              "showLegend": false,
+              "hideWeekends": false,
+              "metricSummary": "total",
+              "legendPosition": "bottom",
+              "yAxisScaleType": "linear",
+              "showAnnotations": true,
+              "metricShowChange": true,
+              "yAxisStartAtZero": true,
+              "showMultipleYAxes": false,
+              "showLabelsOnSeries": false,
+              "showValuesOnSeries": true,
+              "smoothingIntervals": 1,
+              "showPercentStackView": false,
+              "stackBreakdownValues": false,
+              "aggregationAxisFormat": "numeric",
+              "resultCustomizationBy": "value",
+              "excludeBoxPlotOutliers": true,
+              "metricColorByDirection": false,
+              "showAlertThresholdLines": false
+            },
+            "filterTestAccounts": true
+          }
+        }
+      }
+    }
+  ],
+  "creates": [
+    {
+      "key": "fresh-total",
+      "tool": "insight-create",
+      "input": {
+        "name": "Desktop / Observed new profiles since tracking began",
+        "description": "Distinct desktop installation UUIDs with installation_observed and fresh initial origin, since tracking began on 12 October 2026. Retained reinstalls keep identity. Cleared or separate profiles can count again; unopened and opted-out installations are absent. This is not a people or installer-download total.",
+        "query": {
+          "kind": "InsightVizNode",
+          "source": {
+            "kind": "TrendsQuery",
+            "series": [
+              {
+                "kind": "EventsNode",
+                "event": "installation_observed",
+                "math": "dau",
+                "custom_name": "Observed fresh profiles"
+              }
+            ],
+            "dateRange": {
+              "date_from": "all"
+            },
+            "interval": "day",
+            "properties": [
+              {
+                "key": "os",
+                "type": "event",
+                "operator": "exact",
+                "value": ["windows", "macos", "linux"]
+              },
+              {
+                "key": "profile_origin",
+                "type": "event",
+                "operator": "exact",
+                "value": ["fresh"]
+              }
+            ],
+            "filterTestAccounts": true,
+            "trendsFilter": {
+              "display": "BoldNumber"
+            }
+          }
+        }
+      }
+    },
+    {
+      "key": "fresh-period",
+      "tool": "insight-create",
+      "input": {
+        "name": "Desktop / Observed new profiles in the selected period",
+        "description": "Distinct desktop profiles first observed as fresh during the selected project-calendar period. Existing-profile and unknown origins remain separate in the initial-origin report. Retained reinstalls keep identity; cleared profiles can count again. All build channels are included unless filtered.",
+        "query": {
+          "kind": "InsightVizNode",
+          "source": {
+            "kind": "TrendsQuery",
+            "series": [
+              {
+                "kind": "EventsNode",
+                "event": "installation_observed",
+                "math": "dau",
+                "custom_name": "Observed fresh profiles"
+              }
+            ],
+            "dateRange": {
+              "date_from": "-30d"
+            },
+            "interval": "day",
+            "properties": [
+              {
+                "key": "os",
+                "type": "event",
+                "operator": "exact",
+                "value": ["windows", "macos", "linux"]
+              },
+              {
+                "key": "profile_origin",
+                "type": "event",
+                "operator": "exact",
+                "value": ["fresh"]
+              }
+            ],
+            "filterTestAccounts": true,
+            "trendsFilter": {
+              "display": "BoldNumber"
+            }
+          }
+        }
+      }
+    },
+    {
+      "key": "utc-headlines",
+      "tool": "insight-create",
+      "standalone": true,
+      "input": {
+        "name": "Desktop / Completed UTC activity and partial today",
+        "description": "Foreground-active installation UUIDs: yesterday DAU, the union across the seven completed UTC dates ending yesterday, and partial today DAU. Uses activity_date. Standalone SQL controls select build channel and distribution; source date filter stays all-time. No people, background-use or exact-once claim.",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "display": "ActionsTable",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "WITH toDate(formatDateTime(now(), '%Y-%m-%d', 'UTC')) AS utc_today\nSELECT\n    toString(addDays(utc_today, -1)) AS completed_utc_day,\n    uniqExactIf(distinct_id, toDate(properties.activity_date) = addDays(utc_today, -1)) AS dau_completed_day,\n    toString(addDays(utc_today, -7)) AS wau_first_utc_day,\n    uniqExactIf(distinct_id, toDate(properties.activity_date) >= addDays(utc_today, -7) AND toDate(properties.activity_date) < utc_today) AS wau_seven_completed_days,\n    toString(utc_today) AS partial_utc_day,\n    uniqExactIf(distinct_id, toDate(properties.activity_date) = utc_today) AS dau_partial_today\nFROM events\nWHERE event = 'app_active_day'\n  AND timestamp >= toDateTime(concat(toString(addDays(utc_today, -7)), ' 00:00:00'), 'UTC')\n  AND timestamp < toDateTime(concat(toString(addDays(utc_today, 1)), ' 00:00:00'), 'UTC')\n  AND properties.os IN ('windows', 'macos', 'linux')\n  AND ({variables.desktop_build_channel} = 'all' OR properties.build_channel = {variables.desktop_build_channel})\n  AND ({variables.desktop_distribution} = 'all' OR properties.distribution = {variables.desktop_distribution})\n  AND {filters}\n",
+            "filters": {
+              "dateRange": {
+                "date_from": "all"
+              },
+              "filterTestAccounts": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "key": "utc-activity",
+      "tool": "insight-create",
+      "standalone": true,
+      "input": {
+        "name": "Desktop / UTC DAU and rolling WAU",
+        "description": "Daily foreground-active installation UUIDs and the union across each UTC day plus its previous six dates. Last 30 completed days and partial today. First six tracking days have partial history. Standalone SQL controls select build channel/distribution. Do not inherit dashboard date filters.",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "display": "ActionsLineGraph",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "WITH toDate(formatDateTime(now(), '%Y-%m-%d', 'UTC')) AS utc_today\nSELECT\n    activity_day AS utc_activity_date,\n    if(activity_day = utc_today, 'partial today', 'complete') AS period_status,\n    if(addDays(activity_day, -6) < toDate('2026-10-12'), 'partial tracking history', 'available tracking history') AS wau_history,\n    uniqExactIf(installation_id, active_that_day AND installation_id != '') AS dau,\n    uniqExactIf(installation_id, installation_id != '') AS wau\nFROM (\n    SELECT\n        addDays(toDate(properties.activity_date), offset) AS activity_day,\n        distinct_id AS installation_id,\n        offset = 0 AS active_that_day\n    FROM events\n    ARRAY JOIN range(7) AS offset\n    WHERE event = 'app_active_day'\n      AND timestamp >= toDateTime(concat(toString(addDays(utc_today, -36)), ' 00:00:00'), 'UTC')\n      AND timestamp < toDateTime(concat(toString(addDays(utc_today, 1)), ' 00:00:00'), 'UTC')\n      AND properties.os IN ('windows', 'macos', 'linux')\n      AND ({variables.desktop_build_channel} = 'all' OR properties.build_channel = {variables.desktop_build_channel})\n      AND ({variables.desktop_distribution} = 'all' OR properties.distribution = {variables.desktop_distribution})\n      AND {filters}\n    UNION ALL\n    SELECT addDays(utc_today, -offset) AS activity_day, '' AS installation_id, false AS active_that_day\n    FROM (SELECT arrayJoin(range(31)) AS offset)\n)\nWHERE activity_day >= addDays(utc_today, -30)\n  AND activity_day <= utc_today\n  AND activity_day >= toDate('2026-10-12')\nGROUP BY activity_day\nORDER BY activity_day\nLIMIT 31\n",
+            "filters": {
+              "dateRange": {
+                "date_from": "all"
+              },
+              "filterTestAccounts": true
+            }
+          },
+          "chartSettings": {
+            "xAxis": {
+              "column": "utc_activity_date"
+            },
+            "yAxis": [
+              {
+                "column": "dau"
+              },
+              {
+                "column": "wau"
+              }
+            ],
+            "showLegend": true
+          }
+        }
+      }
+    }
+  ],
+  "dashboardIntegration": "After approved creation, add the native observed-new insights and a text tile linking the standalone UTC and arrival reports. Preserve every existing playback/weekly report and existing layout. SQL reports are standalone to preserve warmup and UTC windows. Do not attach them to a dashboard date override without a supported ignore-date setting and a boundary test.",
+  "validation": "Native fresh-total Trends validated, aggregated_value197. SQL default-literal diagnostics validated: 22Oct DAU33 /16-22Oct WAU151 /23Oct partialDAU9. Project-filter/source-schema readback and variable controls require post-save verification.",
+  "applyOrder": [
+    "Refresh and compare preconditions; abort on concurrent changes.",
+    "Obtain production approval for this exact definition diff.",
+    "Create variables; verify generated code names and retain returned IDs.",
+    "Create reviewed insights and record returned IDs.",
+    "Apply rename-only updates and read back query equality.",
+    "Add native insights and link-only report tile without replacing existing dashboard content.",
+    "Read back every definition, verify boundary/filter cases and record applied revision."
+  ],
+  "rollback": "Restore only these update inputs from rollback definitions. Delete only newly created IDs from the recorded application receipt. Preserve pre-existing dashboard content, project settings and all events."
+}
