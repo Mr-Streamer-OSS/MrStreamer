@@ -35,7 +35,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import sharp from "sharp";
@@ -113,7 +113,7 @@ const proof: Record<string, unknown> = {
   system:
     process.platform === "darwin"
       ? execFileSync("sw_vers", { encoding: "utf8" })
-      : execFileSync("uname", ["-a"], { encoding: "utf8" }),
+      : execFileSync("uname", ["-srm"], { encoding: "utf8" }),
   appVersion: JSON.parse(readFileSync(join(desktop, "package.json"), "utf8")).version,
   mainSha256: hash(readFileSync(join(desktop, "out/main/index.js"))),
   manifestSha256: hash(readFileSync(join(root, "docs/assets/marketing-demo-sources.json"))),
@@ -181,7 +181,7 @@ try {
     Object.entries(media).map(([name, paths]) => [
       name,
       (Array.isArray(paths) ? paths : [paths]).map((file: string) => ({
-        file,
+        file: linuxListing ? basename(file) : file,
         sha256: hash(readFileSync(file)),
         bytes: readFileSync(file).length,
       })),
@@ -632,10 +632,10 @@ async function capture(
     captures.push(entry);
     recordCapture(manifestFile, entry, {
       ...provenance(),
-      status: "candidate, pending parent integration and final verification",
+      status: "candidate, pending final visual and listing acceptance",
       method: "Unedited whole X11 window, ImageMagick import -window <owned XID> -frame",
-      nativeSession: linux.identity,
-      evidence,
+      nativeSession: { ...linux.identity, tools: "Portable Openbox and X11 tools" },
+      evidence: `.local/verification/linux-listing/${basename(evidence)}`,
       language: "en",
       caption: {
         home: "Home with live preview and Continue watching",

@@ -72,7 +72,7 @@ Read-only literal fixtures returned 11 arrivals on 0.0.19: two new profiles, two
 known upgrades, two downgrades, one channel transition and four unknown histories.
 Filtering to stable returned ten arrivals and three unknown histories. The
 fixtures include duplicate UUIDs, delayed delivery, numeric version ordering,
-cleared profiles and downgrade/re-upgrade sequences. The drilldown returned
+cleared profiles and downgrade/re-upgrade sequences. Nightly ordering compares the numeric base, date and run, matching the client release contract. Same-base nightly date/run upgrades and downgrades have separate fixtures; equal or unsupported pairs stay unknown. The drilldown returned
 exactly the two known-upgrade fixture UUIDs. No fixture entered event storage.
 Final independent review remains required.
 

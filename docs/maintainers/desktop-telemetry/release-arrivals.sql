@@ -37,14 +37,18 @@ WHERE event = 'app_version_observed'
         tupleElement(first_observation, 7) AS observation_kind,
         tupleElement(first_observation, 8) AS previous_app_version,
         tupleElement(first_observation, 9) AS previous_build_channel,
+        match(app_version, '^[0-9]+[.][0-9]+[.][0-9]+(-nightly[.][0-9]{8}[.][0-9]+)?$') AS version_known,
+        match(previous_app_version, '^[0-9]+[.][0-9]+[.][0-9]+(-nightly[.][0-9]{8}[.][0-9]+)?$') AS previous_version_known,
+        tuple(toIntOrZero(extract(app_version, '^([0-9]+)[.]')), toIntOrZero(extract(app_version, '^[0-9]+[.]([0-9]+)[.]')), toIntOrZero(extract(app_version, '^[0-9]+[.][0-9]+[.]([0-9]+)')), if(match(app_version, '-nightly[.]'), 0, 1), toIntOrZero(extract(app_version, '-nightly[.]([0-9]{8})[.]')), toIntOrZero(extract(app_version, '-nightly[.][0-9]{8}[.]([0-9]+)$'))) AS version_key,
+        tuple(toIntOrZero(extract(previous_app_version, '^([0-9]+)[.]')), toIntOrZero(extract(previous_app_version, '^[0-9]+[.]([0-9]+)[.]')), toIntOrZero(extract(previous_app_version, '^[0-9]+[.][0-9]+[.]([0-9]+)')), if(match(previous_app_version, '-nightly[.]'), 0, 1), toIntOrZero(extract(previous_app_version, '-nightly[.]([0-9]{8})[.]')), toIntOrZero(extract(previous_app_version, '-nightly[.][0-9]{8}[.]([0-9]+)$'))) AS previous_version_key,
         multiIf(
-            observation_kind = 'new_profile' AND app_version != 'unknown', 'new profile',
-            observation_kind != 'transition' OR app_version = 'unknown' OR previous_app_version IN ('', 'unknown')
+            observation_kind = 'new_profile' AND version_known, 'new profile',
+            observation_kind != 'transition' OR NOT version_known OR NOT previous_version_known
                 OR build_channel = 'unknown' OR previous_build_channel IN ('', 'unknown'), 'unknown history',
             build_channel != previous_build_channel, 'channel transition',
-            sortableSemVer(app_version) > sortableSemVer(if(previous_app_version IN ('', 'unknown'), '0.0.0', previous_app_version)), 'known upgrade',
-            sortableSemVer(app_version) < sortableSemVer(if(previous_app_version IN ('', 'unknown'), '0.0.0', previous_app_version)), 'downgrade',
-            'channel transition'
+            version_key > previous_version_key, 'known upgrade',
+            version_key < previous_version_key, 'downgrade',
+            'unknown history'
         ) AS arrival_category
     FROM first_arrivals
 )
@@ -61,5 +65,5 @@ FROM classified
 WHERE ({variables.desktop_build_channel} = 'all' OR build_channel = {variables.desktop_build_channel})
   AND ({variables.desktop_distribution} = 'all' OR distribution = {variables.desktop_distribution})
 GROUP BY app_version
-ORDER BY sortableSemVer(if(app_version = 'unknown', '0.0.0', app_version)) DESC
+ORDER BY max(version_key) DESC
 LIMIT 100
