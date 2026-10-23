@@ -2,7 +2,6 @@
   "schemaVersion": 1,
   "direction": "B: The signature, selected by Wout on 2026-10-23",
   "acceptance": "Candidate exports. Final visual acceptance and listing publication are separate.",
-  "sourceRevision": "e1fd4f6f39ac0e3577b1df480d2e1e90e32f0a6e",
   "provenance": {
     "hat": "Existing Mr. Streamer launch-film model, derived from mark.svg. Static Blender 4.5 render, 3072px, 96 samples. No generative image model or product UI is used.",
     "font": "Inter variable, SIL Open Font License 1.1. Licence included beside the font.",
@@ -19,11 +18,11 @@
   "sources": [
     {
       "file": "apps/desktop/assets/brand/hat.py",
-      "sha256": "c8f32981e83ca454ac0281ae208983bd949a52c29eb2dddba7610d1973e3260c"
+      "sha256": "979ae341cd4947679e4db58c352b025c581c54544a616a76d80dadcddd1ee95d"
     },
     {
       "file": "apps/desktop/assets/brand/hat.png",
-      "sha256": "5c4ec513e2bdc82e9e78e304076233eb91fad2475ccd48b328010948fe8d3e2b"
+      "sha256": "aafa1ad1f1ee4f1033ea753db17dc903c9c471e2c189ff3e3a207593957d96ef"
     },
     {
       "file": "apps/desktop/assets/brand/mark.svg",
@@ -69,8 +68,8 @@
         },
         "placement": "Landscape creative master; source for the trailer thumbnail."
       },
-      "bytes": 1691009,
-      "sha256": "e4cb35d9791bdba940e423e169337a6a2259923e13687fd4b06a7960217e7cc8"
+      "bytes": 1685628,
+      "sha256": "5cfa79261ac1fc3429efd54ebe455ee2e724ccb287f77e15291e65ed04040636"
     },
     {
       "file": "signature-portrait.png",
@@ -100,8 +99,8 @@
         },
         "placement": "9:16 creative master. No Microsoft app poster slot is claimed."
       },
-      "bytes": 462792,
-      "sha256": "23eb3657a5783e2825ef36ae9f068b9b1542ec28efaa84e71868209dc7b1da94"
+      "bytes": 461015,
+      "sha256": "07689b3c9d35bbd3312b6d4c22aa36ef153f4cfc74648dbf0a8772d544ce2610"
     },
     {
       "file": "signature-square.png",
@@ -131,8 +130,8 @@
         },
         "placement": "Square creative master. This is not a Microsoft game box or app icon."
       },
-      "bytes": 902723,
-      "sha256": "6810f5540326d7954eef8b17f0259ae585e9a64fb3290f67d3bf411b340837af"
+      "bytes": 899763,
+      "sha256": "9e25cb1eee442406a109beaa3b95c36f93f51cefd0276e3b1838664825de1fe5"
     },
     {
       "file": "store-hero.png",
@@ -153,8 +152,8 @@
         },
         "placement": "Microsoft Store 16:9 hero candidate. Text-free, detail in the upper two thirds."
       },
-      "bytes": 1194399,
-      "sha256": "ce609268cc748abe99f45faa0ac9ddc85e2e601c5659add9d3a458898496211d"
+      "bytes": 1190219,
+      "sha256": "27f47f1f2d309c674924101eca305952f6a4f48f5af13f8a5ab9d0d733805cf8"
     },
     {
       "file": "store-trailer-thumbnail.png",
@@ -163,8 +162,8 @@
       "format": "PNG",
       "alpha": false,
       "placement": "Microsoft Store trailer thumbnail candidate. Final acceptance and upload are separate.",
-      "bytes": 472079,
-      "sha256": "0fa48056e3f9447faf4b90d2c076991834e4aa910c3b2da30374716f3b840343"
+      "bytes": 469712,
+      "sha256": "3cb8f47c418b769ba2b7365394b7a5df817f9fe918ba59ae168d9e653561a3c2"
     }
   ]
 }

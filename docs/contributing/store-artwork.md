@@ -27,9 +27,11 @@ Portrait and square are creative masters. The documented 2:3 poster and square b
 art slots apply to games, so these files do not claim those app placements.
 Partner Center acceptance has not been tested.
 
-Linux listing screenshots are separate genuine app-window captures, with native
-decoration and shadow. Do not turn a promotional composition into a Flathub
-screenshot or replace raw screenshots with historical Mac masters. Follow
+Linux listing screenshots are separate genuine app-window captures. Native
+decoration and shadow are required; the current noncomposited candidates need a
+composited recapture. See [Linux listing captures](linux-listing-capture.md).
+Do not turn a promotional composition into a Flathub screenshot or replace raw
+screenshots with historical Mac masters. Follow
 [marketing artwork](marketing-artwork.md) for invented demo media and its credits,
 then the current [Flathub screenshot rules](https://docs.flathub.org/docs/for-app-authors/metainfo-guidelines/quality-guidelines#screenshots).
 
@@ -50,12 +52,15 @@ and record their hashes rather than assuming byte-identical output.
 
 The editable model is `apps/desktop/assets/brand/hat.py`, adapted from the existing
 desktop launch film's model. Its geometry follows `mark.svg`; it retains the
-same satin materials, lighting and three-quarter camera. It contains only still
-rendering. Blender 4.5 generated the 3072-pixel master at 96 samples with a
-transparent background. To rebuild that master with Blender on your path:
+same satin materials, lighting and three-quarter camera. Sharp cut edges keep
+the smooth crown's normals separate from the flat triangle walls. It contains
+only still rendering. Blender 4.5 generated the 3072-pixel master at 96 samples
+with a transparent background. To rebuild that master with Blender on your path:
 
 ```sh
-blender -b -P apps/desktop/assets/brand/hat.py -- --out apps/desktop/assets/brand/hat.png
+nice -n 10 blender -b -t 4 -P apps/desktop/assets/brand/hat.py -- \
+  --out apps/desktop/assets/brand/hat.png --size 3072 --samples 96 \
+  --view three-quarter --background transparent
 node apps/desktop/scripts/store-artwork.ts
 pnpm exec prettier --write docs/assets/store/manifest.json
 ```

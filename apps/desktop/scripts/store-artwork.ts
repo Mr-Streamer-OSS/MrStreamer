@@ -147,7 +147,6 @@ await writeFile(
       direction: "B: The signature, selected by Wout on 2026-10-23",
       acceptance:
         "Candidate exports. Final visual acceptance and listing publication are separate.",
-      sourceRevision: "e1fd4f6f39ac0e3577b1df480d2e1e90e32f0a6e",
       provenance: {
         hat: "Existing Mr. Streamer launch-film model, derived from mark.svg. Static Blender 4.5 render, 3072px, 96 samples. No generative image model or product UI is used.",
         font: "Inter variable, SIL Open Font License 1.1. Licence included beside the font.",

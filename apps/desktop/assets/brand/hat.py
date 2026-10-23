@@ -210,6 +210,13 @@ def cut_play(crown):
     cut.solver = "EXACT"
     play.hide_render = True
     play.hide_viewport = True
+    # Keep the crown smooth without blending its normals across the flat cut walls.
+    bpy.context.view_layer.update()
+    evaluated = crown.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    mesh = bpy.data.meshes.new_from_object(evaluated)
+    crown.modifiers.clear()
+    crown.data = mesh
+    mesh.set_sharp_from_angle(angle=math.radians(30))
     return play
 
 
