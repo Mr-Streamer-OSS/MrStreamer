@@ -560,7 +560,7 @@ describe("analytics delivery and deadlines", () => {
       transport: {
         async send(event, signal) {
           const result = await local.send(event, signal);
-          answered++;
+          if (event.event !== "app_version_observed") answered++;
           return result;
         },
       },
