@@ -170,10 +170,11 @@ export interface Provider {
     signal?: AbortSignal,
   ): Promise<ArchiveStream>;
   /**
-   * Requests an address `liveStream` or `titleFile` gave, the way `providerFetch` does: never
-   * sending the login unencrypted after an https address.
+   * Requests an address `liveStream`, `archiveStream` or `titleFile` gave, or, with that address
+   * as `from`, one its playlists named, the way `providerFetch` does: never sending the login
+   * unencrypted after an https address.
    */
-  request(url: string, init?: RequestInit): Promise<Response>;
+  request(url: string, init?: RequestInit, from?: string): Promise<Response>;
   /**
    * The provider's programme guide, or that it has none. A playlist reads its first line again
    * for it, so a guide its publisher added, moved or dropped since is found.
@@ -216,30 +217,41 @@ const REDIRECTS: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 20;
 
 /**
- * Fetch for a provider's addresses, which carry `login`, its username and password. It follows
- * GET redirects itself and refuses one that `exposesLogin`, so an https address never sends the
- * login unencrypted. Its errors name no address beyond its origin.
+ * Fetch for a provider's addresses, which carry `login`: its username and password, or what else
+ * of a playlist's link can be one. It follows GET redirects itself. After an https address it
+ * sends nothing to http that holds the login (`exposesLogin`), so the login never travels
+ * unencrypted, and a header that holds it goes to no other origin (`sentWith`). `from` is the
+ * stream's address when its playlists named `url`, as they name variants, segments and keys:
+ * those are held to `from` as its redirects are. Its errors name no address beyond its origin.
  */
 export function providerFetch(fetchImpl: typeof fetch, login: readonly string[]) {
-  return async (url: string, init: RequestInit = {}): Promise<Response> => {
+  return async (url: string, init: RequestInit = {}, from = url): Promise<Response> => {
     try {
-      const start = new URL(url);
-      let target = start;
+      const admitted = new URL(from);
+      const headers = new Headers(init.headers);
+      let target = new URL(url);
       for (let redirects = 0; ; redirects++) {
-        const response = await fetchImpl(target.href, { ...init, redirect: "manual" });
+        if (exposesLogin(admitted, target, login)) {
+          throw new TypeError(
+            redirects === 0
+              ? t(
+                  "The stream's playlist named an unencrypted address with your login in it, so Mr. Streamer stopped.",
+                )
+              : t(
+                  "It redirected to an unencrypted address with your login in it, so Mr. Streamer stopped.",
+                ),
+          );
+        }
+        const response = await fetchImpl(target.href, {
+          ...init,
+          headers: sentWith(headers, admitted, target, login),
+          redirect: "manual",
+        });
         const location = REDIRECTS.has(response.status) ? response.headers.get("location") : null;
         if (location === null) return response;
         void response.body?.cancel().catch(() => {});
         if (redirects === MAX_REDIRECTS) throw new TypeError(t("It redirected too many times."));
-        const next = new URL(location, target);
-        if (exposesLogin(start, next, login)) {
-          throw new TypeError(
-            t(
-              "It redirected to an unencrypted address with your login in it, so Mr. Streamer stopped.",
-            ),
-          );
-        }
-        target = next;
+        target = new URL(location, target);
       }
     } catch (cause) {
       throw withoutAddress(cause);
@@ -248,27 +260,89 @@ export function providerFetch(fetchImpl: typeof fetch, login: readonly string[])
 }
 
 /**
- * Whether following a redirect to `target` sends the login unencrypted when the request started
- * at an https address: an http target whose user info, path segments or query values hold the
- * username or the password. One that holds neither, such as a stream's address with a token of
- * its own, is followed. The stricter rule, never following https to http, would be
- * `start.protocol === "https:" && target.protocol === "http:"`.
+ * Whether a request to `target` sends the login unencrypted, its stream's address `admitted`
+ * being https: an http target whose user info, path segments or query hold any of the login
+ * (`holds`). One that holds none, such as a stream's address with a token of its own, is asked.
+ * The stricter rule, never following https to http, would be
+ * `admitted.protocol === "https:" && target.protocol === "http:"`.
  */
-function exposesLogin(start: URL, target: URL, login: readonly string[]): boolean {
-  if (start.protocol !== "https:" || target.protocol !== "http:") return false;
+function exposesLogin(admitted: URL, target: URL, login: readonly string[]): boolean {
+  if (admitted.protocol !== "https:" || target.protocol !== "http:") return false;
   const parts = [
-    ...[target.username, target.password, ...target.pathname.split("/")].map(decoded),
+    target.username,
+    target.password,
+    ...target.pathname.split("/"),
     ...target.searchParams.values(),
   ];
-  return login.some((secret) => secret !== "" && parts.includes(secret));
+  return login.some(
+    (secret) =>
+      secret !== "" &&
+      // A long one counts in the query's keys as well, a short one only in its values.
+      [...parts, ...(secret.length >= ANYWHERE ? [target.search] : [])].some((part) =>
+        holds(part, secret),
+      ),
+  );
 }
 
-function decoded(text: string): string {
-  try {
-    return decodeURIComponent(text);
-  } catch {
-    return text;
+/**
+ * The headers a request to `target` carries: all of them at the origin of its stream's address,
+ * `admitted`. Elsewhere one that holds any of the login stays behind, except a Referer, which
+ * goes cut to its origin, as a browser sends one to another origin.
+ */
+function sentWith(headers: Headers, admitted: URL, target: URL, login: readonly string[]): Headers {
+  if (target.origin === admitted.origin) return headers;
+  const holdsLogin = (text: string) => login.some((secret) => secret !== "" && holds(text, secret));
+  const sent = new Headers();
+  headers.forEach((value, name) => {
+    if (!holdsLogin(value)) sent.set(name, value);
+    else if (name === "referer") {
+      const origin = URL.parse(value)?.origin;
+      if (origin && origin !== "null" && !holdsLogin(origin)) sent.set(name, `${origin}/`);
+    }
+  });
+  return sent;
+}
+
+/**
+ * A value of the login this long counts wherever it is, joined to other text too. A shorter one,
+ * such as the `ts` a panel's playlist link asks for, can be part of anything (`index.ts`), so it
+ * counts only as a whole part.
+ */
+const ANYWHERE = 8;
+/** What runs on in a name, as in `index.m3u8` or `seg_1.ts`: beside it, a value is part of one. */
+const NAME = /[\p{L}\p{N}\-._~]/u;
+
+/**
+ * Whether `text`, decoded as many times as it was percent-encoded, holds `secret`: anywhere for
+ * one of `ANYWHERE` characters or more, so joined to other text, as in `user:password`, it is
+ * still found; a shorter one only between characters that end a name, as in `auth=guest:k9x`.
+ */
+function holds(text: string, secret: string): boolean {
+  for (let form = text, rounds = 0; ; rounds++) {
+    if (secret.length >= ANYWHERE ? form.includes(secret) : whole(form, secret)) return true;
+    const next = decoded(form);
+    if (next === form || rounds === 4) return false;
+    form = next;
   }
+}
+
+/** Whether `secret` is in `text` without a name's character right before or after it. */
+function whole(text: string, secret: string): boolean {
+  for (let at = text.indexOf(secret); at !== -1; at = text.indexOf(secret, at + 1)) {
+    if (!NAME.test(text[at - 1] ?? "") && !NAME.test(text[at + secret.length] ?? "")) return true;
+  }
+  return false;
+}
+
+/** `text` with its percent-encoded characters decoded; a `%` that encodes none stays as it is. */
+function decoded(text: string): string {
+  return text.replace(/(?:%[\da-f]{2})+/gi, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
 }
 
 /**

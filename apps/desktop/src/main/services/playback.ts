@@ -1043,7 +1043,14 @@ function make(deps: PlaybackDeps) {
           const input = await openHlsTsInput(
             variant.url,
             async (address, signal) => {
-              const answer = await connect(session, address, variant.headers, signal, []);
+              const answer = await connect(
+                session,
+                address,
+                variant.headers,
+                signal,
+                [],
+                variant.url,
+              );
               if (!answer.ok) throw new HlsInputFailure(answer.failure);
               return answer.response;
             },
@@ -1473,24 +1480,33 @@ function make(deps: PlaybackDeps) {
       const range: Record<string, string> = request.headers.range
         ? { Range: request.headers.range }
         : {};
-      // With what the player adds: delivery directives (_HLS_msn) to a low-latency playlist.
-      const requestFor = (address: string, headers: Readonly<Record<string, string>>) => {
+      // With what the player adds: delivery directives (_HLS_msn) to a low-latency playlist. Every
+      // address the stream's playlists name is held to the stream's own, `variant.url`.
+      const requestFor = (address: string, variant: LiveSession["variants"][number]) => {
         const upstreamUrl = new URL(address);
         for (const [name, value] of url.searchParams) upstreamUrl.searchParams.set(name, value);
-        return connect(session, upstreamUrl.href, { ...headers, ...range }, signal, []);
+        return connect(
+          session,
+          upstreamUrl.href,
+          { ...variant.headers, ...range },
+          signal,
+          [],
+          variant.url,
+        );
       };
 
       try {
         if (id !== null) {
           const address = addresses.addressOf(subtitle ? id.slice(5) : id);
-          if (!address) {
-            response.writeHead(410).end();
-            return;
-          }
+          // The stream whose playlists named it: the one the session delivers.
           const variant =
             session.variants.find((each) => each.id === session.delivered.variantId) ??
             session.variants[0];
-          const upstream = await requestFor(address, variant?.headers ?? {});
+          if (!address || !variant) {
+            response.writeHead(410).end();
+            return;
+          }
+          const upstream = await requestFor(address, variant);
           const opened = upstream.ok ? await readStart(upstream.response, address) : null;
           if (signal.aborted) {
             void opened?.reader.cancel().catch(() => {});
@@ -1515,7 +1531,7 @@ function make(deps: PlaybackDeps) {
           : session.variants;
         let failure: StreamFailure = noStream;
         for (const variant of variants) {
-          const upstream = await requestFor(variant.url, variant.headers);
+          const upstream = await requestFor(variant.url, variant);
           const opened = upstream.ok ? await readStart(upstream.response, variant.url) : null;
           if (signal.aborted) {
             void opened?.reader.cancel().catch(() => {});
@@ -3102,7 +3118,8 @@ function make(deps: PlaybackDeps) {
 
     /**
      * Requests `url` through the session's provider, retrying briefly when it refuses: it can take
-     * a moment to free the connection of a request we just closed.
+     * a moment to free the connection of a request we just closed. `from` is the stream's own
+     * address when one of its playlists named `url`, which is held to that address's encryption.
      */
     async function connect(
       session: Session,
@@ -3110,6 +3127,7 @@ function make(deps: PlaybackDeps) {
       headers: Readonly<Record<string, string>>,
       signal: AbortSignal,
       retryDelays: readonly number[] = REFUSED_RETRY_DELAYS_MS,
+      from = url,
     ): Promise<{ ok: true; response: Response } | { ok: false; failure: StreamFailure }> {
       for (let attempt = 0; ; attempt++) {
         const timeout = new AbortController();
@@ -3120,10 +3138,11 @@ function make(deps: PlaybackDeps) {
           if (session.kind === "title")
             session.headers.forEach((value, name) => requested.set(name, value));
           new Headers(headers).forEach((value, name) => requested.set(name, value));
-          response = await session.request(url, {
-            headers: requested,
-            signal: AbortSignal.any([signal, timeout.signal]),
-          });
+          response = await session.request(
+            url,
+            { headers: requested, signal: AbortSignal.any([signal, timeout.signal]) },
+            from,
+          );
         } catch (cause) {
           return {
             ok: false,

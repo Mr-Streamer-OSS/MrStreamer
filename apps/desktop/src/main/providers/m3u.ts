@@ -277,14 +277,15 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
       };
     },
 
-    request(url, init) {
+    request(url, init, from = url) {
       // Title credentials belong to exact imported files. Live keeps its existing redirect policy.
-      return titleAddresses.has(url)
-        ? providerFetch(options.fetch ?? fetch, [...loginIn(account.link), ...loginIn(url)])(
+      return titleAddresses.has(from)
+        ? providerFetch(options.fetch ?? fetch, [...loginIn(account.link), ...loginIn(from)])(
             url,
             init,
+            from,
           )
-        : fetchImpl(url, init);
+        : fetchImpl(url, init, from);
     },
 
     /**
