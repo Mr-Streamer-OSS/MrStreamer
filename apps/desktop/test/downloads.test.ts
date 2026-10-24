@@ -2,7 +2,7 @@
 // the loopback proxy for copies, and a disk that can fail the way a full or missing one does.
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
@@ -125,6 +125,13 @@ async function copyOf(dataDir: string, id: string): Promise<Buffer> {
   const media = names.find((name) => name.startsWith("media.") && !name.endsWith(".part"));
   if (!media) throw new Error(`No copy in ${names.join(", ")}`);
   return readFile(join(dataDir, "downloads", id, media));
+}
+
+/** The bytes in a download's partial file, or null without one. */
+async function partial(dataDir: string, id: string): Promise<number | null> {
+  const names = await readdir(join(dataDir, "downloads", id)).catch((): string[] => []);
+  const part = names.find((name) => name.endsWith(".part"));
+  return part ? (await stat(join(dataDir, "downloads", id, part))).size : null;
 }
 
 /** A file's bytes as one short string, so a mismatch fails without comparing them byte by byte. */
@@ -1250,6 +1257,364 @@ describe.skipIf(!hasTools)("downloads", () => {
     );
     expect(await subtitles.saved(copy.sessionId)).toBeNull();
     await playback.close(copy.sessionId);
+  }, 60_000);
+});
+
+describe.skipIf(!hasTools)("the queue", () => {
+  /** How main lists the downloads now: each one's id and how it stands, in its order. */
+  const standing = async (downloads: Awaited<ReturnType<typeof app>>["downloads"]) =>
+    (await downloads.list()).items.map((item) => [item.id, item.status.kind]);
+  const quiet = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it("pauses a transfer once its request ended, keeps its partial file, and goes on only when resumed", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    provider.stallMovieFile(film.id, 200_000, 60_000);
+    const queued = await downloads.add(film.ref);
+    await vi.waitFor(
+      async () =>
+        expect((await find(queued.id))?.status).toMatchObject({
+          kind: "transferring",
+          received: 200_000,
+        }),
+      { timeout: LONG },
+    );
+    const asked = provider.fileRequests();
+    await downloads.pause(queued.id);
+    // Answered once the request ended: nothing more is sent, and its partial file stays.
+    const sent = provider.fileBytes();
+    const paused = { kind: "paused", received: 200_000, size: film.bytes.length };
+    expect((await find(queued.id))?.status).toEqual(paused);
+    expect(await partial(dataDir, queued.id)).toBe(200_000);
+    await vi.waitFor(() => expect(provider.activeStreams()).toBe(0), { timeout: 1000 });
+    // Nothing takes it again: not the queue, nor the next start.
+    await quiet(1000);
+    expect(provider.fileRequests()).toBe(asked);
+    await quit();
+    const again = await app(dataDir);
+    await quiet(1000);
+    expect((await again.find(queued.id))?.status).toEqual(paused);
+    expect(provider.fileRequests()).toBe(asked);
+    expect(provider.fileBytes()).toBe(sent);
+
+    // Resumed, it goes on from the partial file, which the provider proves is of the same file.
+    provider.stallMovieFile(film.id, Number.MAX_SAFE_INTEGER, 0);
+    await again.downloads.resume(queued.id);
+    await vi.waitFor(
+      async () => expect((await again.find(queued.id))?.status.kind).toBe("complete"),
+      { timeout: LONG },
+    );
+    expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(film.bytes));
+    expect(provider.fileBytes() - sent).toBe(film.bytes.length - 200_000);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  }, 60_000);
+
+  it("keeps a pause through playback and a receiver taking the connection, then goes on in order", async () => {
+    const { provider, subscriptionId, downloads, playback, onDemand, find } = await connected();
+    const [first, held, last, shown] = [
+      "TEST | Two sound tracks and subtitles (MULTI)",
+      "TEST | Old AVI",
+      "TEST | Long subtitles",
+      "TEST | Index at the end",
+    ].map((name) => movie(provider, subscriptionId, name));
+    provider.stallMovieFile(first!.id, 200_000, 60_000);
+    provider.stallMovieFile(last!.id, 30_000, 60_000);
+    const a = (await downloads.add(first!.ref)).id;
+    const b = (await downloads.add(held!.ref)).id;
+    const c = (await downloads.add(last!.ref)).id;
+    await vi.waitFor(
+      async () =>
+        expect((await find(a))?.status).toMatchObject({ kind: "transferring", received: 200_000 }),
+      { timeout: LONG },
+    );
+    await downloads.pause(b);
+    // Playback of the subscription takes the connection: the others wait, the paused one says so.
+    const file = await onDemand.file(shown!.ref);
+    const playing = await playback.openTitle(shown!.ref, file.url, DECODERS, file);
+    await vi.waitFor(async () =>
+      expect(await standing(downloads)).toEqual([
+        [a, "waiting"],
+        [b, "paused"],
+        [c, "waiting"],
+      ]),
+    );
+    await playback.close(playing.sessionId);
+    // Given back, the first goes on and finishes; the paused one is passed over for the last.
+    await vi.waitFor(
+      async () =>
+        expect(await standing(downloads)).toEqual([
+          [c, "transferring"],
+          [b, "paused"],
+          [a, "complete"],
+        ]),
+      { timeout: LONG },
+    );
+    await vi.waitFor(async () =>
+      expect((await find(c))?.status).toMatchObject({ received: 30_000 }),
+    );
+    // A receiver takes it too, and gives it back to the same one.
+    const receiving = await playback.openReceiverTitle(shown!.ref, file.url, {
+      address: "127.0.0.1",
+      decoders: DECODERS,
+    });
+    await vi.waitFor(async () =>
+      expect(await standing(downloads)).toEqual([
+        [b, "paused"],
+        [c, "waiting"],
+        [a, "complete"],
+      ]),
+    );
+    provider.stallMovieFile(last!.id, Number.MAX_SAFE_INTEGER, 0);
+    await playback.close(receiving.sessionId);
+    await vi.waitFor(async () => expect((await find(c))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    // Neither gave the pause back: only Resume does.
+    await quiet(500);
+    expect((await find(b))?.status).toEqual({ kind: "paused", received: 0, size: null });
+    await downloads.resume(b);
+    await vi.waitFor(async () => expect((await find(b))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  }, 60_000);
+
+  it("moves the downloads waiting their turn, keeps the order through a restart, and never stops the transfer", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected();
+    const titles = [
+      "TEST | Two sound tracks and subtitles (MULTI)",
+      "TEST | Index at the end",
+      "TEST | Old AVI",
+      "TEST | Long subtitles",
+    ].map((name) => movie(provider, subscriptionId, name));
+    provider.stallMovieFile(titles[0]!.id, 200_000, 60_000);
+    // Added one after another, as a season's episodes are, they go in that order.
+    const ids: string[] = [];
+    for (const title of titles) ids.push((await downloads.add(title.ref)).id);
+    const [a, b, c, d] = ids as [string, string, string, string];
+    await vi.waitFor(
+      async () =>
+        expect((await find(a))?.status).toMatchObject({ kind: "transferring", received: 200_000 }),
+      { timeout: LONG },
+    );
+    const order = async () => (await downloads.list()).items.map((item) => item.id);
+    expect(await order()).toEqual([a, b, c, d]);
+    const asked = provider.fileRequests();
+    await downloads.move(d, -1);
+    await downloads.move(d, -1);
+    expect(await order()).toEqual([a, d, b, c]);
+    // The first waiting goes no earlier, the last no later, and the transfer doesn't move.
+    await downloads.move(d, -1);
+    await downloads.move(c, 1);
+    await downloads.move(a, 1);
+    expect(await order()).toEqual([a, d, b, c]);
+    // A paused one keeps its place, and moves as the others do.
+    await downloads.pause(b);
+    await downloads.move(b, 1);
+    expect(await standing(downloads)).toEqual([
+      [a, "transferring"],
+      [d, "queued"],
+      [c, "queued"],
+      [b, "paused"],
+    ]);
+    // None of it stopped the transfer.
+    expect((await find(a))?.status).toMatchObject({ received: 200_000 });
+    expect(provider.fileRequests()).toBe(asked);
+
+    await quit();
+    provider.stallMovieFile(titles[3]!.id, 30_000, 60_000);
+    const again = await app(dataDir);
+    // The first goes on at the start and finishes; then the one moved up, not the one added next.
+    await vi.waitFor(
+      async () =>
+        expect(await standing(again.downloads)).toEqual([
+          [d, "transferring"],
+          [c, "queued"],
+          [b, "paused"],
+          [a, "complete"],
+        ]),
+      { timeout: LONG },
+    );
+    // Pause all stops the transfer and holds the rest; Resume all starts again from the first.
+    await vi.waitFor(async () =>
+      expect((await again.find(d))?.status).toMatchObject({ received: 30_000 }),
+    );
+    await again.downloads.pauseAll();
+    expect(await standing(again.downloads)).toEqual([
+      [d, "paused"],
+      [c, "paused"],
+      [b, "paused"],
+      [a, "complete"],
+    ]);
+    await vi.waitFor(() => expect(provider.activeStreams()).toBe(0), { timeout: 1000 });
+    provider.stallMovieFile(titles[3]!.id, Number.MAX_SAFE_INTEGER, 0);
+    await again.downloads.resumeAll();
+    await vi.waitFor(
+      async () =>
+        expect(await standing(again.downloads)).toEqual([
+          [b, "complete"],
+          [c, "complete"],
+          [d, "complete"],
+          [a, "complete"],
+        ]),
+      { timeout: LONG },
+    );
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  }, 90_000);
+
+  it("starts a paused download again, and says so, when the provider's file changed meanwhile", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    provider.stallMovieFile(film.id, 200_000, 60_000);
+    const queued = await downloads.add(film.ref);
+    await vi.waitFor(
+      async () => expect((await find(queued.id))?.status).toMatchObject({ received: 200_000 }),
+      { timeout: LONG },
+    );
+    await downloads.pause(queued.id);
+    const replacement = fixture("title-long-subs.mkv");
+    provider.replaceMovieFile(film.id, replacement);
+    provider.stallMovieFile(film.id, 30_000, 1500);
+    const sent = provider.fileBytes();
+    await downloads.resume(queued.id);
+    await vi.waitFor(
+      async () =>
+        expect((await find(queued.id))?.status).toMatchObject({
+          kind: "transferring",
+          received: 30_000,
+          restarted: true,
+        }),
+      { timeout: LONG },
+    );
+    await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    // The new file whole, never the old bytes with the new ones after them.
+    expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(replacement));
+    expect(provider.fileBytes() - sent).toBe(replacement.length);
+  }, 60_000);
+
+  it("changes nothing when a pause or a move can't be written down, and holds once asked again", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find } = await connected();
+    const [first, second, third] = [
+      "TEST | Two sound tracks and subtitles (MULTI)",
+      "TEST | Index at the end",
+      "TEST | Old AVI",
+    ].map((name) => movie(provider, subscriptionId, name));
+    provider.stallMovieFile(first!.id, 200_000, 60_000);
+    provider.stallMovieFile(third!.id, 30_000, 60_000);
+    const a = (await downloads.add(first!.ref)).id;
+    const b = (await downloads.add(second!.ref)).id;
+    const c = (await downloads.add(third!.ref)).id;
+    await vi.waitFor(
+      async () => expect((await find(a))?.status).toMatchObject({ received: 200_000 }),
+      { timeout: LONG },
+    );
+    const asked = provider.fileRequests();
+    // Another copy of the app holds the database's write lock past the second the app waits.
+    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    lock.exec("begin exclusive");
+    try {
+      const unwritten = { error: { kind: "unexpected" } };
+      await expect(downloads.pause(a)).rejects.toMatchObject(unwritten);
+      await expect(downloads.move(c, -1)).rejects.toMatchObject(unwritten);
+      await expect(downloads.pauseAll()).rejects.toMatchObject(unwritten);
+    } finally {
+      lock.exec("rollback");
+      lock.close();
+    }
+    // The transfer went on and nothing moved.
+    expect(await standing(downloads)).toEqual([
+      [a, "transferring"],
+      [b, "queued"],
+      [c, "queued"],
+    ]);
+    expect(provider.activeStreams()).toBe(1);
+    expect(provider.fileRequests()).toBe(asked);
+    // Asked again, each is kept.
+    await downloads.move(c, -1);
+    await downloads.pause(a);
+    await vi.waitFor(
+      async () =>
+        expect(await standing(downloads)).toEqual([
+          [c, "transferring"],
+          [a, "paused"],
+          [b, "queued"],
+        ]),
+      { timeout: LONG },
+    );
+  }, 60_000);
+
+  it("leaves nothing of a download removed as it pauses, and pauses no copy or one that just finished", async () => {
+    // The first partial file holds its flush until the test lets it go, and says when it closes.
+    const flushing = Promise.withResolvers<void>();
+    const flushed = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    let holding = true;
+    const disk: Disk = {
+      ...fileDisk,
+      write: (path, start) => {
+        const sink = fileDisk.write(path, start);
+        if (!holding) return sink;
+        holding = false;
+        return new Writable({
+          write: (chunk, encoding, done) => void sink.write(chunk, encoding, done),
+          final: (done) => {
+            flushing.resolve();
+            void flushed.promise.then(() => {
+              if (!sink.destroyed) sink.end(() => done());
+            });
+          },
+          destroy: (error, done) => {
+            sink.destroy();
+            closed.resolve();
+            done(error);
+          },
+        });
+      },
+    };
+    const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected({}, disk);
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const held = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    // Paused as its every byte is in and only the flush is left: no copy is made of it.
+    const last = (await downloads.add(film.ref)).id;
+    await flushing.promise;
+    const pausing = downloads.pause(last);
+    await closed.promise;
+    flushed.resolve();
+    await pausing;
+    expect((await find(last))?.status).toMatchObject({ kind: "paused" });
+    expect(await readdir(join(dataDir, "downloads", last))).not.toContain("media.mp4");
+    await downloads.resume(last);
+    await vi.waitFor(async () => expect((await find(last))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    expect(digest(await copyOf(dataDir, last))).toBe(digest(film.bytes));
+    // A copy has nothing to pause, resume or move.
+    await downloads.pause(last);
+    await downloads.move(last, -1);
+    expect((await find(last))?.status.kind).toBe("complete");
+
+    // Paused and cancelled at once: gone, its files too, whichever came first.
+    provider.stallMovieFile(held.id, 200_000, 60_000);
+    const going = (await downloads.add(held.ref)).id;
+    await vi.waitFor(
+      async () => expect((await find(going))?.status).toMatchObject({ received: 200_000 }),
+      { timeout: LONG },
+    );
+    const [paused, removed] = await Promise.allSettled([
+      downloads.pause(going),
+      downloads.remove(going),
+    ]);
+    expect(removed.status).toBe("fulfilled");
+    if (paused.status === "rejected")
+      expect(paused.reason).toMatchObject({ error: { kind: "unexpected" } });
+    await vi.waitFor(() => expect(provider.activeStreams()).toBe(0), { timeout: 1000 });
+    expect(await standing(downloads)).toEqual([[last, "complete"]]);
+    expect(await readdir(join(dataDir, "downloads"))).toEqual([last]);
+    await quit();
+    const again = await app(dataDir);
+    expect(await standing(again.downloads)).toEqual([[last, "complete"]]);
   }, 60_000);
 });
 
