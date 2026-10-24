@@ -357,6 +357,65 @@ describe("the queue on the Downloads page", () => {
     expect(document.activeElement).toBe(document.body);
   });
 
+  /**
+   * The rows of a move that main keeps while an older list, made before it, still takes away a
+   * row above it: the transfer, then B, C and D waiting, D moved up past C.
+   */
+  const passing = () => {
+    const [b, c, d] = ["B", "C", "D"].map((name) =>
+      download({ id: name.toLowerCase(), name, status: { kind: "queued" } }),
+    );
+    return { b: b!, c: c!, d: d! };
+  };
+
+  it("keeps a move's keyboard through an older list that only took a row above it away, its answer first", async () => {
+    const { b, c, d } = passing();
+    ipc.always("downloads.list", list([running, b, c, d]));
+    const page = await show(createElement(DownloadsPage), "[data-download]");
+    const up = () => labelled(rowOf(page, "d"), "Move D up")!;
+    await act(async () => up().focus());
+    const answer = ipc.hold("downloads.move");
+    await click(up());
+    await act(async () => answer.resolve(null));
+    // Made before the move: B went, D is no further up than C.
+    await changed(list([running, c, d]), () => order(page).join() === "running,c,d");
+    await changed(list([running, d, c]), () => order(page).join() === "running,d,c");
+    expect(up().disabled).toBe(true);
+    expect(document.activeElement).toBe(labelled(rowOf(page, "d"), "Move D down"));
+  });
+
+  it("keeps a move's keyboard through an older list that only took a row above it away, that list first", async () => {
+    const { b, c, d } = passing();
+    ipc.always("downloads.list", list([running, b, c, d]));
+    const page = await show(createElement(DownloadsPage), "[data-download]");
+    const up = () => labelled(rowOf(page, "d"), "Move D up")!;
+    await act(async () => up().focus());
+    const answer = ipc.hold("downloads.move");
+    await click(up());
+    await changed(list([running, c, d]), () => order(page).join() === "running,c,d");
+    await act(async () => answer.resolve(null));
+    await changed(list([running, d, c]), () => order(page).join() === "running,d,c");
+    expect(up().disabled).toBe(true);
+    expect(document.activeElement).toBe(labelled(rowOf(page, "d"), "Move D down"));
+  });
+
+  it("ends a move's keyboard once the neighbour it moved around is gone, taking nothing later", async () => {
+    const { b, c, d } = passing();
+    ipc.always("downloads.list", list([running, b, c, d]));
+    const page = await show(createElement(DownloadsPage), "[data-download]");
+    const up = () => labelled(rowOf(page, "d"), "Move D up")!;
+    await act(async () => up().focus());
+    const answer = ipc.hold("downloads.move");
+    await click(up());
+    await act(async () => answer.resolve(null));
+    // C went too: which neighbour main moved it around can't be told any more.
+    await changed(list([running, b, d]), () => order(page).join() === "running,b,d");
+    expect(document.activeElement).toBe(up());
+    await act(async () => up().blur());
+    await changed(list([running, d, b]), () => order(page).join() === "running,d,b");
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it("says a change it couldn't keep, and keeps the control to press again", async () => {
     ipc.always("downloads.list", list([running, next]));
     const unwritten = { kind: "unexpected", detail: "database is locked" } as const;
