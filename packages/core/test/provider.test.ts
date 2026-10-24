@@ -274,3 +274,80 @@ describe("an Xtream account's login, however short", () => {
     expect(reached.map((each) => each.path)).toEqual(["/relay/live.ts?token=7f3a"]);
   });
 });
+
+describe("an Xtream password as each part of an address spells it", () => {
+  // A path and a header read "+" as a plus; a query reads it as a space as well, as a form spells
+  // one. An escape that is no UTF-8 reads as U+FFFD, and the characters beside it still count.
+  /** An account with `password`, its https addresses all redirecting to `target` on http. */
+  const redirecting = (password: string, target: string) =>
+    xtreamProvider(
+      { server: "https://panel.test", username: "viewer7", password },
+      {
+        userAgent: "fixture",
+        fetch: async (input, init) =>
+          new URL(String(input)).protocol === "http:"
+            ? fetch(input, init)
+            : new Response(null, { status: 302, headers: { location: `${plain}${target}` } }),
+      },
+    );
+  /** Asks for the account's live stream. */
+  const ask = async (provider: ReturnType<typeof redirecting>, init?: RequestInit) =>
+    provider.request((await provider.liveStream("1")).url, init);
+  /** `text` with each character percent-encoded, then encoded `times` more times. */
+  const encoded = (text: string, times: number) =>
+    Array.from({ length: times }).reduce<string>(
+      (each) => encodeURIComponent(each),
+      [...text].map((character) => `%${character.charCodeAt(0).toString(16)}`).join(""),
+    );
+
+  it.each([
+    ["q+x", "a path segment, its plus as written and the rest escaped", "/%71+%78/live.ts"],
+    ["q+x", "a query value spelled that way", "/live.ts?auth=%71+%78"],
+    ["q+x", "a query name spelled that way", "/live.ts?%71+%78"],
+    ["open sesame", "a query value, its space a plus", "/live.ts?auth=open+sesame"],
+    ["q7x", "a query value beside an escape that is no UTF-8", "/live.ts?auth=x%FF%71%37%78y"],
+    ["q7x", "a query name beside one", "/live.ts?%71%37%78%FF"],
+    ["q7x", "a path segment after a character cut short", "/%E2%82%71%37%78/live.ts"],
+    ["pässwörd", "a path segment in UTF-8 escapes after a stray byte", "/%FF%70%C3%A4ssw%C3%B6rd/"],
+    ["q7x", "a query value after a % that encodes nothing", "/live.ts?auth=%%71%37%78"],
+  ])("refuses a redirect to http with the password %s in %s", async (password, _case, target) => {
+    await expect(ask(redirecting(password, target))).rejects.toThrow("unencrypted");
+    expect(reached).toEqual([]);
+  });
+
+  it.each([
+    ["open sesame", "a path's plus, which is no space there", "/open+sesame/live.ts"],
+    ["q7x", "an escape that is no UTF-8, and no password", "/caf%E9/live.ts"],
+    ["q7x", "a % that encodes nothing", "/100%/live.ts?step=%zz"],
+    ["q7x", "a value encoded four times, as deep as it is read", `/live.ts?v=${encoded("ok", 3)}`],
+  ])("follows a redirect to http for the password %s with %s", async (password, _case, target) => {
+    expect(await (await ask(redirecting(password, target))).text()).toBe("plain");
+    expect(reached.map((each) => each.path)).toEqual([target]);
+  });
+
+  it("refuses a value encoded once more than that, as it can't tell what it holds", async () => {
+    const target = `/live.ts?v=${encoded("ok", 4)}`;
+    await expect(ask(redirecting("q7x", target))).rejects.toThrow("unencrypted");
+    expect(reached).toEqual([]);
+  });
+
+  it.each([
+    ["q+x", "https://site.test/%71+%78/watch", "https://site.test/"],
+    ["q7x", "https://site.test/watch/%71%37%78%FF", "https://site.test/"],
+    ["open sesame", "https://site.test/watch?auth=open+sesame", "https://site.test/"],
+    ["open sesame", "https://site.test/open+sesame/watch", "https://site.test/open+sesame/watch"],
+  ])("takes the password %s's Referer %s to http as %s", async (password, referer, sent) => {
+    await ask(redirecting(password, "/relay/live.ts?token=7f3a"), {
+      headers: { Referer: referer },
+    });
+    expect(reached.map((each) => each.headers.referer)).toEqual([sent]);
+  });
+
+  it("leaves another header behind that spells the password with a plus as written", async () => {
+    const headers = { "X-Session": "%71+%78", Range: "bytes=0-3" };
+    await ask(redirecting("q+x", "/relay/live.ts?token=7f3a"), { headers });
+    expect(reached).toHaveLength(1);
+    expect(reached[0]?.headers).not.toHaveProperty("x-session");
+    expect(reached[0]?.headers.range).toBe("bytes=0-3");
+  });
+});

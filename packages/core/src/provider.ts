@@ -171,8 +171,8 @@ export interface Provider {
   ): Promise<ArchiveStream>;
   /**
    * Requests an address `liveStream`, `archiveStream` or `titleFile` gave, or, with that address
-   * as `from`, one its playlists named, the way `providerFetch` does: never sending the login
-   * unencrypted after an https address.
+   * as `from`, one its playlists named, the way `providerFetch` does: after an https address,
+   * sending http nothing that holds the login as it recognizes it.
    */
   request(url: string, init?: RequestInit, from?: string): Promise<Response>;
   /**
@@ -230,8 +230,8 @@ export interface ProviderLogin {
 
 /**
  * Fetch for a provider's addresses, which carry `login`. It follows GET redirects itself. After an
- * https address it sends nothing to http that holds the login (`exposesLogin`), so the login never
- * travels unencrypted, and a header that holds it goes to no other origin (`sentWith`). `from` is
+ * https address it sends nothing to http that holds the login as `exposesLogin` reads it, and a
+ * header that holds it goes to no other origin (`sentWith`). `from` is
  * the stream's address when its playlists named `url`, as they name variants, segments and keys:
  * those are held to `from` as its redirects are. Its errors name no address beyond its origin.
  */
@@ -284,13 +284,14 @@ export function providerFetch(fetchImpl: typeof fetch, login: ProviderLogin) {
  */
 function exposesLogin(admitted: URL, target: URL, login: ProviderLogin): boolean {
   if (admitted.protocol !== "https:" || target.protocol !== "http:") return false;
-  const { username, password, pathname } = target;
+  const { username, password, pathname, search, searchParams } = target;
+  const written: Carried[] = [{ text: username }, { text: password }, { text: pathname }];
   // Uncertain values count in the query's values only: its names, as the `ts` of
   // `?ts=1700000000`, name settings.
   return holdsLogin(
     login,
-    [username, password, pathname, target.search],
-    [username, password, pathname, ...target.searchParams.values()],
+    [...written, { text: search, query: true }],
+    [...written, ...Array.from(searchParams.values(), (text) => ({ text, query: true }))],
   );
 }
 
@@ -301,7 +302,10 @@ function exposesLogin(admitted: URL, target: URL, login: ProviderLogin): boolean
  */
 function sentWith(headers: Headers, admitted: URL, target: URL, login: ProviderLogin): Headers {
   if (target.origin === admitted.origin) return headers;
-  const holds = (text: string) => holdsLogin(login, [text]);
+  // A header reads as written, its "+" a plus; one that is an address, as a Referer is, has a
+  // query as well.
+  const holds = (text: string) =>
+    holdsLogin(login, [{ text }, { text: URL.parse(text)?.search ?? "", query: true }]);
   const sent = new Headers();
   headers.forEach((value, name) => {
     if (!holds(value)) sent.set(name, value);
@@ -314,21 +318,30 @@ function sentWith(headers: Headers, admitted: URL, target: URL, login: ProviderL
 }
 
 /**
+ * Text a request carries: user info, a path or a header, where "+" is a plus, or a query, which
+ * servers read with "+" a space as well, as a form spells one.
+ */
+interface Carried {
+  readonly text: string;
+  readonly query?: boolean;
+}
+
+/**
  * Whether texts hold any of `login`: a secret anywhere in one of `anywhere`, joined to other text
  * as in `user:password` too, and an uncertain value as a whole part of one of `parts`. Each is
  * read as written and decoded (`decodings`). Text still encoded after that counts as holding a
  * secret: what it hides can't be told.
  */
-function holdsLogin(login: ProviderLogin, anywhere: readonly string[], parts = anywhere): boolean {
+function holdsLogin(login: ProviderLogin, anywhere: readonly Carried[], parts = anywhere): boolean {
   const { secrets, uncertain = [] } = login;
   return (
     (secrets.length > 0 &&
-      anywhere.some((text) => {
-        const { forms, deeper } = decodings(text);
+      anywhere.some(({ text, query }) => {
+        const { forms, deeper } = decodings(text, query);
         return deeper || forms.some((form) => secrets.some((secret) => form.includes(secret)));
       })) ||
-    parts.some((text) =>
-      decodings(text).forms.some((form) => uncertain.some((value) => whole(form, value))),
+    parts.some(({ text, query }) =>
+      decodings(text, query).forms.some((form) => uncertain.some((value) => whole(form, value))),
     )
   );
 }
@@ -337,18 +350,28 @@ function holdsLogin(login: ProviderLogin, anywhere: readonly string[], parts = a
 const DECODINGS = 4;
 
 /**
- * `text` as written, then decoded as a query spells it, "+" a space and percent encoding as it
- * says, as long as that changes it: at most `DECODINGS` times. `deeper` when it would change it
- * still.
+ * `text` as written, then decoded (`decoded`) as long as that changes it: at most `DECODINGS`
+ * times, a query's both with "+" a plus and with it a space. `deeper` when either would change
+ * it still.
  */
-function decodings(text: string): { readonly forms: readonly string[]; readonly deeper: boolean } {
+function decodings(
+  text: string,
+  query = false,
+): { readonly forms: readonly string[]; readonly deeper: boolean } {
   const forms = [text];
-  for (let form = text; ;) {
-    const next = decoded(form);
-    if (next === form) return { forms, deeper: false };
-    if (forms.length > DECODINGS) return { forms, deeper: true };
-    forms.push((form = next));
+  let deeper = false;
+  for (const spaces of query ? [false, true] : [false]) {
+    for (let form = text, times = 0; ; times++) {
+      const next = decoded(form, spaces);
+      if (next === form) break;
+      if (times === DECODINGS) {
+        deeper = true;
+        break;
+      }
+      forms.push((form = next));
+    }
   }
+  return { forms, deeper };
 }
 
 /** What runs on in a name, as in `index.m3u8` or `seg_1.ts`: beside it, a value is part of one. */
@@ -366,15 +389,35 @@ function whole(text: string, value: string): boolean {
   return false;
 }
 
-/** `text` decoded once as a query spells it; a `%` that encodes nothing stays as it is. */
-function decoded(text: string): string {
-  return text.replaceAll("+", " ").replace(/(?:%[\da-f]{2})+/gi, (run) => {
-    try {
-      return decodeURIComponent(run);
-    } catch {
-      return run;
+/**
+ * `text` decoded once: its percent escapes as UTF-8 and, with `spaces`, "+" as a space. An escape
+ * that starts no character, as `%FF`, reads as U+FFFD, as URLSearchParams reads it, and those
+ * beside it still decode; a `%` that encodes nothing stays as it is.
+ */
+function decoded(text: string, spaces: boolean): string {
+  return (spaces ? text.replaceAll("+", " ") : text).replace(/(?:%[\da-f]{2})+/gi, utf8);
+}
+
+/** A run of percent escapes read as UTF-8, as `decoded` reads it. */
+function utf8(run: string): string {
+  try {
+    return decodeURIComponent(run);
+  } catch {
+    // A character at a time: the escapes its first byte says it takes, or one, as U+FFFD.
+    let text = "";
+    for (let at = 0; at < run.length;) {
+      const first = Number.parseInt(run.slice(at + 1, at + 3), 16);
+      const bytes = first < 0xc0 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
+      try {
+        text += decodeURIComponent(run.slice(at, at + 3 * bytes));
+        at += 3 * bytes;
+      } catch {
+        text += "\uFFFD";
+        at += 3;
+      }
     }
-  });
+    return text;
+  }
 }
 
 /**

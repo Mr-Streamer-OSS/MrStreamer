@@ -268,7 +268,10 @@ interface SessionBase {
   readonly token: string;
   /** What the UI's player decodes. */
   readonly decoders: ReadonlySet<Codec>;
-  /** Requests the upstream addresses through the provider, which never sends the login unencrypted. */
+  /**
+   * Requests the upstream addresses through the provider, which keeps the login it recognizes off
+   * http after an https address.
+   */
   readonly request: Provider["request"];
   /** Aborts every upstream request of this session when its scope closes. */
   readonly closed: AbortController;

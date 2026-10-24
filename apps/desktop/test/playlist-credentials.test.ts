@@ -403,6 +403,98 @@ describe("what of a playlist's link counts as its login", () => {
     expect(Buffer.from(await (await fetch(relay.url)).arrayBuffer())).toEqual(CLIP);
     expect(app.reached.map((each) => each.path)).toEqual(["/relay/live.ts?token=7f3a"]);
   });
+
+  it("refuses the link's token in an http address with a plus as written and the rest escaped, as a path reads it", async () => {
+    const app = await connected(
+      () => [
+        '#EXTINF:-1 tvg-id="joined",Joined',
+        "https://cdn.test/joined.ts",
+        '#EXTINF:-1 tvg-id="child",Child',
+        "https://cdn.test/child/index.m3u8",
+        '#EXTINF:-1 tvg-id="referer",Referer',
+        "#EXTVLCOPT:http-referrer=https://site.test/%71+%78/watch",
+        "https://cdn.test/referer.ts",
+      ],
+      `https://lists.test/list.m3u?token=${encodeURIComponent("q+x")}`,
+    );
+    const { routes, plain } = app;
+    routes.set("https://cdn.test/joined.ts", { location: `${plain}/joined/%71+%78/live.ts` });
+    routes.set(
+      "https://cdn.test/child/index.m3u8",
+      `#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\n${plain}/leak/%71+%78/seg-0.ts\n#EXTINF:3,\n${plain}/relay/seg-1.ts\n`,
+    );
+    routes.set("https://cdn.test/referer.ts", { location: `${plain}/referer/live.ts` });
+    for (const path of ["/joined/%71+%78/live.ts", "/leak/%71+%78/seg-0.ts", "/relay/seg-1.ts"])
+      routes.set(`${plain}${path}`, CLIP);
+    routes.set(`${plain}/referer/live.ts`, CLIP);
+
+    await refused(app, "joined");
+    const child = await app.playback.open(app.own("child"), DECODERS);
+    const [leaked, relayed] = await named(child.url);
+    expect((await fetch(leaked!)).status).toBe(502);
+    expect(Buffer.from(await (await fetch(relayed!)).arrayBuffer())).toEqual(CLIP);
+    const referer = await app.playback.open(app.own("referer"), DECODERS);
+    expect(Buffer.from(await (await fetch(referer.url)).arrayBuffer())).toEqual(CLIP);
+    expect(app.reached.map((each) => [each.path, each.headers.referer])).toEqual([
+      ["/relay/seg-1.ts", undefined],
+      ["/referer/live.ts", "https://site.test/"],
+    ]);
+  });
+
+  it("plays a stream redirected to http with a plus in its path for a login with a space", async () => {
+    const app = await connected(
+      () => [
+        '#EXTINF:-1 tvg-id="plus",Plus',
+        "#EXTVLCOPT:http-referrer=https://site.test/open+sesame/watch",
+        "https://cdn.test/plus.ts",
+      ],
+      `https://lists.test/list.m3u?token=${encodeURIComponent("open sesame")}`,
+    );
+    app.routes.set("https://cdn.test/plus.ts", { location: `${app.plain}/open+sesame/live.ts` });
+    app.routes.set(`${app.plain}/open+sesame/live.ts`, CLIP);
+    const session = await app.playback.open(app.own("plus"), DECODERS);
+    expect(Buffer.from(await (await fetch(session.url)).arrayBuffer())).toEqual(CLIP);
+    expect(app.reached.map((each) => [each.path, each.headers.referer])).toEqual([
+      ["/open+sesame/live.ts", "https://site.test/open+sesame/watch"],
+    ]);
+  });
+
+  it("refuses the link's token beside an escape that is no UTF-8, and plays such an escape without it", async () => {
+    const app = await connected(
+      () => [
+        '#EXTINF:-1 tvg-id="broken",Broken',
+        "https://cdn.test/broken.ts",
+        '#EXTINF:-1 tvg-id="child",Child',
+        "https://cdn.test/child/index.m3u8",
+        '#EXTINF:-1 tvg-id="latin",Latin',
+        "#EXTVLCOPT:http-referrer=https://site.test/watch/%71%37%78%FF",
+        "https://cdn.test/latin.ts",
+      ],
+      `https://lists.test/list.m3u?token=${SHORT}`,
+    );
+    const { routes, plain } = app;
+    routes.set("https://cdn.test/broken.ts", {
+      location: `${plain}/relay/live.ts?auth=x%FF%71%37%78y`,
+    });
+    routes.set(
+      "https://cdn.test/child/index.m3u8",
+      `#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\n${plain}/leak/x%FF%71%37%78y/seg-0.ts\n`,
+    );
+    routes.set("https://cdn.test/latin.ts", { location: `${plain}/caf%E9/live.ts` });
+    for (const path of ["/relay/live.ts", "/leak/x%FF%71%37%78y/seg-0.ts", "/caf%E9/live.ts"])
+      routes.set(`${plain}${path}`, CLIP);
+
+    await refused(app, "broken");
+    const child = await app.playback.open(app.own("child"), DECODERS);
+    const [leaked] = await named(child.url);
+    expect((await fetch(leaked!)).status).toBe(502);
+    expect(app.reached).toEqual([]);
+    const latin = await app.playback.open(app.own("latin"), DECODERS);
+    expect(Buffer.from(await (await fetch(latin.url)).arrayBuffer())).toEqual(CLIP);
+    expect(app.reached.map((each) => [each.path, each.headers.referer])).toEqual([
+      ["/caf%E9/live.ts", "https://site.test/"],
+    ]);
+  });
 });
 
 describe("the headers a playlist entry asks for", () => {
