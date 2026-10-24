@@ -12,6 +12,7 @@ import type { Download } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import { setLanguage } from "@mrstreamer/core/i18n";
 import { playlistGroupId } from "@mrstreamer/core/playlist/import";
+import * as Effect from "effect/Effect";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { OperationObserver } from "../src/main/analytics/operations.ts";
 import type { AnalyticsFailure } from "@mrstreamer/contracts/analytics";
@@ -22,6 +23,7 @@ import { Downloads } from "../src/main/services/downloads.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { OnlineSubtitles } from "../src/main/services/online-subtitles.ts";
 import { Playback } from "../src/main/services/playback.ts";
+import { PlaybackCoordination } from "../src/main/services/playback-coordination.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture, type FakeProvider, type FakeProviderOptions } from "./fake-provider.ts";
@@ -1266,6 +1268,83 @@ describe.skipIf(!hasTools)("the queue", () => {
     (await downloads.list()).items.map((item) => [item.id, item.status.kind]);
   const quiet = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  /**
+   * Holds the admission to providers' connections, as a playback open or a subscription's removal
+   * does while it runs; the function it answers lets go.
+   */
+  async function holdAdmission(runtime: Awaited<ReturnType<typeof app>>["runtime"]) {
+    const coordination = await runtime.runPromise(PlaybackCoordination);
+    const held = Promise.withResolvers<void>();
+    const letGo = Promise.withResolvers<void>();
+    const holding = runtime.runPromise(
+      coordination.exclusive(
+        Effect.promise(async () => {
+          held.resolve();
+          await letGo.promise;
+        }),
+      ),
+    );
+    await held.promise;
+    return async () => {
+      letGo.resolve();
+      await holding;
+    };
+  }
+
+  /**
+   * A transfer paused while another copy of the app holds the database: the pause is written
+   * down, the transfer stops and where it stopped can't be. Its partial file closes only once the
+   * lock is taken, so the lock meets that very write.
+   */
+  async function pausedUnkept() {
+    const closing = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    let holding = true;
+    const disk: Disk = {
+      ...fileDisk,
+      write: (path, start) => {
+        const sink = fileDisk.write(path, start);
+        if (!holding) return sink;
+        holding = false;
+        return new Writable({
+          write: (chunk, encoding, done) => void sink.write(chunk, encoding, done),
+          final: (done) => void sink.end(() => done()),
+          destroy: (error, done) => {
+            closing.resolve();
+            void closed.promise.then(() => {
+              sink.destroy();
+              done(error);
+            });
+          },
+        });
+      },
+    };
+    const started = await connected({}, disk);
+    const film = movie(
+      started.provider,
+      started.subscriptionId,
+      "TEST | Two sound tracks and subtitles (MULTI)",
+    );
+    started.provider.stallMovieFile(film.id, 200_000, 60_000);
+    const id = (await started.downloads.add(film.ref)).id;
+    await vi.waitFor(
+      async () => expect((await started.find(id))?.status).toMatchObject({ received: 200_000 }),
+      { timeout: LONG },
+    );
+    const pausing = started.downloads.pause(id);
+    await closing.promise;
+    const lock = new DatabaseSync(join(started.dataDir, "mrstreamer.db"));
+    lock.exec("begin exclusive");
+    closed.resolve();
+    try {
+      await expect(pausing).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    } finally {
+      lock.exec("rollback");
+      lock.close();
+    }
+    return { ...started, film, id };
+  }
+
   it("pauses a transfer once its request ended, keeps its partial file, and goes on only when resumed", async () => {
     const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected();
     const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
@@ -1494,7 +1573,7 @@ describe.skipIf(!hasTools)("the queue", () => {
     expect(provider.fileBytes() - sent).toBe(replacement.length);
   }, 60_000);
 
-  it("changes nothing when a pause or a move can't be written down, and holds once asked again", async () => {
+  it("changes nothing when a pause or a move can't be written down at all, the transfer going on, and holds once asked again", async () => {
     const { provider, dataDir, subscriptionId, downloads, find } = await connected();
     const [first, second, third] = [
       "TEST | Two sound tracks and subtitles (MULTI)",
@@ -1543,6 +1622,210 @@ describe.skipIf(!hasTools)("the queue", () => {
         ]),
       { timeout: LONG },
     );
+  }, 60_000);
+
+  it("stops a transfer whose stopping point can't be written down, says it failed, and Retry goes on from its partial file", async () => {
+    const { provider, dataDir, downloads, find, film, id } = await pausedUnkept();
+    // Unlike a pause that couldn't be written at all, the transfer stopped: nothing goes on.
+    await vi.waitFor(() => expect(provider.activeStreams()).toBe(0), { timeout: 1000 });
+    expect((await find(id))?.status).toMatchObject({ kind: "failed", failure: { kind: "app" } });
+    expect(await partial(dataDir, id)).toBe(200_000);
+    const sent = provider.fileBytes();
+    provider.stallMovieFile(film.id, Number.MAX_SAFE_INTEGER, 0);
+    await downloads.retry(id);
+    await vi.waitFor(async () => expect((await find(id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    expect(digest(await copyOf(dataDir, id))).toBe(digest(film.bytes));
+    expect(provider.fileBytes() - sent).toBe(film.bytes.length - 200_000);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  }, 60_000);
+
+  it("keeps the pause of a transfer whose stopping point couldn't be written: the next start lists it paused", async () => {
+    const { provider, dataDir, find, quit, film, id } = await pausedUnkept();
+    expect((await find(id))?.status.kind).toBe("failed");
+    await quit();
+    const again = await app(dataDir);
+    await quiet(500);
+    expect((await again.find(id))?.status.kind).toBe("paused");
+    expect(await partial(dataDir, id)).toBe(200_000);
+    const sent = provider.fileBytes();
+    provider.stallMovieFile(film.id, Number.MAX_SAFE_INTEGER, 0);
+    await again.downloads.resume(id);
+    await vi.waitFor(async () => expect((await again.find(id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    expect(digest(await copyOf(dataDir, id))).toBe(digest(film.bytes));
+    expect(provider.fileBytes() - sent).toBe(film.bytes.length - 200_000);
+  }, 60_000);
+
+  it("starts the first download allowed once a held admission lets go, as moved meanwhile, and keeps that order", async () => {
+    const { provider, dataDir, runtime, subscriptionId, downloads, find, quit } = await connected();
+    const [missing, held, first, second] = [
+      "TEST | Missing file",
+      "TEST | Long subtitles",
+      "TEST | Two sound tracks and subtitles (MULTI)",
+      "TEST | Old AVI",
+    ].map((name) => movie(provider, subscriptionId, name));
+    provider.stallMovieFile(held!.id, 10_000, 60_000);
+    provider.stallMovieFile(first!.id, 200_000, 60_000);
+    provider.stallMovieFile(second!.id, 30_000, 60_000);
+    // Ahead of the two: one that failed, and one the viewer paused.
+    const f = (await downloads.add(missing!.ref)).id;
+    await vi.waitFor(async () => expect((await find(f))?.status.kind).toBe("failed"), {
+      timeout: LONG,
+    });
+    const p = (await downloads.add(held!.ref)).id;
+    await vi.waitFor(
+      async () => expect((await find(p))?.status).toMatchObject({ received: 10_000 }),
+      {
+        timeout: LONG,
+      },
+    );
+    await downloads.pause(p);
+    // A playback open holds the admission: the queue asks for the first one's connection and waits.
+    const letGo = await holdAdmission(runtime);
+    const a = (await downloads.add(first!.ref)).id;
+    const b = (await downloads.add(second!.ref)).id;
+    await downloads.move(b, -1);
+    expect(await standing(downloads)).toEqual([
+      [p, "paused"],
+      [b, "queued"],
+      [a, "queued"],
+      [f, "failed"],
+    ]);
+    const sent = provider.fileBytes();
+    await letGo();
+    // The one moved first is the one asked for: the first bytes the provider sends are its own.
+    await vi.waitFor(
+      async () =>
+        expect((await find(b))?.status).toMatchObject({ kind: "transferring", received: 30_000 }),
+      { timeout: LONG },
+    );
+    expect(provider.fileBytes() - sent).toBe(30_000);
+    expect(await standing(downloads)).toEqual([
+      [b, "transferring"],
+      [p, "paused"],
+      [a, "queued"],
+      [f, "failed"],
+    ]);
+    // The order was kept: the next start finishes it first, then takes the other.
+    await quit();
+    const again = await app(dataDir);
+    await vi.waitFor(
+      async () =>
+        expect(await standing(again.downloads)).toEqual([
+          [a, "transferring"],
+          [p, "paused"],
+          [f, "failed"],
+          [b, "complete"],
+        ]),
+      { timeout: LONG },
+    );
+    await vi.waitFor(async () =>
+      expect((await again.find(a))?.status).toMatchObject({ received: 200_000 }),
+    );
+    expect(provider.fileBytes() - sent).toBe(second!.bytes.length + 200_000);
+    expect(provider.mostFilesAtOnce()).toBe(1);
+  }, 60_000);
+
+  it("gives back the connection lent for one subscription when another's download was moved first meanwhile", async () => {
+    const {
+      provider,
+      runtime,
+      subscriptionId,
+      downloads,
+      subscriptions,
+      onDemand,
+      playback,
+      find,
+    } = await connected();
+    const other = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
+    const elsewhere = await subscriptions.add({
+      server: other.url,
+      username: "demo",
+      password: "demo",
+    });
+    await onDemand.refresh(elsewhere.id);
+    const here = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    const there = movie(other, elsewhere.id, "TEST | Old AVI");
+    const shown = movie(provider, subscriptionId, "TEST | Index at the end");
+    provider.stallMovieFile(here.id, 200_000, 60_000);
+    other.stallMovieFile(there.id, 30_000, 60_000);
+    const letGo = await holdAdmission(runtime);
+    const a = (await downloads.add(here.ref)).id;
+    const b = (await downloads.add(there.ref)).id;
+    await downloads.move(b, -1);
+    const asked = provider.fileRequests();
+    await letGo();
+    await vi.waitFor(
+      async () =>
+        expect((await find(b))?.status).toMatchObject({ kind: "transferring", received: 30_000 }),
+      { timeout: LONG },
+    );
+    // The first subscription's lease went back unused: nothing was asked of it.
+    expect(provider.fileRequests()).toBe(asked);
+    expect((await find(a))?.status.kind).toBe("queued");
+    // Its playback opens at once and leaves the other subscription's transfer alone.
+    const file = await onDemand.file(shown.ref);
+    const playing = await playback.openTitle(shown.ref, file.url, DECODERS, file);
+    expect(await read(playing.url, 0)).toBeGreaterThan(0);
+    expect((await find(a))?.status.kind).toBe("waiting");
+    expect((await find(b))?.status).toMatchObject({ kind: "transferring", received: 30_000 });
+    await playback.close(playing.sessionId);
+    // Its connection is free to lend: once the other one goes, its download takes it.
+    await downloads.remove(b);
+    await vi.waitFor(
+      async () =>
+        expect((await find(a))?.status).toMatchObject({ kind: "transferring", received: 200_000 }),
+      { timeout: LONG },
+    );
+    expect(provider.mostFilesAtOnce()).toBe(1);
+    expect(other.mostFilesAtOnce()).toBe(1);
+  }, 60_000);
+
+  it("goes back to the queue's order when playback stops while another subscription's download waits for admission", async () => {
+    const {
+      provider,
+      runtime,
+      subscriptionId,
+      downloads,
+      subscriptions,
+      onDemand,
+      playback,
+      find,
+    } = await connected();
+    const other = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
+    const elsewhere = await subscriptions.add({
+      server: other.url,
+      username: "demo",
+      password: "demo",
+    });
+    await onDemand.refresh(elsewhere.id);
+    const here = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    const there = movie(other, elsewhere.id, "TEST | Old AVI");
+    const shown = movie(provider, subscriptionId, "TEST | Index at the end");
+    provider.stallMovieFile(here.id, 200_000, 60_000);
+    other.stallMovieFile(there.id, 30_000, 60_000);
+    // The first in the queue waits for its subscription's playback.
+    const file = await onDemand.file(shown.ref);
+    const playing = await playback.openTitle(shown.ref, file.url, DECODERS, file);
+    const a = (await downloads.add(here.ref)).id;
+    expect((await find(a))?.status.kind).toBe("waiting");
+    // The other subscription's download asks for its connection while admission is held...
+    const letGo = await holdAdmission(runtime);
+    const b = (await downloads.add(there.ref)).id;
+    // ...and the playback stops before admission lets go: the first in the queue goes.
+    await playback.close(playing.sessionId);
+    await letGo();
+    await vi.waitFor(
+      async () =>
+        expect((await find(a))?.status).toMatchObject({ kind: "transferring", received: 200_000 }),
+      { timeout: LONG },
+    );
+    expect((await find(b))?.status.kind).toBe("queued");
+    expect(other.fileRequests()).toBe(0);
+    expect(provider.mostFilesAtOnce()).toBe(1);
   }, 60_000);
 
   it("leaves nothing of a download removed as it pauses, and pauses no copy or one that just finished", async () => {

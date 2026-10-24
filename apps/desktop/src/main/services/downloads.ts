@@ -104,7 +104,9 @@ export class Downloads extends Context.Service<
      * Pauses an unfinished download that hasn't failed. The pause is written down first, so the
      * queue can't take the download meanwhile; a transfer then stops, and this answers once its
      * request ended, its partial file closed and where it stopped is written down. Fails, changing
-     * nothing, when the pause can't be written down, and when where it stopped couldn't be.
+     * nothing, when the pause can't be written down: a transfer goes on. A transfer stopped before
+     * where it got to can't be written down fails too, its pause and partial file kept on disk:
+     * until the next start, this run lists it as failed, with Retry.
      */
     pause(id: string): Effect.Effect<void, Failed>;
     /** Lets a paused download take its turn again, going on from its partial file where proven. */
@@ -395,7 +397,26 @@ function make(deps: DownloadsDeps) {
       }, CHANGES_MS);
     };
 
-    /** Starts the next transfer the queue can have now, if none goes on: the first not paused. */
+    /**
+     * The first download the queue may start now, in its order: queued, not paused, and of a
+     * subscription that plays nothing and didn't refuse its connection in this choice.
+     */
+    const firstAllowed = (busy: ReadonlySet<string>, refused: ReadonlySet<string>) =>
+      unfinished().find(
+        (record) =>
+          record.state === "queued" &&
+          record.pausedAt === undefined &&
+          !busy.has(record.subscriptionId) &&
+          !refused.has(record.subscriptionId),
+      );
+
+    /**
+     * Starts the first download allowed to go, if none goes on. Its subscription's connection is
+     * lent under playback's admission, which can wait on an open or a removal: the queue may have
+     * been reordered, paused or emptied meanwhile. Whatever is first then starts, when the lease is
+     * its subscription's; otherwise the lease goes back and the choice is made again from the queue
+     * as it is.
+     */
     let picking = false;
     let again = false;
     const next = async (): Promise<void> => {
@@ -405,29 +426,33 @@ function make(deps: DownloadsDeps) {
       }
       picking = true;
       try {
-        do {
-          again = false;
+        // Subscriptions that lent nothing in this choice: something of theirs plays. Woken
+        // meanwhile, as when playback stopped, the queue forgets them: they may lend now.
+        const refused = new Set<string>();
+        for (;;) {
           if (active || closing) return;
-          const busy = await Effect.runPromise(coordination.busy);
-          for (const record of unfinished()) {
-            if (
-              record.state !== "queued" ||
-              record.pausedAt !== undefined ||
-              busy.has(record.subscriptionId)
-            )
-              continue;
-            const lent = await Effect.runPromise(coordination.lend(record.subscriptionId));
-            if (!lent) continue;
-            // Removed or paused, or the app began to close, while it waited for its lease.
-            const latest = records.get(record.id);
-            if (closing || latest?.state !== "queued" || latest.pausedAt !== undefined) {
-              lent.release();
-              continue;
-            }
-            start(latest, lent);
-            break;
+          if (again) refused.clear();
+          again = false;
+          const chosen = firstAllowed(await Effect.runPromise(coordination.busy), refused);
+          if (!chosen) {
+            if (!again) return;
+            continue;
           }
-        } while (again);
+          const lent = await Effect.runPromise(coordination.lend(chosen.subscriptionId));
+          if (!lent) {
+            refused.add(chosen.subscriptionId);
+            continue;
+          }
+          const busy = await Effect.runPromise(coordination.busy);
+          if (again) refused.clear();
+          // Read only now: the app may have begun to close while the lease was asked for.
+          const first = closing ? undefined : firstAllowed(busy, refused);
+          if (first?.subscriptionId === chosen.subscriptionId) {
+            start(first, lent);
+            return;
+          }
+          lent.release();
+        }
       } finally {
         picking = false;
       }
@@ -639,7 +664,8 @@ function make(deps: DownloadsDeps) {
 
     /**
      * Stops the transfer under way, its pause already written down: done once its request ended,
-     * its partial file closed and where it stopped is kept, which is why it fails when it isn't.
+     * its partial file closed and where it stopped is kept. Fails, the transfer stopped all the
+     * same, when where it stopped can't be kept.
      */
     const stopPaused = async (transferring: Active) => {
       transferring.controller.abort();

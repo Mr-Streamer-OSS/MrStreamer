@@ -792,7 +792,9 @@ export interface IpcOutputs {
   "downloads.retry": null;
   /**
    * Once the pause is written down; for a transfer, also once its request ended, its partial file
-   * closed and where it stopped is kept. Fails, changing nothing, when it can't be written down.
+   * closed and where it stopped is kept. Fails, changing nothing, when the pause can't be written
+   * down. A transfer stopped before where it got to could be written down fails too, its pause kept
+   * on disk: the list says it failed, with Retry, until the next start.
    */
   "downloads.pause": null;
   "downloads.resume": null;
