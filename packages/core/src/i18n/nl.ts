@@ -463,8 +463,8 @@ export const nl: Translation = {
   "It's your only subscription, so Mr. Streamer returns to Connect.":
     "Het is je enige abonnement, dus Mr. Streamer gaat terug naar Verbinden.",
   "{names} stay.": { one: "{names} blijft.", other: "{names} blijven." },
-  "Also delete favourites, watchlist, history and progress":
-    "Ook favorieten, kijklijst, geschiedenis en voortgang verwijderen",
+  "Also delete favourites, watchlist, history, progress and channels in lists":
+    "Ook favorieten, kijklijst, geschiedenis, voortgang en zenders in lijsten verwijderen",
   Keep: "Houden",
   Active: "Actief",
   Expired: "Verlopen",

@@ -456,8 +456,8 @@ export const en = {
   "It's your only subscription, so Mr. Streamer returns to Connect.":
     "It's your only subscription, so Mr. Streamer returns to Connect.",
   "{names} stay.": { one: "{names} stays.", other: "{names} stay." },
-  "Also delete favourites, watchlist, history and progress":
-    "Also delete favourites, watchlist, history and progress",
+  "Also delete favourites, watchlist, history, progress and channels in lists":
+    "Also delete favourites, watchlist, history, progress and channels in lists",
   Keep: "Keep",
   Active: "Active",
   Expired: "Expired",

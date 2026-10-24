@@ -8,6 +8,8 @@
 // channels for adults.
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { LANGUAGE_NAMES, type Locale } from "../../../../packages/contracts/src/language.ts";
+import { translate } from "../../../../packages/core/src/i18n.ts";
 import type { Driver } from "./language.ts";
 
 const named = (selector: string, text: string) =>
@@ -506,27 +508,143 @@ async function refreshChannels(d: Driver, index: number) {
   await d.key("Escape", 27);
 }
 
-/** Removes the second subscription from Settings, with Also delete ticked or not. */
-async function removeBackup(d: Driver, erase: boolean) {
+/**
+ * Picks the interface language in Settings > General with the keyboard, as the viewer does: a
+ * name typed into the closed select, whole, so "English" can't land on Español. "system" types
+ * System default's own name and goes back to the harness's English. The app's own text changes
+ * at once.
+ */
+async function interfaceLanguage(d: Driver, from: Locale, to: Locale | "system") {
+  const select = `document.querySelector('main section select:has(option[value="en-US"])')`;
+  await d.click("Open Settings for the interface language", SETTINGS);
+  if (!(await d.exists(select)))
+    await d.click("Open General settings", named("nav button", translate(from, "General")));
+  await d.wait(() => d.exists(select));
+  const name =
+    to === "system"
+      ? await d.evaluate<string>(`${select}.options[0].textContent`)
+      : LANGUAGE_NAMES[to];
+  d.action(`Pick ${name} with the keyboard`);
+  await d.evaluate(`${select}.focus()`);
+  for (const char of name) {
+    await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
+    await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
+  }
+  const lang = to === "system" ? "en-US" : to;
+  await d.wait(() =>
+    d.evaluate<boolean>(`document.documentElement.lang === ${JSON.stringify(lang)}`),
+  );
+  await d.key("Escape", 27);
+}
+
+/**
+ * The removal question of the second subscription, at the smallest window the app allows, 960 ×
+ * 600, in `locale`'s words: its Also delete box with its whole label, Remove and Keep each drawn,
+ * in the page's width and the one thing under its own middle. The page is sized, not the window,
+ * as the language scenario does.
+ */
+async function removalQuestion(d: Driver, locale: Locale) {
+  await d.send("Emulation.setDeviceMetricsOverride", {
+    width: 960,
+    height: 600,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  d.action("Size the page as the smallest window, 960 × 600");
+  await d.wait(() => d.evaluate<boolean>("innerWidth === 960 && innerHeight === 600"));
+  const item = `${SUBSCRIPTION_ROWS}[1]`;
+  const label = translate(
+    locale,
+    "Also delete favourites, watchlist, history, progress and channels in lists",
+  );
+  await d.evaluate(
+    `${item}.querySelector('[role=checkbox]').closest('label').scrollIntoView({ block: "center" })`,
+  );
+  await d.evaluate(
+    "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+  );
+  const seen = await d.evaluate<{
+    label: string;
+    lines: number;
+    parts: { part: string; fits: boolean; hit: boolean; box: number[] }[];
+  }>(`(() => {
+    const item = ${item};
+    const box = item.querySelector('[role=checkbox]');
+    const label = box.closest('label');
+    const buttons = [...item.querySelectorAll('button')];
+    const parts = [
+      ['label', label],
+      ['checkbox', box],
+      ['remove', buttons.find(b => b.textContent.trim() === ${JSON.stringify(translate(locale, "Remove"))})],
+      ['keep', buttons.find(b => b.textContent.trim() === ${JSON.stringify(translate(locale, "Keep"))})],
+    ];
+    const text = [...label.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim();
+    const lineHeight = parseFloat(getComputedStyle(label).lineHeight) || 22;
+    return {
+      label: text,
+      lines: Math.round(label.getBoundingClientRect().height / lineHeight),
+      parts: parts.map(([part, element]) => {
+        const r = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return {
+          part,
+          fits: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && r.width > 0,
+          hit: !!hit && (element === hit || element.contains(hit) || (part === 'label' && label.contains(hit))),
+          box: [r.left, r.top, r.width, r.height].map(Math.round),
+        };
+      }),
+    };
+  })()`);
+  d.observed[`removalQuestion:${locale}`] = seen;
+  check(seen.label === label, `The Also delete label in ${locale} reads otherwise`);
+  check(
+    seen.parts.every((part) => part.fits && part.hit),
+    `Part of the removal question in ${locale} is clipped or covered`,
+  );
+  await d.capture(`removal-question-${locale}-960`);
+}
+
+/**
+ * Removes the second subscription from Settings, with Also delete ticked or not, in `locale`'s
+ * words, after checking its question at the smallest window. `keep` answers Keep instead, which
+ * leaves it saved.
+ */
+async function removeBackup(
+  d: Driver,
+  erase: boolean,
+  { locale = "en-US", keep = false }: { locale?: Locale; keep?: boolean } = {},
+) {
   await d.click("Open Settings to remove a subscription", SETTINGS);
-  await d.click("Open Subscriptions", named("nav button", "Subscriptions"));
+  await d.click("Open Subscriptions", named("nav button", translate(locale, "Subscriptions")));
   const item = `${SUBSCRIPTION_ROWS}[1]`;
   if (!(await d.exists(`${item}.querySelector('[role=region]')`)))
     await d.click("Open the second subscription", `${item}.querySelector('button')`);
+  const ask = translate(locale, "Remove {name}", { name: "Backup" });
   await d.click(
     "Ask to remove it",
-    `[...${item}.querySelectorAll('button')].find(e => e.textContent.startsWith('Remove '))`,
+    `[...${item}.querySelectorAll('button')].find(e => e.textContent.trim() === ${JSON.stringify(ask)})`,
   );
-  if (erase) await d.click("Tick Also delete", `${item}.querySelector('[role=checkbox]')`);
-  await d.click(
-    erase ? "Remove with Also delete" : "Remove without erasing",
-    `[...${item}.querySelectorAll('button')].find(e => e.textContent === 'Remove')`,
-  );
-  await d.wait(() =>
-    d.evaluate<boolean>(
-      "(async () => { const r = await window.mrStreamer.invoke('subscription.list'); return r.ok && r.value.length === 1; })()",
-    ),
-  );
+  await removalQuestion(d, locale);
+  if (keep) {
+    await d.click(
+      "Keep it",
+      `[...${item}.querySelectorAll('button')].find(e => e.textContent.trim() === ${JSON.stringify(translate(locale, "Keep"))})`,
+    );
+    await d.wait(async () => !(await d.exists(`${item}.querySelector('[role=checkbox]')`)));
+  } else {
+    if (erase) await d.click("Tick Also delete", `${item}.querySelector('[role=checkbox]')`);
+    await d.click(
+      erase ? "Remove with Also delete" : "Remove without erasing",
+      `[...${item}.querySelectorAll('button')].find(e => e.textContent.trim() === ${JSON.stringify(translate(locale, "Remove"))})`,
+    );
+    await d.wait(() =>
+      d.evaluate<boolean>(
+        "(async () => { const r = await window.mrStreamer.invoke('subscription.list'); return r.ok && r.value.length === 1; })()",
+      ),
+    );
+  }
+  await d.send("Emulation.clearDeviceMetricsOverride");
+  await d.wait(() => d.evaluate<boolean>("innerWidth > 960"));
   await d.key("Escape", 27);
 }
 
@@ -646,9 +764,14 @@ export async function customListSourcesScenario(
   d.observed["readded"] = await shownList(d);
   await d.capture("sources-readded");
 
-  // Removed with Also delete: added again, nothing of its account is in the list, and the
-  // database keeps none of its channels.
-  await removeBackup(d, true);
+  // Removed with Also delete, its label in the two longest languages at the smallest window:
+  // French, then Keep, and Dutch, ticked. Added again, nothing of its account is in the list,
+  // and the database keeps none of its channels.
+  await interfaceLanguage(d, "en-US", "fr-FR");
+  await removeBackup(d, true, { locale: "fr-FR", keep: true });
+  await interfaceLanguage(d, "fr-FR", "nl-NL");
+  await removeBackup(d, true, { locale: "nl-NL" });
+  await interfaceLanguage(d, "nl-NL", "system");
   await addBackup(d, fixture.otherUrl, "Add the second subscription after erasing");
   await openList(d, "Mixed");
   await d.wait(

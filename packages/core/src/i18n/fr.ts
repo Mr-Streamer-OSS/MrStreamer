@@ -479,8 +479,8 @@ export const fr: Translation = {
   "It's your only subscription, so Mr. Streamer returns to Connect.":
     "C'est votre seul abonnement, Mr. Streamer revient donc à l'écran de connexion.",
   "{names} stay.": { one: "{names} reste.", many: "{names} restent.", other: "{names} restent." },
-  "Also delete favourites, watchlist, history and progress":
-    "Supprimer aussi favoris, liste à voir, historique et progression",
+  "Also delete favourites, watchlist, history, progress and channels in lists":
+    "Supprimer aussi favoris, liste à voir, historique, progression et chaînes des listes",
   Keep: "Garder",
   Active: "Actif",
   Expired: "Expiré",

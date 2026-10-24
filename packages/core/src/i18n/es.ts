@@ -482,8 +482,8 @@ export const es: Translation = {
     many: "{names} se quedan.",
     other: "{names} se quedan.",
   },
-  "Also delete favourites, watchlist, history and progress":
-    "Eliminar también favoritos, lista, historial y progreso",
+  "Also delete favourites, watchlist, history, progress and channels in lists":
+    "Eliminar también favoritos, lista, historial, progreso y canales de las listas",
   Keep: "Conservar",
   Active: "Activa",
   Expired: "Caducada",

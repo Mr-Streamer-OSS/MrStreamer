@@ -468,8 +468,8 @@ export const de: Translation = {
   "It's your only subscription, so Mr. Streamer returns to Connect.":
     "Es ist dein einziges Abonnement, daher kehrt Mr. Streamer zum Verbinden zurück.",
   "{names} stay.": { one: "{names} bleibt.", other: "{names} bleiben." },
-  "Also delete favourites, watchlist, history and progress":
-    "Auch Favoriten, Merkliste, Verlauf und Fortschritt löschen",
+  "Also delete favourites, watchlist, history, progress and channels in lists":
+    "Auch Favoriten, Merkliste, Verlauf, Fortschritt und Sender in Listen löschen",
   Keep: "Behalten",
   Active: "Aktiv",
   Expired: "Abgelaufen",
