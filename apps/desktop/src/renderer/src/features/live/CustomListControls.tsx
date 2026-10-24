@@ -3,6 +3,7 @@
 // row's lists menu, the channels a list keeps that their subscription no longer lists, and the
 // line a failed change leaves, with Retry. Menus are UI A's, and keep their keys to themselves.
 import { Menu } from "@base-ui/react/menu";
+import { useQueryClient } from "@tanstack/react-query";
 import { Check, Ellipsis, ListPlus, Plus } from "lucide-react";
 import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import { CUSTOM_LIST_NAME_MAX, type CustomList } from "@mrstreamer/contracts/custom-lists";
@@ -15,7 +16,7 @@ import { menuItem, menuSurface } from "../../components/ui/menu.ts";
 import { describeError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { cn } from "../../lib/utils.ts";
-import { holds, useListChange, type ChangeState } from "./custom-lists.ts";
+import { holds, removeList, useListChange, type ChangeState } from "./custom-lists.ts";
 
 /**
  * Keeps a menu's pointer and keys from the row or page behind it: its popup sits in a portal,
@@ -183,32 +184,26 @@ export function RenameList({ list, onDone }: { list: CustomList; onDone: () => v
 
 /**
  * Asks once before a list goes: "Delete Late sport?" with Cancel and Delete list, which deletes
- * it with every channel it holds, of every account. `onDone` follows a cancel. Each delete sent
- * is `onSending` first, then `onDeleted` once it is stored or `onFailed` if it isn't.
+ * it with every channel it holds, of every account. `onDone` follows a cancel, `onDeleted` the
+ * delete.
  */
 export function DeleteList({
   list,
   onDone,
-  onSending,
-  onFailed,
   onDeleted,
 }: {
   list: CustomList;
   onDone: () => void;
-  onSending: () => void;
-  onFailed: () => void;
   onDeleted: () => void;
 }) {
+  const client = useQueryClient();
   const change = useListChange();
   const saving = change.state.status === "saving";
   const failure = failureOf(change.state);
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
   const remove = async () => {
-    if (saving) return;
-    onSending();
-    if (await change.run(() => call("customLists.remove", { id: list.id }))) onDeleted();
-    else onFailed();
+    if (!saving && (await change.run(removeList(client, list.id)))) onDeleted();
   };
   return (
     <div

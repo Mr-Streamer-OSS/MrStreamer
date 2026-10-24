@@ -2,6 +2,7 @@
 // changes Live TV makes to them. A change answers every list as stored, which the lists' query
 // takes, unless a later change began meanwhile: then the lists are read again, as `syncCustomLists`
 // also has them read once a change is stored. One that fails keeps what it asked, to send again.
+// A delete is the window's own from when it is sent, kept with the window's query client.
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { CustomList } from "@mrstreamer/contracts/custom-lists";
@@ -38,6 +39,39 @@ async function send(client: QueryClient, change: ListChange): Promise<readonly C
     void client.invalidateQueries({ queryKey: queries.customLists().queryKey });
     throw cause;
   }
+}
+
+/**
+ * The lists each window deleted, by the deletes of each it sent that haven't failed. They are
+ * kept with the window's query client, which outlives Live TV's page: a list that goes once its
+ * delete is sent went from here, whether the answer or the lists read again come first, and
+ * after Live TV was left and opened again. Another client starts with none.
+ */
+const deletions = new WeakMap<QueryClient, Map<string, number>>();
+
+/** Whether the window of `client` deleted `id`'s list, or has a delete of it out. */
+export function deletedHere(client: QueryClient, id: string): boolean {
+  return deletions.get(client)?.has(id) ?? false;
+}
+
+/**
+ * Deletes `id`'s list, as the window's own from when it is sent: one that fails no longer
+ * counts, so a list that goes otherwise still says so. Answers the lists as stored.
+ */
+export function removeList(client: QueryClient, id: string): ListChange {
+  return async () => {
+    const sent = deletions.get(client) ?? new Map<string, number>();
+    deletions.set(client, sent);
+    sent.set(id, (sent.get(id) ?? 0) + 1);
+    try {
+      return await call("customLists.remove", { id });
+    } catch (cause) {
+      const left = (sent.get(id) ?? 1) - 1;
+      if (left > 0) sent.set(id, left);
+      else sent.delete(id);
+      throw cause;
+    }
+  };
 }
 
 /**

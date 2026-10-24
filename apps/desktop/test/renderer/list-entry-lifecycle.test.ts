@@ -5,8 +5,9 @@
 // screen stays. A delete or rename answered after the viewer moved on ends only what it began: a
 // list chosen meanwhile stays chosen, with its new order or its own field as they are. The list
 // on screen, deleted from here, gives way to All channels without saying it went, whether its
-// answer or the lists read again come first; one that goes otherwise, after a failed delete,
-// still says so.
+// answer or the lists read again come first, and also once Live TV was left and opened again
+// while the delete was out. One that goes otherwise, after a failed delete too, still says so,
+// and another window knows nothing of this one's deletes.
 import { browseResult } from "./browse-support.ts";
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -17,9 +18,13 @@ import type { CustomList } from "@mrstreamer/contracts/custom-lists";
 import type { Category, LiveChannel } from "@mrstreamer/contracts/library";
 import type { OwnedId, SubscriptionSummary } from "@mrstreamer/contracts/subscription";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
+import { App } from "../../src/renderer/src/app/App.tsx";
 import { useUi, type ChannelList } from "../../src/renderer/src/app/ui-store.ts";
+import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { queries, syncCustomLists } from "../../src/renderer/src/lib/queries.ts";
+import { player } from "../../src/renderer/src/player/player.ts";
+import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
 const own = (id: string): OwnedId => ({ subscriptionId: "one", id });
 
@@ -82,15 +87,32 @@ beforeEach(() => {
 });
 afterEach(() => {
   unmount();
+  player.reset();
+  titlePlayer.close();
   vi.useRealTimers();
 });
 
 const settled = (ms = 20) => act(() => vi.advanceTimersByTimeAsync(ms));
 
-/** Live TV on `shown`, with the viewer's `lists` as stored, which `store` changes. */
-async function livePage(shown: ChannelList, lists: readonly CustomList[] = []) {
+/**
+ * Live TV on `shown`, with the viewer's `lists` as stored, which `store` changes. With `app`,
+ * the whole window, whose bar leaves Live TV and opens it again.
+ */
+async function livePage(
+  shown: ChannelList,
+  lists: readonly CustomList[] = [],
+  { app = false } = {},
+) {
   ipc.reset();
-  useUi.setState({ view: "live", list: shown, watching: false, searchOpen: false, searchFrom: "" });
+  useUi.setState({
+    view: "live",
+    list: shown,
+    watching: false,
+    searchOpen: false,
+    searchFrom: "",
+    settings: null,
+    details: null,
+  });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await client.fetchQuery(queries.preferences());
   let stored = lists;
@@ -123,18 +145,32 @@ async function livePage(shown: ChannelList, lists: readonly CustomList[] = []) {
   ipc.always("library.searchGroups", []);
   ipc.answer("customLists.get", () => stored);
   ipc.always("viewing.get", viewing);
+  if (app) {
+    // The window reads these itself, and remembers the list shown.
+    ipc.always("subscription.list", [subscription]);
+    ipc.always("library.categories", CATEGORIES);
+    ipc.always("ondemand.status", { lists: [], metadata: null });
+    if (shown.kind === "custom") ipc.always("liveBrowse.get", { kind: "custom", id: shown.id });
+  }
   const stopLists = syncCustomLists(client);
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   await act(async () =>
     root.render(
-      createElement(QueryClientProvider, { client }, createElement(GuidePage, { active: true })),
+      createElement(
+        QueryClientProvider,
+        { client },
+        app
+          ? createElement(TooltipProvider, null, createElement(App))
+          : createElement(GuidePage, { active: true }),
+      ),
     ),
   );
   unmount = () => {
     stopLists();
     act(() => root.unmount());
+    client.clear();
     container.remove();
   };
   await settled();
@@ -199,6 +235,16 @@ async function livePage(shown: ChannelList, lists: readonly CustomList[] = []) {
     rename: () => container.querySelector<HTMLInputElement>('main input[aria-label="List name"]'),
     text: () => container.textContent ?? "",
     click: (label: string) => press(button(label), `button "${label}"`),
+    /** Opens a page from the window's bar, as the viewer does. */
+    open: async (name: string) => {
+      await press(
+        [...container.querySelectorAll("header nav button")].find(
+          (each) => each.textContent?.trim() === name,
+        ),
+        `${name} in the window's bar`,
+      );
+      await settled();
+    },
     /** Picks a list in the rail with the pointer, and waits for its channels. */
     pick: async (title: string) => {
       await press(rail().querySelector(`button[title="${title}"]`), `rail entry "${title}"`);
@@ -459,6 +505,39 @@ describe("deleting the list on screen", () => {
     expect(page.text()).not.toContain("no longer listed");
   });
 
+  it("leaves another list's notice when a late delete is answered", async () => {
+    const page = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA]);
+    await page.option("Alpha", "Delete list");
+    const removed = ipc.hold("customLists.remove");
+    await page.click("Delete list");
+    await page.pick("Beta");
+    // Beta goes otherwise, and says so; Alpha's answer leaves that as it is.
+    await page.changed([]);
+    expect(page.text()).toContain("Beta is no longer listed. Showing all channels.");
+    await act(async () => removed.resolve([]));
+    await settled();
+    expect(page.heading()).toBe("All channels");
+    expect(page.text()).toContain("Beta is no longer listed. Showing all channels.");
+  });
+
+  it("starts another window without this one's deletes", async () => {
+    const first = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA]);
+    await first.option("Alpha", "Delete list");
+    const removed = ipc.hold("customLists.remove");
+    await first.click("Delete list");
+    first.store([BETA]);
+    await act(async () => removed.resolve([BETA]));
+    await settled();
+    expect(first.heading()).toBe("All channels");
+    unmount();
+
+    // Another window, with a client of its own, shows Alpha until it goes otherwise.
+    const second = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA]);
+    expect(second.heading()).toBe("Alpha");
+    await second.changed([BETA]);
+    expect(second.text()).toContain("Alpha is no longer listed. Showing all channels.");
+  });
+
   it("keeps the list and Retry when the delete fails, and says so when it goes otherwise", async () => {
     const page = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA]);
     await page.option("Alpha", "Delete list");
@@ -470,6 +549,53 @@ describe("deleting the list on screen", () => {
     expect(page.entry("Alpha")).not.toBeNull();
     expect(page.text()).toContain("Couldn't save.");
 
+    await page.changed([BETA]);
+    expect(page.heading()).toBe("All channels");
+    expect(page.text()).toContain("Alpha is no longer listed. Showing all channels.");
+  });
+});
+
+describe("leaving Live TV while the delete of its list is out", () => {
+  /** Live TV on Alpha, whose delete is sent and held, left for Home and opened again. */
+  async function leftAndBack() {
+    const page = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA], { app: true });
+    await page.option("Alpha", "Delete list");
+    const removed = ipc.hold("customLists.remove");
+    await page.click("Delete list");
+    await page.open("Home");
+    expect(useUi.getState().view).toBe("home");
+    await page.open("Live TV");
+    expect(page.heading()).toBe("Alpha");
+    return { page, removed };
+  }
+
+  it("says nothing when the lists are read without it before the delete is answered", async () => {
+    const { page, removed } = await leftAndBack();
+    await page.changed([BETA]);
+    expect(page.heading()).toBe("All channels");
+    expect(page.text()).not.toContain("no longer listed");
+    await act(async () => removed.resolve([BETA]));
+    await settled();
+    expect(page.heading()).toBe("All channels");
+    expect(page.text()).not.toContain("no longer listed");
+  });
+
+  it("says nothing when the delete is answered first", async () => {
+    const { page, removed } = await leftAndBack();
+    page.store([BETA]);
+    await act(async () => removed.resolve([BETA]));
+    await settled();
+    expect(page.heading()).toBe("All channels");
+    expect(page.text()).not.toContain("no longer listed");
+    await page.changed([BETA]);
+    expect(page.text()).not.toContain("no longer listed");
+  });
+
+  it("says so when the delete failed meanwhile and the list goes otherwise", async () => {
+    const { page, removed } = await leftAndBack();
+    await act(async () => removed.reject({ kind: "unexpected", detail: "database is locked" }));
+    await settled();
+    expect(page.heading()).toBe("Alpha");
     await page.changed([BETA]);
     expect(page.heading()).toBe("All channels");
     expect(page.text()).toContain("Alpha is no longer listed. Showing all channels.");

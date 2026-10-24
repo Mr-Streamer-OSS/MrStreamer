@@ -90,7 +90,7 @@ import {
   useShowList,
 } from "./lists.ts";
 import { orderKey, useListOrder, waits } from "./reorder.ts";
-import { useListChange, useNewList } from "./custom-lists.ts";
+import { deletedHere, useListChange, useNewList } from "./custom-lists.ts";
 import {
   AwayNote,
   ChangeNotice,
@@ -144,6 +144,7 @@ export function GuidePage({ active }: { active: boolean }) {
   const toggleFavourite = useToggleFavourite();
   const showList = useShowList();
   const keyboard = useKeyboardMode();
+  const client = useQueryClient();
   const customLists = useQuery(queries.customLists());
   const customList =
     list.kind === "custom" ? customLists.data?.find((each) => each.id === list.id) : undefined;
@@ -158,18 +159,6 @@ export function GuidePage({ active }: { active: boolean }) {
    */
   const finish = (which: typeof editing) =>
     setEditing((current) => (current === which ? null : current));
-  /**
-   * The lists deleted from here, by their deletes sent that haven't failed. One gives way to All
-   * channels without saying it went, even when the lists are read again before its delete is
-   * answered. A list that goes otherwise says so, after a failed delete of it too.
-   */
-  const deleted = useRef(new Map<string, number>());
-  /** Counts a delete of `id` sent from here, or takes back one that failed. */
-  const deleting = (id: string, by: 1 | -1) => {
-    const count = (deleted.current.get(id) ?? 0) + by;
-    if (count > 0) deleted.current.set(id, count);
-    else deleted.current.delete(id);
-  };
 
   const picker = useListPicker(list, { create: true });
   const { entries, entry, setEntry, openGroup: toggle } = picker;
@@ -201,7 +190,7 @@ export function GuidePage({ active }: { active: boolean }) {
     }
     const resolved = resolveDiscovery(list, categories.data, customLists.data);
     if (resolved.kind === "all") {
-      const quietly = list.kind === "custom" && deleted.current.has(list.id);
+      const quietly = list.kind === "custom" && deletedHere(client, list.id);
       setRemovedCategory(quietly ? null : lastCategoryTitle.current || t("Current category"));
       showList({ kind: "all" });
     } else {
@@ -213,7 +202,7 @@ export function GuidePage({ active }: { active: boolean }) {
         useUi.setState({ list: resolved });
       setRemovedCategory(null);
     }
-  }, [list, categories.data, customLists.data, categoryMap, showList]);
+  }, [list, categories.data, customLists.data, categoryMap, showList, client]);
 
   // New list, from the lists or from a row's lists menu, selects the list it made.
   const creating = useNewList((id) => {
@@ -825,8 +814,6 @@ export function GuidePage({ active }: { active: boolean }) {
               <DeleteList
                 list={customList}
                 onDone={() => finish(editing)}
-                onSending={() => deleting(customList.id, 1)}
-                onFailed={() => deleting(customList.id, -1)}
                 onDeleted={() => {
                   finish(editing);
                   // Only the list still on screen gives way to All channels.
