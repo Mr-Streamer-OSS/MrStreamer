@@ -41,6 +41,29 @@ export interface DetailsTarget extends OwnedId {
   readonly asked?: boolean;
 }
 
+/**
+ * Where a title's details stood as a related title opened from them: the season picked there,
+ * null for the one being watched, how far the sheet was scrolled, and the related title opened,
+ * by its `Title.key`, which Back gives the keyboard back to.
+ */
+export interface DetailsPlace {
+  readonly season: number | null;
+  readonly scroll: number;
+  readonly related: string;
+}
+
+/** Details a related title led away from, with where they stood. */
+interface DetailsStep {
+  readonly target: DetailsTarget;
+  readonly place: DetailsPlace;
+}
+
+/**
+ * How many details Back returns through. Opening a related title beyond that lets the earliest
+ * go: a viewer seldom retraces more, and the trail stays a few small records.
+ */
+export const DETAILS_TRAIL = 8;
+
 /** The update dialog on screen: the panel under the top bar's Update, or the restart question. */
 type UpdateDialog = "panel" | "restart";
 
@@ -57,6 +80,13 @@ interface UiState {
   readonly playingTitle: boolean;
   /** A movie's or series' details, over the page they were opened from. */
   readonly details: DetailsTarget | null;
+  /**
+   * The details related titles led away from to these, the latest last, which Back returns
+   * through: at most `DETAILS_TRAIL`, for this session only, and none without details.
+   */
+  readonly trail: readonly DetailsStep[];
+  /** Where Back found the details on screen, for them to show as they open, once. */
+  readonly place: DetailsPlace | null;
   /** A saved title the lists don't have, in its own short sheet over the page. */
   readonly savedEntry: WatchlistEntry | null;
   /** Watch's channel list is open over the picture. */
@@ -83,6 +113,8 @@ export const useUi = create<UiState>(() => ({
   watching: false,
   playingTitle: false,
   details: null,
+  trail: [],
+  place: null,
   savedEntry: null,
   channelsOpen: false,
   searchOpen: false,
@@ -97,6 +129,9 @@ export const useUi = create<UiState>(() => ({
 
 // Settings over a title holds the countdown to its next episode, so nothing starts behind it.
 useUi.subscribe((state) => titlePlayer.holdNext(state.settings !== null));
+
+/** No details on screen, nor a way back through any. */
+const NO_DETAILS = { details: null, trail: [], place: null } as const;
 
 /**
  * Leaves the title, saving how far it got, back to its details or the page. One that plays on a
@@ -114,7 +149,7 @@ export function openView(view: View): void {
     watching: false,
     channelsOpen: false,
     settings: null,
-    details: null,
+    ...NO_DETAILS,
     savedEntry: null,
   });
 }
@@ -131,7 +166,7 @@ export function resetForAccount(): void {
     view: "home",
     watching: false,
     playingTitle: false,
-    details: null,
+    ...NO_DETAILS,
     savedEntry: null,
     channelsOpen: false,
     searchOpen: false,
@@ -167,10 +202,15 @@ export function closeWatch(): void {
   useUi.setState({ watching: false, channelsOpen: false });
 }
 
-/** Shows a movie's or series' details over the page. */
+/**
+ * Shows a movie's or series' details over the page, as from a poster, search or a playing title.
+ * Back leads from them to the page, as Close does.
+ */
 export function openDetails(target: DetailsTarget): void {
   useUi.setState({
     details: target,
+    trail: [],
+    place: null,
     savedEntry: null,
     searchOpen: false,
     settings: null,
@@ -178,9 +218,62 @@ export function openDetails(target: DetailsTarget): void {
   });
 }
 
+/**
+ * Shows a related title's details over the details on screen, which Back returns to as they
+ * stood (`here`). Past `DETAILS_TRAIL`, the earliest of them goes.
+ */
+export function openRelated(target: DetailsTarget, here: DetailsPlace): void {
+  const { details, trail } = useUi.getState();
+  if (!details) return openDetails(target);
+  useUi.setState({
+    details: target,
+    trail: [...trail, { target: details, place: here }].slice(-DETAILS_TRAIL),
+    place: null,
+  });
+}
+
+/**
+ * Back over details: to the details the ones on screen were opened from as a related title, as
+ * they stood, or to the page once there are none.
+ */
+export function backDetails(): void {
+  const { details, trail } = useUi.getState();
+  const step = trail.at(-1);
+  if (!details || !step) return closeDetails();
+  useUi.setState({ details: step.target, trail: trail.slice(0, -1), place: step.place });
+}
+
+/** Closes the details, and the way back through them, to the page they were opened over. */
+export function closeDetails(): void {
+  useUi.setState(NO_DETAILS);
+}
+
+/**
+ * What a removed subscription listed leaves the window: details of it close, with the way back
+ * through them, Back passes over its titles, and a saved title's sheet goes when it was saved
+ * from it.
+ */
+export function leaveSubscription(id: string): void {
+  useUi.setState(({ details, trail, savedEntry }) => ({
+    ...(details?.subscriptionId === id
+      ? NO_DETAILS
+      : { trail: trail.filter((step) => step.target.subscriptionId !== id) }),
+    savedEntry: savedEntry?.sources.includes(id) ? null : savedEntry,
+  }));
+}
+
+/**
+ * Closes a title's details, with the way back through them, and a saved title's sheet, as when
+ * Settings hides titles for adults: what shows may be one. Only the details on screen can be: a
+ * related title never is, and one for adults lists none.
+ */
+export function closeTitleSheets(): void {
+  useUi.setState({ ...NO_DETAILS, savedEntry: null });
+}
+
 /** Shows a saved title the lists don't have, over the page: what was kept of it, and Remove. */
 export function openSavedEntry(entry: WatchlistEntry): void {
-  useUi.setState({ savedEntry: entry, details: null, searchOpen: false, settings: null });
+  useUi.setState({ savedEntry: entry, ...NO_DETAILS, searchOpen: false, settings: null });
 }
 
 /** Whether two lists are the same. */

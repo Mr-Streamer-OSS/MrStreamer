@@ -1,0 +1,448 @@
+// @vitest-environment happy-dom
+// Back over a title's details: a related title opens over them, and Back in the sheet's top bar
+// returns through those it was opened from as they stood, the season picked, the scroll and the
+// keyboard on the related title opened, then to the page and what had the keyboard there. Close,
+// Escape and a title opened anew start over. A playing title and Settings over the details keep
+// the way back. What a removed subscription, hidden titles for adults or a new account take away,
+// Back no longer reaches, and it reaches back eight details at most.
+import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  Episode,
+  MovieDetails,
+  OnDemandStatus,
+  SeriesDetails,
+  Title,
+} from "@mrstreamer/contracts/ondemand";
+import type { OwnedId, SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import { App } from "../../src/renderer/src/app/App.tsx";
+import {
+  backDetails,
+  closeTitleSheets,
+  DETAILS_TRAIL,
+  leaveSubscription,
+  openDetails,
+  openRelated,
+  openView,
+  resetForAccount,
+  useUi,
+  type DetailsTarget,
+} from "../../src/renderer/src/app/ui-store.ts";
+import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
+
+/** A second subscription beside the tests' own, as the main process lists it. */
+const OTHER = "9d2b7c41-6e0a-4f3b-8a15-c4e7f1d09b62";
+const BOTH: readonly SubscriptionSummary[] = [
+  { ...SAVED, name: "Nova TV" },
+  { ...SAVED, id: OTHER, name: "Skyline", server: "https://skyline.example.tv" },
+];
+
+const listed = (kind: Title["kind"], subscriptionId: string, id: string, name: string): Title => ({
+  kind,
+  key: `${kind}:${id}`,
+  subscriptionId,
+  id,
+  name: `${name} (EN)`,
+  title: name,
+  originalTitle: null,
+  originalLanguage: "en",
+  tags: ["EN"],
+  year: 2024,
+  posterUrl: null,
+  backdropUrl: null,
+  rating: null,
+  addedAt: null,
+  adult: false,
+  tmdbId: null,
+  genres: ["Drama"],
+  versions: [{ subscriptionId, id, tags: ["EN"] }],
+});
+
+// A film of the tests' subscription leads to a series of the other, which leads to a film of the
+// first again. The app relates a movie only to movies and a series to series; the stand-in
+// answers below mix them so one chain passes through a series' seasons.
+const harbour = {
+  ...listed("movie", SUBSCRIPTION, "a", "Night Harbour"),
+  backdropUrl: "https://image.example/harbour.jpg",
+};
+const canyon = listed("series", OTHER, "b", "Canyon Hours");
+// Two versions, so its details offer the menu of them beside Play.
+const meridian = {
+  ...listed("movie", SUBSCRIPTION, "c", "Meridian Dawn"),
+  versions: [
+    { subscriptionId: SUBSCRIPTION, id: "c", tags: ["EN"] },
+    { subscriptionId: SUBSCRIPTION, id: "c2", tags: ["NL"] },
+  ],
+};
+const field = listed("movie", OTHER, "d", "Quiet Field");
+const titles = new Map<string, Title>([
+  ...[harbour, canyon, meridian, field].map((title) => [title.id, title] as const),
+  ["c2", meridian],
+]);
+
+const episode = (season: number, number: number): Episode => ({
+  subscriptionId: OTHER,
+  id: `b${season}${number}`,
+  seriesId: "b",
+  season,
+  number,
+  title: `Chapter ${season}.${number}`,
+  plot: null,
+  duration: 2700,
+  stillUrl: null,
+  airDate: null,
+});
+
+const base = {
+  originalTitle: null,
+  plot: null,
+  genres: ["Drama"],
+  cast: [],
+  directors: [],
+  releaseDate: null,
+  duration: null,
+  backdropUrl: null,
+};
+
+function detailsOf(id: string): MovieDetails | SeriesDetails {
+  const title = titles.get(id)!;
+  if (title.kind === "movie") return { ...base, kind: "movie", title };
+  return {
+    ...base,
+    kind: "series",
+    title,
+    seasons: [1, 2].map((number) => ({
+      number,
+      name: `Season ${number}`,
+      posterUrl: null,
+      episodes: [episode(number, 1), episode(number, 2)],
+    })),
+  };
+}
+
+/** What each title's related row shows, by the version opened. */
+let related: Record<string, readonly Title[]> = {};
+
+const status: OnDemandStatus = {
+  lists: [SUBSCRIPTION, OTHER].map((subscriptionId) => ({
+    subscriptionId,
+    movies: 3,
+    series: 1,
+    fetchedAt: 1,
+    failure: null,
+  })),
+  metadata: null,
+};
+
+/** Lets the window take in what just happened, on the fake clock. */
+const settle = () => act(() => vi.advanceTimersByTimeAsync(20));
+const sheet = () => document.body.querySelector<HTMLElement>('[role="dialog"]');
+/** The details' name, as the sheet is called. */
+const shown = () => {
+  const named = sheet()?.getAttribute("aria-labelledby");
+  return named ? (document.getElementById(named)?.textContent ?? null) : null;
+};
+const relatedTile = (name: string) =>
+  [
+    ...(sheet()?.querySelectorAll<HTMLButtonElement>(
+      '[aria-label="Also in your subscriptions"] button',
+    ) ?? []),
+  ].find((tile) => tile.textContent?.includes(name));
+const inSheet = (label: string) =>
+  [...(sheet()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+    (each) => each.textContent?.trim() === label || each.getAttribute("aria-label") === label,
+  );
+/** Back in the top bar the sheet keeps above its backdrop. */
+const back = () =>
+  [...(sheet()?.querySelectorAll<HTMLButtonElement>("header button") ?? [])].find(
+    (each) => each.textContent?.trim() === "Back",
+  );
+/** The part of the sheet that scrolls. */
+const scroller = () => sheet()?.querySelector<HTMLElement>(".overflow-y-auto") ?? null;
+const press = async (button: HTMLButtonElement | undefined) => {
+  if (!button) throw new Error("No such button.");
+  await act(async () => button.click());
+  await settle();
+};
+const key = (name: string, modifiers: KeyboardEventInit = {}) =>
+  act(async () => {
+    (document.activeElement ?? window).dispatchEvent(
+      new KeyboardEvent("keydown", { key: name, bubbles: true, ...modifiers }),
+    );
+  });
+
+/** Waits on the fake clock for the details of `name` with their related titles. */
+async function showing(name: string) {
+  await vi.waitFor(
+    async () => {
+      await settle();
+      expect(shown()).toBe(name);
+      expect(sheet()?.textContent).not.toContain("Loading related titles…");
+    },
+    { interval: 1 },
+  );
+}
+
+let unmount = () => {};
+beforeEach(() => {
+  vi.useFakeTimers();
+  ipc.reset();
+  related = { a: [canyon, field], b: [meridian, harbour], c: [field], d: [] };
+  ipc.always("subscription.list", BOTH);
+  ipc.always("liveBrowse.get", { kind: "all" });
+  ipc.always("ondemand.status", status);
+  ipc.answer("ondemand.titles", ({ versions }) =>
+    versions.flatMap((version) => titles.get(version.id) ?? []),
+  );
+  ipc.answer("ondemand.details", ({ version }) => detailsOf(version.id));
+  ipc.answer("ondemand.related", ({ version }) => ({
+    basis: "Drama",
+    titles: (related[version.id] ?? []).map((title) => ({ title, reason: "Drama" })),
+  }));
+  ipc.always("viewing.progress", []);
+  ipc.always("watchlist.saved", null);
+  // Movies leads with Night Harbour, the most popular film.
+  ipc.answer("ondemand.rows", ({ kind }) =>
+    kind === "movie" ? [{ id: "popular", name: "Popular", total: 1, titles: [harbour] }] : [],
+  );
+  useUi.setState(useUi.getInitialState(), true);
+});
+afterEach(() => {
+  unmount();
+  useUi.setState(useUi.getInitialState(), true);
+  vi.useRealTimers();
+});
+
+/** The window on Movies with both subscriptions, as the app draws it. */
+async function window_() {
+  useUi.setState({ view: "movies" });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () =>
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(TooltipProvider, null, createElement(App)),
+      ),
+    ),
+  );
+  unmount = () => {
+    act(() => root.unmount());
+    client.clear();
+    container.remove();
+  };
+  await vi.waitFor(
+    async () => {
+      await settle();
+      expect(document.querySelector("header")).not.toBeNull();
+    },
+    { interval: 1 },
+  );
+}
+
+/** The page's own control labelled `label`, once it shows. */
+async function onPage(label: string): Promise<HTMLButtonElement> {
+  let control: HTMLButtonElement | undefined;
+  await vi.waitFor(
+    async () => {
+      await settle();
+      control = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+        (each) => each.textContent?.trim() === label && !each.closest('[role="dialog"]'),
+      );
+      expect(control).toBeDefined();
+    },
+    { interval: 1 },
+  );
+  return control!;
+}
+
+/**
+ * Opens Night Harbour from the keyboard on Movies' Details, then its related Canyon Hours, on
+ * Season 2 and scrolled, then Meridian Dawn: the control the keyboard was on.
+ */
+async function threeDeep(): Promise<HTMLButtonElement> {
+  await window_();
+  const opener = await onPage("Details");
+  opener.focus();
+  await press(opener);
+  await showing("Night Harbour");
+  await press(relatedTile("Canyon Hours"));
+  await showing("Canyon Hours");
+  await press(inSheet("Season 2"));
+  scroller()!.scrollTop = 240;
+  await press(relatedTile("Meridian Dawn"));
+  await showing("Meridian Dawn");
+  return opener;
+}
+
+const ownedOf = (title: Title): OwnedId => ({ subscriptionId: title.subscriptionId, id: title.id });
+
+describe("Back over details", () => {
+  it("returns through each related title's details as they stood, then to the page", async () => {
+    const opener = await threeDeep();
+
+    await press(back());
+    await showing("Canyon Hours");
+    // The season picked and the scroll stand, and the keyboard is on the title opened from here.
+    expect(inSheet("Season 2")?.getAttribute("aria-pressed")).toBe("true");
+    expect(scroller()?.scrollTop).toBe(240);
+    expect(document.activeElement).toBe(relatedTile("Meridian Dawn"));
+
+    await press(back());
+    await showing("Night Harbour");
+    expect(document.activeElement).toBe(relatedTile("Canyon Hours"));
+
+    await press(back());
+    expect(sheet()).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("closes to the page with Close or Escape, and a title opened again starts over", async () => {
+    const opener = await threeDeep();
+    await press(inSheet("Close"));
+    expect(sheet()).toBeNull();
+    expect(document.activeElement).toBe(opener);
+
+    await act(async () => openDetails({ kind: "movie", ...ownedOf(meridian) }));
+    await showing("Meridian Dawn");
+    await press(back());
+    expect(sheet()).toBeNull();
+
+    await act(async () => openDetails({ kind: "movie", ...ownedOf(harbour) }));
+    await showing("Night Harbour");
+    await press(relatedTile("Canyon Hours"));
+    await showing("Canyon Hours");
+    await key("Escape");
+    await settle();
+    expect(sheet()).toBeNull();
+  });
+
+  it("returns the keyboard to the page's control after a menu opened and closed in the details", async () => {
+    const opener = await threeDeep();
+    const versions = inSheet("Versions")!;
+    versions.focus();
+    await press(versions);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    await key("Escape");
+    await settle();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(shown()).toBe("Meridian Dawn");
+
+    await press(inSheet("Close"));
+    expect(sheet()).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("keeps the way back through a title played and Settings, and the title adds no step", async () => {
+    await threeDeep();
+    ipc.hold("playback.openTitle");
+    await press(inSheet("Play"));
+    expect(document.querySelector("[data-view=title]")).not.toBeNull();
+    expect(sheet()).toBeNull();
+    await press(
+      [...document.querySelectorAll<HTMLButtonElement>("[data-view=title] header button")].find(
+        (each) => each.textContent?.trim() === "Back",
+      ),
+    );
+    await showing("Meridian Dawn");
+
+    await key(",", { ctrlKey: true, metaKey: true });
+    await settle();
+    expect(useUi.getState().settings).toBe("general");
+    expect(sheet()).toBeNull();
+    await press(
+      [
+        ...document.querySelectorAll<HTMLButtonElement>('[data-view="settings"] header button'),
+      ].find((each) => each.textContent?.trim() === "Back"),
+    );
+    await showing("Meridian Dawn");
+
+    await press(back());
+    await showing("Canyon Hours");
+    await press(back());
+    await showing("Night Harbour");
+    await press(back());
+    expect(sheet()).toBeNull();
+  });
+
+  it("gives the keyboard to the sheet when the title opened from it is no longer related", async () => {
+    await threeDeep();
+    // Long enough away for what Canyon Hours showed to be forgotten, and its related titles change.
+    related = { ...related, b: [harbour] };
+    await act(() => vi.advanceTimersByTimeAsync(6 * 60_000));
+    await press(back());
+    await showing("Canyon Hours");
+    expect(relatedTile("Meridian Dawn")).toBeUndefined();
+    expect(inSheet("Season 2")?.getAttribute("aria-pressed")).toBe("true");
+    expect(scroller()?.scrollTop).toBe(240);
+    expect(document.activeElement).toBe(sheet());
+  });
+});
+
+describe("the way back", () => {
+  const target = (id: string, subscriptionId = SUBSCRIPTION): DetailsTarget => ({
+    kind: "movie",
+    subscriptionId,
+    id,
+  });
+  const here = (related: string) => ({ season: null, scroll: 0, related });
+  /** Presses Back until the details close: the version each Back shows, the page last. */
+  function backs(): (string | null)[] {
+    const seen: (string | null)[] = [];
+    while (useUi.getState().details) {
+      backDetails();
+      seen.push(useUi.getState().details?.id ?? null);
+    }
+    return seen;
+  }
+  /** Opens `ids` one from the other, the first from the page. */
+  function chain(...targets: DetailsTarget[]) {
+    const [first, ...rest] = targets;
+    openDetails(first!);
+    for (const next of rest) openRelated(next, here(next.id));
+  }
+
+  it(`reaches back ${DETAILS_TRAIL} details at most, the latest first`, () => {
+    chain(...Array.from({ length: DETAILS_TRAIL + 3 }, (_, at) => target(`t${at}`)));
+    expect(useUi.getState().details?.id).toBe(`t${DETAILS_TRAIL + 2}`);
+    expect(backs()).toEqual([
+      ...Array.from({ length: DETAILS_TRAIL }, (_, at) => `t${DETAILS_TRAIL + 1 - at}`),
+      null,
+    ]);
+  });
+
+  it("passes over a removed subscription's titles, and closes on its details", () => {
+    chain(target("a"), target("b", OTHER), target("c"));
+    leaveSubscription(OTHER);
+    expect(useUi.getState().details?.id).toBe("c");
+    expect(backs()).toEqual(["a", null]);
+
+    chain(target("a"), target("b", OTHER), target("c"));
+    leaveSubscription(SUBSCRIPTION);
+    expect(useUi.getState().details).toBeNull();
+    backDetails();
+    expect(useUi.getState().details).toBeNull();
+  });
+
+  it("goes when titles for adults are hidden, the account starts over or a page opens", () => {
+    for (const end of [closeTitleSheets, resetForAccount, () => openView("movies")]) {
+      chain(target("a"), target("b"), target("c"));
+      end();
+      expect(useUi.getState().details).toBeNull();
+      backDetails();
+      expect(useUi.getState().details).toBeNull();
+    }
+  });
+
+  it("starts over when a title opens anew, as from search or the player", () => {
+    chain(target("a"), target("b"));
+    openDetails(target("d"));
+    expect(backs()).toEqual([null]);
+  });
+});
