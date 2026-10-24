@@ -183,16 +183,20 @@ export function RenameList({ list, onDone }: { list: CustomList; onDone: () => v
 
 /**
  * Asks once before a list goes: "Delete Late sport?" with Cancel and Delete list, which deletes
- * it with every channel it holds, of every account. `onDone` follows a cancel, `onDeleted` the
- * delete.
+ * it with every channel it holds, of every account. `onDone` follows a cancel. Each delete sent
+ * is `onSending` first, then `onDeleted` once it is stored or `onFailed` if it isn't.
  */
 export function DeleteList({
   list,
   onDone,
+  onSending,
+  onFailed,
   onDeleted,
 }: {
   list: CustomList;
   onDone: () => void;
+  onSending: () => void;
+  onFailed: () => void;
   onDeleted: () => void;
 }) {
   const change = useListChange();
@@ -201,8 +205,10 @@ export function DeleteList({
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
   const remove = async () => {
-    if (!saving && (await change.run(() => call("customLists.remove", { id: list.id }))))
-      onDeleted();
+    if (saving) return;
+    onSending();
+    if (await change.run(() => call("customLists.remove", { id: list.id }))) onDeleted();
+    else onFailed();
   };
   return (
     <div

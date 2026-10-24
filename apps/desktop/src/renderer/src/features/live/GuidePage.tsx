@@ -158,8 +158,18 @@ export function GuidePage({ active }: { active: boolean }) {
    */
   const finish = (which: typeof editing) =>
     setEditing((current) => (current === which ? null : current));
-  /** A list deleted from here, which falls back to All channels without saying it went. */
-  const deleted = useRef<string | null>(null);
+  /**
+   * The lists deleted from here, by their deletes sent that haven't failed. One gives way to All
+   * channels without saying it went, even when the lists are read again before its delete is
+   * answered. A list that goes otherwise says so, after a failed delete of it too.
+   */
+  const deleted = useRef(new Map<string, number>());
+  /** Counts a delete of `id` sent from here, or takes back one that failed. */
+  const deleting = (id: string, by: 1 | -1) => {
+    const count = (deleted.current.get(id) ?? 0) + by;
+    if (count > 0) deleted.current.set(id, count);
+    else deleted.current.delete(id);
+  };
 
   const picker = useListPicker(list, { create: true });
   const { entries, entry, setEntry, openGroup: toggle } = picker;
@@ -191,7 +201,7 @@ export function GuidePage({ active }: { active: boolean }) {
     }
     const resolved = resolveDiscovery(list, categories.data, customLists.data);
     if (resolved.kind === "all") {
-      const quietly = list.kind === "custom" && deleted.current === list.id;
+      const quietly = list.kind === "custom" && deleted.current.has(list.id);
       setRemovedCategory(quietly ? null : lastCategoryTitle.current || t("Current category"));
       showList({ kind: "all" });
     } else {
@@ -815,8 +825,9 @@ export function GuidePage({ active }: { active: boolean }) {
               <DeleteList
                 list={customList}
                 onDone={() => finish(editing)}
+                onSending={() => deleting(customList.id, 1)}
+                onFailed={() => deleting(customList.id, -1)}
                 onDeleted={() => {
-                  deleted.current = customList.id;
                   finish(editing);
                   // Only the list still on screen gives way to All channels.
                   const gone = { kind: "custom", id: customList.id } as const;

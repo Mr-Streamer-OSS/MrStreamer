@@ -3,7 +3,10 @@
 // channel row's lists menu opens the rail's name field wherever the rail was, in a provider's
 // categories or a Find, and makes the list with that channel; Escape makes none, and the list on
 // screen stays. A delete or rename answered after the viewer moved on ends only what it began: a
-// list chosen meanwhile stays chosen, with its new order or its own field as they are.
+// list chosen meanwhile stays chosen, with its new order or its own field as they are. The list
+// on screen, deleted from here, gives way to All channels without saying it went, whether its
+// answer or the lists read again come first; one that goes otherwise, after a failed delete,
+// still says so.
 import { browseResult } from "./browse-support.ts";
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -170,6 +173,15 @@ async function livePage(shown: ChannelList, lists: readonly CustomList[] = []) {
     store: (lists: readonly CustomList[]) => {
       stored = lists;
     },
+    /**
+     * Stores `lists` and says the lists changed, as the main process does once a change is
+     * stored, whether or not its answer is out yet: the window reads them again.
+     */
+    changed: async (lists: readonly CustomList[]) => {
+      stored = lists;
+      await act(async () => ipc.emit("customLists.changed", null));
+      await settled();
+    },
     heading: () => container.querySelector("main h1")?.textContent,
     rows: () =>
       [...container.querySelectorAll("[data-index]")].map(
@@ -310,10 +322,12 @@ describe("a delete or rename answered after the viewer moved on", () => {
     await page.click("Move Channel 3 down");
     expect(page.rows()).toEqual(["Channel 1", "Channel 3"]);
 
-    page.store([BETA]);
+    // The lists are read again without Alpha before its delete is answered.
+    await page.changed([BETA]);
     await act(async () => removed.resolve([BETA]));
     await settled();
     expect(page.entry("Alpha")).toBeNull();
+    expect(page.text()).not.toContain("no longer listed");
     expect(useUi.getState().list).toEqual({ kind: "custom", id: "beta" });
     expect(page.heading()).toBe("Beta");
     expect(page.drafting()).toBe(true);
@@ -342,26 +356,11 @@ describe("a delete or rename answered after the viewer moved on", () => {
     await page.option("Beta", "Rename");
     await page.type(page.rename()!, "Beta weekend");
 
-    page.store([BETA]);
+    await page.changed([BETA]);
     await act(async () => removed.resolve([BETA]));
     await settled();
     expect(useUi.getState().list).toEqual({ kind: "custom", id: "beta" });
     expect(page.rename()?.value).toBe("Beta weekend");
-  });
-
-  it("falls back to All channels, saying nothing, when the list on screen is deleted", async () => {
-    const page = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA]);
-    await page.option("Alpha", "Delete list");
-    const removed = ipc.hold("customLists.remove");
-    await page.click("Delete list");
-    page.store([BETA]);
-    await act(async () => removed.resolve([BETA]));
-    await settled();
-
-    expect(useUi.getState().list).toEqual({ kind: "all" });
-    expect(page.heading()).toBe("All channels");
-    expect(page.entry("Alpha")).toBeNull();
-    expect(page.text()).not.toContain("no longer listed");
   });
 
   it("leaves the field another list opened meanwhile, when a rename is answered", async () => {
@@ -399,5 +398,80 @@ describe("a delete or rename answered after the viewer moved on", () => {
     await act(async () => renamed.resolve([news, BETA]));
     await settled();
     expect(page.rename()?.value).toBe("Alpha late");
+  });
+});
+
+describe("deleting the list on screen", () => {
+  it("falls back to All channels, saying nothing, when the delete is answered first", async () => {
+    const page = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA]);
+    await page.option("Alpha", "Delete list");
+    const removed = ipc.hold("customLists.remove");
+    await page.click("Delete list");
+    page.store([BETA]);
+    await act(async () => removed.resolve([BETA]));
+    await settled();
+    expect(useUi.getState().list).toEqual({ kind: "all" });
+    expect(page.heading()).toBe("All channels");
+    expect(page.entry("Alpha")).toBeNull();
+    expect(page.text()).not.toContain("no longer listed");
+
+    // The change it stored is said afterwards, and read again.
+    await page.changed([BETA]);
+    expect(page.heading()).toBe("All channels");
+    expect(page.text()).not.toContain("no longer listed");
+  });
+
+  it("says nothing either when the lists are read without it before the delete is answered", async () => {
+    const page = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA]);
+    await page.option("Alpha", "Delete list");
+    const removed = ipc.hold("customLists.remove");
+    await page.click("Delete list");
+    await page.changed([BETA]);
+    expect(useUi.getState().list).toEqual({ kind: "all" });
+    expect(page.heading()).toBe("All channels");
+    expect(page.text()).not.toContain("no longer listed");
+
+    await act(async () => removed.resolve([BETA]));
+    await settled();
+    expect(page.heading()).toBe("All channels");
+    expect(page.entry("Alpha")).toBeNull();
+    expect(page.text()).not.toContain("no longer listed");
+  });
+
+  it("says nothing when an earlier delete of it failed while a later one was out", async () => {
+    const page = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA]);
+    await page.option("Alpha", "Delete list");
+    const earlier = ipc.hold("customLists.remove");
+    await page.click("Delete list");
+    await page.pick("Beta");
+    await page.pick("Alpha");
+    await page.option("Alpha", "Delete list");
+    const later = ipc.hold("customLists.remove");
+    await page.click("Delete list");
+    expect(ipc.argsOf("customLists.remove")).toEqual([{ id: "alpha" }, { id: "alpha" }]);
+
+    await act(async () => earlier.reject({ kind: "unexpected", detail: "database is locked" }));
+    await settled();
+    await page.changed([BETA]);
+    await act(async () => later.resolve([BETA]));
+    await settled();
+    expect(page.heading()).toBe("All channels");
+    expect(page.text()).not.toContain("no longer listed");
+  });
+
+  it("keeps the list and Retry when the delete fails, and says so when it goes otherwise", async () => {
+    const page = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA]);
+    await page.option("Alpha", "Delete list");
+    const removed = ipc.hold("customLists.remove");
+    await page.click("Delete list");
+    await act(async () => removed.reject({ kind: "unexpected", detail: "database is locked" }));
+    await settled();
+    expect(page.heading()).toBe("Alpha");
+    expect(page.entry("Alpha")).not.toBeNull();
+    expect(page.text()).toContain("Couldn't save.");
+
+    await page.changed([BETA]);
+    expect(page.heading()).toBe("All channels");
+    expect(page.text()).toContain("Alpha is no longer listed. Showing all channels.");
   });
 });
