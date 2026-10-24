@@ -118,6 +118,41 @@ export async function tick(d: Driver, list: string, member: boolean) {
 /** What the list shows in Live TV: its channels by provider name, in order. */
 export const shownRows = (d: Driver) => d.evaluate<string[]>(ROWS);
 
+/**
+ * Holds the profile database's write lock while `held` runs, as another program would. Taking
+ * it waits up to ten seconds for a write of the app's to end, then fails as SQLite says. The lock
+ * is let go only once it was taken, the database closes either way, and a failure in letting go
+ * never hides an earlier one.
+ */
+export async function withWriteLock(
+  d: Pick<Driver, "profile" | "action">,
+  held: () => Promise<void>,
+): Promise<void> {
+  const db = new DatabaseSync(join(d.profile, "mrstreamer.db"), { timeout: 10_000 });
+  let locked = false;
+  let failure: { readonly cause: unknown } | null = null;
+  try {
+    db.exec("begin exclusive");
+    locked = true;
+    d.action("Harness holds the database write lock (begin exclusive)");
+    await held();
+  } catch (cause) {
+    failure = { cause };
+  }
+  try {
+    if (locked) db.exec("rollback");
+  } catch (cause) {
+    failure ??= { cause };
+  }
+  try {
+    db.close();
+  } catch (cause) {
+    failure ??= { cause };
+  }
+  if (locked) d.action("Harness lets the write lock go");
+  if (failure) throw failure.cause;
+}
+
 export async function customListsScenario(
   d: Driver,
   fixture: { otherUrl: string; streams(): { requests: number; active: number } },
@@ -370,10 +405,7 @@ export async function customListsScenario(
 
   // A write refused while another program holds the database's write lock: the menu's change says
   // Couldn't save with Retry, and Retry once the lock is let go stores it.
-  const db = new DatabaseSync(join(d.profile, "mrstreamer.db"));
-  try {
-    db.exec("begin exclusive");
-    d.action("Harness holds the database write lock (begin exclusive)");
+  await withWriteLock(d, async () => {
     await rowMenu(d, "TEST | HEVC + AAC", "HEVC");
     await tick(d, "Late sports", false);
     await d.wait(
@@ -397,11 +429,7 @@ export async function customListsScenario(
       15_000,
     );
     await d.capture("failed-create");
-  } finally {
-    db.exec("rollback");
-    db.close();
-    d.action("Harness lets the write lock go");
-  }
+  });
   await d.click("Retry the list's change", named("main [role=alert] button", "Retry"));
   await d.wait(() =>
     d.evaluate<boolean>(`${rail("Late sports")}?.textContent.trim() === 'Late sports2'`),

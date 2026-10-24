@@ -7,7 +7,10 @@
 // on screen, deleted from here, gives way to All channels without saying it went, whether its
 // answer or the lists read again come first, and also once Live TV was left and opened again
 // while the delete was out. One that goes otherwise, after a failed delete too, still says so,
-// and another window knows nothing of this one's deletes.
+// and another window knows nothing of this one's deletes. Of changes sent side by side, the last
+// that failed shows with its Retry or Close until the viewer answers it or another fails:
+// another answering meanwhile leaves it. A saved order's answer gives way to lists read again
+// while its channels were read, and to subscriptions saved since.
 import { browseResult } from "./browse-support.ts";
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -22,6 +25,7 @@ import { App } from "../../src/renderer/src/app/App.tsx";
 import { useUi, type ChannelList } from "../../src/renderer/src/app/ui-store.ts";
 import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
+import { SubscriptionSection } from "../../src/renderer/src/features/settings/SubscriptionSection.tsx";
 import { queries, syncCustomLists } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
@@ -96,12 +100,13 @@ const settled = (ms = 20) => act(() => vi.advanceTimersByTimeAsync(ms));
 
 /**
  * Live TV on `shown`, with the viewer's `lists` as stored, which `store` changes. With `app`,
- * the whole window, whose bar leaves Live TV and opens it again.
+ * the whole window, whose bar leaves Live TV and opens it again; with `settings`, Settings'
+ * subscriptions open beside the page, as the window shows them over it.
  */
 async function livePage(
   shown: ChannelList,
   lists: readonly CustomList[] = [],
-  { app = false } = {},
+  { app = false, settings = false } = {},
 ) {
   ipc.reset();
   useUi.setState({
@@ -110,7 +115,7 @@ async function livePage(
     watching: false,
     searchOpen: false,
     searchFrom: "",
-    settings: null,
+    settings: settings ? "subscriptions" : null,
     details: null,
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -134,12 +139,12 @@ async function livePage(
   // The library answers a category or a list of channels with their channels, in that order.
   ipc.answer("library.browse", (query) =>
     browseResult(
-      (query.scope.kind === "channels"
-        ? query.scope.channels.map((each) => each.id)
-        : query.scope.kind === "category"
-          ? (HOLDS[query.scope.category.id] ?? [])
-          : ["1", "2", "3"]
-      ).map(channel),
+      query.scope.kind === "channels"
+        ? query.scope.channels.map((each) => ({ ...channel(each.id), ...each }))
+        : (query.scope.kind === "category"
+            ? (HOLDS[query.scope.category.id] ?? [])
+            : ["1", "2", "3"]
+          ).map(channel),
     ),
   );
   ipc.always("library.searchGroups", []);
@@ -152,10 +157,23 @@ async function livePage(
     ipc.always("ondemand.status", { lists: [], metadata: null });
     if (shown.kind === "custom") ipc.always("liveBrowse.get", { kind: "custom", id: shown.id });
   }
+  if (settings) {
+    client.setQueryData(["guide", "status"], []);
+    client.setQueryData(["ondemand", "status"], { lists: [], metadata: null });
+  }
   const stopLists = syncCustomLists(client);
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
+  const beside = document.createElement("div");
+  document.body.append(beside);
+  const besideRoot = createRoot(beside);
+  if (settings)
+    await act(async () =>
+      besideRoot.render(
+        createElement(QueryClientProvider, { client }, createElement(SubscriptionSection)),
+      ),
+    );
   await act(async () =>
     root.render(
       createElement(
@@ -170,8 +188,10 @@ async function livePage(
   unmount = () => {
     stopLists();
     act(() => root.unmount());
+    act(() => besideRoot.unmount());
     client.clear();
     container.remove();
+    beside.remove();
   };
   await settled();
 
@@ -193,7 +213,7 @@ async function livePage(
    */
   const choose = async (item: string) => {
     await settled();
-    const target = [...document.querySelectorAll('[role="menuitem"]')].find(
+    const target = [...document.querySelectorAll('[role^="menuitem"]')].find(
       (each) => each.textContent?.trim() === item,
     );
     await act(async () => {
@@ -254,6 +274,53 @@ async function livePage(
     newListFrom: async (title: string) => {
       await press(button(`Lists for ${title}`), `lists menu of ${title}`);
       await choose("New list");
+    },
+    /** Ticks or clears each of `lists` in a row's lists menu, one after the other, then closes it. */
+    tick: async (row: string, lists: readonly string[]) => {
+      await press(button(`Lists for ${row}`), `lists menu of ${row}`);
+      for (const name of lists) await choose(name);
+      await act(async () => {
+        document
+          .querySelector('[role="menu"]')
+          ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      });
+      await settled();
+    },
+    /** The line under the filters for a change that failed, if one shows: its words and button. */
+    alert: () => {
+      const line = container.querySelector('main p[role="alert"]');
+      return line
+        ? `${line.firstElementChild?.textContent} ${line.lastElementChild?.textContent}`
+        : null;
+    },
+    /** Presses that line's button: Retry, or Close. */
+    respond: () =>
+      press(container.querySelector('main p[role="alert"] > button'), "the line's button"),
+    /** Adds a subscription in Settings with `fields`, as the main process `added` it. */
+    addSubscription: async (fields: readonly string[], added: SubscriptionSummary) => {
+      await press(
+        [...beside.querySelectorAll("button")].find(
+          (each) => each.textContent?.trim() === "Add subscription",
+        ),
+        "Add subscription",
+      );
+      await settled();
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      await act(async () =>
+        beside.querySelectorAll("form input").forEach((input, index) => {
+          setValue.call(input, fields[index] ?? "");
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }),
+      );
+      const sent = ipc.hold("subscription.add");
+      await act(async () => {
+        beside
+          .querySelector("form")
+          ?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      });
+      await settled();
+      await act(async () => sent.resolve(added));
+      await settled();
     },
     /** Opens the header menu of the list on screen and chooses `item`. */
     option: async (name: string, item: string) => {
@@ -599,5 +666,172 @@ describe("leaving Live TV while the delete of its list is out", () => {
     await page.changed([BETA]);
     expect(page.heading()).toBe("All channels");
     expect(page.text()).toContain("Alpha is no longer listed. Showing all channels.");
+  });
+});
+
+describe("changes sent side by side", () => {
+  const locked = { kind: "unexpected", detail: "database is locked" } as const;
+
+  it("keeps a failure and its Retry when an earlier change succeeds after it", async () => {
+    const page = await livePage({ kind: "all" }, [ALPHA, BETA]);
+    const toAlpha = ipc.hold("customLists.setMember", (change) => change.list === "alpha");
+    const fromBeta = ipc.hold("customLists.setMember", (change) => change.list === "beta");
+    await page.tick("Channel 3", ["Alpha", "Beta"]);
+    expect(ipc.argsOf("customLists.setMember")).toEqual([
+      { list: "alpha", channel: own("3"), member: true },
+      { list: "beta", channel: own("3"), member: false },
+    ]);
+    await act(async () => fromBeta.reject(locked));
+    await settled();
+    expect(page.alert()).toBe("Couldn't save. Retry");
+    await act(async () => toAlpha.resolve([list("alpha", "Alpha", ["1", "2", "3"], 3), BETA]));
+    await settled();
+    expect(page.alert()).toBe("Couldn't save. Retry");
+
+    // Retry sends Beta's change again, the one that failed.
+    const again = ipc.hold("customLists.setMember");
+    await page.respond();
+    expect(ipc.argsOf("customLists.setMember").at(-1)).toEqual({
+      list: "beta",
+      channel: own("3"),
+      member: false,
+    });
+    await act(async () =>
+      again.resolve([list("alpha", "Alpha", ["1", "2", "3"], 3), list("beta", "Beta", ["1"], 3)]),
+    );
+    await settled();
+    expect(page.alert()).toBeNull();
+  });
+
+  it("keeps an earlier failure while a later change starts and succeeds, until it is closed", async () => {
+    const page = await livePage({ kind: "all" }, [ALPHA, BETA]);
+    const toAlpha = ipc.hold("customLists.setMember");
+    await page.tick("Channel 3", ["Alpha"]);
+    await act(async () => toAlpha.reject({ kind: "list-changed" }));
+    await settled();
+    expect(page.alert()).toBe("This list changed. Close");
+
+    const toBeta = ipc.hold("customLists.setMember");
+    await page.tick("Channel 2", ["Beta"]);
+    expect(page.alert()).toBe("This list changed. Close");
+    await act(async () => toBeta.resolve([ALPHA, list("beta", "Beta", ["3", "1", "2"], 3)]));
+    await settled();
+    expect(page.alert()).toBe("This list changed. Close");
+    await page.respond();
+    expect(page.alert()).toBeNull();
+  });
+
+  it("retries the change whose failure shows, whatever answers before it", async () => {
+    const page = await livePage({ kind: "all" }, [ALPHA, BETA]);
+    const toAlpha = ipc.hold("customLists.setMember", (change) => change.list === "alpha");
+    const fromBeta = ipc.hold("customLists.setMember", (change) => change.list === "beta");
+    await page.tick("Channel 3", ["Alpha", "Beta"]);
+    await act(async () => fromBeta.reject(locked));
+    await settled();
+
+    // The viewer sends Beta's again. Alpha's fails meanwhile, then Beta's goes through.
+    const betaAgain = ipc.hold("customLists.setMember", (change) => change.list === "beta");
+    await page.respond();
+    expect(page.alert()).toBeNull();
+    await act(async () => toAlpha.reject(locked));
+    await settled();
+    expect(page.alert()).toBe("Couldn't save. Retry");
+    await act(async () => betaAgain.resolve([ALPHA, list("beta", "Beta", ["1"], 3)]));
+    await settled();
+    expect(page.alert()).toBe("Couldn't save. Retry");
+
+    const alphaAgain = ipc.hold("customLists.setMember", (change) => change.list === "alpha");
+    await page.respond();
+    expect(ipc.argsOf("customLists.setMember").at(-1)).toEqual({
+      list: "alpha",
+      channel: own("3"),
+      member: true,
+    });
+    await act(async () =>
+      alphaAgain.resolve([
+        list("alpha", "Alpha", ["1", "2", "3"], 3),
+        list("beta", "Beta", ["1"], 3),
+      ]),
+    );
+    await settled();
+    expect(page.alert()).toBeNull();
+  });
+});
+
+describe("a saved order's answer, and lists newer than it", () => {
+  /** Saves Alpha's order with Channel 1 moved down, and holds the read of the answer's channels. */
+  async function savedOrder(
+    page: Awaited<ReturnType<typeof livePage>>,
+    answer: readonly CustomList[],
+  ) {
+    await page.click("Reorder");
+    await page.click("Move Channel 1 down");
+    const arranged = ipc.hold("customLists.arrange");
+    await page.click("Save");
+    const reading = ipc.hold(
+      "library.browse",
+      (query) =>
+        query.scope.kind === "channels" &&
+        query.scope.channels.map((each) => each.id).join() === "2,1",
+    );
+    await act(async () => arranged.resolve(answer));
+    await settled();
+    return () => act(async () => reading.resolve(browseResult([channel("2"), channel("1")])));
+  }
+
+  it("keeps lists read again while the answer's channels were read", async () => {
+    const page = await livePage({ kind: "custom", id: "alpha" }, [ALPHA, BETA]);
+    const saved = list("alpha", "Alpha", ["2", "1"], 3);
+    const read = await savedOrder(page, [saved, BETA]);
+    // Meanwhile Beta is deleted, Gamma made and Alpha renamed.
+    await page.changed([
+      { ...saved, name: "Alpha news", revision: 4 },
+      list("gamma", "Gamma", ["3"], 1),
+    ]);
+    await read();
+    await settled();
+    expect(page.drafting()).toBe(false);
+    expect(page.heading()).toBe("Alpha news");
+    expect(page.rows()).toEqual(["Channel 2", "Channel 1"]);
+    expect(page.entry("Beta")).toBeNull();
+    expect(page.entry("Gamma")).not.toBeNull();
+  });
+
+  it("leaves the answer for the subscriptions saved before one was added meanwhile", async () => {
+    // Alpha keeps a channel of a subscription that isn't saved: one away.
+    const away = { ...ALPHA, away: 1 };
+    const page = await livePage({ kind: "custom", id: "alpha" }, [away, BETA], { settings: true });
+    expect(page.text()).toContain("from a subscription that isn't saved");
+    const read = await savedOrder(page, [
+      { ...list("alpha", "Alpha", ["2", "1"], 3), away: 1 },
+      BETA,
+    ]);
+
+    // That subscription is added in Settings meanwhile, and the lists read again hold its
+    // channel among Alpha's.
+    const two: SubscriptionSummary = {
+      ...subscription,
+      id: "two",
+      name: "Backup",
+      username: "two",
+    };
+    const back = list("alpha", "Alpha", ["2", "1"], 3);
+    ipc.always("subscription.list", [subscription, two]);
+    page.store([
+      {
+        ...back,
+        members: [
+          ...back.members,
+          { member: "alpha-9", kind: "listed", channel: { subscriptionId: "two", id: "9" } },
+        ],
+      },
+      BETA,
+    ]);
+    await page.addSubscription(["Backup", "tv.backup.example:8080", "two", "s3cret"], two);
+    await read();
+    await settled();
+    expect(page.drafting()).toBe(false);
+    expect(page.rows()).toEqual(["Channel 2", "Channel 1", "Channel 9"]);
+    expect(page.text()).not.toContain("from a subscription that isn't saved");
   });
 });

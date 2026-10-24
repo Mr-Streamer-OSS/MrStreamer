@@ -277,11 +277,18 @@ export function useListOrder(
     keepViewing(client, viewing, from);
   };
 
-  /** The same for the lists the main process answered a list's order with. */
+  /**
+   * The same for the lists the main process answered a list's order with. Lists read again while
+   * the answer's channels were read, or subscriptions saved since, are newer than that answer:
+   * then the lists are read again instead, as for a change overtaken by a later one.
+   */
   const takeInLists = async (from: string, lists: readonly CustomList[]) => {
     if (!connected(from)) return;
+    const held = client.getQueryData(queries.customLists().queryKey);
     await read(client.getQueryData(queries.viewing().queryKey), lists).catch(() => {});
-    client.setQueryData(queries.customLists().queryKey, lists);
+    if (connected(from) && client.getQueryData(queries.customLists().queryKey) === held)
+      client.setQueryData(queries.customLists().queryKey, lists);
+    else void client.invalidateQueries({ queryKey: queries.customLists().queryKey });
   };
 
   const select = (channel: OwnedId, part: RowPart = "row") => {

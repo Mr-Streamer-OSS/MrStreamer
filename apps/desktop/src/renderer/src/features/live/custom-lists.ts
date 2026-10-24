@@ -2,7 +2,8 @@
 // changes Live TV makes to them. A change answers every list as stored, which the lists' query
 // takes, unless a later change began meanwhile: then the lists are read again, as `syncCustomLists`
 // also has them read once a change is stored. One that fails keeps what it asked, to send again.
-// A delete is the window's own from when it is sent, kept with the window's query client.
+// A delete is the window's own from when it is sent, kept with the window's query client. Of
+// changes sent side by side, the last that failed shows until the viewer answers it.
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { CustomList } from "@mrstreamer/contracts/custom-lists";
@@ -98,6 +99,39 @@ export function useListChange() {
     run,
     retry: () => (state.status === "failed" ? run(state.change) : Promise.resolve(null)),
     dismiss: () => setState({ status: "idle" }),
+  };
+}
+
+const IDLE: ChangeState = { status: "idle" };
+
+/**
+ * Changes of the lists sent side by side, from rows and menus that don't wait for one another:
+ * the last that failed shows, with Retry, until the viewer sends it again or closes it, or
+ * another fails. A change starting or answering meanwhile leaves it showing.
+ */
+export function useListChanges() {
+  const client = useQueryClient();
+  const [failed, setFailed] = useState<Extract<ChangeState, { status: "failed" }> | null>(null);
+  /** Sends `change`; answers the lists as stored, or null once it failed, which then shows. */
+  const run = async (change: ListChange): Promise<readonly CustomList[] | null> => {
+    try {
+      return await send(client, change);
+    } catch (cause) {
+      setFailed({ status: "failed", error: appError(cause), change });
+      return null;
+    }
+  };
+  /** Takes down the failure the viewer answered, unless another failed since. */
+  const answered = () => setFailed((current) => (current === failed ? null : current));
+  return {
+    state: failed ?? IDLE,
+    run,
+    retry: () => {
+      if (!failed) return;
+      answered();
+      void run(failed.change);
+    },
+    dismiss: answered,
   };
 }
 

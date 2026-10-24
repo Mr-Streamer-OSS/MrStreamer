@@ -90,7 +90,7 @@ import {
   useShowList,
 } from "./lists.ts";
 import { orderKey, useListOrder, waits } from "./reorder.ts";
-import { deletedHere, useListChange, useNewList } from "./custom-lists.ts";
+import { deletedHere, useListChanges, useNewList } from "./custom-lists.ts";
 import {
   AwayNote,
   ChangeNotice,
@@ -149,7 +149,7 @@ export function GuidePage({ active }: { active: boolean }) {
   const customList =
     list.kind === "custom" ? customLists.data?.find((each) => each.id === list.id) : undefined;
   /** Changes made from rows and menus, and the last of them that failed, for Retry. */
-  const listChange = useListChange();
+  const listChange = useListChanges();
   /** What a list's header shows in its place: a field to rename it, or Delete's question. */
   const [editing, setEditing] = useState<{ id: string; kind: "rename" | "delete" } | null>(null);
   if (editing && editing.id !== customList?.id) setEditing(null);
@@ -826,7 +826,7 @@ export function GuidePage({ active }: { active: boolean }) {
             {customList && <AwayNote count={customList.away} />}
             <ChangeNotice
               state={listChange.state}
-              onRetry={() => void listChange.retry()}
+              onRetry={listChange.retry}
               onDismiss={listChange.dismiss}
             />
             <SourceNotices />
