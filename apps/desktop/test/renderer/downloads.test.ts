@@ -323,9 +323,9 @@ describe("the queue on the Downloads page", () => {
       list([running, next, waiting, held]),
       () => order(page).join() === "running,next,waiting,held",
     );
-    await act(async () => (document.activeElement as HTMLElement).blur());
+    // First now, it goes no earlier: Down has the keyboard, and keeps it once the answer comes.
+    expect(document.activeElement).toBe(labelled(rowOf(page, "next"), "Move The Bear down"));
     await act(async () => answer.resolve(null));
-    // First now, it goes no earlier: Down has the keyboard.
     expect(document.activeElement).toBe(labelled(rowOf(page, "next"), "Move The Bear down"));
     // Paused from the keyboard, the row's Resume has it once its row says so.
     const hold = () => rowOf(page, "next").querySelector<HTMLButtonElement>("[data-hold]")!;
@@ -414,6 +414,129 @@ describe("the queue on the Downloads page", () => {
     await act(async () => up().blur());
     await changed(list([running, d, b]), () => order(page).join() === "running,d,b");
     expect(document.activeElement).toBe(document.body);
+  });
+
+  /**
+   * The transfer, then B, C and D waiting, the pointer moving C down while the keyboard stays on
+   * B's Down: main moves B around D, though the window, still drawing B, C and D, showed C below.
+   */
+  async function movedAroundAnother(order: "answer first" | "list first") {
+    const { b, c, d } = passing();
+    ipc.always("downloads.list", list([running, b, c, d]));
+    ipc.always("downloads.move", null);
+    const page = await show(createElement(DownloadsPage), "[data-download]");
+    const down = () => labelled(rowOf(page, "b"), "Move B down")!;
+    await act(async () => down().focus());
+    await click(labelled(rowOf(page, "c"), "Move C down"));
+    expect(document.activeElement).toBe(down());
+    const answer = ipc.hold("downloads.move");
+    await click(down());
+    expect(ipc.argsOf("downloads.move")).toEqual([
+      { id: "c", by: 1 },
+      { id: "b", by: 1 },
+    ]);
+    if (order === "answer first") await act(async () => answer.resolve(null));
+    await changed(list([running, b, d, c]), () => rows(page) === "running,b,d,c");
+    if (order === "list first") await act(async () => answer.resolve(null));
+    await changed(list([running, d, b, c]), () => rows(page) === "running,d,b,c");
+    expect(document.activeElement).toBe(down());
+    return { page, b, c, d };
+  }
+  const rows = (page: HTMLElement) => order(page).join();
+
+  for (const arrival of ["answer first", "list first"] as const) {
+    it(`leaves the keyboard to the row the viewer goes to after a move another move changed, ${arrival}`, async () => {
+      const { page, b, d } = await movedAroundAnother(arrival);
+      // The viewer goes on to C and cancels it: the keyboard was C's, so nothing takes it.
+      ipc.always("downloads.remove", null);
+      const cancel = button(rowOf(page, "c"), "Cancel")!;
+      await act(async () => cancel.focus());
+      await click(cancel);
+      expect(ipc.argsOf("downloads.remove")).toEqual([{ id: "c" }]);
+      await changed(list([running, d, b]), () => rows(page) === "running,d,b");
+      expect(document.activeElement).toBe(document.body);
+    });
+  }
+
+  for (const leaving of ["before", "after"] as const) {
+    it(`takes no keyboard back for a move once the viewer went to another row ${leaving} its answer`, async () => {
+      const { b, c, d } = passing();
+      ipc.always("downloads.list", list([running, b, c, d]));
+      ipc.always("downloads.remove", null);
+      const page = await show(createElement(DownloadsPage), "[data-download]");
+      const up = () => labelled(rowOf(page, "d"), "Move D up")!;
+      await act(async () => up().focus());
+      const answer = ipc.hold("downloads.move");
+      await click(up());
+      if (leaving === "after") await act(async () => answer.resolve(null));
+      const cancel = button(rowOf(page, "c"), "Cancel")!;
+      await act(async () => cancel.focus());
+      await click(cancel);
+      if (leaving === "before") await act(async () => answer.resolve(null));
+      // Main moved D past C, then took C away, both told in one list: the keyboard went with C.
+      await changed(list([running, b, d]), () => rows(page) === "running,b,d");
+      expect(document.activeElement).toBe(document.body);
+    });
+  }
+
+  it("keeps a paused transfer's keyboard through an older list, on the row's Resume and Pause", async () => {
+    const [p, q] = ["P", "Q"].map((name) =>
+      download({ id: name.toLowerCase(), name, status: { kind: "queued" } }),
+    );
+    const paused = { kind: "paused", received: 0, size: null } as const;
+    const moving = { ...running, id: "a", name: "A" };
+    ipc.always("downloads.list", list([moving, { ...p!, status: paused }, q!]));
+    answered();
+    const page = await show(createElement(DownloadsPage), "[data-download]");
+    const hold = () => rowOf(page, "a").querySelector<HTMLButtonElement>("[data-hold]")!;
+    await act(async () => hold().focus());
+    await click(hold());
+    // Made before the pause: P went. Then A paused takes its place after Q.
+    await changed(list([moving, q!]), () => rows(page) === "a,q");
+    await changed(list([q!, { ...moving, status: paused }]), () => rows(page) === "q,a");
+    expect(hold().textContent).toBe("Resume");
+    expect(document.activeElement).toBe(hold());
+    await click(hold());
+    await changed(list([moving, q!]), () => rows(page) === "a,q");
+    expect(hold().textContent).toBe("Pause");
+    expect(document.activeElement).toBe(hold());
+  });
+
+  it("hands the keyboard to Up when a move takes the row to the bottom", async () => {
+    const { b, c } = passing();
+    ipc.always("downloads.list", list([running, b, c]));
+    answered();
+    const page = await show(createElement(DownloadsPage), "[data-download]");
+    const down = () => labelled(rowOf(page, "b"), "Move B down")!;
+    await act(async () => down().focus());
+    await click(down());
+    await changed(list([running, c, b]), () => rows(page) === "running,c,b");
+    expect(down().disabled).toBe(true);
+    expect(document.activeElement).toBe(labelled(rowOf(page, "b"), "Move B up"));
+  });
+
+  it("hands the keyboard to the other arrow where the browser drops it as the arrow turns off", async () => {
+    // Chromium can take the keyboard from a button as it is turned off, before anything runs.
+    const setAttribute = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (this: Element, name: string, value: string) {
+      setAttribute.call(this, name, value);
+      if (name === "disabled" && this === document.activeElement) (this as HTMLElement).blur();
+    };
+    try {
+      const { b, c, d } = passing();
+      ipc.always("downloads.list", list([running, b, c, d]));
+      answered();
+      const page = await show(createElement(DownloadsPage), "[data-download]");
+      const up = () => labelled(rowOf(page, "d"), "Move D up")!;
+      await act(async () => up().focus());
+      await click(up());
+      await changed(list([running, c, d]), () => rows(page) === "running,c,d");
+      await changed(list([running, d, c]), () => rows(page) === "running,d,c");
+      expect(up().disabled).toBe(true);
+      expect(document.activeElement).toBe(labelled(rowOf(page, "d"), "Move D down"));
+    } finally {
+      Element.prototype.setAttribute = setAttribute;
+    }
   });
 
   it("says a change it couldn't keep, and keeps the control to press again", async () => {

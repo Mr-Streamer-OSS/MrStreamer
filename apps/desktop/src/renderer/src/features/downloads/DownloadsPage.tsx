@@ -6,15 +6,15 @@
 // keeps its partial file until resumed, while one whose subscription plays waits for that. Pause
 // all in the heading pauses everything that can be, then Resume all lets it all go on. A pause, a
 // resume or a move that can't be kept says so on its row, or under the heading, its control there
-// to press again. Pressed from the keyboard, the control keeps the keyboard wherever its row goes,
-// or the other arrow takes it where the row reached an end. A copy plays offline from here, with
+// to press again. A button of a row keeps the keyboard wherever the list moves its row, and where
+// the row reached an end the other arrow takes it. A copy plays offline from here, with
 // how far it was watched, and says so once its subscription went. Everything here is read from
 // this computer; artwork comes from the copies' own folders.
 //   With no subscription saved the page stands alone, opened from Connect: its bar has only
 //   Downloads, and Add subscription goes back to the form.
 import { useMutation } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Pause, Play } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useLayoutEffect, useState } from "react";
 import type { Download } from "@mrstreamer/contracts/downloads";
 import { formatBytes, formatNumber, t } from "@mrstreamer/core/i18n";
 import { openView } from "../../app/ui-store.ts";
@@ -36,36 +36,18 @@ import { cn } from "../../lib/utils.ts";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
 
 /**
- * A row's change kept from the keyboard, and where the keyboard goes once the row shows that very
- * change: back to its control. A move shows once the row is past the neighbour it was moved
- * around (`past`), a pause or resume once its button offers the other (`offers`). Another list
- * between, as one made before the change that only took a row away, moves nothing yet.
+ * Hands the keyboard on where drawing the list turned off the arrow that had it, `had` being where
+ * it was as the list came: the row's other arrow takes it. React gives a button the keyboard back
+ * when the list moves its row, but can't give it to an arrow turned off at an end. Anything else,
+ * as a button that went with its row or a keyboard the viewer had elsewhere, is left alone.
  */
-type Refocus =
-  | { readonly id: string; readonly control: -1 | 1; readonly past: string }
-  | { readonly id: string; readonly control: "hold"; readonly offers: Hold };
-
-/** What a row's Pause or Resume button does: its `data-hold`. */
-type Hold = "pause" | "resume";
-
-/** `element` when it is a button that can be pressed. */
-const pressable = (element: Element | null | undefined) =>
-  element instanceof HTMLButtonElement && !element.disabled ? element : null;
-
-/**
- * Whether `rows` show the change `wanted` asked of `row`, or can't any more: the row lost the
- * control it asked with, as once it began to transfer or finished, or the neighbour it moved
- * around is no longer waiting, so the move can't be told from the queue around it.
- */
-function shows(wanted: Refocus, row: HTMLElement, rows: readonly HTMLElement[]): boolean {
-  if (wanted.control === "hold") {
-    const hold = row.querySelector<HTMLElement>("[data-hold]");
-    return !hold || hold.dataset["hold"] === wanted.offers;
-  }
-  const other = rows.find((each) => each.dataset["download"] === wanted.past);
-  if (!row.querySelector("[data-move]") || !other?.querySelector("[data-move]")) return true;
-  const passed = rows.indexOf(row) - rows.indexOf(other);
-  return wanted.control === -1 ? passed < 0 : passed > 0;
+function handOn(had: Element | null) {
+  if (!(had instanceof HTMLButtonElement) || !had.disabled || !had.isConnected) return;
+  const by = Number(had.dataset["move"]);
+  const now = document.activeElement;
+  if (!by || (now !== had && now !== null && now !== document.body)) return;
+  const other = had.closest("[data-download]")?.querySelector(`[data-move="${-by}"]`);
+  if (other instanceof HTMLButtonElement && !other.disabled) other.focus();
 }
 
 export function DownloadsPage({ standalone = false }: { standalone?: boolean }) {
@@ -75,7 +57,6 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
   const copies = items.filter(onComputer);
   // Main lists the ones waiting together, after the transfer.
   const line = queue.filter(waiting);
-  const places = new Map(line.map((item, at) => [item, at]));
   const pausable = queue.some(
     (item) =>
       item.status.kind === "transferring" || (waiting(item) && item.status.kind !== "paused"),
@@ -85,27 +66,9 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
     mutationFn: (pause: boolean) =>
       pause ? call("downloads.pauseAll") : call("downloads.resumeAll"),
   });
-  const page = useRef<HTMLDivElement>(null);
-  const refocus = useRef<Refocus | null>(null);
-  // Main's answer and its lists come in any order: whichever comes last shows the change.
-  const refocusNow = useCallback(() => {
-    const wanted = refocus.current;
-    if (!wanted) return;
-    const rows = [...(page.current?.querySelectorAll<HTMLElement>("[data-download]") ?? [])];
-    const row = rows.find((each) => each.dataset["download"] === wanted.id);
-    if (row && !shows(wanted, row, rows)) return;
-    refocus.current = null;
-    // Only while the keyboard has nowhere else to be: the viewer may have gone on meanwhile.
-    const focused = document.activeElement;
-    if (!row || (focused && focused !== document.body && !row.contains(focused))) return;
-    const target =
-      wanted.control === "hold"
-        ? pressable(row.querySelector("[data-hold]"))
-        : (pressable(row.querySelector(`[data-move="${wanted.control}"]`)) ??
-          pressable(row.querySelector(`[data-move="${-wanted.control}"]`)));
-    target?.focus();
-  }, []);
-  useEffect(refocusNow, [list.data, refocusNow]);
+  // Where the keyboard is as this list is drawn, for `handOn` once it is.
+  const had = document.activeElement;
+  useLayoutEffect(() => handOn(had));
   const summary = list.data
     ? [
         list.data.bytes > 0
@@ -119,7 +82,7 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
   return (
     <div className="flex h-full flex-col">
       {standalone ? <OfflineBar /> : <WindowBar className="bg-black" />}
-      <div ref={page} className="min-h-0 flex-1 overflow-y-auto px-10 pt-2 pb-10">
+      <div className="min-h-0 flex-1 overflow-y-auto px-10 pt-2 pb-10">
         <div className="mb-3 flex items-baseline gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">{t("Downloads")}</h1>
           {items.length > 0 && (
@@ -159,21 +122,9 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
         {queue.length > 0 && (
           <section aria-label={t("Queue")}>
             <h2 className="mt-2 mb-1 text-[0.9375rem] font-semibold">{t("Queue")}</h2>
-            {queue.map((item) => {
-              const at = places.get(item) ?? -1;
-              return (
-                <Row
-                  key={item.id}
-                  item={item}
-                  above={line[at - 1]?.id ?? null}
-                  below={at < 0 ? null : (line[at + 1]?.id ?? null)}
-                  onKept={(wanted) => {
-                    refocus.current = wanted;
-                    refocusNow();
-                  }}
-                />
-              );
-            })}
+            {queue.map((item) => (
+              <Row key={item.id} item={item} first={line[0] === item} last={line.at(-1) === item} />
+            ))}
           </section>
         )}
         {copies.length > 0 && (
@@ -230,62 +181,39 @@ function waiting(item: Download): boolean {
   );
 }
 
-/** Whether `event` pressed a control the keyboard is on, which it then gets back. */
-const fromKeyboard = (event: MouseEvent<HTMLElement>) =>
-  event.currentTarget === document.activeElement;
-
 function Row({
   item,
-  above = null,
-  below = null,
-  onKept = () => {},
+  first = false,
+  last = false,
 }: {
   item: Download;
-  /** The downloads waiting their turn just before and after it, as Up and Down swap it. */
-  above?: string | null;
-  below?: string | null;
-  /** Once a pause, resume or move pressed from the keyboard was kept. */
-  onKept?: (refocus: Refocus) => void;
+  /** Whether it is the first, or last, of the downloads waiting their turn. */
+  first?: boolean;
+  last?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
   const remove = useMutation({ mutationFn: () => call("downloads.remove", { id: item.id }) });
   const retry = useMutation({ mutationFn: () => call("downloads.retry", { id: item.id }) });
-  // Kept from the keyboard, each hands the page where the keyboard goes and what must show first.
   const hold = useMutation({
-    mutationFn: ({ pause }: { readonly pause: boolean; readonly keyboard: boolean }) =>
+    mutationFn: (pause: boolean) =>
       pause ? call("downloads.pause", { id: item.id }) : call("downloads.resume", { id: item.id }),
-    onSuccess: (_, { pause, keyboard }) => {
-      if (keyboard) onKept({ id: item.id, control: "hold", offers: pause ? "resume" : "pause" });
-    },
   });
   const move = useMutation({
-    mutationFn: ({
-      by,
-    }: {
-      readonly by: -1 | 1;
-      /** The neighbour it moves around, as the row had it when pressed. */
-      readonly past: string;
-      readonly keyboard: boolean;
-    }) => call("downloads.move", { id: item.id, by }),
-    onSuccess: (_, { by, past, keyboard }) => {
-      if (keyboard) onKept({ id: item.id, control: by, past });
-    },
+    mutationFn: (by: -1 | 1) => call("downloads.move", { id: item.id, by }),
   });
   // Pressed again while it is under way, a change does nothing; it isn't disabled meanwhile,
   // which would leave the keyboard on a button that can't be pressed.
-  const holding = (pause: boolean) => (event: MouseEvent<HTMLElement>) => {
+  const holding = (pause: boolean) => () => {
     if (hold.isPending) return;
     move.reset();
-    hold.mutate({ pause, keyboard: fromKeyboard(event) });
+    hold.mutate(pause);
   };
-  const moving = (by: -1 | 1) => (event: MouseEvent<HTMLElement>) => {
-    const past = by === -1 ? above : below;
-    if (move.isPending || past === null) return;
+  const moving = (by: -1 | 1) => () => {
+    if (move.isPending) return;
     hold.reset();
-    move.mutate({ by, past, keyboard: fromKeyboard(event) });
+    move.mutate(by);
   };
   const { status } = item;
-  const offers: Hold = status.kind === "paused" ? "resume" : "pause";
   const episode = episodeLine(item);
   const name = episode ? `${item.name} · ${episode}` : item.name;
   const copy = onComputer(item);
@@ -356,7 +284,7 @@ function Row({
               size="icon-sm"
               aria-label={t("Move {name} up", { name })}
               data-move={-1}
-              disabled={above === null}
+              disabled={first}
               onClick={moving(-1)}
             >
               <ArrowUp />
@@ -366,7 +294,7 @@ function Row({
               size="icon-sm"
               aria-label={t("Move {name} down", { name })}
               data-move={1}
-              disabled={below === null}
+              disabled={last}
               onClick={moving(1)}
             >
               <ArrowDown />
@@ -374,7 +302,7 @@ function Row({
           </>
         )}
         {(waiting(item) || status.kind === "transferring") && (
-          <Button size="sm" data-hold={offers} onClick={holding(offers === "pause")}>
+          <Button size="sm" data-hold onClick={holding(status.kind !== "paused")}>
             {status.kind === "paused" ? (
               <Play className="fill-current" />
             ) : (
