@@ -25,6 +25,8 @@ const hasProbe = spawnSync(FFPROBE, ["-version"]).status === 0;
 const DECODERS: readonly Codec[] = ["h264", "aac"];
 const SECRET = "synthetic-secret";
 const LINK = `https://lists.test/list.m3u?token=${SECRET}`;
+/** A token of three characters: the login all the same. */
+const SHORT = "q7x";
 const CLIP = fixture("h264-aac.mpegts");
 /** An entry's Referer that holds the link's token, and one that holds nothing of it. */
 const REFERER = `https://site.test/watch?token=${SECRET}`;
@@ -39,11 +41,11 @@ afterEach(async () => {
 });
 
 /**
- * The playlist at `LINK` listing `entries`, with playback and the subscription connected. `routes`
+ * The playlist at `link` listing `entries`, with playback and the subscription connected. `routes`
  * answers by address without its query, http ones on the loopback server at `plain`. `reached`
  * notes every http request and `asked` every https one, with their headers.
  */
-async function connected(entries: (plain: string) => readonly string[]) {
+async function connected(entries: (plain: string) => readonly string[], link = LINK) {
   const routes = new Map<string, Answer>();
   const reached: { path: string; headers: IncomingHttpHeaders }[] = [];
   const asked: { url: string; headers: Headers }[] = [];
@@ -78,9 +80,12 @@ async function connected(entries: (plain: string) => readonly string[]) {
     asked.push({ url: url.href, headers: new Headers(init?.headers) });
     const found = routes.get(`${url.origin}${url.pathname}`);
     if (found === undefined) return new Response(null, { status: 404 });
-    if (typeof found === "object" && "location" in found)
-      return new Response(null, { status: 302, headers: { location: found.location } });
-    return new Response(found);
+    const response =
+      typeof found === "object" && "location" in found
+        ? new Response(null, { status: 302, headers: { location: found.location } })
+        : new Response(found);
+    // As fetch tells the address it answered for, which a moved playlist's addresses start from.
+    return Object.defineProperty(response, "url", { value: url.href });
   };
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: null, ffprobe: hasProbe ? FFPROBE : null }).pipe(
@@ -96,7 +101,7 @@ async function connected(entries: (plain: string) => readonly string[]) {
   );
   const subscriptions = await promised(runtime, Subscriptions);
   const { id: subscriptionId } = await subscriptions.add({
-    server: LINK,
+    server: link,
     username: "",
     password: "",
   });
@@ -247,6 +252,77 @@ describe("addresses an https stream's playlists name", () => {
     await app.playback.close(opened.sessionId);
   });
 
+  it("names a moved playlist's addresses from where it moved, held to the stream's own address", async () => {
+    const app = await connected(() => [
+      '#EXTINF:-1 tvg-id="moved",Moved',
+      `#EXTVLCOPT:http-referrer=${REFERER}`,
+      "https://cdn.test/moved/master.m3u8",
+    ]);
+    const { routes, leaky } = app;
+    routes.set("https://cdn.test/moved/master.m3u8", {
+      location: "https://edge.test/now/master.m3u8",
+    });
+    routes.set(
+      "https://edge.test/now/master.m3u8",
+      "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nlow/media.m3u8\n",
+    );
+    routes.set(
+      "https://edge.test/now/low/media.m3u8",
+      `#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nsegment.ts\n#EXTINF:3,\n${leaky("/part.ts")}\n`,
+    );
+    // The segment leads back to the stream's own origin.
+    routes.set("https://edge.test/now/low/segment.ts", {
+      location: "https://cdn.test/back/segment.ts",
+    });
+    routes.set("https://cdn.test/back/segment.ts", CLIP);
+    routes.set(`${app.plain}/part.ts`, CLIP);
+
+    const session = await app.playback.open(app.own("moved"), DECODERS);
+    const [media] = await named(session.url);
+    expect(new URL(media!).origin).toBe(new URL(session.url).origin);
+    const [segment, part] = await named(media!);
+    const ranged = await fetch(segment!, { headers: { Range: "bytes=0-187" } });
+    expect(Buffer.from(await ranged.arrayBuffer())).toEqual(CLIP);
+    expect((await fetch(part!)).status).toBe(502);
+    expect(app.reached).toEqual([]);
+
+    /** What each request to `url` carried as `name`. */
+    const sent = (url: string, name: string) =>
+      new Set(app.asked.filter((each) => each.url === url).map((each) => each.headers.get(name)));
+    // Elsewhere, its first request included, the Referer goes cut to its origin; back at the
+    // stream's origin, whole.
+    for (const url of [
+      "https://edge.test/now/master.m3u8",
+      "https://edge.test/now/low/media.m3u8",
+      "https://edge.test/now/low/segment.ts",
+    ])
+      expect(sent(url, "referer"), url).toEqual(new Set(["https://site.test/"]));
+    expect(sent("https://cdn.test/back/segment.ts", "referer")).toEqual(new Set([REFERER]));
+    expect(sent("https://cdn.test/back/segment.ts", "range")).toEqual(new Set(["bytes=0-187"]));
+  });
+
+  it("holds a playlist an https stream redirected to http to the stream's own address", async () => {
+    const app = await connected(() => [
+      '#EXTINF:-1 tvg-id="relay",Relay',
+      "https://cdn.test/relay.m3u8",
+    ]);
+    const { routes, plain } = app;
+    routes.set("https://cdn.test/relay.m3u8", { location: `${plain}/relay/index.m3u8` });
+    routes.set(
+      `${plain}/relay/index.m3u8`,
+      `#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nsegment.ts?token=${SECRET}\n#EXTINF:3,\nsegment.ts\n`,
+    );
+    routes.set(`${plain}/relay/segment.ts`, CLIP);
+
+    const session = await app.playback.open(app.own("relay"), DECODERS);
+    const [leaked, relayed] = await named(session.url);
+    expect((await fetch(leaked!)).status).toBe(502);
+    expect(Buffer.from(await (await fetch(relayed!)).arrayBuffer())).toEqual(CLIP);
+    expect(new Set(app.reached.map((each) => each.path))).toEqual(
+      new Set(["/relay/index.m3u8", "/relay/segment.ts"]),
+    );
+  });
+
   it("plays a recording from the catch-up archive with none of its parts asked of http with the token", async () => {
     const app = await connected(() => [
       '#EXTINF:-1 tvg-id="archive" catchup="flussonic" catchup-days="2",Archive',
@@ -266,6 +342,66 @@ describe("addresses an https stream's playlists name", () => {
     const [part] = await named(session.url);
     expect((await fetch(part!)).status).toBe(502);
     expect(app.reached).toEqual([]);
+  });
+});
+
+describe("what of a playlist's link counts as its login", () => {
+  /** Opens the stream `id` and checks it stopped before asking http for anything. */
+  async function refused(app: Awaited<ReturnType<typeof connected>>, id: string) {
+    const session = await app.playback.open(app.own(id), DECODERS);
+    expect((await fetch(session.url)).status).toBe(502);
+    expect(await app.playback.failure(session.sessionId)).toMatchObject({
+      kind: "network",
+      detail: expect.stringContaining("unencrypted"),
+    });
+    await app.playback.close(session.sessionId);
+    expect(app.reached).toEqual([]);
+  }
+
+  it("plays a stream redirected to http with a setting of the link's in a name, not with its token", async () => {
+    const app = await connected(
+      () => [
+        '#EXTINF:-1 tvg-id="setting",Setting',
+        "https://cdn.test/setting.ts",
+        '#EXTINF:-1 tvg-id="token",Token',
+        "https://cdn.test/token.ts",
+      ],
+      `https://lists.test/list.m3u?format=hlsarchive&token=${SECRET}`,
+    );
+    const { routes, plain } = app;
+    routes.set("https://cdn.test/setting.ts", { location: `${plain}/hlsarchive_index.ts` });
+    routes.set("https://cdn.test/token.ts", {
+      location: `${plain}/hlsarchive_index.ts?token=${SECRET}`,
+    });
+    routes.set(`${plain}/hlsarchive_index.ts`, CLIP);
+
+    await refused(app, "token");
+    const setting = await app.playback.open(app.own("setting"), DECODERS);
+    expect(Buffer.from(await (await fetch(setting.url)).arrayBuffer())).toEqual(CLIP);
+    expect(app.reached.map((each) => each.path)).toEqual(["/hlsarchive_index.ts"]);
+  });
+
+  it("refuses a stream redirected to http with the link's token joined to other text, however short", async () => {
+    const app = await connected(
+      () => [
+        '#EXTINF:-1 tvg-id="relay",Relay',
+        "https://cdn.test/relay.ts",
+        '#EXTINF:-1 tvg-id="joined",Joined',
+        "https://cdn.test/joined.ts",
+      ],
+      `https://lists.test/list.m3u?token=${SHORT}`,
+    );
+    const { routes, plain } = app;
+    routes.set("https://cdn.test/relay.ts", { location: `${plain}/relay/live.ts?token=7f3a` });
+    routes.set("https://cdn.test/joined.ts", {
+      location: `${plain}/relay/live.ts?auth=x${SHORT}y`,
+    });
+    routes.set(`${plain}/relay/live.ts`, CLIP);
+
+    await refused(app, "joined");
+    const relay = await app.playback.open(app.own("relay"), DECODERS);
+    expect(Buffer.from(await (await fetch(relay.url)).arrayBuffer())).toEqual(CLIP);
+    expect(app.reached.map((each) => each.path)).toEqual(["/relay/live.ts?token=7f3a"]);
   });
 });
 

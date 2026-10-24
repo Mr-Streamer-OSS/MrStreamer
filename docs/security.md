@@ -4,7 +4,7 @@
 
 Your subscriptions are stored on your computer. Passwords, playlist links and guide addresses you provide are encrypted with a key held by macOS Keychain, your Windows account, or GNOME Keyring or KWallet on Linux. On Linux without a keyring, Chromium uses a fixed key, so other programs running under your account can read them. Server addresses and usernames are not encrypted. Your own TMDB key is not encrypted either.
 
-Your provider receives its login in every request the app makes to it. Mr. Streamer never falls back from HTTPS to unencrypted HTTP. After an HTTPS address, a redirect or a stream's playlist leads to HTTP only without your login. An address entered with `http://` sends the login unencrypted; an address without a scheme asks before using HTTP when HTTPS fails. The [privacy policy](privacy.md) lists what is stored and every connection the app makes.
+Your provider receives its login in every request the app makes to it. Mr. Streamer never falls back from HTTPS to unencrypted HTTP. After an HTTPS address, a redirect or a stream's playlist leads to HTTP only without your username, password or playlist link's token. A stream's own token, and a stream a playlist lists with `http://`, can travel over HTTP. An address entered with `http://` sends the login unencrypted; an address without a scheme asks before using HTTP when HTTPS fails. The [privacy policy](privacy.md) lists what is stored and every connection the app makes.
 
 ## Basic app-use statistics
 

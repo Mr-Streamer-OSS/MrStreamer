@@ -5,13 +5,22 @@
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { providerFetch } from "../src/provider.ts";
+import { providerFetch, type ProviderLogin } from "../src/provider.ts";
+import { xtreamProvider } from "../src/xtream.ts";
 
 const USER = "synthetic-user";
 const SECRET = "synthetic-secret";
-/** A short password, and the format words a panel's playlist link carries beside the login. */
+/** A short password, and one with a space. */
 const PIN = "k9x";
-const LOGIN = [USER, SECRET, PIN, "ts", "m3u8"];
+const SPACED = "open sesame";
+/**
+ * The login, and the values of a playlist link that can be settings as well as a token: the
+ * format words a panel's link carries beside the login, and a longer one.
+ */
+const LOGIN: ProviderLogin = {
+  secrets: [USER, SECRET, PIN, SPACED],
+  uncertain: ["ts", "m3u8", "hlsarchive"],
+};
 const REFERER = `https://site.test/watch?token=${SECRET}`;
 
 let server: Server;
@@ -53,7 +62,7 @@ function world(redirects: Readonly<Record<string, string>> = {}) {
       ? new Response(null, { status: 302, headers: { location } })
       : new Response("secure");
   };
-  return { asked, request: providerFetch(fetchImpl, LOGIN) };
+  return { asked, fetchImpl, request: providerFetch(fetchImpl, LOGIN) };
 }
 
 const START = "https://panel.test/live/stream.ts";
@@ -70,6 +79,11 @@ describe("redirects from https to http", () => {
     ["the user name in a path segment", () => `${plain}/${encodeURIComponent(USER)}/live.ts`],
     ["a short password as a whole part", () => `${plain}/media?auth=guest:${PIN}`],
     ["a short password as a path segment", () => `${plain}/media/${PIN}/live.ts`],
+    [
+      "a password with a space, form encoded",
+      () => `${plain}/media?auth=${SPACED.replace(" ", "+")}`,
+    ],
+    ["a link's value that can be a token, as a whole part", () => `${plain}/media?auth=hlsarchive`],
   ])("refuses one with %s, sending nothing to http", async (_case, target) => {
     const { request } = world({ [START]: target() });
     await expect(request(START)).rejects.toThrow("unencrypted");
@@ -79,6 +93,7 @@ describe("redirects from https to http", () => {
   it.each([
     ["a token of its own", () => `${plain}/relay/live.ts?token=7f3a`],
     ["the link's format words inside names", () => `${plain}/relay/index.m3u8?ts=1700000000`],
+    ["a longer one of the link's values inside a name", () => `${plain}/relay/hlsarchive_index.ts`],
   ])("follows one with %s", async (_case, target) => {
     const { request } = world({ [START]: target() });
     expect(await (await request(START)).text()).toBe("plain");
@@ -179,5 +194,83 @@ describe("the headers a stream asks for", () => {
     const { request } = world();
     await request(`${plain}/segment.ts`, { headers }, "https://cdn.test/live/index.m3u8");
     expect(reached[0]?.headers.referer).toBe("https://site.test/");
+  });
+});
+
+describe("an Xtream account's login, however short", () => {
+  // Its username and password are the login for certain, as its addresses carry them.
+  const ACCOUNT = { server: "https://panel.test", username: "viewer7", password: "q7x" };
+  const STREAM = "https://panel.test/live/viewer7/q7x/1.ts";
+  const account = (redirects: Readonly<Record<string, string>> = {}) => {
+    const { asked, fetchImpl } = world(redirects);
+    return {
+      asked,
+      request: xtreamProvider(ACCOUNT, { userAgent: "fixture", fetch: fetchImpl }).request,
+    };
+  };
+  /** `text` with each character percent-encoded, then encoded `times` more times. */
+  const encoded = (text: string, times: number) =>
+    Array.from({ length: times }).reduce<string>(
+      (each) => encodeURIComponent(each),
+      [...text].map((character) => `%${character.charCodeAt(0).toString(16)}`).join(""),
+    );
+
+  it.each([
+    [
+      "the password joined to other text in a query value",
+      () => `${plain}/live.ts?auth=x${ACCOUNT.password}y`,
+    ],
+    [
+      "the password joined to other text in a path segment",
+      () => `${plain}/x${ACCOUNT.password}y/live.ts`,
+    ],
+    [
+      "the password joined and encoded twice",
+      () => `${plain}/live.ts?auth=x${encoded(ACCOUNT.password, 1)}y`,
+    ],
+    ["the password as a query key", () => `${plain}/live.ts?${ACCOUNT.password}`],
+    ["the username joined to other text", () => `${plain}/live/${ACCOUNT.username}0/live.ts`],
+    ["text still encoded after four decodings", () => `${plain}/live.ts?auth=${encoded("x", 4)}`],
+  ])("refuses a redirect to http with %s, sending nothing there", async (_case, target) => {
+    const { request } = account({ [STREAM]: target() });
+    await expect(request(STREAM)).rejects.toThrow("unencrypted");
+    expect(reached).toEqual([]);
+  });
+
+  it("refuses an http address an https playlist names with the password in it, past another hop", async () => {
+    const playlist = "https://cdn.test/live/index.m3u8";
+    const segment = "https://edge.test/live/segment.ts";
+    const { request, asked } = account({
+      [segment]: `${plain}/segment.ts?auth=x${ACCOUNT.password}y`,
+    });
+    await expect(
+      request(`${plain}/segment.ts?auth=x${ACCOUNT.password}y`, {}, playlist),
+    ).rejects.toThrow("unencrypted");
+    await expect(request(segment, {}, playlist)).rejects.toThrow("unencrypted");
+    expect(asked.map((each) => each.url)).toEqual([segment]);
+    expect(reached).toEqual([]);
+  });
+
+  it("leaves a header holding the password at the account's origin, on a redirect and a playlist's child alike", async () => {
+    const { request } = account({ [STREAM]: `${plain}/relay/live.ts?token=7f3a` });
+    const headers = {
+      Referer: `https://site.test/view?auth=x${ACCOUNT.password}y`,
+      "X-Session": `x${ACCOUNT.password}y`,
+      Range: "bytes=0-3",
+    };
+    await request(STREAM, { headers });
+    await request(`${plain}/segment.ts`, { headers }, "https://panel.test/live/index.m3u8");
+    expect(reached).toHaveLength(2);
+    for (const each of reached) {
+      expect(each.headers).toMatchObject({ referer: "https://site.test/", range: "bytes=0-3" });
+      expect(each.headers).not.toHaveProperty("x-session");
+    }
+    expect(JSON.stringify(reached)).not.toContain(ACCOUNT.password);
+  });
+
+  it("follows a redirect to http that holds neither", async () => {
+    const { request } = account({ [STREAM]: `${plain}/relay/live.ts?token=7f3a` });
+    expect(await (await request(STREAM)).text()).toBe("plain");
+    expect(reached.map((each) => each.path)).toEqual(["/relay/live.ts?token=7f3a"]);
   });
 });

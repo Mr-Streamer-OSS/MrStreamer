@@ -142,7 +142,7 @@ Your network operator and DNS provider can see which servers the app contacts.
 
 Passwords, playlist links, guide addresses and subtitle-service logins are encrypted with a key your system keeps: the macOS Keychain, your Windows account, or GNOME Keyring or KWallet on Linux. On Linux without a keyring the key is fixed, so other programs running as you can read them. Server addresses, usernames and your own TMDB key aren't encrypted.
 
-An `https://` address never falls back to http. A redirect from one, or an address its stream's playlists name, goes to http only without your login, and a header holding your login goes only to the stream's own server. A stream a playlist lists with `http://` plays over http. If https fails for an address you typed without one, the app asks before sending your login over http, where anyone between you and your provider can read it. Settings marks those logins "not encrypted". Statistics and website analytics go to PostHog over https.
+An `https://` address never falls back to http. A redirect from one, or an address its stream's playlists name, goes to http only without your username, password or playlist link's token, and a header holding one of them goes only to the stream's own server. Mr. Streamer knows a link's token by its query name, such as `token` or `key`. A stream's own token, and a stream a playlist lists with `http://`, can go over http. If https fails for an address you typed without one, the app asks before sending your login over http, where anyone between you and your provider can read it. Settings marks those logins "not encrypted". Statistics and website analytics go to PostHog over https.
 
 ## International transfers
 
