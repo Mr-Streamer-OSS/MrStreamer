@@ -2,10 +2,11 @@
 // channels alike: made with New list by pointer and by keyboard, channels of both subscriptions
 // put in from rows' lists menus, the same channels in the list, the guide grid, Watch's channel
 // list and Home's row, an order saved and kept through a restart, renamed, moved and deleted from
-// the header, and a write refused while the harness holds the database's write lock, then sent
-// again with Retry. `custom-lists-sources` covers what the providers and the subscriptions do to
-// a list: a lost canonical stream, a dropped channel, removal with and without Also delete, and
-// channels for adults.
+// the header, a write refused while the harness holds the database's write lock, then sent
+// again with Retry, and a new order that ends when another list showing the same channels, or
+// Favourites, is chosen. `custom-lists-sources` covers what the providers and the subscriptions
+// do to a list: a lost canonical stream, a dropped channel, removal with and without Also delete,
+// and channels for adults.
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { LANGUAGE_NAMES, type Locale } from "../../../../packages/contracts/src/language.ts";
@@ -457,6 +458,102 @@ export async function customListsScenario(
     "(async()=>{const r=await window.mrStreamer.invoke('customLists.get');return r.ok?r.value.map(l=>[l.name,l.members.length]):null;})()",
   );
   await d.capture("same-name-empty");
+
+  // A new order belongs to the list it was made in. Kids weekend gets Late sports' two channels in
+  // the same order, so both lists show one answer of the library; a draft of Late sports ends when
+  // Kids weekend is chosen, and Kids weekend's own Save changes Kids weekend alone.
+  const saved = () =>
+    d.evaluate<{ name: string; revision: number; channels: string[] }[]>(
+      "(async()=>{const r=await window.mrStreamer.invoke('customLists.get');return r.ok?r.value.map(l=>({name:l.name,revision:l.revision,channels:l.members.map(m=>m.channel?.id??m.kind)})):[];})()",
+    );
+  const favourites = () =>
+    d.evaluate<unknown>(
+      "(async()=>{const r=await window.mrStreamer.invoke('viewing.get');return r.ok?r.value.favourites:null;})()",
+    );
+  const lateSports = async () => (await saved()).find((list) => list.name === "Late sports");
+  await openList(d, "All channels");
+  for (const name of [FIRST, SECOND]) {
+    await rowMenu(d, name, "H.264 + AAC");
+    await tick(d, "Kids weekend", true);
+  }
+  await d.click(
+    "Clear the list search",
+    "document.querySelector('main button[aria-label=\"Clear search\"]')",
+  );
+  await openList(d, "Late sports");
+  const before = await lateSports();
+  await draftFirstDown(d, "Late sports");
+  await openList(d, "Kids weekend");
+  d.observed["draftAfterListSwitch"] = await d.exists(DRAFT);
+  check(d.observed["draftAfterListSwitch"] === false, "Late sports' draft stayed in Kids weekend");
+  check(
+    JSON.stringify(await shownRows(d)) === JSON.stringify([FIRST, SECOND]),
+    "Kids weekend shows another order",
+  );
+  await d.capture("switched-list-without-draft");
+  await draftFirstDown(d, "Kids weekend");
+  await d.key("Enter", 13);
+  await d.wait(async () => !(await d.exists(DRAFT)));
+  await d.wait(async () => JSON.stringify(await shownRows(d)) === JSON.stringify([SECOND, FIRST]));
+  check(
+    JSON.stringify(await lateSports()) === JSON.stringify(before),
+    "Kids weekend's Save changed Late sports",
+  );
+  await openList(d, "Late sports");
+  check(
+    JSON.stringify(await shownRows(d)) === JSON.stringify([FIRST, SECOND]),
+    "Late sports doesn't show its saved order",
+  );
+  // The same from Favourites, starred in Late sports' order: its draft ends when Late sports is
+  // chosen, and Late sports' own Save changes Late sports alone.
+  for (const name of [FIRST, SECOND])
+    await d.click(
+      `Star ${name}`,
+      `${row(name)}.querySelector('button[aria-label="Add to favourites"]')`,
+    );
+  await openList(d, "Favourites");
+  await d.wait(async () => JSON.stringify(await shownRows(d)) === JSON.stringify([FIRST, SECOND]));
+  const starred = await favourites();
+  await draftFirstDown(d, "Favourites");
+  await openList(d, "Late sports");
+  d.observed["draftAfterFavouritesSwitch"] = await d.exists(DRAFT);
+  check(
+    d.observed["draftAfterFavouritesSwitch"] === false,
+    "The Favourites draft stayed in Late sports",
+  );
+  await draftFirstDown(d, "Late sports");
+  await d.key("Enter", 13);
+  await d.wait(async () => !(await d.exists(DRAFT)));
+  await d.wait(async () => JSON.stringify(await shownRows(d)) === JSON.stringify([SECOND, FIRST]));
+  check(
+    JSON.stringify(await favourites()) === JSON.stringify(starred),
+    "Late sports' Save changed the favourites",
+  );
+  await openList(d, "Favourites");
+  check(
+    JSON.stringify(await shownRows(d)) === JSON.stringify([FIRST, SECOND]),
+    "Favourites doesn't show its saved order",
+  );
+  d.observed["listsAfterSwitchedDrafts"] = await saved();
+  await d.capture("favourites-after-switched-draft");
+}
+
+/** A new order's rows while one is being made. */
+const DRAFT = "document.querySelector('[role=list][aria-label$=\"in the order to save\"]')";
+
+/** Reorder, then Home and Alt+Down: the first channel goes down one place in the draft. */
+async function draftFirstDown(d: Driver, list: string) {
+  await d.click(`Reorder ${list}`, named("main button", "Reorder"));
+  await d.wait(() => d.exists(DRAFT));
+  await d.key("Home", 36);
+  d.action(`Press Alt+ArrowDown in ${list}'s draft`);
+  for (const type of ["rawKeyDown", "keyUp"])
+    await d.send("Input.dispatchKeyEvent", {
+      type,
+      key: "ArrowDown",
+      windowsVirtualKeyCode: 40,
+      modifiers: 1,
+    });
 }
 
 /** The first provider's channel in Full HD, HD and SD, by its Full HD stream's name and id. */

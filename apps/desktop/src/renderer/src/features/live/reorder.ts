@@ -126,6 +126,13 @@ const sameChannels = (a: readonly OwnedId[], b: readonly OwnedId[]) =>
 export const waits = (draft: Draft | null): boolean =>
   draft?.status === "saving" || draft?.status === "reading";
 
+/** Whether `list` is the one a draft orders: Favourites, or the same list of the viewer's. */
+function orders(ordered: Ordered, list: ChannelList): boolean {
+  return ordered.kind === "favourites"
+    ? list.kind === "favourites"
+    : list.kind === "custom" && list.id === ordered.list.id;
+}
+
 /** Whether what a draft orders is still as it was read: the same favourites, or list revision. */
 function stillAsRead(
   ordered: Ordered,
@@ -189,15 +196,18 @@ export function useListOrder(
           })()
         : undefined;
 
-  // A draft ends when the list is left and when a subscription is added or removed, whatever it
-  // waits for: an answer that comes later finds no draft to change. One being arranged ends too when
-  // the favourites or the channels shown are no longer the ones it was made from. The channels
-  // are the same for as long as the lists' cache gives the same array, which it does through
-  // every read that finds them unchanged: another name, logo or stream makes another array, as
-  // another channel does, and programmes or a watch in between make none.
+  // A draft ends when the list is left, for another list even with the same channels, and when
+  // a subscription is added or removed, whatever it waits for: an answer that comes later finds
+  // no draft to change. One being arranged ends too when the favourites or the channels shown are
+  // no longer the ones it was made from. The channels are the same for as long as the lists'
+  // cache gives the same array, which it does through every read that finds them unchanged:
+  // another name, logo or stream makes another array, as another channel does, and programmes or
+  // a watch in between make none. Two lists that show the same channels share that array too,
+  // which is why the list itself is compared.
   const obsolete =
     held !== null &&
     (!open ||
+      !orders(held.ordered, list) ||
       held.saved !== saved ||
       ((held.status === "editing" || held.status === "failed") &&
         (!stillAsRead(held.ordered, favourites, customLists) || channels !== held.listed)));
