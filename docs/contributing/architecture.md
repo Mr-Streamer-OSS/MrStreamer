@@ -487,6 +487,8 @@ At its start, a reminder whose programme is on tells: told is written first, the
 
 The window's notice (`features/reminders/ReminderBanners.tsx`) shows for a reminder that told this run until it is dismissed (`reminders.dismiss`) or its programme ends, whatever the system did with its own: after a restart a told reminder shows none. A click on the system's notice brings the window forward, or opens it again where macOS kept the app without one, and shows that notice again while it holds. Notices close on cancel, removal, the programme's end, a click and quitting. Electron 44 says when the system couldn't show a notice (`failed`, macOS and Windows) and whether it shows any (`Notification.isSupported`), never whether the viewer turned them off, so `ReminderList.notifications` says only `failed` or `unsupported`. Nothing of a reminder reaches the analytics or the diagnostics log.
 
+In the bell's list (`features/reminders/RemindersMenu.tsx`) a cancel's answer moves no keys. Main says its list changed before it answers, and the list read on that can come back first, so a row that had the keys hands them on as it goes, whichever read takes it out: to the next row's cross, else the one before, else the list. Closing the list or leaving the page hands none on.
+
 ## Views and the picture
 
 The window shows a page, Home, Live TV, Movies, Series or Watchlist. A title's details open in a sheet over the page, and so does what was kept of a saved title the lists no longer have; Watch, for a channel, and a playing movie or episode open over everything. The page stays laid out underneath, hidden and `inert`, so leaving any of them finds it scrolled where it was and a key or Tab never reaches it meanwhile.

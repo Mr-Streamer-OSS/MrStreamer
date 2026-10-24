@@ -6,7 +6,7 @@
 import { Popover } from "@base-ui/react/popover";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bell, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffectEvent, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { Reminder } from "@mrstreamer/contracts/reminders";
 import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
@@ -25,15 +25,6 @@ export function RemindersMenu() {
   const popup = useRef<HTMLDivElement>(null);
   const shown = reminders.data?.reminders ?? [];
   const coming = shown.filter((each) => each.start > now).length;
-  /**
-   * The keys on a reminder's row that goes move first to the next row's cross, else the one
-   * before, else the list itself, so they never fall out of it.
-   */
-  const handOn = (row: HTMLElement) => {
-    const cross = (sibling: Element | null) =>
-      sibling?.querySelector<HTMLButtonElement>("button[data-remove]");
-    (cross(row.nextElementSibling) ?? cross(row.previousElementSibling) ?? popup.current)?.focus();
-  };
   const label = coming > 0 ? t("Reminders, {count} to come", { count: coming }) : t("Reminders");
   const footer =
     reminders.data?.notifications === "failed"
@@ -81,21 +72,13 @@ export function RemindersMenu() {
                   {t("Retry")}
                 </Button>
               </div>
-            ) : reminders.isSuccess && shown.length === 0 ? (
-              <div className="px-3 pb-2">
-                <p>{t("No reminders yet.")}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t(
-                    "Set one on a programme still to come. Mr. Streamer reminds you while it's open.",
-                  )}
-                </p>
-              </div>
             ) : (
-              <ul className="max-h-[22rem] overflow-y-auto">
-                {shown.map((reminder) => (
-                  <ReminderRow key={reminder.id} reminder={reminder} now={now} onGoing={handOn} />
-                ))}
-              </ul>
+              <ReminderRows
+                reminders={shown}
+                empty={reminders.isSuccess && shown.length === 0}
+                now={now}
+                popup={popup}
+              />
             )}
             {footer && (
               <p className="mx-1 mt-2 border-t border-white/10 px-2 pt-3 pb-1 text-[0.8125rem]">
@@ -106,6 +89,57 @@ export function RemindersMenu() {
         </Popover.Positioner>
       </Popover.Portal>
     </Popover.Root>
+  );
+}
+
+/**
+ * The reminders listed, or what the list says without any. The list stays while it empties, so a
+ * row goes on its own once its reminder left it, by whichever read says so first: the one main's
+ * changed event starts, which can come back before the cancel's answer, or the one after that
+ * answer. A row that has the keys as it goes hands them on then: to the next row's cross, else
+ * the one before, else the popup, so they never fall out of it. As the popup closes, the page
+ * changes or the list can't be read, React takes the list down before its rows, and none does.
+ */
+function ReminderRows({
+  reminders,
+  empty,
+  now,
+  popup,
+}: {
+  reminders: readonly Reminder[];
+  empty: boolean;
+  now: number;
+  popup: RefObject<HTMLDivElement | null>;
+}) {
+  const leaving = useRef(false);
+  useLayoutEffect(() => {
+    leaving.current = false;
+    return () => {
+      leaving.current = true;
+    };
+  }, []);
+  const handOn = (row: HTMLElement) => {
+    if (leaving.current || !row.contains(document.activeElement)) return;
+    const cross = (sibling: Element | null) =>
+      sibling?.querySelector<HTMLButtonElement>("button[data-remove]");
+    (cross(row.nextElementSibling) ?? cross(row.previousElementSibling) ?? popup.current)?.focus();
+  };
+  return (
+    <>
+      {empty && (
+        <div className="px-3 pb-2">
+          <p>{t("No reminders yet.")}</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("Set one on a programme still to come. Mr. Streamer reminds you while it's open.")}
+          </p>
+        </div>
+      )}
+      <ul hidden={empty} className="max-h-[22rem] overflow-y-auto">
+        {reminders.map((reminder) => (
+          <ReminderRow key={reminder.id} reminder={reminder} now={now} onGoing={handOn} />
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -132,15 +166,23 @@ function ReminderRow({
 }: {
   reminder: Reminder;
   now: number;
-  /** It was taken out while its row had the keys, and the row is about to go. */
+  /** The row is going, still on the page. */
   onGoing: (row: HTMLElement) => void;
 }) {
   const client = useQueryClient();
   const row = useRef<HTMLLIElement>(null);
+  const going = useEffectEvent(onGoing);
+  // React runs this cleanup as it takes the row out, before the row leaves the page.
+  useLayoutEffect(() => {
+    const element = row.current;
+    return () => {
+      if (element) going(element);
+    };
+  }, []);
+  // The answer moves no keys: the row's going does, whenever that is.
   const removal = useMutation({
     mutationFn: async () => {
       await call("reminders.cancel", { id: reminder.id });
-      if (row.current && row.current.contains(document.activeElement)) onGoing(row.current);
       await client.invalidateQueries({ queryKey: remindersQuery().queryKey });
     },
   });
