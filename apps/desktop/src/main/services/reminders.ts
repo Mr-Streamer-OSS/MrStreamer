@@ -185,10 +185,13 @@ function make(deps: RemindersDeps) {
     /**
      * What reminders.json holds, read once it can be, or null while it can't be used. Reminders
      * of subscriptions that aren't saved, and those past keeping, go as it is read: from memory at
-     * once, and from the file with them. Only runs in a turn.
+     * once, and from the file with them. A file that couldn't be used before, and can now, wakes
+     * the loop, which waits for a wake once its check found nothing to schedule. The first read
+     * needs none: the loop's first check comes after it, or makes it. Only runs in a turn.
      */
     const loaded = Effect.gen(function* () {
       if (store.kind === "read") return store.file;
+      const recovered = store.kind === "refused";
       const read = yield* Effect.promise(() => readReminders(path));
       if (read.kind === "refused") {
         if (!warned) yield* Effect.logWarning(`[reminders] reminders.json is ${read.reason}`);
@@ -214,6 +217,7 @@ function make(deps: RemindersDeps) {
             Effect.logWarning("[reminders] couldn't drop reminders that went"),
           ),
         );
+      if (recovered) yield* wake;
       return file;
     });
 

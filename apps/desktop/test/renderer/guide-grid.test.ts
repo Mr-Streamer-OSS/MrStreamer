@@ -867,12 +867,13 @@ describe("reminders in the guide grid", () => {
     expect(ipc.argsOf("reminders.set")).toEqual([
       { channel: { subscriptionId: SUBSCRIPTION, id: "1" }, start: next.start },
     ]);
-    expect(page.label(next.title)).toContain("Reminder set");
+    // The cell reads the same list, and may draw a moment after the button.
+    await ready(() => expect(page.label(next.title)).toContain("Reminder set"));
 
     await page.click("Reminder set");
     await ready(() => expect(pressed("Remind me")).toBe("false"));
     expect(ipc.argsOf("reminders.cancel")).toEqual([{ id: `r${next.start}` }]);
-    expect(page.label(next.title)).not.toContain("Reminder set");
+    await ready(() => expect(page.label(next.title)).not.toContain("Reminder set"));
   });
 
   it("keeps what a press did with the programme it was pressed for", async () => {

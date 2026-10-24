@@ -1,5 +1,6 @@
 // Programme reminders through the app's services, against the fake provider and a guide served
 // for the test, with a test clock the test moves and a stand-in for the system's notifications.
+import { readFileSync } from "node:fs";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
@@ -37,10 +38,14 @@ const evening = (id: string) => [
   programme(id, "2130", "2300", "Late Film"),
 ];
 
-/** The system's notifications, as the test sees what was asked of them and answers for them. */
-function fakeNotifier(supported = true) {
+/**
+ * The system's notifications, as the test sees what was asked of them and answers for them. Each
+ * notice also notes how reminders.json at `file` kept its reminder as it was asked to show.
+ */
+function fakeNotifier(file: string, supported = true) {
   type Events = Parameters<Notifier["show"]>[1];
   const shown: { id: string; title: string; body: string }[] = [];
+  const storedAtShow: unknown[] = [];
   const closed: string[] = [];
   const events = new Map<string, Events>();
   /** When set, the system says it couldn't show the next notice, or throws as it is asked. */
@@ -49,6 +54,14 @@ function fakeNotifier(supported = true) {
     supported,
     show(notice, on) {
       if (refuse === "throw") throw new Error("The system broke.");
+      const kept = JSON.parse(readFileSync(file, "utf8")) as {
+        subscriptions: Record<string, { id: string; state: unknown }[]>;
+      };
+      storedAtShow.push(
+        Object.values(kept.subscriptions)
+          .flat()
+          .find((each) => each.id === notice.id)?.state,
+      );
       shown.push(notice);
       events.set(notice.id, on);
       if (refuse === "fail") on.failed();
@@ -61,6 +74,7 @@ function fakeNotifier(supported = true) {
   return {
     notifier,
     shown,
+    storedAtShow,
     closed,
     click: (id: string) => events.get(id)?.clicked(),
     refuseNext: (value: "no" | "fail" | "throw") => {
@@ -94,7 +108,7 @@ async function reminding(options: { adultChannels?: boolean; supported?: boolean
     tv(...evening(channel.guideId), ...(options.adultChannels ? evening("afterhours.adult") : [])),
   );
   const dataDir = await tempDir();
-  const notices = fakeNotifier(options.supported);
+  const notices = fakeNotifier(join(dataDir, "reminders.json"), options.supported);
   let owner: string | null = null;
   const start = async (time = NOW) => {
     const clock = Layer.effectDiscard(TestClock.setTime(time)).pipe(
@@ -551,6 +565,70 @@ describe("programme reminders", () => {
       notifications: "unsupported",
       reminders: [{ id: told.id, banner: true }],
     });
+  });
+
+  it.each([
+    ["it couldn't read, read again by the list", "{ cut short", "unreadable", "list"],
+    [
+      "a newer release wrote, read again by the list",
+      JSON.stringify({ version: 2, subscriptions: {} }),
+      "newer",
+      "list",
+    ],
+    ["it couldn't read, read again by setting it once more", "{ cut short", "unreadable", "set"],
+  ] as const)("tells on its own at its start once a file %s", async (_case, text, reason, via) => {
+    const { app, channel, dataDir, notices, start } = await reminding();
+    const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
+    await app.close();
+    const path = join(dataDir, "reminders.json");
+    const saved = await readFile(path, "utf8");
+    await writeFile(path, text);
+    const again = await start(at("20:28"));
+    await expect(again.reminders.list()).rejects.toMatchObject({
+      error: { kind: "reminder", reason },
+    });
+    // What the guide's first changes wake has settled before the file is whole again.
+    await again.clockTo(at("20:28") + 10_000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await writeFile(path, saved);
+    // Only that call reads it again: Retry in the bell's list, or Remind me pressed once more,
+    // which answers the reminder already set.
+    if (via === "set")
+      expect((await again.reminders.set(again.own(channel.id), at("20:30"))).id).toBe(reminder.id);
+    expect((await again.reminders.list()).reminders).toMatchObject([
+      { id: reminder.id, status: { kind: "upcoming" } },
+    ]);
+
+    // The clock runs on past its start a quarter of a minute at a time, and nothing else asks.
+    for (let time = at("20:28") + 15_000; time <= at("20:31"); time += MINUTE / 4) {
+      await again.clockTo(time);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    expect(notices.shown.map((each) => each.id)).toEqual([reminder.id]);
+    // Told was on disk before the system was asked.
+    expect(notices.storedAtShow).toEqual([{ kind: "told", at: expect.any(Number) }]);
+    const [told] = (await again.reminders.list()).reminders;
+    expect(told?.status.kind === "told" && told.status.at - at("20:30")).toBeLessThan(MINUTE);
+
+    // A cancel still takes it with its notice, and the app still closes.
+    await again.reminders.cancel(reminder.id);
+    expect(notices.closed).toEqual([reminder.id]);
+    await again.close();
+  });
+
+  it("waits for nothing while no reminder is kept, through a clock that jumps decades", async () => {
+    const { app, dataDir, start } = await reminding();
+    await app.close();
+    const path = join(dataDir, "reminders.json");
+    await writeFile(path, "{ cut short");
+    const again = await start();
+    await expect(again.reminders.list()).rejects.toMatchObject({
+      error: { kind: "reminder", reason: "unreadable" },
+    });
+    await writeFile(path, JSON.stringify({ version: 1, subscriptions: {} }));
+    expect((await again.reminders.list()).reminders).toEqual([]);
+    await again.clockTo(NOW + 50 * 365 * 24 * 60 * MINUTE);
+    expect((await again.reminders.list()).reminders).toEqual([]);
   });
 
   it("keeps told and missed reminders until the end of the day their programme ends", async () => {
