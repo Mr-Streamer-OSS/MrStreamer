@@ -3,6 +3,7 @@ import {
   expired,
   keptUntil,
   nextAt,
+  relisted,
   sameReminder,
   seen,
   statusOf,
@@ -97,6 +98,22 @@ describe("programme reminders", () => {
       false,
     );
     expect(sameReminder(found, { subscriptionId: "s1", streams: ["11"], start: STOP })).toBe(false);
+  });
+
+  it("follows its channel after it told or was missed, and keeps what it told", () => {
+    const filed = { id: "10", streams: ["10", "12"], name: "Eurosport", adult: true };
+    for (const state of [{ kind: "told", at: START }, { kind: "missed" }] as const) {
+      const kept = set({ state });
+      expect(relisted(kept, filed)).toEqual({
+        ...kept,
+        channel: "10",
+        streams: ["10", "12", "11"],
+        channelName: "Eurosport",
+        adult: true,
+      });
+      // The guide changes nothing of it.
+      expect(seen(kept, filed, { title: "Ski Flying", stop: STOP + HOUR })).toBe(kept);
+    }
   });
 
   it("keeps one that told, was missed or went until the midnight ending its programme's day there", () => {

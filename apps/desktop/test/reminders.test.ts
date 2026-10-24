@@ -1,7 +1,7 @@
 // Programme reminders through the app's services, against the fake provider and a guide served
 // for the test, with a test clock the test moves and a stand-in for the system's notifications.
 import { readFileSync } from "node:fs";
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { Guide } from "@mrstreamer/core/guide/service";
@@ -143,6 +143,12 @@ async function reminding(options: { adultChannels?: boolean; supported?: boolean
   await app.guide.refresh(app.subscriptionId);
   return { provider, channel, dataDir, notices, start, app };
 }
+
+/** The provider lists the channel of stream `id` for adults from now on, as a panel may refile it. */
+const forAdults = (provider: FakeProvider, id: string) =>
+  provider.serveChannels((all) =>
+    all.map((each) => (String(each.streamId) === id ? { ...each, adult: true } : each)),
+  );
 
 describe("programme reminders", () => {
   it("tells once at its start, in the window and from the system, and never again after a restart", async () => {
@@ -367,6 +373,132 @@ describe("programme reminders", () => {
       { id: told.id, status: { kind: "told" }, banner: false },
       { id: hidden.id, status: { kind: "missed" }, banner: false },
     ]);
+  });
+
+  it("hides one that told, and closes its system notice, once its channel is for adults while they're hidden", async () => {
+    const { app, provider, channel, notices } = await reminding();
+    await app.settings.update({ adultTitles: false });
+    const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
+    await app.clockTo(at("20:30"));
+    await app.reminders.check();
+    expect(notices.shown.map((each) => each.id)).toEqual([reminder.id]);
+
+    forAdults(provider, channel.id);
+    await app.library.refresh(app.subscriptionId);
+    expect((await app.library.lookup(app.subscriptionId))(channel.id)?.adult).toBe(true);
+    // The new catalogue is enough: nothing else asks.
+    await vi.waitFor(async () => expect((await app.reminders.list()).reminders).toEqual([]));
+    expect(notices.closed).toEqual([reminder.id]);
+    await app.clockTo(at("20:31") + 30_000);
+    await app.reminders.check();
+    expect((await app.reminders.list()).reminders).toEqual([]);
+    // A click on what the system may still show brings nothing back.
+    notices.click(reminder.id);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect((await app.reminders.list()).reminders).toEqual([]);
+
+    // Shown again, it is as it was: told once, its notice in the window gone for good.
+    await app.settings.update({ adultTitles: true });
+    expect((await app.reminders.list()).reminders).toMatchObject([
+      { id: reminder.id, status: { kind: "told" }, banner: false },
+    ]);
+    expect(notices.shown).toHaveLength(1);
+  });
+
+  it("keeps one that told listed while adults show, closing only its system notice, once its channel is for adults", async () => {
+    const { app, provider, channel, notices } = await reminding();
+    await app.settings.update({ adultTitles: true });
+    const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
+    await app.clockTo(at("20:30"));
+    await app.reminders.check();
+
+    forAdults(provider, channel.id);
+    await app.library.refresh(app.subscriptionId);
+    await app.reminders.check();
+    // A channel for adults keeps no system notice, also while adults show; the window's stays.
+    expect(notices.closed).toEqual([reminder.id]);
+    expect((await app.reminders.list()).reminders).toMatchObject([
+      { id: reminder.id, status: { kind: "told" }, banner: true },
+    ]);
+    expect(notices.shown).toHaveLength(1);
+  });
+
+  it("hides one that was missed once its channel is for adults while they're hidden", async () => {
+    const { app, provider, channel, start } = await reminding();
+    await app.settings.update({ adultTitles: false });
+    const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
+    await app.close();
+    // Its programme ended while the app was closed.
+    const again = await start(at("21:40"));
+    await again.reminders.check();
+    expect((await again.reminders.list()).reminders).toMatchObject([
+      { id: reminder.id, status: { kind: "missed" } },
+    ]);
+
+    forAdults(provider, channel.id);
+    await again.library.refresh(again.subscriptionId);
+    await again.reminders.check();
+    expect((await again.reminders.list()).reminders).toEqual([]);
+    await again.settings.update({ adultTitles: true });
+    expect((await again.reminders.list()).reminders).toMatchObject([
+      { id: reminder.id, status: { kind: "missed" } },
+    ]);
+  });
+
+  it("hides one that told even while reminders.json can't be written", async () => {
+    const { app, provider, channel, dataDir, notices } = await reminding();
+    await app.settings.update({ adultTitles: false });
+    const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
+    await app.clockTo(at("20:30"));
+    await app.reminders.check();
+
+    // A folder in its place: nothing can be written over it.
+    const path = join(dataDir, "reminders.json");
+    await rm(path);
+    await mkdir(path);
+    try {
+      forAdults(provider, channel.id);
+      await app.library.refresh(app.subscriptionId);
+      await app.reminders.check();
+      expect((await app.reminders.list()).reminders).toEqual([]);
+      expect(notices.closed).toEqual([reminder.id]);
+    } finally {
+      await rmdir(path);
+    }
+    // Once it can be written, it stays hidden, and told: it tells nothing again.
+    await app.reminders.check();
+    expect((await app.reminders.list()).reminders).toEqual([]);
+    expect(notices.shown).toHaveLength(1);
+  });
+
+  it("keeps one that told as it told when the guide lists something else at its start", async () => {
+    const { app, provider, channel, notices } = await reminding();
+    const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
+    await app.clockTo(at("20:30"));
+    await app.reminders.check();
+    for (const programmes of [
+      [
+        programme(channel.guideId, "2000", "2030", "Evening News"),
+        programme(channel.guideId, "2030", "2200", "Ski Flying"),
+      ],
+      [
+        programme(channel.guideId, "2000", "2100", "News Special"),
+        programme(channel.guideId, "2100", "2200", "Ski Jumping"),
+      ],
+    ]) {
+      provider.serveGuide(tv(...programmes));
+      await app.guide.refresh(app.subscriptionId);
+      await app.reminders.check();
+      expect((await app.reminders.list()).reminders).toMatchObject([
+        {
+          id: reminder.id,
+          title: "Ski Jumping",
+          stop: at("21:30"),
+          status: { kind: "told", at: at("20:30") },
+        },
+      ]);
+    }
+    expect(notices.shown).toHaveLength(1);
   });
 
   it("goes with its subscription, its notice too, and the next start drops one a release before left", async () => {

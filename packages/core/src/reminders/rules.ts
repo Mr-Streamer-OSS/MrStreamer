@@ -61,11 +61,26 @@ export function sameReminder(
 }
 
 /**
+ * `reminder` with its channel as the lists show it now: its id, every stream seen for it, its
+ * name, and whether it is for adults. Its programme and how it stands stay, also once it told or
+ * was missed, so a channel the provider files for adults later hides that reminder too.
+ */
+export function relisted(reminder: KeptReminder, channel: FoundChannel): KeptReminder {
+  return {
+    ...reminder,
+    channel: channel.id,
+    streams: [...new Set([...channel.streams, ...reminder.streams])],
+    channelName: channel.name,
+    adult: channel.adult,
+  };
+}
+
+/**
  * `reminder` as the lists and the guide stand now. `channel` is its channel as the lists show it,
  * null when they list none of its streams, undefined when that can't be told, as before a
  * catalogue is read. `programme` is what the guide lists on that channel at its start, null for
  * nothing, undefined when that can't be told, as before a guide is read: that changes nothing. A
- * reminder that told or was missed stays as it is.
+ * reminder that told or was missed stays as it is: only `relisted` follows its channel.
  */
 export function seen(
   reminder: KeptReminder,
@@ -73,15 +88,7 @@ export function seen(
   programme: Pick<Programme, "title" | "stop"> | null | undefined,
 ): KeptReminder {
   if (reminder.state.kind === "told" || reminder.state.kind === "missed") return reminder;
-  const found = channel
-    ? {
-        ...reminder,
-        channel: channel.id,
-        streams: [...new Set([...channel.streams, ...reminder.streams])],
-        channelName: channel.name,
-        adult: channel.adult,
-      }
-    : reminder;
+  const found = channel ? relisted(reminder, channel) : reminder;
   if (channel === null || programme === null) return { ...found, state: { kind: "gone" } };
   if (programme === undefined) return found;
   return { ...found, title: programme.title, stop: programme.stop, state: { kind: "pending" } };

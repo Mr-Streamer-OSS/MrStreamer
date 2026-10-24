@@ -15,8 +15,9 @@
 //
 // A loop checks them: at the next start, or the end of a programme that told, at most a minute
 // apart, so a clock that was set, or slept, catches up; once the guide has changed and settled;
-// and when the app asks, as the computer wakes or is unlocked. A reminder of a channel for adults
-// shows only while Settings shows titles for adults, and never gets a system notice. A system
+// once a catalogue has changed; and when the app asks, as the computer wakes or is unlocked. A
+// reminder of a channel for adults, also one the provider files for adults after it told, shows
+// only while Settings shows titles for adults, and never keeps a system notice. A system
 // notice carries the programme's title and its channel, nothing else; what a locked screen shows
 // of it is the system's setting.
 import { randomUUID } from "node:crypto";
@@ -33,6 +34,7 @@ import {
   expired,
   lateMinutes,
   nextAt,
+  relisted,
   sameReminder,
   seen,
   statusOf,
@@ -240,13 +242,17 @@ function make(deps: RemindersDeps) {
       dirty = true;
     };
 
+    /** Takes a reminder's system notice down. */
+    const closeNotice = (id: string) => {
+      if (!notices.delete(id)) return;
+      notifier?.close(id);
+      dirty = true;
+    };
+
     /** Takes a reminder's notices down: the system's, and the window's. */
     const quiet = (id: string) => {
       if (banners.delete(id)) dirty = true;
-      if (notices.delete(id)) {
-        notifier?.close(id);
-        dirty = true;
-      }
+      closeNotice(id);
     };
 
     /** Tells of `reminder`, told at `now`: in the window, and from the system unless for adults. */
@@ -309,13 +315,11 @@ function make(deps: RemindersDeps) {
       );
 
     /**
-     * `reminder` as the lists and the guide stand now. Its channel is found by any of its streams.
-     * One for adults while they are hidden learns nothing of its programme. `finders` keeps each
-     * subscription's lookup for one check.
+     * `reminder`'s channel as the lists show it now, found by any of its streams, or undefined
+     * where they show none. `finders` keeps each subscription's lookup for one check.
      */
-    const reread = (
+    const channelNow = (
       reminder: KeptReminder,
-      adults: boolean,
       finders: Map<string, (channelId: string) => LiveChannel | undefined>,
     ) =>
       Effect.gen(function* () {
@@ -325,10 +329,19 @@ function make(deps: RemindersDeps) {
           find = yield* library.lookup(subscriptionId);
           finders.set(subscriptionId, find);
         }
-        const listed = reminder.streams.map(find).find((channel) => channel !== undefined);
-        if (!listed)
+        const listed = reminder.streams.map(find).find((each) => each !== undefined);
+        return listed && foundAs(listed);
+      });
+
+    /**
+     * `reminder`, still to tell, as the guide stands now on `channel`, its channel as the lists
+     * show it now. One for adults while they are hidden learns nothing of its programme.
+     */
+    const reread = (reminder: KeptReminder, channel: FoundChannel | undefined, adults: boolean) =>
+      Effect.gen(function* () {
+        const { subscriptionId } = reminder;
+        if (!channel)
           return seen(reminder, (yield* catalogued(subscriptionId)) ? null : undefined, undefined);
-        const channel = foundAs(listed);
         if (!visible(channel, adults)) return seen(reminder, channel, undefined);
         const answer = yield* guide.startingAt({ subscriptionId, id: channel.id }, reminder.start);
         return seen(
@@ -340,9 +353,10 @@ function make(deps: RemindersDeps) {
 
     /**
      * Brings every reminder up to date at the time now, writes what changed, then tells those
-     * that came due and takes down notices whose programme ended. A write that fails tells
-     * nothing: the next check tries again. Answers when the next check is due, or null while no
-     * reminder is kept and none needs one. Only runs in a turn.
+     * that came due and takes down notices whose programme ended or whose channel may no longer
+     * show them. A write that fails tells nothing: the next check tries again. Answers when the
+     * next check is due, or null while no reminder is kept and none needs one. Only runs in a
+     * turn.
      */
     const checkNow = Effect.gen(function* () {
       const file = yield* loaded;
@@ -356,38 +370,49 @@ function make(deps: RemindersDeps) {
       );
       const unread = new Map([...file.unread].filter(([id]) => saved.has(id)));
       const finders = new Map<string, (channelId: string) => LiveChannel | undefined>();
+      // Every reminder kept follows its channel, told or not; only those still to tell follow
+      // the guide and the clock, so one that told never tells again.
+      const known: KeptReminder[] = [];
       const next: KeptReminder[] = [];
       const due: KeptReminder[] = [];
       for (const each of kept) {
+        const channel = yield* channelNow(each, finders);
+        const listed = channel ? relisted(each, channel) : each;
+        known.push(listed);
         const current =
           each.state.kind === "pending" || each.state.kind === "gone"
-            ? yield* reread(each, adults, finders)
-            : each;
+            ? yield* reread(listed, channel, adults)
+            : listed;
         const { reminder, tells } = atTime(current, now, visible(current, adults));
         next.push(reminder);
         if (tells) due.push(reminder);
       }
-      const purged = { reminders: kept, unread };
-      if (
-        next.length !== file.reminders.length ||
+      const differs = (reminders: readonly KeptReminder[]) =>
+        reminders.length !== file.reminders.length ||
         unread.size !== file.unread.size ||
-        next.some((each, at) => !isDeepStrictEqual(each, file.reminders[at]))
-      ) {
+        reminders.some((each, at) => !isDeepStrictEqual(each, file.reminders[at]));
+      if (differs(next)) {
         const changed = { reminders: next, unread };
         const written = yield* Effect.result(save(changed));
         if (written._tag === "Success") {
           commit(changed);
           for (const reminder of due) tell(reminder, now);
         } else {
-          if (kept.length !== file.reminders.length || unread.size !== file.unread.size)
-            commit(purged);
+          // What went goes, and what the lists say of each channel holds, written or not: one
+          // filed for adults hides now. How each stands waits for a write.
+          if (differs(known)) commit({ reminders: known, unread });
           yield* Effect.logWarning("[reminders] couldn't save a check; it is tried again");
         }
       }
       const current = store.kind === "read" ? store.file.reminders : [];
       const byId = new Map(current.map((each) => [each.id, each]));
-      // A notice goes with its programme, its subscription, and its channel's hiding.
-      for (const id of [...notices, ...banners.keys()]) {
+      // A notice goes with its programme and its subscription. A channel for adults keeps no
+      // system notice, even while adults show, and the window's goes while they're hidden.
+      for (const id of notices) {
+        const reminder = byId.get(id);
+        if (!reminder || now >= reminder.stop || reminder.adult) closeNotice(id);
+      }
+      for (const id of banners.keys()) {
         const reminder = byId.get(id);
         if (!reminder || now >= reminder.stop || !visible(reminder, adults)) quiet(id);
       }
@@ -396,15 +421,20 @@ function make(deps: RemindersDeps) {
         : Math.min(nextAt(current, now) ?? Infinity, now + RESCAN_MS);
     });
 
-    /** A notice clicked: the window is forward, and shows its notice again while it holds. */
+    /**
+     * A notice clicked: the window is forward, and shows its notice again while it holds, by its
+     * channel as the lists show it now, which a check may not have caught up with yet.
+     */
     const reopen = (id: string) =>
       Effect.gen(function* () {
         if (notices.delete(id)) notifier?.close(id);
         if (store.kind !== "read") return;
-        const reminder = store.file.reminders.find((each) => each.id === id);
+        const kept = store.file.reminders.find((each) => each.id === id);
+        if (kept?.state.kind !== "told") return;
+        const channel = yield* channelNow(kept, new Map());
+        const reminder = channel ? relisted(kept, channel) : kept;
         const now = yield* Clock.currentTimeMillis;
         if (
-          reminder?.state.kind === "told" &&
           now < reminder.stop &&
           (yield* savedIds).has(reminder.subscriptionId) &&
           visible(reminder, yield* adultsShown)
@@ -440,10 +470,12 @@ function make(deps: RemindersDeps) {
         }
       }),
     );
-    // A guide that changed may list another programme at a reminder's start, or none.
+    // A guide that changed may list another programme at a reminder's start, or none, and a
+    // catalogue that changed may list a reminder's channel anew, or file it for adults.
     yield* Effect.forkScoped(
       Stream.runForEach(guide.changes.pipe(Stream.debounce(GUIDE_SETTLE)), () => wake),
     );
+    yield* Effect.forkScoped(Stream.runForEach(library.changes, () => wake));
     // What the system says of its notices.
     yield* Effect.forkScoped(
       Effect.forever(
