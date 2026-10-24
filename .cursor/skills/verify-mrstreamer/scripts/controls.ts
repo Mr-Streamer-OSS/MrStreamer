@@ -3,7 +3,8 @@
 // menus, Live TV's rail, rows, schedule and filter menu, Watch's channel list and a playing
 // title's CC panel. Every surface is captured for before/after comparison with its computed
 // shape recorded beside it. Assertions cover public behavior only: each menu opens from its
-// trigger, highlights a row from the keys and closes with Escape, leaving the view under it open.
+// trigger, Down highlights a row, another than before where more than one is enabled, and Escape
+// closes it, leaving the view under it open.
 import type { Driver } from "./language.ts";
 
 const button = (selector: string, text: string) =>
@@ -23,11 +24,20 @@ interface Shape {
   readonly background: string;
 }
 
+/** A menu's highlighted row by its place among the rows, -1 for none, and how many are enabled. */
+interface Highlight {
+  readonly row: number;
+  readonly label: string | null;
+  readonly enabled: number;
+}
+
 export async function controlsScenario(d: Driver): Promise<void> {
   const shapes: Record<string, Shape | null> = {};
   const menus: string[] = [];
+  const highlights: Record<string, { before: Highlight; after: Highlight }> = {};
   d.observed["shapes"] = shapes;
   d.observed["menus"] = menus;
+  d.observed["highlights"] = highlights;
   const size = async (width: number, height: number) => {
     await d.send("Emulation.setDeviceMetricsOverride", {
       width,
@@ -59,22 +69,40 @@ export async function controlsScenario(d: Driver): Promise<void> {
         return !!e && e.getAnimations({ subtree: true }).every(a => a.playState !== 'running');
       })()`),
     );
+  /** The row of `popup` Base UI marks highlighted or, in a menu of plain buttons, focus is on. */
+  const highlight = (popup: string) =>
+    d.evaluate<Highlight>(`(() => {
+      const rows = [...(${popup})?.querySelectorAll('[role^=menuitem]') ?? []];
+      const marked = rows.findIndex(e => e.matches('[data-highlighted]'));
+      const row = marked >= 0 ? marked : rows.findIndex(e => e.matches(':focus'));
+      return {
+        row,
+        label: rows[row]?.getAttribute('aria-label') ?? rows[row]?.textContent.trim() ?? null,
+        enabled: rows.filter(e => !e.matches(':disabled, [aria-disabled=true]')).length,
+      };
+    })()`);
   /**
-   * Opens a menu from its trigger, moves to a row with Down where the menu doesn't already focus
-   * one, captures it and closes it with Escape.
+   * Opens a menu from its trigger and presses Down, which highlights a row: another than before
+   * where more than one is enabled, as a single row may keep it. Captures it and closes it with
+   * Escape.
    */
   const menu = async (
     name: string,
     trigger: string,
     popup: string,
-    { arrow = true, within }: { arrow?: boolean; within?: string } = {},
+    { within }: { within?: string } = {},
   ) => {
     await d.click(`Open the ${name} menu`, trigger);
     await d.wait(() => d.exists(popup));
     await settled(popup);
-    if (arrow) await d.key("ArrowDown", 40);
+    const before = await highlight(popup);
+    await d.key("ArrowDown", 40);
+    await d.wait(async () => {
+      const { row } = await highlight(popup);
+      return row >= 0 && (before.enabled < 2 || row !== before.row);
+    });
+    highlights[name] = { before, after: await highlight(popup) };
     const item = `${popup}?.querySelector(':is([data-highlighted], :focus)')`;
-    await d.wait(() => d.exists(item));
     await shape(`${name} menu`, popup);
     await shape(`${name} highlighted row`, item);
     await d.capture(`menu-${name.replaceAll(" ", "-")}`);
@@ -273,7 +301,6 @@ export async function controlsScenario(d: Driver): Promise<void> {
     "live country filter",
     query('button[data-browse-filter="countries"]'),
     query('[role=menu][aria-label="Country"]'),
-    { arrow: false },
   );
 
   // Watch's channel list over a playing channel.
