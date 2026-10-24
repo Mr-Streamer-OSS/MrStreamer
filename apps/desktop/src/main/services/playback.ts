@@ -84,7 +84,7 @@ import { audioTracks, languageCode, subtitleTracks } from "@mrstreamer/core/onde
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { PlaybackCoordination } from "./playback-coordination.ts";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
-import type { Provider } from "@mrstreamer/core/provider";
+import { withoutAddresses, type Provider } from "@mrstreamer/core/provider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -745,7 +745,7 @@ function make(deps: PlaybackDeps) {
         stands ? Effect.void : Effect.fail(new Failed({ error: { kind: "no-subscription" } })),
       );
     const { port } = yield* Effect.acquireRelease(
-      Effect.promise(() => listen((request, response) => void serve(request, response))),
+      Effect.promise(() => listen(serve)),
       ({ server }) =>
         Effect.sync(() => {
           server.closeAllConnections();
@@ -778,14 +778,17 @@ function make(deps: PlaybackDeps) {
       servers: 0,
     });
 
-    async function serve(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    async function serve(
+      request: IncomingMessage,
+      response: ServerResponse,
+      url: URL,
+    ): Promise<void> {
       response.setHeader("Access-Control-Allow-Origin", "*");
       response.setHeader("Cache-Control", "no-store");
       if (request.method === "OPTIONS") {
         response.writeHead(204, { "Access-Control-Allow-Headers": "Range" }).end();
         return;
       }
-      const url = new URL(request.url ?? "/", base);
       // /hls/<token>/<ffmpeg>/<number>.ts and /hls/<token>/<ffmpeg>/list: what an ffmpeg makes
       // for a receiver.
       const made = /^\/hls\/([\w-]+)\/([\w-]+)\/(?:(\d{1,9})\.ts|(list))$/.exec(url.pathname);
@@ -803,8 +806,7 @@ function make(deps: PlaybackDeps) {
           response.writeHead(410).end();
           return;
         }
-        void maker.receiver.receive(made[2]!, index, request, response);
-        return;
+        return maker.receiver.receive(made[2]!, index, request, response);
       }
       if (request.headers.expect) response.writeContinue();
       // /stream/<token>.ts, /stream/<token>.m3u8 and its /stream/<token>/<address id>,
@@ -3189,7 +3191,7 @@ function make(deps: PlaybackDeps) {
       Effect.gen(function* () {
         const listening = yield* Effect.tryPromise({
           try: () =>
-            listen((request, response) => {
+            listen((request, response, url) => {
               const session = sessions.get(id);
               if (!session?.lan) return void response.writeHead(410).end();
               response.setHeader("Access-Control-Allow-Origin", "*");
@@ -3200,8 +3202,8 @@ function make(deps: PlaybackDeps) {
                 return void response
                   .writeHead(204, { "Access-Control-Allow-Headers": "Range" })
                   .end();
-              if (session.receiver) void session.receiver.serve(request, response);
-              else response.writeHead(410).end();
+              if (session.receiver) return session.receiver.serve(request, response, url);
+              response.writeHead(410).end();
             }, receiver.address),
           catch: () => new Failed({ error: { kind: "output", failure: { kind: "no-network" } } }),
         });
@@ -3966,16 +3968,36 @@ function textRelay(): TextRelay {
 /**
  * Starts the proxy on a free port: loopback's, or `host`'s for a receiver on the local network. A
  * request may take as long as it likes to arrive: ffmpeg's reports are requests that last as long
- * as its run, and Node would end one after five minutes.
+ * as its run, and Node would end one after five minutes. `handle` gets each request with its
+ * target read as an address. Node's parser takes some that are none, such as `http://[`: those
+ * are answered 400 before anything else looks at them. A request `handle` fails ends there, its
+ * error logged without addresses, instead of being left unhandled.
  */
 function listen(
-  handle: (request: IncomingMessage, response: ServerResponse) => void,
+  handle: (request: IncomingMessage, response: ServerResponse, url: URL) => void | Promise<void>,
   host = "127.0.0.1",
 ): Promise<{ server: Server; port: number }> {
+  const answer = async (request: IncomingMessage, response: ServerResponse) => {
+    // Only the path and query count: the origin is the server's own.
+    const url = URL.parse(request.url ?? "/", "http://proxy.invalid");
+    if (!url) return void response.writeHead(400).end();
+    try {
+      await handle(request, response, url);
+    } catch (cause) {
+      console.error(
+        "[proxy] a request failed:",
+        withoutAddresses(cause instanceof Error ? cause.message : "unknown"),
+      );
+      if (response.headersSent) response.destroy();
+      else response.writeHead(500).end();
+    }
+  };
+  const answered = (request: IncomingMessage, response: ServerResponse) =>
+    void answer(request, response);
   return new Promise((resolve, reject) => {
-    const http = createServer({ requestTimeout: 0 }, handle);
+    const http = createServer({ requestTimeout: 0 }, answered);
     // A request that asks before it sends, "Expect: 100-continue", is told to by its handler.
-    http.on("checkContinue", handle);
+    http.on("checkContinue", answered);
     http.once("error", reject);
     http.listen(0, host, () => {
       const address = http.address();
