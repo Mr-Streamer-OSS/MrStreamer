@@ -23,11 +23,13 @@ import { useSearchUsage } from "../../app/analytics.ts";
 // another order: see ./reorder.ts for its keys, which replace these until the order is saved or
 // cancelled.
 //   The viewer's lists are made with New list at the end of them in the lists, and a channel goes
-// in one, or out, from its row's lists menu. A list's header menu renames, moves and deletes it,
-// each in its place: the name turns into a field, and Delete asks once. A channel a list keeps
-// that its saved subscription no longer lists shows at the end, by its name, with Remove; one
-// of a subscription that isn't saved is counted under the filters. A change that fails says so
-// with Retry.
+// in one, or out, from its row's lists menu, whose New list opens that field from wherever the
+// lists were, for a list with the channel. A list's header menu renames, moves and deletes it,
+// each in its place: the name turns into a field, and Delete asks once. An answer that comes
+// after the viewer moved on leaves the list and field they moved to as they are. A channel a
+// list keeps that its saved subscription no longer lists shows at the end, by its name, with
+// Remove; one of a subscription that isn't saved is counted under the filters. A change that
+// fails says so with Retry.
 //   The lists hold every saved subscription's channels. One that can't be reached keeps the
 // channels it loaded, and a line under the title says so, with Retry.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -48,7 +50,7 @@ import type { LiveView } from "@mrstreamer/contracts/preferences";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { t } from "@mrstreamer/core/i18n";
 import { hasModifier, isMac, isTyping } from "../../app/platform.ts";
-import { openView, openWatch, useUi } from "../../app/ui-store.ts";
+import { openView, openWatch, sameList, useUi } from "../../app/ui-store.ts";
 import { CatalogueNotice, catalogueState } from "../../components/CatalogueNotice.tsx";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
@@ -150,6 +152,12 @@ export function GuidePage({ active }: { active: boolean }) {
   /** What a list's header shows in its place: a field to rename it, or Delete's question. */
   const [editing, setEditing] = useState<{ id: string; kind: "rename" | "delete" } | null>(null);
   if (editing && editing.id !== customList?.id) setEditing(null);
+  /**
+   * Ends `which` if it is still the one open. A rename or delete can be answered after the viewer
+   * chose another list, or opened another field, even for the same list: that one stays.
+   */
+  const finish = (which: typeof editing) =>
+    setEditing((current) => (current === which ? null : current));
   /** A list deleted from here, which falls back to All channels without saying it went. */
   const deleted = useRef<string | null>(null);
 
@@ -752,7 +760,7 @@ export function GuidePage({ active }: { active: boolean }) {
                   </span>
                 </>
               ) : customList && editing?.kind === "rename" ? (
-                <RenameList list={customList} onDone={() => setEditing(null)} />
+                <RenameList list={customList} onDone={() => finish(editing)} />
               ) : (
                 <>
                   {searching && listed && (
@@ -806,11 +814,13 @@ export function GuidePage({ active }: { active: boolean }) {
             {customList && editing?.kind === "delete" && (
               <DeleteList
                 list={customList}
-                onDone={() => setEditing(null)}
+                onDone={() => finish(editing)}
                 onDeleted={() => {
                   deleted.current = customList.id;
-                  setEditing(null);
-                  showList({ kind: "all" });
+                  finish(editing);
+                  // Only the list still on screen gives way to All channels.
+                  const gone = { kind: "custom", id: customList.id } as const;
+                  if (sameList(useUi.getState().list, gone)) showList({ kind: "all" });
                 }}
               />
             )}
@@ -943,7 +953,10 @@ export function GuidePage({ active }: { active: boolean }) {
                                 member,
                               }),
                             ),
+                          // The rail goes back to New list for its field, out of a Find or a
+                          // provider's categories; the list on screen stays.
                           onNew: (channel) => {
+                            picker.showNew();
                             setFocus("lists");
                             creating.start(ownedId(channel));
                           },

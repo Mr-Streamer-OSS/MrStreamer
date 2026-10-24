@@ -3,10 +3,11 @@
 // put in from rows' lists menus, the same channels in the list, the guide grid, Watch's channel
 // list and Home's row, an order saved and kept through a restart, renamed, moved and deleted from
 // the header, a write refused while the harness holds the database's write lock, then sent
-// again with Retry, and a new order that ends when another list showing the same channels, or
-// Favourites, is chosen. `custom-lists-sources` covers what the providers and the subscriptions
-// do to a list: a lost canonical stream, a dropped channel, removal with and without Also delete,
-// and channels for adults.
+// again with Retry, a new order that ends when another list showing the same channels, or
+// Favourites, is chosen, and New list from a row's lists menu while a provider's category is
+// chosen or the lists' Find holds text. `custom-lists-sources` covers what the providers and the
+// subscriptions do to a list: a lost canonical stream, a dropped channel, removal with and
+// without Also delete, and channels for adults.
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { LANGUAGE_NAMES, type Locale } from "../../../../packages/contracts/src/language.ts";
@@ -536,6 +537,90 @@ export async function customListsScenario(
   );
   d.observed["listsAfterSwitchedDrafts"] = await saved();
   await d.capture("favourites-after-switched-draft");
+
+  // New list in a row's lists menu opens the rail's field, focused, from a provider's category,
+  // which stays on screen: Escape makes no list, and Enter makes one with that row's channel.
+  const listed = async () =>
+    (await saved()).map((list) => [list.name, list.channels.length] as const);
+  const newListFromRow = async (name: string) => {
+    await d.click(
+      `Lists menu of ${name}`,
+      `${row(name)}.querySelector('button[aria-label^="Lists for "]')`,
+    );
+    await d.wait(() => d.exists(MENU));
+    await d.click(`New list for ${name}`, named("[role=menu] [role=menuitem]", "New list"));
+    await d.wait(() => d.exists(`document.activeElement === ${LIST_FIELD}`));
+  };
+  const entries = () =>
+    d.evaluate<string[]>(`[...${PICKER}.querySelectorAll('[data-entry]')].map(e => e.title)`);
+  const openQuality = async () => {
+    await d.click("Open Provider lists", rail("Provider lists"));
+    await d.click("Open Belgium", rail("Belgium"));
+    const quality = (await entries()).find((title) => title.startsWith("Kwaliteit"));
+    check(quality !== undefined, "Belgium lists no Kwaliteit");
+    await d.click(`Open ${quality}`, rail(quality!));
+    await d.wait(async () => (await d.evaluate<string | undefined>(HEADING)) === "Kwaliteit");
+    return quality!;
+  };
+  const quality = await openQuality();
+  const firstRow = await d.evaluate<string>(
+    "document.querySelector('main [data-index=\"0\"] span[title]')?.title ?? ''",
+  );
+  const listsBefore = await listed();
+  await newListFromRow(firstRow);
+  const fromCategory = { heading: await d.evaluate<string | undefined>(HEADING) };
+  d.observed["fieldFromCategory"] = fromCategory;
+  check(fromCategory.heading === "Kwaliteit", "The category left the screen");
+  await d.capture("new-list-from-category");
+  await d.send("Input.insertText", { text: "Never made" });
+  await d.key("Escape", 27);
+  await d.wait(async () => !(await d.exists(LIST_FIELD)));
+  const escaped = { heading: await d.evaluate<string | undefined>(HEADING), lists: await listed() };
+  d.observed["escapeFromCategory"] = escaped;
+  check(
+    escaped.heading === "Kwaliteit" &&
+      JSON.stringify(escaped.lists) === JSON.stringify(listsBefore),
+    "Escape made a list or left the category",
+  );
+  await openQuality();
+  await newListFromRow(firstRow);
+  await d.send("Input.insertText", { text: "From Belgium" });
+  await d.key("Enter", 13);
+  await d.wait(async () => (await d.evaluate<string | undefined>(HEADING)) === "From Belgium");
+  const made = (await saved()).filter((list) => list.name === "From Belgium");
+  const shown = await shownRows(d);
+  d.observed["madeFromCategory"] = { from: quality, row: firstRow, shown, stored: made };
+  check(
+    JSON.stringify(shown) === JSON.stringify([firstRow]) && made.length === 1,
+    "The list from the category holds another channel, or was made twice",
+  );
+  await d.capture("made-from-category");
+
+  // The same over the rail's Find, for a channel of the list on screen.
+  await openList(d, "Late sports");
+  const find = `${PICKER}.querySelector('input[aria-label="Find a category"]')`;
+  await d.click("Find a category", find);
+  await d.send("Input.insertText", { text: "kwal" });
+  await d.wait(async () => !(await entries()).includes("Late sports"));
+  await newListFromRow(FIRST);
+  const fromFind = {
+    heading: await d.evaluate<string | undefined>(HEADING),
+    find: await d.evaluate<string>(`${find}.value`),
+  };
+  d.observed["fieldFromFind"] = fromFind;
+  check(
+    fromFind.heading === "Late sports" && fromFind.find === "",
+    "Late sports left the screen, or Find kept its text",
+  );
+  await d.send("Input.insertText", { text: "From Find" });
+  await d.key("Enter", 13);
+  await d.wait(async () => (await d.evaluate<string | undefined>(HEADING)) === "From Find");
+  check(
+    JSON.stringify(await shownRows(d)) === JSON.stringify([FIRST]),
+    "The list from Find holds another channel",
+  );
+  d.observed["listsAfterRowNewList"] = await saved();
+  await d.capture("made-from-find");
 }
 
 /** A new order's rows while one is being made. */

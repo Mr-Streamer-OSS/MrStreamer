@@ -545,6 +545,16 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
     search(query);
     setEntry(0);
   };
+  /**
+   * Back at the root, out of a Find, a country and Provider lists, on New list: where a list
+   * made from a channel row's lists menu is named.
+   */
+  const showNew = () => {
+    search("");
+    setGroup(null);
+    setProviders(false);
+    setEntry(3 + (customLists?.length ?? 0));
+  };
   const back = () => {
     if (query.trim() !== "") {
       setQuery("");
@@ -586,6 +596,7 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
     query,
     setQuery,
     openGroup,
+    showNew,
     back,
     entry: Math.min(entry, Math.max(entries.length - 1, 0)),
     setEntry,
