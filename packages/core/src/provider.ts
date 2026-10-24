@@ -350,28 +350,29 @@ function holdsLogin(login: ProviderLogin, anywhere: readonly Carried[], parts = 
 const DECODINGS = 4;
 
 /**
- * `text` as written, then decoded (`decoded`) as long as that changes it: at most `DECODINGS`
- * times, a query's both with "+" a plus and with it a space. `deeper` when either would change
- * it still.
+ * `text` as written and each text `decoded` reads from it, up to `DECODINGS` decodings deep. Each
+ * decoding of a query reads its "+" both as a plus and as a space, so every order counts: a
+ * server reads a form's "+" as a space, and code given the value can decode it again either way.
+ * A query's texts at most double with each decoding. `deeper` when one more decoding would read
+ * text none of these is.
  */
 function decodings(
   text: string,
   query = false,
 ): { readonly forms: readonly string[]; readonly deeper: boolean } {
-  const forms = [text];
-  let deeper = false;
-  for (const spaces of query ? [false, true] : [false]) {
-    for (let form = text, times = 0; ; times++) {
-      const next = decoded(form, spaces);
-      if (next === form) break;
-      if (times === DECODINGS) {
-        deeper = true;
-        break;
+  const forms = new Set([text]);
+  for (let layer = [text], times = 0; ; times++) {
+    const next = new Set<string>();
+    for (const form of layer) {
+      for (const spaces of query ? [false, true] : [false]) {
+        const read = decoded(form, spaces);
+        if (!forms.has(read)) next.add(read);
       }
-      forms.push((form = next));
     }
+    if (next.size === 0 || times === DECODINGS) return { forms: [...forms], deeper: next.size > 0 };
+    for (const form of next) forms.add(form);
+    layer = [...next];
   }
-  return { forms, deeper };
 }
 
 /** What runs on in a name, as in `index.m3u8` or `seg_1.ts`: beside it, a value is part of one. */
@@ -390,34 +391,16 @@ function whole(text: string, value: string): boolean {
 }
 
 /**
- * `text` decoded once: its percent escapes as UTF-8 and, with `spaces`, "+" as a space. An escape
- * that starts no character, as `%FF`, reads as U+FFFD, as URLSearchParams reads it, and those
- * beside it still decode; a `%` that encodes nothing stays as it is.
+ * `text` decoded once: with `spaces`, "+" as a space first, then its percent escapes as UTF-8, as
+ * URLSearchParams decodes them. A byte order mark stays; bytes that are no UTF-8 read as U+FFFD,
+ * one for each character cut short or byte that starts none, and the characters beside them
+ * still decode; a `%` that encodes nothing stays as it is.
  */
 function decoded(text: string, spaces: boolean): string {
-  return (spaces ? text.replaceAll("+", " ") : text).replace(/(?:%[\da-f]{2})+/gi, utf8);
-}
-
-/** A run of percent escapes read as UTF-8, as `decoded` reads it. */
-function utf8(run: string): string {
-  try {
-    return decodeURIComponent(run);
-  } catch {
-    // A character at a time: the escapes its first byte says it takes, or one, as U+FFFD.
-    let text = "";
-    for (let at = 0; at < run.length;) {
-      const first = Number.parseInt(run.slice(at + 1, at + 3), 16);
-      const bytes = first < 0xc0 ? 1 : first < 0xe0 ? 2 : first < 0xf0 ? 3 : 4;
-      try {
-        text += decodeURIComponent(run.slice(at, at + 3 * bytes));
-        at += 3 * bytes;
-      } catch {
-        text += "\uFFFD";
-        at += 3;
-      }
-    }
-    return text;
-  }
+  const utf8 = new TextDecoder("utf-8", { ignoreBOM: true });
+  return (spaces ? text.replaceAll("+", " ") : text).replace(/(?:%[\da-f]{2})+/gi, (run) =>
+    utf8.decode(Uint8Array.from(run.slice(1).split("%"), (hex) => Number.parseInt(hex, 16))),
+  );
 }
 
 /**

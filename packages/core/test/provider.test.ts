@@ -277,7 +277,8 @@ describe("an Xtream account's login, however short", () => {
 
 describe("an Xtream password as each part of an address spells it", () => {
   // A path and a header read "+" as a plus; a query reads it as a space as well, as a form spells
-  // one. An escape that is no UTF-8 reads as U+FFFD, and the characters beside it still count.
+  // one, at each decoding. Bytes that are no UTF-8 read as URLSearchParams reads them, and the
+  // characters beside them still count.
   /** An account with `password`, its https addresses all redirecting to `target` on http. */
   const redirecting = (password: string, target: string) =>
     xtreamProvider(
@@ -299,6 +300,10 @@ describe("an Xtream password as each part of an address spells it", () => {
       (each) => encodeURIComponent(each),
       [...text].map((character) => `%${character.charCodeAt(0).toString(16)}`).join(""),
     );
+  /** A query value as URLSearchParams reads it, as a server reading a form does. */
+  const form = (value: string) => new URLSearchParams(`v=${value}`).get("v") ?? "";
+  /** The form value "q+ %78" of `q%2B+%2578`, decoded again as code given it can: "q+ x". */
+  const MIXED = decodeURIComponent(form("q%2B+%2578"));
 
   it.each([
     ["q+x", "a path segment, its plus as written and the rest escaped", "/%71+%78/live.ts"],
@@ -310,6 +315,9 @@ describe("an Xtream password as each part of an address spells it", () => {
     ["q7x", "a path segment after a character cut short", "/%E2%82%71%37%78/live.ts"],
     ["pässwörd", "a path segment in UTF-8 escapes after a stray byte", "/%FF%70%C3%A4ssw%C3%B6rd/"],
     ["q7x", "a query value after a % that encodes nothing", "/live.ts?auth=%%71%37%78"],
+    [MIXED, "a query value read as a form, then decoded again", "/live.ts?auth=q%2B+%2578"],
+    [form("a%E2%82b"), "a query value with a character cut short", "/live.ts?auth=a%E2%82b"],
+    [form("a%F0%9F%92b"), "a query value with a longer one cut short", "/live.ts?auth=a%F0%9F%92b"],
   ])("refuses a redirect to http with the password %s in %s", async (password, _case, target) => {
     await expect(ask(redirecting(password, target))).rejects.toThrow("unencrypted");
     expect(reached).toEqual([]);
@@ -320,6 +328,8 @@ describe("an Xtream password as each part of an address spells it", () => {
     ["q7x", "an escape that is no UTF-8, and no password", "/caf%E9/live.ts"],
     ["q7x", "a % that encodes nothing", "/100%/live.ts?step=%zz"],
     ["q7x", "a value encoded four times, as deep as it is read", `/live.ts?v=${encoded("ok", 3)}`],
+    [MIXED, "that spelling in a path, its plus a plus", "/q%2B+%2578/live.ts"],
+    ["q7x", "a query value read both ways that holds no password", "/live.ts?auth=q%2B+%2578"],
   ])("follows a redirect to http for the password %s with %s", async (password, _case, target) => {
     expect(await (await ask(redirecting(password, target))).text()).toBe("plain");
     expect(reached.map((each) => each.path)).toEqual([target]);
@@ -336,6 +346,8 @@ describe("an Xtream password as each part of an address spells it", () => {
     ["q7x", "https://site.test/watch/%71%37%78%FF", "https://site.test/"],
     ["open sesame", "https://site.test/watch?auth=open+sesame", "https://site.test/"],
     ["open sesame", "https://site.test/open+sesame/watch", "https://site.test/open+sesame/watch"],
+    [MIXED, "https://site.test/watch?auth=q%2B+%2578", "https://site.test/"],
+    [MIXED, "https://site.test/q%2B+%2578/watch", "https://site.test/q%2B+%2578/watch"],
   ])("takes the password %s's Referer %s to http as %s", async (password, referer, sent) => {
     await ask(redirecting(password, "/relay/live.ts?token=7f3a"), {
       headers: { Referer: referer },
