@@ -19,8 +19,9 @@
 //
 // A change to a list's channels names a channel by its subscription, which has to be saved, with
 // the login it had when the channel was looked up, when the change is stored: what arrives after
-// it went is stored for none. Each change is told to the UI after it is stored. Nothing here logs
-// the name of a list or a channel.
+// it went is stored for none. That is asked in the change's own transaction, so a removal that
+// erases the account comes wholly before or after it. Each change is told to the UI after it is
+// stored. Nothing here logs the name of a list or a channel.
 import type { CustomList, CustomListMember } from "@mrstreamer/contracts/custom-lists";
 import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
 import type { CatalogueStatus, LiveChannel } from "@mrstreamer/contracts/library";
@@ -287,15 +288,10 @@ function make() {
           streams: streamsOf(channel),
           name: channel.title,
           adult: channel.adult === true,
+          stands: () => subscriptions.standsNow(subscription),
         };
         return { subscription, channelOf, channel, listed };
       });
-
-    /** Fails with `no-subscription` unless `subscription` stands. Asked last before a change. */
-    const standing = (subscription: SavedSubscription) =>
-      Effect.flatMap(subscriptions.stands(subscription), (stands) =>
-        stands ? Effect.void : Effect.fail(noSubscription),
-      );
 
     const service: CustomLists["Service"] = {
       lists,
@@ -305,7 +301,6 @@ function make() {
           const named = yield* nameOf(name);
           const first = channel ? yield* listedOf(channel) : null;
           const at = yield* Clock.currentTimeMillis;
-          if (first) yield* standing(first.subscription);
           yield* store.create({ id, name: named, first: first?.listed ?? null, at });
           return yield* after(true);
         }),
@@ -322,9 +317,8 @@ function make() {
 
       setMember: (list, named, member) =>
         Effect.gen(function* () {
-          const { subscription, channelOf, channel, listed } = yield* listedOf(named);
+          const { channelOf, channel, listed } = yield* listedOf(named);
           const at = yield* Clock.currentTimeMillis;
-          yield* standing(subscription);
           const changed = yield* store.setMember({
             list,
             channel: listed,

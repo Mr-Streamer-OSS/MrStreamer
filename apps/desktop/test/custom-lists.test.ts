@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { CustomList } from "@mrstreamer/contracts/custom-lists";
+import { Failed } from "@mrstreamer/core/failure";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -26,10 +27,11 @@ async function started(dataDir: string) {
     quit: () => runtime.dispose(),
     /**
      * Removes a subscription with its record, as Settings does with Also delete, and has the
-     * removal wait until `release`: before its turn among the storage changes (`queued`), or once
-     * the record is erased (`erased`). Answers once it waits there.
+     * removal wait until `release`: before its turn among the storage changes (`queued`), once
+     * the record is erased (`erased`), or as it erases, which then fails and erases nothing
+     * (`refused`). Answers once it waits there.
      */
-    removing: async (subscriptionId: string, held: "queued" | "erased") => {
+    removing: async (subscriptionId: string, held: "queued" | "erased" | "refused") => {
       const services = await runtime.context();
       const subscriptions = Context.get(services, Subscriptions);
       const viewing = Context.get(services, ViewingRecord);
@@ -47,7 +49,10 @@ async function started(dataDir: string) {
             })
           : Context.add(services, ViewingRecord, {
               ...viewing,
-              erase: (account) => Effect.andThen(viewing.erase(account), wait),
+              erase: (account) =>
+                held === "erased"
+                  ? Effect.andThen(viewing.erase(account), wait)
+                  : Effect.andThen(wait, Effect.fail(refused)),
             });
       const roster = await promised(
         runtimeFor(Roster.layer.pipe(Layer.provide(Layer.succeedContext(slowed)))),
@@ -65,6 +70,11 @@ async function started(dataDir: string) {
     settings: await promised(runtime, Settings),
   };
 }
+
+/** What an erase that can't be done fails with. */
+const refused = new Failed({
+  error: { kind: "unexpected", detail: "The record can't be erased." },
+});
 
 const login = (provider: FakeProvider) => ({
   server: provider.url,
@@ -476,4 +486,66 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
       expect(shown((await lists.lists())[0])).toEqual({ members: [`${a}:2014`], away: 0 });
     },
   );
+
+  it.each(["setMember", "create"] as const)(
+    "keeps an account erased when a list change for it (%s) starts as its removal does",
+    async (change) => {
+      const provider = await fakeProvider();
+      const app = await started(await tempDir());
+      /** The rounds whose list kept a channel of the erased account, and what came back. */
+      const away: number[] = [];
+      const restored: string[] = [];
+      let made: string | null = null;
+      // The change starts a few turns of the event loop after the removal, a few more each round:
+      // whichever comes first, the account's channel is erased with its record or never stored.
+      for (let turns = 0; turns <= 32; turns++) {
+        // Each round adds the account the round before removed with Also delete, as the viewer
+        // can: its list holds none of that account's channels.
+        const owner = (await app.roster.add(login(provider))).id;
+        await app.library.refresh(owner);
+        if (made !== null) {
+          const last = (await app.lists.lists()).find((each) => each.id === made);
+          for (const member of last?.members ?? []) restored.push(`${turns - 1}:${member.kind}`);
+        }
+        if (turns === 32) break;
+        const id = randomUUID();
+        made = id;
+        const channel = { subscriptionId: owner, id: "2014" };
+        if (change === "setMember") await app.lists.create({ id, name: id });
+        const removal = app.roster.remove(owner, true);
+        for (let turn = 0; turn < turns; turn++) await Promise.resolve();
+        await Promise.allSettled([
+          removal,
+          change === "create"
+            ? app.lists.create({ id, name: id, channel })
+            : app.lists.setMember(id, channel, true),
+        ]);
+        await removal;
+        if ((await app.lists.lists()).find((each) => each.id === id)?.away) away.push(turns);
+      }
+      expect({ away, restored }).toEqual({ away: [], restored: [] });
+      await app.quit();
+    },
+  );
+
+  it("takes a list change for a subscription again once its removal failed and kept it", async () => {
+    const app = await withTwo();
+    const { lists, removing, a, b } = app;
+    const id = randomUUID();
+    await lists.create({ id, name: "Kept", channel: { subscriptionId: a, id: "2014" } });
+
+    const removal = await removing(b, "refused");
+    // In force while it erases: the change is refused and nothing is stored.
+    await expect(
+      lists.setMember(id, { subscriptionId: b, id: "2014" }, true),
+    ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+    removal.release();
+    await expect(removal.done).rejects.toBe(refused);
+    // The removal gave way, so the subscription is saved still and the change goes through.
+    await lists.setMember(id, { subscriptionId: b, id: "2014" }, true);
+    expect(shown((await lists.lists()).find((each) => each.id === id))).toEqual({
+      members: [`${a}:2014`, `${b}:2014`],
+      away: 0,
+    });
+  });
 });

@@ -113,10 +113,16 @@ export interface ListedChannel {
   readonly streams: readonly string[];
   readonly name: string;
   readonly adult: boolean;
+  /**
+   * Whether that subscription is saved still, with the login it had: asked first in the
+   * transaction of a change that names the channel, so a removal that erases the account can't
+   * come between the answer and the change. A no fails with `no-subscription`, writing nothing.
+   */
+  readonly stands: () => boolean;
 }
 
 /** What a stored channel is to hold as it is listed now: its streams, name and adult mark. */
-export type ListedNow = Omit<ListedChannel, "account">;
+export type ListedNow = Omit<ListedChannel, "account" | "stands">;
 
 /** Where the viewer's channel lists are kept. */
 export class CustomListStore extends Context.Service<
@@ -128,7 +134,7 @@ export class CustomListStore extends Context.Service<
      * In one transaction: makes a list called `name` after the others, holding `first` when
      * given, under `id`. A list made under `id` before stays as it is, and one deleted since
      * fails with `no-list`. Fails with `list-name-taken` when another list is called the same,
-     * apart from case and accents.
+     * apart from case and accents, and with `no-subscription` once `first` stands no more.
      */
     readonly create: (input: {
       readonly id: string;
@@ -148,7 +154,8 @@ export class CustomListStore extends Context.Service<
     /**
      * In one transaction: adds `channel` at the end of list `list` unless one of its account's
      * channels there is it, as `same` says of each; without `member`, takes every such one out.
-     * Answers whether that changed the list. Fails with `no-list` without the list.
+     * Answers whether that changed the list. Fails with `no-subscription` once `channel` stands
+     * no more, and with `no-list` without the list.
      */
     readonly setMember: (input: {
       readonly list: string;
@@ -336,6 +343,7 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
     create: ({ id, name, first, at }) =>
       attempt(() =>
         transaction(db, () => {
+          if (first && !first.stands()) fail("no-subscription");
           if (statements.made.get(id)) {
             existing(id);
             return;
@@ -378,6 +386,7 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
     setMember: ({ list, channel, member, same, at }) =>
       attempt(() =>
         transaction(db, () => {
+          if (!channel.stands()) fail("no-subscription");
           existing(list);
           const found = membersOf(statements.members.all(list)).filter(
             (stored) => stored.account === channel.account && same(stored),
@@ -453,7 +462,7 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
 }
 
 /** Throws a failure the UI knows, which ends the transaction it is in with nothing written. */
-function fail(kind: "no-list" | "list-name-taken" | "list-changed"): never {
+function fail(kind: "no-list" | "list-name-taken" | "list-changed" | "no-subscription"): never {
   throw new Failed({ error: { kind } });
 }
 
