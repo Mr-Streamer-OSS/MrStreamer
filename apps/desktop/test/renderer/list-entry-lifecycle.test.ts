@@ -2,15 +2,16 @@
 // Where a list of the viewer's begins, and how a change to one ends, in Live TV. New list in a
 // channel row's lists menu opens the rail's name field wherever the rail was, in a provider's
 // categories or a Find, and makes the list with that channel; Escape makes none, and the list on
-// screen stays. A delete or rename answered after the viewer moved on ends only what it began: a
-// list chosen meanwhile stays chosen, with its new order or its own field as they are. The list
-// on screen, deleted from here, gives way to All channels without saying it went, whether its
-// answer or the lists read again come first, and also once Live TV was left and opened again
-// while the delete was out. One that goes otherwise, after a failed delete too, still says so,
-// and another window knows nothing of this one's deletes. Of changes sent side by side, the last
-// that failed shows with its Retry or Close until the viewer answers it or another fails:
-// another answering meanwhile leaves it. A saved order's answer gives way to lists read again
-// while its channels were read, and to subscriptions saved since.
+// screen stays. While one list is being made, another row's New list leaves its field, name and
+// channel as they are. A delete or rename answered after the viewer moved on ends only what it
+// began: a list chosen meanwhile stays chosen, with its new order or its own field as they are. The
+// list on screen, deleted from here, gives way to All channels without saying it went, whether its
+// answer or the lists read again come first, and also once Live TV was left and opened again while
+// the delete was out. One that goes otherwise, after a failed delete too, still says so, and
+// another window knows nothing of this one's deletes. Of changes sent side by side, the last that
+// failed shows with its Retry or Close until the viewer answers it or another fails: another
+// answering meanwhile leaves it. A saved order's answer gives way to lists read again while its
+// channels were read, and to subscriptions saved since.
 import { browseResult } from "./browse-support.ts";
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -400,6 +401,84 @@ describe("New list in a channel row's lists menu", () => {
     await settled();
     expect(page.heading()).toBe("Mornings");
     expect(page.rows()).toEqual(["Channel 1"]);
+  });
+
+  it("keeps a list being made, its name and channel, when another row's New list is chosen", async () => {
+    const page = await livePage({ kind: "all" }, [ALPHA]);
+    await page.newListFrom("Channel 3");
+    await page.type(page.newName()!, "Late");
+    const made = ipc.hold("customLists.create");
+    await page.key(page.newName()!, "Enter");
+    expect(ipc.argsOf("customLists.create")).toEqual([
+      { id: expect.any(String), name: "Late", channel: own("3") },
+    ]);
+
+    // New list in another row while that list is being made.
+    await page.newListFrom("Channel 2");
+    expect(page.newName()?.value).toBe("Late");
+    expect(page.newName()?.readOnly).toBe(true);
+    await page.key(page.newName()!, "Enter");
+    expect(ipc.argsOf("customLists.create")).toHaveLength(1);
+
+    // Its own answer ends it as ever: the list is made with its channel, and chosen.
+    const [{ id } = { id: "" }] = ipc.argsOf("customLists.create");
+    const late = list(id, "Late", ["3"], 1);
+    page.store([ALPHA, late]);
+    await act(async () => made.resolve([ALPHA, late]));
+    await settled();
+    expect(page.newName()).toBeNull();
+    expect(page.heading()).toBe("Late");
+    expect(page.rows()).toEqual(["Channel 3"]);
+
+    // A later New list from a row works as ever.
+    await page.pick("All channels");
+    await page.newListFrom("Channel 2");
+    expect(page.newName()?.value).toBe("");
+    expect(document.activeElement).toBe(page.newName());
+    await page.type(page.newName()!, "Early");
+    const again = ipc.hold("customLists.create");
+    await page.key(page.newName()!, "Enter");
+    const [, { id: second } = { id: "" }] = ipc.argsOf("customLists.create");
+    expect(ipc.argsOf("customLists.create")).toEqual([
+      { id, name: "Late", channel: own("3") },
+      { id: second, name: "Early", channel: own("2") },
+    ]);
+    const early = list(second, "Early", ["2"], 1);
+    page.store([ALPHA, late, early]);
+    await act(async () => again.resolve([ALPHA, late, early]));
+    await settled();
+    expect(page.heading()).toBe("Early");
+    expect(page.rows()).toEqual(["Channel 2"]);
+  });
+
+  it("starts another list from a row once the one being made failed", async () => {
+    const page = await livePage({ kind: "all" }, [ALPHA]);
+    await page.newListFrom("Channel 3");
+    await page.type(page.newName()!, "Late");
+    const made = ipc.hold("customLists.create");
+    await page.key(page.newName()!, "Enter");
+    await act(async () => made.reject({ kind: "unexpected", detail: "database is locked" }));
+    await settled();
+    expect(page.text()).toContain("Couldn't save.");
+
+    await page.newListFrom("Channel 2");
+    expect(page.newName()?.value).toBe("");
+    expect(page.newName()?.readOnly).toBe(false);
+    await page.type(page.newName()!, "Early");
+    const again = ipc.hold("customLists.create");
+    await page.key(page.newName()!, "Enter");
+    expect(ipc.argsOf("customLists.create").at(-1)).toEqual({
+      id: expect.any(String),
+      name: "Early",
+      channel: own("2"),
+    });
+    const [, { id } = { id: "" }] = ipc.argsOf("customLists.create");
+    const early = list(id, "Early", ["2"], 1);
+    page.store([ALPHA, early]);
+    await act(async () => again.resolve([ALPHA, early]));
+    await settled();
+    expect(page.heading()).toBe("Early");
+    expect(page.rows()).toEqual(["Channel 2"]);
   });
 
   it("makes no list on Escape, and leaves the category on screen", async () => {

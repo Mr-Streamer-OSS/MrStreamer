@@ -144,7 +144,8 @@ export function holds(list: CustomList, channel: OwnedId): boolean {
 /**
  * The rail's New list, as a field that names one: closed, or open with what is typed and how the
  * last try went. One made from a row's lists menu holds that row's channel from the start. Each
- * name typed is sent under one id, so Retry, or Enter again, never makes a second list.
+ * name typed is sent under one id, so Retry, or Enter again, never makes a second list. One list
+ * is made at a time: while it is sent, New list from a row leaves its field as it is.
  */
 export function useNewList(onMade: (id: string) => void) {
   const change = useListChange();
@@ -158,6 +159,7 @@ export function useNewList(onMade: (id: string) => void) {
     text: field?.text ?? "",
     state: change.state,
     start: (channel: OwnedId | null = null) => {
+      if (change.state.status === "saving") return;
       change.dismiss();
       setField({ text: "", channel, id: crypto.randomUUID() });
     },
