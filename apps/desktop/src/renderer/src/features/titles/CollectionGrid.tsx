@@ -81,7 +81,8 @@ export function usePages(listKey: string): {
 
 /**
  * A collection's titles, fetched a page at a time as the grid asks. `titleAt` answers for loaded
- * positions; `load` asks for the pages around the positions in view.
+ * positions; `load` asks for the pages around the positions in view. `settled` is false while a
+ * page is being read, for the first time or again after the lists changed.
  */
 export function useCollection(
   kind: TitleKind,
@@ -105,6 +106,7 @@ export function useCollection(
     unfiltered: first ? (first.unfiltered ?? first.total) : null,
     titleAt: (index: number) => byPage.get(Math.floor(index / PAGE))?.titles[index % PAGE],
     load,
+    settled: loaded.every((each) => !each.isFetching),
     error: loaded.find((each) => each.error)?.error ?? null,
   };
 }
@@ -163,6 +165,7 @@ export function CollectionGrid({
           itemAt={listed.titleAt}
           keyOf={titleKey}
           onVisible={listed.load}
+          settled={listed.settled}
           active={active}
           onOpen={open}
           tile={(title, grid) => <GridPoster title={title} caption={describe(title)} grid={grid} />}
@@ -240,15 +243,16 @@ interface Chosen {
 }
 
 /**
- * The position of the chosen item now: where it was, or where its key went, or else what now
- * stands where it was, or the last. Until its page is in, it stays where it was.
+ * The position of the chosen item now: where it was, or where its key went among the loaded
+ * pages. Until the page at its position is in, it stays where it was. Null when the loaded pages
+ * don't have it: it was removed, it moved past them, or a page that will have it hasn't answered.
  */
 function locate<T>(
   chosen: Chosen,
   total: number,
   itemAt: (index: number) => T | undefined,
   keyOf: (item: T) => string,
-): number {
+): number | null {
   const kept = Math.min(chosen.index, Math.max(total - 1, 0));
   if (chosen.key === null) return kept;
   const there = chosen.index < total ? itemAt(chosen.index) : undefined;
@@ -261,7 +265,7 @@ function locate<T>(
       if (item && keyOf(item) === chosen.key) return at;
     }
   }
-  return kept;
+  return null;
 }
 
 /** The selected tile's control the focus belongs on: `part` 0 is the one that opens it. */
@@ -275,7 +279,8 @@ function controlOf(scroller: HTMLElement, index: number, part: number): HTMLElem
  * whatever `tile` draws for an item, 2:3 with a name and one line under it. The grid is a list
  * whose items say their place in it, and the selected one stays drawn when scrolled away, so it
  * keeps the focus and the Tab stop. `takeFocus` asks the selected tile to take the focus once it
- * is drawn, unless the focus went to another control first; `onFocusTaken` says it did.
+ * is drawn, unless the focus went to another control first; `onFocusTaken` says it did. `settled`
+ * is false while a page of the list is still being read, as a refresh reads them one at a time.
  */
 export function Grid<T>({
   total,
@@ -287,6 +292,7 @@ export function Grid<T>({
   tile,
   takeFocus = false,
   onFocusTaken,
+  settled = true,
 }: {
   total: number;
   /** The item at a position, or undefined while its page loads. */
@@ -300,6 +306,7 @@ export function Grid<T>({
   tile: (item: T, tile: GridTile) => ReactNode;
   takeFocus?: boolean;
   onFocusTaken?: () => void;
+  settled?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const rem = useRem();
@@ -320,9 +327,16 @@ export function Grid<T>({
   const rows = Math.ceil(total / columns);
 
   const [chosen, setChosen] = useState<Chosen>({ key: null, index: 0 });
-  const selected = locate(chosen, total, itemAt, keyOf);
+  const found = locate(chosen, total, itemAt, keyOf);
+  // A title the loaded pages lack keeps its key while a page is still being read: a refresh
+  // answers them one at a time, and the title can be in none of them for a moment. Meanwhile it
+  // shows no ring, takes no focus and opens nothing. Once every page answered, a title still
+  // missing counts as gone, and what now stands at its position takes its place. One that moved
+  // past the pages loaded so far isn't looked for beyond them.
+  const pending = found === null && !settled;
+  const selected = found ?? Math.min(chosen.index, Math.max(total - 1, 0));
   const selectedItem = itemAt(selected);
-  const selectedKey = selectedItem ? keyOf(selectedItem) : chosen.key;
+  const selectedKey = pending || !selectedItem ? chosen.key : keyOf(selectedItem);
   // Kept where it was found, so the next render needn't look for it again.
   if (selected !== chosen.index || selectedKey !== chosen.key)
     setChosen({ key: selectedKey, index: selected });
@@ -359,13 +373,25 @@ export function Grid<T>({
   useEffect(() => onVisible(selected, selected), [selected, onVisible]);
 
   const keyboard = useKeyboardMode();
-  // A key moved the selection: the focus follows once its tile is drawn.
+  // A key moved the selection, or what opened details is back: the focus follows once its tile is
+  // drawn.
   const follow = useRef(false);
   // Which control of the selected tile has the focus while the grid has it, 0 the one that opens
   // it; still set when that tile went from under the focus, as a removal takes it.
   const part = useRef<number | null>(null);
   // Set when an item opened, to give the focus back to it once what it opened closes.
   const reopen = useRef<{ readonly focus: boolean } | null>(null);
+  // The viewer put the focus on another control: what the grid still meant to focus, a selection
+  // whose page hadn't come or the place of a tile that went, is no longer the grid's to take.
+  useEffect(() => {
+    const elsewhere = (event: Event) => {
+      if (event.target instanceof Node && box.current?.contains(event.target)) return;
+      follow.current = false;
+      part.current = null;
+    };
+    document.addEventListener("focusin", elsewhere);
+    return () => document.removeEventListener("focusin", elsewhere);
+  }, []);
   const select = (index: number) => {
     const item = itemAt(index);
     setChosen({ key: item ? keyOf(item) : null, index });
@@ -379,13 +405,22 @@ export function Grid<T>({
   };
   const state = useRef({
     selected,
+    pending,
     columns,
     total,
     rowsInView: drawn.current.length,
     select,
     open,
   });
-  state.current = { selected, columns, total, rowsInView: drawn.current.length, select, open };
+  state.current = {
+    selected,
+    pending,
+    columns,
+    total,
+    rowsInView: drawn.current.length,
+    select,
+    open,
+  };
   useEffect(() => {
     if (!active) return;
     function onKey(event: KeyboardEvent) {
@@ -439,7 +474,7 @@ export function Grid<T>({
           move(current.total);
           break;
         case "Enter":
-          current.open(current.selected, true);
+          if (!current.pending) current.open(current.selected, true);
           break;
         default:
           return;
@@ -451,10 +486,11 @@ export function Grid<T>({
   }, [active, virtual]);
 
   // The focus goes with the selection when a key moved it, when the search handed the keys over,
-  // when the grid has it, and when the tile that had it went. It is never taken from elsewhere.
+  // when the grid has it, and when the tile that had it went. It is never taken from elsewhere,
+  // and waits while the selected title's pages are still being read.
   useLayoutEffect(() => {
     const scroller = box.current;
-    if (!scroller || !active) return;
+    if (!scroller || !active || pending) return;
     const focused = document.activeElement;
     const within = !!focused && scroller.contains(focused);
     const idle = !focused || focused === document.body;
@@ -473,26 +509,26 @@ export function Grid<T>({
     if (target !== focused) target.focus({ preventScroll: true });
   });
 
-  // Back from what an item opened: the selection is that item, by its key, and so is the focus
-  // when the keyboard opened it. The sheet gives the focus back to what had it before, or else to
-  // what had it before an earlier popup, in a microtask queued as it closed; this one runs after
-  // it, and moves the focus to the item when the sheet put it on another tile.
+  // Back from what an item opened: the selection is that item, by its key, or what took its place
+  // once its removal settled, and so is the focus when the keyboard opened it. The sheet gives the
+  // focus back to what had it before, or else to what had it before an earlier popup, in a
+  // microtask queued as it closed; this one runs after it. When the sheet put the focus on another
+  // tile, that tile's selection is undone too.
   const wasActive = useRef(active);
   useLayoutEffect(() => {
     const back = active && !wasActive.current ? reopen.current : null;
     wasActive.current = active;
     if (!back) return;
     reopen.current = null;
-    const index = selected;
+    const opener = chosen;
     if (back.focus) virtual.scrollToIndex(selectedRow, { align: "auto" });
     queueMicrotask(() => {
       const scroller = box.current;
       const focused = document.activeElement;
       if (!scroller || (!back.focus && !(focused && scroller.contains(focused)))) return;
-      state.current.select(index);
-      const target = controlOf(scroller, index, 0);
-      if (!target) follow.current = true;
-      else if (focused !== target) target.focus({ preventScroll: true });
+      // A new object, so the grid draws again and its focus effect runs.
+      setChosen({ ...opener });
+      follow.current = true;
     });
   }, [active]);
 
@@ -564,7 +600,7 @@ export function Grid<T>({
                     className="min-w-0"
                   >
                     {tile(item, {
-                      selected: keyboard && active && index === selected,
+                      selected: keyboard && active && !pending && index === selected,
                       tabIndex: index === selected ? 0 : -1,
                       open: () => open(index, false),
                     })}

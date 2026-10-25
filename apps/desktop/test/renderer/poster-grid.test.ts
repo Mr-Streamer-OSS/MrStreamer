@@ -190,6 +190,201 @@ describe("a collection", () => {
     expect(focused()).toEqual({ label: "Blade Runner, 1982", position: "4 of 4" });
   });
 
+  /**
+   * Two pages of titles, read by offset from `catalogue`, with the keys on Title 119: the last of
+   * the first page. `titles` is the list as it was.
+   */
+  async function twoPages() {
+    const titles = Array.from({ length: 240 }, (_, index) =>
+      film(`t${index}`, `Title ${index}`, 2000),
+    );
+    const list = { catalogue: titles };
+    ipc.answer("ondemand.collection", ({ offset, limit }) =>
+      all(list.catalogue.slice(offset, offset + limit), list.catalogue.length),
+    );
+    const render = await movies();
+    // Both pages are in before the keys come back to the first.
+    await press("End");
+    await settle();
+    await press("Home");
+    for (let step = 0; step < 119; step++) await press("ArrowRight");
+    expect(focused()).toEqual({ label: "Title 119, 2000", position: "120 of 240" });
+    return { titles, list, render };
+  }
+
+  /** A title added at the top of the list: it pushes Title 119 into the second page. */
+  const added = film("new", "Added", 2026);
+
+  it.each([
+    ["the first page", 0],
+    ["the second page", 120],
+  ])(
+    "keeps the selected title when a refresh moves it across pages and %s answers last",
+    async (_, late) => {
+      const { titles, list } = await twoPages();
+      const held = ipc.hold("ondemand.collection", ({ offset }) => offset === late);
+      list.catalogue = [added, ...titles];
+      await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+      await settle();
+      // Half the list is read again: Title 119 is in neither page, or still in the old one.
+      // Nothing else takes its place.
+      expect(focused().label ?? "Title 119, 2000").toBe("Title 119, 2000");
+
+      await act(async () =>
+        held.resolve(all(list.catalogue.slice(late, late + 120), list.catalogue.length)),
+      );
+      await settle();
+      expect(focused()).toEqual({ label: "Title 119, 2000", position: "121 of 241" });
+      await press("Enter");
+      expect(useUi.getState().details?.id).toBe("t119");
+    },
+  );
+
+  it("moves the selection to what took a removed title's place once its pages answer", async () => {
+    const { titles, list } = await twoPages();
+    const held = ipc.hold("ondemand.collection", ({ offset }) => offset === 120);
+    list.catalogue = titles.filter((title) => title.id !== "t119");
+    await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+    await settle();
+    await act(async () => held.resolve(all(list.catalogue.slice(120, 240), list.catalogue.length)));
+    await settle();
+    expect(focused()).toEqual({ label: "Title 120, 2000", position: "120 of 239" });
+  });
+
+  it.each([
+    ["before", true],
+    ["after", false],
+  ])(
+    "puts the focus back on the poster that opened details when its moved page answers %s they close",
+    async (_, beforeClose) => {
+      const { titles, list, render } = await twoPages();
+      await press("Enter");
+      expect(useUi.getState().details?.id).toBe("t119");
+
+      // Details cover the page; a refresh moves the title, and its new page answers late.
+      await render(false);
+      await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+      const held = ipc.hold("ondemand.collection", ({ offset }) => offset === 120);
+      list.catalogue = [added, ...titles];
+      await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+      await settle();
+      const answer = () =>
+        act(async () => held.resolve(all(list.catalogue.slice(120, 240), list.catalogue.length)));
+      if (beforeClose) await answer();
+      await act(async () => useUi.setState({ details: null }));
+      await render(true);
+      await settle();
+      if (!beforeClose) {
+        expect(focused().label ?? "Title 119, 2000").toBe("Title 119, 2000");
+        await answer();
+        await settle();
+      }
+      expect(focused()).toEqual({ label: "Title 119, 2000", position: "121 of 241" });
+    },
+  );
+
+  it.each([
+    ["nowhere", false],
+    ["on a poster", true],
+  ])(
+    "leaves the focus in the field the viewer chose while a page the keys asked for loads, from %s",
+    async (_, fromPoster) => {
+      const titles = Array.from({ length: 300 }, (_, index) =>
+        film(`t${index}`, `Title ${index}`, 2000),
+      );
+      ipc.answer("ondemand.collection", ({ offset, limit }) =>
+        all(titles.slice(offset, offset + limit), titles.length),
+      );
+      const last = ipc.hold("ondemand.collection", ({ offset }) => offset === 240);
+      await movies();
+      if (fromPoster) {
+        await press("ArrowDown");
+        expect(focused().label).toBe("Title 1, 2000");
+      }
+
+      await press("End");
+      await settle();
+      const field = document.querySelector<HTMLInputElement>('input[aria-label="Search movies"]')!;
+      await act(async () => field.focus());
+      await act(async () => last.resolve(all(titles.slice(240), titles.length)));
+      await settle();
+      expect(document.activeElement).toBe(field);
+      // The keys still went to the end: Tab enters there.
+      expect(
+        document.querySelector('[role="listitem"][aria-posinset="300"] [tabindex="0"]'),
+      ).not.toBeNull();
+    },
+  );
+
+  it.each([false, true])(
+    "drops the old selection and late page after adult reclassification, with outside focus %s",
+    async (outside) => {
+      const { titles, list } = await twoPages();
+      // Same catalogue timestamps, but the second update marks the selected title for adults.
+      const late = ipc.hold("ondemand.collection", ({ offset }) => offset === 120);
+      await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+      await settle();
+      list.catalogue = titles.filter((title) => title.id !== "t119");
+      const current = ipc.hold(
+        "ondemand.collection",
+        ({ id, offset, limit }) => id === "all" && offset === 0 && limit === 120,
+      );
+      await act(async () =>
+        ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+      );
+      await settle();
+      expect(document.querySelectorAll('[role="listitem"]')).toHaveLength(0);
+      await press("Enter");
+      expect(useUi.getState().details).toBeNull();
+      const field = document.querySelector<HTMLInputElement>('input[aria-label="Search movies"]')!;
+      if (outside) await act(async () => field.focus());
+
+      // The pre-reset page cannot restore its selected title, cursor or pending focus.
+      await act(async () => late.resolve(all(titles.slice(120), titles.length)));
+      await settle();
+      expect(document.querySelectorAll('[role="listitem"]')).toHaveLength(0);
+      await act(async () =>
+        current.resolve(all(list.catalogue.slice(0, 120), list.catalogue.length)),
+      );
+      await settle();
+      expect(document.body.textContent).not.toContain("Title 119");
+      const stop = document.querySelector('[role="listitem"] [tabindex="0"]');
+      expect(stop?.getAttribute("aria-label")).toBe("Title 0, 2000");
+      expect(stop?.closest('[role="listitem"]')?.getAttribute("aria-posinset")).toBe("1");
+      if (outside) expect(document.activeElement).toBe(field);
+      else expect(focused()).toEqual({ label: "Title 0, 2000", position: "1 of 239" });
+    },
+  );
+
+  it("returns from details to a safe first poster after a marked reset, without reviving the old opener", async () => {
+    const { titles, list, render } = await twoPages();
+    await press("Enter");
+    expect(useUi.getState().details?.id).toBe("t119");
+    await render(false);
+    await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+    list.catalogue = titles.filter((title) => title.id !== "t119");
+    const current = ipc.hold(
+      "ondemand.collection",
+      ({ id, offset, limit }) => id === "all" && offset === 0 && limit === 120,
+    );
+    await act(async () =>
+      ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
+    );
+    await settle();
+    await act(async () => useUi.setState({ details: null }));
+    await render(true);
+    await settle();
+    expect(document.querySelectorAll('[role="listitem"]')).toHaveLength(0);
+    await act(async () =>
+      current.resolve(all(list.catalogue.slice(0, 120), list.catalogue.length)),
+    );
+    await settle();
+    expect(document.body.textContent).not.toContain("Title 119");
+    expect(focused()).toEqual({ label: "Title 0, 2000", position: "1 of 239" });
+    await press("Enter");
+    expect(useUi.getState().details?.id).toBe("t0");
+  });
+
   it("moves the focus to the last poster once its page arrives, and keeps it there while scrolled away", async () => {
     const titles = Array.from({ length: 300 }, (_, index) =>
       film(`t${index}`, `Title ${index}`, 2000),
@@ -306,5 +501,67 @@ describe("the Watchlist", () => {
     await settle();
     expect(cross()).toBe("Remove Blade Runner from Watchlist");
     expect(ipc.argsOf("watchlist.remove").map(({ entry }) => entry.id)).toEqual(["e-a", "e-c"]);
+  });
+
+  /** The Watchlist with `entries` saved, and the next removal held until the test answers it. */
+  async function watchlist(entries: readonly WatchlistEntry[]) {
+    ipc.always("subscription.list", [playlist]);
+    ipc.always("ondemand.status", { lists: [], metadata: null });
+    ipc.always("watchlist.list", { total: entries.length, entries });
+    const removal = ipc.hold("watchlist.remove");
+    useUi.setState({ view: "watchlist" });
+    await shown((active) => createElement(WatchlistPage, { active }));
+    return removal;
+  }
+
+  it.each([
+    ["two titles remain", "removal answers", 3],
+    ["two titles remain", "list changes", 3],
+    ["nothing remains", "removal answers", 1],
+    ["nothing remains", "list changes", 1],
+  ])(
+    "leaves the focus on the window bar the viewer moved to while a removal ran, when %s and the %s first",
+    async (_, order, count) => {
+      const entries = saved.slice(0, count);
+      const removal = await watchlist(entries);
+      const pressed = document.querySelector<HTMLElement>(
+        `[aria-label="Remove ${entries[0]!.name} from Watchlist"]`,
+      )!;
+      // The cross pressed with the keyboard, then Tab on to the window bar before it answers.
+      await act(async () => {
+        pressed.focus();
+        pressed.click();
+      });
+      await settle();
+      const outside = document.querySelector<HTMLElement>("header button")!;
+      await act(async () => outside.focus());
+
+      ipc.always("watchlist.list", { total: count - 1, entries: entries.slice(1) });
+      if (order === "list changes") {
+        await act(async () => ipc.emit("watchlist.changed", null));
+        await settle();
+      }
+      await act(async () => removal.resolve(null));
+      await settle();
+      expect(document.body.textContent?.includes("Nothing saved yet")).toBe(count === 1);
+      expect(document.activeElement).toBe(outside);
+    },
+  );
+
+  it("gives the page the focus once the last title goes with the cross that had it", async () => {
+    const removal = await watchlist(saved.slice(0, 1));
+    const only = document.querySelector<HTMLElement>(
+      '[aria-label="Remove Arrival from Watchlist"]',
+    )!;
+    await act(async () => {
+      only.focus();
+      only.click();
+    });
+    ipc.always("watchlist.list", { total: 0, entries: [] });
+    await act(async () => removal.resolve(null));
+    await settle();
+    expect(document.body.textContent).toContain("Nothing saved yet");
+    expect(document.activeElement?.getAttribute("tabindex")).toBe("-1");
+    expect(document.activeElement?.textContent).toContain("Watchlist");
   });
 });

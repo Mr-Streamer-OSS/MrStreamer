@@ -27,7 +27,10 @@ const SORTS: readonly { value: WatchlistSort; label: PlainKey }[] = [
 /** How the list is ordered, kept while the viewer goes elsewhere and comes back. */
 const useOrder = create<{ sort: WatchlistSort }>(() => ({ sort: "saved" }));
 
-/** The watchlist in `sort`, fetched a page at a time as the grid asks. */
+/**
+ * The watchlist in `sort`, fetched a page at a time as the grid asks. `settled` is false while a
+ * page is being read, for the first time or again after the watchlist changed.
+ */
 function useWatchlist(sort: WatchlistSort) {
   const { pages, load } = usePages(sort);
   const loaded = useQueries({
@@ -39,6 +42,7 @@ function useWatchlist(sort: WatchlistSort) {
     total: first ? first.total : null,
     entryAt: (index: number) => byPage.get(Math.floor(index / PAGE))?.entries[index % PAGE],
     load,
+    settled: loaded.every((each) => !each.isFetching),
     error: loaded.find((each) => each.error)?.error ?? null,
     retry: () => void Promise.all(loaded.map((each) => each.refetch())),
   };
@@ -51,8 +55,8 @@ export function WatchlistPage({ active }: { active: boolean }) {
   const stale = useStale();
 
   // A cross pressed with the keyboard leaves the focus on the cross of the tile that takes its
-  // place, or of the one before it when the last tile went (see Grid). The page gets it once
-  // nothing is left.
+  // place, or of the one before it when the last tile went (see Grid). Once nothing is left, the
+  // page takes the focus that went with the last cross, unless the viewer put it elsewhere since.
   const page = useRef<HTMLDivElement>(null);
   const hadFocus = useRef(false);
   const { total } = saved;
@@ -60,7 +64,8 @@ export function WatchlistPage({ active }: { active: boolean }) {
     const box = page.current;
     if (!hadFocus.current || !box || removal.isPending) return;
     hadFocus.current = false;
-    if (!box.contains(document.activeElement)) box.focus();
+    const focused = document.activeElement;
+    if (total === 0 && (!focused || focused === document.body)) box.focus();
   }, [total, removal.isPending]);
 
   const remove = (entry: WatchlistEntry) => {
@@ -111,6 +116,7 @@ export function WatchlistPage({ active }: { active: boolean }) {
               itemAt={saved.entryAt}
               keyOf={ownedKey}
               onVisible={saved.load}
+              settled={saved.settled}
               active={active}
               onOpen={openSaved}
               tile={(entry, grid) => (

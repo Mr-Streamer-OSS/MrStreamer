@@ -6,7 +6,7 @@ Save/remove movies or whole series from details, browse Watchlist and Home, sort
 
 ## How to get to it (user POV)
 
-A movie or series poster opens details. **Save** becomes **Saved** after saving; pressing it again removes the title. **Watchlist** in the window bar after Series permanently opens saved titles, including when its row is hidden or empty. Home also offers its Watchlist row and **All** entry. It remains available for live-only subscriptions. Tiles open details and have a removal control. The arrow keys move the focus between tiles; Tab reaches the selected tile's poster, then its cross, then leaves the grid. A cross pressed with the keyboard leaves the focus on the cross of the tile that took its place, or of the one before it when the last went, and on the page once nothing is left.
+A movie or series poster opens details. **Save** becomes **Saved** after saving; pressing it again removes the title. **Watchlist** in the window bar after Series permanently opens saved titles, including when its row is hidden or empty. Home also offers its Watchlist row and **All** entry. It remains available for live-only subscriptions. Tiles open details and have a removal control. The arrow keys move the focus between tiles; Tab reaches the selected tile's poster, then its cross, then leaves the grid. A cross pressed with the keyboard leaves the focus on the cross of the tile that took its place, or of the one before it when the last went, and on the page once nothing is left. Focus the viewer moved elsewhere while the removal ran stays there.
 
 `apps/desktop/test/viewing-erasure.test.ts` holds pending viewing and Watchlist writes across
 subscription removal on real SQLite. Public reads after re-adding must keep Also delete erased,
