@@ -1,8 +1,10 @@
 # AUR maintainer runbook
 
-Owner: Wout Stiens (`hello@mrstreamer.app`). Proposed package: `mrstreamer-bin`, x86_64 only.
-This is an unpublished recipe template. There is no public AUR install command yet.
-Public user documentation and website activation wait for checked public availability.
+Project contact: Wout Stiens (`hello@mrstreamer.app`). The public
+[`mrstreamer-bin`](https://aur.archlinux.org/packages/mrstreamer-bin) package is
+maintained externally and supports x86_64. See the [user update guide](../../docs/user/updates.md#installed-through-the-aur).
+This directory holds the repository's recipe template and local preparation tools;
+updating the public AUR package is a separate maintainer action.
 
 ## Ownership and inputs
 

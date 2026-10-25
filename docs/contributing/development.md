@@ -5,15 +5,16 @@ Needs Node 24 or later and the pnpm version pinned in [package.json](../../packa
 ```sh
 pnpm install --frozen-lockfile
 pnpm dev          # the app with hot reload
-pnpm knip         # unused files, exports and dependencies
-pnpm lint         # oxlint
-pnpm fmt:check    # Prettier
-pnpm typecheck    # main, preload and shared code, then the renderer
+pnpm check        # lint, formatting, types, unused code and workflows
+pnpm lint:fix     # apply Oxlint's safe fixes
+pnpm fmt          # format with Prettier
 pnpm test         # Vitest
 pnpm build        # production bundles in apps/desktop/out/
 ```
 
 The repository is a pnpm workspace: the app is `apps/desktop`, the website is `apps/marketing`, shared contracts and rules are in `packages/`; [architecture](architecture.md) shows the layout. `pnpm dev:marketing`, `pnpm build:marketing` and `pnpm preview:marketing` run the website, which [its README](../../apps/marketing/README.md) describes. The scripts above run from the root. If `pnpm dev` reports that Electron failed to install, as a fresh install from pnpm's store can leave it, run `node node_modules/electron/install.js`.
+
+`pnpm check` runs static checks; tests and builds are separate. `pnpm lint` and `pnpm fmt:check` check without writing. [The root scripts](../../package.json) also expose each check separately.
 
 ## Running the app
 
