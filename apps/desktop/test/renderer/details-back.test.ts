@@ -4,12 +4,15 @@
 // keyboard on the related title opened, then to the page and what had the keyboard there. Close,
 // Escape and a title opened anew start over. A playing title and Settings over the details keep
 // the way back. What a removed subscription, hidden titles for adults or a new account take away,
-// Back no longer reaches, and it reaches back eight details at most.
+// Back no longer reaches, nor a title the lists have since marked for adults while Settings hides
+// them, and it reaches back eight details at most. Back to the same title's earlier visit
+// restores it at once, and only then. Search opened over the details, by pointer or shortcut,
+// gives the keyboard back to them.
 import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type {
   Episode,
   MovieDetails,
@@ -125,6 +128,8 @@ function detailsOf(id: string): MovieDetails | SeriesDetails {
 
 /** What each title's related row shows, by the version opened. */
 let related: Record<string, readonly Title[]> = {};
+/** The versions the lists now mark for adults, as after a provider's update. */
+let forAdults = new Set<string>();
 
 const status: OnDemandStatus = {
   lists: [SUBSCRIPTION, OTHER].map((subscriptionId) => ({
@@ -191,11 +196,16 @@ beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
   related = { a: [canyon, field], b: [meridian, harbour], c: [field], d: [] };
+  forAdults = new Set();
   ipc.always("subscription.list", BOTH);
   ipc.always("liveBrowse.get", { kind: "all" });
   ipc.always("ondemand.status", status);
   ipc.answer("ondemand.titles", ({ versions }) =>
-    versions.flatMap((version) => titles.get(version.id) ?? []),
+    versions.flatMap((version) => {
+      const title = titles.get(version.id);
+      if (!title) return [];
+      return forAdults.has(version.id) ? [{ ...title, adult: true }] : [title];
+    }),
   );
   ipc.answer("ondemand.details", ({ version }) => detailsOf(version.id));
   ipc.answer("ondemand.related", ({ version }) => ({
@@ -216,8 +226,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** The window on Movies with both subscriptions, as the app draws it. */
-async function window_() {
+/** The window on Movies with both subscriptions, as the app draws it, and its query client. */
+async function window_(): Promise<QueryClient> {
   useUi.setState({ view: "movies" });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const container = document.createElement("div");
@@ -244,6 +254,7 @@ async function window_() {
     },
     { interval: 1 },
   );
+  return client;
 }
 
 /** The page's own control labelled `label`, once it shows. */
@@ -385,6 +396,113 @@ describe("Back over details", () => {
   });
 });
 
+describe("Back after the lists or the sheet changed", () => {
+  it("passes over a title the lists now mark for adults while they are hidden, never showing it", async () => {
+    await threeDeep();
+    // The provider now marks Canyon Hours for adults: the lists say so, and related rows leave it out.
+    forAdults.add("b");
+    related = { ...related, a: [field] };
+    const shown: (string | null)[] = [];
+    onTestFinished(useUi.subscribe((state) => shown.push(state.details?.id ?? null)));
+    await press(back());
+    await showing("Night Harbour");
+    expect(shown).not.toContain("b");
+    expect(document.body.textContent).not.toContain("Canyon Hours");
+    await press(back());
+    expect(sheet()).toBeNull();
+  });
+
+  it("returns to a title the lists now mark for adults while Settings shows them", async () => {
+    ipc.prefer({ adultTitles: true });
+    await threeDeep();
+    forAdults.add("b");
+    await press(back());
+    await showing("Canyon Hours");
+  });
+
+  it("restores an earlier visit of the same title at once, and nothing restores it again later", async () => {
+    related = { ...related, c: [field, canyon] };
+    const client = await window_();
+    await act(async () => openDetails({ kind: "series", ...ownedOf(canyon) }));
+    await showing("Canyon Hours");
+    await press(inSheet("Season 2"));
+    scroller()!.scrollTop = 240;
+    await press(relatedTile("Meridian Dawn"));
+    await showing("Meridian Dawn");
+    await press(relatedTile("Canyon Hours"));
+    await showing("Canyon Hours");
+    expect(inSheet("Season 1")?.getAttribute("aria-pressed")).toBe("true");
+    scroller()!.scrollTop = 40;
+    // The tests' own subscription goes, Meridian Dawn with it, as Settings removes one: the way
+    // back keeps the earlier Canyon Hours alone, and everything is read again, so its related
+    // titles no longer have Meridian Dawn.
+    related = { ...related, b: [] };
+    await act(async () => {
+      leaveSubscription(SUBSCRIPTION);
+      void client.invalidateQueries();
+    });
+    await vi.waitFor(
+      async () => {
+        await settle();
+        expect(relatedTile("Meridian Dawn")).toBeUndefined();
+      },
+      { interval: 1 },
+    );
+    await showing("Canyon Hours");
+
+    await press(back());
+    await showing("Canyon Hours");
+    expect(inSheet("Season 2")?.getAttribute("aria-pressed")).toBe("true");
+    expect(scroller()?.scrollTop).toBe(240);
+    expect(document.activeElement).toBe(sheet());
+
+    // A title played from it, then Settings: each time the sheet opens afresh, as before.
+    ipc.hold("playback.openTitle");
+    await press(
+      [...(sheet()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((each) =>
+        /^Play S1/.test(each.textContent?.trim() ?? ""),
+      ),
+    );
+    expect(document.querySelector("[data-view=title]")).not.toBeNull();
+    await press(
+      [...document.querySelectorAll<HTMLButtonElement>("[data-view=title] header button")].find(
+        (each) => each.textContent?.trim() === "Back",
+      ),
+    );
+    await showing("Canyon Hours");
+    expect(inSheet("Season 1")?.getAttribute("aria-pressed")).toBe("true");
+    expect(scroller()?.scrollTop).toBe(0);
+    await key(",", { ctrlKey: true, metaKey: true });
+    await settle();
+    await press(
+      [
+        ...document.querySelectorAll<HTMLButtonElement>('[data-view="settings"] header button'),
+      ].find((each) => each.textContent?.trim() === "Back"),
+    );
+    await showing("Canyon Hours");
+    expect(inSheet("Season 1")?.getAttribute("aria-pressed")).toBe("true");
+    expect(scroller()?.scrollTop).toBe(0);
+  });
+
+  it("gives the keyboard back to the details after Search from their bar or its shortcut", async () => {
+    await threeDeep();
+    inSheet("Play")!.focus();
+    await press(sheet()!.querySelector<HTMLButtonElement>('header button[aria-label="Search"]')!);
+    expect(useUi.getState().searchOpen).toBe(true);
+    await key("Escape");
+    await settle();
+    expect(useUi.getState().searchOpen).toBe(false);
+    expect(document.activeElement).toBe(inSheet("Play"));
+
+    await key("k", { ctrlKey: true, metaKey: true });
+    await settle();
+    expect(useUi.getState().searchOpen).toBe(true);
+    await key("Escape");
+    await settle();
+    expect(document.activeElement).toBe(inSheet("Play"));
+  });
+});
+
 describe("the way back", () => {
   const target = (id: string, subscriptionId = SUBSCRIPTION): DetailsTarget => ({
     kind: "movie",
@@ -393,10 +511,10 @@ describe("the way back", () => {
   });
   const here = (related: string) => ({ season: null, scroll: 0, related });
   /** Presses Back until the details close: the version each Back shows, the page last. */
-  function backs(): (string | null)[] {
+  async function backs(): Promise<(string | null)[]> {
     const seen: (string | null)[] = [];
     while (useUi.getState().details) {
-      backDetails();
+      await backDetails();
       seen.push(useUi.getState().details?.id ?? null);
     }
     return seen;
@@ -408,41 +526,47 @@ describe("the way back", () => {
     for (const next of rest) openRelated(next, here(next.id));
   }
 
-  it(`reaches back ${DETAILS_TRAIL} details at most, the latest first`, () => {
+  it(`reaches back ${DETAILS_TRAIL} details at most, the latest first`, async () => {
     chain(...Array.from({ length: DETAILS_TRAIL + 3 }, (_, at) => target(`t${at}`)));
     expect(useUi.getState().details?.id).toBe(`t${DETAILS_TRAIL + 2}`);
-    expect(backs()).toEqual([
+    expect(await backs()).toEqual([
       ...Array.from({ length: DETAILS_TRAIL }, (_, at) => `t${DETAILS_TRAIL + 1 - at}`),
       null,
     ]);
   });
 
-  it("passes over a removed subscription's titles, and closes on its details", () => {
+  it("passes over a removed subscription's titles, and closes on its details", async () => {
     chain(target("a"), target("b", OTHER), target("c"));
     leaveSubscription(OTHER);
     expect(useUi.getState().details?.id).toBe("c");
-    expect(backs()).toEqual(["a", null]);
+    expect(await backs()).toEqual(["a", null]);
 
     chain(target("a"), target("b", OTHER), target("c"));
     leaveSubscription(SUBSCRIPTION);
     expect(useUi.getState().details).toBeNull();
-    backDetails();
+    await backDetails();
     expect(useUi.getState().details).toBeNull();
   });
 
-  it("goes when titles for adults are hidden, the account starts over or a page opens", () => {
+  it("passes over titles the lists now mark for adults, and forgets them", async () => {
+    chain(target("a"), target("b"), target("c"), target("d"));
+    forAdults.add("b").add("c");
+    expect(await backs()).toEqual(["a", null]);
+  });
+
+  it("goes when titles for adults are hidden, the account starts over or a page opens", async () => {
     for (const end of [closeTitleSheets, resetForAccount, () => openView("movies")]) {
       chain(target("a"), target("b"), target("c"));
       end();
       expect(useUi.getState().details).toBeNull();
-      backDetails();
+      await backDetails();
       expect(useUi.getState().details).toBeNull();
     }
   });
 
-  it("starts over when a title opens anew, as from search or the player", () => {
+  it("starts over when a title opens anew, as from search or the player", async () => {
     chain(target("a"), target("b"));
     openDetails(target("d"));
-    expect(backs()).toEqual([null]);
+    expect(await backs()).toEqual([null]);
   });
 });

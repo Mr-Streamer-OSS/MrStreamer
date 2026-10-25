@@ -2,8 +2,10 @@ import type { SettingsSection, SettingsControl } from "../features/settings/cata
 import { create } from "zustand";
 import type { LiveDiscovery, LiveFilters } from "@mrstreamer/contracts/live-browse";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
-import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistEntry } from "@mrstreamer/contracts/watchlist";
+import { call } from "../lib/ipc.ts";
+import { currentPreferences, readPreferences } from "../lib/preferences.ts";
 import { titlePlayer } from "../player/title-player.ts";
 
 /** The page under everything else. Watch, details and playing a title open over it. */
@@ -87,6 +89,12 @@ interface UiState {
   readonly trail: readonly DetailsStep[];
   /** Where Back found the details on screen, for them to show as they open, once. */
   readonly place: DetailsPlace | null;
+  /**
+   * Rises as details open, as a related title opens over them and as Back returns to some: each
+   * visit gets a sheet of its own, the same title's again too, so what Back restores applies as
+   * that sheet opens, and only then.
+   */
+  readonly visit: number;
   /** A saved title the lists don't have, in its own short sheet over the page. */
   readonly savedEntry: WatchlistEntry | null;
   /** Watch's channel list is open over the picture. */
@@ -115,6 +123,7 @@ export const useUi = create<UiState>(() => ({
   details: null,
   trail: [],
   place: null,
+  visit: 0,
   savedEntry: null,
   channelsOpen: false,
   searchOpen: false,
@@ -207,15 +216,16 @@ export function closeWatch(): void {
  * Back leads from them to the page, as Close does.
  */
 export function openDetails(target: DetailsTarget): void {
-  useUi.setState({
+  useUi.setState(({ visit }) => ({
     details: target,
     trail: [],
     place: null,
+    visit: visit + 1,
     savedEntry: null,
     searchOpen: false,
     settings: null,
     watching: false,
-  });
+  }));
 }
 
 /**
@@ -223,24 +233,65 @@ export function openDetails(target: DetailsTarget): void {
  * stood (`here`). Past `DETAILS_TRAIL`, the earliest of them goes.
  */
 export function openRelated(target: DetailsTarget, here: DetailsPlace): void {
-  const { details, trail } = useUi.getState();
+  const { details, trail, visit } = useUi.getState();
   if (!details) return openDetails(target);
   useUi.setState({
     details: target,
     trail: [...trail, { target: details, place: here }].slice(-DETAILS_TRAIL),
     place: null,
+    visit: visit + 1,
   });
 }
 
+/** Rises with each Back, so only the latest goes by what the lists answer. */
+let backing = 0;
+
 /**
  * Back over details: to the details the ones on screen were opened from as a related title, as
- * they stood, or to the page once there are none.
+ * they stood, or to the page once there are none. The lists are asked first, as they stand now:
+ * details of a title they keep from the viewer, as one they have since marked for adults while
+ * Settings hides those, are passed over and forgotten, and never show. Anything the viewer did
+ * meanwhile wins over the answer.
  */
-export function backDetails(): void {
-  const { details, trail } = useUi.getState();
-  const step = trail.at(-1);
-  if (!details || !step) return closeDetails();
-  useUi.setState({ details: step.target, trail: trail.slice(0, -1), place: step.place });
+export async function backDetails(): Promise<void> {
+  const mine = ++backing;
+  for (;;) {
+    const { details, trail } = useUi.getState();
+    const step = trail.at(-1);
+    if (!details || !step) return closeDetails();
+    const shown = await stillShown(step.target);
+    const now = useUi.getState();
+    if (mine !== backing || now.details !== details || now.trail !== trail) return;
+    if (!shown) {
+      useUi.setState({ trail: trail.slice(0, -1) });
+      continue;
+    }
+    useUi.setState({
+      details: step.target,
+      trail: trail.slice(0, -1),
+      place: step.place,
+      visit: now.visit + 1,
+    });
+    return;
+  }
+}
+
+/**
+ * Whether the lists, as they stand now, let `target`'s title show: not when they mark it for
+ * adults while Settings hides those. A title they no longer list shows what its details have of
+ * it, as before. When the lists or the preferences can't be read, it doesn't show.
+ */
+async function stillShown(target: DetailsTarget): Promise<boolean> {
+  try {
+    const [title] = await call("ondemand.titles", {
+      kind: target.kind,
+      versions: [ownedId(target)],
+    });
+    if (!title?.adult) return true;
+    return (currentPreferences() ?? (await readPreferences())).adultTitles === true;
+  } catch {
+    return false;
+  }
 }
 
 /** Closes the details, and the way back through them, to the page they were opened over. */
@@ -264,8 +315,8 @@ export function leaveSubscription(id: string): void {
 
 /**
  * Closes a title's details, with the way back through them, and a saved title's sheet, as when
- * Settings hides titles for adults: what shows may be one. Only the details on screen can be: a
- * related title never is, and one for adults lists none.
+ * Settings hides titles for adults: what shows may be one. A title the lists mark for adults only
+ * later is passed over by Back (`backDetails`).
  */
 export function closeTitleSheets(): void {
   useUi.setState({ ...NO_DETAILS, savedEntry: null });

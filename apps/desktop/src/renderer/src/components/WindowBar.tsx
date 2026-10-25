@@ -80,7 +80,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
       : watching
         ? closeWatch
         : detailsOpen
-          ? backDetails
+          ? () => void backDetails()
           : savedOpen
             ? () => useUi.setState({ savedEntry: null })
             : null);

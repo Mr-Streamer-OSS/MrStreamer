@@ -95,6 +95,7 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
   const watching = useUi((state) => state.watching);
   const playingTitle = useUi((state) => state.playingTitle);
   const details = useUi((state) => state.details);
+  const visit = useUi((state) => state.visit);
   const savedEntry = useUi((state) => state.savedEntry);
   const settingsOpen = useUi((state) => state.settings !== null);
   const covered = watching || playingTitle;
@@ -161,10 +162,12 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
         </PresentationVisible>
       </div>
       {/* Closed under Settings, whose Escape would otherwise reach the sheet's focus first. The
-          page's bar is inert behind them, so details keep one of their own for Back. */}
+          page's bar is inert behind them, so details keep one of their own for Back. Each visit
+          gets a sheet of its own, the same title's on Back too, so what Back restores applies
+          once. */}
       {details && !covered && !settingsOpen && (
         <DetailsView
-          key={`${details.kind}:${ownedKey(details)}`}
+          key={`${visit}:${details.kind}:${ownedKey(details)}`}
           target={details}
           bar={<WindowBar className="bg-black" />}
         />
