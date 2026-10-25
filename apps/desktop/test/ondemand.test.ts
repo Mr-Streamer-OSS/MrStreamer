@@ -340,6 +340,65 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect(told).toEqual([]);
   });
 
+  it("marks for adults only by the row the lists show for an id, the first, in either kind", async () => {
+    const app = await onDemandApp();
+    const { onDemand, provider, own } = app;
+    // Series 80001 and film 91001 each listed twice, an ordinary row and one for adults.
+    const twice = (
+      series: "ordinary first" | "adult first",
+      film: "ordinary first" | "adult first",
+    ) =>
+      provider.serveTitles((all) => {
+        const show = all.series.find((each) => each.id === 80_001)!;
+        const movie = all.movies.find((each) => each.id === 91_001)!;
+        const shows = [show, { ...show, adult: true }];
+        // A category named for adults marks a film.
+        const movies = [movie, { ...movie, categoryId: "505" }];
+        return {
+          ...all,
+          series: [
+            ...all.series.filter((each) => each !== show),
+            ...(series === "ordinary first" ? shows : shows.toReversed()),
+          ],
+          movies: [
+            ...all.movies.filter((each) => each !== movie),
+            ...(film === "ordinary first" ? movies : movies.toReversed()),
+          ],
+        };
+      });
+    const adult = async () => [
+      (await onDemand.titles("series", [own("80001")]))[0]?.adult,
+      (await onDemand.titles("movie", [own("91001")]))[0]?.adult,
+    ];
+    twice("ordinary first", "ordinary first");
+    await onDemand.refresh();
+    const told = await collect(app.runtime, onDemand.changes);
+    const marked: boolean[] = [];
+    const shown: (boolean | undefined)[][] = [];
+    const refresh = async () => {
+      await onDemand.refresh();
+      await vi.waitFor(() => expect(told).toHaveLength(marked.length + 1));
+      marked.push(told.at(-1)!.markedForAdults === true);
+      shown.push(await adult());
+    };
+    // The same lists: the rows they show stay ordinary.
+    await refresh();
+    // The series' row for adults comes first, so the series shows for adults; then unchanged.
+    twice("adult first", "ordinary first");
+    await refresh();
+    await refresh();
+    // So does the film's.
+    twice("adult first", "adult first");
+    await refresh();
+    expect(marked).toEqual([false, true, false, true]);
+    expect(shown).toEqual([
+      [false, false],
+      [true, false],
+      [true, false],
+      [true, true],
+    ]);
+  });
+
   it("tells the views when refreshed lists mark for adults a title they listed before, and only then", async () => {
     const app = await onDemandApp();
     const { onDemand, provider } = app;

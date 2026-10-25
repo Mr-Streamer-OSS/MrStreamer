@@ -610,7 +610,8 @@ async function finishRefresh({
 
 /**
  * Whether `after` marks for adults, by the provider's flag or a category named for adults, a
- * title `before` listed without that mark. Lists read before may still name it.
+ * title `before` listed without that mark. Lists read before may still name it. As the index
+ * does, each kind shows the first row listed for an id; the others count for nothing.
  */
 function marksForAdults(before: OnDemandCatalogue, after: OnDemandCatalogue): boolean {
   const kinds = [
@@ -619,9 +620,15 @@ function marksForAdults(before: OnDemandCatalogue, after: OnDemandCatalogue): bo
   ] as const;
   for (const [was, wasIn, now, nowIn] of kinds) {
     const wasAdult = adultIn(wasIn);
-    const unmarked = new Set(was.flatMap((title) => (wasAdult(title) ? [] : [title.id])));
+    const shown = new Map<string, boolean>();
+    for (const title of was) if (!shown.has(title.id)) shown.set(title.id, wasAdult(title));
     const isAdult = adultIn(nowIn);
-    if (now.some((title) => unmarked.has(title.id) && isAdult(title))) return true;
+    const seen = new Set<string>();
+    for (const title of now) {
+      if (seen.has(title.id)) continue;
+      seen.add(title.id);
+      if (shown.get(title.id) === false && isAdult(title)) return true;
+    }
   }
   return false;
 }
