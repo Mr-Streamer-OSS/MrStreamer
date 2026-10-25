@@ -277,14 +277,16 @@ function linesAt(lines: readonly Line[], at: number): string[] {
   return lines.filter(([from, until]) => from <= at && at < until).map(([, , text]) => text);
 }
 
-function streamsOf(body: Buffer): { codec_type: string; codec_name: string; channels?: number }[] {
+function streamsOf(
+  body: Buffer,
+): { codec_type: string; codec_name: string; channels?: number; pix_fmt?: string }[] {
   const probe = spawnSync(
     FFPROBE,
     [
       "-v",
       "error",
       "-show_entries",
-      "stream=codec_type,codec_name,channels",
+      "stream=codec_type,codec_name,channels,pix_fmt",
       "-of",
       "json",
       "-i",
@@ -399,10 +401,15 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
         expect(copy.response.headers.get("x-title-audio")).toBe("convert");
         const converted = await play(`${opened.url}?start=5&audio=2&picture=convert`);
         expect(converted.response.headers.get("x-title-video")).toBe("convert");
+        expect(converted.response.headers.get("x-title-audio")).toBe("copy");
         expect(converted.response.headers.get("x-start")).toBe("5");
         expect(converted.streams).toEqual(
           expect.arrayContaining([
-            expect.objectContaining({ codec_type: "video", codec_name: "h264" }),
+            expect.objectContaining({
+              codec_type: "video",
+              codec_name: "h264",
+              pix_fmt: "yuv420p",
+            }),
             expect.objectContaining({ codec_type: "audio", codec_name: "aac" }),
           ]),
         );
