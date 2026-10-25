@@ -278,7 +278,12 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
           ViewingAccount,
           Effect.map(Subscriptions, (subscriptions) => ({
             owners: Effect.map(subscriptions.saved, (saved) =>
-              saved.map(({ id, key, original }) => ({ subscriptionId: id, key, original })),
+              saved.map((owner) => ({
+                subscriptionId: owner.id,
+                key: owner.key,
+                original: owner.original,
+                stands: () => subscriptions.standsNow(owner),
+              })),
             ),
           })),
         ),

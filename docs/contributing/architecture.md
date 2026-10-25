@@ -279,6 +279,12 @@ Background work, downloads and stream sessions run in their service's scope. Qui
 
 ## Viewing record
 
+Desktop viewing commands carry each saved owner's synchronous presence check into the store's
+transaction. The runtime binds it to `Subscriptions.standsNow` for that source revision, so a
+roster read answered from before removal cannot append events after Also delete. The existing
+transaction refusal leaves the command id available for retry. Removal without erasure keeps
+the account's record, and a failed removal restores the same roster authority.
+
 Favourites, watch history and how far movies and episodes got are events, per account: `favourite-added`, `favourite-removed` and `watched` with a channel id, `title-progress` with a title, its position and length and when that play began (`since`), `title-removed` when a title leaves Continue watching, and `series-finished` when a series' last episode was watched into its credits. `@mrstreamer/core/viewing/record` holds the rules as plain functions: `decide` turns a command into events (none when it asks for what already holds), and `apply` adds channel events to the state, favourites in the order added and the twelve most recent channels. `@mrstreamer/core/viewing/titles` holds the title rules: a checkpoint's row, when a title counts as finished (its last 5 %, at least 30 s), and Continue watching: movies past two minutes and not finished, and each series at the episode played last, finished or not, so the UI can offer the next one. The record offers up to 100 of them and the row shows 20, so the titles the UI leaves out, those for adults and those the provider no longer lists, don't push others off it. Removing a title takes every version played, by the ids of its versions, and keeps how far it got. A checkpoint brings it back only from a play begun after the removal, so the minute checkpoints of a play still going don't undo it. A finished series leaves the same way, every version played, by the ids the UI sends. `@mrstreamer/core/viewing/service` runs each command for the account of the subscription it names. Every channel and title it is given, and every one it answers with, names its subscription; the events and rows keep the provider's ids alone, under the account. Without a subscription the lists are empty, and a change fails with `no-subscription`, as does one that names a subscription that isn't saved.
 
 `viewing.get` answers one record for every saved subscription: the favourites in the order starred, whichever subscription each is of, the channels watched by when they were watched, and Continue watching by when each title played. Nothing is stored to say so. Each entry stays in its own account's record, so removing a subscription takes its entries out of the lists and nothing else, and one whose password can't be read keeps its entries in them. The events' sequence runs through every account, so the event that gave an entry its place says where it stands among the others'. The store works that out from an account's channel events once per run, keeps it current as changes commit (`Placed` in `platform/viewing-store.ts`), and never needs it for a single account, whose lists read as they always did.
@@ -376,6 +382,15 @@ A subscription added later that lists the title too plays it from the same entry
 `platform/watchlist-store.ts` keeps two tables in `mrstreamer.db`: `watchlist`, one row per record and account, and `watchlist_versions`, one row per version, which names the record it belongs to. A unique index holds one record per account, kind and TMDB id among the titles the lists gather by it, which leaves out rows for adults. Two records of an account can hold one provider id, as when the provider gave a saved title's id to another title and the viewer saved that one too. The index on the provider id finds the records, and `sameTitle` says which of them a title is. Like the viewing record, they keep the provider's ids under the account's key and name no subscription. The service says whose an account's records are.
 
 Every change is one transaction. A failure rolls everything back: nothing is half saved, for one account or for several, the call fails, and the UI offers the same action again.
+
+Watchlist saves and catalogue adoption check `Subscriptions.standsNow` inside that transaction.
+A save requires every source that listed a version to remain saved at the same revision, so
+erasing one refuses the whole save. Removal checks its named source and selects the other saved
+accounts in the transaction, leaving an account removed without erasure alone. These checks
+share the subscription roster's existing removal and rollback authority with channel lists;
+they add no separate lock or account state. `viewing-erasure.test.ts` holds public-service
+writes before real SQLite transactions and observes the records after removal and re-adding,
+including other-account writes and failed-removal retries.
 
 `platform/database.ts` opens the file once for both stores. Each makes and reads its own tables only. The viewing record's rebuild deletes `state` and `titles` and nothing else, here and in every build before, so a change to its rules, or an older build working on the file, leaves the watchlist as it is. A build from before the watchlist never looks at these tables. Going back to one loses nothing, with one limit: when such a build removes a subscription with the box ticked, it erases the viewing record alone, and the account's watchlist rows, with the account's key, stay in the file until this build erases that account.
 
