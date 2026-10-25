@@ -344,10 +344,12 @@ export function Grid<T>({
 
   // The rows in view and their overscan, without the selected row drawn beside them.
   const drawn = useRef<readonly number[]>([]);
+  const visibleRows = useRef(1);
   const rangeExtractor = useCallback(
     (range: Range) => {
       const shown = defaultRangeExtractor(range);
       drawn.current = shown;
+      visibleRows.current = Math.max(1, range.endIndex - range.startIndex + 1);
       return selectedRow >= range.count || shown.includes(selectedRow)
         ? shown
         : [...shown, selectedRow].sort((a, b) => a - b);
@@ -408,7 +410,7 @@ export function Grid<T>({
     pending,
     columns,
     total,
-    rowsInView: drawn.current.length,
+    rowsInView: visibleRows.current,
     select,
     open,
   });
@@ -417,7 +419,7 @@ export function Grid<T>({
     pending,
     columns,
     total,
-    rowsInView: drawn.current.length,
+    rowsInView: visibleRows.current,
     select,
     open,
   };
@@ -462,10 +464,10 @@ export function Grid<T>({
           move(-current.columns);
           break;
         case "PageDown":
-          move(current.columns * Math.max(1, current.rowsInView - 2));
+          move(current.columns * current.rowsInView);
           break;
         case "PageUp":
-          move(-current.columns * Math.max(1, current.rowsInView - 2));
+          move(-current.columns * current.rowsInView);
           break;
         case "Home":
           move(-current.selected);

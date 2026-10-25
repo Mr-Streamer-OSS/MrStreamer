@@ -18,6 +18,8 @@ const STATE = `(() => {
   const scroller = grid?.parentElement ?? null;
   const box = active?.getBoundingClientRect();
   const view = scroller?.getBoundingClientRect();
+  const rowTops = [...(grid?.children ?? [])].map(row => row.getBoundingClientRect().top).sort((a, b) => a - b);
+  const rowHeight = Math.min(...rowTops.slice(1).map((top, at) => top - rowTops[at]).filter(height => height > 0));
   const tiles = [...(grid?.querySelectorAll('[role="listitem"]') ?? [])];
   const top = tiles.length ? Math.min(...tiles.map((tile) => tile.getBoundingClientRect().top)) : 0;
   const lines = item ? [...item.querySelectorAll('button span.truncate')].map((line) => line.textContent) : [];
@@ -37,6 +39,8 @@ const STATE = `(() => {
     // Mostly shown: with large text in a small window one tile is taller than the grid's view.
     inView: !!(box && view && Math.min(box.bottom, view.bottom) - Math.max(box.top, view.top) >= 0.5 * Math.min(box.height, view.height)),
     columns: tiles.filter((tile) => Math.abs(tile.getBoundingClientRect().top - top) < 2).length,
+    visibleRows: view ? rowTops.filter(top => top < view.bottom && top + rowHeight > view.top).length : 0,
+    fullRows: view ? rowTops.filter(top => top >= view.top && top + rowHeight <= view.bottom).length : 0,
     tiles: tiles.length,
     innerWidth,
     innerHeight,
@@ -59,6 +63,8 @@ interface GridState {
   readonly tabStops: number;
   readonly inView: boolean;
   readonly columns: number;
+  readonly visibleRows: number;
+  readonly fullRows: number;
   readonly tiles: number;
   readonly innerWidth: number;
   readonly innerHeight: number;
@@ -228,6 +234,12 @@ export async function posterGridScenario(
   let previous = 1;
   const pages: number[] = [];
   while (previous < 130) {
+    const beforePage = await state();
+    const least = Math.min(
+      total - 1,
+      previous + beforePage.columns * Math.max(1, beforePage.fullRows),
+    );
+    const most = Math.min(total - 1, previous + beforePage.columns * beforePage.visibleRows);
     await d.key("PageDown", 34);
     await d.wait(async () => {
       const now = await state();
@@ -236,6 +248,10 @@ export async function posterGridScenario(
       );
     }, 15_000);
     const now = await aligned(`PageDown from ${previous}`, (await state()).index!, total);
+    expect(
+      now.index! >= least && now.index! <= most,
+      `PageDown from ${previous}: expected ${least}..${most}, got ${now.index}`,
+    );
     previous = now.index!;
     pages.push(previous);
   }
@@ -243,9 +259,16 @@ export async function posterGridScenario(
   await d.key("End", 35);
   await aligned("End", total - 1, total);
   await d.capture("collection-end");
+  const beforeUp = await state();
   await d.key("PageUp", 33);
-  const up = (await state()).index;
-  expect(up !== null && up < total - 1, "PageUp did not move from the end");
+  await d.wait(async () => (await state()).index !== total - 1);
+  const up = await aligned("PageUp goes back one visible page", (await state()).index!, total);
+  const leastUp = Math.max(0, total - 1 - beforeUp.columns * beforeUp.visibleRows);
+  const mostUp = Math.max(0, total - 1 - beforeUp.columns * Math.max(1, beforeUp.fullRows));
+  expect(
+    up.index! >= leastUp && up.index! <= mostUp,
+    `PageUp: expected ${leastUp}..${mostUp}, got ${up.index}`,
+  );
   await d.key("Home", 36);
   await aligned("Home", 0, total);
 
