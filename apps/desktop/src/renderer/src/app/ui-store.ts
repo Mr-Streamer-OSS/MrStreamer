@@ -157,6 +157,11 @@ useUi.subscribe((state, previous) => {
     navigation += 1;
 });
 
+/** A catalogue accepted meanwhile makes a Back's earlier visibility answer obsolete. */
+export function invalidateDetailsCatalogue(): void {
+  navigation += 1;
+}
+
 /** No details on screen, nor a way back through any. */
 const NO_DETAILS = { details: null, trail: [], place: null } as const;
 

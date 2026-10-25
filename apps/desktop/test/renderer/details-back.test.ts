@@ -23,6 +23,7 @@ import type {
   Title,
 } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId, SubscriptionSummary } from "@mrstreamer/contracts/subscription";
+import { syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 import { App } from "../../src/renderer/src/app/App.tsx";
 import {
   backDetails,
@@ -232,6 +233,7 @@ afterEach(() => {
 async function window_(): Promise<QueryClient> {
   useUi.setState({ view: "movies" });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const stopLists = syncOnDemand(client);
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -245,6 +247,7 @@ async function window_(): Promise<QueryClient> {
     ),
   );
   unmount = () => {
+    stopLists();
     act(() => root.unmount());
     client.clear();
     container.remove();
@@ -533,6 +536,90 @@ describe("a Back still waiting for the lists", () => {
     expect(scroller()?.scrollTop).toBe(240);
   };
 
+  it("discards an older Back answer when accepted lists mark its target for adults", async () => {
+    await threeDeep();
+    await act(async () => ipc.emit("ondemand.updated", status));
+    await showing("Meridian Dawn");
+    const held = holdCanyon();
+    await press(back());
+    ipc.answer("ondemand.titles", ({ versions }) =>
+      versions.flatMap((version) => {
+        const title = titles.get(version.id);
+        return title ? [{ ...title, adult: version.id === "b" }] : [];
+      }),
+    );
+    await act(async () => ipc.emit("ondemand.updated", { ...status, markedForAdults: true }));
+    await answer(held);
+    expect(shown()).toBe("Meridian Dawn");
+    await press(back());
+    await showing("Night Harbour");
+  });
+
+  it("waits for refreshed related tiles before restoring season, scroll and focus", async () => {
+    await threeDeep();
+    const held = ipc.hold("ondemand.related", ({ version }) => version.id === "b");
+    await act(async () => ipc.emit("ondemand.updated", status));
+    await press(back());
+    expect(shown()).toBe("Canyon Hours");
+    expect(sheet()?.textContent).toContain("Loading related titles…");
+    expect(inSheet("Season 2")?.getAttribute("aria-pressed")).toBe("true");
+    await act(async () =>
+      held.resolve({ basis: "Drama", titles: [{ title: meridian, reason: "Drama" }] }),
+    );
+    await showing("Canyon Hours");
+    expect(scroller()?.scrollTop).toBe(240);
+    expect(document.activeElement).toBe(relatedTile("Meridian Dawn"));
+  });
+
+  it.each(["settings", "playback"] as const)(
+    "does not apply a delayed related restore behind %s",
+    async (cover) => {
+      const play = () =>
+        [...(sheet()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((button) =>
+          /^Play\b/.test(button.textContent?.trim() ?? ""),
+        );
+      await threeDeep();
+      const held = ipc.hold("ondemand.related", ({ version }) => version.id === "b");
+      await act(async () => ipc.emit("ondemand.updated", status));
+      await press(back());
+      expect(shown()).toBe("Canyon Hours");
+      expect(sheet()?.textContent).toContain("Loading related titles…");
+      await vi.waitFor(
+        async () => {
+          await settle();
+          expect(play()).toBeDefined();
+        },
+        { interval: 1 },
+      );
+      if (cover === "settings") await key(",", { ctrlKey: true, metaKey: true });
+      else {
+        ipc.hold("playback.openTitle");
+        await press(play());
+      }
+      await settle();
+      const focused = document.activeElement;
+      await act(async () =>
+        held.resolve({ basis: "Drama", titles: [{ title: meridian, reason: "Drama" }] }),
+      );
+      await settle();
+      expect(document.activeElement).toBe(focused);
+      expect(document.querySelector('[aria-label="Also in your subscriptions"]')).toBeNull();
+      if (cover === "settings") await leaveSettings();
+      else await leaveTitle();
+      await showing("Canyon Hours");
+      await vi.waitFor(
+        async () => {
+          await settle();
+          expect(play()).toBeDefined();
+          expect(document.activeElement).toBe(play());
+        },
+        { interval: 1 },
+      );
+      await settle();
+      expect(document.activeElement).toBe(play());
+    },
+  );
+
   it("gives way to Settings opened meanwhile, whether the lists answer before or after it closes", async () => {
     await threeDeep();
     const held = holdCanyon();
@@ -701,5 +788,76 @@ describe("the way back", () => {
     chain(target("a"), target("b"));
     openDetails(target("d"));
     expect(await backs()).toEqual([null]);
+  });
+});
+
+describe("grid and related details", () => {
+  it("closes a keyboard related chain to its grid opener after the poster moved", async () => {
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get: () => 900,
+    });
+    let grid = [harbour, field];
+    ipc.answer("ondemand.collection", ({ id, offset, limit }) => ({
+      name: "All movies",
+      total: id === "all" ? grid.length : 0,
+      titles: id === "all" ? grid.slice(offset, offset + limit) : [],
+    }));
+    ipc.always("ondemand.filterOptions", { qualities: [], languages: [], verified: [], files: 0 });
+    await window_();
+    await press(await onPage("All movies"));
+    await settle();
+    await vi.waitFor(
+      async () => {
+        await settle();
+        expect(document.querySelector('[role="listitem"][data-index="0"] button')).not.toBeNull();
+      },
+      { interval: 1 },
+    );
+    const opener = document.querySelector<HTMLButtonElement>(
+      '[role="listitem"][data-index="0"] button',
+    );
+    expect(opener).not.toBeNull();
+    opener!.focus();
+    await key("Home");
+    await key("Enter");
+    await showing("Night Harbour");
+    await press(relatedTile("Canyon Hours"));
+    await showing("Canyon Hours");
+    await press(inSheet("Season 2"));
+    scroller()!.scrollTop = 240;
+    await press(relatedTile("Meridian Dawn"));
+    await showing("Meridian Dawn");
+    grid = [field, harbour];
+    const held = ipc.hold("ondemand.related", ({ version }) => version.id === "b");
+    await act(async () =>
+      ipc.emit("ondemand.updated", {
+        ...status,
+        lists: status.lists.map((list) => ({ ...list, fetchedAt: 2 })),
+      }),
+    );
+    await press(back());
+    expect(sheet()?.textContent).toContain("Loading related titles…");
+    await act(async () =>
+      held.resolve({ basis: "Drama", titles: [{ title: meridian, reason: "Drama" }] }),
+    );
+    await showing("Canyon Hours");
+    expect(inSheet("Season 2")?.getAttribute("aria-pressed")).toBe("true");
+    expect(scroller()?.scrollTop).toBe(240);
+    expect(document.activeElement).toBe(relatedTile("Meridian Dawn"));
+    await press(back());
+    await showing("Night Harbour");
+    await key("Escape");
+    await settle();
+    expect(sheet()).toBeNull();
+    expect(document.activeElement?.getAttribute("aria-label")).toContain("Night Harbour");
+    expect(
+      document.activeElement?.closest('[role="listitem"]')?.getAttribute("aria-posinset"),
+    ).toBe("2");
+    expect(document.activeElement?.querySelector("span.ring-2.ring-white")).not.toBeNull();
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get: () => 0,
+    });
   });
 });
