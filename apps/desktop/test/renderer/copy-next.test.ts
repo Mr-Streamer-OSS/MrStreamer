@@ -1,18 +1,20 @@
 // @vitest-environment happy-dom
 // At the end of a downloaded episode, the copy of the very next episode of its series plays after
 // the saved delay, as online: cancellable, held while Settings is open, off when autoplay is off,
-// and at once with Next. It opens only once this copy's progress is saved and main's list, read
-// again, still has it on this computer. A next episode with no copy, one still downloading and the
-// series' last episode say so instead; a copy queued before series were kept ends as before. None
-// of it asks a provider, the viewing record or a receiver.
+// and at once with Next. It opens only once main kept this copy's progress and main's list, read
+// again, still has it on this computer: a save main refused keeps this copy, says so and leaves
+// Next to try again. A next episode with no copy, one still downloading and the series' last
+// episode say so instead; a copy queued before series were kept ends as before. None of it asks a
+// provider, the viewing record or a receiver.
 import { ipc } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CopySession, Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { TitleWatch } from "../../src/renderer/src/features/titles/TitleWatch.tsx";
+import { useFlash } from "../../src/renderer/src/features/watch/flash-state.ts";
 import { watchOffline } from "../../src/renderer/src/lib/downloads.ts";
 import type { TitleRun } from "../../src/renderer/src/player/title-engine.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
@@ -373,6 +375,123 @@ it("saves where this copy got to before Next episode opens the next one mid-play
   await act(async () => saved.resolve(null));
   await wait(0);
   expect(opened()).toEqual(["pilot", "tide"]);
+});
+
+/** What main answers a save while another copy of the app holds the database. */
+const LOCKED = { kind: "unexpected", detail: "database is locked" } as const;
+const REFUSED = "Couldn't save. Try again.";
+
+describe("a save main refuses", () => {
+  it("keeps the copy playing when Next mid-play can't save it, and Next tries again", async () => {
+    ipc.always("downloads.list", listOf(tide, pilot));
+    await watch(pilot, { progress: { position: 600, duration: 2700 } });
+    ipc.refuse("downloads.recordProgress", LOCKED);
+    const reads = ipc.argsOf("downloads.list").length;
+
+    await press("Next episode");
+    await wait(0);
+    expect(ipc.argsOf("downloads.recordProgress")).toEqual([
+      { id: "pilot", position: 595, duration: 2700 },
+    ]);
+    expect(text()).toContain(REFUSED);
+    // Nothing is looked up or opened on a save main refused, and the copy plays on.
+    expect(ipc.argsOf("downloads.list")).toHaveLength(reads);
+    expect(opened()).toEqual(["pilot"]);
+    expect(titlePlayer.state()).toMatchObject({
+      now: { kind: "copy", copy: "pilot" },
+      phase: { kind: "playing" },
+    });
+    await wait(15_000);
+    expect(opened()).toEqual(["pilot"]);
+
+    ipc.always("downloads.recordProgress", null);
+    await press("Next episode");
+    await wait(0);
+    expect(opened()).toEqual(["pilot", "tide"]);
+  });
+
+  it("stops the countdown on a save main refused, goes on to nothing by itself, and Next tries again", async () => {
+    ipc.always("downloads.list", listOf(tide, pilot));
+    await watchToEnd(pilot);
+    expect(text()).toContain("Plays in 10");
+    ipc.refuse("downloads.recordProgress", LOCKED);
+    const reads = ipc.argsOf("downloads.list").length;
+
+    await wait(10_000);
+    expect(text()).toContain(REFUSED);
+    expect(ipc.argsOf("downloads.list")).toHaveLength(reads);
+    expect(titlePlayer.state()).toMatchObject({
+      now: { kind: "copy", copy: "pilot" },
+      phase: { kind: "ended" },
+      countdown: null,
+    });
+    // Neither time nor Settings opened and closed starts it again.
+    await act(async () => useUi.setState({ settings: "playback" }));
+    await wait(15_000);
+    await act(async () => useUi.setState({ settings: null }));
+    await wait(15_000);
+    expect(opened()).toEqual(["pilot"]);
+    expect(text()).toContain("S1 E3 · Low Tide");
+
+    // Refused again, it says so again and stays.
+    await press("Next episode");
+    await wait(0);
+    expect(opened()).toEqual(["pilot"]);
+    expect(text()).toContain(REFUSED);
+
+    ipc.always("downloads.recordProgress", null);
+    await press("Next episode");
+    await wait(0);
+    expect(opened()).toEqual(["pilot", "tide"]);
+    expect(ipc.argsOf("downloads.recordProgress").at(-2)).toEqual({
+      id: "pilot",
+      position: 2700,
+      duration: 2700,
+    });
+  });
+
+  it.each([
+    ["Cancel is pressed", () => press("Cancel")],
+    [
+      "the viewer leaves",
+      () =>
+        act(async () => {
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        }),
+    ],
+  ])("opens nothing and says nothing once %s while the save is under way", async (_, interrupt) => {
+    ipc.always("downloads.list", listOf(tide, pilot));
+    await watchToEnd(pilot);
+    const refused = ipc.hold("downloads.recordProgress");
+    const kept = ipc.hold("downloads.recordProgress");
+    await wait(10_000);
+    expect(ipc.argsOf("downloads.recordProgress")).toHaveLength(2);
+
+    await interrupt();
+    await act(async () => refused.reject(LOCKED));
+    await act(async () => kept.resolve(null));
+    await wait(15_000);
+    expect(opened()).toEqual(["pilot"]);
+    // Said nowhere: the note is the player's, whichever view shows it.
+    expect(useFlash.getState().text).not.toBe(REFUSED);
+  });
+
+  it("goes by the save of the latest press, whichever answers first", async () => {
+    ipc.always("downloads.list", listOf(tide, pilot));
+    await watch(pilot, { progress: { position: 600, duration: 2700 } });
+    const first = ipc.hold("downloads.recordProgress");
+    const second = ipc.hold("downloads.recordProgress");
+    await press("Next episode");
+    await press("Next episode");
+
+    await act(async () => second.resolve(null));
+    await wait(0);
+    expect(opened()).toEqual(["pilot", "tide"]);
+    await act(async () => first.reject(LOCKED));
+    await wait(0);
+    expect(opened()).toEqual(["pilot", "tide"]);
+    expect(useFlash.getState().text).not.toBe(REFUSED);
+  });
 });
 
 it("ends a copy queued before series were kept as before, with nothing next", async () => {

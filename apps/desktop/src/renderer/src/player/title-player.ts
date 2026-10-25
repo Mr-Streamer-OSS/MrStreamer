@@ -42,9 +42,9 @@ import {
 // series on this computer (see @mrstreamer/core/downloads/series): main's list of downloads is
 // read as the copy opens, at its end and once more before the next opens, and followed as main
 // says it changed. The countdown, Next and their setting work as online, and the next copy opens
-// only once this one's progress is saved. A next episode whose copy isn't complete, or isn't on
-// this computer, stops it there, this copy left as it was; a copy queued before downloads kept
-// their series has no next.
+// only once main kept this one's progress: a save it refused keeps this copy, says so and leaves
+// Next to try again. A next episode whose copy isn't complete, or isn't on this computer, stops it
+// there, this copy left as it was; a copy queued before downloads kept their series has no next.
 import { SubtitleTiming, type SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import { createStore, useStore } from "zustand";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
@@ -77,7 +77,7 @@ import { finishes, nextUnwatched } from "@mrstreamer/core/viewing/episodes";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { appError, describeError } from "../lib/errors.ts";
 import { t } from "@mrstreamer/core/i18n";
-import { flashNote } from "../features/watch/flash-state.ts";
+import { flash, flashNote } from "../features/watch/flash-state.ts";
 import { call, listen } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
 import type { EngineError } from "./engine.ts";
@@ -527,14 +527,7 @@ function save(): void {
   if (!now || !duration || position <= 0) return;
   // A copy keeps its own, whatever its subscription's record says.
   if (now.kind === "copy") {
-    saving = call("downloads.recordProgress", {
-      id: now.copy,
-      position: Math.min(position, duration),
-      duration,
-    }).then(
-      () => {},
-      () => {},
-    );
+    void saveCopy(now.copy, position, duration);
     return;
   }
   let saved: Promise<unknown> = call("viewing.recordProgress", {
@@ -552,6 +545,24 @@ function save(): void {
     () => {},
     () => {},
   );
+}
+
+/**
+ * Saves how far the copy `copy` got with it, as `save` does for one, and answers whether main kept
+ * it: a save it refused, as while another copy of the app holds the database, answers false. The
+ * next copy goes on only from one it kept.
+ */
+function saveCopy(copy: string, position: number, duration: number): Promise<boolean> {
+  const kept = call("downloads.recordProgress", {
+    id: copy,
+    position: Math.min(position, duration),
+    duration,
+  }).then(
+    () => true,
+    () => false,
+  );
+  saving = kept.then(() => {});
+  return kept;
 }
 
 /**
@@ -657,19 +668,27 @@ function tickCountdown(): void {
 }
 
 /**
- * Opens the copy of the next episode, from where it was left, once the open copy's progress is
- * saved and main's list read again still has that copy complete on this computer. Otherwise the
- * countdown stops and the end says what came of it, the open copy and its progress as they were.
- * Pressed again, cancelled or another title opened meanwhile, nothing opens on the earlier press.
+ * Opens the copy of the next episode, from where it was left, once main kept the open copy's
+ * progress as of now and its list read again still has that copy complete on this computer.
+ * Otherwise the countdown stops and the end says what came of it, the open copy and its progress
+ * as they were. A save main refused leaves the open copy where it is, says so, and goes on to
+ * nothing by itself: Next tries again. Pressed again, cancelled or another title opened
+ * meanwhile, nothing opens on the earlier press, and nothing is said of it.
  */
 async function playNextCopy(): Promise<void> {
-  if (store.getState().nextCopy?.kind !== "copy") return;
+  const { now, nextCopy: offered, position, duration } = store.getState();
+  if (now?.kind !== "copy" || offered?.kind !== "copy") return;
   if (countdownTimer) clearInterval(countdownTimer);
   countdownTimer = null;
   const mine = ++nextRequest;
-  save();
-  await saving;
+  // With nothing played yet there is nothing to keep.
+  const kept = !duration || position <= 0 || (await saveCopy(now.copy, position, duration));
   if (mine !== nextRequest) return;
+  if (!kept) {
+    stopCountdown();
+    flash(t("Couldn't save. Try again."));
+    return;
+  }
   const known = await refreshNext();
   if (mine !== nextRequest) return;
   const next = store.getState().nextCopy;

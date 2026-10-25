@@ -5,8 +5,10 @@
 // the picture server then stop. With the subscription still saved, autoplay off offers the next
 // copy without a countdown and Settings holds a countdown. The subscription is removed; with none
 // saved, the countdown opens the next copy, a next episode with no copy stops it, Cancel keeps the
-// copy, Next mid-play saves where it got to first, and a next copy whose file is removed during the
-// countdown stops it on the copy before. A last start finds the progress and the missing file.
+// copy, Next mid-play saves where it got to first, a save main refuses while another connection
+// holds the database keeps the copy until Next is pressed once the lock goes, and a next copy whose
+// file is removed during the countdown stops it on the copy before. A last start finds the
+// progress and the missing file.
 //   With `--previous <executable>`, stable 0.0.19's build (as its AppImage unpacks) starts on the
 // same profile after the first start: it finishes an episode this build queued, plays one of this
 // build's copies and downloads an episode itself. This build must find its series kept through
@@ -16,6 +18,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { access, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -74,6 +77,8 @@ export async function runDownloadsSeries(
   let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
   let pictures: Server | undefined;
   let running: { app: ChildProcess; page?: Page } | undefined;
+  /** Another connection to the run's profile database, holding its write lock while set. */
+  let locked: DatabaseSync | undefined;
   let failed: unknown;
   const cleanupErrors: string[] = [];
   const now = () => new Date().toISOString();
@@ -759,6 +764,115 @@ export async function runDownloadsSeries(
       throw new Error(`N didn't save where S1 E2 got to first: ${JSON.stringify(midPlay)}`);
     await leave(alone);
 
+    // While another connection holds the database's write lock past main's one-second wait,
+    // S1 E2's progress can't be saved: N mid-play and the countdown at its end both keep S1 E2,
+    // say so, and go on to nothing by themselves. Once the lock goes, Next plays S1 E3, saving
+    // first. The lock is taken and read through the run's own profile, as a second copy of the
+    // app would hold it; the window is driven as before.
+    const stored = () =>
+      (
+        JSON.parse(
+          String(
+            locked?.prepare("select record from downloads where id = ?").get(ids.s1e2)?.["record"],
+          ),
+        ) as { progress: { position: number } | null }
+      ).progress;
+    const lock = () => {
+      locked = new DatabaseSync(join(profile!, "mrstreamer.db"), { timeout: 5000 });
+      locked.exec("begin immediate");
+      action("Hold the profile database's write lock from another connection");
+    };
+    const unlock = () => {
+      locked?.exec("rollback");
+      locked?.close();
+      locked = undefined;
+      action("Let the profile database's write lock go");
+    };
+    // Every word the player's note says, as the window draws it: an observation only.
+    await alone.page.evaluate(`(() => {
+      const said = window.__noteSaid = [];
+      new MutationObserver(() => {
+        for (const note of document.querySelectorAll('[role=status]')) {
+          const text = note.textContent.trim();
+          if (text && said.at(-1) !== text) said.push(text);
+        }
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    })()`);
+    const noted = () => alone.page.evaluate<string[]>("window.__noteSaid ?? []");
+    const refused = t("Couldn't save. Try again.");
+    await watch(alone, ids.s1e2, "Watch S1 E2, to press N while its progress can't be saved");
+    await alone.wait(async () => (await alone.video()).time > 2);
+    const before = (await standing(alone)).find((item) => item.id === ids.s1e2)?.progress ?? null;
+    lock();
+    await alone.key("n", 78);
+    // Main gives up on the lock after a second; the next copy would have opened by now.
+    await delay(4000, undefined, { signal: abort.signal });
+    const refusedMidPlay = {
+      video: await alone.video(),
+      noted: await noted(),
+      listed: (await standing(alone)).find((item) => item.id === ids.s1e2)?.progress ?? null,
+      stored: stored(),
+      before,
+    };
+    observed["checkpointRefusedMidPlay"] = refusedMidPlay;
+    await alone.capture("checkpoint-refused-mid-play");
+    if (
+      !refusedMidPlay.video.title?.includes(episodeLabel(1, 2)) ||
+      refusedMidPlay.video.title.includes(episodeLabel(1, 3)) ||
+      refusedMidPlay.video.paused ||
+      !refusedMidPlay.noted.includes(refused) ||
+      JSON.stringify(refusedMidPlay.listed) !== JSON.stringify(before)
+    )
+      throw new Error(`N went on from a save main refused: ${JSON.stringify(refusedMidPlay)}`);
+    unlock();
+    await alone.key("n", 78);
+    await playing(alone, episodeLabel(1, 3));
+    const keptMidPlay = (await standing(alone)).find((item) => item.id === ids.s1e2)?.progress;
+    observed["checkpointKeptMidPlay"] = { progress: keptMidPlay, video: await alone.video() };
+    if (!keptMidPlay || keptMidPlay.position <= (before?.position ?? 0))
+      throw new Error(`N after the lock went didn't save first: ${JSON.stringify(keptMidPlay)}`);
+    await leave(alone);
+
+    await watch(alone, ids.s1e2, "Watch S1 E2, to end while its progress can't be saved");
+    await alone.page.evaluate("window.__noteSaid.length = 0");
+    lock();
+    await seekEnd(alone);
+    await alone.wait(async () => (await remaining(alone)) !== null);
+    // The countdown's end, main's second on the lock and as long again: nothing goes on.
+    await delay((DELAY * 2 + 3) * 1000, undefined, { signal: abort.signal });
+    const refusedAtEnd = {
+      video: await alone.video(),
+      remaining: await remaining(alone),
+      noted: await noted(),
+      listed: (await standing(alone)).find((item) => item.id === ids.s1e2)?.progress ?? null,
+      stored: stored(),
+    };
+    observed["checkpointRefusedAtEnd"] = refusedAtEnd;
+    await alone.capture("checkpoint-refused-at-end");
+    if (
+      refusedAtEnd.remaining !== null ||
+      !refusedAtEnd.video.title?.includes(
+        t("Finished {episode}", { episode: episodeLabel(1, 2) }),
+      ) ||
+      !refusedAtEnd.noted.includes(refused)
+    )
+      throw new Error(
+        `The countdown went on from a save main refused: ${JSON.stringify(refusedAtEnd)}`,
+      );
+    unlock();
+    await alone.click(
+      "Next episode once the lock went",
+      button("[data-view=title] button", t("Next episode")),
+    );
+    await playing(alone, episodeLabel(1, 3));
+    const keptAtEnd = (await standing(alone)).find((item) => item.id === ids.s1e2)?.progress;
+    observed["checkpointKeptAtEnd"] = { progress: keptAtEnd, video: await alone.video() };
+    if (!keptAtEnd || keptAtEnd.position < keptAtEnd.duration - 1)
+      throw new Error(
+        `Next after the lock went didn't save the end first: ${JSON.stringify(keptAtEnd)}`,
+      );
+    await leave(alone);
+
     await watch(alone, ids.s1e2, "Watch S1 E2, its next file to be removed");
     await seekEnd(alone);
     await alone.wait(async () => (await remaining(alone)) !== null);
@@ -854,6 +968,16 @@ export async function runDownloadsSeries(
         cleanupErrors.push(String(error));
       }
     };
+    // The app's own writes as it quits wait on the lock: it goes first.
+    if (locked) {
+      const held = locked;
+      await clean(async () => {
+        held.exec("rollback");
+        held.close();
+      });
+      locked = undefined;
+    }
+    observed["lockReleased"] = locked === undefined;
     if (running) {
       const owned = running;
       await clean(() => stop(owned.app, owned.page));
