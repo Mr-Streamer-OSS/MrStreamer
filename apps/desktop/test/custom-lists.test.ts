@@ -495,6 +495,8 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
       /** The rounds whose list kept a channel of the erased account, and what came back. */
       const away: number[] = [];
       const restored: string[] = [];
+      /** The rounds whose change was refused, with why: only because its subscription went. */
+      const refused: { readonly turns: number; readonly reason: unknown }[] = [];
       let made: string | null = null;
       // The change starts a few turns of the event loop after the removal, a few more each round:
       // whichever comes first, the account's channel is erased with its record or never stored.
@@ -514,19 +516,40 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
         if (change === "setMember") await app.lists.create({ id, name: id });
         const removal = app.roster.remove(owner, true);
         for (let turn = 0; turn < turns; turn++) await Promise.resolve();
-        await Promise.allSettled([
+        const [, outcome] = await Promise.allSettled([
           removal,
           change === "create"
             ? app.lists.create({ id, name: id, channel })
             : app.lists.setMember(id, channel, true),
         ]);
         await removal;
+        if (outcome.status === "rejected") refused.push({ turns, reason: outcome.reason });
         if ((await app.lists.lists()).find((each) => each.id === id)?.away) away.push(turns);
       }
       expect({ away, restored }).toEqual({ away: [], restored: [] });
+      // A change that went through was erased; one refused was refused for no other reason.
+      expect(refused).toMatchObject(
+        refused.map(({ turns }) => ({ turns, reason: { error: { kind: "no-subscription" } } })),
+      );
       await app.quit();
     },
   );
+
+  it("refuses a channel its saved subscription doesn't list as not found, making nothing", async () => {
+    const { lists, a } = await withTwo();
+    const id = randomUUID();
+    const missing = { subscriptionId: a, id: "no-such-channel" };
+    const notFound = { error: { kind: "channel-not-found", channelId: "no-such-channel" } };
+    await expect(lists.create({ id, name: "Missing", channel: missing })).rejects.toMatchObject(
+      notFound,
+    );
+    await lists.create({ id, name: "Missing" });
+    await expect(lists.setMember(id, missing, true)).rejects.toMatchObject(notFound);
+    expect(shown((await lists.lists()).find((each) => each.id === id))).toEqual({
+      members: [],
+      away: 0,
+    });
+  });
 
   it("takes a list change for a subscription again once its removal failed and kept it", async () => {
     const app = await withTwo();

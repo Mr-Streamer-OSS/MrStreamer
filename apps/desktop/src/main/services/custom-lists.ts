@@ -281,6 +281,9 @@ function make() {
         const channelOf = yield* library.lookup(subscription.id);
         const channel = channelOf(named.id);
         if (!channel) {
+          // The lookup reads the saved subscriptions again, and finds nothing of one that went
+          // since: that is a subscription that went, not a channel it doesn't list.
+          if (!subscriptions.standsNow(subscription)) return yield* noSubscription;
           return yield* new Failed({ error: { kind: "channel-not-found", channelId: named.id } });
         }
         const listed: ListedChannel = {
