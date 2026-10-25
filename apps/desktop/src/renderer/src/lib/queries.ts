@@ -734,6 +734,34 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
 }
 
 /**
+ * Lists of titles to browse, by their key's second part: Home's recommendations, rows,
+ * collections and searches. After an update that says new lists marked for adults a title they
+ * listed before, each goes rather than show what it kept (see `syncOnDemand`).
+ */
+const TITLE_LISTS: ReadonlySet<unknown> = new Set([
+  "home-recommendations",
+  "rows",
+  "collection",
+  "search",
+  "searchKind",
+]);
+
+/**
+ * Drops what the queries `filters` match kept, rather than show it while they are read again: a
+ * read under way is cancelled, an open query asks again from its loading state, and a closed one
+ * is removed once reset. Reset alone, a closed one would never expire; removed alone, it would
+ * keep its answer for an observer's placeholder.
+ */
+function forget(client: QueryClient, filters: QueryFilters): void {
+  void client.resetQueries(filters);
+  client.removeQueries({
+    ...filters,
+    predicate: (query) =>
+      query.getObserversCount() === 0 && (filters.predicate ? filters.predicate(query) : true),
+  });
+}
+
+/**
  * Reads movies and series again once the main process has fetched new lists, and a title's
  * details once TMDB's arrived after them. TMDB's progress alone only updates the status.
  */
@@ -754,9 +782,14 @@ export function syncOnDemand(client: QueryClient): () => void {
     // that a row read before them still names. With new lists, each such row goes instead of
     // showing while it is read again: an open one asks again at once, a closed one as it opens.
     // TMDB's metadata marks nothing. The first update can't tell which lists came before it.
+    // Lists of titles to browse go only when the update says new lists did mark one: read again
+    // they cost more, and a grid would lose its place.
     const now = JSON.stringify(status.lists.map((list) => [list.subscriptionId, list.fetchedAt]));
     const newLists = now !== fetched;
     fetched = now;
+    const dropped = (part: unknown) =>
+      (newLists && part === "related") ||
+      (status.markedForAdults === true && TITLE_LISTS.has(part));
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
     // the next time it shows, not each time more metadata arrives.
     const lists = {
@@ -764,7 +797,7 @@ export function syncOnDemand(client: QueryClient): () => void {
       predicate: (query) =>
         query.queryKey[1] !== "details" &&
         query.queryKey[1] !== "season" &&
-        !(newLists && query.queryKey[1] === "related"),
+        !dropped(query.queryKey[1]),
     } satisfies QueryFilters;
     // Invalidation alone reuses a first read with no cached data. Cancel its old answer before
     // reading the changed catalogue; queries with cached data keep their posters while it loads.
@@ -775,13 +808,8 @@ export function syncOnDemand(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: ["ondemand", "details"], refetchType: "none" });
     // And which versions and marks are a series' own: the lists say what a series is.
     void client.invalidateQueries({ queryKey: ["viewing", "episodes"] });
-    if (newLists) {
-      // A reset cancels an open row's read under way and asks again. A closed row is removed,
-      // which cancels its read too: reset, it would never expire.
-      const related = { queryKey: ["ondemand", "related"] };
-      client.removeQueries({ ...related, predicate: (query) => query.getObserversCount() === 0 });
-      void client.resetQueries(related);
-    }
+    if (newLists || status.markedForAdults)
+      forget(client, { queryKey: ["ondemand"], predicate: (query) => dropped(query.queryKey[1]) });
   });
   return () => {
     stopDetails();
@@ -835,12 +863,20 @@ export function syncCustomLists(client: QueryClient): () => void {
 
 /**
  * Reads the watchlist again once a title was saved or removed, and once the lists changed: they
- * say which title each entry is.
+ * say which title each entry is. Once they marked for adults a title they listed before, its
+ * pages go rather than show what they kept, as other lists of titles do (see `syncOnDemand`).
  */
 export function syncWatchlist(client: QueryClient): () => void {
   const read = () => void client.invalidateQueries({ queryKey: ["watchlist"] });
   const stopChanges = listen("watchlist.changed", read);
-  const stopLists = listen("ondemand.updated", read);
+  const stopLists = listen("ondemand.updated", ({ markedForAdults }) => {
+    if (!markedForAdults) return read();
+    void client.invalidateQueries({
+      queryKey: ["watchlist"],
+      predicate: (query) => query.queryKey[1] !== "list",
+    });
+    forget(client, { queryKey: ["watchlist", "list"] });
+  });
   return () => {
     stopChanges();
     stopLists();
