@@ -781,15 +781,16 @@ export function syncOnDemand(client: QueryClient): () => void {
     // Related titles leave out every title the lists mark for adults, and new lists can mark one
     // that a row read before them still names. With new lists, each such row goes instead of
     // showing while it is read again: an open one asks again at once, a closed one as it opens.
+    // So it does when the update says new lists marked one, as two can share a fetch time.
     // TMDB's metadata marks nothing. The first update can't tell which lists came before it.
     // Lists of titles to browse go only when the update says new lists did mark one: read again
     // they cost more, and a grid would lose its place.
     const now = JSON.stringify(status.lists.map((list) => [list.subscriptionId, list.fetchedAt]));
     const newLists = now !== fetched;
     fetched = now;
+    const marked = status.markedForAdults === true;
     const dropped = (part: unknown) =>
-      (newLists && part === "related") ||
-      (status.markedForAdults === true && TITLE_LISTS.has(part));
+      part === "related" ? newLists || marked : marked && TITLE_LISTS.has(part);
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
     // the next time it shows, not each time more metadata arrives.
     const lists = {
@@ -808,7 +809,7 @@ export function syncOnDemand(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: ["ondemand", "details"], refetchType: "none" });
     // And which versions and marks are a series' own: the lists say what a series is.
     void client.invalidateQueries({ queryKey: ["viewing", "episodes"] });
-    if (newLists || status.markedForAdults)
+    if (newLists || marked)
       forget(client, { queryKey: ["ondemand"], predicate: (query) => dropped(query.queryKey[1]) });
   });
   return () => {
