@@ -93,11 +93,12 @@ export function RemindersMenu() {
 }
 
 /**
- * The reminders listed, or what the list says without any. The list stays while it empties, so a
- * row goes on its own once its reminder left it, by whichever read says so first: the one main's
- * changed event starts, which can come back before the cancel's answer, or the one after that
- * answer. A row that has the keys as it goes hands them on then: to the next row's cross, else
- * the one before, else the popup, so they never fall out of it. As the popup closes, the page
+ * The reminders listed, or what the list says without any. A row goes once its reminder left the
+ * list, by whichever read says so first: the one main's changed event starts, which can come back
+ * before the cancel's answer, or the one after that answer. A row that has the keys as it goes
+ * hands them on then, once, to a row the list keeps: the next one's cross, else the one before,
+ * else the popup. So they never fall out of it, and never pass through a row going in the same
+ * change, which the popup would take for the keys leaving it. As the popup closes, the page
  * changes or the list can't be read, React takes the list down before its rows, and none does.
  */
 function ReminderRows({
@@ -111,6 +112,7 @@ function ReminderRows({
   now: number;
   popup: RefObject<HTMLDivElement | null>;
 }) {
+  const client = useQueryClient();
   const leaving = useRef(false);
   useLayoutEffect(() => {
     leaving.current = false;
@@ -120,26 +122,38 @@ function ReminderRows({
   }, []);
   const handOn = (row: HTMLElement) => {
     if (leaving.current || !row.contains(document.activeElement)) return;
-    const cross = (sibling: Element | null) =>
-      sibling?.querySelector<HTMLButtonElement>("button[data-remove]");
-    (cross(row.nextElementSibling) ?? cross(row.previousElementSibling) ?? popup.current)?.focus();
+    // A going row never gets the render that drops it, so which rows stay comes from the cache,
+    // which holds that list before React takes any row out.
+    const kept = new Set(
+      client.getQueryData(remindersQuery().queryKey)?.reminders.map(({ id }) => id),
+    );
+    const keptCross = (sibling: Element | null, onward: (each: Element) => Element | null) => {
+      for (let each = sibling; each; each = onward(each))
+        if (kept.has(each.getAttribute("data-reminder") ?? ""))
+          return each.querySelector<HTMLButtonElement>("button[data-remove]");
+      return null;
+    };
+    (
+      keptCross(row.nextElementSibling, (each) => each.nextElementSibling) ??
+      keptCross(row.previousElementSibling, (each) => each.previousElementSibling) ??
+      popup.current
+    )?.focus();
   };
+  if (empty)
+    return (
+      <div className="px-3 pb-2">
+        <p>{t("No reminders yet.")}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t("Set one on a programme still to come. Mr. Streamer reminds you while it's open.")}
+        </p>
+      </div>
+    );
   return (
-    <>
-      {empty && (
-        <div className="px-3 pb-2">
-          <p>{t("No reminders yet.")}</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("Set one on a programme still to come. Mr. Streamer reminds you while it's open.")}
-          </p>
-        </div>
-      )}
-      <ul hidden={empty} className="max-h-[22rem] overflow-y-auto">
-        {reminders.map((reminder) => (
-          <ReminderRow key={reminder.id} reminder={reminder} now={now} onGoing={handOn} />
-        ))}
-      </ul>
-    </>
+    <ul className="max-h-[22rem] overflow-y-auto">
+      {reminders.map((reminder) => (
+        <ReminderRow key={reminder.id} reminder={reminder} now={now} onGoing={handOn} />
+      ))}
+    </ul>
   );
 }
 
@@ -189,7 +203,11 @@ function ReminderRow({
   const dim = reminder.status.kind === "gone" || reminder.start <= now;
   const error = removal.isError ? appError(removal.error) : null;
   return (
-    <li ref={row} className="flex items-start gap-2 rounded-lg py-2 pr-1 pl-3">
+    <li
+      ref={row}
+      data-reminder={reminder.id}
+      className="flex items-start gap-2 rounded-lg py-2 pr-1 pl-3"
+    >
       <div className="min-w-0 flex-1">
         <div className={cn("truncate", dim && "text-muted-foreground")}>{reminder.title}</div>
         <div className="truncate text-[0.8125rem] text-muted-foreground">

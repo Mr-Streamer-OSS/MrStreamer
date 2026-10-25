@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
 // The reminders' bell in Live TV's header and the notice a reminder that told shows on every page:
 // what each says, the cross that takes one out and where the keys go then, whether main's word of
-// the change or its answer comes first, what a failed save, an empty list and a list that can't be
-// read say, and Watch and Dismiss.
+// the change or its answer comes first and when rows go together, what a failed save, an empty
+// list and a list that can't be read say, and Watch and Dismiss.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, Fragment } from "react";
 import { createRoot } from "react-dom/client";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Reminder, ReminderList } from "@mrstreamer/contracts/reminders";
 import { formatDate } from "@mrstreamer/core/i18n";
@@ -359,59 +359,80 @@ describe("the keys as a reminder's row goes", () => {
     },
   );
 
-  const together = [
-    { to: "the next row left", titles: ["First", "Second", "Third"], stays: ["Third"] },
-    { to: "the popup", titles: ["First", "Second"], stays: [] },
-  ];
-
-  it.each(orders.flatMap((order) => together.map((shape) => ({ order, ...shape }))))(
-    "hands them past a row going in the same change, to $to, $order",
-    async ({ order, titles, stays }) => {
-      const all = titles.map((title, at) => reminder(title, 30 * (at + 1)));
-      // Main took the next one out in the same change.
-      const rest = {
-        notifications: null,
-        reminders: all.filter((each) => stays.includes(each.id)),
-      };
-      const page = await shown({ notifications: null, reminders: all });
-      await page.open();
-      await ready(() => expect(page.rows()).toHaveLength(all.length));
-      const answer = await page.takeOut("First");
-      const target = () => (stays[0] ? page.cross(stays[0]) : page.popup());
-
+  /**
+   * Five rows, `out` taken out one after the other from the keyboard while main's answers wait,
+   * so that one change of main's list takes them all out together.
+   */
+  async function takingOut(out: readonly string[]) {
+    const all = ["A", "B", "C", "D", "E"].map((title, at) => reminder(title, 30 * (at + 1)));
+    const page = await shown({ notifications: null, reminders: all });
+    await page.open();
+    await ready(() => expect(page.rows()).toHaveLength(all.length));
+    const answers: Awaited<ReturnType<typeof page.takeOut>>[] = [];
+    for (const title of out) answers.push(await page.takeOut(title));
+    const rest = { notifications: null, reminders: all.filter((each) => !out.includes(each.id)) };
+    const answer = () => act(async () => answers.forEach((each) => each.resolve(null)));
+    /** Main's list loses them: the change and the answers in `order`, until all is read. */
+    const lose = async (order: (typeof orders)[number]) => {
       if (order === "the change first") await page.change(rest);
       else {
         page.serve(rest);
-        await act(async () => answer.resolve(null));
+        await answer();
       }
-      await ready(() => expect(page.rows().map(([title]) => title)).toEqual(stays));
-      expect(document.activeElement).toBe(target());
-      if (order === "the change first") await act(async () => answer.resolve(null));
+      const left = rest.reminders.map((each) => each.id).join();
+      await ready(() =>
+        expect(
+          page.popup() === null ||
+            page
+              .rows()
+              .map(([title]) => title)
+              .join() === left,
+        ).toBe(true),
+      );
+      if (order === "the change first") await answer();
       else await page.change(rest);
       await page.settled();
-      expect(document.activeElement).toBe(target());
+    };
+    return { page, rest, answer, lose };
+  }
+
+  /** Each element the keys land on from now, by its label. */
+  const landings = () => {
+    const landed: string[] = [];
+    const land = ({ target }: FocusEvent) =>
+      landed.push((target as Element).getAttribute("aria-label") ?? (target as Element).tagName);
+    document.addEventListener("focus", land, true);
+    onTestFinished(() => document.removeEventListener("focus", land, true));
+    return landed;
+  };
+
+  const together = [
+    { to: "on to the next row left", out: ["D", "C", "B"], target: "E" },
+    { to: "back to the row left before", out: ["C", "E", "D"], target: "B" },
+    { to: "to the popup once every row went", out: ["A", "C", "D", "E", "B"], target: null },
+  ];
+
+  it.each(orders.flatMap((order) => together.map((shape) => ({ order, ...shape }))))(
+    "hands them once, $to, past the rows going in the same change, $order",
+    async ({ order, out, target }) => {
+      const { page, rest, lose } = await takingOut(out);
+      const landed = landings();
+      await lose(order);
+      expect(page.popup()).not.toBeNull();
+      expect(page.rows().map(([title]) => title)).toEqual(rest.reminders.map((each) => each.id));
+      expect(document.activeElement).toBe(target ? page.cross(target) : page.popup());
+      expect(landed).toEqual([target ? `Remove the reminder for ${target}` : "Reminders"]);
     },
   );
 
   it.each(orders)("leaves them where the viewer took them meanwhile, %s", async (order) => {
-    const all = [reminder("First", 30), reminder("Second", 60), reminder("Third", 90)];
-    const rest = { notifications: null, reminders: all.slice(1) };
-    const page = await shown({ notifications: null, reminders: all });
-    await page.open();
-    await ready(() => expect(page.rows()).toHaveLength(3));
-    const answer = await page.takeOut("First");
-    page.cross("Third").focus();
-
-    if (order === "the change first") await page.change(rest);
-    else {
-      page.serve(rest);
-      await act(async () => answer.resolve(null));
-    }
-    await ready(() => expect(page.rows().map(([title]) => title)).toEqual(["Second", "Third"]));
-    if (order === "the change first") await act(async () => answer.resolve(null));
-    else await page.change(rest);
-    await page.settled();
-    expect(document.activeElement).toBe(page.cross("Third"));
+    const { page, lose } = await takingOut(["D", "C", "B"]);
+    page.cross("A").focus();
+    const landed = landings();
+    await lose(order);
+    expect(page.popup()).not.toBeNull();
+    expect(document.activeElement).toBe(page.cross("A"));
+    expect(landed).toEqual([]);
   });
 
   it("keeps them on a cross whose removal fails, through a change that keeps its row", async () => {
@@ -437,44 +458,37 @@ describe("the keys as a reminder's row goes", () => {
     expect(document.activeElement).toBe(page.cross("First"));
   });
 
-  it("hands nothing on once the list closed before the answer came", async () => {
-    const all = [reminder("First", 30), reminder("Second", 60)];
-    const page = await shown({ notifications: null, reminders: all });
-    await page.open();
-    await ready(() => expect(page.rows()).toHaveLength(2));
-    const answer = await page.takeOut("First");
-
+  it("hands nothing on once the list closed before the answers came", async () => {
+    const { page, rest, answer } = await takingOut(["D", "C", "B"]);
     await page.press("Escape");
     await ready(() => expect(page.popup()).toBeNull());
     expect(document.activeElement).toBe(page.bell());
-    await page.change({ notifications: null, reminders: all.slice(1) });
-    await act(async () => answer.resolve(null));
+    const landed = landings();
+
+    await page.change(rest);
+    await answer();
     await page.settled();
-    await ready(() => expect(page.bell().getAttribute("aria-label")).toBe("Reminders, 1 to come"));
+    await ready(() => expect(page.bell().getAttribute("aria-label")).toBe("Reminders, 2 to come"));
     expect(page.popup()).toBeNull();
     expect(document.activeElement).toBe(page.bell());
+    expect(landed).toEqual([]);
   });
 
-  it("hands nothing on once the page went before the answer came", async () => {
-    const all = [reminder("First", 30), reminder("Second", 60)];
-    const page = await shown({ notifications: null, reminders: all });
-    await page.open();
-    await ready(() => expect(page.rows()).toHaveLength(2));
-    const answer = await page.takeOut("First");
-
+  it("hands nothing on once the page went before the answers came", async () => {
+    const { page, rest, answer } = await takingOut(["D", "C", "B"]);
     await page.leave();
     const elsewhere = document.createElement("button");
     document.body.append(elsewhere);
-    try {
-      // The next page has the keys.
-      elsewhere.focus();
-      await page.change({ notifications: null, reminders: all.slice(1) });
-      await act(async () => answer.resolve(null));
-      await page.settled();
-      expect(ipc.argsOf("reminders.cancel")).toEqual([{ id: "First" }]);
-      expect(document.activeElement).toBe(elsewhere);
-    } finally {
-      elsewhere.remove();
-    }
+    onTestFinished(() => elsewhere.remove());
+    // The next page has the keys.
+    elsewhere.focus();
+    const landed = landings();
+
+    await page.change(rest);
+    await answer();
+    await page.settled();
+    expect(ipc.argsOf("reminders.cancel")).toEqual([{ id: "D" }, { id: "C" }, { id: "B" }]);
+    expect(document.activeElement).toBe(elsewhere);
+    expect(landed).toEqual([]);
   });
 });
