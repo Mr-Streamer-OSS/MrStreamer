@@ -240,6 +240,40 @@ describe("a collection", () => {
     },
   );
 
+  it("keeps focus on an already loaded moved title when another refresh shortens its old page", async () => {
+    const { titles, list } = await twoPages();
+    await press("End");
+    expect(focused()).toEqual({ label: "Title 239, 2000", position: "240 of 240" });
+
+    const oldPage = ipc.hold(
+      "ondemand.collection",
+      ({ id, offset, limit }) => id === "all" && offset === 120 && limit === 120,
+    );
+    list.catalogue = [...titles.slice(0, 50), titles[239]!, ...titles.slice(50, 239)];
+    await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+    await settle();
+    // Its new first-page position has answered; its old second-page copy is still cached.
+    expect(focused()).toEqual({ label: "Title 239, 2000", position: "240 of 240" });
+
+    const first = ipc.hold(
+      "ondemand.collection",
+      ({ id, offset, limit }) => id === "all" && offset === 0 && limit === 120,
+    );
+    list.catalogue = list.catalogue.slice(0, 220);
+    await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
+    await settle();
+    // The old slot is now empty. The loaded title keeps the keys before the first page answers.
+    expect(focused()).toEqual({ label: "Title 239, 2000", position: "51 of 240" });
+    expect(document.querySelectorAll('[role="listitem"] [tabindex="0"]')).toHaveLength(1);
+    await press("Enter");
+    expect(useUi.getState().details?.id).toBe("t239");
+
+    await act(async () => oldPage.resolve(all(titles.slice(120), titles.length)));
+    await act(async () => first.resolve(all(list.catalogue.slice(0, 120), list.catalogue.length)));
+    await settle();
+    expect(focused()).toEqual({ label: "Title 239, 2000", position: "51 of 220" });
+  });
+
   it("moves the selection to what took a removed title's place once its pages answer", async () => {
     const { titles, list } = await twoPages();
     const held = ipc.hold("ondemand.collection", ({ offset }) => offset === 120);

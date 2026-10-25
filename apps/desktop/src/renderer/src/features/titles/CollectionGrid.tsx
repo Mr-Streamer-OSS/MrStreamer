@@ -244,8 +244,8 @@ interface Chosen {
 
 /**
  * The position of the chosen item now: where it was, or where its key went among the loaded
- * pages. Until the page at its position is in, it stays where it was. Null when the loaded pages
- * don't have it: it was removed, it moved past them, or a page that will have it hasn't answered.
+ * pages. An empty old position still looks for its key in the other loaded pages. Null when
+ * they don't have it: it was removed, it moved past them, or its page hasn't answered.
  */
 function locate<T>(
   chosen: Chosen,
@@ -256,7 +256,7 @@ function locate<T>(
   const kept = Math.min(chosen.index, Math.max(total - 1, 0));
   if (chosen.key === null) return kept;
   const there = chosen.index < total ? itemAt(chosen.index) : undefined;
-  if (there ? keyOf(there) === chosen.key : chosen.index < total) return kept;
+  if (there && keyOf(there) === chosen.key) return kept;
   // Nearest first: an insertion or a removal moves it only a little.
   const span = Math.max(chosen.index, total - 1 - chosen.index);
   for (let distance = 1; distance <= span; distance++) {
