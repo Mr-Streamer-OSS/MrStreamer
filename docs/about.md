@@ -26,7 +26,7 @@ It reads MPEG-TS and HLS live streams, MP3 and AAC radio, and MKV, MP4 and AVI m
 
 ## Your data
 
-Logins, preferences, favourites, watchlist, history and progress stay on your computer. Provider logins go directly to your provider. From 0.0.11, usage statistics default on and can be turned off in **Settings > Privacy**: first-seen profiles and daily app use, and from 0.0.12 the parts of the app opened, playback, download and update-check results, and unexpected window stops. Viewing history and provider details are excluded; builds without a configured PostHog project send no app statistics. The [privacy policy](privacy.md) describes its connections and the website's analytics; [Security](security.md) explains login storage and installer signing.
+Logins, preferences, favourites, watchlist, history and progress stay on your computer. Provider requests go directly from the app to the configured addresses and any redirects or stream addresses they supply, subject to the [login checks](security.md#your-login). From 0.0.11, usage statistics default on and can be turned off in **Settings > Privacy**: first-seen profiles and daily app use, and from 0.0.12 the parts of the app opened, playback, download and update-check results, and unexpected window stops. Viewing history and provider details are excluded; builds without a configured PostHog project send no app statistics. The [privacy policy](privacy.md) describes its connections and the website's analytics; [Security](security.md) explains login storage and installer signing.
 
 ## Licence and source
 
