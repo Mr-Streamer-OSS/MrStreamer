@@ -793,6 +793,11 @@ describe("the way back", () => {
 
 describe("grid and related details", () => {
   it("closes a keyboard related chain to its grid opener after the poster moved", async () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+    onTestFinished(() => {
+      if (original) Object.defineProperty(HTMLElement.prototype, "offsetHeight", original);
+      else Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
+    });
     Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
       configurable: true,
       get: () => 900,
@@ -855,9 +860,5 @@ describe("grid and related details", () => {
       document.activeElement?.closest('[role="listitem"]')?.getAttribute("aria-posinset"),
     ).toBe("2");
     expect(document.activeElement?.querySelector("span.ring-2.ring-white")).not.toBeNull();
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      get: () => 0,
-    });
   });
 });
