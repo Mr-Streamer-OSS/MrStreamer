@@ -37,14 +37,22 @@ import {
 // plays, it is the one play the viewer began, and its progress is saved as that play's.
 //
 // A downloaded copy plays the same way from this computer, as its own title: its progress is kept
-// with the copy, it has no next episode, and it never moves to a receiver. Nothing about it asks
-// a provider, the catalogue or the viewing record.
+// with the copy, and it never moves to a receiver. Nothing about it asks a provider, the catalogue
+// or the viewing record. An episode's copy goes on to the copy of the very next episode of its
+// series on this computer (see @mrstreamer/core/downloads/series): main's list of downloads is
+// read as the copy opens, at its end and once more before the next opens, and followed as main
+// says it changed. The countdown, Next and their setting work as online, and the next copy opens
+// only once this one's progress is saved. A next episode whose copy isn't complete, or isn't on
+// this computer, stops it there, this copy left as it was; a copy queued before downloads kept
+// their series has no next.
 import { SubtitleTiming, type SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import { createStore, useStore } from "zustand";
+import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import {
   seriesOf,
   type Episode,
+  type RawTitleRef,
   type SeriesDetails,
   type TitleRef,
 } from "@mrstreamer/contracts/ondemand";
@@ -61,6 +69,7 @@ import {
   ORIGINAL_SOUND,
   type Preferences,
 } from "@mrstreamer/contracts/preferences";
+import { nextCopy, type NextCopy } from "@mrstreamer/core/downloads/series";
 import { DEFAULT_TITLE_LANGUAGE } from "@mrstreamer/core/ondemand/languages";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { chooseTracks } from "@mrstreamer/core/ondemand/tracks";
@@ -129,6 +138,8 @@ export interface ProviderNow extends Shown {
 export interface CopyNow extends Shown {
   readonly kind: "copy";
   readonly copy: string;
+  /** The file it was made of, by the provider's ids: an episode's numbers say where it stands. */
+  readonly title: RawTitleRef;
 }
 
 export type NowPlaying = ProviderNow | CopyNow;
@@ -142,6 +153,28 @@ export function episodeRef(episode: Episode): Extract<TitleRef, { kind: "episode
     seriesId: episode.seriesId,
     season: episode.season,
     episode: episode.number,
+  };
+}
+
+/** A downloaded episode's "S2 E3 · Its name", or null for a movie. */
+export function episodeLine(download: Download): string | null {
+  const { title } = download;
+  if (title.kind !== "episode") return null;
+  const label = episodeLabel(title.season, title.episode);
+  return download.episodeName ? `${label} · ${download.episodeName}` : label;
+}
+
+/** What the player shows for a copy: like its title online, with "Offline" for its subscription. */
+export function copyNow(download: Download): CopyNow {
+  const episode = episodeLine(download);
+  return {
+    kind: "copy",
+    copy: download.id,
+    title: download.title,
+    name: download.name,
+    detail: [episode ?? download.year, t("Offline")].filter(Boolean).join(" · "),
+    artworkUrl: download.wideUrl ?? download.posterUrl,
+    originalLanguage: download.originalLanguage,
   };
 }
 
@@ -222,6 +255,12 @@ export interface TitlePlayerState {
    * doesn't list, and until the record has answered for this one.
    */
   readonly next: Episode | null | undefined;
+  /**
+   * For a copy, what comes after it as main's list of downloads last said: undefined for movies,
+   * for copies without a series, for episodes their series doesn't list, and until the list has
+   * answered for this one.
+   */
+  readonly nextCopy: NextCopy | undefined;
   /** Seconds until the next episode. Zero is pending Instant; null means no countdown. */
   readonly countdown: number | null;
   /**
@@ -256,6 +295,7 @@ const idle: TitlePlayerState = {
   downloadedOn: false,
   speed: 1,
   next: undefined,
+  nextCopy: undefined,
   countdown: null,
   continued: false,
   shows: null,
@@ -267,6 +307,14 @@ const store = createStore<TitlePlayerState>(() => idle);
 /** Reads the title player's state in a component. */
 export function useTitlePlayer<T>(selector: (state: TitlePlayerState) => T): T {
   return useStore(store, selector);
+}
+
+/**
+ * Whether Next has something to play now: the next episode online, or for a copy, the next
+ * episode's copy complete on this computer.
+ */
+export function offersNext(state: TitlePlayerState): boolean {
+  return state.now?.kind === "copy" ? state.nextCopy?.kind === "copy" : Boolean(state.next);
 }
 
 /**
@@ -379,7 +427,15 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("beforeunload", () => save());
 // What comes after the open episode follows the record: one marked or played since is passed over.
-listen("viewing.changed", () => void refreshNext());
+listen("viewing.changed", () => {
+  if (store.getState().now?.kind === "provider") void refreshNext();
+});
+// What comes after an open copy follows main's list as it changes. A list read for a question,
+// which also looks for files gone, still answers it: what opens is decided on that.
+listen("downloads.changed", (list) => {
+  const { now } = store.getState();
+  if (now?.kind === "copy") followCopies(now, list);
+});
 listen("playback.readingAhead", ({ sessionId }) => {
   if (!session || session.id !== sessionId) return;
   const phase = store.getState().phase.kind;
@@ -406,10 +462,11 @@ listen("playback.fileReplaced", ({ sessionId }) => {
  * nothing from its own answer and settles as the latest does, so an answer from before a mark
  * neither puts back nor opens what the mark changed, however late the answer after it is.
  * Answers whether the record said what comes next. When it didn't, the player keeps what it last
- * heard and this answers false: nothing opens on that.
+ * heard and this answers false: nothing opens on that. A copy asks main's list instead.
  */
 function refreshNext(): Promise<boolean> {
   const { now } = store.getState();
+  if (now?.kind === "copy") return refreshCopies(now);
   if (now?.kind !== "provider" || !now.series || now.title.kind !== "episode") {
     return Promise.resolve(false);
   }
@@ -427,6 +484,34 @@ function refreshNext(): Promise<boolean> {
     });
   nextQuestion = mine;
   return mine;
+}
+
+/**
+ * Reads main's list of downloads afresh, which also finds a copy whose file went, and works out
+ * what comes after the open copy, as `refreshNext` does from the record: only the latest question
+ * counts, and it answers whether the list was read.
+ */
+function refreshCopies(now: CopyNow): Promise<boolean> {
+  const mine: Promise<boolean> = call("downloads.list")
+    .catch(() => null)
+    .then((list) => {
+      if (store.getState().now !== now) return false;
+      if (nextQuestion !== mine) return nextQuestion;
+      if (!list) return false;
+      followCopies(now, list);
+      return true;
+    });
+  nextQuestion = mine;
+  return mine;
+}
+
+/** What comes after the open copy in `list`. A countdown to a copy that isn't next now stops. */
+function followCopies(now: CopyNow, list: DownloadList): void {
+  const next = nextCopy(list, now.copy);
+  store.setState({ nextCopy: next });
+  if (next?.kind !== "copy" && (countdownRun || store.getState().countdown !== null)) {
+    stopCountdown();
+  }
 }
 
 /**
@@ -513,7 +598,7 @@ function stopCountdown(): void {
  * At the end of an episode with another after it, counts down to that one once a second, unless
  * the viewer turned that off. Which one comes next and the setting are read now, so an episode
  * marked and a change made while it played count. Nothing counts down while the record doesn't
- * say what comes next.
+ * say what comes next, or for a copy, until main's list says the next one's copy is complete here.
  */
 function countDown(mine: number): Promise<void> {
   const pending = { generation: mine, ready: Promise.resolve() };
@@ -522,7 +607,7 @@ function countDown(mine: number): Promise<void> {
   pending.ready = (async () => {
     const known = await refreshNext();
     if (countdownRun !== pending || mine !== generation) return;
-    if (!known || !store.getState().next) return stopCountdown();
+    if (!known || !offersNext(store.getState())) return stopCountdown();
     const preferences = await readPreferences().catch(() => null);
     if (countdownRun !== pending || mine !== generation) return;
     if (!preferences || store.getState().phase.kind !== "ended") return stopCountdown();
@@ -569,6 +654,27 @@ function tickCountdown(): void {
     store.setState({ countdown: 0 });
     titlePlayer.playNext();
   }, 1000);
+}
+
+/**
+ * Opens the copy of the next episode, from where it was left, once the open copy's progress is
+ * saved and main's list read again still has that copy complete on this computer. Otherwise the
+ * countdown stops and the end says what came of it, the open copy and its progress as they were.
+ * Pressed again, cancelled or another title opened meanwhile, nothing opens on the earlier press.
+ */
+async function playNextCopy(): Promise<void> {
+  if (store.getState().nextCopy?.kind !== "copy") return;
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = null;
+  const mine = ++nextRequest;
+  save();
+  await saving;
+  if (mine !== nextRequest) return;
+  const known = await refreshNext();
+  if (mine !== nextRequest) return;
+  const next = store.getState().nextCopy;
+  if (!known || next?.kind !== "copy") return stopCountdown();
+  void titlePlayer.open(copyNow(next.copy), 0, true);
 }
 
 /** Plays the element at `speed`, and starts each run after this at it too. */
@@ -1254,12 +1360,14 @@ export const titlePlayer = {
    */
   async open(now: NowPlaying, from: number, continued = false, retry = false): Promise<void> {
     const before = store.getState();
+    // The next copy is of the series the copy before it was.
     const sameSeries =
-      before.now?.kind === "provider" &&
-      now.kind === "provider" &&
-      before.now.title.kind === "episode" &&
-      now.title.kind === "episode" &&
-      sameOwned(seriesOf(before.now.title), seriesOf(now.title));
+      (before.now?.kind === "provider" &&
+        now.kind === "provider" &&
+        before.now.title.kind === "episode" &&
+        now.title.kind === "episode" &&
+        sameOwned(seriesOf(before.now.title), seriesOf(now.title))) ||
+      (continued && before.now?.kind === "copy" && now.kind === "copy");
     if (!claim.take()) return;
     closeTitle(retry);
     // Subtitle timing belongs to a file; a new title starts on time.
@@ -1448,11 +1556,13 @@ export const titlePlayer = {
    * one: when it doesn't answer, the countdown stops and the episode on offer stays for another
    * try. Nothing opens once the viewer cancelled, skipped back or opened something else while it
    * was asked. Does nothing for movies, with none left after this one, and while the next episode
-   * is already starting.
+   * is already starting. A copy goes on to the next copy instead (`playNextCopy`).
    */
   playNext(): void {
     const { now, continued, phase } = store.getState();
-    if (now?.kind !== "provider" || !now.series || (continued && phase.kind !== "failed")) return;
+    if (continued && phase.kind !== "failed") return;
+    if (now?.kind === "copy") return void playNextCopy();
+    if (now?.kind !== "provider" || !now.series) return;
     if (countdownTimer) clearInterval(countdownTimer);
     countdownTimer = null;
     const { series } = now;

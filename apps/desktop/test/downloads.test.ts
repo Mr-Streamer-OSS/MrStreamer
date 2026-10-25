@@ -1901,6 +1901,137 @@ describe.skipIf(!hasTools)("the queue", () => {
   }, 60_000);
 });
 
+describe.skipIf(!hasTools)("an episode's series", () => {
+  it("keeps what an episode's series lists as it is queued, from the details it reads anyway, by series version and account", async () => {
+    const { provider, dataDir, subscriptionId, downloads, subscriptions, onDemand, quit } =
+      await connected();
+    const dutch = provider.titles.series.find((each) => each.name === "TEST | Formats (NL)")!;
+    const english = provider.titles.series.find((each) => each.name === "TEST | Formats (EN)")!;
+    const ref = (
+      series: typeof dutch,
+      season: number,
+      number: number,
+      from = subscriptionId,
+    ): TitleRef => ({
+      kind: "episode",
+      subscriptionId: from,
+      id: String(series.seasons[season - 1]![number - 1]!.id),
+      seriesId: String(series.id),
+      season,
+      episode: number,
+    });
+    const asked = provider.detailRequests();
+    const first = await downloads.add(ref(dutch, 1, 2));
+    // The series' details are what queuing an episode reads already: once, then kept.
+    expect(provider.detailRequests() - asked).toBeLessThanOrEqual(1);
+    const read = provider.detailRequests();
+    const next = await downloads.add(ref(dutch, 2, 1));
+    const other = await downloads.add(ref(english, 1, 1));
+    const film = await downloads.add(
+      movie(provider, subscriptionId, "TEST | Index at the end").ref,
+    );
+    expect(provider.detailRequests() - read).toBeLessThanOrEqual(2);
+
+    // The same ids and TMDB id of another account's series stand apart.
+    const elsewhere = await fakeProvider({ maxConnections: 1, second: true });
+    const saved = await subscriptions.add({
+      server: elsewhere.url,
+      username: "demo",
+      password: "demo",
+    });
+    await onDemand.refresh(saved.id);
+    const german = elsewhere.titles.series.find((each) => each.name === "TEST | Formats (DE)")!;
+    expect(german.id).toBe(dutch.id);
+    const theirs = await downloads.add(ref(german, 1, 2, saved.id));
+
+    const keys = async (list: Awaited<ReturnType<typeof downloads.list>>) => {
+      const of = (id: string) => list.items.find((item) => item.id === id)!.series;
+      return [of(first.id), of(next.id), of(other.id), of(film.id), of(theirs.id)] as const;
+    };
+    const check = async (list: Awaited<ReturnType<typeof downloads.list>>) => {
+      const [a, b, english, movie, account] = await keys(list);
+      expect(a).toEqual(expect.any(String));
+      expect(b).toBe(a);
+      expect(english).toEqual(expect.any(String));
+      expect(english).not.toBe(a);
+      expect(account).toEqual(expect.any(String));
+      expect(account).not.toBe(a);
+      expect(movie).toBeNull();
+      expect(list.series[a!]).toEqual({
+        seasons: [
+          { number: 1, episodes: [1, 2, 3] },
+          { number: 2, episodes: [1, 2] },
+        ],
+        sourceOrder: false,
+      });
+      // Made up for the window: nothing of the account or its server in it.
+      for (const key of [a, english, account]) {
+        expect(key).not.toMatch(/demo|127\.0\.0\.1|localhost/);
+      }
+    };
+    await check(await downloads.list());
+    await quit();
+    // Kept with each record: the next start groups them alike, under keys of its own.
+    const again = await app(dataDir);
+    await check(await again.downloads.list());
+  }, 60_000);
+
+  it("keeps apart a series whose id the provider gave to another, and lets copies without a series stand alone", async () => {
+    const { provider, dataDir, subscriptionId, downloads, onDemand, find, quit } =
+      await connected();
+    const dutch = provider.titles.series.find((each) => each.name === "TEST | Formats (NL)")!;
+    const ref = (number: number): TitleRef => ({
+      kind: "episode",
+      subscriptionId,
+      id: String(dutch.seasons[0]![number - 1]!.id),
+      seriesId: String(dutch.id),
+      season: 1,
+      episode: number,
+    });
+    const before = await downloads.add(ref(2));
+    // The provider now lists another series under that id, with another TMDB id.
+    provider.serveTitles((all) => ({
+      ...all,
+      series: all.series.map((each) => (each.id === dutch.id ? { ...each, tmdb: "777" } : each)),
+    }));
+    await onDemand.refresh(subscriptionId);
+    const after = await downloads.add(ref(3));
+    await vi.waitFor(
+      async () => {
+        expect((await find(before.id))?.status.kind).toBe("complete");
+        expect((await find(after.id))?.status.kind).toBe("complete");
+      },
+      { timeout: LONG },
+    );
+    const keyOf = async (id: string) => (await find(id))?.series;
+    expect(await keyOf(before.id)).toEqual(expect.any(String));
+    expect(await keyOf(after.id)).toEqual(expect.any(String));
+    expect(await keyOf(before.id)).not.toBe(await keyOf(after.id));
+    await quit();
+
+    // A record kept before series were, and one whose series this build can't read, stand alone.
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    const row = (id: string) =>
+      JSON.parse(
+        String(db.prepare("select record from downloads where id = ?").get(id)?.["record"]),
+      ) as Record<string, unknown>;
+    const { series: _kept, ...older } = row(before.id);
+    const update = db.prepare("update downloads set record = ? where id = ?");
+    update.run(JSON.stringify(older), before.id);
+    update.run(JSON.stringify({ ...row(after.id), series: { seasons: "later" } }), after.id);
+    db.close();
+    const again = await app(dataDir);
+    const listed = await again.downloads.list();
+    expect(listed.items.map((item) => [item.id, item.status.kind, item.series]).toSorted()).toEqual(
+      [
+        [before.id, "complete", null],
+        [after.id, "complete", null],
+      ].toSorted(),
+    );
+    expect(listed.series).toEqual({});
+  }, 60_000);
+});
+
 // Main makes its services before it applies the saved interface language, and the viewer can pick
 // another while it runs: a failure made later is in the language of that moment.
 it("says a download asked for after it went is gone in the interface language picked since", async () => {
