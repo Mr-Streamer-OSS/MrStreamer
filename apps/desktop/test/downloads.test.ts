@@ -136,6 +136,15 @@ async function partial(dataDir: string, id: string): Promise<number | null> {
   return part ? (await stat(join(dataDir, "downloads", id, part))).size : null;
 }
 
+/**
+ * Waits until a download's partial file holds `bytes`. Progress counts bytes as they arrive, a
+ * moment before the disk has them, and a stop keeps what the disk has: a test that stops a
+ * transfer at a provider's hold, then counts on going on from there, waits for the disk first.
+ */
+async function written(dataDir: string, id: string, bytes: number): Promise<void> {
+  await vi.waitFor(async () => expect(await partial(dataDir, id)).toBe(bytes), { timeout: LONG });
+}
+
 /** A file's bytes as one short string, so a mismatch fails without comparing them byte by byte. */
 function digest(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -402,6 +411,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       },
       { timeout: LONG },
     );
+    await written(dataDir, queued.id, 200_000);
     await quit();
     const sentBefore = provider.fileBytes();
     await vi.waitFor(() => expect(provider.activeStreams()).toBe(0));
@@ -1331,6 +1341,7 @@ describe.skipIf(!hasTools)("the queue", () => {
       async () => expect((await started.find(id))?.status).toMatchObject({ received: 200_000 }),
       { timeout: LONG },
     );
+    await written(started.dataDir, id, 200_000);
     const pausing = started.downloads.pause(id);
     await closing.promise;
     const lock = new DatabaseSync(join(started.dataDir, "mrstreamer.db"));
@@ -1358,6 +1369,7 @@ describe.skipIf(!hasTools)("the queue", () => {
         }),
       { timeout: LONG },
     );
+    await written(dataDir, queued.id, 200_000);
     const asked = provider.fileRequests();
     await downloads.pause(queued.id);
     // Answered once the request ended: nothing more is sent, and its partial file stays.
@@ -1389,7 +1401,8 @@ describe.skipIf(!hasTools)("the queue", () => {
   }, 60_000);
 
   it("keeps a pause through playback and a receiver taking the connection, then goes on in order", async () => {
-    const { provider, subscriptionId, downloads, playback, onDemand, find } = await connected();
+    const { provider, dataDir, subscriptionId, downloads, playback, onDemand, find } =
+      await connected();
     const [first, held, last, shown] = [
       "TEST | Two sound tracks and subtitles (MULTI)",
       "TEST | Old AVI",
@@ -1406,6 +1419,7 @@ describe.skipIf(!hasTools)("the queue", () => {
         expect((await find(a))?.status).toMatchObject({ kind: "transferring", received: 200_000 }),
       { timeout: LONG },
     );
+    await written(dataDir, a, 200_000);
     await downloads.pause(b);
     // Playback of the subscription takes the connection: the others wait, the paused one says so.
     const file = await onDemand.file(shown!.ref);
@@ -1500,6 +1514,7 @@ describe.skipIf(!hasTools)("the queue", () => {
     expect((await find(a))?.status).toMatchObject({ received: 200_000 });
     expect(provider.fileRequests()).toBe(asked);
 
+    await written(dataDir, a, 200_000);
     await quit();
     provider.stallMovieFile(titles[3]!.id, 30_000, 60_000);
     const again = await app(dataDir);
@@ -1710,6 +1725,7 @@ describe.skipIf(!hasTools)("the queue", () => {
       [f, "failed"],
     ]);
     // The order was kept: the next start finishes it first, then takes the other.
+    await written(dataDir, b, 30_000);
     await quit();
     const again = await app(dataDir);
     await vi.waitFor(
