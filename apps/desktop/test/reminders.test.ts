@@ -1,7 +1,7 @@
 // Programme reminders through the app's services, against the fake provider and a guide served
 // for the test, with a test clock the test moves and a stand-in for the system's notifications.
-import { readFileSync } from "node:fs";
-import { chmod, mkdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { Guide } from "@mrstreamer/core/guide/service";
@@ -142,6 +142,23 @@ async function reminding(options: { adultChannels?: boolean; supported?: boolean
   await app.library.refresh(app.subscriptionId);
   await app.guide.refresh(app.subscriptionId);
   return { provider, channel, dataDir, notices, start, app };
+}
+
+/**
+ * Runs `phase` with a folder where reminders.json is, which no write can replace, on every
+ * system, then takes it away and puts back the file that was there, if any.
+ */
+async function unwritable(dataDir: string, phase: () => Promise<void>) {
+  const path = join(dataDir, "reminders.json");
+  const before = existsSync(path) ? await readFile(path) : null;
+  await rm(path, { force: true });
+  await mkdir(path);
+  try {
+    await phase();
+  } finally {
+    await rmdir(path);
+    if (before) await writeFile(path, before);
+  }
 }
 
 /** The provider lists the channel of stream `id` for adults from now on, as a panel may refile it. */
@@ -542,41 +559,37 @@ describe("programme reminders", () => {
     expect(read.subscriptions["gone-subscription"]).toBeUndefined();
   });
 
-  it.skipIf(process.platform === "win32")(
-    "changes nothing and tells nothing while it can't be saved, and the same call works once it can",
-    async () => {
-      const { app, channel, dataDir, notices } = await reminding();
-      await chmod(dataDir, 0o500);
-      try {
-        await expect(app.reminders.set(app.own(channel.id), at("20:30"))).rejects.toMatchObject({
-          error: { kind: "unexpected" },
-        });
-        expect((await app.reminders.list()).reminders).toEqual([]);
-      } finally {
-        await chmod(dataDir, 0o700);
-      }
-      const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
+  it("changes nothing and tells nothing while it can't be saved, and the same call works once it can", async () => {
+    const { app, channel, dataDir, notices } = await reminding();
+    // Read first: a folder at its path before it is read makes a file it can't read, which
+    // refuses every call, rather than one it can't write.
+    expect((await app.reminders.list()).reminders).toEqual([]);
+    await unwritable(dataDir, async () => {
+      await expect(app.reminders.set(app.own(channel.id), at("20:30"))).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      expect((await app.reminders.list()).reminders).toEqual([]);
+    });
+    const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
 
-      // Due, but what it told can't be written: it doesn't tell, and tells once it can.
-      await chmod(dataDir, 0o500);
-      try {
-        await app.clockTo(at("20:30"));
-        await app.reminders.check();
-        expect(notices.shown).toEqual([]);
-        expect((await app.reminders.list()).reminders).toMatchObject([
-          { id: reminder.id, status: { kind: "upcoming" } },
-        ]);
-        await expect(app.reminders.cancel(reminder.id)).rejects.toMatchObject({
-          error: { kind: "unexpected" },
-        });
-      } finally {
-        await chmod(dataDir, 0o700);
-      }
-      await app.clockTo(at("20:31"));
+    // Due, but what it told can't be written: it doesn't tell, and tells once it can.
+    await unwritable(dataDir, async () => {
+      await app.clockTo(at("20:30"));
       await app.reminders.check();
-      expect(notices.shown).toMatchObject([{ id: reminder.id }]);
-    },
-  );
+      expect(notices.shown).toEqual([]);
+      expect((await app.reminders.list()).reminders).toMatchObject([
+        { id: reminder.id, status: { kind: "upcoming" } },
+      ]);
+      await expect(app.reminders.cancel(reminder.id)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+    });
+    await app.clockTo(at("20:31"));
+    await app.reminders.check();
+    expect(notices.shown).toMatchObject([{ id: reminder.id }]);
+    await app.reminders.cancel(reminder.id);
+    expect((await app.reminders.list()).reminders).toEqual([]);
+  });
 
   it("keeps a file it can't read, or a newer release wrote, as it is, and uses none of it", async () => {
     const { app, channel, dataDir, start } = await reminding();
