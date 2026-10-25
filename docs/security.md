@@ -4,7 +4,7 @@
 
 Your subscriptions are stored on your computer. Passwords, playlist links, guide addresses and subtitle-service logins use Electron's system storage encryption: macOS Keychain, your Windows account, or GNOME Keyring or KWallet when selected on Linux. Linux can instead use `basic_text`, a fixed-key fallback that does not protect secrets from other programs running as you. Server addresses, subscription usernames and your own TMDB key are not encrypted.
 
-New in 0.0.20, including its Nightly previews: the app refuses HTTP redirects and playlist addresses that it recognizes as carrying the known login of an HTTPS source. It removes recognized login-bearing headers when requests leave that source's origin. HTTP addresses without a recognized login can still be used. Unknown tokens and encodings are not all recognizable, so use subscriptions and playlists you trust.
+The app refuses HTTP redirects that it recognizes as carrying the known login of an HTTPS source. In 0.0.20, including its Nightly previews, it also checks playlist addresses and removes recognized login-bearing headers when requests leave that source's origin. HTTP addresses without a recognized login can still be used. Unknown tokens and encodings are not all recognizable, so use subscriptions and playlists you trust.
 
 An address entered with `http://` sends its login unencrypted. An address without a scheme asks before using HTTP when HTTPS fails. The [privacy policy](privacy.md) lists what is stored and the connections the app makes.
 
