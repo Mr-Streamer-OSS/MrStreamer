@@ -7,7 +7,9 @@
 // Back no longer reaches, nor a title the lists have since marked for adults while Settings hides
 // them, and it reaches back eight details at most. Back to the same title's earlier visit
 // restores it at once, and only then. Search opened over the details, by pointer or shortcut,
-// gives the keyboard back to them.
+// gives the keyboard back to them. A Back still waiting for the lists gives way to whatever the
+// viewer does meanwhile: Settings, a title played, Search, another Back, Close or another title,
+// opened and left again too, and the way back stays as it was.
 import { ipc, SAVED, SUBSCRIPTION } from "./support.ts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -500,6 +502,137 @@ describe("Back after the lists or the sheet changed", () => {
     await key("Escape");
     await settle();
     expect(document.activeElement).toBe(inSheet("Play"));
+  });
+});
+
+describe("a Back still waiting for the lists", () => {
+  /** Holds the lists' answer about Canyon Hours, which Back asks for, until the test gives it. */
+  const holdCanyon = () =>
+    ipc.hold("ondemand.titles", ({ versions }) => versions.some((version) => version.id === "b"));
+  const answer = async (held: ReturnType<typeof holdCanyon>) => {
+    await act(async () => held.resolve([canyon]));
+    await settle();
+  };
+  const leaveSettings = () =>
+    press(
+      [
+        ...document.querySelectorAll<HTMLButtonElement>('[data-view="settings"] header button'),
+      ].find((each) => each.textContent?.trim() === "Back"),
+    );
+  const leaveTitle = () =>
+    press(
+      [...document.querySelectorAll<HTMLButtonElement>("[data-view=title] header button")].find(
+        (each) => each.textContent?.trim() === "Back",
+      ),
+    );
+  /** Back again, answered at once: Canyon Hours as it stood, so the way back stayed whole. */
+  const stillLeadsToCanyon = async () => {
+    await press(back());
+    await showing("Canyon Hours");
+    expect(inSheet("Season 2")?.getAttribute("aria-pressed")).toBe("true");
+    expect(scroller()?.scrollTop).toBe(240);
+  };
+
+  it("gives way to Settings opened meanwhile, whether the lists answer before or after it closes", async () => {
+    await threeDeep();
+    const held = holdCanyon();
+    await press(back());
+    await key(",", { ctrlKey: true, metaKey: true });
+    await settle();
+    expect(useUi.getState().settings).toBe("general");
+    await answer(held);
+    await leaveSettings();
+    await showing("Meridian Dawn");
+    await stillLeadsToCanyon();
+
+    await press(relatedTile("Meridian Dawn"));
+    await showing("Meridian Dawn");
+    const late = holdCanyon();
+    await press(back());
+    await key(",", { ctrlKey: true, metaKey: true });
+    await settle();
+    await leaveSettings();
+    await showing("Meridian Dawn");
+    await answer(late);
+    expect(shown()).toBe("Meridian Dawn");
+    await press(back());
+    await showing("Canyon Hours");
+  });
+
+  it("gives way to a title played meanwhile, whether the lists answer before or after it is left", async () => {
+    await threeDeep();
+    ipc.hold("playback.openTitle");
+    const held = holdCanyon();
+    await press(back());
+    await press(inSheet("Play"));
+    expect(document.querySelector("[data-view=title]")).not.toBeNull();
+    await answer(held);
+    await leaveTitle();
+    await showing("Meridian Dawn");
+    await stillLeadsToCanyon();
+
+    await press(relatedTile("Meridian Dawn"));
+    await showing("Meridian Dawn");
+    const late = holdCanyon();
+    await press(back());
+    await press(inSheet("Play"));
+    await leaveTitle();
+    await showing("Meridian Dawn");
+    await answer(late);
+    expect(shown()).toBe("Meridian Dawn");
+    await press(back());
+    await showing("Canyon Hours");
+  });
+
+  it("gives way to Search opened meanwhile, which gives the keyboard back to the details", async () => {
+    await threeDeep();
+    inSheet("Play")!.focus();
+    const held = holdCanyon();
+    await press(back());
+    await press(sheet()!.querySelector<HTMLButtonElement>('header button[aria-label="Search"]')!);
+    expect(useUi.getState().searchOpen).toBe(true);
+    await answer(held);
+    await key("Escape");
+    await settle();
+    expect(shown()).toBe("Meridian Dawn");
+    expect(document.activeElement).toBe(inSheet("Play"));
+    await stillLeadsToCanyon();
+  });
+
+  it("gives way to a newer Back, to Close and to another title", async () => {
+    await threeDeep();
+    const first = holdCanyon();
+    await press(back());
+    const second = holdCanyon();
+    await press(back());
+    await answer(first);
+    expect(shown()).toBe("Meridian Dawn");
+    await answer(second);
+    await showing("Canyon Hours");
+
+    await press(relatedTile("Meridian Dawn"));
+    await showing("Meridian Dawn");
+    const closed = holdCanyon();
+    await press(back());
+    await press(inSheet("Close"));
+    expect(sheet()).toBeNull();
+    await answer(closed);
+    expect(sheet()).toBeNull();
+
+    await act(async () => openDetails({ kind: "movie", ...ownedOf(harbour) }));
+    await showing("Night Harbour");
+    await press(relatedTile("Canyon Hours"));
+    await showing("Canyon Hours");
+    await press(relatedTile("Meridian Dawn"));
+    await showing("Meridian Dawn");
+    const replaced = holdCanyon();
+    await press(back());
+    await act(async () => openDetails({ kind: "movie", ...ownedOf(field) }));
+    await showing("Quiet Field");
+    await answer(replaced);
+    expect(shown()).toBe("Quiet Field");
+    await press(back());
+    expect(sheet()).toBeNull();
   });
 });
 

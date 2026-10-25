@@ -139,6 +139,24 @@ export const useUi = create<UiState>(() => ({
 // Settings over a title holds the countdown to its next episode, so nothing starts behind it.
 useUi.subscribe((state) => titlePlayer.holdNext(state.settings !== null));
 
+/**
+ * Rises as the viewer goes somewhere: to other details or none, or into Settings, a playing title,
+ * Watch or search over them, however each was opened. A Back still waiting for the lists gives
+ * way to it (`backDetails`), even when the viewer has come back by the time they answer.
+ */
+let navigation = 0;
+useUi.subscribe((state, previous) => {
+  if (
+    state.details !== previous.details ||
+    state.trail !== previous.trail ||
+    (state.settings !== null && previous.settings === null) ||
+    (state.playingTitle && !previous.playingTitle) ||
+    (state.watching && !previous.watching) ||
+    (state.searchOpen && !previous.searchOpen)
+  )
+    navigation += 1;
+});
+
 /** No details on screen, nor a way back through any. */
 const NO_DETAILS = { details: null, trail: [], place: null } as const;
 
@@ -243,35 +261,32 @@ export function openRelated(target: DetailsTarget, here: DetailsPlace): void {
   });
 }
 
-/** Rises with each Back, so only the latest goes by what the lists answer. */
-let backing = 0;
-
 /**
  * Back over details: to the details the ones on screen were opened from as a related title, as
  * they stood, or to the page once there are none. The lists are asked first, as they stand now:
  * details of a title they keep from the viewer, as one they have since marked for adults while
- * Settings hides those, are passed over and forgotten, and never show. Anything the viewer did
- * meanwhile wins over the answer.
+ * Settings hides those, are passed over and forgotten, and never show. Going anywhere meanwhile
+ * wins over the answer (`navigation`): another Back, Close, other details, Settings, a playing
+ * title or search, also left again before the lists answer, and the way back stays as it was.
  */
 export async function backDetails(): Promise<void> {
-  const mine = ++backing;
   for (;;) {
+    const mine = ++navigation;
     const { details, trail } = useUi.getState();
     const step = trail.at(-1);
     if (!details || !step) return closeDetails();
     const shown = await stillShown(step.target);
-    const now = useUi.getState();
-    if (mine !== backing || now.details !== details || now.trail !== trail) return;
+    if (mine !== navigation) return;
     if (!shown) {
       useUi.setState({ trail: trail.slice(0, -1) });
       continue;
     }
-    useUi.setState({
+    useUi.setState(({ visit }) => ({
       details: step.target,
       trail: trail.slice(0, -1),
       place: step.place,
-      visit: now.visit + 1,
-    });
+      visit: visit + 1,
+    }));
     return;
   }
 }
