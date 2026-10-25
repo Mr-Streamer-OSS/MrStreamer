@@ -20,6 +20,8 @@ Codex can invoke `$verify-mrstreamer`; Claude/Cursor can invoke `/verify-mrstrea
 
 ## Prepare and prove
 
+Run `pnpm check` for lint, formatting, type checks, unused code and workflow checks. `pnpm lint:fix` applies safe lint fixes with the same failure flags; run `pnpm check` after fixing. Run affected tests separately, and build before the runtime checks below.
+
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
