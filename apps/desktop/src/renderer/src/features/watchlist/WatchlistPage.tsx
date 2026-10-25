@@ -2,11 +2,12 @@
 // grid of posters, the one saved last first, or by name. It reads what was saved and what the
 // lists have of it, and asks no provider anything: a title's details load when it opens. A title
 // no provider lists any more stays, dimmed, until the viewer removes it.
-//   The grid takes the same keys as a collection's. The cross on a tile, reached with Tab, takes
-//   it off the list; no key of its own does.
+//   The grid takes the same keys as a collection's. The cross on the selected tile, reached with
+//   Tab after its poster, takes it off the list; no key of its own does.
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
 import type { WatchlistEntry, WatchlistSort } from "@mrstreamer/contracts/watchlist";
 import { formatNumber, type PlainKey, t } from "@mrstreamer/core/i18n";
 import { Sorts } from "../../components/Sorts.tsx";
@@ -49,8 +50,9 @@ export function WatchlistPage({ active }: { active: boolean }) {
   const removal = useRemoveSaved();
   const stale = useStale();
 
-  // A cross pressed with the keyboard leaves the focus on the tile that takes its place. When
-  // the last tile went, the one before it gets the focus, or the page once nothing is left.
+  // A cross pressed with the keyboard leaves the focus on the cross of the tile that takes its
+  // place, or of the one before it when the last tile went (see Grid). The page gets it once
+  // nothing is left.
   const page = useRef<HTMLDivElement>(null);
   const hadFocus = useRef(false);
   const { total } = saved;
@@ -58,9 +60,7 @@ export function WatchlistPage({ active }: { active: boolean }) {
     const box = page.current;
     if (!hadFocus.current || !box || removal.isPending) return;
     hadFocus.current = false;
-    if (box.contains(document.activeElement)) return;
-    const crosses = box.querySelectorAll<HTMLElement>("[data-remove]");
-    (crosses[crosses.length - 1] ?? box).focus();
+    if (!box.contains(document.activeElement)) box.focus();
   }, [total, removal.isPending]);
 
   const remove = (entry: WatchlistEntry) => {
@@ -109,11 +109,12 @@ export function WatchlistPage({ active }: { active: boolean }) {
               key={sort}
               total={total ?? 0}
               itemAt={saved.entryAt}
+              keyOf={ownedKey}
               onVisible={saved.load}
               active={active}
               onOpen={openSaved}
-              tile={(entry, selected) => (
-                <SavedTile entry={entry} selected={selected} onRemove={() => remove(entry)} />
+              tile={(entry, grid) => (
+                <SavedTile entry={entry} grid={grid} onRemove={() => remove(entry)} />
               )}
             />
           </>
