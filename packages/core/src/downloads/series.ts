@@ -49,6 +49,13 @@ export interface ShelfSeries {
  * seasons has a run for each stretch of one season.
  */
 export interface ShelfSeason {
+  /**
+   * Tells the run from the series' other runs, unchanged as copies before it or in it come and
+   * go: the stretch of the listing it shows, by that stretch's season and first episode. Copies of
+   * episodes the listing no longer holds go in the run before them when it is of their season,
+   * else in a run of their own, named after their season.
+   */
+  readonly key: string;
   readonly number: number;
   readonly entries: readonly ShelfEntry[];
 }
@@ -70,8 +77,9 @@ export function nextCopy(list: DownloadList, id: string): NextCopy | undefined {
   if (!current || !place || !series) return undefined;
   const chain = chainsOf(series).find((each) => each.some((step) => same(step, place)));
   if (!chain) return undefined;
-  const after = chain[chain.findIndex((step) => same(step, place)) + 1];
-  if (!after) return { kind: "end" };
+  const next = chain[chain.findIndex((step) => same(step, place)) + 1];
+  if (!next) return { kind: "end" };
+  const after: Place = { season: next.season, episode: next.episode };
   const copies = list.items.filter((item) => {
     const at = item.series === current.series ? placeOf(item) : null;
     return at !== null && same(at, after);
@@ -134,9 +142,10 @@ function onComputer(item: Download): boolean {
  * The orders episodes follow one another in: the series' whole listing in source order, else its
  * numbered episodes, then its specials apart.
  */
-function chainsOf(series: DownloadSeries): readonly (readonly Place[])[] {
+function chainsOf(series: DownloadSeries): readonly (readonly (Place & { run: string })[])[] {
+  // Each place knows the stretch of the listing it is in, which names the run it shows in.
   const all = series.seasons.flatMap(({ number, episodes }) =>
-    episodes.map((episode) => ({ season: number, episode })),
+    episodes.map((episode) => ({ season: number, episode, run: `${number}:${episodes[0]}` })),
   );
   return series.sourceOrder
     ? [all]
@@ -151,10 +160,11 @@ function seasonsOf(
   copies: readonly Download[],
   series: DownloadSeries | undefined,
 ): readonly ShelfSeason[] {
-  const seasons: { number: number; entries: ShelfEntry[] }[] = [];
-  const add = (season: number, entry: ShelfEntry) => {
+  const seasons: { key: string; number: number; entries: ShelfEntry[] }[] = [];
+  // Stretches next to each other are of other seasons (seriesEpisodeSeasons): each makes one run.
+  const add = (key: string, season: number, entry: ShelfEntry) => {
     const last = seasons.at(-1);
-    const run = last?.number === season ? last : { number: season, entries: [] };
+    const run = last?.number === season ? last : { key, number: season, entries: [] };
     if (run !== last) seasons.push(run);
     const before = run.entries.at(-1);
     if (entry.kind === "gap" && before?.kind === "gap") {
@@ -177,16 +187,19 @@ function seasonsOf(
     for (const step of first < 0 ? [] : chain.slice(first, last + 1)) {
       const here = at(step);
       for (const copy of here) {
-        add(step.season, { kind: "copy", copy });
+        add(step.run, step.season, { kind: "copy", copy });
         placed.add(copy);
       }
-      if (here.length === 0) add(step.season, { kind: "gap", episodes: [step.episode] });
+      if (here.length === 0) add(step.run, step.season, { kind: "gap", episodes: [step.episode] });
     }
   }
   const rest = copies
     .filter((copy) => !placed.has(copy))
     .toSorted((a, b) => order(placeOf(a)!, placeOf(b)!));
-  for (const copy of rest) add(placeOf(copy)!.season, { kind: "copy", copy });
+  for (const copy of rest) {
+    const { season } = placeOf(copy)!;
+    add(`unlisted:${season}`, season, { kind: "copy", copy });
+  }
   return seasons;
 }
 

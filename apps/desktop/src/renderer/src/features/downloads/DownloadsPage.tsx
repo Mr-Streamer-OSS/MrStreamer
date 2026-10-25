@@ -233,8 +233,8 @@ function SeriesCopies({ series }: { series: ShelfSeries }) {
         </Button>
       </div>
       {open &&
-        series.seasons.map((season, index) => (
-          <Fragment key={`${index}:${season.number}`}>
+        series.seasons.map((season) => (
+          <Fragment key={season.key}>
             <div className="mt-2.5 ml-14 text-[0.8125rem] font-semibold">
               {season.number === 0
                 ? t("Specials")

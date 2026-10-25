@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement, Profiler, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
+import type { Download, DownloadList, DownloadSeries } from "@mrstreamer/contracts/downloads";
 import type { InterfaceLanguage } from "@mrstreamer/contracts/language";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { OutputStatus } from "@mrstreamer/contracts/output";
@@ -304,6 +304,62 @@ describe("a series' copies on the Downloads page", () => {
     await click(fold);
     expect(rows(series)).toEqual(["s1e9", "s2e1", "s2e2", "s2e4"]);
   });
+
+  // Copies before a later copy come and go: a season before its own, or the first stretch of its
+  // season in a mapped playlist that comes back to that season after another.
+  const earlier = {
+    "a season before it": {
+      series: {
+        seasons: [
+          { number: 1, episodes: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
+          { number: 2, episodes: [1, 2, 3, 4, 5, 6] },
+        ],
+        sourceOrder: false,
+      },
+      before: [episode("s1e9", 1, 9)],
+      later: [episode("s2e1", 2, 1), episode("s2e2", 2, 2)],
+    },
+    "its season's first stretch": {
+      series: {
+        seasons: [
+          { number: 1, episodes: [1, 2] },
+          { number: 2, episodes: [1] },
+          { number: 1, episodes: [3, 4] },
+        ],
+        sourceOrder: true,
+      },
+      before: [episode("s1e1", 1, 1)],
+      later: [episode("s2e1", 2, 1), episode("s1e3", 1, 3), episode("s1e4", 1, 4)],
+    },
+  } satisfies Record<string, { series: DownloadSeries; before: Download[]; later: Download[] }>;
+
+  for (const [what, { series, before, later }] of Object.entries(earlier)) {
+    for (const change of ["comes", "goes"] as const) {
+      it(`keeps a later copy's Delete pressed once, and the keyboard on it, as ${what} ${change}`, async () => {
+        const listed = (items: readonly Download[]) => ({
+          ...list(items),
+          series: { severance: series },
+        });
+        const all = [...before, ...later];
+        ipc.always("downloads.list", listed(change === "comes" ? later : all));
+        const page = await show(createElement(DownloadsPage), "[data-series]");
+        const row = () => page.querySelector<HTMLElement>(`[data-download="${later.at(-1)!.id}"]`)!;
+        const control = button(row(), "Delete")!;
+        await act(async () => control.focus());
+        await click(control);
+        expect(control.textContent).toBe("Delete copy");
+        const shown = () => page.querySelector(`[data-download="${before[0]!.id}"]`) !== null;
+        await changed(
+          listed(change === "comes" ? all : later),
+          () => shown() === (change === "comes"),
+        );
+        // The very control, still waiting for its second press, with the keyboard still on it.
+        expect(row().contains(control)).toBe(true);
+        expect(control.textContent).toBe("Delete copy");
+        expect(document.activeElement).toBe(control);
+      });
+    }
+  }
 });
 
 describe("the queue on the Downloads page", () => {

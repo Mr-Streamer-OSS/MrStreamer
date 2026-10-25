@@ -197,7 +197,7 @@ describe("the copies on this computer", () => {
     ];
     const [shelf] = copyShelf(list(items));
     expect(shelf).toMatchObject({ kind: "series", copies: [items[0], items[1], items[2]] });
-    expect(shelf?.kind === "series" && shelf.seasons).toEqual([
+    expect(shelf?.kind === "series" && shelf.seasons).toMatchObject([
       {
         number: 1,
         entries: [
@@ -250,7 +250,7 @@ describe("the copies on this computer", () => {
     };
     const items = [episode("c", 1, 3), episode("a", 1, 1)];
     const [shelf] = copyShelf(list(items, { harbour: playlist }));
-    expect(shelf?.kind === "series" && shelf.seasons).toEqual([
+    expect(shelf?.kind === "series" && shelf.seasons).toMatchObject([
       {
         number: 1,
         entries: [
@@ -261,6 +261,34 @@ describe("the copies on this computer", () => {
       { number: 2, entries: [{ kind: "gap", episodes: [1] }] },
       { number: 1, entries: [{ kind: "copy", copy: items[0] }] },
     ]);
+  });
+
+  it("names each run apart from the others, the same while copies before it or in it come and go", () => {
+    const keys = (items: readonly Download[], series = harbour) => {
+      const [shelf] = copyShelf(list(items, { harbour: series }));
+      return shelf?.kind === "series" ? shelf.seasons.map((season) => season.key) : [];
+    };
+    const later = [episode("s2e2", 2, 2), episode("s2e3", 2, 3), episode("gone-s3", 3, 5)];
+    const [second, unlisted] = keys(later);
+    const withEarlier = keys([...later, episode("s1e1", 1, 1)]);
+    expect(withEarlier).toEqual([expect.any(String), second, unlisted]);
+    expect(new Set(withEarlier).size).toBe(3);
+    // The first copy of season 2 goes: its run is still the same one.
+    expect(keys([later[1]!, later[2]!, episode("s1e1", 1, 1)])).toEqual(withEarlier);
+
+    const playlist: DownloadSeries = {
+      seasons: [
+        { number: 1, episodes: [1, 2] },
+        { number: 2, episodes: [1] },
+        { number: 1, episodes: [3, 4] },
+      ],
+      sourceOrder: true,
+    };
+    const items = [episode("a", 1, 1), episode("b", 2, 1), episode("c", 1, 3), episode("d", 1, 4)];
+    const [first, between, again] = keys(items, playlist);
+    expect(new Set([first, between, again]).size).toBe(3);
+    // Season 1's first stretch goes: its later one keeps its own name, not the gone one's.
+    expect(keys(items.slice(1), playlist)).toEqual([between, again]);
   });
 
   it("groups by series key alone: the same name of another version stays apart", () => {
