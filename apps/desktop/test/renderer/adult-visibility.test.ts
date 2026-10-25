@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IpcInput } from "@mrstreamer/contracts/ipc";
 import type { OnDemandUpdate, Title, TitlePage } from "@mrstreamer/contracts/ondemand";
 import { defaultPreferences } from "@mrstreamer/contracts/preferences";
+import type { TitleProgress, Viewing } from "@mrstreamer/contracts/viewing";
 import type { WatchlistEntry } from "@mrstreamer/contracts/watchlist";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
@@ -17,7 +18,13 @@ import { SearchPalette } from "../../src/renderer/src/features/search/SearchPale
 import { TitlesPage } from "../../src/renderer/src/features/titles/TitlesPage.tsx";
 import { WatchlistPage } from "../../src/renderer/src/features/watchlist/WatchlistPage.tsx";
 import { acceptPreferences, syncPreferences } from "../../src/renderer/src/lib/preferences.ts";
-import { queries, syncOnDemand, syncWatchlist } from "../../src/renderer/src/lib/queries.ts";
+import { PresentationVisible } from "../../src/renderer/src/lib/presentation.ts";
+import {
+  queries,
+  syncOnDemand,
+  syncViewing,
+  syncWatchlist,
+} from "../../src/renderer/src/lib/queries.ts";
 
 const movie = (name: string, adult = false): Title => ({
   kind: "movie",
@@ -431,5 +438,172 @@ describe("after a refresh marks a listed title for adults", () => {
     await until(() => expect(view.shows()).toContain("Daylight"));
     expect(view.shows()).not.toContain("Later Reel");
     expect(ipc.argsOf("ondemand.collection").filter(isAll)).toHaveLength(3);
+  });
+});
+
+describe("Continue watching, after a refresh marks a title in it for adults", () => {
+  /** Listed for everyone until the refresh, which marks it for adults. */
+  const LATER = movie("Later Reel");
+  const DAYLIGHT = movie("Daylight");
+  const EVENING = movie("Evening Reel");
+  const played = (title: Title, at: number): TitleProgress => ({
+    title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: title.id },
+    position: 600,
+    duration: 1200,
+    finished: false,
+    at,
+    since: at,
+  });
+  const record = (titles: readonly Title[], sequence: number): Viewing => ({
+    favourites: [],
+    recent: [],
+    continueWatching: titles.map((title, index) => played(title, 100 - index)),
+    marked: [],
+    sequence,
+  });
+  const ordinary: OnDemandUpdate = {
+    lists: [{ subscriptionId: SUBSCRIPTION, movies: 3, series: 0, fetchedAt: 1, failure: null }],
+    metadata: null,
+  };
+  const marked: OnDemandUpdate = { ...ordinary, markedForAdults: true };
+
+  /** Home with two films to continue; `refresh` has the lists mark Later Reel for adults. */
+  async function home() {
+    const listed = new Map([LATER, DAYLIGHT, EVENING].map((title) => [title.id, title]));
+    ipc.always("subscription.list", [SAVED]);
+    ipc.always("library.categories", []);
+    ipc.always("library.channels", []);
+    ipc.always("library.status", []);
+    ipc.always("ondemand.status", { lists: [], metadata: null });
+    ipc.always("ondemand.rows", []);
+    ipc.always("ondemand.collection", page("All", []));
+    ipc.always("watchlist.list", { total: 0, entries: [] });
+    ipc.always("viewing.get", record([LATER, DAYLIGHT], 1));
+    const answer = ({ versions }: IpcInput<"ondemand.titles">) =>
+      versions.flatMap((version) => listed.get(version.id) ?? []);
+    ipc.answer("ondemand.titles", answer);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(queries.subscriptions().queryKey, [SAVED]);
+    const stops = [
+      syncPreferences(client, () => {}),
+      syncOnDemand(client),
+      syncWatchlist(client),
+      syncViewing(client),
+    ];
+    acceptPreferences(client, ipc.snapshot(defaultPreferences));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    cleanup = () => {
+      for (const stop of stops) stop();
+      act(() => root.unmount());
+      container.remove();
+      client.clear();
+    };
+    /** Home open or not, and in view or covered, as by Watch or a playing title. */
+    const show = (open: boolean, visible = true) =>
+      act(async () =>
+        root.render(
+          createElement(
+            QueryClientProvider,
+            { client },
+            createElement(
+              TooltipProvider,
+              null,
+              createElement(
+                PresentationVisible,
+                { value: visible },
+                open ? createElement(HomeScreen, { active: visible }) : null,
+              ),
+            ),
+          ),
+        ),
+      );
+    const refresh = () => {
+      listed.set(LATER.id, { ...LATER, adult: true });
+      return act(async () => ipc.emit("ondemand.updated", marked));
+    };
+    /** Holds the next title lookup, answered as the lists say then. */
+    const hold = () => {
+      const held = ipc.hold("ondemand.titles");
+      return {
+        resolve: (titles: readonly Title[]) => act(async () => held.resolve(titles)),
+      };
+    };
+    return { container, show, refresh, hold, listed };
+  }
+
+  it("opens Home again without it, before the new answer", async () => {
+    const view = await home();
+    await view.show(true);
+    await until(() => expect(view.container.textContent).toContain("Later Reel"));
+    await view.show(false);
+    await view.refresh();
+    const held = view.hold();
+    await view.show(true);
+    expect(view.container.textContent).not.toContain("Later Reel");
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(view.container.textContent).not.toContain("Later Reel");
+    await held.resolve([{ ...LATER, adult: true }, DAYLIGHT]);
+    await until(() => expect(view.container.textContent).toContain("Daylight"));
+    expect(view.container.textContent).not.toContain("Later Reel");
+  });
+
+  it("takes it off an open Home before the new answer, and drops a late answer from before", async () => {
+    const view = await home();
+    await view.show(true);
+    await until(() => expect(view.container.textContent).toContain("Later Reel"));
+    // An ordinary refresh keeps it while the films are looked up again, still under way when a
+    // later refresh marks Later Reel for adults.
+    const late = view.hold();
+    await act(async () => ipc.emit("ondemand.updated", ordinary));
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(view.container.textContent).toContain("Later Reel");
+    const current = view.hold();
+    await view.refresh();
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(view.container.textContent).not.toContain("Later Reel");
+    await late.resolve([LATER, DAYLIGHT]);
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(view.container.textContent).not.toContain("Later Reel");
+    await current.resolve([{ ...LATER, adult: true }, DAYLIGHT]);
+    await until(() => expect(view.container.textContent).toContain("Daylight"));
+    expect(view.container.textContent).not.toContain("Later Reel");
+  });
+
+  it("shows it nowhere once a covered Home is in view again", async () => {
+    const view = await home();
+    await view.show(true);
+    await until(() => expect(view.container.textContent).toContain("Later Reel"));
+    // Watch covers Home: its lookups wait, keeping what they had.
+    await view.show(true, false);
+    await view.refresh();
+    const held = view.hold();
+    await view.show(true, true);
+    expect(view.container.textContent).not.toContain("Later Reel");
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(view.container.textContent).not.toContain("Later Reel");
+    await held.resolve([{ ...LATER, adult: true }, DAYLIGHT]);
+    await until(() => expect(view.container.textContent).toContain("Daylight"));
+    expect(view.container.textContent).not.toContain("Later Reel");
+  });
+
+  it("lends a new lookup nothing from the one before the refresh", async () => {
+    const view = await home();
+    await view.show(true);
+    await until(() => expect(view.container.textContent).toContain("Later Reel"));
+    const again = view.hold();
+    await view.refresh();
+    // A third film is played: the films to look up change while Later Reel's lookup waits. Home
+    // shows the latest it may, here with room for one.
+    const third = view.hold();
+    ipc.always("viewing.get", record([EVENING, LATER, DAYLIGHT], 2));
+    await act(async () => ipc.emit("viewing.changed", { sequence: 2 }));
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    expect(view.container.textContent).not.toContain("Later Reel");
+    await again.resolve([{ ...LATER, adult: true }, DAYLIGHT]);
+    await third.resolve([{ ...LATER, adult: true }, DAYLIGHT, EVENING]);
+    await until(() => expect(view.container.textContent).toContain("Evening Reel"));
+    expect(view.container.textContent).not.toContain("Later Reel");
   });
 });

@@ -423,6 +423,16 @@ export const queries = {
       queryFn: () => call("ondemand.titles", { kind, versions: versions.map(ownedId) }),
       enabled: versions.length > 0,
     }),
+  /**
+   * The same, for Continue watching: kept apart from the titles open details read, so that an
+   * update marking one for adults drops these (see `TITLE_LISTS`) while open details keep theirs.
+   */
+  continuing: (kind: TitleKind, versions: readonly OwnedId[]) =>
+    queryOptions({
+      queryKey: ["ondemand", "continuing", kind, versions.map(ownedKey)],
+      queryFn: () => call("ondemand.titles", { kind, versions: versions.map(ownedId) }),
+      enabled: versions.length > 0,
+    }),
   /** The details of one version of a movie or series. */
   details: (kind: TitleKind, version: OwnedId) =>
     queryOptions({
@@ -735,8 +745,9 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
 
 /**
  * Lists of titles to browse, by their key's second part: Home's recommendations, rows,
- * collections and searches. After an update that says new lists marked for adults a title they
- * listed before, each goes rather than show what it kept (see `syncOnDemand`).
+ * collections, searches and the titles Continue watching shows. After an update that says new
+ * lists marked for adults a title they listed before, each goes rather than show what it kept
+ * (see `syncOnDemand`).
  */
 const TITLE_LISTS: ReadonlySet<unknown> = new Set([
   "home-recommendations",
@@ -744,6 +755,7 @@ const TITLE_LISTS: ReadonlySet<unknown> = new Set([
   "collection",
   "search",
   "searchKind",
+  "continuing",
 ]);
 
 /**
