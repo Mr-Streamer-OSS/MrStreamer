@@ -18,7 +18,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { databaseLayer } from "../src/main/platform/database.ts";
 import { viewingStoreLayer } from "../src/main/platform/viewing-store.ts";
 import { WatchlistStore, watchlistStoreLayer } from "../src/main/platform/watchlist-store.ts";
-import { mainLayer } from "../src/main/runtime.ts";
+import { mainLayer, viewingAccount } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Roster } from "../src/main/services/roster.ts";
@@ -80,16 +80,7 @@ async function erasureApp() {
             ...viewingStore,
             commit: (input) => Effect.andThen(viewingGate.wait, viewingStore.commit(input)),
           }),
-          Layer.succeed(ViewingAccount, {
-            owners: Effect.map(subscriptions.saved, (saved) =>
-              saved.map((owner) => ({
-                subscriptionId: owner.id,
-                key: owner.key,
-                original: owner.original,
-                stands: () => subscriptions.standsNow(owner),
-              })),
-            ),
-          }),
+          Layer.succeed(ViewingAccount, viewingAccount(subscriptions)),
           Layer.succeed(ViewingChannels, { lookup: library.lookup }),
           Layer.succeed(ViewingSeries, {
             identity: (series) =>
