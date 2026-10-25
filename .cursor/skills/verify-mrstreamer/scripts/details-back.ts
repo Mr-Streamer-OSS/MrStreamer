@@ -103,7 +103,7 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
       return (a.getAttribute('aria-label') || a.textContent.trim()).slice(0, 60) + (a.closest('[role=dialog]') ? ' (sheet)' : ' (page)');
     })()`);
   const pressWith = async (key: string, code: string, keyCode: number, modifiers: number) => {
-    d.action(`Press ${modifiers === 2 ? "Ctrl+" : ""}${key}`);
+    d.action(`Press ${modifiers === 4 ? "Cmd+" : modifiers === 2 ? "Ctrl+" : ""}${key}`);
     for (const type of ["rawKeyDown", "keyUp"])
       await d.send("Input.dispatchKeyEvent", {
         type,
@@ -362,7 +362,7 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
   expect(keyboardBack.focus, `Keyboard Back left the keyboard on ${await focused()}.`);
   await d.key("Enter", 13);
   await showing(second);
-  await pressWith("k", "KeyK", 75, 2);
+  await pressWith("k", "KeyK", 75, process.platform === "darwin" ? 4 : 2);
   await d.wait(() => d.evaluate<boolean>(`!!document.querySelector('[role=dialog] input')`));
   await d.key("Escape", 27);
   await d.wait(() => d.evaluate<boolean>(`!document.querySelector('[role=dialog] input')`));

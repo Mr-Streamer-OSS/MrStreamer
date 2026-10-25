@@ -41,6 +41,14 @@ const STATE = `(() => {
     columns: tiles.filter((tile) => Math.abs(tile.getBoundingClientRect().top - top) < 2).length,
     visibleRows: view ? rowTops.filter(top => top < view.bottom && top + rowHeight > view.top).length : 0,
     fullRows: view ? rowTops.filter(top => top >= view.top && top + rowHeight <= view.bottom).length : 0,
+    geometry: view && scroller ? {
+      scrollTop: scroller.scrollTop,
+      top: view.top,
+      bottom: view.bottom,
+      clientHeight: scroller.clientHeight,
+      rowHeight: Number.isFinite(rowHeight) ? rowHeight : null,
+      rowTops,
+    } : null,
     tiles: tiles.length,
     innerWidth,
     innerHeight,
@@ -65,6 +73,14 @@ interface GridState {
   readonly columns: number;
   readonly visibleRows: number;
   readonly fullRows: number;
+  readonly geometry: {
+    readonly scrollTop: number;
+    readonly top: number;
+    readonly bottom: number;
+    readonly clientHeight: number;
+    readonly rowHeight: number | null;
+    readonly rowTops: readonly number[];
+  } | null;
   readonly tiles: number;
   readonly innerWidth: number;
   readonly innerHeight: number;
@@ -96,6 +112,21 @@ export async function posterGridScenario(
   const steps: Record<string, unknown>[] = [];
   d.observed["posterGridSteps"] = steps;
   const state = () => d.evaluate<GridState>(STATE);
+  /** Focus can arrive before the scrolled virtual rows; measure a page after both have settled. */
+  const settledState = async () => {
+    let previous = await state();
+    await d.wait(async () => {
+      await d.evaluate(
+        "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+      );
+      const now = await state();
+      const stable =
+        !!now.geometry && JSON.stringify(now.geometry) === JSON.stringify(previous.geometry);
+      previous = now;
+      return stable && now.inGrid && now.ringIndex === now.index && now.inView;
+    }, 15_000);
+    return previous;
+  };
   const shiftTab = async () => {
     d.action("Press Shift+Tab");
     for (const type of ["rawKeyDown", "keyUp"])
@@ -241,7 +272,8 @@ export async function posterGridScenario(
   let previous = 1;
   const pages: number[] = [];
   while (previous < 130) {
-    const beforePage = await state();
+    const beforePage = await settledState();
+    steps.push({ step: `Before PageDown from ${previous}`, ...beforePage });
     const least = Math.min(
       total - 1,
       previous + beforePage.columns * Math.max(1, beforePage.fullRows),
@@ -266,7 +298,8 @@ export async function posterGridScenario(
   await d.key("End", 35);
   await aligned("End", total - 1, total);
   await d.capture("collection-end");
-  const beforeUp = await state();
+  const beforeUp = await settledState();
+  steps.push({ step: "Before PageUp from End", ...beforeUp });
   await d.key("PageUp", 33);
   await d.wait(async () => (await state()).index !== total - 1);
   const up = await aligned("PageUp goes back one visible page", (await state()).index!, total);
