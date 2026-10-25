@@ -747,12 +747,24 @@ export function syncOnDemand(client: QueryClient): () => void {
     // status yet, the first one brings the progress with it.
     client.setQueryData(queries.onDemandStatus().queryKey, (old) => old && { ...old, metadata });
   });
-  const stopLists = listen("ondemand.updated", () => {
+  /** Each subscription's lists in use and when they were fetched, as the last update said. */
+  let fetched: string | undefined;
+  const stopLists = listen("ondemand.updated", (status) => {
+    // Related titles leave out every title the lists mark for adults, and new lists can mark one
+    // that a row read before them still names. With new lists, each such row goes instead of
+    // showing while it is read again: an open one asks again at once, a closed one as it opens.
+    // TMDB's metadata marks nothing. The first update can't tell which lists came before it.
+    const now = JSON.stringify(status.lists.map((list) => [list.subscriptionId, list.fetchedAt]));
+    const newLists = now !== fetched;
+    fetched = now;
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
     // the next time it shows, not each time more metadata arrives.
     const lists = {
       queryKey: ["ondemand"],
-      predicate: (query) => query.queryKey[1] !== "details" && query.queryKey[1] !== "season",
+      predicate: (query) =>
+        query.queryKey[1] !== "details" &&
+        query.queryKey[1] !== "season" &&
+        !(newLists && query.queryKey[1] === "related"),
     } satisfies QueryFilters;
     // Invalidation alone reuses a first read with no cached data. Cancel its old answer before
     // reading the changed catalogue; queries with cached data keep their posters while it loads.
@@ -763,6 +775,13 @@ export function syncOnDemand(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: ["ondemand", "details"], refetchType: "none" });
     // And which versions and marks are a series' own: the lists say what a series is.
     void client.invalidateQueries({ queryKey: ["viewing", "episodes"] });
+    if (newLists) {
+      // A reset cancels an open row's read under way and asks again. A closed row is removed,
+      // which cancels its read too: reset, it would never expire.
+      const related = { queryKey: ["ondemand", "related"] };
+      client.removeQueries({ ...related, predicate: (query) => query.getObserversCount() === 0 });
+      void client.resetQueries(related);
+    }
   });
   return () => {
     stopDetails();
