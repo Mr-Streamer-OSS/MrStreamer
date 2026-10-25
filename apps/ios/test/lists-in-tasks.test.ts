@@ -155,6 +155,16 @@ describe("movie and series lists read and indexed in tasks", () => {
     },
   );
 
+  it("refuses the login when a catalogue request answers HTTP 401", async () => {
+    const refusing = xtreamProvider(
+      { server: "http://panel.test", username: "fixture", password: "secret" },
+      { userAgent: "fixture", inTasks, fetch: async () => new Response(null, { status: 401 }) },
+    );
+    await expect(refusing.onDemandCatalogue()).rejects.toMatchObject({
+      error: { kind: "invalid-login" },
+    });
+  });
+
   it("refuses a catalogue response that is not JSON", async () => {
     // An answer that isn't JSON at all is no Xtream API.
     const garbled = xtreamProvider(
