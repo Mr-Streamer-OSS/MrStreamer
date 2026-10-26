@@ -263,14 +263,6 @@ export function TextButton({
 }
 
 const styles = StyleSheet.create({
-  primaryButton: {
-    minHeight: 52,
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primaryLabel: { color: "#000000", fontWeight: "600" },
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16 },
   starred: { paddingRight: 4 },
   main: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, alignSelf: "stretch" },
@@ -296,5 +288,12 @@ const styles = StyleSheet.create({
   headline: { color: colors.text, fontSize: 17, fontWeight: "600" },
   textButton: { minHeight: 44, justifyContent: "center" },
   textButtonLabel: { color: colors.text, fontSize: 17, fontWeight: "600" },
+  primaryButton: {
+    minHeight: 52,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+  },
+  primaryLabel: { color: "#000000" },
   destructive: { color: "#FF453A" },
 });

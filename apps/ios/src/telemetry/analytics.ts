@@ -234,11 +234,7 @@ export class Analytics {
   private counting(): boolean {
     const { view } = this;
     return (
-      this.enabled() &&
-      this.run !== null &&
-      view.playing &&
-      view.watched &&
-      (this.foreground || view.background)
+      this.run !== null && view.playing && view.watched && (this.foreground || view.background)
     );
   }
 

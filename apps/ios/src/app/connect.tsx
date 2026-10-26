@@ -30,6 +30,7 @@ export default function Connect() {
           </View>
           <ProviderForm mode={{ kind: "connect" }} />
           <Text style={styles.footnote}>Your login goes only to your provider.</Text>
+          <View style={styles.space} />
         </>
       ) : (
         <>
@@ -53,7 +54,6 @@ export default function Connect() {
           />
         </>
       )}
-      {form ? <View style={styles.space} /> : null}
       <TextButton
         label="Privacy policy"
         onPress={() => {

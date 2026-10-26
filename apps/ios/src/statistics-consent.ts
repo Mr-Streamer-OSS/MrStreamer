@@ -2,14 +2,14 @@ import { Alert } from "react-native";
 import { setStatistics, statisticsChoice } from "./telemetry/index.ts";
 
 /** Both answers continue even when storage refuses the choice; statistics then remain off. */
-export function requestStatisticsChoice(onDone: () => void): void {
+export function requestStatisticsChoice(onDone?: () => void): void {
   if (statisticsChoice() !== null) {
-    onDone();
+    onDone?.();
     return;
   }
   const choose = (enabled: boolean) => {
     setStatistics(enabled);
-    onDone();
+    onDone?.();
   };
   Alert.alert(
     "Share usage statistics?",

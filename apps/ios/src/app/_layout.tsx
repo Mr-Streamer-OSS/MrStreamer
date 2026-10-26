@@ -5,10 +5,10 @@ import { useRoster } from "../account.ts";
 import { startDownloads } from "../downloads.ts";
 import { onScreen } from "../playback.ts";
 import { holdLaunchScreen, StartupScreen } from "../startup-screen.tsx";
+import { requestStatisticsChoice } from "../statistics-consent.ts";
 import { startUp, useStartup } from "../startup.ts";
 import { onTelemetryScreen, startTelemetry } from "../telemetry/index.ts";
 import { WatchLayer } from "../watch.tsx";
-import { requestStatisticsChoice } from "../statistics-consent.ts";
 
 // The app: Connect until a subscription is saved, then the four tabs, with Search over them.
 // Without one, Connect also opens Downloads (`offline`), as copies play with no provider. Watch
@@ -50,7 +50,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (!opening && restored && !asked.current) {
       asked.current = true;
-      requestStatisticsChoice(() => {});
+      requestStatisticsChoice();
     }
   }, [opening, restored]);
   return (
