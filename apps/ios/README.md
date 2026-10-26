@@ -705,8 +705,10 @@ The icon, `assets/icon.png`, is the desktop's Store tile at 1024 px, rendered wi
 icons by `pnpm icons:export` in `apps/desktop`.
 
 The build runs on the Mac mini from a committed checkout, through its fleet-managed signing
-interface. Set `IOS_PROVISIONING_PROFILE` to the UUID of the **existing** App Store profile for
-`app.mrstreamer.player`. These commands use manual signing and never create or refresh profiles:
+interface. Xcode resolves the existing cached team profiles with Automatic signing; the fleet's
+profiles are Xcode managed and cannot be used under Manual. The device archive uses Apple Development;
+the App Store export uses Apple Distribution. No provisioning-update or device-registration flags
+are passed, so missing material fails rather than creating or refreshing profiles:
 
 ```sh
 onmac run -- onmac-job apps/ios/scripts/testflight.sh archive

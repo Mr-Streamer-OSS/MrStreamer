@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local signed archives and explicit App Store Connect exports. Run heavy work with
-# `onmac run -- onmac-job`; signing uses the fleet's existing identity and profile only.
+# `onmac run -- onmac-job`; signing uses cached fleet material without provisioning updates.
 set -euo pipefail
 
 usage() {
@@ -22,9 +22,8 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 : "${APPLE_TEAM_ID:?Use the fleet-managed signing interface.}"
-: "${IOS_PROVISIONING_PROFILE:?Set the UUID of the existing App Store provisioning profile.}"
-[[ $APPLE_TEAM_ID =~ ^[A-Z0-9]{10}$ && $IOS_PROVISIONING_PROFILE =~ ^[a-fA-F0-9-]{36}$ ]] || {
-  echo "Invalid signing team or profile UUID." >&2
+[[ $APPLE_TEAM_ID =~ ^[A-Z0-9]{10}$ ]] || {
+  echo "Invalid signing team." >&2
   exit 1
 }
 
@@ -65,7 +64,8 @@ writeFileSync('build/configuration.json', JSON.stringify(hashes, null, 2) + '\n'
 JS
     # Hold the Settings inventory to the actual JavaScript packages and native pods.
     node scripts/licences.ts --check --pods ios/Podfile.lock
-    # Command-line profile overrides reach Pods too. Sign only the app's Release target.
+    # Xcode-managed cached profiles require Automatic. With no provisioning-update flags,
+    # missing signing material fails rather than creating or refreshing it. Scope to the app.
     node <<'JS'
 const { writeFileSync } = require('node:fs');
 const { IOSConfig } = require('expo/config-plugins');
@@ -78,10 +78,10 @@ const [, release] = xcode.getBuildConfigurationForListIdAndName(project, {
 });
 Object.assign(release.buildSettings, {
   DEVELOPMENT_TEAM: process.env.APPLE_TEAM_ID,
-  CODE_SIGN_STYLE: 'Manual',
-  CODE_SIGN_IDENTITY: '"Apple Distribution"',
-  PROVISIONING_PROFILE_SPECIFIER: process.env.IOS_PROVISIONING_PROFILE,
+  CODE_SIGN_STYLE: 'Automatic',
+  CODE_SIGN_IDENTITY: '"Apple Development"',
 });
+delete release.buildSettings.PROVISIONING_PROFILE_SPECIFIER;
 writeFileSync(project.filepath, project.writeSync());
 JS
     # Keep the composed Metro/Hermes map with the exact bundle from this archive.
@@ -122,11 +122,7 @@ JS
   <key>method</key><string>app-store-connect</string>
   <key>destination</key><string>$command</string>
   <key>teamID</key><string>$APPLE_TEAM_ID</string>
-  <key>signingStyle</key><string>manual</string>
-  <key>signingCertificate</key><string>Apple Distribution</string>
-  <key>provisioningProfiles</key><dict>
-    <key>app.mrstreamer.player</key><string>$IOS_PROVISIONING_PROFILE</string>
-  </dict>
+  <key>signingStyle</key><string>automatic</string>
   <key>manageAppVersionAndBuildNumber</key><false/>
   <key>uploadSymbols</key><true/>
   <key>testFlightInternalTestingOnly</key><$internal/>

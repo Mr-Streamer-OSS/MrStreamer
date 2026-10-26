@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 /** Exercise the shipping CLI with a saved archive and an Xcode stand-in, without Apple access. */
-function candidate(options: { fresh?: boolean; environment?: NodeJS.ProcessEnv } = {}) {
+function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.ProcessEnv> } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ios-distribution-"));
   roots.push(root);
   mkdirSync(join(root, "scripts"));
@@ -64,7 +64,6 @@ function candidate(options: { fresh?: boolean; environment?: NodeJS.ProcessEnv }
           ...process.env,
           PATH: `${join(root, "bin")}:${process.env["PATH"]}`,
           APPLE_TEAM_ID: "ABCDEFGHIJ",
-          IOS_PROVISIONING_PROFILE: "12345678-1234-1234-1234-123456789abc",
           ...options.environment,
         },
       }),
