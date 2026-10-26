@@ -1026,17 +1026,33 @@ const fenced = (record: Stored): Stored => ({
 /** Retains recognised records and copies, fencing only their unfinished requests. */
 async function endRestricted() {
   for (const record of doc.items) {
-    if (restricting.has(record.id)) continue;
+    if (!standing(record) || owed.has(record.id) || restricting.has(record.id)) continue;
     const excluded = excludedDownload(record);
-    if (Boolean(record.excluded) !== excluded)
-      update(record.id, (latest) => ({ ...latest, excluded }));
-    if (!excluded || record.state === "complete") continue;
     restricting.add(record.id);
     try {
+      if (Boolean(record.excluded) !== excluded)
+        update(record.id, (latest) => ({ ...latest, excluded }));
+      if (
+        !excluded ||
+        record.state === "complete" ||
+        (record.state === "failed" && !boundOf(record))
+      )
+        continue;
       const bound = boundOf(record);
-      if (bound) await transfers.cancelAuthorization(bound.authorization, "remove");
+      if (bound) {
+        const fence = await transfers.cancelAuthorization(bound.authorization, "remove");
+        for (const receipt of fence.receipts) {
+          if (
+            receipt.authorization === bound.authorization &&
+            receipt.outcome.kind === "complete"
+          ) {
+            await take(receipt, false);
+          }
+        }
+      }
       const latest = find(record.id);
-      if (latest && latest.state !== "complete") update(record.id, () => fenced(latest));
+      if (latest && latest.state !== "complete" && standing(latest) && !owed.has(record.id))
+        update(record.id, () => fenced(latest));
     } catch {
       // A refused native fence keeps its binding for reconciliation and the next attempt.
     } finally {
@@ -1509,7 +1525,9 @@ export function startDownloads(): void {
   onRoster(() => {
     if (phase === "ready") {
       endRemoved();
-      void endRestricted().finally(tell);
+      void endRestricted()
+        .catch(() => undefined)
+        .finally(tell);
     }
     tell();
     refill();
@@ -1554,6 +1572,7 @@ async function again(record: Stored, stands: Stands = always): Promise<Retried> 
     (file) => file.container,
     () => record.container,
   );
+  // Lookup failure may retain its known container, but never grants catalogue admission.
   admitTitle(ref);
   const latest = find(record.id);
   if (latest?.state !== "failed" || !standing(latest)) return "unchanged";
@@ -1836,7 +1855,14 @@ function playCopy(id: string, record: Stored) {
           tell();
           throw new AppFailure({ kind: "stream", failure: { kind: "unavailable", status: 404 } });
         }
-        return { url: media.uri, container: record.container };
+        return {
+          url: media.uri,
+          container: record.container,
+          admit: () => {
+            if (!playable(find(id)))
+              throw new AppFailure({ kind: "title-not-found", titleId: record.title.id });
+          },
+        };
       },
     },
     {

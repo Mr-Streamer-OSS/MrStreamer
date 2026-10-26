@@ -360,7 +360,7 @@ export function watchlistTitles(
  * saved first.
  */
 export function alignWatchlist(
-  index: IndexedCatalogue,
+  index: IndexedCatalogue | null,
   listed: readonly {
     readonly subscriptionId: string;
     readonly catalogue: OnDemandCatalogue;
@@ -377,7 +377,7 @@ export function alignWatchlist(
     const classified = before.map((entry) =>
       !entry.adult && excludedSaved(catalogue, entry) ? { ...entry, adult: true } : entry,
     );
-    const after = aligned(index, subscriptionId, classified);
+    const after = index ? aligned(index, subscriptionId, classified) : classified;
     if (after.length !== before.length || after.some((entry, at) => entry !== before[at])) {
       (next ??= { ...accounts })[subscriptionId] = after;
     }

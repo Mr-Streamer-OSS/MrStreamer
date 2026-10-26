@@ -154,6 +154,9 @@ same permitted catalogue. Saved watchlist records are checked against current pr
 remember a recognised exclusion across later removals and relaunch. Ordinary versions remain
 available when a provider marks another version of the same title.
 
+Playback rechecks that authority through format preparation and native admission. Raw catalogue
+changes revoke pending or attached recognised sources. Queued download authorization waits for
+the current title lists, so it can fail when no saved or provider catalogue is available.
 Playback and new/retried download requests check the latest raw catalogue too, including while a
 replacement index is being built. Newly recognised unfinished downloads are fenced without
 removing their records. Recognised copies are hidden and cannot play; their files remain intact.

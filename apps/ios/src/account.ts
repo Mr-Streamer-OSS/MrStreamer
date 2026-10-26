@@ -31,6 +31,7 @@ import {
   playbackState,
   progressSettled,
   request,
+  recheckPlayback,
   stop,
   type Plan,
 } from "./playback.ts";
@@ -1262,6 +1263,10 @@ function livePlan(channel: Channel, asked?: string): Plan | null {
       const stream = await sourceOf(channel.subscriptionId).provider.liveStream(variant.id, signal);
       if (!permitted()) throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
       return {
+        admit: () => {
+          if (!permitted())
+            throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
+        },
         url: stream.url,
         container: stream.format === "hls" ? "m3u8" : "ts",
         ...(stream.headers ? { headers: stream.headers } : {}),
@@ -1398,8 +1403,21 @@ export const channelsWorkedOut = () =>
 
 /** Shows the channels from the parts there are, and works out those still to come. */
 function publish() {
+  recheckPlayback();
   const all = members();
   const sources = liveSources(all);
+  for (const source of sources) {
+    const before = parts.get(source.subscriptionId);
+    if (!before || before.catalogue === source.catalogue) continue;
+    const wasAdult = adultIn(before.catalogue.categories);
+    const permitted = new Set(
+      before.catalogue.channels.filter((row) => !wasAdult(row)).map((row) => row.id),
+    );
+    const isAdult = adultIn(source.catalogue.categories);
+    if (source.catalogue.channels.some((row) => permitted.has(row.id) && isAdult(row))) {
+      parts.delete(source.subscriptionId);
+    }
+  }
   for (const id of parts.keys()) {
     if (!sources.some((source) => source.subscriptionId === id)) parts.delete(id);
   }

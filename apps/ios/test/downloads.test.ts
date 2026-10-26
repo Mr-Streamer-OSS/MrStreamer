@@ -622,6 +622,45 @@ describe("downloads", { timeout: 30_000 }, () => {
     );
   });
 
+  it.each(["missed native notification", "refused completion write"])(
+    "retains a completed personal copy while restriction fences it after %s",
+    async (race) => {
+      await install();
+      const app = await launch();
+      const { a } = await withProviders(app);
+      one.stallMovieFile(movie().id, 1024, 500);
+      const copy = await app.addDownload(movieRef(a));
+      await until(() => (receivedOf(app, copy.id) ?? 0) > 0, "the partial download");
+      appGoes("background");
+      if (race === "missed native notification") background.die();
+      else
+        native.sync = (operation, path) => {
+          if (operation === "write" && path.endsWith("downloads.json.next"))
+            throw new Error("Storage refused");
+        };
+      await until(() => native.open === 0 && mediaFile(copy.id) !== undefined, "native completion");
+      const media = mediaFile(copy.id)!;
+      const requests = one.fileRequests();
+      memory.restricted = { movies: [String(movie().id)], series: [], channel: "" };
+      app.reloadTitles(a);
+      await until(
+        () => app.titlesWorkedOut() && app.members()[0]?.titles.kind === "ready",
+        "the classified catalogue",
+      );
+      expect(app.downloadList().items.some((item) => item.id === copy.id)).toBe(false);
+      native.sync = null;
+      appGoes("active");
+      await until(() => background.receipts.length === 0, "the completion to be reconciled");
+      memory.restricted = null;
+      app.reloadTitles(a);
+      await until(() => isComplete(app, copy.id), "the permitted retained copy");
+      expect(media.exists).toBe(true);
+      expect(one.fileRequests()).toBe(requests);
+      app.playDownload(copy.id);
+      await until(() => memory.played.at(-1)?.uri === media.uri, "the retained offline playback");
+    },
+  );
+
   it("applies a saved copy's original language through the real play action without establishing provider-file facts", async () => {
     await install();
     let app = await launch();

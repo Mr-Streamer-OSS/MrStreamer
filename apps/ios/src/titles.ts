@@ -332,6 +332,8 @@ export function titlesWorkedOut(): boolean {
 function relist() {
   const all = members();
   const listed = listedOf(all);
+  // Retain recognised saved references as soon as raw lists arrive, even if indexing is replaced.
+  alignWatchlist(null, listed);
   const now = shown.get();
   const gone =
     now.made !== null &&
@@ -357,7 +359,9 @@ function relist() {
       if (!before || before.catalogue === next.catalogue) return false;
       return (["movie", "series"] as const).some((kind) =>
         [...titlePolicy(next.catalogue)[kind]].some(
-          (id) => !titlePolicy(before.catalogue)[kind].has(id),
+          (id) =>
+            titlePolicy(before.catalogue).known[kind].has(id) &&
+            !titlePolicy(before.catalogue)[kind].has(id),
         ),
       );
     });
@@ -1027,6 +1031,7 @@ type FileRow = Pick<SavedFile, "kind" | "id" | "seriesId" | "name" | "container"
  * a downloaded copy or a channel; telling unknown tracks is telling nothing.
  */
 export type TitleFile = ProviderFile & {
+  readonly admit?: () => void;
   readonly observed?: (tracks: ObservedFileTracks) => void;
 };
 
@@ -1079,15 +1084,19 @@ export async function titleFile(ref: TitleRef, signal: AbortSignal): Promise<Tit
       const name = version.name;
       const file = await reading.provider.titleFile("movie", ref.id, container, signal);
       admitTitle(ref);
-      if (name === undefined) return file;
+      if (name === undefined) return { ...file, admit: () => admitTitle(ref) };
       const row: FileRow = { kind: "movie", id: ref.id, name, container };
-      return { ...file, observed: observing(ref.subscriptionId, reading, row) };
+      return {
+        ...file,
+        admit: () => admitTitle(ref),
+        observed: observing(ref.subscriptionId, reading, row),
+      };
     }
     const { raw, source } = await answered({ ...title, ...ownedId(ref) });
     admitTitle(ref);
     const file = await source.provider.titleFile("movie", ref.id, raw.container ?? "mp4", signal);
     admitTitle(ref);
-    return file;
+    return { ...file, admit: () => admitTitle(ref) };
   }
   const series = { subscriptionId: ref.subscriptionId, id: ref.seriesId };
   const title = titleOf(index, "series", series);
@@ -1105,7 +1114,11 @@ export async function titleFile(ref: TitleRef, signal: AbortSignal): Promise<Tit
     name: episode.name,
     container: episode.container,
   };
-  return { ...file, observed: observing(ref.subscriptionId, source, row) };
+  return {
+    ...file,
+    admit: () => admitTitle(ref),
+    observed: observing(ref.subscriptionId, source, row),
+  };
 }
 
 /** One subscription's file facts under one login: those saved, with what playback found since. */
