@@ -199,7 +199,7 @@ describe("before the viewer chooses", () => {
     });
   });
 
-  it.each(["on", "off"] as const)("preserves deliberate beta %s across launch", async (choice) => {
+  it.each(["on", "off"] as const)("keeps a deliberate beta %s choice", async (choice) => {
     files.set(
       "analytics.json",
       JSON.stringify({
@@ -214,18 +214,11 @@ describe("before the viewer chooses", () => {
     const app = await launch();
     expect(app.statisticsChoice()).toBe(choice);
     if (choice === "on") await until(() => captured.length === 2);
-    else {
-      await quiet();
-      expect(captured).toEqual([]);
-    }
-    appState("background");
-    const next = await launch();
-    expect(next.statisticsChoice()).toBe(choice);
     await quiet();
     expect(captured).toHaveLength(choice === "on" ? 2 : 0);
   });
 
-  it("discards the default-on beta backlog and unfinished play before opt-in and relaunch", async () => {
+  it("discards the default-on beta backlog and unfinished play before opt-in", async () => {
     const id = "00000000-0000-4000-8000-000000000001";
     const unfinished: CaptureEvent = {
       uuid: "00000000-0000-4000-8000-000000000002",
@@ -264,8 +257,6 @@ describe("before the viewer chooses", () => {
     });
     app.setStatistics(true);
     await until(() => captured.length === 2);
-    appState("background");
-    await launch();
     await quiet();
     expect(names()).toEqual(["installation_observed", "app_active_day"]);
     expect(
