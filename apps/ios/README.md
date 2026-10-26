@@ -725,7 +725,9 @@ Run `pnpm check`, both iOS typechecks, real Metro export and affected contract t
 `archive` prebuilds a Release device app with embedded JavaScript/Hermes and its composed source
 map, checks the licence inventory against installed pods, retains matching FFmpeg dSYMs from the
 exact linked build outputs, then records committed source and file hashes. An existing archive, map or receipt is preserved. Export verifies those hashes and refuses another source
-commit, including a rebase. It also rejects added or missing receipt files before exporting or uploading.
+commit, including a rebase. It also rejects added or missing receipt files and added, removed or
+retargeted symlinks before exporting or uploading. Symlink paths and targets are recorded in a
+separate JSON receipt covered by the archive hashes.
 `export` always saves locally with `method: app-store-connect` and
 `destination: export`; it cannot upload. Both explicit intents preserve version/build. A local
 export is not Apple processing, App Store eligibility or public release acceptance.

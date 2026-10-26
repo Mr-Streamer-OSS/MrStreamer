@@ -1,6 +1,14 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -52,10 +60,12 @@ function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.Proc
   commit("candidate");
   if (!options.fresh) {
     writeFileSync(join(root, "build/source.txt"), `${git("rev-parse", "HEAD")}\n`);
+    symlinkSync("main.jsbundle", join(root, "build/MrStreamer.xcarchive/bundle-link"));
     const files = {
       "build/MrStreamer.xcarchive/main.jsbundle": "fixture archive bytes",
       "build/main.jsbundle.map": "fixture map",
       "build/configuration.json": "{}",
+      "build/archive-symlinks.json": `${JSON.stringify([["build/MrStreamer.xcarchive/bundle-link", "main.jsbundle"]])}\n`,
     };
     for (const [path, contents] of Object.entries(files)) {
       writeFileSync(join(root, path), contents);
@@ -86,6 +96,14 @@ function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.Proc
       writeFileSync(join(root, "build/MrStreamer.xcarchive/main.jsbundle"), "changed bytes"),
     addResource: () =>
       writeFileSync(join(root, "build/MrStreamer.xcarchive/added.txt"), "unrecorded resource"),
+    addSymlink: () =>
+      symlinkSync("main.jsbundle", join(root, "build/MrStreamer.xcarchive/added-link")),
+    removeSymlink: () => rmSync(join(root, "build/MrStreamer.xcarchive/bundle-link")),
+    retargetSymlink: () => {
+      const path = join(root, "build/MrStreamer.xcarchive/bundle-link");
+      rmSync(path);
+      symlinkSync("../configuration.json", path);
+    },
     orphanMap: () => writeFileSync(join(root, "build/main.jsbundle.map"), "retained map"),
     map: () => readFileSync(join(root, "build/main.jsbundle.map"), "utf8"),
     changeSource: () => {
@@ -137,6 +155,24 @@ it.each(["export", "upload"])("refuses added archive resources before %s", (comm
   const result = c.run(command, "app-store");
   expect(result.status).toBe(1);
   expect(result.stderr).toContain("Archive contents differ from the receipt");
+  expect(() => c.plist()).toThrow();
+});
+
+it.each(
+  ["export", "upload"].flatMap((command) =>
+    (["addSymlink", "removeSymlink", "retargetSymlink"] as const).map((change) => ({
+      command,
+      change,
+    })),
+  ),
+)("refuses $change before $command", ({ command, change }) => {
+  const c = candidate({
+    environment: { ASC_KEY_PATH: "/fixture/key", ASC_KEY_ID: "fixture", ASC_ISSUER_ID: "fixture" },
+  });
+  c[change]();
+  const result = c.run(command, "app-store");
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain("Archive symlinks differ from the receipt");
   expect(() => c.plist()).toThrow();
 });
 

@@ -17,6 +17,22 @@ esac
 
 cd "$(dirname "$0")/.."
 archive=build/MrStreamer.xcarchive
+archive_symlinks() {
+  node - "$archive" build/main.jsbundle.map build/configuration.json <<'JS'
+const { lstatSync, readdirSync, readlinkSync } = require('node:fs');
+const { join } = require('node:path');
+const links = [];
+function visit(path) {
+  const entry = lstatSync(path);
+  if (entry.isSymbolicLink()) links.push([path, readlinkSync(path)]);
+  else if (entry.isDirectory()) {
+    for (const name of readdirSync(path).sort()) visit(join(path, name));
+  }
+}
+for (const path of process.argv.slice(2)) visit(path);
+process.stdout.write(JSON.stringify(links) + '\n');
+JS
+}
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "Commit local changes first: the archive and export must identify one commit." >&2
   exit 1
@@ -29,7 +45,7 @@ fi
 
 case "$command" in
   archive)
-    for artifact in "$archive" build/main.jsbundle.map build/source.txt build/archive.sha256 build/configuration.json; do
+    for artifact in "$archive" build/main.jsbundle.map build/source.txt build/archive.sha256 build/archive-symlinks.json build/configuration.json; do
       if [[ -e $artifact ]]; then
         echo "Candidate files already exist; retain the archive, map and receipts together before rebuilding." >&2
         exit 1
@@ -104,7 +120,8 @@ JS
       exit 1
     }
     echo "$source" >build/source.txt
-    find "$archive" build/main.jsbundle.map build/configuration.json -type f -exec shasum -a 256 {} + >build/archive.sha256
+    archive_symlinks >build/archive-symlinks.json
+    find "$archive" build/main.jsbundle.map build/configuration.json build/archive-symlinks.json -type f -exec shasum -a 256 {} + >build/archive.sha256
     echo "commit $source"
     for key in CFBundleIdentifier CFBundleShortVersionString CFBundleVersion MinimumOSVersion UIDeviceFamily; do
       echo "$key"
@@ -116,8 +133,13 @@ JS
       echo "No archive of this commit: run archive first. Rebase or source changes require a rebuild." >&2
       exit 1
     fi
+    current_links=$(archive_symlinks)
+    [[ $current_links == "$(cat build/archive-symlinks.json)" ]] || {
+      echo "Archive symlinks differ from the receipt." >&2
+      exit 1
+    }
     manifest_paths=$(sed -E 's/^[[:xdigit:]]{64}  //' build/archive.sha256 | LC_ALL=C sort)
-    actual_paths=$(find "$archive" build/main.jsbundle.map build/configuration.json -type f -print | LC_ALL=C sort)
+    actual_paths=$(find "$archive" build/main.jsbundle.map build/configuration.json build/archive-symlinks.json -type f -print | LC_ALL=C sort)
     [[ $manifest_paths == "$actual_paths" ]] || {
       echo "Archive contents differ from the receipt." >&2
       exit 1
