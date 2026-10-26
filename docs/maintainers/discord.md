@@ -6,17 +6,17 @@ Wout owns the public [Mr. Streamer server](https://discord.gg/sR4tjEw6bQ) and mo
 
 Community is enabled, with verified email, media scanning for all members and default notifications set to Only @mentions. `#start-here` is the rules channel; private `#moderators` receives Community Updates. The server icon and bot avatar use `apps/ios/assets/icon.png`.
 
-The **Mr. Streamer** bot configured the server through the Discord API and owns the release webhooks. It stays in the server: removing it may break announcements. It has Administrator permission; its token stays private with Wout, never in the repository, logs or evidence. Release delivery uses the GitHub Actions webhook secrets and needs no continuously hosted bot process. The previous manual setup wizard is obsolete.
+The **Mr. Streamer** bot configured the server through the Discord API and owns the release webhooks. It stays in the server: removing it may break announcements. It has Administrator permission; its token stays private with Wout, never in the repository, logs or evidence. Release delivery uses the GitHub Actions webhook secrets and needs no continuously hosted bot process.
 
-Roles, in intended order below the bot's own role:
+Roles, highest first, all below the bot's own role:
 
-| Role       | Permissions                                                                                                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Admin      | Administrator                                                                                                                                                               |
-| Soft Admin | Moderator rights plus Manage Server, Channels, Roles, Threads, Nicknames, Expressions and Events, and View Audit Log; no Administrator, Manage Webhooks or Mention Everyone |
-| Moderator  | View Channels, Read Message History, Manage Messages, Moderate Members, Kick Members and Ban Members; no Administrator or server, role or webhook management                |
+| Role       | Permissions                                                                                                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Admin      | Administrator                                                                                                                                                                                    |
+| Soft Admin | Moderator rights plus Manage Server, Channels, Roles, Threads and Nicknames, Create and Manage Expressions and Events, and View Audit Log; no Administrator, Manage Webhooks or Mention Everyone |
+| Moderator  | View Channels, Read Message History, Manage Messages, Moderate Members, Kick Members and Ban Members; no Administrator or server, role or webhook management                                     |
 
-Wout is moving the bot role above Admin so the order **bot > Admin > Soft Admin > Moderator** can be applied. Admin, Soft Admin and Moderator can see `#moderators`.
+Wout is moving the bot role above Admin so this order can apply. All three roles can see `#moderators`.
 
 | Channel       | Type         | Ordinary members |
 | ------------- | ------------ | ---------------- |
@@ -49,7 +49,7 @@ This welcome is pinned in `#start-here`:
 >
 > Report reproducible bugs with your app version, system and steps: https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose
 
-Wout's ordinary second-account check is pending: join through the invite, confirm the rules prompt and acceptance, read the three read-only channels, write in general/help and confirm moderators is hidden. Configuration and role preview do not prove this member path. This follow-up does not block the PR.
+Wout's ordinary second-account check is pending: join through the invite, confirm the rules prompt and acceptance, read the three read-only channels, write in general/help and confirm moderators is hidden. Configuration and role preview do not prove this member path.
 
 ## Release webhooks
 
@@ -68,10 +68,10 @@ There are no automatic retries. A timeout may have delivered the message: inspec
 
 ## Setup proof
 
-On 26 October 2026, both labelled setup posts were sent with this branch's `scripts/discord-release.ts --test` and confirmed by Discord with zero mentions: [Stable v0.0.20](https://discord.com/channels/1564289427230949517/1564291463183990784/1564291770303381584) and [Nightly v0.0.21-nightly.20261026.431](https://discord.com/channels/1564289427230949517/1564291465452986439/1564291774602678402). The project card holds setup evidence and the pending second-account check.
+On 26 October 2026, both labelled setup posts were sent with `scripts/discord-release.ts --test` and confirmed by Discord with zero mentions: [Stable v0.0.20](https://discord.com/channels/1564289427230949517/1564291463183990784/1564291770303381584) and [Nightly v0.0.21-nightly.20261026.431](https://discord.com/channels/1564289427230949517/1564291465452986439/1564291774602678402). The project card holds setup evidence and the pending second-account check.
 
 For a labelled delivery check without publishing anything, privately supply the two webhook environment variables, then run the script with Node 24 once per channel with `--test`, `CHANNEL`, `VERSION`, `TAG` and `GITHUB_REPOSITORY=Mr-Streamer-OSS/MrStreamer`. Use existing published release tags and versions. Keep webhook values out of terminal history and recordings. Confirm both `[Setup test]` messages appear in the intended channels, link the correct release pages and create no mentions. Do not cross-server Publish test messages.
 
-Record the permanent invite, member join/access result and two test message links on the existing project card. These live checks are separate from the local webhook stub tests, which prove delivery payloads, routing, warnings and bounded failure handling.
+Record the member check result and any new test message links on the existing project card. These live checks are separate from the local webhook stub tests, which prove delivery payloads, routing, warnings and bounded failure handling.
 
 References: [Community requirements](https://support.discord.com/hc/en-us/articles/360047132851-Enabling-Your-Community-Server), [invites](https://support.discord.com/hc/en-us/articles/208866998-Invites-101), [announcement channels](https://support.discord.com/hc/en-us/articles/360032008192-Announcement-Channel-FAQ), [webhook execution](https://docs.discord.com/developers/resources/webhook#execute-webhook).
