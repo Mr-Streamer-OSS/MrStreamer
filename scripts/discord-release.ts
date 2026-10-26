@@ -13,10 +13,10 @@ export async function announceRelease(
     warn("Missing or invalid release metadata; no announcement sent.");
     return;
   }
-  const webhook =
-    channel === "stable" ? env.DISCORD_STABLE_WEBHOOK_URL : env.DISCORD_NIGHTLY_WEBHOOK_URL;
+  const secret = `DISCORD_${channel.toUpperCase()}_WEBHOOK_URL`;
+  const webhook = env[secret];
   if (!webhook) {
-    warn(`DISCORD_${channel.toUpperCase()}_WEBHOOK_URL is not configured; no announcement sent.`);
+    warn(`${secret} is not configured; no announcement sent.`);
     return;
   }
   try {
