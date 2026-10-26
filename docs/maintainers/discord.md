@@ -1,10 +1,22 @@
 # Discord community
 
-Wout owns the public Mr. Streamer server and moderates initially. The Moderator role gives trusted helpers View Channels, Read Message History, Manage Messages, Moderate Members, Kick Members and Ban Members. Leave Administrator and server, role and webhook management off.
+Wout owns the public [Mr. Streamer server](https://discord.gg/sR4tjEw6bQ) and moderates initially. The invite never expires, has unlimited uses and does not grant temporary membership.
 
-## Server setup
+## Server configuration
 
-Enable Community in Server Settings, with verified email and media scanning for all members. Set `#start-here` as the rules channel and private `#moderators` as the Community Updates destination. No bot or hosting is needed.
+Community is enabled, with verified email, media scanning for all members and default notifications set to Only @mentions. `#start-here` is the rules channel; private `#moderators` receives Community Updates. The server icon and bot avatar use `apps/ios/assets/icon.png`.
+
+The **Mr. Streamer** bot configured the server through the Discord API and owns the release webhooks. It stays in the server: removing it may break announcements. It has Administrator permission; its token stays private with Wout, never in the repository, logs or evidence. Release delivery uses the GitHub Actions webhook secrets and needs no continuously hosted bot process. The previous manual setup wizard is obsolete.
+
+Roles, in intended order below the bot's own role:
+
+| Role       | Permissions                                                                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Admin      | Administrator                                                                                                                                                               |
+| Soft Admin | Moderator rights plus Manage Server, Channels, Roles, Threads, Nicknames, Expressions and Events, and View Audit Log; no Administrator, Manage Webhooks or Mention Everyone |
+| Moderator  | View Channels, Read Message History, Manage Messages, Moderate Members, Kick Members and Ban Members; no Administrator or server, role or webhook management                |
+
+Wout is moving the bot role above Admin so the order **bot > Admin > Soft Admin > Moderator** can be applied. Admin, Soft Admin and Moderator can see `#moderators`.
 
 | Channel       | Type         | Ordinary members |
 | ------------- | ------------ | ---------------- |
@@ -15,11 +27,19 @@ Enable Community in Server Settings, with verified email and media scanning for 
 | `#help`       | Text         | Read and write   |
 | `#moderators` | Private text | Hidden           |
 
-In the three read-only channels, allow View Channel and Read Message History; deny Send Messages, Send Messages in Threads, Create Public Threads and Create Private Threads for `@everyone`. In `#moderators`, deny `@everyone` View Channel and allow Moderator View Channel and Send Messages. Check category and other role overrides too. Helpers do not need permission to post release announcements.
+The three read-only channels allow View Channel and Read Message History; their `@everyone` overrides deny Send Messages, Send Messages in Threads, Create Public Threads and Create Private Threads. `#moderators` denies `@everyone` View Channel and allows Moderator and Soft Admin View Channel, Send Messages and Read Message History. Helpers do not need permission to post release announcements.
 
-In Server Settings > Roles, turn off **Mention @everyone, @here and All Roles** for `@everyone` and Moderator. Set the server default notifications to Only @mentions. Members choose their own channel notifications. Do not use `@everyone` or `@here` pings. Cross-server **Publish** stays manual; webhook delivery does not publish to followers.
+**Mention @everyone, @here and All Roles** is off for `@everyone`, Moderator and Soft Admin. Members choose their own channel notifications. Do not use `@everyone` or `@here` pings. Cross-server **Publish** stays manual; webhook delivery does not publish to followers.
 
-Post and pin this welcome in `#start-here`:
+Rules Screening requires members to accept five rules before talking:
+
+1. Be kind and respectful.
+2. No spam or self-promotion.
+3. No piracy requests. Never share subscriptions, credentials, provider addresses, stream URLs or viewing history.
+4. Report bugs on GitHub with your app version, system and steps.
+5. Moderators may remove messages or members that break these rules.
+
+This welcome is pinned in `#start-here`:
 
 > Welcome to Mr. Streamer. Get the app: https://mrstreamer.app/download
 >
@@ -29,11 +49,11 @@ Post and pin this welcome in `#start-here`:
 >
 > Report reproducible bugs with your app version, system and steps: https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose
 
-After Community is enabled, create an invite to `#start-here`: Create Invite > Edit invite link > Expire After **Never**, Max Number of Uses **No limit**, temporary membership **off**. Verify a real ordinary member can join, read the three read-only channels, write in general/help and cannot see moderators before putting the invite in README. Role preview alone does not prove joining works.
+Wout's ordinary second-account check is pending: join through the invite, confirm the rules prompt and acceptance, read the three read-only channels, write in general/help and confirm moderators is hidden. Configuration and role preview do not prove this member path. This follow-up does not block the PR.
 
 ## Release webhooks
 
-For each release channel: Edit Channel > Integrations > Webhooks > New Webhook. Check its channel, save and copy the URL privately. Install these **repository Actions secrets on GitHub**, `Mr-Streamer-OSS/MrStreamer`, where releases run:
+The bot created the release webhooks and installed these **repository Actions secrets on GitHub**, `Mr-Streamer-OSS/MrStreamer`, where releases run:
 
 - `DISCORD_STABLE_WEBHOOK_URL`: `#releases`
 - `DISCORD_NIGHTLY_WEBHOOK_URL`: `#nightly`
@@ -47,6 +67,8 @@ The GitCafe source mirror does not run GitHub Actions. No new PAT is needed. Nev
 There are no automatic retries. A timeout may have delivered the message: inspect the channel before retrying, or rerunning the Discord job. Rerunning a successful announcement job can duplicate its post. Do not rerun publication or publish a release to test Discord.
 
 ## Setup proof
+
+On 26 October 2026, both labelled setup posts were sent with this branch's `scripts/discord-release.ts --test` and confirmed by Discord with zero mentions: [Stable v0.0.20](https://discord.com/channels/1564289427230949517/1564291463183990784/1564291770303381584) and [Nightly v0.0.21-nightly.20261026.431](https://discord.com/channels/1564289427230949517/1564291465452986439/1564291774602678402). The project card holds setup evidence and the pending second-account check.
 
 For a labelled delivery check without publishing anything, privately supply the two webhook environment variables, then run the script with Node 24 once per channel with `--test`, `CHANNEL`, `VERSION`, `TAG` and `GITHUB_REPOSITORY=Mr-Streamer-OSS/MrStreamer`. Use existing published release tags and versions. Keep webhook values out of terminal history and recordings. Confirm both `[Setup test]` messages appear in the intended channels, link the correct release pages and create no mentions. Do not cross-server Publish test messages.
 

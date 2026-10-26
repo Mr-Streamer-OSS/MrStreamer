@@ -31,6 +31,8 @@ macOS 13 or later on Apple silicon, Windows 11 on x64, or x86_64 Linux. [Install
 
 ## Help
 
+Join the [Discord community](https://discord.gg/sR4tjEw6bQ) for questions, chat and Stable/Nightly release announcements.
+
 [Subscriptions](docs/user/subscriptions.md) · [Live TV](docs/user/live-tv.md) · [Movies and series](docs/user/movies-and-series.md) · [Downloads](docs/user/downloads.md) · [Updates and channels](docs/user/updates.md) · [What plays](docs/user/playback.md) · [Troubleshooting](docs/user/troubleshooting.md) · [Privacy](docs/privacy.md) · [Security](docs/security.md)
 
 Found a bug? [Report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with your system, the Mr. Streamer version from Settings > About, and what happened.
