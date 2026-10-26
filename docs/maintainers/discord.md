@@ -8,7 +8,7 @@ Community is enabled, with verified email, media scanning for all members and de
 
 The **Mr. Streamer** bot configured the server through the Discord API and owns the release webhooks. It stays in the server: removing it may break announcements. It has Administrator permission; its token stays private with Wout, never in the repository, logs or evidence. Release delivery uses the GitHub Actions webhook secrets and needs no continuously hosted bot process.
 
-Roles, highest first, all below the bot's own role:
+Roles, in intended order below the bot's own role:
 
 | Role       | Permissions                                                                                                                                                                                      |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -53,7 +53,7 @@ Wout's ordinary second-account check is pending: join through the invite, confir
 
 ## Release webhooks
 
-The bot created the release webhooks and installed these **repository Actions secrets on GitHub**, `Mr-Streamer-OSS/MrStreamer`, where releases run:
+The bot created the release webhooks; setup stored their URLs as these **repository Actions secrets on GitHub**, `Mr-Streamer-OSS/MrStreamer`, where releases run:
 
 - `DISCORD_STABLE_WEBHOOK_URL`: `#releases`
 - `DISCORD_NIGHTLY_WEBHOOK_URL`: `#nightly`
