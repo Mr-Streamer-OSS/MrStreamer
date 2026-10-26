@@ -156,10 +156,10 @@ available when a provider marks another version of the same title.
 
 Playback and new/retried download requests check the latest raw catalogue too, including while a
 replacement index is being built. Newly recognised unfinished downloads are fenced without
-removing their records. Recognised copies are hidden and cannot play; their files remain intact. Ordinary personal copies
-remain playable offline. There is
-no adult opt-in in this release and desktop policy is unchanged. Provider data with no
-recognisable classification is not proven adult-free.
+removing their records. Recognised copies are hidden and cannot play; their files remain intact.
+Ordinary personal copies remain playable offline. There is no adult opt-in in this release and
+desktop policy is unchanged. Provider data with no recognisable classification is not proven
+adult-free.
 
 `test/downloads.test.ts` exercises refresh, restore, saved entries, stale action requests, a
 restricted transfer and retained offline playback against the fixture provider. Native iPhone

@@ -49,9 +49,9 @@ import { currentSource, onSignedIn, sourceOf, type Source } from "./sources.ts";
 import { store, useStore } from "./store.ts";
 import {
   admitTitle,
-  excludedTitle,
   detailsOf,
   episodesOf,
+  excludedTitle,
   listedIndex,
   titleFile,
   titleOf,
@@ -647,17 +647,7 @@ async function reduce(receipt: ReceiptV2, heardLive: boolean) {
     typeof removal !== "object" &&
     (restricting.has(record.id) || excludedDownload(record))
   ) {
-    update(record.id, () => ({
-      ...unbound(record),
-      state: "failed",
-      failure: {
-        kind: "app",
-        error: {
-          kind: "unexpected",
-          detail: describeError({ kind: "title-not-found", titleId: record.title.id }),
-        },
-      },
-    }));
+    update(record.id, () => fenced(record));
     return;
   }
   if (receipt.outcome.kind === "cancelled" || typeof removal === "object") {
@@ -1020,11 +1010,23 @@ function excludedDownload(record: Stored): boolean {
   );
 }
 
+/** An unfinished recognised request, failed without its binding and kept on the list. */
+const fenced = (record: Stored): Stored => ({
+  ...unbound(record),
+  state: "failed",
+  failure: {
+    kind: "app",
+    error: {
+      kind: "unexpected",
+      detail: describeError({ kind: "title-not-found", titleId: record.title.id }),
+    },
+  },
+});
+
 /** Retains recognised records and copies, fencing only their unfinished requests. */
 async function endRestricted() {
   for (const record of doc.items) {
     if (restricting.has(record.id)) continue;
-    const ref = { ...record.title, subscriptionId: record.subscriptionId };
     const excluded = excludedDownload(record);
     if (Boolean(record.excluded) !== excluded)
       update(record.id, (latest) => ({ ...latest, excluded }));
@@ -1034,19 +1036,7 @@ async function endRestricted() {
       const bound = boundOf(record);
       if (bound) await transfers.cancelAuthorization(bound.authorization, "remove");
       const latest = find(record.id);
-      if (latest && latest.state !== "complete") {
-        update(record.id, () => ({
-          ...unbound(latest),
-          state: "failed",
-          failure: {
-            kind: "app",
-            error: {
-              kind: "unexpected",
-              detail: describeError({ kind: "title-not-found", titleId: ref.id }),
-            },
-          },
-        }));
-      }
+      if (latest && latest.state !== "complete") update(record.id, () => fenced(latest));
     } catch {
       // A refused native fence keeps its binding for reconciliation and the next attempt.
     } finally {
@@ -1380,32 +1370,28 @@ async function authorize(record: Stored): Promise<boolean> {
     return false;
   }
   const ref = { ...record.title, subscriptionId: record.subscriptionId };
-  const file = await Promise.resolve()
-    .then(async () => {
-      await listedIndex(ref.subscriptionId, AbortSignal.timeout(20_000));
-      admitTitle(ref);
-      return source.provider.titleFile(
-        record.title.kind,
-        record.title.id,
-        record.container,
-        AbortSignal.timeout(20_000),
-      );
-    })
-    .then((file) => {
-      admitTitle(ref);
-      return file;
-    })
-    .catch((cause: unknown) => {
-      if (stands()) {
-        const detail = describeError(appError(cause));
-        update(record.id, (latest) => ({
-          ...latest,
-          state: "failed",
-          failure: { kind: "app", error: { kind: "unexpected", detail } },
-        }));
-      }
-      return null;
-    });
+  const file = await (async () => {
+    await listedIndex(ref.subscriptionId, AbortSignal.timeout(20_000));
+    admitTitle(ref);
+    const asked = await source.provider.titleFile(
+      record.title.kind,
+      record.title.id,
+      record.container,
+      AbortSignal.timeout(20_000),
+    );
+    admitTitle(ref);
+    return asked;
+  })().catch((cause: unknown) => {
+    if (stands()) {
+      const detail = describeError(appError(cause));
+      update(record.id, (latest) => ({
+        ...latest,
+        state: "failed",
+        failure: { kind: "app", error: { kind: "unexpected", detail } },
+      }));
+    }
+    return null;
+  });
   if (!file || !stands()) return false;
   let authorization: string;
   try {
@@ -1429,8 +1415,12 @@ async function authorize(record: Stored): Promise<boolean> {
       () => false,
     );
   if (!stands()) return abandon();
+  if (excludedDownload(record)) {
+    await abandon();
+    update(record.id, (latest) => fenced(latest));
+    return false;
+  }
   try {
-    admitTitle(ref);
     const folder = folderOf(record.id);
     folder.create({ intermediates: true, idempotent: true });
     // Left by an attempt never written down as complete: there is no proof it is whole.
@@ -1560,7 +1550,6 @@ export type Retried = "queued" | "unchanged" | "stopped";
 async function again(record: Stored, stands: Stands = always): Promise<Retried> {
   const ref: TitleRef = { ...record.title, subscriptionId: record.subscriptionId };
   if (excludedDownload(record)) throw new AppFailure({ kind: "title-not-found", titleId: ref.id });
-  admitTitle(ref);
   const container = await titleFile(ref, AbortSignal.timeout(20_000)).then(
     (file) => file.container,
     () => record.container,

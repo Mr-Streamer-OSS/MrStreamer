@@ -1239,9 +1239,9 @@ let chosen: string | null = null;
 /** Core chooses up to three streams for Automatic, or only the explicit or accepted pick. */
 function livePlan(channel: Channel, asked?: string): Plan | null {
   const permitted = () => {
+    if (channel.adult) return false;
     const member = members().find((each) => each.entry.id === channel.subscriptionId);
     const latest = member && shownOf(member.live);
-    if (channel.adult) return false;
     if (!latest) return true;
     const adult = adultIn(latest.categories);
     return !latest.channels.some(

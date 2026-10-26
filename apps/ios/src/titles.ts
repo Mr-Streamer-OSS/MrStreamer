@@ -851,10 +851,8 @@ export async function detailsOf(
   title: Title,
   show?: (details: TitleDetails) => void,
 ): Promise<TitleDetails> {
-  const check = () => {
-    if (title.adult) throw new AppFailure({ kind: "title-not-found", titleId: title.id });
-    admitTitle({ kind: title.kind, ...ownedId(title) });
-  };
+  if (title.adult) throw new AppFailure({ kind: "title-not-found", titleId: title.id });
+  const check = () => admitTitle({ kind: title.kind, ...ownedId(title) });
   check();
   // A replaced language never answers through the old callback. A caller still waiting is
   // read again in the latest language, while login replacement keeps its existing authority.
@@ -984,7 +982,7 @@ export async function episodesOf(
   const reading = readingLanguage();
   const { language } = reading;
   const { tmdbId } = title;
-  if (!client || !tmdbId || title.adult) return seasonEpisodes(season, []);
+  if (!client || !tmdbId) return seasonEpisodes(season, []);
   const id = title.subscriptionId;
   const source = currentSource(id);
   const stands = () => source !== undefined && savable(id, source);
