@@ -1,8 +1,9 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { Image, Linking, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import { DownloadsLink } from "../downloads-screen.tsx";
 import { useDownloads } from "../downloads.ts";
+import { openLink } from "../open-link.ts";
 import { ProviderForm } from "../provider-form.tsx";
 import { requestStatisticsChoice } from "../statistics-consent.ts";
 import { colors, TextButton } from "../ui.tsx";
@@ -56,9 +57,7 @@ export default function Connect() {
       )}
       <TextButton
         label="Privacy policy"
-        onPress={() => {
-          void Linking.openURL("https://mrstreamer.app/privacy");
-        }}
+        onPress={() => openLink("https://mrstreamer.app/privacy")}
       />
       {downloads.items.length > 0 ? (
         <View style={styles.downloads}>
