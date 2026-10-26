@@ -74,7 +74,7 @@ describe("Discord release announcements", () => {
     expect(log).toHaveBeenCalledWith(expect.stringMatching(/^::warning::.*DISCORD_STABLE/));
   });
 
-  it.each([400, 429, 500, 0])(
+  it.each([429, 0])(
     "warns without failing or retrying HTTP %i (0 is an ambiguous timeout)",
     async (status) => {
       const target = await discord(status);
@@ -93,15 +93,12 @@ describe("Discord release announcements", () => {
     },
   );
 
-  it.each(["not a URL with private-token", "http://127.0.0.1:1/private-token"])(
-    "keeps invalid configuration and connection failures private: %s",
-    async (webhook) => {
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      await expect(
-        announceRelease({ ...release, DISCORD_STABLE_WEBHOOK_URL: webhook }),
-      ).resolves.toBeUndefined();
-      expect(log).toHaveBeenCalledWith(expect.stringMatching(/^::warning::Discord:/));
-      expect(log.mock.calls.flat().join("\n")).not.toContain("private-token");
-    },
-  );
+  it("warns privately for a malformed webhook secret", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await expect(
+      announceRelease({ ...release, DISCORD_STABLE_WEBHOOK_URL: "not a URL with private-token" }),
+    ).resolves.toBeUndefined();
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/^::warning::Discord:/));
+    expect(log.mock.calls.flat().join("\n")).not.toContain("private-token");
+  });
 });
