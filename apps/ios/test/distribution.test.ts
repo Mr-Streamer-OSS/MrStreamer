@@ -11,12 +11,14 @@ afterEach(() => {
 });
 
 /** Exercise the shipping CLI with a saved archive and an Xcode stand-in, without Apple access. */
-function candidate() {
+function candidate(options: { fresh?: boolean; environment?: NodeJS.ProcessEnv } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ios-distribution-"));
   roots.push(root);
   mkdirSync(join(root, "scripts"));
   mkdirSync(join(root, "bin"));
-  mkdirSync(join(root, "build/MrStreamer.xcarchive"), { recursive: true });
+  mkdirSync(join(root, options.fresh ? "build" : "build/MrStreamer.xcarchive"), {
+    recursive: true,
+  });
   cpSync(
     join(import.meta.dirname, "../scripts/testflight.sh"),
     join(root, "scripts/testflight.sh"),
@@ -44,13 +46,15 @@ function candidate() {
     );
   };
   commit("candidate");
-  writeFileSync(join(root, "build/source.txt"), `${git("rev-parse", "HEAD")}\n`);
-  const bundle = "build/MrStreamer.xcarchive/main.jsbundle";
-  writeFileSync(join(root, bundle), "fixture archive bytes");
-  writeFileSync(
-    join(root, "build/archive.sha256"),
-    `${createHash("sha256").update("fixture archive bytes").digest("hex")}  ${bundle}\n`,
-  );
+  if (!options.fresh) {
+    writeFileSync(join(root, "build/source.txt"), `${git("rev-parse", "HEAD")}\n`);
+    const bundle = "build/MrStreamer.xcarchive/main.jsbundle";
+    writeFileSync(join(root, bundle), "fixture archive bytes");
+    writeFileSync(
+      join(root, "build/archive.sha256"),
+      `${createHash("sha256").update("fixture archive bytes").digest("hex")}  ${bundle}\n`,
+    );
+  }
   return {
     run: (...args: string[]) =>
       spawnSync("bash", ["scripts/testflight.sh", ...args], {
@@ -61,10 +65,14 @@ function candidate() {
           PATH: `${join(root, "bin")}:${process.env["PATH"]}`,
           APPLE_TEAM_ID: "ABCDEFGHIJ",
           IOS_PROVISIONING_PROFILE: "12345678-1234-1234-1234-123456789abc",
+          ...options.environment,
         },
       }),
     plist: () => readFileSync(join(root, "build/called.plist"), "utf8"),
-    changeBundle: () => writeFileSync(join(root, bundle), "changed bytes"),
+    changeBundle: () =>
+      writeFileSync(join(root, "build/MrStreamer.xcarchive/main.jsbundle"), "changed bytes"),
+    orphanMap: () => writeFileSync(join(root, "build/main.jsbundle.map"), "retained map"),
+    map: () => readFileSync(join(root, "build/main.jsbundle.map"), "utf8"),
     changeSource: () => {
       writeFileSync(join(root, "changed.txt"), "another source");
       commit("changed");
@@ -109,4 +117,33 @@ it("requires a new archive when committed source changes", () => {
   const result = c.run("export", "app-store");
   expect(result.status).toBe(1);
   expect(result.stderr).toContain("No archive of this commit");
+});
+
+it("requires production inputs before starting an archive", () => {
+  const c = candidate({ fresh: true, environment: { EXPO_PUBLIC_TMDB_KEY: "" } });
+  const result = c.run("archive");
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain("Load the approved production");
+});
+
+it("refuses fixture overrides in distribution archives", () => {
+  for (const name of [
+    "EXPO_PUBLIC_TMDB_API",
+    "EXPO_PUBLIC_PROOF_URL",
+    "EXPO_PUBLIC_MR_STREAMER_ANALYTICS_LOCAL_ENDPOINT",
+  ]) {
+    const c = candidate({ fresh: true, environment: { [name]: "http://127.0.0.1:8080" } });
+    const result = c.run("archive");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Fixture overrides are not allowed");
+  }
+});
+
+it("preserves a retained map when the archive has already been moved", () => {
+  const c = candidate({ fresh: true });
+  c.orphanMap();
+  const result = c.run("archive");
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain("Candidate files already exist");
+  expect(c.map()).toBe("retained map");
 });

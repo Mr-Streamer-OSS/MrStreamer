@@ -30,23 +30,63 @@ fi
 
 case "$command" in
   archive)
-    if [[ -e "$archive" ]]; then
-      echo "Archive already exists; retain it before starting another candidate." >&2
+    for artifact in "$archive" build/main.jsbundle.map build/source.txt build/archive.sha256 build/configuration.json; do
+      if [[ -e $artifact ]]; then
+        echo "Candidate files already exist; retain the archive, map and receipts together before rebuilding." >&2
+        exit 1
+      fi
+    done
+    # Expo must use only the approved environment, never leftover dotenv or fixture inputs.
+    export EXPO_NO_DOTENV=1
+    if [[ -n ${EXPO_PUBLIC_TMDB_API:-} || -n ${EXPO_PUBLIC_PROOF_URL:-} ||
+      -n ${EXPO_PUBLIC_MR_STREAMER_ANALYTICS_LOCAL_ENDPOINT:-} ]]; then
+      echo "Fixture overrides are not allowed in a distribution archive." >&2
+      exit 1
+    fi
+    if [[ -z ${EXPO_PUBLIC_TMDB_KEY:-} || ${EXPO_PUBLIC_MR_STREAMER_ANALYTICS_RELEASE_BUILD:-} != 1 ||
+      ! ${EXPO_PUBLIC_MR_STREAMER_ANALYTICS_HOST:-} =~ ^https://(eu|us)\.i\.posthog\.com$ ||
+      ! ${EXPO_PUBLIC_MR_STREAMER_ANALYTICS_PROJECT_TOKEN:-} =~ ^phc_[A-Za-z0-9_-]+$ ]]; then
+      echo "Load the approved production TMDB and statistics inputs before archiving." >&2
       exit 1
     fi
     source=$(git rev-parse HEAD)
     pnpm install --frozen-lockfile
     scripts/build-ffmpeg.sh ios
     CI=1 npx expo prebuild --platform ios --clean
+    # Hash the approved inputs without storing their values in receipts or logs.
+    node <<'JS'
+const { createHash } = require('node:crypto');
+const { writeFileSync } = require('node:fs');
+const names = ['EXPO_PUBLIC_TMDB_KEY', 'EXPO_PUBLIC_MR_STREAMER_ANALYTICS_RELEASE_BUILD',
+  'EXPO_PUBLIC_MR_STREAMER_ANALYTICS_HOST', 'EXPO_PUBLIC_MR_STREAMER_ANALYTICS_PROJECT_TOKEN'];
+const hashes = Object.fromEntries(names.map(name =>
+  [name, createHash('sha256').update(process.env[name]).digest('hex')]));
+writeFileSync('build/configuration.json', JSON.stringify(hashes, null, 2) + '\n');
+JS
     # Hold the Settings inventory to the actual JavaScript packages and native pods.
     node scripts/licences.ts --check --pods ios/Podfile.lock
-    # A failed previous attempt must not supply this archive's map.
-    rm -f build/main.jsbundle.map
+    # Command-line profile overrides reach Pods too. Sign only the app's Release target.
+    node <<'JS'
+const { writeFileSync } = require('node:fs');
+const { IOSConfig } = require('expo/config-plugins');
+const xcode = IOSConfig.XcodeUtils;
+const project = xcode.getPbxproj(process.cwd());
+const { target } = xcode.getApplicationNativeTarget({ project, projectName: 'MrStreamer' });
+const [, release] = xcode.getBuildConfigurationForListIdAndName(project, {
+  configurationListId: target.buildConfigurationList,
+  buildConfiguration: 'Release',
+});
+Object.assign(release.buildSettings, {
+  DEVELOPMENT_TEAM: process.env.APPLE_TEAM_ID,
+  CODE_SIGN_STYLE: 'Manual',
+  CODE_SIGN_IDENTITY: '"Apple Distribution"',
+  PROVISIONING_PROFILE_SPECIFIER: process.env.IOS_PROVISIONING_PROFILE,
+});
+writeFileSync(project.filepath, project.writeSync());
+JS
     # Keep the composed Metro/Hermes map with the exact bundle from this archive.
     xcodebuild archive -workspace ios/MrStreamer.xcworkspace -scheme MrStreamer \
       -configuration Release -destination generic/platform=iOS -archivePath "$archive" \
-      DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Manual \
-      CODE_SIGN_IDENTITY='Apple Distribution' PROVISIONING_PROFILE_SPECIFIER="$IOS_PROVISIONING_PROFILE" \
       SOURCEMAP_FILE="$PWD/build/main.jsbundle.map" | xcbeautify
     app="$archive/Products/Applications/MrStreamer.app"
     if [[ ! -s "$app/main.jsbundle" || ! -s build/main.jsbundle.map ]]; then
@@ -58,9 +98,10 @@ case "$command" in
       exit 1
     }
     echo "$source" >build/source.txt
-    find "$archive" build/main.jsbundle.map -type f -exec shasum -a 256 {} + >build/archive.sha256
+    find "$archive" build/main.jsbundle.map build/configuration.json -type f -exec shasum -a 256 {} + >build/archive.sha256
     echo "commit $source"
     for key in CFBundleIdentifier CFBundleShortVersionString CFBundleVersion MinimumOSVersion UIDeviceFamily; do
+      echo "$key"
       /usr/libexec/PlistBuddy -c "Print :$key" "$app/Info.plist"
     done
     ;;

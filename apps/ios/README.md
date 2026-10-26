@@ -689,8 +689,8 @@ proof out: `src/app/proof.tsx` loads it only in development.
 The app installs as `app.mrstreamer.player`, the desktop's `appId`, in development and release
 builds alike. Its version is its own, not the desktop's: `version` in `app.json` is `0.1.0` for
 the public candidate as well as the private beta. Read the current App Store Connect build and
-version inventory before allocating an unused `ios.buildNumber`. Build 16 follows the read-only
-26 October 2026 inventory (builds 1–15, train 0.1.0). It is allocated locally, not uploaded.
+version inventory before allocating an unused `ios.buildNumber`; record the dated readback and
+allocation on the candidate's project card.
 `supportsTablet: false` requests iPhone device family 1; this removes the native iPad target,
 not Apple's iPhone compatibility mode on iPad. Inspect actual archive/export device families.
 
@@ -715,14 +715,14 @@ onmac run -- onmac-job apps/ios/scripts/testflight.sh export app-store
 onmac run -- onmac-job apps/ios/scripts/testflight.sh export internal-only
 ```
 
-Load the approved production environment privately before archiving. The release uses TMDB and
-optional statistics values from `EXPO_PUBLIC_*`; fixture overrides must be absent. Keep inputs,
+Load the approved production environment privately before archiving. The CLI requires the TMDB
+key and production statistics inputs, disables Expo dotenv loading and refuses fixture overrides. Keep inputs,
 their hashes and all artifacts in ignored private storage. No provider login belongs in the bundle.
 Run `pnpm check`, both iOS typechecks, real Metro export and affected contract tests first.
 
 `archive` prebuilds a Release device app with embedded JavaScript/Hermes and its composed source
 map, checks the licence inventory against installed pods, then records committed source and file
-hashes. An existing archive is preserved. Export verifies those hashes and refuses another source
+hashes. An existing archive, map or receipt is preserved. Export verifies those hashes and refuses another source
 commit, including a rebase. `export` always saves locally with `method: app-store-connect` and
 `destination: export`; it cannot upload. Both explicit intents preserve version/build. A local
 export is not Apple processing, App Store eligibility or public release acceptance.
