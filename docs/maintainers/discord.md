@@ -17,7 +17,7 @@ Enable Community in Server Settings, with verified email and media scanning for 
 
 In the three read-only channels, allow View Channel and Read Message History; deny Send Messages, Send Messages in Threads, Create Public Threads and Create Private Threads for `@everyone`. In `#moderators`, deny `@everyone` View Channel and allow Moderator View Channel and Send Messages. Check category and other role overrides too. Helpers do not need permission to post release announcements.
 
-Set the server default notifications to Only @mentions. Members choose their own channel notifications. Do not use `@everyone` or `@here` pings. Cross-server **Publish** stays manual; webhook delivery does not publish to followers.
+In Server Settings > Roles, turn off **Mention @everyone, @here and All Roles** for `@everyone` and Moderator. Set the server default notifications to Only @mentions. Members choose their own channel notifications. Do not use `@everyone` or `@here` pings. Cross-server **Publish** stays manual; webhook delivery does not publish to followers.
 
 Post and pin this welcome in `#start-here`:
 
@@ -48,9 +48,7 @@ There are no automatic retries. A timeout may have delivered the message: inspec
 
 ## Setup proof
 
-The one-time setup wizard is ephemeral and kept in the implementation worktree's gitignored `.local/discord-community/`. It uses hidden input and pipes webhook values to `gh secret set`; it does not persist webhook values locally. Run it interactively in Wout's logged-in environment with Node 24 and authenticated `gh`. Its only saved values are the public invite, test message links and access-check timestamp. Delete the scratch wizard after accepted setup.
-
-For a labelled delivery check without publishing anything, privately supply the two webhook environment variables, then run the script once per channel with `--test`, `CHANNEL`, `VERSION`, `TAG` and `GITHUB_REPOSITORY=Mr-Streamer-OSS/MrStreamer`. Use existing published release tags and versions. The wizard obtains these from GitHub automatically. Confirm both `[Setup test]` messages appear in the intended channels, link the correct release pages and create no mentions. Do not cross-server Publish test messages.
+For a labelled delivery check without publishing anything, privately supply the two webhook environment variables, then run the script with Node 24 once per channel with `--test`, `CHANNEL`, `VERSION`, `TAG` and `GITHUB_REPOSITORY=Mr-Streamer-OSS/MrStreamer`. Use existing published release tags and versions. Keep webhook values out of terminal history and recordings. Confirm both `[Setup test]` messages appear in the intended channels, link the correct release pages and create no mentions. Do not cross-server Publish test messages.
 
 Record the permanent invite, member join/access result and two test message links on the existing project card. These live checks are separate from the local webhook stub tests, which prove delivery payloads, routing, warnings and bounded failure handling.
 

@@ -10,12 +10,12 @@ import { describe, expect, it } from "vitest";
 // For every event a release run starts on, every plan output that matters, every result of the
 // release run's other jobs and whether the run was cancelled, it works out which of release.yml's
 // calls of publish.yml start and, inside each, which of publish.yml's jobs would run, assuming a
-// job that runs succeeds and reports every output it declares, with every kill switch on. A
+// job that runs succeeds unless an outcome says otherwise, with every kill switch on. A
 // context path it doesn't model fails the test rather than reading as some value. actionlint
 // checks the rest of the YAML; docs/maintainers/ci.md traces each path.
 
 interface Job {
-  readonly "continue-on-error"?: boolean;
+  readonly "continue-on-error"?: boolean | string;
   readonly if?: string;
   readonly needs?: string | readonly string[];
   readonly uses?: string;
@@ -250,7 +250,8 @@ function callInputs(publish: Workflow, given: Record<string, Value>) {
 
 /**
  * The jobs of publish.yml that run for one call, in an order that respects their needs: a job that
- * runs succeeds and reports every output it declares as "true"; one that doesn't is skipped.
+ * runs succeeds unless `outcomes` says otherwise, and reports its outputs as "true" on success;
+ * one that doesn't run is skipped.
  */
 function simulate(
   publish: Workflow,
