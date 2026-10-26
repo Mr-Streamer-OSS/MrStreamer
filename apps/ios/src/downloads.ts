@@ -1000,11 +1000,13 @@ function endRemoved() {
 }
 
 const restricting = new Set<string>();
+const exclusions = new Map<string, boolean>();
 
 /** A retained classification also fences a copy while its provider lists are unavailable. */
 function excludedDownload(record: Stored): boolean {
   return (
     excludedTitle({ ...record.title, subscriptionId: record.subscriptionId }) ??
+    exclusions.get(record.id) ??
     record.excluded ??
     false
   );
@@ -1026,13 +1028,19 @@ const fenced = (record: Stored): Stored => ({
 /** Retains recognised records and copies, fencing only their unfinished requests. */
 async function endRestricted() {
   for (const record of doc.items) {
-    if (!standing(record) || owed.has(record.id) || restricting.has(record.id)) continue;
+    if (!standing(record) || restricting.has(record.id)) continue;
     const excluded = excludedDownload(record);
+    exclusions.set(record.id, excluded);
     restricting.add(record.id);
     try {
-      if (Boolean(record.excluded) !== excluded)
-        update(record.id, (latest) => ({ ...latest, excluded }));
+      try {
+        if (Boolean(record.excluded) !== excluded)
+          update(record.id, (latest) => ({ ...latest, excluded }));
+      } catch {
+        // A refused classification write cannot keep an active native request authorised.
+      }
       if (
+        owed.has(record.id) ||
         !excluded ||
         record.state === "complete" ||
         (record.state === "failed" && !boundOf(record))

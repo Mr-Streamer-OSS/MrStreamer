@@ -75,6 +75,7 @@ const saved = store<Accounts>({ accounts: {} });
 /** The saved subscriptions in their order: only their records show. */
 const owners = store<readonly string[]>([]);
 let loaded = false;
+let alignmentPending = false;
 let members: () => readonly Member[] = () => [];
 
 /** The catalogue owner supplies current raw memberships without a dependency on account.ts. */
@@ -114,6 +115,7 @@ function load() {
 
 function write(accounts: Accounts["accounts"]) {
   writeJson(FILE, { version: 1, accounts });
+  alignmentPending = false;
   saved.set({ accounts });
 }
 
@@ -382,7 +384,16 @@ export function alignWatchlist(
       (next ??= { ...accounts })[subscriptionId] = after;
     }
   }
-  if (next) write(next);
+  if (!next && !alignmentPending) return;
+  const alignedAccounts = next ?? accounts;
+  // Classification takes effect even when storage refuses it. Retry the same in-memory facts
+  // on the next catalogue/status change without interrupting other catalogue listeners.
+  saved.set({ accounts: alignedAccounts });
+  try {
+    write(alignedAccounts);
+  } catch {
+    alignmentPending = true;
+  }
 }
 
 /** One subscription's records in line with the lists; the same array when nothing changes. */

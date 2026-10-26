@@ -622,6 +622,53 @@ describe("downloads", { timeout: 30_000 }, () => {
     );
   });
 
+  it("enforces catalogue and native download exclusion while classification storage refuses writes", async () => {
+    await install();
+    const app = await launch();
+    const { a } = await withProviders(app);
+    const lists = app.titleLists();
+    if (lists.kind !== "ready") throw new Error("No lists");
+    const watchlist = await import("../src/watchlist.ts");
+    const film = app.titleOf(lists.index, "movie", movieRef(a))!;
+    watchlist.saveTitle(film);
+    one.stallMovieFile(movie().id, 1024, 10_000);
+    const copy = await app.addDownload(movieRef(a));
+    await until(() => (receivedOf(app, copy.id) ?? 0) > 0, "the partial download");
+    native.sync = (operation, path) => {
+      if (
+        operation === "write" &&
+        (path.endsWith("downloads.json.next") || path.endsWith("watchlists.json.next"))
+      )
+        throw new Error("Storage refused");
+    };
+    memory.restricted = { movies: [String(movie().id)], series: [], channel: "" };
+    try {
+      app.reloadTitles(a);
+      await until(
+        () =>
+          app.titlesWorkedOut() && app.members()[0]?.titles.kind === "ready" && native.open === 0,
+        "catalogue invalidation and native fence",
+      );
+      const current = app.titleLists();
+      if (current.kind !== "ready") throw new Error("No refreshed lists");
+      expect(app.titleOf(current.index, "movie", movieRef(a))).toBeUndefined();
+      expect(app.downloadList().items.some((item) => item.id === copy.id)).toBe(false);
+      expect(
+        watchlist.watchlistRows(
+          watchlist.currentWatchlist(),
+          { index: current.index, complete: true, members: app.members(), named: app.named },
+          "newest",
+        ),
+      ).toEqual([]);
+    } finally {
+      native.sync = null;
+    }
+    app.reloadTitles(a);
+    await until(() => background.receipts.length === 0, "the retained fence receipt");
+    const ordinary = await app.addDownload(movieRef(a, otherMovie().id));
+    await until(() => isComplete(app, ordinary.id), "an ordinary transfer after storage recovers");
+  });
+
   it.each(["missed native notification", "refused completion write"])(
     "retains a completed personal copy while restriction fences it after %s",
     async (race) => {
