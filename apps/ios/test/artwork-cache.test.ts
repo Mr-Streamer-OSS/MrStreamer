@@ -406,7 +406,10 @@ describe("pictures no one shows any more", () => {
     await settled(() => expect(totalAsked()).toBe(4));
     // Removing the DOM precedes passive subscription cleanup; finish both before freeing a slot.
     const { act } = await import("react");
+    const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    environment.IS_REACT_ACT_ENVIRONMENT = true;
     await act(async () => app.logos([]));
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
     await settled(() => expect(app.shown()).toEqual([]));
     for (const each of held) each[0]?.();
     await settled(() => expect(pictureFiles(kept)).toHaveLength(4));
