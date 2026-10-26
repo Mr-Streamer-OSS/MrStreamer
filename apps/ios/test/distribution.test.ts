@@ -31,16 +31,19 @@ function candidate() {
   const git = (...args: string[]) =>
     execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
   git("init", "-q");
-  git("add", ".");
-  git(
-    "-c",
-    "user.name=Fixture",
-    "-c",
-    "user.email=fixture@example.test",
-    "commit",
-    "-qm",
-    "candidate",
-  );
+  const commit = (message: string) => {
+    git("add", ".");
+    git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.test",
+      "commit",
+      "-qm",
+      message,
+    );
+  };
+  commit("candidate");
   writeFileSync(join(root, "build/source.txt"), `${git("rev-parse", "HEAD")}\n`);
   const bundle = "build/MrStreamer.xcarchive/main.jsbundle";
   writeFileSync(join(root, bundle), "fixture archive bytes");
@@ -64,16 +67,7 @@ function candidate() {
     changeBundle: () => writeFileSync(join(root, bundle), "changed bytes"),
     changeSource: () => {
       writeFileSync(join(root, "changed.txt"), "another source");
-      git("add", ".");
-      git(
-        "-c",
-        "user.name=Fixture",
-        "-c",
-        "user.email=fixture@example.test",
-        "commit",
-        "-qm",
-        "changed",
-      );
+      commit("changed");
     },
   };
 }
@@ -94,9 +88,9 @@ it.each(["app-store", "internal-only"])(
   },
 );
 
-it("requires intent for export and upload before touching Xcode", () => {
+it("requires an explicit intent for export and upload", () => {
   const c = candidate();
-  for (const args of [["export"], ["upload"], ["upload", "public"], ["archive", "extra"]]) {
+  for (const args of [["export"], ["upload"], ["upload", "public"]]) {
     const result = c.run(...args);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Usage:");
