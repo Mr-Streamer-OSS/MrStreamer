@@ -23,6 +23,13 @@ const part = (given: unknown): ReactNode =>
     ? (given as ReactNode)
     : createElement(given as ComponentType);
 
+/** A row's key as React Native's lists pick it: the list's own extractor, else the row's key or id. */
+const rowKey = <T>(item: T, index: number, keyExtractor?: (item: T, index: number) => string) => {
+  if (keyExtractor) return keyExtractor(item, index);
+  const row = item as { key?: unknown; id?: unknown } | null;
+  return String(row?.key ?? row?.id ?? index);
+};
+
 /** A FlatList that draws every row. */
 const FlatList = <T>({
   data,
@@ -50,7 +57,7 @@ const FlatList = <T>({
       : data.map((item, index) =>
           createElement(
             Fragment,
-            { key: keyExtractor?.(item, index) ?? index },
+            { key: rowKey(item, index, keyExtractor) },
             renderItem({ item, index }),
           ),
         ),
@@ -61,6 +68,7 @@ const FlatList = <T>({
 const SectionList = <T, S extends { data: readonly T[] }>({
   sections,
   renderItem,
+  keyExtractor,
   renderSectionHeader,
   renderSectionFooter,
   ListHeaderComponent,
@@ -70,6 +78,7 @@ const SectionList = <T, S extends { data: readonly T[] }>({
 }: {
   sections: readonly S[];
   renderItem: (info: { item: T; index: number; section: S }) => ReactNode;
+  keyExtractor?: (item: T, index: number) => string;
   renderSectionHeader?: (info: { section: S }) => ReactNode;
   renderSectionFooter?: (info: { section: S }) => ReactNode;
   ListHeaderComponent?: unknown;
@@ -89,7 +98,11 @@ const SectionList = <T, S extends { data: readonly T[] }>({
             { key: at },
             renderSectionHeader?.({ section }),
             section.data.map((item, index) =>
-              createElement(Fragment, { key: index }, renderItem({ item, index, section })),
+              createElement(
+                Fragment,
+                { key: rowKey(item, index, keyExtractor) },
+                renderItem({ item, index, section }),
+              ),
             ),
             renderSectionFooter?.({ section }),
           ),

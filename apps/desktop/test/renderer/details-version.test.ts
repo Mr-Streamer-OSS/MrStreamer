@@ -69,6 +69,8 @@ async function opened(
   picks = defaultSubscriptionPreferences,
   { title = film, asked = false, played = [] as readonly TitleProgress[] } = {},
 ): Promise<string | undefined> {
+  // A second open in one test replaces the first, so its page and requests are its own.
+  unmount();
   ipc.reset();
   ipc.always("ondemand.details", {
     kind: "movie",

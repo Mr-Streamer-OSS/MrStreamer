@@ -474,6 +474,8 @@ describe("Continue watching with a marked series", () => {
 
   /** What the row shows of the series for a record that reads `viewing`. */
   async function row(viewing: Pick<Viewing, "continueWatching" | "marked">): Promise<string[]> {
+    // Each read replaces the last one's view, so no earlier record is still mounted.
+    unmount();
     ipc.reset();
     const client = new QueryClient();
     client.setQueryData(queries.viewing().queryKey, {

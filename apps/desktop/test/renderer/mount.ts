@@ -19,13 +19,12 @@ export function bareView() {
 
 /** A bare view whose tree has `client`, cleared once it unmounts. */
 export function queryView(client: QueryClient) {
-  const mounted = bareView();
+  const view = bareView();
   return {
-    container: mounted.container,
-    render: (node?: ReactNode) =>
-      mounted.render(createElement(QueryClientProvider, { client }, node)),
+    container: view.container,
+    render: (node?: ReactNode) => view.render(createElement(QueryClientProvider, { client }, node)),
     unmount() {
-      mounted.unmount();
+      view.unmount();
       client.clear();
     },
   };
