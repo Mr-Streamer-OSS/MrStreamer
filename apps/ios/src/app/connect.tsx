@@ -36,7 +36,11 @@ export default function Connect() {
       ) : (
         <>
           <View style={styles.brand}>
-            <Image source={require("../../assets/mark.png") as number} style={styles.mark} />
+            <Image
+              source={require("../../assets/mark.png") as number}
+              style={styles.mark}
+              accessible={false}
+            />
             <Text style={styles.brandName}>Mr. Streamer</Text>
           </View>
           <View style={styles.welcome}>
