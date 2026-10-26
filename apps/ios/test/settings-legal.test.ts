@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // DOM on a happy-dom window, as settings-removal.test.ts does. The last tests hold the committed
 // inventory to the inputs it was generated from that CI has without the iOS install.
 
-vi.stubGlobal("__DEV__", false);
+Object.assign(globalThis, { __DEV__: false });
 
 const scenario = vi.hoisted(() => ({
   tab: 0,

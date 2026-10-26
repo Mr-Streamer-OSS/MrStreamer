@@ -10,7 +10,7 @@ import { demoEntry } from "../src/demo.ts";
 // happy-dom window, as provider-form.test.ts does; the action sheet and alerts answer as the test
 // picks, and `remove` fails the way the account owner does on each side of its registry write.
 
-vi.stubGlobal("__DEV__", false);
+Object.assign(globalThis, { __DEV__: false });
 
 interface Button {
   readonly text: string;

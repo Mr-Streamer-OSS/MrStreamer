@@ -7,7 +7,7 @@ import type { Member } from "../src/account.ts";
 
 // The real Settings route rendered over native view/sheet doubles and a temporary disk.
 
-vi.stubGlobal("__DEV__", false);
+Object.assign(globalThis, { __DEV__: false });
 
 interface Button {
   readonly text: string;
