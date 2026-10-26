@@ -521,6 +521,9 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(kindOf(restored.index, "movie").titles.some((title) => title.id === film.id)).toBe(
       false,
     );
+    expect(
+      kindOf(restored.index, "movie").titles.some((title) => title.id === String(otherMovie().id)),
+    ).toBe(false);
     expect(kindOf(restored.index, "series").titles.some((title) => title.id === series.id)).toBe(
       false,
     );

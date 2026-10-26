@@ -253,7 +253,10 @@ vi.mock("../src/titles-ui.tsx", async (importOriginal) => {
     },
   };
 });
-vi.mock("../src/watchlist.ts", () => ({ alignWatchlist: () => undefined }));
+vi.mock("../src/watchlist.ts", () => ({
+  alignWatchlist: () => undefined,
+  serveWatchlist: () => undefined,
+}));
 vi.mock("../src/header.tsx", () => ({ tabHref: () => "/" }));
 vi.mock("../src/loading.tsx", async () => {
   const { createElement, Fragment } = await import("react");
