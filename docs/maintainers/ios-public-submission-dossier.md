@@ -2,7 +2,7 @@
 
 Research for [approved project card 283673464][card], prepared 26 October 2026. **Partial preparation, with public-submission blockers open. This document does not establish legal clearance, candidate acceptance or permission to publish.**
 
-Source baseline: `ba1c7aa7a638eaae405a492f0a521ea2dbcbea01`, branch `283673464-ios-public-dossier`. Repository links below pin that commit unless a different revision is explicit. These are source findings, not observations of a newly signed or installed release. No app was run, service deployed, account changed, message sent, Store declaration published or binary accepted for this research.
+Source baseline: `ba1c7aa7a638eaae405a492f0a521ea2dbcbea01`. Repository links below pin that commit unless a different revision is explicit. Later `main` commits through `4457ad97` change only desktop files, none cited here. These are source findings, not observations of a newly signed or installed release. No app was run, service deployed, account changed, message sent, Store declaration published or binary accepted for this research.
 
 ## Decision summary
 
@@ -18,8 +18,6 @@ Source baseline: `ba1c7aa7a638eaae405a492f0a521ea2dbcbea01`, branch `283673464-i
 
 The project README and this card were read with `gh api graphql`. The approved parent spec was read from `.local/dossier/parent-spec.json`. The two supplied reports were read from `/tmp/mr-privacy-sheet.html` and `/tmp/mr-review-handoff.html`, and their raw PostPlan endpoints were fetched with curl. [Privacy answer sheet][prior-privacy]; [private-beta handoff][prior-handoff].
 
-Current checked source metadata says version 0.1.0, build 15 and `supportsTablet: true`. That is configuration to reconcile with the approved iPhone-only release scope, not evidence of an accepted public artifact. [App configuration][r-app-config].
-
 Those reports record:
 
 | Prior fact                                                                                                           | Treatment in this dossier                                                                                                                                              |
@@ -29,6 +27,8 @@ Those reports record:
 | Nine large and seven medium screenshots, selected Search artwork and replacement Header                              | Preserve all 16 screenshots, their order and both accepted creative choices. No asset change is proposed here. ACTIVE was a draft placement state, not Apple approval. |
 | Earlier age/listing facts and later references to current owner answers                                              | Preserve them; dated empty fields in the history are not proof that today's fields are empty. Verify current owner facts without overwriting them.                     |
 | Public draft had no selected build or submission at the last report                                                  | Historical report only. No current Store readback was performed here.                                                                                                  |
+
+Baseline `app.json` says version 0.1.0, build 15 and `supportsTablet: true`. That is configuration to reconcile with the approved iPhone-only release scope, not evidence of an accepted public artifact. [App configuration][r-app-config].
 
 Evidence terms used below: **source fact** means inspected code or a checked file; **vendor statement** means a public first-party document; **requirement** means licence/contract text or the approved scope; **inference/recommendation** means our application of those sources; **open** means evidence remains necessary. Legal licence text, Apple contracts and regulator guidance have different authority and are not interchangeable.
 
