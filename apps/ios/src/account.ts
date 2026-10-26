@@ -3,6 +3,7 @@ import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { AccountStatus } from "@mrstreamer/contracts/subscription";
 import type { Quality } from "@mrstreamer/contracts/library";
 import { chosenVariant, streamsToPlay } from "@mrstreamer/core/catalogue/variants";
+import { adultIn } from "@mrstreamer/core/adult";
 import type { LiveCatalogue, OnDemandCatalogue, Provider } from "@mrstreamer/core/provider";
 import { parseLogin, xtreamProvider, type XtreamAccount } from "@mrstreamer/core/xtream";
 import Constants from "expo-constants";
@@ -1237,6 +1238,17 @@ let chosen: string | null = null;
 
 /** Core chooses up to three streams for Automatic, or only the explicit or accepted pick. */
 function livePlan(channel: Channel, asked?: string): Plan | null {
+  const permitted = () => {
+    const member = members().find((each) => each.entry.id === channel.subscriptionId);
+    const latest = member && shownOf(member.live);
+    if (channel.adult) return false;
+    if (!latest) return true;
+    const adult = adultIn(latest.categories);
+    return !latest.channels.some(
+      (row) => adult(row) && channel.variants.some((variant) => variant.id === row.id),
+    );
+  };
+  if (!permitted()) return null;
   const picks = channelPicks(channel.subscriptionId);
   const { liveQuality } = getMediaPreferences();
   const [first, ...rest] = streamsToPlay(
@@ -1246,7 +1258,9 @@ function livePlan(channel: Channel, asked?: string): Plan | null {
   ).map((variant) => ({
     variantId: variant.id,
     open: async (signal: AbortSignal) => {
+      if (!permitted()) throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
       const stream = await sourceOf(channel.subscriptionId).provider.liveStream(variant.id, signal);
+      if (!permitted()) throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
       return {
         url: stream.url,
         container: stream.format === "hls" ? "m3u8" : "ts",

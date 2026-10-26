@@ -66,8 +66,9 @@ import type { ObservedFileTracks } from "./media-policy.ts";
 import { effectiveTitleLanguage, onMediaPreferences } from "./media-preferences.ts";
 import { currentSource, sourceOf, type Source } from "./sources.ts";
 import { store, useStore } from "./store.ts";
+import { titlePolicy } from "./content-policy.ts";
 import { serveViewing } from "./viewing.ts";
-import { alignWatchlist } from "./watchlist.ts";
+import { alignWatchlist, serveWatchlist } from "./watchlist.ts";
 
 // The movie and series catalogue of every saved subscription together, as the desktop builds it:
 // each provider's lists, which account.ts loads, indexed by core as one (names, versions gathered
@@ -349,7 +350,18 @@ function relist() {
     if (!same) shown.set({ lists: next, made: null });
     return;
   }
-  if (gone) shown.set({ lists: { kind: "loading" }, made: null });
+  const restricted =
+    now.made !== null &&
+    listed.some((next) => {
+      const before = now.listed.find((each) => each.subscriptionId === next.subscriptionId);
+      if (!before || before.catalogue === next.catalogue) return false;
+      return (["movie", "series"] as const).some((kind) =>
+        [...titlePolicy(next.catalogue)[kind]].some(
+          (id) => !titlePolicy(before.catalogue)[kind].has(id),
+        ),
+      );
+    });
+  if (gone || restricted) shown.set({ lists: { kind: "loading" }, made: null });
   else if (indexedEpoch === languageEpoch && sameLists(listed, indexed)) return;
   // Pending launch passwords reserve their possible title reads too. Those already read wait
   // for them until the app opens, including its deadline; late answers join normally after that.
@@ -374,7 +386,11 @@ async function index(listed: readonly Listed[], signal: AbortSignal, reading: Re
   // showed before stays meanwhile, and screens never index a kind while they draw.
   const wanted = () => !signal.aborted && currentLanguage(reading);
   const started = Date.now();
-  const index = await inTasks(indexSteps(listed, reading.language), wanted);
+  const permitted = listed.map((each) => ({
+    ...each,
+    catalogue: titlePolicy(each.catalogue).catalogue,
+  }));
+  const index = await inTasks(indexSteps(permitted, reading.language), wanted);
   if (!index) return;
   const took = Date.now() - started;
   const version = metadataVersion.get();
@@ -390,7 +406,7 @@ async function index(listed: readonly Listed[], signal: AbortSignal, reading: Re
   // Again if TMDB's metadata changed what they show while they were made.
   collect("movie");
   collect("series");
-  alignWatchlist(index);
+  alignWatchlist(index, listed);
   // TMDB's metadata for what is listed, the newest first, once the lists show.
   setTimeout(() => {
     if (wanted()) metadata.want(wantedOf(index), reading.language);
@@ -835,14 +851,29 @@ export async function detailsOf(
   title: Title,
   show?: (details: TitleDetails) => void,
 ): Promise<TitleDetails> {
+  const check = () => {
+    if (title.adult) throw new AppFailure({ kind: "title-not-found", titleId: title.id });
+    admitTitle({ kind: title.kind, ...ownedId(title) });
+  };
+  check();
   // A replaced language never answers through the old callback. A caller still waiting is
   // read again in the latest language, while login replacement keeps its existing authority.
   for (;;) {
     const reading = readingLanguage();
     try {
       const value = await underLogin(title.subscriptionId, (source) =>
-        detailsUnder(title, source, show, reading),
+        detailsUnder(
+          title,
+          source,
+          show &&
+            ((details) => {
+              check();
+              show(details);
+            }),
+          reading,
+        ),
       );
+      check();
       if (currentLanguage(reading)) return value;
     } catch (cause) {
       if (currentLanguage(reading)) throw cause;
@@ -947,6 +978,9 @@ export async function episodesOf(
   season: Season,
   show?: (episodes: readonly EpisodeDetails[]) => void,
 ): Promise<readonly EpisodeDetails[]> {
+  if (title.adult) throw new AppFailure({ kind: "title-not-found", titleId: title.id });
+  const check = () => admitTitle({ kind: "series", ...ownedId(title) });
+  check();
   const reading = readingLanguage();
   const { language } = reading;
   const { tmdbId } = title;
@@ -975,9 +1009,11 @@ export async function episodesOf(
     );
   if (show) {
     const now = await Promise.all(answers.map((answer) => answer.now));
+    check();
     if (stands() && currentLanguage(reading)) show(worked(now));
   }
   const told = await Promise.all(answers.map((answer) => answer.final));
+  check();
   if (!stands()) throw new AppFailure({ kind: "no-subscription" });
   if (!currentLanguage(reading)) return episodesOf(title, season, show);
   return worked(told);
@@ -996,6 +1032,26 @@ export type TitleFile = ProviderFile & {
   readonly observed?: (tracks: ObservedFileTracks) => void;
 };
 
+/** Recognised entries in the latest raw lists, even before their index is ready. */
+export function excludedTitle(
+  ref: TitleRef | ({ readonly kind: "series" } & OwnedId),
+): boolean | null {
+  const kind = ref.kind === "episode" ? "series" : ref.kind;
+  const id = ref.kind === "episode" ? ref.seriesId : ref.id;
+  const member = members().find((each) => each.entry.id === ref.subscriptionId);
+  const catalogue = member && shownOf(member.titles);
+  if (!catalogue) return null;
+  const policy = titlePolicy(catalogue);
+  return policy.known[kind].has(id) ? policy[kind].has(id) : null;
+}
+
+/** Action admission never trusts a restored reference or an older rendered index. */
+export function admitTitle(ref: TitleRef | ({ readonly kind: "series" } & OwnedId)): void {
+  if (excludedTitle(ref)) {
+    throw new AppFailure({ kind: "title-not-found", titleId: ref.id });
+  }
+}
+
 /**
  * Where a movie or an episode streams from, by the file type its provider lists: a movie's in the
  * lists or this run's answer for its details, an episode's in this run's answer for its series'.
@@ -1005,7 +1061,9 @@ export type TitleFile = ProviderFile & {
  * `observed`, kept under the login that looked them up.
  */
 export async function titleFile(ref: TitleRef, signal: AbortSignal): Promise<TitleFile> {
+  admitTitle(ref);
   const index = await listedIndex(ref.subscriptionId, signal);
+  admitTitle(ref);
   // The login that stands now, whichever was signed in while the lists were made again.
   const reading = sourceOf(ref.subscriptionId);
   const missing = new AppFailure({ kind: "title-not-found", titleId: ref.id });
@@ -1022,20 +1080,26 @@ export async function titleFile(ref: TitleRef, signal: AbortSignal): Promise<Tit
       const container = version.container;
       const name = version.name;
       const file = await reading.provider.titleFile("movie", ref.id, container, signal);
+      admitTitle(ref);
       if (name === undefined) return file;
       const row: FileRow = { kind: "movie", id: ref.id, name, container };
       return { ...file, observed: observing(ref.subscriptionId, reading, row) };
     }
     const { raw, source } = await answered({ ...title, ...ownedId(ref) });
-    return source.provider.titleFile("movie", ref.id, raw.container ?? "mp4", signal);
+    admitTitle(ref);
+    const file = await source.provider.titleFile("movie", ref.id, raw.container ?? "mp4", signal);
+    admitTitle(ref);
+    return file;
   }
   const series = { subscriptionId: ref.subscriptionId, id: ref.seriesId };
   const title = titleOf(index, "series", series);
   if (!title) throw missing;
   const { raw, source } = await answered({ ...title, ...series });
+  admitTitle(ref);
   const episode = raw.episodes.find((each) => each.id === ref.id);
   if (!episode) throw missing;
   const file = await source.provider.titleFile("episode", ref.id, episode.container, signal);
+  admitTitle(ref);
   const row: FileRow = {
     kind: "episode",
     id: episode.id,
@@ -1290,6 +1354,7 @@ onRoster(forgetLogins);
 // A login still signed in that may no longer keep its facts, or may again after a failed deletion:
 // they stay held, and screens read them again.
 onSavable(factsChanged);
+serveWatchlist(members);
 onRoster(relist);
 onReadingSaved(relist);
 relist();
