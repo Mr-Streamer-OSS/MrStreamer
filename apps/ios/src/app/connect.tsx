@@ -36,11 +36,9 @@ export default function Connect() {
       ) : (
         <>
           <View style={styles.brand}>
-            <Image
-              source={require("../../assets/mark.png") as number}
-              style={styles.mark}
-              accessible={false}
-            />
+            <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <Image source={require("../../assets/mark.png") as number} style={styles.mark} />
+            </View>
             <Text style={styles.brandName}>Mr. Streamer</Text>
           </View>
           <View style={styles.welcome}>
