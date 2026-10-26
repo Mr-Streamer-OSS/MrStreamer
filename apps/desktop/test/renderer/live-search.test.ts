@@ -122,7 +122,6 @@ async function guidePage(list: ChannelList = { kind: "all" }, channels = CHANNEL
     marked: [],
     sequence: 1,
   });
-  // In the page, as a field takes focus only there.
   const mounted = queryView(client);
   const { container } = mounted;
   await mounted.render(createElement(GuidePage, { active: true }));

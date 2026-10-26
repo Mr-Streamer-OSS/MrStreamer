@@ -132,7 +132,6 @@ async function section(
     loaded.catalogues ?? subscriptions.map((each) => catalogueOf(each)),
   );
   client.setQueryData(["ondemand", "status"], { lists: [], metadata: null });
-  // In the page, as a field takes focus only there.
   const mounted = queryView(client);
   const { container } = mounted;
   await mounted.render(createElement(SubscriptionSection));

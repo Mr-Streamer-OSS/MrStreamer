@@ -405,7 +405,7 @@ describe("the next-episode delay", () => {
     expect(await stored(dataDir)).not.toHaveProperty("nextEpisodeDelaySeconds");
   });
 
-  it.each([75, "future", { mode: "future" }, null])(
+  it.each([-1, 37.5, 75, "future", { mode: "future" }, null])(
     "preserves unsupported raw %j through writes, older readers and original-source forgetting",
     async (nextEpisodeDelaySeconds) => {
       const { dataDir, subscriptions, id } = await connected();

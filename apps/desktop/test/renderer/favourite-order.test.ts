@@ -116,7 +116,6 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
     sequence: 1,
   };
   client.setQueryData(["viewing"], viewing);
-  // In the page, as an element takes the focus only there.
   const view = queryView(client);
   const { container } = view;
   await view.render(createElement(GuidePage, { active: true }));

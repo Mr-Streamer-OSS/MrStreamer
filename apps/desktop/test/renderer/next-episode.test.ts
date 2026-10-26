@@ -366,7 +366,6 @@ describe("the end of an episode", () => {
 
   // Space plays the title everywhere else. Enter on a message's cross is in title-subtitles.test.ts.
   it("closes why the next episode didn't start with Space on its cross, and starts nothing", async () => {
-    document.body.append(container);
     await playToEnd(pilotHouse, "s1");
     const failed = ipc.hold("playback.openTitle");
     await wait(10_000);
@@ -386,7 +385,6 @@ describe("the end of an episode", () => {
     expect(text()).not.toContain("Didn't start");
     expect(titlePlayer.state().phase.kind).toBe("failed");
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Play");
-    container.remove();
   });
 
   it("ends the last episode of a series watched through by recording that every version of it is finished", async () => {

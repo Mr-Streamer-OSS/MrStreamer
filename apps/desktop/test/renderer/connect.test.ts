@@ -32,7 +32,6 @@ async function settled(step: () => unknown): Promise<void> {
 /** The screen in the page, for a first login. */
 async function connectScreen(): Promise<HTMLElement> {
   ipc.reset();
-  // In the page, as a field takes focus only there.
   const view = queryView(new QueryClient());
   await view.render(createElement(ConnectScreen));
   await settled(() => {});
