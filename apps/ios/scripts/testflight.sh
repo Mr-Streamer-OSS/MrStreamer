@@ -116,6 +116,12 @@ JS
       echo "No archive of this commit: run archive first. Rebase or source changes require a rebuild." >&2
       exit 1
     fi
+    manifest_paths=$(sed -E 's/^[[:xdigit:]]{64}  //' build/archive.sha256 | LC_ALL=C sort)
+    actual_paths=$(find "$archive" build/main.jsbundle.map build/configuration.json -type f -print | LC_ALL=C sort)
+    [[ $manifest_paths == "$actual_paths" ]] || {
+      echo "Archive contents differ from the receipt." >&2
+      exit 1
+    }
     shasum -a 256 -c build/archive.sha256 >/dev/null
     internal=false
     [[ $intent == internal-only ]] && internal=true

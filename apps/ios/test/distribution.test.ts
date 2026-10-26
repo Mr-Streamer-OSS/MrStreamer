@@ -13,6 +13,10 @@ afterEach(() => {
 /** Exercise the shipping CLI with a saved archive and an Xcode stand-in, without Apple access. */
 function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.ProcessEnv> } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ios-distribution-"));
+  const environment = { ...process.env };
+  for (const name of Object.keys(environment)) {
+    if (name.startsWith("EXPO_PUBLIC_")) delete environment[name];
+  }
   roots.push(root);
   mkdirSync(join(root, "scripts"));
   mkdirSync(join(root, "bin"));
@@ -48,11 +52,21 @@ function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.Proc
   commit("candidate");
   if (!options.fresh) {
     writeFileSync(join(root, "build/source.txt"), `${git("rev-parse", "HEAD")}\n`);
-    const bundle = "build/MrStreamer.xcarchive/main.jsbundle";
-    writeFileSync(join(root, bundle), "fixture archive bytes");
+    const files = {
+      "build/MrStreamer.xcarchive/main.jsbundle": "fixture archive bytes",
+      "build/main.jsbundle.map": "fixture map",
+      "build/configuration.json": "{}",
+    };
+    for (const [path, contents] of Object.entries(files)) {
+      writeFileSync(join(root, path), contents);
+    }
     writeFileSync(
       join(root, "build/archive.sha256"),
-      `${createHash("sha256").update("fixture archive bytes").digest("hex")}  ${bundle}\n`,
+      Object.entries(files)
+        .map(
+          ([path, contents]) => `${createHash("sha256").update(contents).digest("hex")}  ${path}\n`,
+        )
+        .join(""),
     );
   }
   return {
@@ -61,7 +75,7 @@ function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.Proc
         cwd: root,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...environment,
           PATH: `${join(root, "bin")}:${process.env["PATH"]}`,
           APPLE_TEAM_ID: "ABCDEFGHIJ",
           ...options.environment,
@@ -70,6 +84,8 @@ function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.Proc
     plist: () => readFileSync(join(root, "build/called.plist"), "utf8"),
     changeBundle: () =>
       writeFileSync(join(root, "build/MrStreamer.xcarchive/main.jsbundle"), "changed bytes"),
+    addResource: () =>
+      writeFileSync(join(root, "build/MrStreamer.xcarchive/added.txt"), "unrecorded resource"),
     orphanMap: () => writeFileSync(join(root, "build/main.jsbundle.map"), "retained map"),
     map: () => readFileSync(join(root, "build/main.jsbundle.map"), "utf8"),
     changeSource: () => {
@@ -107,7 +123,21 @@ it("requires an explicit intent for export and upload", () => {
 it("refuses an archive changed after its source binding", () => {
   const c = candidate();
   c.changeBundle();
-  expect(c.run("export", "app-store").status).not.toBe(0);
+  const result = c.run("export", "app-store");
+  expect(result.status).not.toBe(0);
+  expect(result.stderr).toContain("did NOT match");
+  expect(() => c.plist()).toThrow();
+});
+
+it.each(["export", "upload"])("refuses added archive resources before %s", (command) => {
+  const c = candidate({
+    environment: { ASC_KEY_PATH: "/fixture/key", ASC_KEY_ID: "fixture", ASC_ISSUER_ID: "fixture" },
+  });
+  c.addResource();
+  const result = c.run(command, "app-store");
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain("Archive contents differ from the receipt");
+  expect(() => c.plist()).toThrow();
 });
 
 it("requires a new archive when committed source changes", () => {
