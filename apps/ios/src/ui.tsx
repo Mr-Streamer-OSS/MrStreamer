@@ -225,6 +225,7 @@ export function TextButton({
   destructive,
   testID,
   accessibilityLabel,
+  primary,
 }: {
   label: string;
   accessibilityLabel?: string;
@@ -232,6 +233,7 @@ export function TextButton({
   disabled?: boolean;
   destructive?: boolean;
   testID?: string;
+  primary?: boolean;
 }) {
   return (
     <Pressable
@@ -240,15 +242,35 @@ export function TextButton({
       accessibilityState={{ disabled: disabled ?? false }}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [styles.textButton, (pressed || disabled) && styles.pressed]}
+      style={({ pressed }) => [
+        styles.textButton,
+        primary && styles.primaryButton,
+        (pressed || disabled) && styles.pressed,
+      ]}
       testID={testID}
     >
-      <Text style={[styles.textButtonLabel, destructive && styles.destructive]}>{label}</Text>
+      <Text
+        style={[
+          styles.textButtonLabel,
+          primary && styles.primaryLabel,
+          destructive && styles.destructive,
+        ]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  primaryButton: {
+    minHeight: 52,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryLabel: { color: "#000000", fontWeight: "600" },
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16 },
   starred: { paddingRight: 4 },
   main: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, alignSelf: "stretch" },

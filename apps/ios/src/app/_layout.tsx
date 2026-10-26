@@ -1,5 +1,5 @@
 import { DarkTheme, Stack, ThemeProvider, usePathname } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRoster } from "../account.ts";
 import { startDownloads } from "../downloads.ts";
@@ -8,6 +8,7 @@ import { holdLaunchScreen, StartupScreen } from "../startup-screen.tsx";
 import { startUp, useStartup } from "../startup.ts";
 import { onTelemetryScreen, startTelemetry } from "../telemetry/index.ts";
 import { WatchLayer } from "../watch.tsx";
+import { requestStatisticsChoice } from "../statistics-consent.ts";
 
 // The app: Connect until a subscription is saved, then the four tabs, with Search over them.
 // Without one, Connect also opens Downloads (`offline`), as copies play with no provider. Watch
@@ -33,6 +34,7 @@ export default function RootLayout() {
   const roster = useRoster();
   const startup = useStartup();
   const pathname = usePathname();
+  const asked = useRef(false);
   useEffect(() => {
     startTelemetry();
     void startUp();
@@ -44,6 +46,13 @@ export default function RootLayout() {
     onTelemetryScreen(pathname);
   }, [pathname]);
   const opening = startup.kind === "opening";
+  const restored = roster.kind === "ready" && roster.members.length > 0;
+  useEffect(() => {
+    if (!opening && restored && !asked.current) {
+      asked.current = true;
+      requestStatisticsChoice(() => {});
+    }
+  }, [opening, restored]);
   return (
     <View style={styles.black}>
       {roster.kind === "ready" ? <App signedIn={roster.members.length > 0} /> : null}
