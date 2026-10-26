@@ -1,10 +1,10 @@
+import { createRoot, document, type Root } from "./dom.ts";
 import * as React from "react";
 import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import { indexCatalogue, kindOf } from "@mrstreamer/core/ondemand/catalogue";
 import { collections, type Collections } from "@mrstreamer/core/ondemand/collections";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { Window } from "happy-dom";
 import type {
   LiveCatalogue,
   ProviderChannel,
@@ -21,14 +21,6 @@ import { native } from "./native-files.ts";
 // live-browse.test.ts does, over the real viewing record (viewing.ts), whose file is written to
 // the files stand-in (native-files.ts), and a library library.ts builds from two fake providers
 // whose stream ids collide. Playback, navigation and the system's alerts are recorded.
-
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document });
-const { document } = window;
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 interface Shown {
   readonly title: string;

@@ -1,5 +1,5 @@
+import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
-import { Window } from "happy-dom";
 import { mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -7,13 +7,7 @@ import type { Member } from "../src/account.ts";
 
 // The real Settings route rendered over native view/sheet doubles and a temporary disk.
 
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document, __DEV__: false });
-const { document, Event } = window;
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+vi.stubGlobal("__DEV__", false);
 
 interface Button {
   readonly text: string;

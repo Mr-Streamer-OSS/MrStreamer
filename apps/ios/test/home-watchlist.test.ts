@@ -1,8 +1,8 @@
+import { createRoot, document, type Root } from "./dom.ts";
 import * as React from "react";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { indexCatalogue, kindOf } from "@mrstreamer/core/ondemand/catalogue";
 import type { OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider";
-import { Window } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Member } from "../src/account.ts";
 import type { TitleLists } from "../src/titles.ts";
@@ -13,14 +13,6 @@ import type { TitleLists } from "../src/titles.ts";
 // real watchlist owner, whose file is written to the files stand-in (native-files.ts), and lists
 // indexed by core as the app's are. What else Home shows (the Stage, On now, Favourites, Movies for
 // you) stands in as nothing; how each provider stands is set by each test.
-
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document });
-const { document } = window;
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const scenario = vi.hoisted(() => ({
   members: [] as Member[],

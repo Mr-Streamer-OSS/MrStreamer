@@ -1,7 +1,7 @@
+import { createRoot, window } from "./dom.ts";
 import { nativePlayer } from "./native-player.ts";
 import * as React from "react";
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
-import { Window } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue } from "../src/account.ts";
 import type { Playing } from "../src/playback.ts";
@@ -16,13 +16,6 @@ import type { Playing } from "../src/playback.ts";
 // the iPhone can. The Swift itself is not run here. The star of a channel playing saves to the
 // real viewing record, over the files stand-in (native-files.ts), with the channels Live shows
 // set by each test.
-
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document });
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** One stand-in VideoView, as the test drives it. */
 interface NativeView {

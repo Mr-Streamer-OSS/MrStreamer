@@ -1,7 +1,7 @@
+import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { Window } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Settings' legal rows and Licences, as the viewer meets them: the privacy policy opening in the
@@ -10,13 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // DOM on a happy-dom window, as settings-removal.test.ts does. The last tests hold the committed
 // inventory to the inputs it was generated from that CI has without the iOS install.
 
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document, __DEV__: false });
-const { document, Event } = window;
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+vi.stubGlobal("__DEV__", false);
 
 const scenario = vi.hoisted(() => ({
   tab: 0,

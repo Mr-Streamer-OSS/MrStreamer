@@ -1,5 +1,5 @@
+import { createRoot, document, type Root } from "./dom.ts";
 import * as React from "react";
-import { Window } from "happy-dom";
 import type { LiveCatalogue, ProviderChannel } from "@mrstreamer/core/provider";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue, Member } from "../src/account.ts";
@@ -12,14 +12,6 @@ import type { SavedState } from "../src/storage.ts";
 // tab and clears, the tab kept on return, and a category's own list. The real screen runs with
 // React DOM on a happy-dom window, as loading-feedback.test.ts does, over a library library.ts
 // builds from two fake providers; saved state, playback and navigation are recorded.
-
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document });
-const { document } = window;
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 type Sheet = { options: string[]; choose: (index: number) => void };
 

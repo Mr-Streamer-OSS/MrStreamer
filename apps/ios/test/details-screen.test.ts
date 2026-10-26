@@ -1,3 +1,4 @@
+import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import type { Download } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
@@ -5,7 +6,6 @@ import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { byIds, indexCatalogue, type IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
-import { Window } from "happy-dom";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,14 +19,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // views stand in as plain elements, menus answer as the test picks, Play records the version it
 // plays and the downloads owner records what it was asked. The version picked is kept by the
 // app's own state owner (storage.ts) over real files (`native-files.ts`).
-
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document });
-const { document, Event } = window;
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const scenario = vi.hoisted(() => ({
   lists: { kind: "idle" } as { kind: "idle" } | { kind: "ready"; index: unknown },
@@ -299,6 +291,7 @@ interface App {
 const launched: App = { React, createRoot, DetailsScreen };
 
 /** The app's modules as a relaunch starts them, over the same files, with state.json read. */
+const REACT_DOM = "react-dom/client";
 async function relaunch(): Promise<App> {
   vi.resetModules();
   const fresh = (await import(REACT_DOM)) as { createRoot: typeof createRoot };

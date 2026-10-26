@@ -1,8 +1,9 @@
+import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { LiveCatalogue, OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider";
-import { Window, type HTMLInputElement } from "happy-dom";
+import type { HTMLInputElement } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue, Member } from "../src/account.ts";
 import { buildLibrary, type Channel, type Library } from "../src/library.ts";
@@ -14,14 +15,6 @@ import { buildLibrary, type Channel, type Library } from "../src/library.ts";
 // from library.ts and movies and series from the real title owner (titles.ts): each test gives
 // the subscriptions' lists, which it indexes as the app does, and TMDB's names stand in for its
 // metadata store. Nothing here asks a provider for anything; a request would show in `did`.
-
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document });
-const { document, Event } = window;
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const scenario = vi.hoisted(() => ({
   dismissed: 0,

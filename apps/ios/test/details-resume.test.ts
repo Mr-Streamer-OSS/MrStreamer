@@ -1,3 +1,4 @@
+import { createRoot, document, Event } from "./dom.ts";
 import { nativePlayer } from "./native-player.ts";
 import * as React from "react";
 import type { Episode, SeriesDetails } from "@mrstreamer/contracts/ondemand";
@@ -5,7 +6,6 @@ import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type { SeriesViewing, TitleProgress } from "@mrstreamer/contracts/viewing";
 import { byIds, indexCatalogue, type IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
-import { Window } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Resume pressed in a title's details waits for the saves before it and for the record's answer.
@@ -15,14 +15,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // details-screen.test.ts does; the record's reads answer when the test says, the provider's file
 // records which version opened, and the native player is a stand-in. Nothing here proves
 // AVPlayer or an iPhone.
-
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document });
-const { document, Event } = window;
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

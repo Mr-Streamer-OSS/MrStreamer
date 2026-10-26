@@ -1,6 +1,6 @@
+import { createRoot, window, document, type Root } from "./dom.ts";
 import { nativePlayer } from "./native-player.ts";
 import * as React from "react";
-import { Window } from "happy-dom";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Live's Find countries or categories as the viewer meets it, over the app's own owners: account.ts
@@ -10,14 +10,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 // recorded and acted out: a push draws the screen pushed, Back the one under it, which stays as
 // it was. The native player records what it is given, and every request to a panel is counted, so
 // a test sees that finding and opening plays nothing and asks nothing of a provider.
-
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document });
-const { document } = window;
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const scenario = vi.hoisted(() => ({
   keychain: new Map<string, string>(),

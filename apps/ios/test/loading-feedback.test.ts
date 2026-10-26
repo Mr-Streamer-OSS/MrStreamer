@@ -1,8 +1,8 @@
+import { createRoot, document, type Root } from "./dom.ts";
 import * as React from "react";
 import { indexCatalogue, kindOf } from "@mrstreamer/core/ondemand/catalogue";
 import type { LiveCatalogue, ProviderTitle, OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { buildLibrary } from "../src/library.ts";
-import { Window } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue, Member } from "../src/account.ts";
 import type { Channel, Library } from "../src/library.ts";
@@ -14,14 +14,6 @@ import type { TitleLists } from "../src/titles.ts";
 // Movies tab and a group of shapes run as they are, with React DOM on a happy-dom window, as
 // search-screen.test.ts does; React Native's views stand in as plain elements, a view reports a
 // width when it lays out, and Animated records the loops it is asked to run.
-
-const REACT_DOM = "react-dom/client";
-const window = new Window();
-Object.assign(globalThis, { window, document: window.document });
-const { document } = window;
-type Root = { render(node: unknown): void; unmount(): void };
-const { createRoot } = (await import(REACT_DOM)) as { createRoot(container: object): Root };
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const scenario = vi.hoisted(() => ({
   members: [] as Member[],
