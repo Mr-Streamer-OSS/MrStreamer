@@ -723,8 +723,8 @@ their hashes and all artifacts in ignored private storage. No provider login bel
 Run `pnpm check`, both iOS typechecks, real Metro export and affected contract tests first.
 
 `archive` prebuilds a Release device app with embedded JavaScript/Hermes and its composed source
-map, checks the licence inventory against installed pods, then records committed source and file
-hashes. An existing archive, map or receipt is preserved. Export verifies those hashes and refuses another source
+map, checks the licence inventory against installed pods, retains matching FFmpeg dSYMs from the
+exact linked build outputs, then records committed source and file hashes. An existing archive, map or receipt is preserved. Export verifies those hashes and refuses another source
 commit, including a rebase. `export` always saves locally with `method: app-store-connect` and
 `destination: export`; it cannot upload. Both explicit intents preserve version/build. A local
 export is not Apple processing, App Store eligibility or public release acceptance.

@@ -93,6 +93,12 @@ JS
       echo "The archive needs its embedded JavaScript and matching source map." >&2
       exit 1
     fi
+    # Installed FFmpeg frameworks are stripped; the exact linked build outputs still carry
+    # debug maps to the objects. Retain their matching symbols before the workspace is cleaned.
+    for lib in libavcodec libavformat libavutil; do
+      xcrun dsymutil build/ffmpeg/src-iphoneos/"$lib"/"$lib".*.dylib \
+        -o "$archive/dSYMs/$lib.framework.dSYM"
+    done
     [[ $(git rev-parse HEAD) == "$source" && -z "$(git status --porcelain)" ]] || {
       echo "Source changed during the archive; candidate not accepted." >&2
       exit 1
