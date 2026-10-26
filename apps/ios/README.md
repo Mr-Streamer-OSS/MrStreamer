@@ -741,7 +741,7 @@ phone/accessibility, old-beta upgrades and download acceptance remain independen
 
 Apple's [SDK minimum](https://developer.apple.com/news/?id=ueeok6yw) requires iOS SDK 26 or later
 for uploads from 28 April 2026. Its [15 October release notes](https://developer.apple.com/help/app-store-connect/release-notes/)
-accept Xcode 27.1 / iOS 27.1 for App Store uploads. The managed Mac has Xcode 27.1 (27A9275).
+accept Xcode 27.1 / iOS 27.1 for App Store uploads. Check the actual managed toolchain before building.
 Keep the pinned Expo 58 / RN 0.88 release candidate / Hermes inputs; no SDK upgrade is implied.
 The observed minimum OS remains a candidate artifact fact, not the SDK version.
 

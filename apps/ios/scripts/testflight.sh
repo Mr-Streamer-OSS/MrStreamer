@@ -40,6 +40,8 @@ case "$command" in
     CI=1 npx expo prebuild --platform ios --clean
     # Hold the Settings inventory to the actual JavaScript packages and native pods.
     node scripts/licences.ts --check --pods ios/Podfile.lock
+    # A failed previous attempt must not supply this archive's map.
+    rm -f build/main.jsbundle.map
     # Keep the composed Metro/Hermes map with the exact bundle from this archive.
     xcodebuild archive -workspace ios/MrStreamer.xcworkspace -scheme MrStreamer \
       -configuration Release -destination generic/platform=iOS -archivePath "$archive" \
@@ -55,9 +57,8 @@ case "$command" in
       echo "Source changed during the archive; candidate not accepted." >&2
       exit 1
     }
-    printf '%s\n' "$source" >build/source.txt
-    find "$archive" -type f -exec shasum -a 256 {} \; >build/archive.sha256
-    shasum -a 256 build/main.jsbundle.map >>build/archive.sha256
+    echo "$source" >build/source.txt
+    find "$archive" build/main.jsbundle.map -type f -exec shasum -a 256 {} + >build/archive.sha256
     echo "commit $source"
     for key in CFBundleIdentifier CFBundleShortVersionString CFBundleVersion MinimumOSVersion UIDeviceFamily; do
       /usr/libexec/PlistBuddy -c "Print :$key" "$app/Info.plist"
@@ -71,16 +72,14 @@ case "$command" in
     shasum -a 256 -c build/archive.sha256 >/dev/null
     internal=false
     [[ $intent == internal-only ]] && internal=true
-    destination=export
-    [[ $command == upload ]] && destination=upload
-    # Export never uploads. Both destinations preserve the archived version/build, with an
-    # intentional internal-only restriction or regular App Store distribution eligibility intent.
+    # The command is the destination: export saves locally and never uploads. Both keep the
+    # archived version and build; internal-only limits the build to internal TestFlight testers.
     cat >build/ExportOptions.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>method</key><string>app-store-connect</string>
-  <key>destination</key><string>$destination</string>
+  <key>destination</key><string>$command</string>
   <key>teamID</key><string>$APPLE_TEAM_ID</string>
   <key>signingStyle</key><string>manual</string>
   <key>signingCertificate</key><string>Apple Distribution</string>
@@ -92,13 +91,14 @@ case "$command" in
   <key>testFlightInternalTestingOnly</key><$internal/>
 </dict></plist>
 PLIST
-    auth=()
+    # Never empty: macOS's bash 3.2 treats an empty "${array[@]}" as unbound under set -u.
+    args=(-exportArchive -archivePath "$archive" -exportOptionsPlist build/ExportOptions.plist
+      -exportPath "build/$command-$intent")
     if [[ $command == upload ]]; then
-      auth=(-authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" \
+      args+=(-authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID"
         -authenticationKeyIssuerID "$ASC_ISSUER_ID")
     fi
-    xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist build/ExportOptions.plist \
-      -exportPath "build/$command-$intent" "${auth[@]}" | xcbeautify
+    xcodebuild "${args[@]}" | xcbeautify
     echo "$command intent=$intent source=$(cat build/source.txt); Apple processing/eligibility requires separate readback."
     ;;
 esac
