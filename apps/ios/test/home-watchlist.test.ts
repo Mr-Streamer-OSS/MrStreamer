@@ -20,21 +20,7 @@ const scenario = vi.hoisted(() => ({
   did: [] as string[],
 }));
 
-vi.mock("react-native", async () => {
-  const { createElement } = await import("react");
-  type Props = { children?: React.ReactNode; testID?: string };
-  const box = ({ children, testID }: Props) =>
-    createElement("div", { "data-testid": testID }, children);
-  return {
-    View: box,
-    ScrollView: box,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Pressable: ({ children, testID, onPress }: Props & { onPress?: () => void }) =>
-      createElement("button", { "data-testid": testID, onClick: onPress }, children),
-    ActionSheetIOS: { showActionSheetWithOptions: () => undefined },
-    StyleSheet: { create: <T>(styles: T) => styles, absoluteFill: {}, hairlineWidth: 1 },
-  };
-});
+vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
 vi.mock("expo-router", () => ({
   useIsFocused: () => true,
   router: { push: (href: string) => scenario.did.push(`push ${href}`) },

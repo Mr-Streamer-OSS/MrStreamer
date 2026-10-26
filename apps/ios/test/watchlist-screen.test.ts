@@ -36,69 +36,24 @@ const scenario = vi.hoisted(() => ({
   did: [] as string[],
 }));
 
-vi.mock("react-native", async () => {
-  const { createElement, Fragment } = await import("react");
-  type Props = { children?: React.ReactNode; testID?: string };
-  const box = ({ children, testID }: Props) =>
-    createElement("div", { "data-testid": testID }, children);
-  return {
-    View: box,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Pressable: ({
-      children,
-      testID,
-      onPress,
-      accessibilityLabel,
-    }: Props & { onPress?: () => void; accessibilityLabel?: string }) =>
-      createElement(
-        "button",
-        { "data-testid": testID, "aria-label": accessibilityLabel, onClick: onPress },
-        children,
-      ),
-    FlatList: <T>({
-      data,
-      renderItem,
-      keyExtractor,
-      ListHeaderComponent,
-      ListEmptyComponent,
-      testID,
-    }: {
-      data: readonly T[];
-      renderItem: (info: { item: T }) => React.ReactNode;
-      keyExtractor: (item: T) => string;
-      ListHeaderComponent?: React.ReactNode;
-      ListEmptyComponent?: React.ReactNode;
-      testID?: string;
-    }) =>
-      createElement(
-        "div",
-        { "data-testid": testID },
-        ListHeaderComponent,
-        data.length === 0
-          ? ListEmptyComponent
-          : data.map((item) =>
-              createElement(Fragment, { key: keyExtractor(item) }, renderItem({ item })),
-            ),
-      ),
-    ActionSheetIOS: {
-      showActionSheetWithOptions: (
-        { title, options }: { title?: string; options: string[] },
-        callback: (index: number) => void,
-      ) =>
-        scenario.sheets.push({
-          title,
-          options,
-          choose: (label) => React.act(() => callback(options.indexOf(label))),
-        }),
-    },
-    Alert: {
-      alert: (title: string, message: string, buttons: { text: string; onPress?: () => void }[]) =>
-        scenario.alerts.push({ title, message, buttons }),
-    },
-    StyleSheet: { create: <T>(styles: T) => styles, hairlineWidth: 1 },
-    useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }),
-  };
-});
+vi.mock("react-native", async () => ({
+  ...(await import("./react-native.ts")).reactNative,
+  ActionSheetIOS: {
+    showActionSheetWithOptions: (
+      { title, options }: { title?: string; options: string[] },
+      callback: (index: number) => void,
+    ) =>
+      scenario.sheets.push({
+        title,
+        options,
+        choose: (label) => React.act(() => callback(options.indexOf(label))),
+      }),
+  },
+  Alert: {
+    alert: (title: string, message: string, buttons: { text: string; onPress?: () => void }[]) =>
+      scenario.alerts.push({ title, message, buttons }),
+  },
+}));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("../src/files.ts", async (original) => {

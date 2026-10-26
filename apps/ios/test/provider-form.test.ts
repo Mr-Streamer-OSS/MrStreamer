@@ -29,33 +29,7 @@ vi.mock("../src/account.ts", () => ({ add: held("add"), update: held("update") }
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 // Channel rows draw their star with an SF Symbol.
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
-vi.mock("react-native", async () => {
-  const { createElement } = await import("react");
-  type Props = { children?: React.ReactNode; testID?: string };
-  const box = ({ children, testID }: Props) =>
-    createElement("div", { "data-testid": testID }, children);
-  return {
-    View: box,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Pressable: ({
-      children,
-      disabled,
-      onPress,
-    }: Props & { disabled?: boolean; onPress: () => void }) =>
-      createElement("button", { disabled, onClick: onPress }, children),
-    TextInput: ({
-      testID,
-      value,
-      onChangeText,
-    }: Props & { value: string; onChangeText: (value: string) => void }) =>
-      createElement("input", {
-        "data-testid": testID,
-        value,
-        onChange: (event: { target: { value: string } }) => onChangeText(event.target.value),
-      }),
-    StyleSheet: { create: <T>(styles: T) => styles },
-  };
-});
+vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
 
 const { ProviderForm } = await import("../src/provider-form.tsx");
 

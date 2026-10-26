@@ -39,84 +39,23 @@ const scenario = vi.hoisted(() => ({
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("react-native", async () => {
-  const { createElement, Fragment, isValidElement, useEffect } = await import("react");
-  type Props = { children?: React.ReactNode; testID?: string; accessibilityLabel?: string };
-  const box = ({ children, testID, accessibilityLabel }: Props) =>
-    createElement("div", { "data-testid": testID, "aria-label": accessibilityLabel }, children);
-  const View = ({
-    onLayout,
-    ...props
-  }: Props & {
-    onLayout?: (event: { nativeEvent: { layout: { width: number; height: number } } }) => void;
-  }) => {
-    useEffect(() => onLayout?.({ nativeEvent: { layout: { width: 390, height: 600 } } }), []);
-    return box(props);
-  };
-  const node = (part: unknown) =>
-    part === undefined || part === null
-      ? null
-      : isValidElement(part)
-        ? part
-        : createElement(part as React.ComponentType);
+  const { useEffect } = await import("react");
+  const { box, reactNative } = await import("./react-native.ts");
   return {
-    View,
-    ScrollView: box,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Image: () => null,
-    Pressable: ({
-      children,
-      testID,
-      onPress,
-      disabled,
-      accessibilityLabel,
-    }: Props & { onPress?: () => void; disabled?: boolean }) =>
-      createElement(
-        "button",
-        { "data-testid": testID, "aria-label": accessibilityLabel, disabled, onClick: onPress },
-        typeof children === "function" ? null : children,
-      ),
-    FlatList: <T>({
-      data,
-      renderItem,
-      ListHeaderComponent,
-      ListFooterComponent,
-      ListEmptyComponent,
-      testID,
-    }: {
-      data: readonly T[];
-      renderItem: (info: { item: T; index: number }) => React.ReactNode;
-      ListHeaderComponent?: unknown;
-      ListFooterComponent?: unknown;
-      ListEmptyComponent?: unknown;
-      testID?: string;
-    }) =>
-      createElement(
-        "div",
-        { "data-testid": testID },
-        node(ListHeaderComponent),
-        data.length === 0
-          ? node(ListEmptyComponent)
-          : data.map((item, index) =>
-              createElement(Fragment, { key: index }, renderItem({ item, index })),
-            ),
-        node(ListFooterComponent),
-      ),
-    TextInput: () => null,
-    ActionSheetIOS: { showActionSheetWithOptions: () => undefined },
+    ...reactNative,
+    /** A view, which lays out once, as a phone's screen. */
+    View: ({
+      onLayout,
+      ...props
+    }: Parameters<typeof box>[0] & {
+      onLayout?: (event: { nativeEvent: { layout: { width: number; height: number } } }) => void;
+    }) => {
+      useEffect(() => onLayout?.({ nativeEvent: { layout: { width: 390, height: 600 } } }), []);
+      return box(props);
+    },
     Alert: {
       alert: (title: string, _message: string, buttons?: Shown["buttons"]) =>
         void scenario.alerts.push({ title, ...(buttons ? { buttons } : {}) }),
-    },
-    StyleSheet: { create: <T>(styles: T) => styles, hairlineWidth: 1, absoluteFill: {} },
-    useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }),
-    DynamicColorIOS: () => "#000000",
-    AppState: { currentState: "active", addEventListener: () => undefined },
-    AccessibilityInfo: {
-      isReduceTransparencyEnabled: async () => false,
-      isReduceMotionEnabled: async () => false,
-      addEventListener: () => undefined,
-      announceForAccessibility: () => undefined,
-      announceForAccessibilityWithOptions: () => undefined,
     },
   };
 });

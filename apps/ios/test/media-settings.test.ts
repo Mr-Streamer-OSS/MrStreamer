@@ -26,36 +26,22 @@ const scenario = vi.hoisted(() => ({
   alerts: [] as Shown[],
 }));
 
-vi.mock("react-native", async () => {
-  const { createElement } = await import("react");
-  type Props = { children?: React.ReactNode; testID?: string };
-  const box = ({ children, testID }: Props) =>
-    createElement("div", { "data-testid": testID }, children);
-  return {
-    View: box,
-    ScrollView: box,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Image: () => null,
-    Switch: () => null,
-    Linking: { openURL: async () => undefined },
-    Pressable: ({ children, testID, onPress }: Props & { onPress: () => void }) =>
-      createElement("button", { "data-testid": testID, onClick: onPress }, children),
-    StyleSheet: { create: <T>(styles: T) => styles, hairlineWidth: 1 },
-    ActionSheetIOS: {
-      showActionSheetWithOptions: (
-        { options }: { options: readonly string[] },
-        pick: (index: number) => void,
-      ) => {
-        scenario.sheet = { options, pick };
-      },
+vi.mock("react-native", async () => ({
+  ...(await import("./react-native.ts")).reactNative,
+  ActionSheetIOS: {
+    showActionSheetWithOptions: (
+      { options }: { options: readonly string[] },
+      pick: (index: number) => void,
+    ) => {
+      scenario.sheet = { options, pick };
     },
-    Alert: {
-      alert: (title: string, message: string, buttons?: readonly Button[]) => {
-        scenario.alerts.push({ title, message, ...(buttons ? { buttons } : {}) });
-      },
+  },
+  Alert: {
+    alert: (title: string, message: string, buttons?: readonly Button[]) => {
+      scenario.alerts.push({ title, message, ...(buttons ? { buttons } : {}) });
     },
-  };
-});
+  },
+}));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
 vi.mock("expo-router", () => ({
   router: { push: () => undefined },

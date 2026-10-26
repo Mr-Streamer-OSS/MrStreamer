@@ -38,34 +38,17 @@ const scenario = vi.hoisted(() => ({
   download: undefined,
 }));
 
-vi.mock("react-native", async () => {
-  const { createElement } = await import("react");
-  type Props = { children?: React.ReactNode; testID?: string };
-  const box = ({ children, testID }: Props) =>
-    createElement("div", { "data-testid": testID }, children);
-  return {
-    View: box,
-    ScrollView: box,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Pressable: ({
-      children,
-      testID,
-      disabled,
-      onPress,
-    }: Props & { disabled?: boolean; onPress: () => void }) =>
-      createElement("button", { "data-testid": testID, disabled, onClick: onPress }, children),
-    StyleSheet: { create: <T>(styles: T) => styles, absoluteFill: {} },
-    Alert: { alert: () => undefined },
-    ActionSheetIOS: {
-      showActionSheetWithOptions: (
-        { options }: { options: readonly string[] },
-        pick: (index: number) => void,
-      ) => {
-        scenario.menu = { options, pick };
-      },
+vi.mock("react-native", async () => ({
+  ...(await import("./react-native.ts")).reactNative,
+  ActionSheetIOS: {
+    showActionSheetWithOptions: (
+      { options }: { options: readonly string[] },
+      pick: (index: number) => void,
+    ) => {
+      scenario.menu = { options, pick };
     },
-  };
-});
+  },
+}));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("../src/glass.tsx", async () => {

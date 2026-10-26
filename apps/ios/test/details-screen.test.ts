@@ -62,40 +62,24 @@ const scenario = vi.hoisted(() => ({
     new Promise(() => undefined),
 }));
 
-vi.mock("react-native", async () => {
-  const { createElement } = await import("react");
-  type Props = { children?: React.ReactNode; testID?: string };
-  const box = ({ children, testID }: Props) =>
-    createElement("div", { "data-testid": testID }, children);
-  return {
-    View: box,
-    ScrollView: box,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Pressable: ({
-      children,
-      testID,
-      disabled,
-      onPress,
-    }: Props & { disabled?: boolean; onPress: () => void }) =>
-      createElement("button", { "data-testid": testID, disabled, onClick: onPress }, children),
-    StyleSheet: { create: <T>(styles: T) => styles, absoluteFill: {} },
-    Alert: {
-      alert: (
-        title: string,
-        message?: string,
-        buttons: readonly { text: string; onPress?: () => void }[] = [],
-      ) => scenario.alerts.push({ title, message, buttons }),
+vi.mock("react-native", async () => ({
+  ...(await import("./react-native.ts")).reactNative,
+  Alert: {
+    alert: (
+      title: string,
+      message?: string,
+      buttons: readonly { text: string; onPress?: () => void }[] = [],
+    ) => scenario.alerts.push({ title, message, buttons }),
+  },
+  ActionSheetIOS: {
+    showActionSheetWithOptions: (
+      { title, message, options }: { title?: string; message?: string; options: string[] },
+      pick: (index: number) => void,
+    ) => {
+      scenario.menu = { title, message, options, pick };
     },
-    ActionSheetIOS: {
-      showActionSheetWithOptions: (
-        { title, message, options }: { title?: string; message?: string; options: string[] },
-        pick: (index: number) => void,
-      ) => {
-        scenario.menu = { title, message, options, pick };
-      },
-    },
-  };
-});
+  },
+}));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("../src/glass.tsx", async () => {

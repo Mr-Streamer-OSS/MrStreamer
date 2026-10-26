@@ -143,33 +143,18 @@ vi.mock("expo-video", async () => {
     },
   };
 });
-vi.mock("react-native", async () => {
-  const { createElement } = await import("react");
-  type Props = { children?: React.ReactNode; testID?: string; onPress?: () => void };
-  const box = ({ children, testID }: Props) =>
-    createElement("div", { "data-testid": testID }, children);
-  return {
-    View: box,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Pressable: ({ children, testID, onPress }: Props) =>
-      createElement("button", { "data-testid": testID, onClick: onPress }, children),
-    StatusBar: () => null,
-    Image: () => null,
-    StyleSheet: { create: <T>(styles: T) => styles, absoluteFill: {} },
-    Keyboard: { dismiss: () => undefined },
-    PanResponder: { create: () => ({ panHandlers: {} }) },
-    ActionSheetIOS: {
-      showActionSheetWithOptions: (
-        options: { options: readonly string[]; message?: string },
-        pick: (index: number) => void,
-      ) => {
-        native.sheets.push({ ...options, pick });
-      },
+vi.mock("react-native", async () => ({
+  ...(await import("./react-native.ts")).reactNative,
+  ActionSheetIOS: {
+    showActionSheetWithOptions: (
+      options: { options: readonly string[]; message?: string },
+      pick: (index: number) => void,
+    ) => {
+      native.sheets.push({ ...options, pick });
     },
-    Alert: { alert: (title: string, message: string) => void native.alerts.push([title, message]) },
-    useWindowDimensions: () => ({ width: 390, height: 844 }),
-  };
-});
+  },
+  Alert: { alert: (title: string, message: string) => void native.alerts.push([title, message]) },
+}));
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));

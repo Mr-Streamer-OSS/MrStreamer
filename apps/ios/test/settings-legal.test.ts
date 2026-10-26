@@ -25,39 +25,9 @@ const scenario = vi.hoisted(() => ({
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("react-native", async () => {
   const { createElement } = await import("react");
-  type Props = {
-    children?: React.ReactNode;
-    testID?: string;
-    accessibilityLabel?: string;
-    accessibilityRole?: string;
-  };
-  const box = ({ children, testID }: Props) =>
-    createElement("div", { "data-testid": testID }, children);
   return {
-    View: box,
-    ScrollView: box,
-    Text: ({ children }: Props) => createElement("p", null, children),
-    Image: () => null,
-    Switch: () => null,
-    Pressable: ({
-      children,
-      testID,
-      onPress,
-      accessibilityLabel,
-      accessibilityRole,
-    }: Props & { onPress: () => void }) =>
-      createElement(
-        "button",
-        {
-          "data-testid": testID,
-          "aria-label": accessibilityLabel,
-          "data-role": accessibilityRole,
-          onClick: onPress,
-        },
-        children,
-      ),
-    StyleSheet: { create: <T>(styles: T) => styles, hairlineWidth: 1 },
-    ActionSheetIOS: { showActionSheetWithOptions: () => undefined },
+    ...(await import("./react-native.ts")).reactNative,
+    Text: ({ children }: { children?: React.ReactNode }) => createElement("p", null, children),
     Linking: {
       openURL: async (url: string) => {
         scenario.opened.push(url);

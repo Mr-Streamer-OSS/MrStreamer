@@ -56,47 +56,20 @@ vi.mock("expo-router", () => ({ router: { push: () => undefined } }));
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 // Channel rows draw their star with an SF Symbol.
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
-vi.mock("react-native", async () => {
-  const { createElement } = await import("react");
-  type Props = { children?: React.ReactNode; testID?: string };
-  const box = ({ children, testID }: Props) =>
-    createElement("div", { "data-testid": testID }, children);
-  return {
-    Alert: {
-      alert: (_title: string, _message: string, answers: typeof consent.answers) => {
-        consent.answers = answers;
-        consent.prompts++;
-      },
+vi.mock("react-native", async () => ({
+  ...(await import("./react-native.ts")).reactNative,
+  Alert: {
+    alert: (_title: string, _message: string, answers: typeof consent.answers) => {
+      consent.answers = answers;
+      consent.prompts++;
     },
-    Linking: {
-      openURL: async (url: string) => {
-        consent.privacy.push(url);
-      },
+  },
+  Linking: {
+    openURL: async (url: string) => {
+      consent.privacy.push(url);
     },
-    ScrollView: box,
-    View: box,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Pressable: ({
-      children,
-      disabled,
-      onPress,
-    }: Props & { disabled?: boolean; onPress: () => void }) =>
-      createElement("button", { disabled, onClick: onPress }, children),
-    TextInput: ({
-      testID,
-      value,
-      onChangeText,
-    }: Props & { value: string; onChangeText: (value: string) => void }) =>
-      createElement("input", {
-        "data-testid": testID,
-        value,
-        onChange: (event: { target: { value: string } }) => onChangeText(event.target.value),
-      }),
-    Image: box,
-    StyleSheet: { create: <T>(styles: T) => styles },
-    useWindowDimensions: () => ({ fontScale: 1 }),
-  };
-});
+  },
+}));
 
 const { default: Connect } = await import("../src/app/connect.tsx");
 

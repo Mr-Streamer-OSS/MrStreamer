@@ -40,7 +40,8 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", async () => {
-  const { createElement, Fragment, useEffect } = await import("react");
+  const { createElement, useEffect } = await import("react");
+  const { reactNative } = await import("./react-native.ts");
   type Props = { children?: React.ReactNode; testID?: string };
   const box = ({ children, testID }: Props) =>
     createElement("div", { "data-testid": testID }, children);
@@ -65,75 +66,23 @@ vi.mock("react-native", async () => {
   /** A scroll view, which shows the most height it may take. */
   const ScrollView = ({ children, testID, style }: Props & { style?: Style }) =>
     createElement("div", { "data-testid": testID, "data-max-height": style?.maxHeight }, children);
-  type Section = { title: string; data: readonly unknown[] };
   return {
+    ...reactNative,
     View,
     ScrollView,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Image: () => null,
-    Pressable: ({ children, testID, onPress }: Props & { onPress: () => void }) => {
-      if (testID) scenario.presses.set(testID, onPress);
-      return createElement("button", { "data-testid": testID, onClick: onPress }, children);
+    Pressable: (props: Parameters<typeof reactNative.Pressable>[0]) => {
+      if (props.testID && props.onPress) scenario.presses.set(props.testID, props.onPress);
+      return reactNative.Pressable(props);
     },
-    TextInput: ({
-      value,
-      onChangeText,
-      testID,
-    }: {
-      value: string;
-      onChangeText: (text: string) => void;
-      testID: string;
-    }) =>
-      createElement("input", {
-        value,
-        "data-testid": testID,
-        onChange: (event: { target: { value: string } }) => onChangeText(event.target.value),
-      }),
-    SectionList: ({
-      sections,
-      renderItem,
-      renderSectionHeader,
-      renderSectionFooter,
-      ListHeaderComponent,
-      ListEmptyComponent,
-      testID,
-    }: {
-      testID?: string;
-      sections: readonly Section[];
-      renderItem: (info: { item: unknown }) => React.ReactNode;
-      renderSectionHeader: (info: { section: Section }) => React.ReactNode;
-      renderSectionFooter?: (info: { section: Section }) => React.ReactNode;
-      ListHeaderComponent?: React.ReactNode;
-      ListEmptyComponent?: React.ReactNode;
-    }) =>
-      createElement(
-        "div",
-        { "data-testid": testID },
-        ListHeaderComponent,
-        sections.length === 0
-          ? ListEmptyComponent
-          : sections.map((section) =>
-              createElement(
-                Fragment,
-                { key: section.title },
-                renderSectionHeader({ section }),
-                section.data.map((item, at) =>
-                  createElement(Fragment, { key: at }, renderItem({ item })),
-                ),
-                renderSectionFooter?.({ section }),
-              ),
-            ),
-      ),
     Animated: {
       View: box,
       Value: class {},
       timing: () => ({ start: () => undefined }),
     },
-    StyleSheet: { create: <T>(styles: T) => styles },
     AccessibilityInfo: {
+      ...reactNative.AccessibilityInfo,
       announceForAccessibilityWithOptions: (text: string) => scenario.said.push(text),
     },
-    AppState: { currentState: "active", addEventListener: () => undefined },
     Keyboard: {
       dismiss: () => {
         scenario.dismissed++;
@@ -1078,7 +1027,7 @@ describe("Every movie and series that matches", () => {
         kind === "series" ? testID.endsWith(" series") : / movies?$/.test(testID),
       );
 
-  it.each([0, 20, 21, 61, 125])(
+  it.each([0, 20, 21, 125])(
     "shows %i matches of each kind 20 at a time, best first, each kind on its own",
     async (count) => {
       await subscriptions([

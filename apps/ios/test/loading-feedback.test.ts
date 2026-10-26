@@ -45,6 +45,7 @@ const scenario = vi.hoisted(() => ({
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("react-native", async () => {
   const { createElement, useEffect } = await import("react");
+  const { reactNative } = await import("./react-native.ts");
   type Props = {
     children?: React.ReactNode;
     testID?: string;
@@ -89,42 +90,11 @@ vi.mock("react-native", async () => {
     }
   }
   return {
+    ...reactNative,
     View,
     ScrollView,
-    Text: ({ children }: Props) => createElement("span", null, children),
-    Image: () => null,
     TextInput: () => null,
-    Pressable: ({
-      children,
-      testID,
-      onPress,
-      accessibilityLabel,
-    }: Props & { onPress?: () => void; accessibilityLabel?: string }) =>
-      createElement(
-        "button",
-        { "data-testid": testID, "aria-label": accessibilityLabel, onClick: onPress },
-        children,
-      ),
-    FlatList: <T>({
-      data,
-      renderItem,
-      testID,
-    }: {
-      data: readonly T[];
-      renderItem: (info: { item: T; index: number }) => React.ReactNode;
-      testID?: string;
-    }) =>
-      createElement(
-        "div",
-        { "data-testid": testID },
-        data.map((item, index) =>
-          createElement("div", { key: index }, renderItem({ item, index })),
-        ),
-      ),
-    ActionSheetIOS: { showActionSheetWithOptions: () => undefined },
-    StyleSheet: { create: <T>(styles: T) => styles, hairlineWidth: 1 },
     useWindowDimensions: () => ({ width: 390, height: 844, fontScale: scenario.fontScale }),
-    DynamicColorIOS: () => "#000000",
     Easing: { linear: (at: number) => at },
     Animated: {
       Value,
