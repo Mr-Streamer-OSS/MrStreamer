@@ -23,7 +23,7 @@
 
 <a id="your-subscription"></a>
 
-Bring your own Xtream Codes login or M3U playlist; Mr. Streamer includes no channels and sells none. If it doesn't do what you need, the last column names players whose own sites say they do.
+Bring your own Xtream Codes login or M3U playlist; Mr. Streamer includes no channels and sells none. If it doesn't do what you need, the last column names players whose own pages say they do.
 
 | You want                                      | Mr. Streamer                                                      | Also documented by                                                                          |
 | --------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -65,7 +65,7 @@ Kodi is compared with its official [IPTV Simple](https://github.com/kodi-pvr/pvr
 
 </details>
 
-<sub>Checked 27 October 2026 against each player's own site, docs or store listing; a player not named may still do it. TiviMate: [Google Play](https://play.google.com/store/apps/details?id=ar.tvplayer.tv). IPTV Smarters: [features](https://getiptvsmarters.com/features), [downloads](https://getiptvsmarters.com/download), [App Store](https://apps.apple.com/us/app/smarters-player-lite/id1628995509). IPTVX: [iptvx.app](https://iptvx.app/), [features](https://iptvx.app/features/index.html), [Media Server](https://iptvx.app/server/), [App Store](https://apps.apple.com/us/app/iptvx/id1451470024), [Google Play](https://play.google.com/store/apps/details?id=com.bendingx.iptvx.android). VLC: [videolan.org](https://www.videolan.org/vlc/), [recording](https://docs.videolan.me/vlc-user/desktop/3.0/en/basic/recording/playing.html), [Convert/Save](https://docs.videolan.me/vlc-user/desktop/3.0/en/gettingstarted/desktopoverview/windows_and_linux/menu_bar.html), [Chromecast](https://www.videolan.org/vlc/releases/3.0.0.html). Kodi: [downloads](https://kodi.tv/download/), [IPTV Simple](https://github.com/kodi-pvr/pvr.iptvsimple), [its source](https://github.com/kodi-pvr/pvr.iptvsimple/blob/Piers/src/IptvSimple.cpp).</sub>
+<sub>Checked 27 October 2026 against each player's own site, docs or store listing; a player not named may still do it. TiviMate: [Google Play](https://play.google.com/store/apps/details?id=ar.tvplayer.tv). IPTV Smarters: [features](https://getiptvsmarters.com/features), [downloads](https://getiptvsmarters.com/download), [App Store](https://apps.apple.com/us/app/smarters-player-lite/id1628995509). IPTVX: [iptvx.app](https://iptvx.app/), [features](https://iptvx.app/features/index.html), [Media Server](https://iptvx.app/server/), [App Store](https://apps.apple.com/us/app/iptvx/id1451470024), [Google Play](https://play.google.com/store/apps/details?id=com.bendingx.iptvx.android). VLC: [videolan.org](https://www.videolan.org/vlc/), [M3U](https://wiki.videolan.org/M3U), [recording](https://docs.videolan.me/vlc-user/desktop/3.0/en/basic/recording/playing.html), [Convert/Save](https://docs.videolan.me/vlc-user/desktop/3.0/en/gettingstarted/desktopoverview/windows_and_linux/menu_bar.html), [Chromecast](https://www.videolan.org/vlc/releases/3.0.0.html). Kodi: [downloads](https://kodi.tv/download/), [IPTV Simple](https://github.com/kodi-pvr/pvr.iptvsimple), [its source](https://github.com/kodi-pvr/pvr.iptvsimple/blob/Piers/src/IptvSimple.cpp).</sub>
 
 <a id="install"></a>
 
