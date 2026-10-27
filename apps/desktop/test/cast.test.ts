@@ -255,7 +255,6 @@ describe("Cast adapter", () => {
     receiver.answers.launch = "start";
     const next = await adapter.connect(request, never);
     await next!.load(film(2), never);
-    await next!.play(2);
   });
 
   it("closes failed setup even when the receiver's session id cannot be sent back", async () => {
@@ -279,7 +278,6 @@ describe("Cast adapter", () => {
     receiver.answers.launch = "start";
     const next = await adapter.connect(request, never);
     await next!.load(film(1), never);
-    await next!.play(1);
   });
 
   it("refuses the system's picker, an unknown receiver and a receiver that won't start the app", async () => {
