@@ -1121,7 +1121,7 @@ describe("downloads", { timeout: 30_000 }, () => {
 
   it("does not call an uninterrupted transfer restarted after saving its progress", async () => {
     await install();
-    const app = await launch();
+    let app = await launch();
     const { a } = await withProviders(app);
     one.replaceMovieFile(movie().id, fixture("title-receiver.mp4"));
     one.stallMovieFile(movie().id, 300_000, 10_000);
@@ -1148,6 +1148,23 @@ describe("downloads", { timeout: 30_000 }, () => {
     const film = await app.addDownload(movieRef(a));
     await until(() => receivedOf(app, film.id) === 300_000, "the uninterrupted transfer to stall");
     expect(statusOf(app, film.id)).toMatchObject({ kind: "transferring", restarted: false });
+    off();
+    app = await launch();
+    const continued: boolean[] = [];
+    const offContinued = app.onDownloads(() => {
+      const status = statusOf(app, film.id);
+      if (status?.kind === "transferring" && status.received > 300_000) {
+        continued.push(status.restarted);
+      }
+    });
+    onTestFinished(offContinued);
+    await until(
+      () => isComplete(app, film.id),
+      "the same transfer to complete after relaunch",
+      15_000,
+    );
+    expect(continued.length).toBeGreaterThan(0);
+    expect(continued).not.toContain(true);
     expect(native.requests).toHaveLength(1);
   });
 
