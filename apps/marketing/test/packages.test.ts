@@ -107,7 +107,10 @@ describe("independently published download routes", () => {
     expect(document.querySelector("[data-package], pre")).toBeNull();
   });
 
-  /** `html` as the build writes it with `name` in `state` and the other route published. */
+  /**
+   * `html` as the build writes it with `name` in `state` and the other route unpublished. In every
+   * state the page keeps its /download link and shows nothing of the other route.
+   */
   function written(
     html: string,
     name: PackageName,
