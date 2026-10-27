@@ -36,6 +36,13 @@ const label = (text: string) =>
 const nameOf = (title: string) =>
   `[...document.querySelectorAll('main [data-name]')].find(e => e.textContent === ${JSON.stringify(title)})`;
 
+interface Bounds {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
 interface Row {
   name: string;
   title: string;
@@ -160,11 +167,21 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
   );
   const dot = `${nameOf(LONG_TITLE)}?.nextElementSibling`;
   await d.wait(() => d.exists(dot));
-  const playing = await d.evaluate<{ dot: number; cell: number }>(
-    `(() => { const n = ${nameOf(LONG_TITLE)}, cell = n.parentElement.parentElement.getBoundingClientRect(), dot = ${dot}.getBoundingClientRect();
-      return { dot: dot.right, cell: cell.right }; })()`,
+  const playing = await d.evaluate<{ name: Bounds; dot: Bounds; cell: Bounds; gap: number }>(
+    `(() => { const n = ${nameOf(LONG_TITLE)};
+      return { name: n.getBoundingClientRect().toJSON(), dot: ${dot}.getBoundingClientRect().toJSON(),
+        cell: n.parentElement.parentElement.getBoundingClientRect().toJSON(),
+        gap: parseFloat(getComputedStyle(n.parentElement).columnGap) }; })()`,
   );
   d.observed["playingDot"] = playing;
-  check(playing.dot <= playing.cell, "The playing dot left the name's cell", playing);
+  check(playing.dot.right <= playing.cell.right, "The playing dot left the name's cell", playing);
+  check(
+    Math.abs(playing.dot.left - playing.name.right - playing.gap) <= 1 &&
+      Math.abs(
+        (playing.dot.top + playing.dot.bottom) / 2 - (playing.name.top + playing.name.bottom) / 2,
+      ) <= 1,
+    "The playing dot isn't beside the name on its first line",
+    playing,
+  );
   await d.capture("names-playing");
 }

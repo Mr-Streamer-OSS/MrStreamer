@@ -157,6 +157,7 @@ export function ChannelTable({
   const scroller = useRef<HTMLDivElement>(null);
   const asked = useRef(searchFocus);
   const focusedRow = useRef<HTMLElement | null>(null);
+  const [listMenuOpen, setListMenuOpen] = useState(false);
   // Selection can show because Tab enabled keyboard mode. Only navigation or focus already
   // owned by a result row moves DOM focus; disclosure buttons keep their own Tab position.
   useLayoutEffect(() => {
@@ -294,7 +295,7 @@ export function ChannelTable({
                 now={now}
                 playing={rowPlays(channel, searchRows?.[item.index], playingKey)}
                 selected={item.index === selected}
-                covered={covered}
+                covered={covered || listMenuOpen}
                 expanded={
                   key === expandedKey &&
                   !(
@@ -318,6 +319,7 @@ export function ChannelTable({
                   }
                 }
                 lists={lists}
+                onListMenuOpenChange={setListMenuOpen}
                 onWatch={() => onWatch(channel, item.index)}
                 onWatchArchive={(programme) => onWatchArchive(channel, item.index, programme)}
                 onToggleSchedule={() => onToggleSchedule(key)}
@@ -352,6 +354,7 @@ function ChannelRow({
   match,
   order,
   lists,
+  onListMenuOpenChange,
   onWatch,
   onWatchArchive,
   onToggleSchedule,
@@ -378,6 +381,7 @@ function ChannelRow({
   /** Set while the list is being put in another order: the row moves, and plays nothing. */
   order: RowOrder | null;
   lists: TableLists | null;
+  onListMenuOpenChange: (open: boolean) => void;
   onWatch: () => void;
   onWatchArchive: (programme: Programme) => void;
   onToggleSchedule: () => void;
@@ -407,7 +411,6 @@ function ChannelRow({
   // A match that began since it was found is the programme on now.
   const later = match?.later && match.later.start > now ? match.later : null;
   const row = useRef<HTMLDivElement>(null);
-  const [listMenuOpen, setListMenuOpen] = useState(false);
   // The row the keys move takes the focus when the viewer chooses it, and again after each move,
   // which counts as choosing it: the page puts a moved row's node elsewhere, and that drops the
   // focus it had. So does a page that took no input while the order was saved.
@@ -494,7 +497,7 @@ function ChannelRow({
           words={words}
           playing={playing}
           held={selected && !expanded}
-          covered={covered || listMenuOpen}
+          covered={covered}
           details={details}
           bright={groupSummary !== null || copySummary !== null}
         />
@@ -563,7 +566,7 @@ function ChannelRow({
                   shown={selected || lists.lists.some((list) => holds(list, channel))}
                   onSet={(list, member) => lists.onSet(list, channel, member)}
                   onNew={() => lists.onNew(channel)}
-                  onOpenChange={setListMenuOpen}
+                  onOpenChange={onListMenuOpenChange}
                 />
               )}
               {grouped ? (
@@ -658,6 +661,7 @@ function ChannelName({
         // Escape stays the page's, which ends a search or an order with the label up.
         const escape = change.reason === "escape-key";
         if (escape) {
+          setHolding(false);
           change.cancel();
           change.allowPropagation();
         }
