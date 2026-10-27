@@ -59,7 +59,7 @@ Statistics never include what you watch, title or channel names, your provider o
 
 The iPhone app asks whether you want to share basic usage statistics. Statistics stay off until you choose to share them, except when an upgrade retains your earlier deliberate choice. Refusing does not stop you connecting a provider. You can change the choice in Settings > Privacy. Builds without a configured PostHog project send nothing.
 
-When an upgrade finds no deliberate choice, it discards the previous installation identity, unsent pre-consent events and unfinished playback statistics. Choosing to share later does not send that backlog. Turning sharing off stops new capture and delivery and clears unsent statistics. It cannot recall a request already received or delete statistics already held by PostHog.
+When an upgrade finds no deliberate choice, it discards the previous installation identity, unsent pre-consent events and unfinished playback statistics. Choosing to share later does not send that backlog. Turning sharing off stops new capture and delivery. When the changed choice is saved successfully, unsent statistics are cleared. If saving fails, the previous choice and queued statistics can remain on the device; a later launch can restore that choice and send those statistics. Turning sharing off cannot recall a request already received or delete statistics already held by PostHog.
 
 While sharing is on, the app sends the same kinds of events as above, for what the iPhone app has: the first and daily observations, opening Home, Live, Movies, Series, title details, Search, Settings, Downloads or the player, starting a search, switching to another channel, adding, removing or refreshing a subscription, a live channel or a movie or episode starting and stopping and for how many seconds it played, and playback failing with one of the fixed reasons. Only time you could see or hear it counts: in the player, Picture in Picture or AirPlay, or a preview on Home you unmuted. Not paused, loading or the silent preview.
 
@@ -69,7 +69,7 @@ Each event body carries a random installation identifier, an event identifier, t
 
 The iPhone app keeps provider details, preferences, catalogue and guide caches, title details and pictures, favourites, watchlist, history, progress, downloads, and its statistics choice, installation identifier and unsent statistics on the device. Passwords use the iOS Keychain. Local app files can still contain provider addresses and usernames.
 
-Removing a provider clears its own catalogue, guide and title-detail caches. Shared TMDB details and pictures can remain. Keeping its history can retain its server address and username. Remove downloads separately to delete their saved copies. Turning statistics off clears unsent statistics but retains the local installation identifier. These actions do not promise erasure from the Keychain, backups or services that already received data.
+Removing a provider clears its own catalogue, guide and title-detail caches. Shared TMDB details and pictures can remain. Keeping its history can retain its server address and username. Remove downloads separately to delete their saved copies. Turning statistics off retains the local installation identifier and clears unsent statistics when the changed choice is saved successfully. These actions do not promise erasure from the Keychain, backups or services that already received data.
 
 ### The website
 
@@ -130,7 +130,7 @@ Your network operator and DNS provider can see which servers the app contacts.
 ## Your choices
 
 - **Statistics on desktop.** Turn off **Share basic usage statistics** in Settings > Privacy. Sending stops at once, events waiting to be sent are cleared, and it stays off after a restart. Turning it back on keeps the same identifier and sends nothing about the time it was off, including playback that continued meanwhile.
-- **Statistics on iPhone.** Statistics stay off until you choose to share them, except when an upgrade retains an earlier deliberate choice. Change **Share basic usage statistics** in Settings > Privacy. Turning it off stops sending at once, clears events waiting to be sent, and stays off after the app restarts.
+- **Statistics on iPhone.** Statistics stay off until you choose to share them, except when an upgrade retains an earlier deliberate choice. Change **Share basic usage statistics** in Settings > Privacy. Turning it off stops sending at once. When the changed choice is saved successfully, waiting events are cleared and it stays off after the app restarts. If saving fails, a later launch can restore the earlier choice and queued statistics.
 - **Website analytics.** Turn off **Site analytics** at the foot of any page of mrstreamer.app. The choice applies to that browser only, and clearing the site's data from your browser turns them back on.
 - **Subtitle search** is off until you turn it on.
 - **Casting** happens only after you open the receiver list and pick a device.
