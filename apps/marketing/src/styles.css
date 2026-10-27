@@ -477,7 +477,12 @@ h1 {
   }
 
   .need thead td {
-    display: none;
+    /* Keep the empty first column in the accessible table, outside the visible legend. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
 
   .need thead th:first-of-type {
