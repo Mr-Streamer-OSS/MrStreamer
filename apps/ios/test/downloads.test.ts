@@ -1124,7 +1124,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const app = await launch();
     const { a } = await withProviders(app);
     one.replaceMovieFile(movie().id, fixture("title-receiver.mp4"));
-    one.stallMovieFile(movie().id, 300_000, 1_000);
+    one.stallMovieFile(movie().id, 300_000, 10_000);
     const readNow = Date.now;
     let elapsed = 0;
     const clock = vi.spyOn(Date, "now").mockImplementation(() => readNow() + elapsed);
