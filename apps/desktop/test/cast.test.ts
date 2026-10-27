@@ -211,53 +211,76 @@ describe("Cast adapter", () => {
     expect(ofType(events, "lost")).toEqual([]);
   });
 
-  it("recovers when stopping a dropped load exceeds the frame limit", async () => {
-    const { receiver, adapter } = await setup();
-    receiver.answers.launch = "ignore";
-    const request = { kind: "receiver", id: receiver.receiver.id } as const;
-    const connecting = adapter.connect(request, never);
-    await expect.poll(() => receiver.requests("LAUNCH")).toHaveLength(1);
-    const fields = {
-      sourceId: "sender-0",
-      destinationId: "r".repeat(65_000),
-      namespace: CONNECTION,
-    };
-    const size = receiver.encode({ type: "CONNECT", origin: {} }, fields).length;
-    const transportId = fields.destinationId + "r".repeat(65_535 - size);
-    receiver.app = { sessionId: "owned-session", transportId: "owned-transport" };
-    sendInParts(
-      receiver,
-      {
-        type: "RECEIVER_STATUS",
-        requestId: receiver.requests("LAUNCH")[0]!.requestId,
-        status: { applications: [{ appId: "CC1AD845", ...receiver.app, transportId }] },
-      },
-      { sourceId: "receiver-0", namespace: RECEIVER },
-    );
-    const connection = await connecting;
-    if (!connection) throw new Error("not connected");
-    expect(await failure(connection.load(film(1), never))).toEqual({
-      kind: "unavailable",
-      detail: "request too large",
-    });
+  it.each(["stopped", "too large", "unanswered"] as const)(
+    "ends a dropped load session when media STOP is too large and app STOP is %s",
+    async (outcome) => {
+      const { receiver, adapter, events } = await setup();
+      receiver.answers.launch = "ignore";
+      const request = { kind: "receiver", id: receiver.receiver.id } as const;
+      const connecting = adapter.connect(request, never);
+      await expect.poll(() => receiver.requests("LAUNCH")).toHaveLength(1);
+      const fields = {
+        sourceId: "sender-0",
+        destinationId: "r".repeat(65_000),
+        namespace: CONNECTION,
+      };
+      const size = receiver.encode({ type: "CONNECT", origin: {} }, fields).length;
+      const transportId = fields.destinationId + "r".repeat(65_535 - size);
+      const sessionId = outcome === "too large" ? "s".repeat(65_536) : "owned-session";
+      receiver.app = { sessionId, transportId: "owned-transport" };
+      sendInParts(
+        receiver,
+        {
+          type: "RECEIVER_STATUS",
+          requestId: receiver.requests("LAUNCH")[0]!.requestId,
+          status: { applications: [{ appId: "CC1AD845", ...receiver.app, transportId }] },
+        },
+        { sourceId: "receiver-0", namespace: RECEIVER },
+      );
+      const connection = await connecting;
+      if (!connection) throw new Error("not connected");
+      expect(await failure(connection.load(film(1), never))).toEqual({
+        kind: "unavailable",
+        detail: "request too large",
+      });
 
-    sendInParts(
-      receiver,
-      {
-        type: "MEDIA_STATUS",
-        status: [{ mediaSessionId: 1, media: { contentId: film(1).url } }],
-      },
-      { sourceId: transportId, namespace: MEDIA },
-    );
-    await expect.poll(() => receiver.connections).toBe(2);
-    await expect.poll(() => receiver.requests("GET_STATUS").length).toBeGreaterThan(1);
-    await connection.disconnect();
-    expect(receiver.app).toBeNull();
+      receiver.media = {
+        mediaSessionId: 1,
+        playerState: "PLAYING",
+        currentTime: 0,
+        activeTrackIds: [],
+        media: { contentId: film(1).url },
+      };
+      receiver.silent = outcome === "unanswered";
+      sendInParts(
+        receiver,
+        { type: "MEDIA_STATUS", status: [receiver.media] },
+        { sourceId: transportId, namespace: MEDIA },
+      );
+      // No user disconnect: automatic cleanup must finish and invalidate this connection.
+      await expect
+        .poll(() => ofType(events, "lost"))
+        .toEqual([{ type: "lost", failure: { kind: "unreachable" } }]);
+      await expect.poll(() => receiver.sockets.size).toBe(0);
+      expect(receiver.connections).toBe(1);
+      expect(await failure(connection.setVolume({ muted: true }))).toEqual({ kind: "unreachable" });
+      if (outcome === "stopped") {
+        expect(receiver.app).toBeNull();
+        expect(receiver.media).toBeNull();
+        expect(receiver.requests("STOP")).toEqual([expect.objectContaining({ sessionId })]);
+      } else {
+        // The receiver cannot be forced to stop, but no usable session or reconnect loop remains.
+        expect(receiver.media?.playerState).toBe("PLAYING");
+      }
+      await connection.disconnect();
+      expect(ofType(events, "lost")).toHaveLength(1);
+      receiver.silent = false;
 
-    receiver.answers.launch = "start";
-    const next = await adapter.connect(request, never);
-    await next!.load(film(2), never);
-  });
+      receiver.answers.launch = "start";
+      const next = await adapter.connect(request, never);
+      await next!.load(film(2), never);
+    },
+  );
 
   it("closes failed setup even when the receiver's session id cannot be sent back", async () => {
     const { receiver, adapter } = await setup();

@@ -332,11 +332,17 @@ export async function openSession(
       ) {
         current.mediaSessionId = status.mediaSessionId;
         if (current.dropped) {
-          channel.send(app.transportId, NAMESPACE.media, {
-            type: "STOP",
-            mediaSessionId: status.mediaSessionId,
-            requestId: nextRequest++,
-          });
+          try {
+            channel.send(app.transportId, NAMESPACE.media, {
+              type: "STOP",
+              mediaSessionId: status.mediaSessionId,
+              requestId: nextRequest++,
+            });
+          } catch {
+            // Reconnecting cannot shrink this app's transport id. Stop the owned app instead,
+            // then invalidate the session even if that STOP also cannot be sent or answered.
+            void disconnect().then(() => emit({ type: "lost", failure: { kind: "unreachable" } }));
+          }
         }
       }
       if (status.mediaSessionId === current.mediaSessionId && !current.dropped) {
