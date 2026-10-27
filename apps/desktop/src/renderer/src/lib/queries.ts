@@ -890,7 +890,10 @@ export function syncCustomLists(client: QueryClient): () => void {
 export function syncWatchlist(client: QueryClient): () => void {
   const read = () => {
     // Cancel an older first read too: invalidation alone may reuse it as the new answer.
-    void client.cancelQueries({ queryKey: ["watchlist"] });
+    void client.cancelQueries({
+      queryKey: ["watchlist"],
+      predicate: (query) => query.state.data === undefined,
+    });
     void client.invalidateQueries({ queryKey: ["watchlist"] });
   };
   const stopChanges = listen("watchlist.changed", read);
@@ -898,7 +901,7 @@ export function syncWatchlist(client: QueryClient): () => void {
     if (!markedForAdults) return read();
     void client.cancelQueries({
       queryKey: ["watchlist"],
-      predicate: (query) => query.queryKey[1] !== "list",
+      predicate: (query) => query.queryKey[1] !== "list" && query.state.data === undefined,
     });
     void client.invalidateQueries({
       queryKey: ["watchlist"],

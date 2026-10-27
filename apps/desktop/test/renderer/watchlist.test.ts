@@ -393,6 +393,29 @@ describe("the Watchlist page", () => {
     expect(tiles()).toEqual([["Night Harbour", "Movie · 2024"]]);
   });
 
+  it("keeps last-removal focus when the reply arrives before the collection event", async () => {
+    await watchlist(page([harbour]));
+    const cross = button("Remove Night Harbour from Watchlist")!;
+    cross.focus();
+    const removed = ipc.hold("watchlist.remove");
+    const older = ipc.hold("watchlist.list", (query) => query.limit === 120);
+    await press("Remove Night Harbour from Watchlist");
+    await act(async () => removed.resolve(null));
+    await settle();
+
+    const newer = ipc.hold("watchlist.list", (query) => query.limit === 120);
+    await act(async () => ipc.emit("watchlist.changed", null));
+    await settle();
+    await act(async () => newer.resolve(page([])));
+    await settle();
+    expect(document.body.textContent).toContain("Nothing saved yet.");
+    expect(document.activeElement).toBe(document.querySelector("h1")?.parentElement?.parentElement);
+
+    await act(async () => older.resolve(page([harbour])));
+    await settle();
+    expect(tiles()).toHaveLength(0);
+  });
+
   it("keeps showing what was saved when the lists couldn't be refreshed, without calling it unavailable", async () => {
     await watchlist(
       page([{ ...harbour, title: null, listed: false }]),
