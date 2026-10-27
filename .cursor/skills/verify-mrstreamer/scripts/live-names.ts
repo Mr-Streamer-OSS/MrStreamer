@@ -159,6 +159,59 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
     "A narrow row isn't 3.5rem high",
     narrow.map((row) => row.height),
   );
+  const narrowLong = narrow.filter((row) => row.name === LONG_NAME);
+  check(
+    narrowLong.length === 2 &&
+      narrowLong.every((row) => row.line.trim() && row.nameClipped) &&
+      narrowLong
+        .map((row) => row.line)
+        .sort()
+        .join("\n") ===
+        long
+          .map((row) => row.line)
+          .sort()
+          .join("\n"),
+    "The narrow long rows lost their clipped names or distinct metadata",
+    narrowLong,
+  );
+  const narrowLayout = await d.evaluate<
+    {
+      name: Bounds;
+      cell: Bounds;
+      row: Bounds;
+      line: (Bounds & { visible: boolean; clipped: boolean; contained: boolean }) | null;
+    }[]
+  >(`${ROWS}.filter(r => r.querySelector('[data-name]')?.dataset.name === ${JSON.stringify(LONG_NAME)})
+    .map(r => {
+      const name = r.querySelector('[data-name]');
+      const cell = name.parentElement.parentElement;
+      const line = name.parentElement.nextElementSibling;
+      const style = line && getComputedStyle(line);
+      return { name: name.getBoundingClientRect().toJSON(), cell: cell.getBoundingClientRect().toJSON(),
+        row: r.querySelector('[role=button]').getBoundingClientRect().toJSON(),
+        line: line && { ...line.getBoundingClientRect().toJSON(), visible: line.checkVisibility(),
+          clipped: line.scrollWidth > line.clientWidth,
+          contained: ['hidden', 'clip'].includes(style.overflowX) && style.whiteSpace === 'nowrap'
+            && style.textOverflow === 'ellipsis' } };
+    })`);
+  d.observed["narrowLayout"] = narrowLayout;
+  check(
+    narrowLayout.length === 2 &&
+      narrowLayout.every(
+        ({ name, cell, row, line }) =>
+          line !== null &&
+          line.visible &&
+          line.bottom > line.top &&
+          line.right > line.left &&
+          line.top >= name.bottom - 1 &&
+          line.bottom <= row.bottom + 1 &&
+          line.left >= cell.left - 1 &&
+          line.right <= cell.right + 1 &&
+          line.contained,
+      ),
+    "The narrow metadata isn't visible below its name and contained in its cell and row",
+    narrowLayout,
+  );
   await d.capture("names-narrow");
 
   // Back from watching the long channel, its row keeps the playing dot beside the cut name.
