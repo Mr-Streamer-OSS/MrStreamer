@@ -490,11 +490,15 @@ export async function openSession(
         // Stopping the app ends its media too; the media's own stop is for a receiver that is
         // slow about the app. Nothing waits longer than `close` for the receiver to confirm.
         if (load && load.mediaSessionId !== null) {
-          channel.send(app.transportId, NAMESPACE.media, {
-            type: "STOP",
-            mediaSessionId: load.mediaSessionId,
-            requestId: nextRequest++,
-          });
+          try {
+            channel.send(app.transportId, NAMESPACE.media, {
+              type: "STOP",
+              mediaSessionId: load.mediaSessionId,
+              requestId: nextRequest++,
+            });
+          } catch {
+            // The app's STOP can still fit when its media's STOP cannot.
+          }
         }
         await ask({ type: "STOP", sessionId: app.sessionId }, timings.close).catch(() => {});
         channel?.send(app.transportId, NAMESPACE.connection, { type: "CLOSE" });

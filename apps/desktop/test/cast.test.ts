@@ -251,6 +251,7 @@ describe("Cast adapter", () => {
     );
     await expect.poll(() => receiver.connections).toBe(2);
     await connection.disconnect();
+    expect(receiver.app).toBeNull();
 
     receiver.answers.launch = "start";
     const next = await adapter.connect(request, never);

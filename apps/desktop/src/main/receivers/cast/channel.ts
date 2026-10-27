@@ -255,11 +255,11 @@ export interface ChannelOptions {
   readonly silence: number;
   /** Gives up opening when it aborts. An open channel is closed with `close`. */
   readonly signal: AbortSignal;
-  /** Hears every message but the heartbeat's. */
+  /** Hears every message but the heartbeat's; a thrown reply failure breaks the channel. */
   readonly message: (message: CastMessage) => void;
   /**
    * The open connection is gone: the socket failed, the receiver went silent, or it sent what
-   * isn't the protocol. Told once, and never after `close`.
+   * isn't the protocol, or a reply could not be sent. Told once, and never after `close`.
    */
   readonly broken: () => void;
 }
