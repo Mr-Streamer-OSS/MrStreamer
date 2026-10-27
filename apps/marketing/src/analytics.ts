@@ -100,7 +100,7 @@ type SiteEvent =
           /** Every installer link and both stores carry stable releases. Nightlies are on GitHub. */
           readonly download_type: "stable";
           readonly route: string;
-          /** Where on the page. Every installer link now sits in /download's body, as "page". */
+          /** Where on the page. Installers sit on /download; App Store links also appear on other pages. */
           readonly location: "hero" | "page";
         };
     }

@@ -74,9 +74,7 @@ describe("public document pages without JavaScript", () => {
       ["Getting started", "Watching", "Installing and updates", "Price and privacy"],
     );
     expect(document.querySelectorAll(".faq-rows > div[id]")).toHaveLength(14);
-    expect(document.querySelector("#download")?.textContent).toContain(
-      "Download a movie or an episode",
-    );
+    expect(document.querySelector("#download")?.textContent).toContain("Download a movie");
     expect(document.querySelector("#record")?.textContent).toContain("Live TV can't be recorded");
     expect(document.querySelector('main a[href="/docs/downloads"]')).not.toBeNull();
     expect(

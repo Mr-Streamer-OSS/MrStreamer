@@ -6,7 +6,7 @@ Mr. Streamer for iPhone requires iOS 16.4 or later. [Get it on the App Store](ht
 
 1. Open Mr. Streamer and choose **Add provider**.
 2. Choose **Don't share** or **Share** when asked about usage statistics. Both choices continue to setup. Statistics stay off until you choose to share them; you can change the choice in **Settings > Privacy**. An upgrade can retain an earlier deliberate choice. See the [privacy policy](../privacy.md).
-3. Enter the server address, username and password supplied by your provider, then add the provider. This is your provider login, not a new Mr. Streamer account.
+3. Enter the server address, username and password supplied by your provider, then choose **Connect**. This is your provider login, not a new Mr. Streamer account.
 
 ## Watch and download
 
