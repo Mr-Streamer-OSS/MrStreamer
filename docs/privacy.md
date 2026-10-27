@@ -30,7 +30,9 @@ Reminders stay locally until the app checks after the end of the day their progr
 
 **Diagnostics…** in Settings > About reconstructs an export from fixed fields, shows you the text before you save it and uploads nothing. Ordinary local console output is separate and can contain file paths or invalid values from damaged local files. Review console output before sharing it.
 
-### Usage statistics on desktop
+### Usage statistics
+
+This section describes the desktop app.
 
 **Share basic usage statistics** is on by default, in new and existing profiles, without a prompt. While it's on, desktop 0.0.15 sends a short event each time one of these happens. From 0.0.16, the same usage is counted in five-minute groups and playback is reported once at its end:
 
@@ -138,7 +140,9 @@ Your network operator and DNS provider can see which servers the app contacts.
 - **Casting** happens only after you open the receiver list and pick a device.
 - **TMDB and update checks** have no off switch. Settings only lets you choose whose TMDB key the app uses.
 
-### Deleting your data on desktop
+### Deleting your data
+
+The following removal and reset controls describe the desktop app.
 
 - **Remove** on a subscription in Settings > Subscriptions deletes its login, provider lists, guide, mapped channels and reminders, and cancels its unfinished downloads. Favourites, watchlist, history, progress and membership of your custom lists stay for when you add the same account again. Tick **Also delete…** to delete those and its saved subtitles too. Your custom lists themselves and finished downloads stay until you delete them.
 - **Delete list** in a list's menu in Live TV deletes the list with its name and the channels it held. Your other lists, and lists a subscription's removal emptied, stay until you delete them.
