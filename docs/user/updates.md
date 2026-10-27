@@ -12,6 +12,14 @@ Mr. Streamer looks for updates on its own, a little after it starts and then eve
 
 **Not now** hides the notice for that version. A newer version shows it again, and Settings keeps offering the one you skipped.
 
+## A reminder when Stable is behind
+
+Starting with the 0.0.21 client, direct and Homebrew Stable copies show a centered reminder when at least two published Stable releases are newer than yours. It uses the known previous Stable release, including skipped version numbers; an older feed without that history keeps the quiet update notice. Current, ahead and one-release-behind copies get no prominent reminder. This cannot add reminders to older clients.
+
+The reminder appears at most once per app process launch, while you browse. Full Watch and movie or episode playback defer it until you return; the muted Home preview does not. **Not now** or Escape closes it and returns keyboard focus, leaving the quiet **Update** entry available. Rechecking, reopening the window or finding a newer offer during that launch does not repeat a reminder already shown. The next app launch can remind you again. **Download** starts only when you choose it, and restart still needs your confirmation.
+
+Nightly, Microsoft Store and AUR copies keep their existing update behavior.
+
 On Linux, installing the deb package asks for your password, because installing a package needs administrator rights. The AppImage replaces itself without asking.
 
 ## Updates in Settings

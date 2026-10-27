@@ -564,6 +564,8 @@ export const ipcInputs = {
   "updates.cancel": none,
   "updates.restart": none,
   "updates.dismiss": () => type({ version: "string" }),
+  "updates.showReminder": () => type({ version: "string" }),
+  "updates.reminderShown": () => type({ version: "string" }),
   "updates.openStore": none,
   "updates.rateStore": none,
   "diagnostics.preview": none,
@@ -881,6 +883,10 @@ export interface IpcOutputs {
   "updates.restart": null;
   /** Closes the notice for a version; Settings keeps offering it. */
   "updates.dismiss": UpdateStatus;
+  /** Checks eligibility without consuming a deferred reminder. */
+  "updates.showReminder": boolean;
+  /** Records actual display once per app process. */
+  "updates.reminderShown": null;
   /** Opens the app's page in the Microsoft Store, for a copy the Store updates. */
   "updates.openStore": null;
   /** Opens this product's review dialog, only for a copy installed from the Microsoft Store. */

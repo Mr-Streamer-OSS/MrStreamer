@@ -144,6 +144,8 @@ export class Updates extends Context.Service<
     readonly restart: Effect.Effect<void>;
     /** Closes the notice for `version`. Settings keeps offering it; a newer version notifies. */
     dismiss(version: string): Effect.Effect<UpdateStatus>;
+    showReminder(version: string): Effect.Effect<boolean>;
+    reminderShown(version: string): Effect.Effect<void>;
     /** Opens the app's page in the Microsoft Store, for a Store copy. Does nothing for other copies. */
     readonly openStore: Effect.Effect<void, Failed>;
     /** The status after every change, such as a download's progress. */
@@ -191,6 +193,8 @@ function make(deps: UpdatesDeps & DirectUpdates) {
     /** The release the last check found for the channel, whether or not it is newer. */
     let target: Offer | null = null;
     let checked: UpdateStatus["checked"] = null;
+    let reminded: string | null = null;
+    let allowedReminder: string | null = null;
     let nextCheckAt: number | null = null;
     /** The check whose result still counts; a newer check or a channel change voids it. */
     let checking: { readonly channel: Channel; readonly fiber: Fiber.Fiber<CheckResult> } | null =
@@ -221,7 +225,27 @@ function make(deps: UpdatesDeps & DirectUpdates) {
     /** Whether the chosen channel still receives `version`, checked before downloading or installing it. */
     const wanted = (version: string) => receives(channel, version);
 
+    const reminder = () => {
+      const previous = target?.previousStable;
+      return reminded === null &&
+        checking === null &&
+        channel === "stable" &&
+        !installed.nightly &&
+        parseVersion(deps.installed) &&
+        update.kind === "available" &&
+        checked?.failure === null &&
+        previous &&
+        !previous.nightly &&
+        target &&
+        compareVersions(previous, target.version) < 0 &&
+        compareVersions(installed, previous) < 0
+        ? { version: update.version }
+        : null;
+    };
+
     const snapshot = (): UpdateStatus => ({
+      reminder: reminder(),
+      reminded,
       version: deps.installed,
       distribution: "direct",
       channel,
@@ -468,6 +492,19 @@ function make(deps: UpdatesDeps & DirectUpdates) {
           return snapshot();
         }),
 
+      showReminder: (version: string) =>
+        Effect.sync(() => {
+          if (reminder()?.version !== version) return false;
+          allowedReminder = version;
+          return true;
+        }),
+      reminderShown: (version: string) =>
+        Effect.gen(function* () {
+          if (reminded !== null || allowedReminder !== version) return;
+          reminded = version;
+          yield* changed;
+        }),
+
       openStore: Effect.void,
 
       changes: Stream.fromPubSub(updates),
@@ -499,6 +536,8 @@ function managed(deps: UpdatesDeps & (StoreUpdates | PacmanUpdates)) {
     cancel: Effect.void,
     restart: Effect.void,
     dismiss: () => unchanged,
+    showReminder: () => Effect.succeed(false),
+    reminderShown: () => Effect.void,
     openStore:
       "managed" in deps
         ? Effect.void
