@@ -321,6 +321,13 @@ try {
 
   {
     const problems: string[] = [];
+    // Main's lists can be ready before the renderer's availability refresh settles.
+    await waitFor(
+      async () =>
+        !(await exists(page, pageButton("Watchlist"))) &&
+        !(await exists(page, pageButton("Downloads"))),
+      10_000,
+    );
     const pages = await page.evaluate<string[]>(
       `[...document.querySelectorAll("header button")].map((each) => each.textContent.trim()).filter(Boolean)`,
     );
