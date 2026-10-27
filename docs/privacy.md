@@ -67,9 +67,9 @@ Each event body carries a random installation identifier, an event identifier, t
 
 ### Local data on iPhone
 
-The iPhone app keeps provider details, preferences, catalogue and guide caches, favourites, watchlist, history, progress, downloads and its statistics choice on the device. Passwords use the iOS Keychain. Local app files can still contain provider addresses and usernames.
+The iPhone app keeps provider details, preferences, catalogue and guide caches, title details and pictures, favourites, watchlist, history, progress, downloads, and its statistics choice, installation identifier and unsent statistics on the device. Passwords use the iOS Keychain. Local app files can still contain provider addresses and usernames.
 
-Removing a provider clears its catalogue and guide caches. Keeping its history can retain its username. Remove downloads separately to delete their saved copies. Turning statistics off clears unsent statistics but retains the local installation identifier. These actions do not promise erasure from the Keychain, backups or services that already received data.
+Removing a provider clears its own catalogue, guide and title-detail caches. Shared TMDB details and pictures can remain. Keeping its history can retain its server address and username. Remove downloads separately to delete their saved copies. Turning statistics off clears unsent statistics but retains the local installation identifier. These actions do not promise erasure from the Keychain, backups or services that already received data.
 
 ### The website
 
@@ -129,8 +129,8 @@ Your network operator and DNS provider can see which servers the app contacts.
 
 ## Your choices
 
-- **Statistics.** Turn off **Share basic usage statistics** in Settings > Privacy. Sending stops at once, events waiting to be sent are cleared, and it stays off after a restart. Turning it back on keeps the same identifier and sends nothing about the time it was off, including playback that continued meanwhile.
-- **Statistics on iPhone.** Turn off **Share basic usage statistics** in Settings > Privacy. Turning it off stops sending at once, clears events waiting to be sent, and stays off after the app restarts.
+- **Statistics on desktop.** Turn off **Share basic usage statistics** in Settings > General > Privacy. Sending stops at once, events waiting to be sent are cleared, and it stays off after a restart. Turning it back on keeps the same identifier and sends nothing about the time it was off, including playback that continued meanwhile.
+- **Statistics on iPhone.** Statistics stay off until you choose to share them, except when an upgrade retains an earlier deliberate choice. Change **Share basic usage statistics** in Settings > Privacy. Turning it off stops sending at once, clears events waiting to be sent, and stays off after the app restarts.
 - **Website analytics.** Turn off **Site analytics** at the foot of any page of mrstreamer.app. The choice applies to that browser only, and clearing the site's data from your browser turns them back on.
 - **Subtitle search** is off until you turn it on.
 - **Casting** happens only after you open the receiver list and pick a device.
