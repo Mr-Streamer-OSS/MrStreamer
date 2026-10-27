@@ -669,7 +669,7 @@ function ChannelName({
       }}
       label={
         <span className="block max-w-[min(24rem,calc(100vw-2rem))] break-words whitespace-normal">
-          <span className="block">{channel.name}</span>
+          <span className="block">{channel.title}</span>
           {details && <span className="block text-muted-foreground">{details}</span>}
         </span>
       }

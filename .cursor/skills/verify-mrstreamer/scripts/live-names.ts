@@ -20,7 +20,7 @@ const check = (value: boolean, message: string, seen?: unknown) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
 const ROWS = "[...document.querySelectorAll('main [data-index]')]";
-/** Each drawn row: its name, the line under it, its height in rem and whether either line is cut. */
+/** Each drawn row: its names, metadata, height in rem and which lines are cut. */
 const ROW_STATE = `${ROWS}.sort((a, b) => a.dataset.index - b.dataset.index).map(r => {
   const name = r.querySelector('[data-name]');
   const line = name?.parentElement.nextElementSibling ?? null;
@@ -28,7 +28,7 @@ const ROW_STATE = `${ROWS}.sort((a, b) => a.dataset.index - b.dataset.index).map
   return { name: name?.dataset.name ?? '', title: name?.textContent ?? '', line: line?.textContent ?? '',
     height: (r.querySelector('[role=button]')?.getBoundingClientRect().height ?? 0)
       / parseFloat(getComputedStyle(document.documentElement).fontSize),
-    clipped: cut(name) || cut(line), selected: !!r.querySelector('.ring-2') };
+    nameClipped: cut(name), clipped: cut(name) || cut(line), selected: !!r.querySelector('.ring-2') };
 })`;
 /** The label under a row's name that holds `text`. */
 const label = (text: string) =>
@@ -48,6 +48,7 @@ interface Row {
   title: string;
   line: string;
   height: number;
+  nameClipped: boolean;
   clipped: boolean;
   selected: boolean;
 }
@@ -73,7 +74,7 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
   const long = browse.filter((row) => row.name === LONG_NAME);
   const sources = long.map((row) => row.line.split(" · ")[0]);
   check(
-    long.every((row) => row.title === LONG_TITLE && row.clipped),
+    long.every((row) => row.title === LONG_TITLE && row.nameClipped),
     "The long name isn't cut short in its cell",
     long,
   );
@@ -100,6 +101,11 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
   await pointAt(LONG_TITLE);
   await d.wait(() => d.exists(label(LONG_TITLE)), 5_000);
   d.observed["hoverLabel"] = await d.evaluate<string>(`${label(LONG_TITLE)}.innerText`);
+  check(
+    d.observed["hoverLabel"] === `${LONG_TITLE}\n${long[0]!.line}`,
+    "The label doesn't show the full displayed name and its metadata",
+    d.observed["hoverLabel"],
+  );
   await d.capture("names-hover-long");
   const short = browse.find((row) => !row.clipped && row.name !== LONG_NAME);
   check(short !== undefined, "No row fits its cell");
