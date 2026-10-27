@@ -500,8 +500,10 @@ export async function openSession(
         channel?.send(app.transportId, NAMESPACE.connection, { type: "CLOSE" });
         channel?.send(PLATFORM, NAMESPACE.connection, { type: "CLOSE" });
       }
-      end();
-    })());
+    })()
+      // A receiver's identifiers can make even STOP too large. Closing must still settle.
+      .catch(() => {})
+      .finally(end));
 
   /** The LAUNCH, once sent: a connect given up meanwhile still has an app to stop. */
   let launching: Promise<unknown> = Promise.resolve();
@@ -541,8 +543,9 @@ export async function openSession(
               requestId: nextRequest++,
             });
           }
-          end();
-        }),
+        })
+        .catch(() => {})
+        .finally(end),
     );
     throw error;
   }

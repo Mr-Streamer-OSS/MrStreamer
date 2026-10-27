@@ -11,7 +11,7 @@ import {
 import { castAdapter } from "../src/main/receivers/cast/adapter.ts";
 import { castDiscovery } from "../src/main/receivers/cast/discovery.ts";
 import type { CastTimings } from "../src/main/receivers/cast/session.ts";
-import { startFakeCastReceiver } from "./fake-cast-receiver.ts";
+import { startFakeCastReceiver, type CastFields } from "./fake-cast-receiver.ts";
 
 const CONNECTION = "urn:x-cast:com.google.cast.tp.connection";
 const HEARTBEAT = "urn:x-cast:com.google.cast.tp.heartbeat";
@@ -72,6 +72,39 @@ async function connected(timings: Partial<CastTimings> = {}) {
   const connection = await context.adapter.connect(request, never);
   if (!connection) throw new Error("not connected");
   return { ...context, connection };
+}
+
+/** Sends synthetic ASCII status messages within each frame's limit, even with a long sender. */
+function sendInParts(
+  receiver: Awaited<ReturnType<typeof startFakeCastReceiver>>,
+  payload: object,
+  fields: CastFields,
+) {
+  const text = JSON.stringify(payload);
+  const overhead = receiver.encode(
+    {},
+    {
+      ...fields,
+      payloadUtf8: "",
+      continued: true,
+      remainingLength: text.length,
+    },
+  ).length;
+  const size = 65_535 - overhead - 4;
+  for (let at = 0; at < text.length; at += size) {
+    const end = Math.min(at + size, text.length);
+    const part = receiver.encode(
+      {},
+      {
+        ...fields,
+        payloadUtf8: text.slice(at, end),
+        continued: end < text.length,
+        remainingLength: text.length - end,
+      },
+    );
+    expect(part.length).toBeLessThanOrEqual(65_535);
+    receiver.frame(part);
+  }
 }
 
 function film(generation: number, overrides: Partial<ReceiverMedia> = {}): ReceiverMedia {
@@ -176,6 +209,77 @@ describe("Cast adapter", () => {
     await expect.poll(() => receiver.connections).toBe(2);
     await expect.poll(() => failure(connection.play(1))).toBeNull();
     expect(ofType(events, "lost")).toEqual([]);
+  });
+
+  it("recovers when stopping a dropped load exceeds the frame limit", async () => {
+    const { receiver, adapter } = await setup();
+    receiver.answers.launch = "ignore";
+    const request = { kind: "receiver", id: receiver.receiver.id } as const;
+    const connecting = adapter.connect(request, never);
+    await expect.poll(() => receiver.requests("LAUNCH")).toHaveLength(1);
+    const fields = {
+      sourceId: "sender-0",
+      destinationId: "r".repeat(65_000),
+      namespace: CONNECTION,
+    };
+    const size = receiver.encode({ type: "CONNECT", origin: {} }, fields).length;
+    const transportId = fields.destinationId + "r".repeat(65_535 - size);
+    receiver.app = { sessionId: "owned-session", transportId: "owned-transport" };
+    sendInParts(
+      receiver,
+      {
+        type: "RECEIVER_STATUS",
+        requestId: receiver.requests("LAUNCH")[0]!.requestId,
+        status: { applications: [{ appId: "CC1AD845", ...receiver.app, transportId }] },
+      },
+      { sourceId: "receiver-0", namespace: RECEIVER },
+    );
+    const connection = await connecting;
+    if (!connection) throw new Error("not connected");
+    expect(await failure(connection.load(film(1), never))).toEqual({
+      kind: "unavailable",
+      detail: "request too large",
+    });
+
+    sendInParts(
+      receiver,
+      {
+        type: "MEDIA_STATUS",
+        status: [{ mediaSessionId: 1, media: { contentId: film(1).url } }],
+      },
+      { sourceId: transportId, namespace: MEDIA },
+    );
+    await expect.poll(() => receiver.connections).toBe(2);
+    await connection.disconnect();
+
+    receiver.answers.launch = "start";
+    const next = await adapter.connect(request, never);
+    await next!.load(film(2), never);
+    await next!.play(2);
+  });
+
+  it("closes failed setup even when the receiver's session id cannot be sent back", async () => {
+    const { receiver, adapter } = await setup();
+    receiver.answers.launch = "ignore";
+    const request = { kind: "receiver", id: receiver.receiver.id } as const;
+    const connecting = failure(adapter.connect(request, never));
+    await expect.poll(() => receiver.requests("LAUNCH")).toHaveLength(1);
+    sendInParts(
+      receiver,
+      {
+        type: "RECEIVER_STATUS",
+        requestId: receiver.requests("LAUNCH")[0]!.requestId,
+        status: { applications: [{ appId: "CC1AD845", sessionId: "s".repeat(65_536) }] },
+      },
+      { sourceId: "receiver-0", namespace: RECEIVER },
+    );
+    expect(await connecting).toMatchObject({ kind: "unavailable" });
+    await expect.poll(() => receiver.sockets.size).toBe(0);
+
+    receiver.answers.launch = "start";
+    const next = await adapter.connect(request, never);
+    await next!.load(film(1), never);
+    await next!.play(1);
   });
 
   it("refuses the system's picker, an unknown receiver and a receiver that won't start the app", async () => {

@@ -348,14 +348,14 @@ export function openChannel(options: ChannelOptions): Promise<Channel> {
     for (const message of messages) {
       // A message may have closed the channel: the ones behind it are for nobody.
       if (state !== "open") return;
-      if (message.namespace !== NAMESPACE.heartbeat) options.message(message);
-      else if (readPlatformMessage(message.payload)?.type === "PING") {
-        // The receiver's id can fit its frame and still leave no room for our reply.
-        try {
+      try {
+        if (message.namespace !== NAMESPACE.heartbeat) options.message(message);
+        else if (readPlatformMessage(message.payload)?.type === "PING") {
           send(message.sourceId, NAMESPACE.heartbeat, { type: "PONG" });
-        } catch {
-          return fail();
         }
+      } catch {
+        // Receiver identifiers can fit incoming messages but leave no room for our reply.
+        return fail();
       }
     }
   });
