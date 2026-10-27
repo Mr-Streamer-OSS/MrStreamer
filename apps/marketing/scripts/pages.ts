@@ -179,7 +179,10 @@ function linkTo(href: string, source: string): string | null {
   return `${REPOSITORY}/blob/main/${target}${suffix}`;
 }
 
-/** Render Markdown without embedded HTML, unsafe URLs or third-party image requests. */
+/**
+ * Render Markdown without embedded HTML, unsafe URLs or third-party image requests. The one HTML
+ * kept is an empty anchor alone in a paragraph, which holds a renamed heading's old fragment.
+ */
 export function renderMarkdown(
   text: string,
   source: string,
@@ -216,6 +219,11 @@ export function renderMarkdown(
         return target
           ? `<a href="${escapeHtml(target)}">${escapeHtml(text || "Image")}</a>`
           : escapeHtml(text);
+      },
+      // A paragraph of only `<a id="old-heading"></a>` keeps a renamed heading's old fragment.
+      paragraph({ text }) {
+        const legacy = /^<a id="([a-z0-9-]+)"><\/a>$/.exec(text.trim())?.[1];
+        return legacy ? `<a id="${anchorPrefix}${legacy}"></a>\n` : false;
       },
       html({ text }) {
         return escapeHtml(text);
