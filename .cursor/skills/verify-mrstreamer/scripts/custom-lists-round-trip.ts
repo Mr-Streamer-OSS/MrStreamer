@@ -36,7 +36,7 @@ const SETTINGS = "document.querySelector('header button[aria-pressed]')";
 const HEADING = "document.querySelector('main h1')?.textContent";
 const SUBSCRIPTION_ROWS = "document.querySelectorAll('main section > ul > li')";
 const row = (name: string) =>
-  `[...document.querySelectorAll('main [data-index]')].find(r => r.querySelector('[data-name=${JSON.stringify(name)}]'))`;
+  `[...document.querySelectorAll('main [data-index]')].find(r => r.querySelector('[title=${JSON.stringify(name)}]'))`;
 const check = (value: boolean, message: string) => {
   if (!value) throw new Error(message);
 };
