@@ -407,6 +407,7 @@ function ChannelRow({
   // A match that began since it was found is the programme on now.
   const later = match?.later && match.later.start > now ? match.later : null;
   const row = useRef<HTMLDivElement>(null);
+  const [listMenuOpen, setListMenuOpen] = useState(false);
   // The row the keys move takes the focus when the viewer chooses it, and again after each move,
   // which counts as choosing it: the page puts a moved row's node elsewhere, and that drops the
   // focus it had. So does a page that took no input while the order was saved.
@@ -493,7 +494,7 @@ function ChannelRow({
           words={words}
           playing={playing}
           held={selected && !expanded}
-          covered={covered}
+          covered={covered || listMenuOpen}
           details={details}
           bright={groupSummary !== null || copySummary !== null}
         />
@@ -562,6 +563,7 @@ function ChannelRow({
                   shown={selected || lists.lists.some((list) => holds(list, channel))}
                   onSet={(list, member) => lists.onSet(list, channel, member)}
                   onNew={() => lists.onNew(channel)}
+                  onOpenChange={setListMenuOpen}
                 />
               )}
               {grouped ? (
@@ -631,7 +633,18 @@ function ChannelName({
     [name.current, line.current].some(
       (text) => text !== null && text.scrollWidth > text.clientWidth,
     );
-  useLayoutEffect(() => setHolding(held && clipped()), [held, channel.title, details, playing]);
+  useLayoutEffect(() => {
+    if (!held) {
+      setHolding(false);
+      return;
+    }
+    const measure = () => setHolding(clipped());
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (name.current) observer.observe(name.current);
+    if (line.current) observer.observe(line.current);
+    return () => observer.disconnect();
+  }, [held, channel.title, details, playing]);
   // Covered, the pointer can leave unheard: the label waits for the next hover.
   useLayoutEffect(() => {
     if (covered) setHovered(false);
@@ -651,10 +664,10 @@ function ChannelName({
         setHovered(open && !escape && clipped());
       }}
       label={
-        <>
+        <span className="block max-w-[min(24rem,calc(100vw-2rem))] break-words whitespace-normal">
           <span className="block">{channel.name}</span>
           {details && <span className="block text-muted-foreground">{details}</span>}
-        </>
+        </span>
       }
     >
       <span className="flex w-[13rem] min-w-0 flex-none flex-col justify-center gap-0.5">
