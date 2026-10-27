@@ -1020,7 +1020,7 @@ describe("launch update reminders", () => {
       });
       expect(await service.showReminder("0.1.0")).toBe(false);
       await service.reminderShown("0.1.0");
-      expect((await service.check()).reminder).toBeUndefined();
+      expect((await service.check()).reminder ?? null).toBeNull();
     }
   });
 });

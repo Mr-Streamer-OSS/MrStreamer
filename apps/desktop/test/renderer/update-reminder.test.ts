@@ -147,6 +147,7 @@ it("keeps an answer that comes once playback started for the next time the viewe
   await act(async () => answer.resolve(true));
   await settle();
   expect(dialog()).toBeNull();
+  expect(ipc.argsOf("updates.reminderShown")).toEqual([]);
 
   await act(async () => useUi.setState({ watching: false }));
   await settle();
