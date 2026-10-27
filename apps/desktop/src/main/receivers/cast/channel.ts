@@ -304,19 +304,9 @@ export function openChannel(options: ChannelOptions): Promise<Channel> {
   };
   const send: Channel["send"] = (destinationId, namespace, payload) => {
     if (state !== "open") return;
-    try {
-      socket.write(
-        encodeFrame({
-          sourceId: SENDER,
-          destinationId,
-          namespace,
-          payload: JSON.stringify(payload),
-        }),
-      );
-    } catch {
-      // Receiver identifiers can fit an incoming frame but leave no room for our reply.
-      fail();
-    }
+    socket.write(
+      encodeFrame({ sourceId: SENDER, destinationId, namespace, payload: JSON.stringify(payload) }),
+    );
   };
 
   const opening = setTimeout(fail, options.deadline);
@@ -360,7 +350,12 @@ export function openChannel(options: ChannelOptions): Promise<Channel> {
       if (state !== "open") return;
       if (message.namespace !== NAMESPACE.heartbeat) options.message(message);
       else if (readPlatformMessage(message.payload)?.type === "PING") {
-        send(message.sourceId, NAMESPACE.heartbeat, { type: "PONG" });
+        // The receiver's id can fit its frame and still leave no room for our reply.
+        try {
+          send(message.sourceId, NAMESPACE.heartbeat, { type: "PONG" });
+        } catch {
+          return fail();
+        }
       }
     }
   });
