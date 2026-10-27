@@ -181,6 +181,11 @@ describe("website analytics", () => {
     click('#downloads a[href="/download"]');
     expect(events()).toEqual([["$pageview", { route: "/", ...unknown, ...fixed("/") }]]);
     start(download, "/download");
+    const otherApp = document.createElement("a");
+    otherApp.href = "https://apps.apple.com/app/id1234567890";
+    otherApp.textContent = "Another app";
+    document.body.append(otherApp);
+    otherApp.click();
     click('.mine a[data-installer="dmg"]');
     click('.rows a[data-installer="exe"]');
     click('.rows a[href^="https://apps.microsoft.com/"]');

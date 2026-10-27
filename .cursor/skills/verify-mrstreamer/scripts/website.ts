@@ -276,7 +276,7 @@ app.on('window-all-closed', () => app.quit());
       store: string[];
       appStore: string[];
     }>(
-      "({ version: document.querySelector('[data-release-selected]')?.dataset.releaseSelected ?? '', installers: [...document.querySelectorAll('a[data-installer]')].map(a => ({ kind: a.dataset.installer, href: a.href })), store: [...document.querySelectorAll('a[href]')].filter(a => a.textContent.trim() === 'Microsoft Store').map(a => a.href), appStore: [...document.querySelectorAll('a[href]')].map(a => a.href).filter(href => href.startsWith('https://apps.apple.com/')) })",
+      "({ version: document.querySelector('[data-release-selected]')?.dataset.releaseSelected ?? '', installers: [...document.querySelectorAll('a[data-installer]')].map(a => ({ kind: a.dataset.installer, href: a.href })), store: [...document.querySelectorAll('a[href]')].filter(a => a.textContent.trim() === 'Microsoft Store').map(a => a.href), appStore: [...document.querySelectorAll('a')].filter(a => ['Download on the App Store', 'App Store'].includes(a.textContent.trim())).map(a => a.href) })",
     );
     const release = "https://github.com/Mr-Streamer-OSS/MrStreamer/releases";
     const targets = {

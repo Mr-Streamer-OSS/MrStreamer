@@ -473,7 +473,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
           ? INSTALLERS[installer]
           : href.startsWith("https://apps.microsoft.com/")
             ? STORE
-            : href.startsWith("https://apps.apple.com/")
+            : href === "https://apps.apple.com/app/id6823479796"
               ? APP_STORE
               : undefined;
       if (docs) {
