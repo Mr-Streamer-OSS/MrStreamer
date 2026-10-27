@@ -5,7 +5,8 @@
 // (`updates.showReminder`), and records display only once the popup mounts. An answer that
 // arrives after the viewer started playing waits in the UI store for the next time they browse.
 // Download and Not now both close it, Escape too, and the keyboard returns where it was. The top
-// bar's Update stays.
+// bar's Update stays. Unlike the rem-sized app, it takes the selected Paper design's literal px, so
+// it keeps one size across window widths; page zoom still scales it.
 import { Dialog } from "@base-ui/react/dialog";
 import { useCallback, useEffect } from "react";
 import { t } from "@mrstreamer/core/i18n";
@@ -96,21 +97,21 @@ export function UpdateReminder() {
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && close()}>
       <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/62 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-[#0000009e] transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <Dialog.Popup
           ref={recordDisplay}
           data-update-reminder
-          className="fixed top-[44%] left-1/2 z-50 flex w-[23.75rem] max-w-[calc(100vw-2rem)] -translate-1/2 flex-col rounded-2xl bg-popover px-5.5 pt-5.5 pb-4.5 shadow-[0_24px_64px_rgb(0_0_0/70%)] ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0"
+          className="fixed top-[44%] left-1/2 z-50 flex w-[380px] max-w-[calc(100vw-2rem)] -translate-1/2 flex-col rounded-[16px] bg-popover px-[22px] pt-[22px] pb-[18px] shadow-[0_24px_64px_#000000b3] ring-1 ring-[#ffffff1f] outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0"
         >
-          <Dialog.Title className="text-xl leading-[1.625rem] font-semibold tracking-[-0.02em] text-white">
+          <Dialog.Title className="text-[20px] leading-[26px] font-semibold tracking-[-0.02em] text-white">
             {t("Update to {version}", { version })}
           </Dialog.Title>
-          <Dialog.Description className="pt-0.75 text-[0.78125rem] leading-[1.125rem] text-muted-foreground">
+          <Dialog.Description className="pt-[3px] text-[12.5px] leading-[18px] text-muted-foreground">
             {t("You have {version}", { version: status.version })} ·{" "}
             {status.channel === "nightly" ? t("Nightly") : t("Stable")}
           </Dialog.Description>
           {notes.length > 0 && (
-            <ul className="flex flex-col gap-1.25 pt-3.5 text-[0.8125rem] leading-[1.125rem] text-foreground/85">
+            <ul className="flex flex-col gap-[5px] pt-[14px] text-[13px] leading-[18px] text-foreground/85">
               {notes.slice(0, NOTE_LINES).map((item) => (
                 <li key={item.text}>
                   <span aria-hidden>• </span>
@@ -119,11 +120,11 @@ export function UpdateReminder() {
               ))}
             </ul>
           )}
-          <div className="flex items-center gap-1.75 pt-5">
+          <div className="flex items-center gap-[7px] pt-[20px]">
             <Button
               variant="primary"
               size="sm"
-              className="px-3.75 text-xs shadow-none"
+              className="h-[32px] px-[15px] text-[12px] leading-[16px] shadow-none"
               onClick={() => {
                 downloadVersion(version);
                 close();
@@ -131,7 +132,12 @@ export function UpdateReminder() {
             >
               {t("Download")}
             </Button>
-            <Button variant="ghost" size="sm" className="px-3.25 text-xs" onClick={close}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-[32px] px-[13px] text-[12px] leading-[16px]"
+              onClick={close}
+            >
               {t("Not now")}
             </Button>
             <button
@@ -143,7 +149,7 @@ export function UpdateReminder() {
                   updateDialog: null,
                 })
               }
-              className="ml-auto text-xs text-muted-foreground hover:text-white"
+              className="ml-auto text-[12px] leading-[16px] text-muted-foreground hover:text-white"
             >
               {t("Release notes")} ›
             </button>
