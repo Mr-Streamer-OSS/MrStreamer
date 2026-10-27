@@ -102,7 +102,7 @@ export function ChannelTable({
   onToggleCopies,
   onSelectSearch,
   selected,
-  covered = false,
+  covered,
   playingKey,
   expandedKey,
   favourites,
@@ -131,7 +131,7 @@ export function ChannelTable({
    */
   selected: number | null;
   /** Something covers the list, as Watch or Settings do: no row shows a cut name in full. */
-  covered?: boolean;
+  covered: boolean;
   /** The channel that plays and the one whose schedule is open, each by its `ownedKey`. */
   playingKey: string | null;
   expandedKey: string | null;
@@ -401,7 +401,7 @@ function ChannelRow({
   const details =
     groupSummary ??
     copySummary ??
-    [source, channel.browse?.country, qualitiesLine(channel)].filter(Boolean).join(" · ");
+    ([source, channel.browse?.country, qualitiesLine(channel)].filter(Boolean).join(" · ") || null);
   const current = listing?.now ?? null;
   const next = listing?.next ?? null;
   // A match that began since it was found is the programme on now.
@@ -494,7 +494,7 @@ function ChannelRow({
           playing={playing}
           held={selected && !expanded}
           covered={covered}
-          details={details || null}
+          details={details}
           bright={groupSummary !== null || copySummary !== null}
         />
         <span className="flex min-w-0 flex-1 items-center gap-4">

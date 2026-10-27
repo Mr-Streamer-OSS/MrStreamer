@@ -8,7 +8,7 @@ import { addBackup } from "./custom-lists.ts";
 import type { Driver } from "./language.ts";
 
 /** The H.264 test channel's name in both fixtures, too long for the list's name column. */
-export const LONG_NAME = "TEST | H.264 + AAC with a name far too long for the list's name column";
+const LONG_NAME = "TEST | H.264 + AAC with a name far too long for the list's name column";
 const LONG_TITLE = LONG_NAME.slice("TEST | ".length);
 
 /** Renames the H.264 test channel in a fixture to `LONG_NAME`. */
