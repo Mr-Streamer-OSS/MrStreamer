@@ -1,5 +1,7 @@
 # Downloads
 
+This guide covers the latest desktop release. See [Updates and channels](updates.md) to update an older installation.
+
 Download a movie, an episode or a whole series and watch it later on this computer, without a network connection and without a subscription. Pause downloads, reorder the queue, and watch a downloaded series episode after episode.
 
 ## Downloading

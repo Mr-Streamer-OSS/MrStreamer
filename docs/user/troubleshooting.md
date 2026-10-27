@@ -1,5 +1,7 @@
 # Troubleshooting
 
+This guide covers the latest desktop release. See [Updates and channels](updates.md) to update an older installation.
+
 ## Where your data is
 
 Mr. Streamer keeps everything on your computer, in one folder:

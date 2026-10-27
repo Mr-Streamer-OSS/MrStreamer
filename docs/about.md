@@ -4,11 +4,11 @@ Mr. Streamer is a free, open source IPTV player for Mac, Windows and Linux. Brin
 
 ## What it plays
 
-- Live TV from Xtream Codes or an M3U playlist, with favourites, [your own channel lists and programme reminders](user/live-tv.md#your-lists), and a programme guide when your provider or playlist supplies one, as a list or a grid by time. You can add XMLTV guides of your own, which fill in the channels it doesn't cover. Programmes that aired play from their start when your provider keeps catch-up.
+- Live TV from Xtream Codes or an M3U playlist, with favourites, [your own channel lists](user/live-tv.md#your-lists) and [programme reminders](user/live-tv.md#reminders), and a programme guide when your provider or playlist supplies one, as a list or a grid by time. You can add XMLTV guides of your own, which fill in the channels it doesn't cover. Programmes that aired play from their start when your provider keeps catch-up.
 - Movies and series from Xtream Codes or a playlist whose groups you mapped in Settings, with a watchlist, saved progress, keyboard navigation through poster grids and Back through related titles. Playlist movies and episodes need finished files; HLS entries stay out.
 - The sound and subtitle tracks your provider sends. See [What plays](user/playback.md) for formats, playback on a TV and limits.
 
-You can [download movies, episodes and whole series](user/downloads.md) to watch offline, pause downloads and reorder the queue. Downloaded episodes play on to the next one when its complete copy is on this computer. Mr. Streamer does not record live TV, bypass DRM or provide an IPTV subscription. It has no ads or account. Your provider decides what you can watch.
+You can [download movies, episodes and whole series](user/downloads.md) to watch offline, pause downloads and reorder the queue. Downloaded episodes continue when **Next episode** is enabled and the next complete copy is on this computer. Mr. Streamer does not record live TV, bypass DRM or provide an IPTV subscription. It has no ads or account. Your provider decides what you can watch.
 
 It reads MPEG-TS and HLS live streams, MP3 and AAC radio, and MKV, MP4 and AVI movies and episodes. Playback depends on the file's tracks and your system's decoders; [What plays](user/playback.md) describes conversion and the known limits. DASH streams are not supported.
 
