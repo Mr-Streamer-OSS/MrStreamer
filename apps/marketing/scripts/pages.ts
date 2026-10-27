@@ -229,7 +229,7 @@ export function renderMarkdown(
           : escapeHtml(text);
       },
       paragraph({ text }) {
-        const legacy = /^<a id="([a-z0-9-]+)"><\/a>$/.exec(text.trim())?.[1];
+        const legacy = /^<a id="([a-z0-9_-]+)"><\/a>$/.exec(text.trim())?.[1];
         return legacy ? `<a id="${anchorPrefix}${legacy}"></a>\n` : false;
       },
       html({ text }) {

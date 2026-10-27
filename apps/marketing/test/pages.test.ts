@@ -89,7 +89,7 @@ describe("public document pages without JavaScript", () => {
   it("sends non-public documentation to the repository and renders untrusted notes safely", () => {
     open(
       renderMarkdown(
-        '[Signing](../maintainers/signing.md#checking-a-build) [Privacy](../privacy.md#deleting-your-data)\n\n<a id="old-heading"></a>\n\n<script>alert(1)</script>\n\n[Bad](javascript:alert(1)) ![Remote](https://example.com/image.png) <a id="inline" href="https://example.com">x</a>',
+        '[Signing](../maintainers/signing.md#checking-a-build) [Privacy](../privacy.md#deleting-your-data)\n\n<a id="old-heading"></a>\n\n<a id="old_heading"></a>\n\n<script>alert(1)</script>\n\n[Bad](javascript:alert(1)) ![Remote](https://example.com/image.png) <a id="inline" href="https://example.com">x</a>',
         "docs/user/playback.md",
       ),
     );
@@ -100,6 +100,7 @@ describe("public document pages without JavaScript", () => {
     ).not.toBeNull();
     expect(document.querySelector('a[href="/privacy#deleting-your-data"]')).not.toBeNull();
     expect(document.querySelector("a#old-heading:empty")).not.toBeNull();
+    expect(document.querySelector("a#old_heading:empty")).not.toBeNull();
     expect(document.querySelector("#inline, script, img")).toBeNull();
     expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
   });
