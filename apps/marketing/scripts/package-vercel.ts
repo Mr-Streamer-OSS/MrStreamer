@@ -194,7 +194,7 @@ for (const page of PAGES) {
 }
 
 // Public links and fragments must lead to a real page, rather than maintainer-only 404s.
-for (const [, href = ""] of read("llms.txt").matchAll(/\[[^\]\n]+\]\((https:\/\/[^\s)]+)\)/g)) {
+for (const [, href = ""] of read("llms.txt").matchAll(/\]\((https:[^)]+)\)/g)) {
   const url = new URL(href);
   if (url.origin === SITE && !(url.pathname in LISTED)) {
     problems.push(`llms.txt links missing ${url.pathname}.`);

@@ -44,12 +44,6 @@ pnpm preview:marketing   # the built site, on http://localhost:4173
 
 ## Addresses
 
-`public/llms.txt` is a concise Markdown overview for agents, linking canonical public guides,
-downloads, project policies and support. It ships as UTF-8 plain text at `/llms.txt`, without
-page scripts. Keep its claims aligned with the public guides; use stable landing pages rather
-than versioned installers. The package checks its internal destinations. It is informational,
-not a robots access policy or an indexing guarantee.
-
 Both local servers and Vercel answer the same addresses, with or without a query:
 
 | Address                                                                                                                       | Answers                                                               |
@@ -66,6 +60,8 @@ Both local servers and Vercel answer the same addresses, with or without a query
 | Any other address, including HTML aliases such as `/404.html`                                                                 | The 404 page, with status 404                                         |
 
 Every document address also accepts a trailing slash. `scripts/pages.ts` is the address registry used by both local servers and Vercel packaging. Update `public/sitemap.xml` when adding a page; the build checks it against that registry.
+
+`/llms.txt` answers `public/llms.txt`, a short Markdown overview for agents, as UTF-8 plain text. Keep its claims true to the public guides and link stable pages rather than versioned installers; the build checks its site links. It informs agents; it is not a robots policy or an indexing promise.
 
 ## Change it
 
