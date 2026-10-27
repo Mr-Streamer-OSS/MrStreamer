@@ -663,6 +663,7 @@ it.each(["adult setting", "adult catalogue"] as const)(
     await settle();
     expect(nav()).not.toContain("Watchlist");
 
+    await act(async () => ipc.emit("preferences.changed", ipc.snapshot(defaultPreferences)));
     const pending = ipc.hold("watchlist.list");
     await act(async () => {
       if (change === "adult setting") {
