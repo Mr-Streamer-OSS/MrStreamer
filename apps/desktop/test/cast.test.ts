@@ -211,7 +211,7 @@ describe("Cast adapter", () => {
     expect(ofType(events, "lost")).toEqual([]);
   });
 
-  it.each(["stopped", "too large", "unanswered"] as const)(
+  it.each(["stopped", "too large", "unanswered", "explicit disconnect"] as const)(
     "ends a dropped load session when media STOP is too large and app STOP is %s",
     async (outcome) => {
       const { receiver, adapter, events } = await setup();
@@ -251,16 +251,26 @@ describe("Cast adapter", () => {
         activeTrackIds: [],
         media: { contentId: film(1).url },
       };
-      receiver.silent = outcome === "unanswered";
+      receiver.silent = outcome === "unanswered" || outcome === "explicit disconnect";
+      const disconnecting = outcome === "explicit disconnect" ? connection.disconnect() : null;
+      if (disconnecting) {
+        await expect.poll(() => receiver.requests("STOP")).toMatchObject([{ sessionId }]);
+      }
       sendInParts(
         receiver,
         { type: "MEDIA_STATUS", status: [receiver.media] },
         { sourceId: transportId, namespace: MEDIA },
       );
-      // No user disconnect: automatic cleanup must finish and invalidate this connection.
-      await expect
-        .poll(() => ofType(events, "lost"))
-        .toEqual([{ type: "lost", failure: { kind: "unreachable" } }]);
+      if (disconnecting) {
+        // Late media news during explicit teardown must not turn it into an automatic loss.
+        await disconnecting;
+        expect(events).toEqual([]);
+      } else {
+        // No user disconnect: automatic cleanup must finish and invalidate this connection.
+        await expect
+          .poll(() => ofType(events, "lost"))
+          .toEqual([{ type: "lost", failure: { kind: "unreachable" } }]);
+      }
       await expect.poll(() => receiver.sockets.size).toBe(0);
       expect(receiver.connections).toBe(1);
       expect(await failure(connection.setVolume({ muted: true }))).toEqual({ kind: "unreachable" });
@@ -273,7 +283,7 @@ describe("Cast adapter", () => {
         expect(receiver.media?.playerState).toBe("PLAYING");
       }
       await connection.disconnect();
-      expect(ofType(events, "lost")).toHaveLength(1);
+      expect(ofType(events, "lost")).toHaveLength(disconnecting ? 0 : 1);
       receiver.silent = false;
 
       receiver.answers.launch = "start";

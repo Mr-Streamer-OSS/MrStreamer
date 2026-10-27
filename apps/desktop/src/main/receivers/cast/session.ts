@@ -322,7 +322,7 @@ export async function openSession(
   /** A media status message: every media the app holds, in answer to `requestId` or as news. */
   const mediaStatuses = (statuses: readonly MediaStatus[], requestId: number | undefined) => {
     const current = load;
-    if (!current || !channel || !app) return;
+    if (closed || !current || !channel || !app) return;
     for (const status of statuses) {
       // The load's media is the one the answer to its LOAD names, or one playing its address,
       // as found when asking again after the connection broke before the answer.
