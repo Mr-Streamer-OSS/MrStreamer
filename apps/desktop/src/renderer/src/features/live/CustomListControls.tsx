@@ -256,9 +256,21 @@ export function ListMenu({
   onNew: () => void;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const open = useRef(false);
+  useEffect(
+    () => () => {
+      if (open.current) onOpenChange?.(false);
+    },
+    [onOpenChange],
+  );
   return (
     <span onClick={keep} onKeyDown={keep}>
-      <Menu.Root onOpenChange={onOpenChange}>
+      <Menu.Root
+        onOpenChange={(next) => {
+          open.current = next;
+          onOpenChange?.(next);
+        }}
+      >
         <Menu.Trigger
           aria-label={t("Lists for {name}", { name: channel.title })}
           title={t("Lists")}
