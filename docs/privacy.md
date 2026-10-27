@@ -114,6 +114,10 @@ We do not use app statistics or website analytics for advertising. They share a 
 
 Third-party requests go directly from your device to the services you use. Their own privacy policies also apply. Our restricted review provider is an exception: we operate that service ourselves.
 
+Downloaded copies can play without requesting their media from your provider. Other enabled network features, such as app statistics or requests for information and pictures, can still run. Desktop update checks remain desktop-only.
+
+Your network operator and DNS provider can see which servers your device contacts.
+
 #### On desktop
 
 - **Your provider** gets its login, your IP address and app version, and sees what you open, watch and download.
@@ -138,10 +142,6 @@ The iPhone app uses the TMDB key supplied with the app. It does not offer the de
 For app review we operate a restricted sample provider on **[Cloudflare](https://www.cloudflare.com/privacypolicy/)**. When that provider is connected, it receives the review login, connecting IP address and requested catalogue, guide, picture and media resources needed for authentication and delivery. These requests reach a service we operate; they are not requests to an unrelated provider. Cloudflare also processes hosting and network information under its applicable service terms and privacy policy. We do not promise that requests leave no hosting or security records.
 
 An earlier private-beta installation can still retain a demo subscription or downloaded samples. Fetching those sample pictures or media contacts **GitHub's raw-content hosting**, which receives the requested paths, connecting IP address and network metadata. The current new-user flow does not offer Try demo.
-
-Downloaded copies can play without requesting their media from your provider. Other enabled network features, such as app statistics or requests for information and pictures, can still run. Desktop update checks remain desktop-only.
-
-Your network operator and DNS provider can see which servers your device contacts.
 
 ### Services that work for us
 
