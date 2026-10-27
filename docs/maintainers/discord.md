@@ -16,7 +16,7 @@ Community, Rules Screening and native onboarding are enabled, with verified emai
 
 Owner, Admin and Moderator are the existing staff roles. Carl and Ticket Tool remain below protected staff roles. Ticket Tool has its nine invite permissions without Administrator: Manage Channels, Manage Roles, View Channel, Send Messages, Manage Messages, Embed Links, Attach Files, Read Message History and Use Application Commands. It does not have the shared Bot role.
 
-The **Mr. Streamer** provisioning bot owns the release webhooks and keeps Administrator. Removing it may break announcements. Its Administrator grant bypasses ticket/transcript channel denies, as do the server owner and administrator roles. Tokens and webhook URLs stay private, never in commits, logs or evidence.
+The **Mr. Streamer** provisioning bot owns the release webhooks and keeps Administrator. Removing it may break announcements. Like the server owner and administrator roles, it bypasses ticket and transcript channel denies. Tokens and webhook URLs stay private, never in commits, logs or evidence.
 
 Members select Stable/Nightly announcement roles through native Channels & Roles onboarding. Announcements suppress mentions; members choose notifications per channel. No duplicate reaction-role panel is needed. Cross-server **Publish** stays manual.
 
@@ -26,7 +26,7 @@ Use the searchable `#help` forum for ordinary questions. Search first, create on
 
 Private tickets are for staff attention, not secret storage. Never ask for provider logins, passwords, tokens, playlist/stream URLs or unredacted settings. Support is best effort.
 
-Ticket Tool's free panel uses Moderator as Support Team, with Additional Roles empty. The global and panel limits are one open ticket per member. The intake asks for category, app version/OS, problem and expected result, steps tried, and an optional redacted diagnostics link. The first four fields are required. Form answers are displayed inside the ticket.
+Ticket Tool's free panel uses Moderator as Support Team, with Additional Roles empty. The global and panel limits are one open ticket per member. The intake requires category, app version/OS, problem and expected result, and steps tried; a redacted diagnostics link is optional. Form answers are displayed inside the ticket.
 
 Two Step Close and Two Step Ticket are enabled. Close confirms first and keeps a closed ticket; staff can reopen it. Delete and Transcript buttons and commands are Support Team Only. Automatic deletion, automatic transcript saves, transcript DMs, Google Drive storage and channel reuse are disabled.
 
@@ -36,7 +36,7 @@ At resolution, staff record the resolution date and remove retained transcript m
 
 ## Carl and native moderation
 
-Carl uses `#bot-logs` for moderation actions and relevant member, role and channel events. Message edit/delete/purge logging and voice chatter are off. Tickets and transcripts deny Carl access; generated ticket overwrites were checked to deny `@everyone` and grant no shared Bot/Carl access. Keep message-content logging off and recheck new ticket overwrites after panel permission changes. Administrator bypass remains as described above.
+Carl uses `#bot-logs` for moderation actions and relevant member, role and channel events. Message edit/delete/purge logging and voice chatter are off. Tickets and transcripts deny Carl access; generated ticket overwrites were checked to deny `@everyone` and grant no shared Bot/Carl access. Keep message-content logging off and recheck new ticket overwrites after panel permission changes.
 
 Native Discord AutoMod retains suspected-spam blocking with alerts to `#bot-logs` and mention-spam blocking at 20 mentions with raid protection. Carl's slowmode, mention-spam and attachment-spam rate limits are disabled to avoid duplicate spam enforcement. Existing unrelated moderation settings are preserved; no new automatic bans were added. Carl's moderation commands retain their staff permission requirements, with Admin as Bot Manager.
 
@@ -44,14 +44,14 @@ Carl has public, unrestricted saved replies named `download`, `guides`, `bug` an
 
 ## Verification and launch gate
 
-The [support setup project card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=284454567) holds the approved plan, settings, rollback snapshots, PR and observed proof. Wout has only his owner account available and will test ordinary-member paths later. Configuration readback and owner tests do not establish member privacy or Moderator permissions. Overall acceptance remains pending.
+The [support setup project card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=284454567) holds the approved plan, settings, rollback snapshots, PR and observed proof. Wout has only the owner account available and will test ordinary-member paths later. Configuration readback and owner tests do not establish member privacy or Moderator permissions. Overall acceptance remains pending.
 
 The entry point is [restricted #contact-support](https://discord.com/channels/1564289427230949517/1564550464198942720); transcripts are in [staff #ticket-transcripts](https://discord.com/channels/1564289427230949517/1564550461133160569). For the later check:
 
 1. Wout temporarily grants **only the test opener** View Channel, Read Message History and Use Application Commands in contact-support. Keep Send Messages denied. Do not grant staff or Administrator, and keep the entry hidden from everyone else.
 2. The ordinary opener submits a clearly labelled, non-sensitive ticket. Confirm all five intake fields and try opening a second ticket while the first is open; it must be refused.
-3. An unrelated ordinary member opens the ticket and transcript channel links directly. Both must be inaccessible. Check both the channel list and direct links. Owner access or role preview cannot substitute.
-4. A Moderator replies, closes with confirmation, reopens, saves a manual transcript and deletes the setup ticket. The opener must be refused Transcript/Delete. Confirm the transcript lands only in the staff channel and Carl cannot see the ticket/transcript. A tester can receive Moderator after the ordinary phase, then remove that temporary role afterward.
+3. An unrelated ordinary member must not reach the ticket or transcript channel, in the channel list or through direct links. Owner access or role preview cannot substitute.
+4. A Moderator replies, closes with confirmation, reopens, saves a manual transcript and deletes the setup ticket. The opener must be refused Transcript/Delete. Confirm the transcript lands only in the staff channel and Carl cannot see the ticket/transcript. A tester may get a temporary Moderator role after the ordinary phase; remove it afterward.
 5. Test a new-member welcome, rules acceptance, Stable/Nightly role selection, a public [help forum](https://discord.com/channels/1564289427230949517/1564320588808454305) post and staff status tag, the four helpful replies and a controlled native spam alert in [bot-logs](https://discord.com/channels/1564289427230949517/1564303920916996096). No duplicate Carl spam action or release publication is expected.
 6. Record exact links/results on the same card, then remove deliberately created test artifacts and temporary access. Only after these checks pass, make contact-support public read-only with Use Application Commands allowed; keep Tickets and transcripts private. Recheck ordinary access before marking the card Done.
 
