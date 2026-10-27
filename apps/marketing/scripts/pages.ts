@@ -220,7 +220,6 @@ export function renderMarkdown(
           ? `<a href="${escapeHtml(target)}">${escapeHtml(text || "Image")}</a>`
           : escapeHtml(text);
       },
-      // A paragraph of only `<a id="old-heading"></a>` keeps a renamed heading's old fragment.
       paragraph({ text }) {
         const legacy = /^<a id="([a-z0-9-]+)"><\/a>$/.exec(text.trim())?.[1];
         return legacy ? `<a id="${anchorPrefix}${legacy}"></a>\n` : false;
