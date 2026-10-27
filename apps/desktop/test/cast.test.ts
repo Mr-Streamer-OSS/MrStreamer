@@ -250,6 +250,7 @@ describe("Cast adapter", () => {
       { sourceId: transportId, namespace: MEDIA },
     );
     await expect.poll(() => receiver.connections).toBe(2);
+    await expect.poll(() => receiver.requests("GET_STATUS").length).toBeGreaterThan(1);
     await connection.disconnect();
     expect(receiver.app).toBeNull();
 
