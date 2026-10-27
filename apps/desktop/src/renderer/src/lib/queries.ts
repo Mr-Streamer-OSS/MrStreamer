@@ -882,7 +882,12 @@ export function syncCustomLists(client: QueryClient): () => void {
  * pages go rather than show what they kept, as other lists of titles do (see `syncOnDemand`).
  */
 export function syncWatchlist(client: QueryClient): () => void {
-  const read = () => void client.invalidateQueries({ queryKey: ["watchlist"] });
+  const read = () => {
+    // A change can arrive during the first read, before the cache has data. Cancel that older
+    // snapshot too, so it cannot claim the collection is empty after a save.
+    void client.cancelQueries({ queryKey: ["watchlist"] });
+    void client.invalidateQueries({ queryKey: ["watchlist"] });
+  };
   const stopChanges = listen("watchlist.changed", read);
   const stopLists = listen("ondemand.updated", ({ markedForAdults }) => {
     if (!markedForAdults) return read();

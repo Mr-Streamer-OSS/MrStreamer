@@ -33,6 +33,16 @@ export function useDownloads() {
   return useQuery(downloadsQuery());
 }
 
+const anyKept = (list: DownloadList) => list.items.length > 0;
+
+/**
+ * Whether main keeps any download, in any state: queued, under way, waiting, paused, failed,
+ * complete or with its file gone. Undefined until main first answered.
+ */
+export function useAnyDownloads(): boolean | undefined {
+  return useQuery({ ...downloadsQuery(), select: anyKept }).data;
+}
+
 type FileIndex = Map<string, Map<RawTitleRef["kind"], Map<string, Download>>>;
 const filesBySnapshot = new WeakMap<DownloadList, FileIndex>();
 

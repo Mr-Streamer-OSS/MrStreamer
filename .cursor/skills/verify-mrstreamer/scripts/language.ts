@@ -437,6 +437,13 @@ async function liveTv(d: Driver, locale: Locale) {
 async function pages(d: Driver, locale: Locale) {
   const fits: Record<string, unknown> = {};
   for (const page of ["Live TV", "Movies", "Series", "Watchlist", "Home"] as const) {
+    if (
+      page === "Watchlist" &&
+      !(await d.exists(byText("header button", translate(locale, page))))
+    ) {
+      fits[page] = { hiddenWhileEmpty: true };
+      continue;
+    }
     if (page === "Watchlist")
       await d.click(
         "Return Home for Watchlist",

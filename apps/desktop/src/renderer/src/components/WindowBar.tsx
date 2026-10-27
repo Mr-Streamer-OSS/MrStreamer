@@ -8,6 +8,7 @@ import {
   type RefCallback,
 } from "react";
 import type { Locale } from "@mrstreamer/contracts/language";
+import type { WatchlistPage } from "@mrstreamer/contracts/watchlist";
 import { hasTitles } from "@mrstreamer/contracts/subscription";
 import { useLocale } from "../app/language.ts";
 import { isMac, useWindowFullScreen } from "../app/platform.ts";
@@ -25,8 +26,10 @@ import {
   updateNoticeLabel,
   useKeptUpdate,
 } from "../features/updates/UpdateNotice.tsx";
+import { PAGE } from "../features/titles/CollectionGrid.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { type PlainKey, t } from "@mrstreamer/core/i18n";
+import { useAnyDownloads } from "../lib/downloads.ts";
 import { queries, useSubscriptions } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
 import { WINDOW_BAR } from "../../../shared/window-bar.ts";
@@ -43,6 +46,8 @@ const VIEWS = [
   { view: "downloads", label: "Downloads" },
 ] as const satisfies readonly { readonly view: View; readonly label: PlainKey }[];
 
+const anySaved = (page: WatchlistPage) => page.total > 0;
+
 /**
  * The top of the window: brand, the pages, how far TMDB has come, search and settings. It is also
  * the window's drag area; macOS draws its traffic lights on the left and Windows its controls on
@@ -51,7 +56,8 @@ const VIEWS = [
  * a related title opened, it first returns through those it was opened from (`backDetails`).
  * Details get a bar of their own above their backdrop for it (`App.tsx`). `onBack` overrides
  * where it goes, as a playing title or an open collection does. Subscriptions with
- * live TV only have no Movies or Series; Watchlist stays reachable. Where the window is too
+ * live TV only have no Movies or Series. Watchlist and Downloads show
+ * once anything is saved or kept. Hiding an empty page's entry leaves that page open. Where the window is too
  * narrow for every page's name, Downloads goes beside Search as a button of its own, under the same name. That
  * place also says how the downloads stand while one is under way, waits or stopped, except over
  * the Downloads page itself while its name is in the bar. Where even the other names, or Back,
@@ -74,7 +80,19 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   const update = useQuery(queries.updates()).data;
   const updateOpen = useUi((state) => state.updateDialog === "panel");
   const updateWords = updateNoticeLabel(update, updateOpen, useKeptUpdate());
-  const [pages, fold] = useFolds(status?.text, updateWords, locale);
+  const any: Partial<Record<View, boolean>> = {
+    // The Watchlist page's own first read: its total counts what the viewer sees there, also a
+    // title no provider lists now, and those for adults only while shown.
+    watchlist: useKnown(
+      useQuery({ ...queries.watchlist("saved", 0, PAGE), select: anySaved }).data,
+    ),
+    downloads: useKnown(useAnyDownloads()),
+  };
+  const shown = VIEWS.filter(
+    (entry) => (!liveOnly || withoutTitles(entry.view)) && any[entry.view] !== false,
+  );
+  const names = shown.map((entry) => t(entry.label)).join();
+  const [pages, fold] = useFolds(status?.text, updateWords, locale, names);
   const [backRoom, backFold] = useFolds(status?.text, updateWords, locale);
   const folded = fold !== "none";
   const back =
@@ -88,7 +106,6 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
           : savedOpen
             ? () => useUi.setState({ savedEntry: null })
             : null);
-  const shown = liveOnly ? VIEWS.filter((entry) => withoutTitles(entry.view)) : VIEWS;
   return (
     <BarFrame className={className}>
       <Brand />
@@ -119,7 +136,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
         <TmdbProgress />
         {back ? (
           <DownloadsNotice status={status} compact={backFold === "arrow"} />
-        ) : folded ? (
+        ) : folded && shown.some((entry) => entry.view === "downloads") ? (
           <DownloadsNotice
             status={status}
             page
@@ -218,6 +235,16 @@ export function PageButton({
 }
 
 /**
+ * What `answer` last said: held while it is read again or a read fails, and true before main first
+ * answers, so a page is never taken for empty before main said so.
+ */
+function useKnown(answer: boolean | undefined): boolean {
+  const [known, setKnown] = useState(true);
+  if (answer !== undefined && answer !== known) setKnown(answer);
+  return answer ?? known;
+}
+
+/**
  * How far the bar folds: "none" while every page's name fits; "downloads" once they don't fit
  * where the bar holds them, which puts Downloads beside Search; "arrow" once the other names
  * don't fit beside that button's words either, which leaves it its arrow alone. Back, in the
@@ -232,26 +259,32 @@ type Fold = "none" | "downloads" | "arrow";
  * all their names took, a little more than they need while it stands beside Search. The arrow
  * tries its words again whenever the pages' room grows, the words change or the language does, as
  * Back's name can while the words read the same, and keeps them only if the names still fit beside
- * them; the try is measured before the bar is drawn, so it shows nothing when it fails.
+ * them; the try is measured before the bar is drawn, so it shows nothing when it fails. When the
+ * pages' `names` change, a page coming or going, Downloads tries its place among them the same
+ * way, unless its button beside Search has the keyboard, which it would lose.
  */
 function useFolds(
   words: string | undefined,
   updateWords: string | undefined,
   locale: Locale,
+  names?: string,
 ): [RefCallback<HTMLElement>, Fold] {
   const [fold, setFold] = useState<Fold>("none");
   // The room all the pages' names took when they stopped fitting, and the room the pages had
   // beside the arrow when last measured.
   const needed = useRef(0);
   const besideArrow = useRef(Infinity);
-  const measured = useRef<(again: boolean) => void>(undefined);
+  const measured = useRef<(again: boolean, renamed?: boolean) => void>(undefined);
   const ref = useCallback((element: HTMLElement | null) => {
     if (!element) return;
     // `again`: what the bar holds changed, so the arrow tries its words whatever the room.
-    const measure = (again: boolean) =>
+    // `renamed`: the names changed, so Downloads tries its place among them too.
+    const measure = (again: boolean, renamed = false) =>
       setFold((was) => {
         const room = element.clientWidth;
         const over = element.scrollWidth > room;
+        const notice = element.parentElement?.querySelector("[data-downloads-notice]");
+        if (renamed && was !== "none" && !notice?.contains(document.activeElement)) return "none";
         switch (was) {
           case "none":
             if (!over) return "none";
@@ -269,7 +302,7 @@ function useFolds(
       });
     measured.current = measure;
     // The pages come back after Back with the fold they had, and the bar may have changed meanwhile.
-    measure(true);
+    measure(true, true);
     const observer = new ResizeObserver(() => measure(false));
     observer.observe(element);
     return () => {
@@ -282,5 +315,6 @@ function useFolds(
   // or a language that changes resize nothing either while the arrow stands alone.
   useLayoutEffect(() => measured.current?.(false), [fold]);
   useLayoutEffect(() => measured.current?.(true), [words, updateWords, locale]);
+  useLayoutEffect(() => measured.current?.(true, true), [names]);
   return [ref, fold];
 }

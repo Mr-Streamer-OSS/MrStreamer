@@ -17,6 +17,7 @@ import type { WatchlistEntry, WatchlistPage as Page } from "@mrstreamer/contract
 import { App } from "../../src/renderer/src/app/App.tsx";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
+import { WindowBar } from "../../src/renderer/src/components/WindowBar.tsx";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import { SavedSheet } from "../../src/renderer/src/features/watchlist/SavedSheet.tsx";
 import { WatchlistPage } from "../../src/renderer/src/features/watchlist/WatchlistPage.tsx";
@@ -341,6 +342,7 @@ describe("the Watchlist page", () => {
     await key("Delete");
     await key("Backspace");
     expect(ipc.methods()).not.toContain("watchlist.remove");
+    await press("Saved");
   });
 
   it("takes a title off with its cross once the main process has, and says when it couldn't", async () => {
@@ -589,4 +591,47 @@ describe("a saved title the provider no longer lists", () => {
     expect(ipc.methods()).not.toContain("watchlist.remove");
     useUi.setState(useUi.getInitialState(), true);
   });
+});
+
+it("keeps Watchlist availability through failed and obsolete reads, then hides the last removal without leaving the page", async () => {
+  ipc.reset();
+  useUi.setState({ ...useUi.getInitialState(), view: "home" }, true);
+  const older = ipc.hold("watchlist.list");
+  await shown(createElement(TooltipProvider, null, createElement(WindowBar)));
+  const nav = () => document.querySelector("header nav")?.textContent ?? "";
+  expect(nav()).toContain("Watchlist");
+
+  // A real saved-entry notification overtakes the initial empty snapshot.
+  const newer = ipc.hold("watchlist.list");
+  await act(async () => ipc.emit("watchlist.changed", null));
+  await act(async () => newer.resolve(page([meridian])));
+  await settle();
+  await act(async () => older.resolve(page([])));
+  await settle();
+  expect(nav()).toContain("Watchlist");
+
+  const failed = ipc.hold("watchlist.list");
+  await act(async () => ipc.emit("watchlist.changed", null));
+  await act(async () => failed.reject({ kind: "unexpected", detail: "unavailable" }));
+  await settle();
+  expect(nav()).toContain("Watchlist");
+
+  await press("Watchlist");
+  const home = button("Home")!;
+  home.focus();
+  const empty = ipc.hold("watchlist.list");
+  await act(async () => ipc.emit("watchlist.changed", null));
+  expect(nav()).toContain("Watchlist");
+  await act(async () => empty.resolve(page([])));
+  await settle();
+  expect(nav()).not.toContain("Watchlist");
+  expect(useUi.getState().view).toBe("watchlist");
+  expect(document.activeElement).toBe(home);
+
+  const saved = ipc.hold("watchlist.list");
+  await act(async () => ipc.emit("watchlist.changed", null));
+  expect(nav()).not.toContain("Watchlist");
+  await act(async () => saved.resolve(page([meridian])));
+  await settle();
+  expect(nav()).toContain("Watchlist");
 });
