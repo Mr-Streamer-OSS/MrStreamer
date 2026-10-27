@@ -14,6 +14,7 @@ export function updateHandlers({
     | "setChannel"
     | "check"
     | "download"
+    | "downloadVersion"
     | "cancel"
     | "restart"
     | "dismiss"
@@ -28,6 +29,7 @@ export function updateHandlers({
     "updates.setChannel": ({ channel }) => updates.setChannel(channel),
     "updates.check": () => updates.check,
     "updates.download": () => updates.download,
+    "updates.downloadVersion": ({ version }) => updates.downloadVersion(version),
     "updates.cancel": () => Effect.as(updates.cancel, null),
     "updates.restart": () => Effect.as(updates.restart, null),
     "updates.dismiss": ({ version }) => updates.dismiss(version),

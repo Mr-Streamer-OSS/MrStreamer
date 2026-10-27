@@ -138,6 +138,8 @@ export class Updates extends Context.Service<
      * Playback carries on meanwhile.
      */
     readonly download: Effect.Effect<UpdateStatus>;
+    /** Downloads only the version the reminder actually displayed; stale buttons do nothing. */
+    downloadVersion(version: string): Effect.Effect<UpdateStatus>;
     /** Stops a download in progress; the update goes back to available. */
     readonly cancel: Effect.Effect<void>;
     /** Installs the downloaded update. The user has confirmed the restart. */
@@ -395,28 +397,13 @@ function make(deps: UpdatesDeps & DirectUpdates) {
       });
     if (deps.schedule) yield* Effect.forkIn(automatic(deps.schedule), scope);
 
-    return {
-      status,
-      check: Effect.as(runCheck(true), undefined).pipe(Effect.andThen(status)),
-
-      setChannel: (next: Channel) =>
-        Effect.gen(function* () {
-          channel = next;
-          checking = null;
-          const staged = update.kind === "downloading" || update.kind === "ready" ? update : null;
-          if (!staged || !receives(next, staged.version)) {
-            attempt = null;
-            target = null;
-            update = { kind: "idle" };
-            if (downloading) yield* Fiber.interrupt(downloading);
-          }
-          yield* save;
-          yield* changed;
-          yield* runCheck(true);
+    const download = (expectedVersion?: string) =>
+      Effect.gen(function* () {
+        if (
+          expectedVersion !== undefined &&
+          (!target || formatVersion(target.version) !== expectedVersion)
+        )
           return snapshot();
-        }),
-
-      download: Effect.gen(function* () {
         const retry = update.kind === "failed" && update.step !== "check";
         if ((update.kind !== "available" && !retry) || !target || downloading) return snapshot();
         const release = target;
@@ -467,7 +454,31 @@ function make(deps: UpdatesDeps & DirectUpdates) {
         }
         yield* changed;
         return snapshot();
-      }),
+      });
+
+    return {
+      status,
+      check: Effect.as(runCheck(true), undefined).pipe(Effect.andThen(status)),
+
+      setChannel: (next: Channel) =>
+        Effect.gen(function* () {
+          channel = next;
+          checking = null;
+          const staged = update.kind === "downloading" || update.kind === "ready" ? update : null;
+          if (!staged || !receives(next, staged.version)) {
+            attempt = null;
+            target = null;
+            update = { kind: "idle" };
+            if (downloading) yield* Fiber.interrupt(downloading);
+          }
+          yield* save;
+          yield* changed;
+          yield* runCheck(true);
+          return snapshot();
+        }),
+
+      download: download(),
+      downloadVersion: download,
 
       cancel: Effect.suspend(() => (downloading ? Fiber.interrupt(downloading) : Effect.void)),
 
@@ -539,6 +550,7 @@ function managed(deps: UpdatesDeps & (StoreUpdates | PacmanUpdates)) {
     check: unchanged,
     setChannel: () => unchanged,
     download: unchanged,
+    downloadVersion: () => unchanged,
     cancel: Effect.void,
     restart: Effect.void,
     dismiss: () => unchanged,

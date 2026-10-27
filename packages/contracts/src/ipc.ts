@@ -561,6 +561,7 @@ export const ipcInputs = {
   "updates.setChannel": () => type({ channel: "'stable' | 'nightly'" }),
   "updates.check": none,
   "updates.download": none,
+  "updates.downloadVersion": () => type({ version: "string" }),
   "updates.cancel": none,
   "updates.restart": none,
   "updates.dismiss": () => type({ version: "string" }),
@@ -877,6 +878,8 @@ export interface IpcOutputs {
   "updates.check": UpdateStatus;
   /** Downloads the update the last check found. Resolves when it is ready or failed. */
   "updates.download": UpdateStatus;
+  /** Downloads only this displayed version; a changed offer is returned without downloading. */
+  "updates.downloadVersion": UpdateStatus;
   /** Stops a download in progress. */
   "updates.cancel": null;
   /** Quits and installs the downloaded update. Only after the user confirmed the restart. */

@@ -7,7 +7,7 @@
 // Download and Not now both close it, Escape too, and the keyboard returns where it was. The top
 // bar's Update stays.
 import { Dialog } from "@base-ui/react/dialog";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
@@ -34,7 +34,7 @@ export function UpdateReminder() {
   const {
     status,
     statusRead: { refetch },
-    download,
+    downloadVersion,
   } = useUpdates();
   const reminder = useUi((state) => state.updateReminder);
   const free = useUi(browsing);
@@ -43,6 +43,12 @@ export function UpdateReminder() {
   const version = useKeptUpdate();
   // The service names only the release on offer, so a due reminder is always downloadable.
   const due = status?.reminder?.version ?? null;
+  const recordDisplay = useCallback(
+    (node: HTMLElement | null) => {
+      if (node && version) void call("updates.reminderShown", { version }).catch(() => {});
+    },
+    [version],
+  );
 
   // Validate the offer when browsing. A stale answer refreshes status before another attempt.
   useEffect(() => {
@@ -92,9 +98,7 @@ export function UpdateReminder() {
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/62 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <Dialog.Popup
-          ref={(node) => {
-            if (node) void call("updates.reminderShown", { version }).catch(() => {});
-          }}
+          ref={recordDisplay}
           data-update-reminder
           className="fixed top-[44%] left-1/2 z-50 flex w-[23.75rem] max-w-[calc(100vw-2rem)] -translate-1/2 flex-col rounded-2xl bg-popover px-5.5 pt-5.5 pb-4.5 shadow-[0_24px_64px_rgb(0_0_0/70%)] ring-1 ring-white/12 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0"
         >
@@ -121,7 +125,7 @@ export function UpdateReminder() {
               size="sm"
               className="px-3.75 text-xs shadow-none"
               onClick={() => {
-                download();
+                downloadVersion(version);
                 close();
               }}
             >

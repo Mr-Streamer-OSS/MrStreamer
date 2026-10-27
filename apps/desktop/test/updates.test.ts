@@ -1027,3 +1027,27 @@ describe("launch update reminders", () => {
     }
   });
 });
+
+it("never downloads a changed target from the reminder's stale Download button", async () => {
+  let releases = [offer("0.0.24")];
+  const installer = fakeInstaller();
+  const service = await startUpdates({
+    installed: "0.0.21",
+    dataDir: await tempDir(),
+    discover: async () => releases,
+    installer: installer.installer,
+  });
+  await service.check();
+  releases = [offer("0.0.25")];
+  await service.check();
+  expect((await service.downloadVersion("0.0.24")).update).toEqual({
+    kind: "available",
+    version: "0.0.25",
+  });
+  expect(installer.downloads).toEqual([]);
+  expect((await service.downloadVersion("0.0.25")).update).toEqual({
+    kind: "ready",
+    version: "0.0.25",
+  });
+  expect(installer.downloads.map((each) => each.version)).toEqual(["0.0.25"]);
+});

@@ -34,7 +34,7 @@ const views: (() => void)[] = [];
 let opener: HTMLButtonElement;
 beforeEach(() => {
   ipc.reset();
-  ipc.always("updates.download", {
+  ipc.always("updates.downloadVersion", {
     ...STATUS,
     update: { kind: "downloading", version: "0.0.23", percent: 0 },
   });
@@ -121,7 +121,7 @@ it("downloads through the updater and closes", async () => {
 
   await act(async () => named("Download")!.click());
   await settle();
-  expect(ipc.argsOf("updates.download")).toHaveLength(1);
+  expect(ipc.argsOf("updates.downloadVersion")).toEqual([{ version: "0.0.23" }]);
   expect(dialog()).toBeNull();
   expect(view.container.querySelector("[data-update-notice]")?.textContent).toContain("Updating");
 });
