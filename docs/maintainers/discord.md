@@ -32,7 +32,7 @@ Two Step Close and Two Step Ticket are enabled. Close confirms first and keeps a
 
 Save a transcript **manually only when necessary**, to staff-only `#ticket-transcripts`, with the HTML attachment. Free transcripts cover the latest 1,000 messages; free attachment preservation is not guaranteed. Hosted viewer authorization is unverified. Do not promise that a forwarded file or link remains private, or that deleting its message recalls downloaded copies.
 
-At resolution, staff record the resolution date and delete closed tickets and remove retained transcript messages and controlled exports **within 30 days**. This is a manual staff task, not automatic expiry. Avoid unnecessary exports; share a redacted copy individually only when appropriate. Delete the closed ticket deliberately after deciding whether a record is needed. Never delete unrelated member data as setup cleanup.
+At resolution, staff record the resolution date and delete closed tickets and remove retained transcript messages and controlled exports **within 30 days**. This is a manual staff task, not automatic expiry. Avoid unnecessary exports; share a redacted copy individually only when appropriate. Decide whether a manual record is needed before deleting the closed ticket. Never delete unrelated member data as setup cleanup.
 
 ## Carl and native moderation
 
@@ -55,7 +55,7 @@ The entry point is [restricted #contact-support](https://discord.com/channels/15
 5. Test a new-member welcome, rules acceptance, Stable/Nightly role selection, a public [help forum](https://discord.com/channels/1564289427230949517/1564320588808454305) post and staff status tag, the four helpful replies and a controlled native spam alert in [bot-logs](https://discord.com/channels/1564289427230949517/1564303920916996096). No duplicate Carl spam action or release publication is expected.
 6. Record exact links/results on the same card, then remove deliberately created test artifacts and temporary access. Only after these checks pass, allow `@everyone` View Channel, Read Message History and Use Application Commands in contact-support while retaining its Send Messages and thread-creation denies; keep Tickets and transcripts private. Recheck ordinary access before marking the card Done.
 
-Rollback starts by restricting contact-support or disabling its Create button. Restore changed Carl/onboarding settings from the private starting snapshots. Remove only deliberately created setup artifacts. Existing announcements, user conversations and server layout are not rollback targets.
+Rollback starts by restricting contact-support or disabling its Create button. Restore changed Carl/onboarding settings using the support card's rollback contract and retained private snapshots. Remove only deliberately created setup artifacts. Existing announcements, user conversations and server layout are not rollback targets.
 
 ## Release webhooks
 
