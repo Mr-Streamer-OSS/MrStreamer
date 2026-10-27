@@ -159,8 +159,8 @@ export function writePackages(html: string, routes: PackageRoutes = PACKAGE_ROUT
         return "";
       const anchor = (words: string) =>
         `<a data-package="${name}" href="${escapeHtml(route.url)}">${escapeHtml(words)}</a>`;
-      const link = anchor(`${route.name} · ${route.platform}, ${route.architecture}`);
       if (part === "lane") return ` <span>·</span> ${anchor(LANE[name][0])}${LANE[name][1]}`;
+      const link = anchor(`${route.name} · ${route.platform}, ${route.architecture}`);
       if (part === "availability") return `<span>Also on ${link}.</span>`;
       if (part === "link") return link;
       return `<div class="package-route">${link}<small>${escapeHtml(route.updates)} Package ${escapeHtml(route.publication.lastVerifiedVersion)}.</small><pre><code>${escapeHtml(route.install)}</code></pre></div>`;

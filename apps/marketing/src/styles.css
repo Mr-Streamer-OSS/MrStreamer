@@ -833,7 +833,6 @@ footer p {
 
   .downloads dl {
     grid-column: 1 / -1;
-    display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 3em;
     padding-top: 1.22em;
