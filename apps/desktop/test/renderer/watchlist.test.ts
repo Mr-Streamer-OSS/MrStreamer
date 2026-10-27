@@ -342,6 +342,7 @@ describe("the Watchlist page", () => {
     await key("Delete");
     await key("Backspace");
     expect(ipc.methods()).not.toContain("watchlist.remove");
+    // The order outlives the page: put it back for the tests after.
     await press("Saved");
   });
 

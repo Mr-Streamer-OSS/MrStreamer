@@ -883,8 +883,7 @@ export function syncCustomLists(client: QueryClient): () => void {
  */
 export function syncWatchlist(client: QueryClient): () => void {
   const read = () => {
-    // A change can arrive during the first read, before the cache has data. Cancel that older
-    // snapshot too, so it cannot claim the collection is empty after a save.
+    // Cancel an older first read too: invalidation alone may reuse it as the new answer.
     void client.cancelQueries({ queryKey: ["watchlist"] });
     void client.invalidateQueries({ queryKey: ["watchlist"] });
   };

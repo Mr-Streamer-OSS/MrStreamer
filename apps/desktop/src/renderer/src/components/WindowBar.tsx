@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type RefCallback,
 } from "react";
+import type { DownloadList } from "@mrstreamer/contracts/downloads";
 import type { Locale } from "@mrstreamer/contracts/language";
 import type { WatchlistPage } from "@mrstreamer/contracts/watchlist";
 import { hasTitles } from "@mrstreamer/contracts/subscription";
@@ -29,7 +30,7 @@ import {
 import { PAGE } from "../features/titles/CollectionGrid.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { type PlainKey, t } from "@mrstreamer/core/i18n";
-import { useAnyDownloads } from "../lib/downloads.ts";
+import { downloadsQuery } from "../lib/downloads.ts";
 import { queries, useSubscriptions } from "../lib/queries.ts";
 import { cn } from "../lib/utils.ts";
 import { WINDOW_BAR } from "../../../shared/window-bar.ts";
@@ -47,6 +48,7 @@ const VIEWS = [
 ] as const satisfies readonly { readonly view: View; readonly label: PlainKey }[];
 
 const anySaved = (page: WatchlistPage) => page.total > 0;
+const anyKept = (list: DownloadList) => list.items.length > 0;
 
 /**
  * The top of the window: brand, the pages, how far TMDB has come, search and settings. It is also
@@ -55,9 +57,9 @@ const anySaved = (page: WatchlistPage) => page.total > 0;
  * title's details, Back takes the pages' place and returns to the page underneath; over details
  * a related title opened, it first returns through those it was opened from (`backDetails`).
  * Details get a bar of their own above their backdrop for it (`App.tsx`). `onBack` overrides
- * where it goes, as a playing title or an open collection does. Subscriptions with
- * live TV only have no Movies or Series. Watchlist and Downloads show
- * once anything is saved or kept. Hiding an empty page's entry leaves that page open. Where the window is too
+ * where it goes, as a playing title or an open collection does. Subscriptions with live TV only
+ * have no Movies or Series. Watchlist and Downloads show once anything is saved or kept; hiding an
+ * empty page's entry leaves that page open. Where the window is too
  * narrow for every page's name, Downloads goes beside Search as a button of its own, under the same name. That
  * place also says how the downloads stand while one is under way, waits or stopped, except over
  * the Downloads page itself while its name is in the bar. Where even the other names, or Back,
@@ -80,16 +82,17 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   const update = useQuery(queries.updates()).data;
   const updateOpen = useUi((state) => state.updateDialog === "panel");
   const updateWords = updateNoticeLabel(update, updateOpen, useKeptUpdate());
-  const any: Partial<Record<View, boolean>> = {
+  const filled: Partial<Record<View, boolean>> = {
     // The Watchlist page's own first read: its total counts what the viewer sees there, also a
     // title no provider lists now, and those for adults only while shown.
     watchlist: useKnown(
       useQuery({ ...queries.watchlist("saved", 0, PAGE), select: anySaved }).data,
     ),
-    downloads: useKnown(useAnyDownloads()),
+    // Every download main keeps counts, in any state, also a complete one whose file went.
+    downloads: useKnown(useQuery({ ...downloadsQuery(), select: anyKept }).data),
   };
   const shown = VIEWS.filter(
-    (entry) => (!liveOnly || withoutTitles(entry.view)) && any[entry.view] !== false,
+    (entry) => (!liveOnly || withoutTitles(entry.view)) && filled[entry.view] !== false,
   );
   const names = shown.map((entry) => t(entry.label)).join();
   const [pages, fold] = useFolds(status?.text, updateWords, locale, names);
