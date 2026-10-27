@@ -8,7 +8,6 @@ The first iPhone release supports Live TV with Guide, movies, series and offline
 
 - [App Store for iPhone](https://apps.apple.com/app/id6823479796): iOS 16.4 or later, free, no ads or purchases.
 - [iPhone setup](https://mrstreamer.app/docs/iphone): Connect an existing Xtream provider and understand release scope.
-
 - [Downloads](https://mrstreamer.app/download): Current stable installers, system requirements, checksums and source archives.
 - [Guides](https://mrstreamer.app/docs): Using subscriptions, live TV, movies and series, downloads, updates and playback.
 - [Subscriptions](https://mrstreamer.app/docs/subscriptions): Connect Xtream Codes or an M3U playlist and manage your sources.
@@ -17,7 +16,7 @@ The first iPhone release supports Live TV with Guide, movies, series and offline
 
 ## Project and policies
 
-- [About](https://mrstreamer.app/about): Product capabilities and supported systems and platform limits.
+- [About](https://mrstreamer.app/about): Product capabilities, supported systems and platform limits.
 - [Source repository](https://github.com/Mr-Streamer-OSS/MrStreamer): Public source code and contribution guidance.
 - [License](https://github.com/Mr-Streamer-OSS/MrStreamer/blob/main/LICENSE): GPL-3.0 license terms.
 - [Privacy](https://mrstreamer.app/privacy): Data storage, connections, analytics and privacy choices.
