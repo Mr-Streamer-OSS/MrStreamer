@@ -12,9 +12,7 @@ Wout Stiens in Belgium, publishing as Mr Streamer OSS, is responsible for the da
 
 ### On your computer
 
-This section describes the desktop app.
-
-Most of what the app handles never reaches us. It stays in its data folder ([where it is](user/troubleshooting.md#where-your-data-is)):
+Most of what the desktop app handles never reaches us. It stays in its data folder ([where it is](user/troubleshooting.md#where-your-data-is)):
 
 - your subscriptions: server address, username, and password or playlist link
 - preferences, including your own TMDB key if you entered one
@@ -32,9 +30,7 @@ Reminders stay locally until the app checks after the end of the day their progr
 
 ### Usage statistics
 
-This section describes the desktop app.
-
-**Share basic usage statistics** is on by default, in new and existing profiles, without a prompt. While it's on, desktop 0.0.15 sends a short event each time one of these happens. From 0.0.16, the same usage is counted in five-minute groups and playback is reported once at its end:
+In the desktop app, **Share basic usage statistics** is on by default, in new and existing profiles, without a prompt. While it's on, desktop 0.0.15 sends a short event each time one of these happens. From 0.0.16, the same usage is counted in five-minute groups and playback is reported once at its end:
 
 - you open a part of the app, from a fixed list: Home, Live TV, Movies, Series, Watchlist, Downloads, Search, Settings, the player and title details
 - a live channel, or a movie or episode, starts playing, and when it stops, for how many seconds it played. Only time it was actually playing counts: not paused, loading, seeking or the muted preview on Home
@@ -65,9 +61,9 @@ The iPhone app asks whether you want to share basic usage statistics. Statistics
 
 When an upgrade finds no deliberate choice, it discards the previous installation identity, unsent pre-consent events and unfinished playback statistics. Choosing to share later does not send that backlog. Turning sharing off stops new capture and delivery and clears unsent statistics. It cannot recall a request already received or delete statistics already held by PostHog.
 
-While it's on, the app sends the same kinds of events as above, for what the iPhone app has: the first and daily observations, opening Home, Live, Movies, Series, title details, Search, Settings, Downloads or the player, starting a search, switching to another channel, adding, removing or refreshing a subscription, a live channel or a movie or episode starting and stopping and for how many seconds it played, and playback failing with one of the fixed reasons. Only time you could see or hear it counts: in the player, Picture in Picture or AirPlay, or a preview on Home you unmuted. Not paused, loading or the silent preview.
+While sharing is on, the app sends the same kinds of events as above, for what the iPhone app has: the first and daily observations, opening Home, Live, Movies, Series, title details, Search, Settings, Downloads or the player, starting a search, switching to another channel, adding, removing or refreshing a subscription, a live channel or a movie or episode starting and stopping and for how many seconds it played, and playback failing with one of the fixed reasons. Only time you could see or hear it counts: in the player, Picture in Picture or AirPlay, or a preview on Home you unmuted. Not paused, loading or the silent preview.
 
-Each event body carries a random installation identifier, an event identifier, the time it happened, the app version and build, that it came from iOS and iOS's major version. The explicit event body excludes device model, language, location, provider credentials and addresses, stream URLs, title and channel names, typed searches, and raw logs or errors. Separately, HTTP connections expose a connecting IP address to the receiving infrastructure and can include operating-system network metadata such as language and an app and system user-agent.
+Each event body carries a random installation identifier, an event identifier, the time it happened, the app version and build, that it came from iOS and iOS's major version. The event body leaves out the device model, language, location, provider logins and addresses, stream addresses, title and channel names, what you search for, and raw logs or errors. Separately, each connection exposes your IP address to the servers that receive it, and iOS can add network details such as your language and an app and system user agent.
 
 ### Local data on iPhone
 
@@ -142,7 +138,7 @@ Your network operator and DNS provider can see which servers the app contacts.
 
 ### Deleting your data
 
-The following removal and reset controls describe the desktop app.
+In the desktop app:
 
 - **Remove** on a subscription in Settings > Subscriptions deletes its login, provider lists, guide, mapped channels and reminders, and cancels its unfinished downloads. Favourites, watchlist, history, progress and membership of your custom lists stay for when you add the same account again. Tick **Also delete…** to delete those and its saved subtitles too. Your custom lists themselves and finished downloads stay until you delete them.
 - **Delete list** in a list's menu in Live TV deletes the list with its name and the channels it held. Your other lists, and lists a subscription's removal emptied, stay until you delete them.
@@ -164,11 +160,9 @@ Removing a subscription or turning statistics off keeps an installation identifi
 
 ## Security
 
-The Electron storage and desktop network behavior in this section describe the desktop app.
+In the desktop app, passwords, playlist links, guide addresses and subtitle-service logins use Electron's system storage encryption: macOS Keychain, your Windows account, or GNOME Keyring or KWallet when selected on Linux. Linux can instead use `basic_text`, a fixed-key fallback that does not protect secrets from other programs running as you. Server addresses, subscription usernames and your own TMDB key aren't encrypted.
 
-Passwords, playlist links, guide addresses and subtitle-service logins use Electron's system storage encryption: macOS Keychain, your Windows account, or GNOME Keyring or KWallet when selected on Linux. Linux can instead use `basic_text`, a fixed-key fallback that does not protect secrets from other programs running as you. Server addresses, subscription usernames and your own TMDB key aren't encrypted.
-
-The app refuses HTTP redirects that it recognizes as carrying the known login of an HTTPS source. Desktop 0.0.20, including its Nightly previews, also checks playlist addresses and removes recognized login-bearing headers when a request leaves that source's origin. HTTP addresses without a recognized login can still be used. This cannot identify every unknown token or encoding. An explicit `http://` address sends its login unencrypted. If HTTPS fails for an address entered without a scheme, the app asks before trying HTTP. Settings marks those logins "not encrypted". Statistics and website analytics go to PostHog over HTTPS.
+The desktop app refuses HTTP redirects that it recognizes as carrying the known login of an HTTPS source. Desktop 0.0.20, including its Nightly previews, also checks playlist addresses and removes recognized login-bearing headers when a request leaves that source's origin. HTTP addresses without a recognized login can still be used. This cannot identify every unknown token or encoding. An explicit `http://` address sends its login unencrypted. If HTTPS fails for an address entered without a scheme, the app asks before trying HTTP. Settings marks those logins "not encrypted". Statistics and website analytics go to PostHog over HTTPS.
 
 ## International transfers
 
