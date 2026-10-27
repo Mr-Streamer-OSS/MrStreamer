@@ -62,9 +62,9 @@ describe("public document pages without JavaScript", () => {
       document.querySelector('a[href="/docs/troubleshooting#where-your-data-is"]'),
     ).not.toBeNull();
     expect(document.querySelector('main a[href="https://mrstreamer.app/download"]')).not.toBeNull();
-    expect(document.querySelectorAll(".other-guides li")).toHaveLength(6);
+    expect(document.querySelectorAll(".other-guides li")).toHaveLength(7);
     open(renderPage("docs/index.html", null, null));
-    expect(document.querySelectorAll(".guide-list dt a")).toHaveLength(7);
+    expect(document.querySelectorAll(".guide-list dt a")).toHaveLength(8);
     expect(document.querySelector('a[href="/docs#installed-from-the-microsoft-store"]')).toBeNull();
   });
 
@@ -153,13 +153,15 @@ describe("one stable download contract across pages and metadata", () => {
     showFeedDownloads(document, feed("2026-10-07T17:59:00Z", "0.0.7"));
     expect(document.documentElement.innerHTML).toBe(before);
     showFeedDownloads(document, feed("2026-10-07T18:01:00Z", "0.0.7"));
-    expect(document.title).toBe("Download Mr. Streamer 0.0.7 for Mac, Windows and Linux");
+    expect(document.title).toBe(
+      "Download Mr. Streamer for iPhone, and 0.0.7 for Mac, Windows and Linux",
+    );
     expect(document.querySelector("[data-release-version]")?.textContent).toBe("Version 0.0.7.");
     expect(links()["exe"]).toBe(LATEST);
     expect(links()["dmg"]).toContain("/v0.0.7/");
     open(writeDownloads(renderPage("download/index.html", null, null), null, Date.parse(verified)));
     showFeedDownloads(document, feed("2026-10-07T17:59:00Z", "0.0.8"));
-    expect(document.title).toBe("Download Mr. Streamer for Mac, Windows and Linux");
+    expect(document.title).toBe("Download Mr. Streamer for iPhone, Mac, Windows and Linux");
     expect(Object.values(links()).every((link) => link === LATEST)).toBe(true);
   });
 
@@ -194,12 +196,14 @@ describe("one stable download contract across pages and metadata", () => {
           (link) => typeof link === "string" && link.includes("/v0.0.8/"),
         ),
       ).toBe(true);
-      expect(document.title).toBe("Download Mr. Streamer 0.0.8 for Mac, Windows and Linux");
+      expect(document.title).toBe(
+        "Download Mr. Streamer for iPhone, and 0.0.8 for Mac, Windows and Linux",
+      );
     },
   );
   it("describes the verified release on the home page and links its installers, checksums, notes and sources on the download page", () => {
     open(writeDownloads(home, released));
-    expect(appData()["softwareVersion"]).toBe("0.0.8");
+    expect(appData()["softwareVersion"]).toBe("Desktop 0.0.8");
     expect(appData()["alternateName"]).toBe("Mr. Streamer: IPTV Player");
     expect(appData()["screenshot"]).toHaveLength(5);
     expect(appData()["downloadUrl"]).toBe("https://mrstreamer.app/download");
@@ -214,7 +218,9 @@ describe("one stable download contract across pages and metadata", () => {
       appImage: `${files}/Mr-Streamer-0.0.8-linux-x86_64.AppImage`,
       deb: `${files}/Mr-Streamer-0.0.8-linux-amd64.deb`,
     });
-    expect(document.title).toBe("Download Mr. Streamer 0.0.8 for Mac, Windows and Linux");
+    expect(document.title).toBe(
+      "Download Mr. Streamer for iPhone, and 0.0.8 for Mac, Windows and Linux",
+    );
     expect(document.querySelector('[data-release-link="checksums"]')?.getAttribute("href")).toBe(
       "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/tag/v0.0.8#assets",
     );
@@ -227,7 +233,7 @@ describe("one stable download contract across pages and metadata", () => {
     open(home);
     expect(appData()).not.toHaveProperty("softwareVersion");
     open(renderPage("download/index.html", null, null));
-    expect(document.title).toBe("Download Mr. Streamer for Mac, Windows and Linux");
+    expect(document.title).toBe("Download Mr. Streamer for iPhone, Mac, Windows and Linux");
     expect(Object.values(links()).every((link) => link === LATEST)).toBe(true);
     open(writeDownloads(home, { version: "0.0.8", installers: [] }));
     expect(appData()).not.toHaveProperty("softwareVersion");

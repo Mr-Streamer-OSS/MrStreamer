@@ -407,8 +407,8 @@ h1 {
 
 /*
  * The download page's first block: the visitor's own system. The script in the head names it in
- * data-os on <html>; the block for that system shows and the others stay out. Without it, as on a
- * phone, on a system with no installer or with scripts off, none shows.
+ * data-os on <html>; the block for that system shows and the others stay out. Without it, as on an
+ * iPad, an Android phone, a system with no app or with scripts off, none shows.
  */
 .mine {
   display: none;
@@ -419,6 +419,7 @@ h1 {
   border-top: 1px solid var(--line);
 }
 
+:root[data-os="iphone"] .mine[data-for="iphone"],
 :root[data-os="mac"] .mine[data-for="mac"],
 :root[data-os="windows"] .mine[data-for="windows"],
 :root[data-os="linux"] .mine[data-for="linux"] {

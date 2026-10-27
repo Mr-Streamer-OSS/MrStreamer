@@ -1,5 +1,7 @@
 # Subscriptions
 
+This guide describes the desktop app. For iPhone, see [iPhone setup and release scope](iphone.md).
+
 Mr. Streamer plays the subscriptions you add: Xtream Codes access, with a server address, username and password, or an M3U playlist link. Playlists start with live TV; from 0.0.9, explicit group mapping also imports movies and series. You can add several, and everything from all of them shows together. There is no subscription to switch to: Home, Live TV, Movies, Series and search always show every one.
 
 ## Adding one

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { Marked } from "marked";
-import type { Downloads } from "../src/downloads.ts";
+import { downloadTitle, type Downloads } from "../src/downloads.ts";
 import { PACKAGE_ROUTES, type PackageRoutes } from "../src/packages.ts";
 import { RELEASES, type Release } from "./releases.ts";
 
@@ -12,46 +12,52 @@ const repository = resolve(root, "../..");
 
 export const GUIDES = [
   {
+    slug: "iphone",
+    title: "iPhone setup",
+    description:
+      "Install Mr. Streamer on iPhone, connect your Xtream provider and understand the first release scope.",
+  },
+  {
     slug: "subscriptions",
     title: "Subscriptions",
     description:
-      "Connect and manage Xtream Codes subscriptions and M3U playlists, programme guides and channel mappings in Mr. Streamer.",
+      "On desktop, connect and manage Xtream Codes subscriptions and M3U playlists, programme guides and channel mappings in Mr. Streamer.",
   },
   {
     slug: "live-tv",
     title: "Live TV",
     description:
-      "Watch live TV in Mr. Streamer, use the programme guide, search channels and control playback with the keyboard.",
+      "On desktop, watch live TV in Mr. Streamer, use the programme guide, search channels and control playback with the keyboard.",
   },
   {
     slug: "movies-and-series",
     title: "Movies and series",
     description:
-      "Find movies and series, use the watchlist and continue episodes from your Xtream Codes subscriptions in Mr. Streamer.",
+      "On desktop, find movies and series, use the watchlist and continue episodes from your Xtream Codes subscriptions in Mr. Streamer.",
   },
   {
     slug: "downloads",
     title: "Downloads",
     description:
-      "Download movies and episodes in Mr. Streamer, manage the queue and watch saved copies offline.",
+      "On desktop, download movies and episodes in Mr. Streamer, manage the queue and watch saved copies offline.",
   },
   {
     slug: "updates",
     title: "Updates and channels",
     description:
-      "Update Mr. Streamer, choose Stable or Nightly, and understand how Microsoft Store updates work.",
+      "On desktop, update Mr. Streamer, choose Stable or Nightly, and understand how Microsoft Store updates work.",
   },
   {
     slug: "playback",
     title: "What plays",
     description:
-      "The streams, formats, sound and subtitles Mr. Streamer plays, playing on a TV, and known playback limits.",
+      "The streams, formats, sound and subtitles the desktop app plays, playing on a TV, and known playback limits.",
   },
   {
     slug: "troubleshooting",
     title: "Troubleshooting",
     description:
-      "Fix login, programme guide, playback and update problems in Mr. Streamer, and find your local data.",
+      "On desktop, fix login, programme guide, playback and update problems in Mr. Streamer, and find your local data.",
   },
 ] as const;
 
@@ -68,8 +74,9 @@ export const PAGES: readonly Page[] = [
   {
     address: "/",
     file: "index.html",
-    title: "Mr. Streamer: free IPTV player for Mac, Windows and Linux",
-    description: "Free, open source IPTV player for Mac, Windows and Linux.",
+    title: "Mr. Streamer: free IPTV player for iPhone, Mac, Windows and Linux",
+    description:
+      "Free, open source IPTV player for iPhone, Mac, Windows and Linux. Live TV, movies and series from your Xtream Codes login, or on a computer from an M3U playlist.",
   },
   {
     address: "/faq",
@@ -83,7 +90,7 @@ export const PAGES: readonly Page[] = [
     file: "privacy/index.html",
     title: "Mr. Streamer: privacy policy",
     description:
-      "What Mr. Streamer stores on your computer, what it sends, and how the website uses analytics.",
+      "What Mr. Streamer stores on your device, what it sends, and how the website uses analytics.",
     markdown: "docs/privacy.md",
   },
   {
@@ -103,7 +110,7 @@ export const PAGES: readonly Page[] = [
   {
     address: "/about",
     file: "about/index.html",
-    title: "About Mr. Streamer: free IPTV player for Mac, Windows and Linux",
+    title: "About Mr. Streamer: free IPTV player for iPhone, Mac, Windows and Linux",
     description: "What Mr. Streamer plays, supported systems, its limits, licence and source code.",
     markdown: "docs/about.md",
   },
@@ -118,16 +125,16 @@ export const PAGES: readonly Page[] = [
   {
     address: "/download",
     file: "download/index.html",
-    title: "Download Mr. Streamer for Mac, Windows and Linux",
+    title: "Download Mr. Streamer for iPhone, Mac, Windows and Linux",
     description:
-      "Download Mr. Streamer's stable installers for macOS, Windows and Linux, with requirements, checksums and source code.",
+      "Get Mr. Streamer for iPhone on the App Store, or stable desktop installers for macOS, Windows and Linux, with requirements, checksums and source code.",
   },
   {
     address: "/releases",
     file: "releases/index.html",
     title: "Mr. Streamer releases",
     description:
-      "Stable Mr. Streamer releases, newest first, with release dates and the complete release notes.",
+      "Stable desktop Mr. Streamer releases, newest first, with release dates and the complete release notes.",
   },
 ];
 
@@ -235,7 +242,8 @@ function guideIndex(): string {
 }
 
 function releaseHistory(releases: readonly Release[] | null): string {
-  const intro = "<h1>Releases</h1>";
+  const intro =
+    '<h1>Releases</h1><p>Desktop release history. Get the iPhone app and its updates on the <a href="https://apps.apple.com/app/id6823479796">App Store</a>.</p>';
   if (!releases?.length)
     return `${intro}<p>Release history is unavailable here. Read the stable releases and notes on <a href="${RELEASES}">GitHub Releases</a>.</p>`;
   return `${intro}<p>Every stable release, newest first. Nightly builds are on <a href="${RELEASES}">GitHub</a>.</p>${releases
@@ -274,16 +282,12 @@ export function renderPage(
 ): string {
   const page = PAGES.find((page) => page.file === file);
   if (!page || page.address === "/") throw new Error(`No document page for ${file}`);
-  const version = downloads?.installers.length ? downloads.version : null;
-  const title =
-    page.address === "/download" && version
-      ? `Download Mr. Streamer ${version} for Mac, Windows and Linux`
-      : page.title;
+  const title = page.address === "/download" && downloads ? downloadTitle(downloads) : page.title;
   let content = page.markdown ? renderMarkdown(markdownOf(page.markdown), page.markdown) : "";
   if (page.address === "/about")
     content = content.replace(
       "<h2",
-      '<p><span data-release-version>Stable release on GitHub.</span> <a data-release-link="notes" href="' +
+      '<p>Desktop: <span data-release-version>Stable release on GitHub.</span> <a data-release-link="notes" href="' +
         RELEASES +
         '/latest">Release notes</a>.</p><h2',
     );

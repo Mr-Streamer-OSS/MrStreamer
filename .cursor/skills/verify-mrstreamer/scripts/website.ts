@@ -274,8 +274,9 @@ app.on('window-all-closed', () => app.quit());
       version: string;
       installers: { kind: string; href: string }[];
       store: string[];
+      appStore: string[];
     }>(
-      "({ version: document.querySelector('[data-release-selected]')?.dataset.releaseSelected ?? '', installers: [...document.querySelectorAll('a[data-installer]')].map(a => ({ kind: a.dataset.installer, href: a.href })), store: [...document.querySelectorAll('a[href]')].filter(a => a.textContent.trim() === 'Microsoft Store').map(a => a.href) })",
+      "({ version: document.querySelector('[data-release-selected]')?.dataset.releaseSelected ?? '', installers: [...document.querySelectorAll('a[data-installer]')].map(a => ({ kind: a.dataset.installer, href: a.href })), store: [...document.querySelectorAll('a[href]')].filter(a => a.textContent.trim() === 'Microsoft Store').map(a => a.href), appStore: [...document.querySelectorAll('a[href]')].map(a => a.href).filter(href => href.startsWith('https://apps.apple.com/')) })",
     );
     const release = "https://github.com/Mr-Streamer-OSS/MrStreamer/releases";
     const targets = {
@@ -304,6 +305,11 @@ app.on('window-all-closed', () => app.quit());
       )
     )
       throw new Error("Missing or incorrect Microsoft Store target.");
+    if (
+      !downloads.appStore.length ||
+      downloads.appStore.some((href) => href !== "https://apps.apple.com/app/id6823479796")
+    )
+      throw new Error("Missing or incorrect App Store target.");
     observed["downloadTargets"] = downloads;
     await visit("/releases", "Releases", "releases");
     await visit("/privacy", "Privacy", "privacy");

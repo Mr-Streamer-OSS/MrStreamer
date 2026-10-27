@@ -22,7 +22,25 @@ const visitor = (
   ...rest,
 });
 
-const desktops: [string, System, SystemHints][] = [
+const named: [string, System, SystemHints][] = [
+  [
+    "Safari on an iPhone",
+    "iphone",
+    visitor(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
+      undefined,
+      { maxTouchPoints: 5 },
+    ),
+  ],
+  [
+    "Chrome on an iPhone",
+    "iphone",
+    visitor(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0.7390.96 Mobile/15E148 Safari/604.1",
+      undefined,
+      { maxTouchPoints: 5 },
+    ),
+  ],
   [
     "Chrome on Windows",
     "windows",
@@ -77,10 +95,11 @@ const others: [string, SystemHints][] = [
     "Firefox on Android",
     visitor("Mozilla/5.0 (Android 15; Mobile; rv:143.0) Gecko/143.0 Firefox/143.0"),
   ],
+  // Its system's own name, before any other word: "iPhone OS" alone is also an iPod touch.
   [
-    "Safari on an iPhone",
+    "an iPod touch",
     visitor(
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
+      "Mozilla/5.0 (iPod touch; CPU iPhone OS 15_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6 Mobile/15E148 Safari/604.1",
       undefined,
       { maxTouchPoints: 5 },
     ),
@@ -115,12 +134,12 @@ const others: [string, SystemHints][] = [
   ["no user agent at all", visitor("")],
 ];
 
-describe("the hero's one download button", () => {
-  it.each(desktops)("is the visitor's own for %s", (_, system, hints) => {
+describe("the visitor's own download on the download page", () => {
+  it.each(named)("is the visitor's own for %s", (_, system, hints) => {
     expect(inPage(hints)).toBe(system);
   });
 
-  it.each(others)("stays on Downloads for %s", (_, hints) => {
+  it.each(others)("is left to the rows for %s", (_, hints) => {
     expect(inPage(hints)).toBeUndefined();
   });
 });

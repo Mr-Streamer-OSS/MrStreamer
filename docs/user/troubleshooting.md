@@ -1,5 +1,7 @@
 # Troubleshooting
 
+This guide describes the desktop app. For iPhone, see [iPhone setup and release scope](iphone.md).
+
 ## Where your data is
 
 Mr. Streamer keeps everything on your computer, in one folder:

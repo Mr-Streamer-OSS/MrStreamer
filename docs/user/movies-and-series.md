@@ -1,5 +1,7 @@
 # Movies and series
 
+This guide describes the desktop app. For iPhone, see [iPhone setup and release scope](iphone.md).
+
 The poster-grid keyboard and related-title Back changes below are new in 0.0.20, including its Nightly previews.
 
 **Movies** and **Series** in the top bar list what your providers offer on demand, from [every subscription you added](subscriptions.md) together. Mr. Streamer loads both lists after connecting and keeps them on your computer, refreshing them twice a day; the first load can take a few seconds on a large subscription.

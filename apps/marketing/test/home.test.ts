@@ -14,6 +14,8 @@ const home = writePackages(readFileSync(join(root, "index.html"), "utf8"));
 const css = readFileSync(join(root, "src/styles.css"), "utf8");
 
 const STORE = "https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge";
+const APP_STORE = "https://apps.apple.com/app/id6823479796";
+const IPHONE_SETUP = ["iPhone setup", "/docs/iphone"];
 const HOMEBREW = [
   "Homebrew · macOS, Apple silicon",
   "https://github.com/Mr-Streamer-OSS/homebrew-tap",
@@ -104,6 +106,17 @@ describe("the download page", () => {
     expect(mine()).toEqual([]);
   });
 
+  it("puts the App Store first on an iPhone, with its setup guide beside it", () => {
+    openDownload("iphone", RELEASED);
+    expect(mine()).toEqual([
+      {
+        heading: "iPhone your system",
+        line: "iOS 16.4 or later. Free, with no ads or purchases.",
+        links: [["Download on the App Store", APP_STORE], IPHONE_SETUP],
+      },
+    ]);
+  });
+
   it("puts the Microsoft Store first on Windows, with the setup .exe beside it", () => {
     openDownload("windows", RELEASED);
     expect(mine()).toEqual([
@@ -164,10 +177,12 @@ describe("the download page", () => {
     ]);
   });
 
-  it("lists the Store and every installer in its rows", () => {
+  it("lists both stores and every installer in its rows", () => {
     openDownload(undefined, RELEASED);
 
     expect(links(".rows a")).toEqual([
+      ["App Store", APP_STORE],
+      IPHONE_SETUP,
       ["Download the DMG", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-mac-arm64.dmg`],
       HOMEBREW,
       BREW_UPDATES,
@@ -187,6 +202,8 @@ describe("the download page", () => {
     openDownload();
 
     expect(links(".rows a")).toEqual([
+      ["App Store", APP_STORE],
+      IPHONE_SETUP,
       ["Download the DMG on GitHub Releases", LATEST],
       HOMEBREW,
       BREW_UPDATES,
@@ -206,6 +223,8 @@ describe("the download page", () => {
     openDownload(undefined, { version: "0.0.8", installers: ["dmg", "exe", "appImage"] });
 
     expect(links(".rows a")).toEqual([
+      ["App Store", APP_STORE],
+      IPHONE_SETUP,
       ["Download the DMG", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-mac-arm64.dmg`],
       HOMEBREW,
       BREW_UPDATES,

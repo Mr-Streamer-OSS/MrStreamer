@@ -57,8 +57,8 @@ type HomeSection = (typeof HOME_SECTIONS)[number];
 
 interface Download {
   /** The system the link installs on, not the visitor's. */
-  readonly os_hint: "mac" | "windows" | "linux";
-  readonly kind: "dmg" | "exe" | "appimage" | "deb" | "store";
+  readonly os_hint: "ios" | "mac" | "windows" | "linux";
+  readonly kind: "dmg" | "exe" | "appimage" | "deb" | "store" | "app_store";
 }
 /** By the `data-installer` names downloads.ts gives the release's files. */
 const INSTALLERS: Readonly<Record<string, Download>> = {
@@ -68,6 +68,7 @@ const INSTALLERS: Readonly<Record<string, Download>> = {
   deb: { os_hint: "linux", kind: "deb" },
 };
 const STORE: Download = { os_hint: "windows", kind: "store" };
+const APP_STORE: Download = { os_hint: "ios", kind: "app_store" };
 
 /** The Core Web Vitals sent, by web-vitals' names. */
 type Vital = (CLSMetric | INPMetric | LCPMetric)["name"];
@@ -96,7 +97,7 @@ type SiteEvent =
       readonly event: "download_clicked";
       readonly properties: Download &
         Entry & {
-          /** Every installer link and the Store carry stable releases. Nightlies are on GitHub. */
+          /** Every installer link and both stores carry stable releases. Nightlies are on GitHub. */
           readonly download_type: "stable";
           readonly route: string;
           /** Where on the page. Every installer link now sits in /download's body, as "page". */
@@ -472,7 +473,9 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
           ? INSTALLERS[installer]
           : href.startsWith("https://apps.microsoft.com/")
             ? STORE
-            : undefined;
+            : href.startsWith("https://apps.apple.com/")
+              ? APP_STORE
+              : undefined;
       if (docs) {
         const doc_section = docs[1] ?? "index";
         if (!ID.test(doc_section)) return;

@@ -1,5 +1,7 @@
 # Downloads
 
+This guide describes the desktop app. For iPhone, see [iPhone setup and release scope](iphone.md).
+
 From 0.0.10 you can download a movie or a single episode, and from 0.0.12 a whole series, and watch it later on this computer, without a network connection and without a subscription.
 
 Pausing, queue ordering and offline series continuation are new in 0.0.20, including its Nightly previews.

@@ -164,8 +164,11 @@ function releaseLink(downloads: Downloads, kind: string | undefined): string {
   return kind === "notes" ? release : `${release}#assets`;
 }
 
-function downloadTitle(downloads: Downloads): string {
-  return `Download Mr. Streamer${downloads.installers.length ? ` ${downloads.version}` : ""} for Mac, Windows and Linux`;
+/** The download page's title. The version is the desktop release's; the iPhone app has its own. */
+export function downloadTitle(downloads: Downloads): string {
+  return downloads.installers.length
+    ? `Download Mr. Streamer for iPhone, and ${downloads.version} for Mac, Windows and Linux`
+    : "Download Mr. Streamer for iPhone, Mac, Windows and Linux";
 }
 
 /**
@@ -195,7 +198,7 @@ export function showDownloads(page: ParentNode, downloads: Downloads): void {
 function writeSoftwareVersion(json: string, downloads: Downloads): string {
   const data: unknown = JSON.parse(json);
   if (!isRecord(data)) return json;
-  if (downloads.installers.length) data["softwareVersion"] = downloads.version;
+  if (downloads.installers.length) data["softwareVersion"] = `Desktop ${downloads.version}`;
   else delete data["softwareVersion"];
   return JSON.stringify(data, null, 2);
 }
