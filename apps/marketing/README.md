@@ -44,6 +44,12 @@ pnpm preview:marketing   # the built site, on http://localhost:4173
 
 ## Addresses
 
+`public/llms.txt` is a concise Markdown overview for agents, linking canonical public guides,
+downloads, project policies and support. It ships as UTF-8 plain text at `/llms.txt`, without
+page scripts. Keep its claims aligned with the public guides; use stable landing pages rather
+than versioned installers. The package checks its internal destinations. It is informational,
+not a robots access policy or an indexing guarantee.
+
 Both local servers and Vercel answer the same addresses, with or without a query:
 
 | Address                                                                                                                       | Answers                                                               |
