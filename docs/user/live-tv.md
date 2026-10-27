@@ -1,5 +1,7 @@
 # Live TV
 
+This guide describes the desktop app. For iPhone, see [iPhone setup and release scope](iphone.md).
+
 Custom channel lists and programme reminders are new in 0.0.20, including its Nightly previews.
 
 ## Home

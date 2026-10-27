@@ -11,16 +11,18 @@
   <div id="what-you-need">
     <dt>What do I need?</dt>
     <dd>
-      An IPTV subscription with Xtream Codes access (a server address, username and password) or an
-      M3U playlist link. <a href="/docs/subscriptions">Subscriptions</a>
+      An existing IPTV provider with Xtream Codes access (a server address, username and password).
+      Desktop also accepts an M3U playlist link. <a href="/docs/iphone">iPhone setup</a>
+      <a href="/docs/subscriptions">Subscriptions</a>
     </dd>
   </div>
   <div id="m3u">
     <dt>Will my M3U playlist work?</dt>
     <dd>
-      Yes. Live TV works straight away. For movies and series, map the playlist's groups in
-      Settings. Movies and episodes need finished files, so HLS entries stay out and the app says
-      why. <a href="/docs/subscriptions#mapping-mixed-playlists">Mapping playlists</a>
+      On desktop, yes. Live TV works straight away. For movies and series, map the playlist's groups
+      in Settings. Movies and episodes need finished files, so HLS entries stay out and the app says
+      why. iPhone does not support M3U in its first release.
+      <a href="/docs/subscriptions#mapping-mixed-playlists">Mapping playlists</a>
     </dd>
   </div>
   <div id="several">
@@ -33,24 +35,27 @@
   <div id="download">
     <dt>Can I download?</dt>
     <dd>
-      Yes. Download a movie or an episode, or from 0.0.12 a whole series, and watch it offline, even
-      after the subscription ends. This works with Xtream Codes and with mapped playlists.
+      Yes. Download a movie, an episode or a whole series and watch it offline on iPhone or desktop.
+      Desktop also downloads from mapped playlists. Saved copies remain playable after the
+      subscription ends.
       <a href="/docs/downloads">Downloads</a>
     </dd>
   </div>
   <div id="record">
     <dt>Can it record live TV?</dt>
     <dd>
-      No. Live TV can't be recorded. From 0.0.13, catch-up plays a programme that aired from its
-      start, when your provider keeps it: with Xtream Codes, or a playlist whose catch-up addresses
-      name the programme's start. <a href="/docs/live-tv#the-guide">The guide</a>
+      No. Live TV can't be recorded. iPhone has no catch-up in its first release. On desktop, from
+      0.0.13, catch-up plays a programme that aired from its start, when your provider keeps it:
+      with Xtream Codes, or a playlist whose catch-up addresses name the programme's start.
+      <a href="/docs/live-tv#the-guide">The guide</a>
     </dd>
   </div>
   <div id="guide">
     <dt>Is there a programme guide?</dt>
     <dd>
-      Yes, when your provider or playlist supplies one, as a list or, from 0.0.13, a grid by time.
-      You can also add XMLTV guides of your own, which fill in the channels it doesn't cover.
+      Yes. iPhone shows a Guide, now/next and daily schedules when your provider supplies them. On
+      desktop, your provider or playlist supplies a list or, from 0.0.13, a grid by time, and you
+      can add XMLTV guides of your own, which fill in the channels it doesn't cover.
       <a href="/docs/subscriptions#guides-from-other-addresses">Guides</a>
     </dd>
   </div>
@@ -58,6 +63,7 @@
     <dt>Can I play on my TV?</dt>
     <dd>
       On a Mac, with AirPlay. On Windows, with Google Cast. On Linux it plays on the computer only.
+      iPhone has no Google Cast in its first release.
       <a href="/docs/playback#playing-on-a-tv">What plays</a>
     </dd>
   </div>
@@ -65,9 +71,12 @@
 <h2>Installing and updates</h2>
 <dl class="faq-rows">
   <div id="systems">
-    <dt>Which computers does it run on?</dt>
+    <dt>Which systems does it run on?</dt>
     <dd>
-      macOS 13 or later on Apple silicon, 64-bit Windows 11 and 64-bit Linux.
+      iPhone on iOS 16.4 or later:
+      <a href="https://apps.apple.com/app/id6823479796">App Store for iPhone</a>. iPad and Apple TV
+      are outside this release. Desktop: macOS 13 or later on Apple silicon, 64-bit Windows 11 and
+      64-bit Linux.
       <a href="/download">Download</a>
       <!-- package:homebrew:availability -->
       <!-- package:aur:availability -->
@@ -83,10 +92,10 @@
   <div id="updates">
     <dt>How do updates work?</dt>
     <dd>
-      Direct downloads and Homebrew copies check for updates in the app. You choose when to download
-      and restart, and pick Stable or Nightly in Settings. The Microsoft Store manages its own
-      updates. For the AUR, quit the app and update with makepkg or an AUR helper. Quit before
-      replacing the app with Homebrew too.
+      iPhone updates come through the App Store. Desktop direct downloads and Homebrew copies check
+      for updates in the app. You choose when to download and restart, and pick Stable or Nightly in
+      Settings. The Microsoft Store manages its own updates. For the AUR, quit the app and update
+      with makepkg or an AUR helper. Quit before replacing the app with Homebrew too.
       <a href="/docs/updates">Updates</a>
     </dd>
   </div>
@@ -96,7 +105,7 @@
   <div id="free">
     <dt>Is it really free?</dt>
     <dd>
-      Yes. GPL-3.0, no ads, no account.
+      Yes. GPL-3.0, no ads, no purchases, no Mr. Streamer account. Your own provider is required.
       <a href="https://github.com/Mr-Streamer-OSS/MrStreamer">Don't like it? Fork it.</a>
     </dd>
   </div>

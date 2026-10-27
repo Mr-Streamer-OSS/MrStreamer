@@ -7,33 +7,39 @@
 
 <h1 align="center">Mr. Streamer</h1>
 
-<p align="center">Live TV, movies and series.<br>An open source IPTV player for Mac, Windows and Linux.</p>
+<p align="center">Live TV, movies and series.<br>An open source IPTV player for iPhone, Mac, Windows and Linux.</p>
 
-<p align="center"><strong><a href="https://mrstreamer.app/download">Download</a></strong> · <a href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge">Microsoft Store</a> · <a href="https://discord.gg/sR4tjEw6bQ">Discord</a></p>
+<p align="center"><strong><a href="https://mrstreamer.app/download">Download</a></strong> · <a href="https://apps.apple.com/app/id6823479796">App Store for iPhone</a> · <a href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge">Microsoft Store</a> · <a href="https://discord.gg/sR4tjEw6bQ">Discord</a></p>
 
-<img src="docs/assets/readme-poster.webp" alt="Home with a live preview, favourites and Continue watching, with Live TV and the TV Guide in front of it" width="100%">
+<img src="docs/assets/readme-poster.webp" alt="Desktop Home with a live preview, favourites and Continue watching, with Live TV and the TV Guide in front of it" width="100%">
+
+On iPhone: Live TV with a programme guide, movies, series and offline downloads from your existing Xtream provider. Free, with no ads, purchases or Mr. Streamer account. [iPhone setup and release scope](docs/user/iphone.md).
+
+On desktop:
 
 - Live TV with favourites and a [programme guide](docs/user/live-tv.md#the-guide). Aired programmes play from their start when your provider keeps catch-up.
 - Movies and series with resume, a [watchlist](docs/user/movies-and-series.md#watchlist) and [offline downloads](docs/user/downloads.md).
 - Every sound and subtitle track your provider sends, and [online subtitle search](docs/user/playback.md#online-subtitles-from-009) with your own API key.
 
-Stable 0.0.20 is the current release. New in 0.0.20, including its Nightly previews: [custom channel lists and programme reminders](docs/user/live-tv.md#your-lists), [download pause, queue ordering and offline series continuation](docs/user/downloads.md), and [poster-grid keyboard navigation and Back through related titles](docs/user/movies-and-series.md).
+Stable 0.0.20 is the current desktop release. New in 0.0.20, including its Nightly previews: [custom channel lists and programme reminders](docs/user/live-tv.md#your-lists), [download pause, queue ordering and offline series continuation](docs/user/downloads.md), and [poster-grid keyboard navigation and Back through related titles](docs/user/movies-and-series.md).
 
-The pictures come from a test provider with made-up titles and public-domain footage.
+The desktop pictures come from a test provider with made-up titles and public-domain footage.
 
 ## Your subscription
 
-Connect Xtream Codes or an M3U playlist. Mr. Streamer includes no channels and sells none. [Set up a subscription](docs/user/subscriptions.md).
+On iPhone, connect your existing Xtream Codes provider. On desktop, connect Xtream Codes or an M3U playlist. Mr. Streamer includes no channels and sells none. [Set up a subscription](docs/user/subscriptions.md).
 
 ## Install
 
-macOS 13 or later on Apple silicon, Windows 11 on x64, or x86_64 Linux. [Installers, requirements and checksums](https://mrstreamer.app/download) are on the website, and the files on [GitHub Releases](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest). [Updates and channels](docs/user/updates.md) also covers Homebrew and the AUR.
+**iPhone:** iOS 16.4 or later. [Get Mr. Streamer on the App Store](https://apps.apple.com/app/id6823479796), then follow the [iPhone setup guide](docs/user/iphone.md). M3U, catch-up and Google Cast are later iPhone work; iPad and Apple TV are outside this release.
+
+**Desktop:** macOS 13 or later on Apple silicon, Windows 11 on x64, or x86_64 Linux. [Installers, requirements and checksums](https://mrstreamer.app/download) are on the website, and the files on [GitHub Releases](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest). [Updates and channels](docs/user/updates.md) also covers Homebrew and the AUR.
 
 ## Help
 
 Join the [Discord community](https://discord.gg/sR4tjEw6bQ) for questions, chat and Stable/Nightly release announcements.
 
-[Subscriptions](docs/user/subscriptions.md) · [Live TV](docs/user/live-tv.md) · [Movies and series](docs/user/movies-and-series.md) · [Downloads](docs/user/downloads.md) · [Updates and channels](docs/user/updates.md) · [What plays](docs/user/playback.md) · [Troubleshooting](docs/user/troubleshooting.md) · [Privacy](docs/privacy.md) · [Security](docs/security.md)
+[iPhone setup](docs/user/iphone.md) · [Desktop subscriptions](docs/user/subscriptions.md) · [Live TV](docs/user/live-tv.md) · [Movies and series](docs/user/movies-and-series.md) · [Downloads](docs/user/downloads.md) · [Updates and channels](docs/user/updates.md) · [What plays](docs/user/playback.md) · [Troubleshooting](docs/user/troubleshooting.md) · [Privacy](docs/privacy.md) · [Security](docs/security.md)
 
 Found a bug? [Report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with your system, the Mr. Streamer version from Settings > About, and what happened.
 
@@ -43,13 +49,15 @@ Mr. Streamer is open source and under active development. For now it accepts sma
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE). Installers include FFmpeg and x264, also under the GPL; their exact sources are attached to every release. Settings > About > Open-source licences lists every component the app ships, with its licence.
+GPL-3.0. See [LICENSE](LICENSE). Desktop installers include FFmpeg and x264, also under the GPL; their exact sources are attached to every release. Settings > About > Open-source licences lists every component the app ships, with its licence.
 
 Movie and series details come from [TMDB](https://www.themoviedb.org). This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB. Where titles stream comes from [JustWatch](https://www.justwatch.com).
 
 <sub>Store screenshots and the trailer include Big Buck Bunny (c) copyright 2008, Blender Foundation, [www.bigbuckbunny.org](https://www.bigbuckbunny.org), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/): excerpts, renamed and subtitled in the demo. Earth views: NASA. Grand Canyon footage: U.S. National Park Service.</sub>
 
 ## How it compares
+
+The tables below describe the desktop app. See [iPhone setup](docs/user/iphone.md) for the iPhone release scope.
 
 VLC is a general media player. Kodi is compared with its official [IPTV Simple](https://github.com/kodi-pvr/pvr.iptvsimple) add-on.
 

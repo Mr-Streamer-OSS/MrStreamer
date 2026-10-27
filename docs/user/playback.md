@@ -1,5 +1,7 @@
 # What plays
 
+This guide describes the desktop app. For iPhone, see [iPhone setup and release scope](iphone.md).
+
 ## Live channels
 
 Mr. Streamer plays live channels your provider delivers as MPEG-TS, the format most Xtream Codes providers use, and radio channels that send plain MP3 or AAC audio.

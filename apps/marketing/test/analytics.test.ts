@@ -181,9 +181,15 @@ describe("website analytics", () => {
     click('#downloads a[href="/download"]');
     expect(events()).toEqual([["$pageview", { route: "/", ...unknown, ...fixed("/") }]]);
     start(download, "/download");
+    const otherApp = document.createElement("a");
+    otherApp.href = "https://apps.apple.com/app/id1234567890";
+    otherApp.textContent = "Another app";
+    document.body.append(otherApp);
+    otherApp.click();
     click('.mine a[data-installer="dmg"]');
     click('.rows a[data-installer="exe"]');
     click('.rows a[href^="https://apps.microsoft.com/"]');
+    click('.rows a[href^="https://apps.apple.com/"]');
     click('footer a[href="https://github.com/Mr-Streamer-OSS/MrStreamer"]');
     click('footer a[href$="/issues/new/choose"]');
     click('footer a[href="/faq"]');
@@ -231,6 +237,18 @@ describe("website analytics", () => {
           ...page,
         },
       ],
+      [
+        "download_clicked",
+        {
+          os_hint: "ios",
+          kind: "app_store",
+          download_type: "stable",
+          route: "/download",
+          location: "page",
+          ...unknown,
+          ...page,
+        },
+      ],
       ["github_link_clicked", { route: "/download", link_location: "footer_source", ...page }],
       ["github_link_clicked", { route: "/download", link_location: "footer_bug", ...page }],
       [
@@ -242,6 +260,7 @@ describe("website analytics", () => {
     expect(sent().map(({ init }) => init.keepalive)).toEqual([
       false,
       false,
+      true,
       true,
       true,
       true,

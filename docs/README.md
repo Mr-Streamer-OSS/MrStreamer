@@ -4,7 +4,8 @@
 
 - [About Mr. Streamer](./about.md)
 - [Download and install](../README.md#install)
-- [Subscriptions](./user/subscriptions.md)
+- [iPhone setup and release scope](./user/iphone.md)
+- [Desktop subscriptions](./user/subscriptions.md)
 - [Live TV](./user/live-tv.md)
 - [Movies and series](./user/movies-and-series.md)
 - [Downloads](./user/downloads.md)

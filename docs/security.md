@@ -1,5 +1,7 @@
 # Security
 
+The storage, diagnostics, casting and installer details below describe the desktop app. For iPhone, see [iPhone setup](user/iphone.md) and the [privacy policy](privacy.md). [Reporting a problem](#reporting-a-problem) applies to every platform.
+
 ## Your login
 
 Your subscriptions are stored on your computer. Passwords, playlist links, guide addresses and subtitle-service logins use Electron's system storage encryption: macOS Keychain, your Windows account, or GNOME Keyring or KWallet when selected on Linux. Linux can instead use `basic_text`, a fixed-key fallback that does not protect secrets from other programs running as you. Server addresses, subscription usernames and your own TMDB key are not encrypted.

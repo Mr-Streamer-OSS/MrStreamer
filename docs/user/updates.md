@@ -1,5 +1,7 @@
 # Updates and channels
 
+This guide describes the desktop app. For iPhone, see [iPhone setup and release scope](iphone.md).
+
 Mr. Streamer looks for updates on its own, a little after it starts and then every four hours, unless you installed it through [the AUR](#installed-through-the-aur) or [the Microsoft Store](#installed-from-the-microsoft-store). It never downloads or restarts without you: you download an update, and then choose when to restart into it. Your login, preferences, favourites and history stay through every update.
 
 ## When an update is available

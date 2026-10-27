@@ -1,18 +1,22 @@
 # Mr. Streamer
 
-> A free, open-source desktop IPTV player for macOS, Windows and Linux. Bring your own Xtream Codes subscription or M3U playlist. No channels or subscriptions are included.
+> A free, open-source IPTV player for iPhone, macOS, Windows and Linux. Bring your own Xtream Codes provider on iPhone, or Xtream Codes subscription or M3U playlist on desktop. No channels or subscriptions are included.
+
+The first iPhone release supports Live TV with Guide, movies, series and offline downloads. M3U, catch-up and Google Cast are later iPhone work. iPad and Apple TV are outside this release. Other guides and app pictures describe desktop.
 
 ## Downloads and guides
 
+- [App Store for iPhone](https://apps.apple.com/app/id6823479796): iOS 16.4 or later, free, no ads or purchases.
+- [iPhone setup](https://mrstreamer.app/docs/iphone): Connect an existing Xtream provider and understand release scope.
 - [Downloads](https://mrstreamer.app/download): Current stable installers, system requirements, checksums and source archives.
 - [Guides](https://mrstreamer.app/docs): Using subscriptions, live TV, movies and series, downloads, updates and playback.
-- [Subscriptions](https://mrstreamer.app/docs/subscriptions): Connect Xtream Codes or an M3U playlist and manage your sources.
+- [Subscriptions](https://mrstreamer.app/docs/subscriptions): Desktop setup: connect Xtream Codes or an M3U playlist and manage your sources.
 - [FAQ](https://mrstreamer.app/faq): Answers about setup, supported systems and playback.
-- [Release notes](https://mrstreamer.app/releases): Published stable releases and their changes.
+- [Release notes](https://mrstreamer.app/releases): Published stable desktop releases and their changes.
 
 ## Project and policies
 
-- [About](https://mrstreamer.app/about): Product capabilities and supported desktop systems.
+- [About](https://mrstreamer.app/about): Product capabilities, supported systems and platform limits.
 - [Source repository](https://github.com/Mr-Streamer-OSS/MrStreamer): Public source code and contribution guidance.
 - [License](https://github.com/Mr-Streamer-OSS/MrStreamer/blob/main/LICENSE): GPL-3.0 license terms.
 - [Privacy](https://mrstreamer.app/privacy): Data storage, connections, analytics and privacy choices.

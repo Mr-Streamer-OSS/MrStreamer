@@ -1,8 +1,16 @@
 # About Mr. Streamer
 
-Mr. Streamer is a free, open source IPTV player for Mac, Windows and Linux. Bring your own Xtream Codes subscription or M3U playlist. It includes no channels and sells none.
+Mr. Streamer is a free, open source IPTV player for iPhone, Mac, Windows and Linux. Bring your own Xtream Codes provider on iPhone, or an Xtream Codes subscription or M3U playlist on desktop. It includes no channels and sells none.
+
+## On iPhone
+
+The first iPhone release, 0.1.0, includes Live TV with Guide, now/next and daily schedules when supplied by your provider, movies, series and offline downloads. It is free, with no ads, purchases or Mr. Streamer account. [Get it on the App Store](https://apps.apple.com/app/id6823479796) and follow [iPhone setup](user/iphone.md).
+
+M3U, catch-up and Google Cast are later iPhone work. iPad and Apple TV are outside this release. The app pictures on the website show desktop.
 
 ## What it plays
+
+On desktop:
 
 - Live TV from Xtream Codes or an M3U playlist, with a programme guide when your provider or playlist supplies one, as a list or a grid by time. You can add XMLTV guides of your own, which fill in the channels it doesn't cover. Programmes that aired play from their start when your provider keeps catch-up.
 - Movies and series from Xtream Codes or a playlist whose groups you mapped in Settings, with a watchlist and saved progress. Playlist movies and episodes need finished files; HLS entries stay out.
@@ -10,7 +18,7 @@ Mr. Streamer is a free, open source IPTV player for Mac, Windows and Linux. Brin
 
 You can [download movies and episodes](user/downloads.md) to watch offline. Mr. Streamer does not record live TV, bypass DRM or provide an IPTV subscription. It has no ads or account. Your provider decides what you can watch.
 
-Stable 0.0.20 is the current release. New in 0.0.20, including its Nightly previews: [custom channel lists and programme reminders](user/live-tv.md#your-lists), [download pause, queue ordering and offline series continuation](user/downloads.md), and [poster-grid keyboard navigation and Back through related titles](user/movies-and-series.md).
+Stable 0.0.20 is the current desktop release. New in 0.0.20, including its Nightly previews: [custom channel lists and programme reminders](user/live-tv.md#your-lists), [download pause, queue ordering and offline series continuation](user/downloads.md), and [poster-grid keyboard navigation and Back through related titles](user/movies-and-series.md).
 
 It reads MPEG-TS and HLS live streams, MP3 and AAC radio, and MKV, MP4 and AVI movies and episodes. Playback depends on the file's tracks and your system's decoders; [What plays](user/playback.md) describes conversion and the known limits. DASH streams are not supported.
 
@@ -18,6 +26,7 @@ It reads MPEG-TS and HLS live streams, MP3 and AAC radio, and MKV, MP4 and AVI m
 
 | System  | Requirements                                                                |
 | ------- | --------------------------------------------------------------------------- |
+| iPhone  | iOS 16.4 or later; [App Store](https://apps.apple.com/app/id6823479796)     |
 | macOS   | macOS 13 or later, Apple silicon                                            |
 | Windows | Windows 11, x64                                                             |
 | Linux   | x86_64 Linux. The AppImage needs FUSE 2; the .deb is for Ubuntu and Debian. |
@@ -26,7 +35,7 @@ It reads MPEG-TS and HLS live streams, MP3 and AAC radio, and MKV, MP4 and AVI m
 
 ## Your data
 
-Logins, preferences, favourites, watchlist, history and progress stay on your computer. Provider requests go directly from the app to the configured addresses and any redirects or stream addresses they supply, subject to the [login checks](security.md#your-login). From 0.0.11, usage statistics default on and can be turned off in **Settings > Privacy**: first-seen profiles and daily app use, and from 0.0.12 the parts of the app opened, playback, download and update-check results, and unexpected window stops. Viewing history and provider details are excluded; builds without a configured PostHog project send no app statistics. The [privacy policy](privacy.md) describes its connections and the website's analytics; [Security](security.md) explains login storage and installer signing.
+Logins, preferences, favourites, watchlist, history and progress stay on your device. Provider requests go directly from the app to the configured addresses and any redirects or stream addresses they supply, subject to the [login checks](security.md#your-login). On iPhone, statistics stay off until you choose to share them, except when an upgrade retains an earlier deliberate choice. First setup offers both choices before the provider form; change the choice in **Settings > Privacy**. On desktop, from 0.0.11, usage statistics default on and can be turned off in **Settings > Privacy**: first-seen profiles and daily app use, and from 0.0.12 the parts of the app opened, playback, download and update-check results, and unexpected window stops. Viewing history and provider details are excluded; builds without a configured PostHog project send no app statistics. The [privacy policy](privacy.md) describes its connections and the website's analytics; [Security](security.md) explains login storage and installer signing.
 
 ## Licence and source
 

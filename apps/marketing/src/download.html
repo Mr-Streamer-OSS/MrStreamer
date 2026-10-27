@@ -1,15 +1,28 @@
 <h1>Download Mr. Streamer</h1>
 <p>
-  <span data-release-version>Stable release on GitHub.</span>
+  Desktop: <span data-release-version>Stable release on GitHub.</span>
   <a data-release-link="notes" href="https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest"
     >Release notes</a
   >.
 </p>
 <!--
   The visitor's own system first. The script in the head names it in data-os on <html>
-  (src/system.ts), and styles.css shows the block that matches. Without a named system, as on a
-  phone, on a system with no installer or with scripts off, none shows and the rows below stand.
+  (src/system.ts), and styles.css shows the block that matches. Without a named system, as on an
+  iPad, an Android phone, a system with no app or with scripts off, none shows and the rows below
+  stand.
 -->
+<div class="mine" data-for="iphone">
+  <div>
+    <h2>iPhone <span class="me">your system</span></h2>
+    <p class="note">iOS 16.4 or later. Free, with no ads or purchases.</p>
+  </div>
+  <p class="actions">
+    <a class="button primary" href="https://apps.apple.com/app/id6823479796"
+      >Download on the App Store</a
+    >
+    <a href="/docs/iphone">iPhone setup</a>
+  </p>
+</div>
 <div class="mine" data-for="mac">
   <div>
     <h2>Mac <span class="me">your system</span></h2>
@@ -69,6 +82,33 @@
 </div>
 <!-- A row for each system, with a drawing of its file. The drawings are plain lines, not system marks. -->
 <dl class="rows">
+  <div class="row">
+    <svg
+      class="glyph"
+      viewBox="0 0 72 64"
+      width="72"
+      height="64"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="23" y="4" width="26" height="56" rx="6" />
+      <path d="M32 10h8M36 24v15M30 34l6 5 6-5" />
+    </svg>
+    <dt>iPhone, iOS 16.4 or later</dt>
+    <dd>
+      <a href="https://apps.apple.com/app/id6823479796">App Store</a>
+      <small>
+        Free, with no ads, purchases or Mr. Streamer account. Sign in with your provider's Xtream
+        Codes login for Live TV with its Guide, movies, series and offline downloads. M3U playlists,
+        catch-up and Google Cast are desktop only for now. iPhone only, not iPad or Apple TV.
+      </small>
+      <small><a href="/docs/iphone">iPhone setup</a></small>
+    </dd>
+  </div>
   <div class="row">
     <svg
       class="glyph"
