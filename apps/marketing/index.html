@@ -268,13 +268,26 @@
         </section>
 
         <section class="downloads" id="downloads" data-reveal>
-          <h2>Download</h2>
-          <p>macOS 13 or later on Apple silicon, Windows 11 or 64-bit Linux.</p>
-          <p class="actions">
-            <a class="button primary" href="/download">Download</a>
-            <!-- package:homebrew:availability -->
-            <!-- package:aur:availability -->
-          </p>
+          <h2>Get Mr. Streamer</h2>
+          <!-- The formats are words; the button goes to them. Homebrew and AUR are written by the build. -->
+          <dl>
+            <div>
+              <dt>Mac</dt>
+              <dd>macOS 13 or later, Apple silicon</dd>
+              <dd>DMG<!-- package:homebrew:lane --></dd>
+            </div>
+            <div>
+              <dt>Windows</dt>
+              <dd>Windows 11, 64-bit</dd>
+              <dd>Microsoft Store <span>·</span> Setup .exe</dd>
+            </div>
+            <div>
+              <dt>Linux</dt>
+              <dd>64-bit. The AppImage needs FUSE 2.</dd>
+              <dd>AppImage <span>·</span> .deb<!-- package:aur:lane --></dd>
+            </div>
+          </dl>
+          <a class="button primary" href="/download">Download</a>
         </section>
       </main>
 
