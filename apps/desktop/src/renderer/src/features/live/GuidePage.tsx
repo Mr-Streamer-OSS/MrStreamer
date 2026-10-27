@@ -150,6 +150,7 @@ export function GuidePage({ active }: { active: boolean }) {
   // Something covers the list: Watch or a details sheet, which end `active`, Settings, Search or
   // the update dialog.
   const covered = useUi((ui) => !active || !!ui.settings || ui.searchOpen || !!ui.updateDialog);
+  const [filterOpen, setFilterOpen] = useState(false);
   const client = useQueryClient();
   const customLists = useQuery(queries.customLists());
   const customList =
@@ -829,7 +830,7 @@ export function GuidePage({ active }: { active: boolean }) {
                 }}
               />
             )}
-            <BrowseFilters list={list} result={browse} />
+            <BrowseFilters list={list} result={browse} onOpenChange={setFilterOpen} />
             {customList && <AwayNote count={customList.away} />}
             <ChangeNotice
               state={listChange.state}
@@ -926,7 +927,7 @@ export function GuidePage({ active }: { active: boolean }) {
                     })
                   }
                   selected={draft || (keyboard && focus === "channels") ? selected : null}
-                  covered={covered}
+                  covered={covered || filterOpen}
                   playingKey={playingKey}
                   expandedKey={expandedKey}
                   favourites={favourites}

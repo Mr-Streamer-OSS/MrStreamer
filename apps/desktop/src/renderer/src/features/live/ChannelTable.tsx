@@ -631,7 +631,7 @@ function ChannelName({
     [name.current, line.current].some(
       (text) => text !== null && text.scrollWidth > text.clientWidth,
     );
-  useLayoutEffect(() => setHolding(held && clipped()), [held, channel.title, details]);
+  useLayoutEffect(() => setHolding(held && clipped()), [held, channel.title, details, playing]);
   // Covered, the pointer can leave unheard: the label waits for the next hover.
   useLayoutEffect(() => {
     if (covered) setHovered(false);
@@ -639,6 +639,7 @@ function ChannelName({
   return (
     <Tooltip
       side="bottom"
+      disableHoverablePopup
       open={!covered && (hovered || holding)}
       onOpenChange={(open, change) => {
         // Escape stays the page's, which ends a search or an order with the label up.
@@ -651,7 +652,7 @@ function ChannelName({
       }}
       label={
         <>
-          <span className="block">{channel.title}</span>
+          <span className="block">{channel.name}</span>
           {details && <span className="block text-muted-foreground">{details}</span>}
         </>
       }

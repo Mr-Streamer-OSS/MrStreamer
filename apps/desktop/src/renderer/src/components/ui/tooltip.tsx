@@ -15,6 +15,7 @@ export function Tooltip({
   disabled = false,
   open,
   onOpenChange,
+  disableHoverablePopup,
 }: {
   label: ReactNode;
   children: ReactElement;
@@ -22,9 +23,15 @@ export function Tooltip({
   disabled?: boolean;
   open?: boolean;
   onOpenChange?: TooltipPrimitive.Root.Props["onOpenChange"];
+  disableHoverablePopup?: boolean;
 }) {
   return (
-    <TooltipPrimitive.Root disabled={disabled} open={open} onOpenChange={onOpenChange}>
+    <TooltipPrimitive.Root
+      disabled={disabled}
+      open={open}
+      onOpenChange={onOpenChange}
+      disableHoverablePopup={disableHoverablePopup}
+    >
       <TooltipPrimitive.Trigger render={children} />
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Positioner side={side} sideOffset={8} className="z-[140]">
