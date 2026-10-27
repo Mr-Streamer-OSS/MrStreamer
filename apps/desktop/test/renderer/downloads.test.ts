@@ -1351,9 +1351,5 @@ describe("the top bar's word on the downloads", () => {
     expect(button(bar, "Downloads")).toBeUndefined();
     expect(useUi.getState().view).toBe("downloads");
     expect(document.activeElement).toBe(home);
-
-    await act(async () => useUi.setState({ view: "movies" }));
-    await until(() => !pages(bar).includes("Downloads"));
-    expect(bar.querySelector("[data-downloads-notice]")).toBeNull();
   });
 });

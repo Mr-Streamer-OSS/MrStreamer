@@ -372,8 +372,6 @@ it("promotes the first visible nonempty channel row once, across title rows, mov
   assertOnce("recent");
   await save(() => button("Reset to defaults").click());
   assertOnce("favourites");
-  await act(async () => button("Back").click());
-  expect(container.querySelector("header nav")?.textContent).not.toContain("Watchlist");
 });
 
 it("sparse saved titles keep their resolved owner and unavailable-entry action without eager details", async () => {

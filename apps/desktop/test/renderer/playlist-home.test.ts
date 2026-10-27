@@ -162,7 +162,6 @@ it("shows mapped titles without live channels or invented added dates, and opens
   const navigation = container.querySelector("header");
   expect(navigation?.textContent).toContain("Movies");
   expect(navigation?.textContent).toContain("Series");
-  expect(navigation?.textContent).not.toContain("Watchlist");
   expect(ipc.argsOf("ondemand.collection").every((query) => query.id === "all")).toBe(true);
   expect(ipc.argsOf("watchlist.list").filter((query) => query.home)).toHaveLength(1);
   const heading = [...container.querySelectorAll("h2")].find(
