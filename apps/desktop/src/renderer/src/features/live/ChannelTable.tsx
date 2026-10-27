@@ -1,5 +1,7 @@
-// The guide's channel list: a row per channel with its number, logo and name, the qualities of a
-// channel with several streams, what's on now with progress and time left, and what's next. The chevron opens the rest of the day under the row,
+// The guide's channel list: a row per channel with its number, logo and name, and under the name
+// what tells its stream apart: the source where another's channel is called the same, the country
+// and the qualities of a channel with several streams. Then what's on now with progress and time
+// left, and what's next. The chevron opens the rest of the day under the row,
 // after today's programmes so far that the provider's catch-up keeps, which play from their start.
 // A later programme opens to its description and Remind me, and one with a reminder set shows a
 // bell at the end of its line (../reminders/). Rows ask the guide for programmes only as they
@@ -39,6 +41,7 @@ import { archiveHolds } from "@mrstreamer/core/catchup";
 import { matchRanges } from "@mrstreamer/core/text";
 import { t } from "@mrstreamer/core/i18n";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
+import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { Progress } from "../../components/Progress.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { clockTime, endOfDay, pastTime, progressOf, timeLeft } from "../../lib/format.ts";
@@ -99,6 +102,7 @@ export function ChannelTable({
   onToggleCopies,
   onSelectSearch,
   selected,
+  covered = false,
   playingKey,
   expandedKey,
   favourites,
@@ -126,6 +130,8 @@ export function ChannelTable({
    * that holds the focus, whichever is in use.
    */
   selected: number | null;
+  /** Something covers the list, as Watch or Settings do: no row shows a cut name in full. */
+  covered?: boolean;
   /** The channel that plays and the one whose schedule is open, each by its `ownedKey`. */
   playingKey: string | null;
   expandedKey: string | null;
@@ -288,6 +294,7 @@ export function ChannelTable({
                 now={now}
                 playing={rowPlays(channel, searchRows?.[item.index], playingKey)}
                 selected={item.index === selected}
+                covered={covered}
                 expanded={
                   key === expandedKey &&
                   !(
@@ -338,6 +345,7 @@ function ChannelRow({
   now,
   playing,
   selected,
+  covered,
   expanded,
   favourite,
   words,
@@ -362,6 +370,7 @@ function ChannelRow({
   now: number;
   playing: boolean;
   selected: boolean;
+  covered: boolean;
   expanded: boolean;
   favourite: boolean;
   words: readonly string[];
@@ -383,10 +392,16 @@ function ChannelRow({
     ? `${t("{count} subscriptions", { count: subscriptionCount })} · ${searchQualities(searchRow.group.copies)}`
     : null;
   const copySummary = searchRow?.copy
-    ? [searchQualities([channel]), source, category?.group, category?.title]
+    ? [source, searchQualities([channel]), category?.group, category?.title]
         .filter(Boolean)
         .join(" · ")
     : null;
+  // Under the name: a group's subscriptions and qualities, a copy's source and where it's filed,
+  // or else the source where another's channel is called the same, its country and qualities.
+  const details =
+    groupSummary ??
+    copySummary ??
+    [source, channel.browse?.country, qualitiesLine(channel)].filter(Boolean).join(" · ");
   const current = listing?.now ?? null;
   const next = listing?.next ?? null;
   // A match that began since it was found is the programme on now.
@@ -473,33 +488,15 @@ function ChannelRow({
           {grouped ? "" : (channel.number ?? "")}
         </span>
         <ChannelLogo channel={channel} className="h-8 w-12" />
-        <span
-          className={cn(
-            "flex w-[13rem] flex-none gap-2",
-            grouped || searchRow?.copy ? "flex-wrap items-center gap-y-0" : "items-center",
-          )}
-          title={channel.name}
-        >
-          <span className={cn("truncate text-[0.9375rem]", playing && "font-semibold text-white")}>
-            <Marked text={channel.title} words={words} />
-          </span>
-          {playing && <span className="size-1.5 flex-none rounded-full bg-white" />}
-          <span
-            className={cn(
-              "text-xs text-muted-foreground",
-              grouped || searchRow?.copy ? "w-full truncate text-white" : "flex-none",
-            )}
-            title={copySummary ?? undefined}
-          >
-            {grouped ? groupSummary : searchRow?.copy ? copySummary : qualitiesLine(channel)}
-          </span>
-          {/* Plain text in the name's cell, which gives way before the name does. */}
-          {!grouped && !searchRow?.copy && (source || channel.browse?.country) && (
-            <span className="min-w-0 flex-shrink-[3] truncate text-xs text-muted-foreground">
-              · {[channel.browse?.country, source].filter(Boolean).join(" · ")}
-            </span>
-          )}
-        </span>
+        <ChannelName
+          channel={channel}
+          words={words}
+          playing={playing}
+          held={selected && !expanded}
+          covered={covered}
+          details={details || null}
+          bright={groupSummary !== null || copySummary !== null}
+        />
         <span className="flex min-w-0 flex-1 items-center gap-4">
           {current && (
             <>
@@ -600,6 +597,89 @@ function ChannelRow({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * A row's name, with the playing dot, over the line that tells its stream apart. Each line ends in
+ * "…" where it doesn't fit; then both show in full below it on hover, and while `held`, as the
+ * keys select the row with its day shut, unless something covers the list. `bright` sets a
+ * search's summary in white.
+ */
+function ChannelName({
+  channel,
+  words,
+  playing,
+  held,
+  covered,
+  details,
+  bright,
+}: {
+  channel: LiveChannel;
+  words: readonly string[];
+  playing: boolean;
+  held: boolean;
+  covered: boolean;
+  details: string | null;
+  bright: boolean;
+}) {
+  const name = useRef<HTMLSpanElement>(null);
+  const line = useRef<HTMLSpanElement>(null);
+  const [hovered, setHovered] = useState(false);
+  const [holding, setHolding] = useState(false);
+  const clipped = () =>
+    [name.current, line.current].some(
+      (text) => text !== null && text.scrollWidth > text.clientWidth,
+    );
+  useLayoutEffect(() => setHolding(held && clipped()), [held, channel.title, details]);
+  // Covered, the pointer can leave unheard: the label waits for the next hover.
+  useLayoutEffect(() => {
+    if (covered) setHovered(false);
+  }, [covered]);
+  return (
+    <Tooltip
+      side="bottom"
+      open={!covered && (hovered || holding)}
+      onOpenChange={(open, change) => {
+        // Escape stays the page's, which ends a search or an order with the label up.
+        const escape = change.reason === "escape-key";
+        if (escape) {
+          change.cancel();
+          change.allowPropagation();
+        }
+        setHovered(open && !escape && clipped());
+      }}
+      label={
+        <>
+          <span className="block">{channel.title}</span>
+          {details && <span className="block text-muted-foreground">{details}</span>}
+        </>
+      }
+    >
+      <span className="flex w-[13rem] min-w-0 flex-none flex-col justify-center gap-0.5">
+        <span className="flex min-w-0 items-center gap-2">
+          <span
+            ref={name}
+            data-name={channel.name}
+            className={cn(
+              "truncate text-[0.9375rem] leading-tight",
+              playing && "font-semibold text-white",
+            )}
+          >
+            <Marked text={channel.title} words={words} />
+          </span>
+          {playing && <span className="size-1.5 flex-none rounded-full bg-white" />}
+        </span>
+        {details && (
+          <span
+            ref={line}
+            className={cn("truncate text-xs", bright ? "text-white" : "text-muted-foreground")}
+          >
+            {details}
+          </span>
+        )}
+      </span>
+    </Tooltip>
   );
 }
 
