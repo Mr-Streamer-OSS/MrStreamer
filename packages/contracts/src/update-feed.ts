@@ -193,12 +193,6 @@ function readRelease(json: unknown, channel: Channel): FeedRelease | null {
   const previous =
     typeof json["previousStable"] === "string" ? parseVersion(json["previousStable"]) : null;
   return {
-    ...(channel === "stable" &&
-    previous &&
-    !previous.nightly &&
-    compareVersions(previous, version) < 0
-      ? { previousStable: formatVersion(previous) }
-      : {}),
     version: formatVersion(version),
     published: text("published"),
     page: text("page"),
@@ -206,6 +200,10 @@ function readRelease(json: unknown, channel: Channel): FeedRelease | null {
     notes: text("notes"),
     platforms,
     ...(isNames(installers) && { installers }),
+    ...(channel === "stable" &&
+      previous &&
+      !previous.nightly &&
+      compareVersions(previous, version) < 0 && { previousStable: formatVersion(previous) }),
   };
 }
 

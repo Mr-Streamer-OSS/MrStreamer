@@ -23,7 +23,7 @@ import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 
 /** A release this platform can update to. */
 export interface Offer {
-  /** Known stable release immediately preceding this offer. Missing history never implies overdue. */
+  /** The Stable release just below this one, when known. Missing history never implies overdue. */
   readonly previousStable?: Version;
   readonly version: Version;
   /** The folder holding the release's files, for electron-updater's generic provider. */

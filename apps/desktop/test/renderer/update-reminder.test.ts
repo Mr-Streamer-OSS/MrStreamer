@@ -62,7 +62,7 @@ async function mount() {
     createElement(Fragment, null, createElement(UpdateNotice), createElement(UpdateReminder)),
   );
   views.push(view.unmount);
-  return view;
+  return { ...view, client };
 }
 
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
@@ -157,8 +157,53 @@ it("keeps an answer that comes once playback started for the next time the viewe
 
 it("shows nothing when the main process doesn't allow it", async () => {
   ipc.always("updates.showReminder", false);
+  ipc.always("updates.status", { ...STATUS, reminder: null });
   await mount();
   await settle();
   expect(ipc.argsOf("updates.showReminder")).toHaveLength(1);
   expect(dialog()).toBeNull();
+});
+
+it("validates a changed offer again before showing a deferred reminder", async () => {
+  const answer = ipc.hold("updates.showReminder");
+  ipc.always("updates.showReminder", true);
+  const { client } = await mount();
+  await act(async () => useUi.setState({ watching: true }));
+  await act(async () => answer.resolve(true));
+  await settle();
+  await act(async () =>
+    client.setQueryData(["updates"], {
+      ...STATUS,
+      reminder: { version: "0.1.0" },
+      update: { kind: "available", version: "0.1.0" },
+    } satisfies UpdateStatus),
+  );
+  await act(async () => useUi.setState({ watching: false }));
+  await settle();
+  expect(ipc.argsOf("updates.showReminder")).toEqual([{ version: "0.0.23" }, { version: "0.1.0" }]);
+  expect(dialog()?.textContent).toContain("Update to 0.1.0");
+  expect(ipc.argsOf("updates.reminderShown")).toContainEqual({ version: "0.1.0" });
+  // A later recheck must not leave Download describing an old target.
+  await act(async () =>
+    client.setQueryData(["updates"], {
+      ...STATUS,
+      update: { kind: "checking" },
+    } satisfies UpdateStatus),
+  );
+  await settle();
+  expect(dialog()).toBeNull();
+});
+
+it("can remind after an in-flight check refused an earlier stale request", async () => {
+  const answer = ipc.hold("updates.showReminder");
+  ipc.always("updates.status", { ...STATUS, reminder: null });
+  ipc.always("updates.showReminder", true);
+  const { client } = await mount();
+  await act(async () => answer.resolve(false));
+  await settle();
+  expect(dialog()).toBeNull();
+  await act(async () => client.setQueryData(["updates"], STATUS));
+  await settle();
+  expect(dialog()).not.toBeNull();
+  expect(ipc.argsOf("updates.showReminder")).toHaveLength(2);
 });

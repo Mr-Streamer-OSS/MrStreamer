@@ -2,16 +2,17 @@
 // least two releases behind (the service decides, in `UpdateStatus.reminder`). It waits until the
 // viewer browses: nothing plays over the page and no Settings, search, sheet or update panel is
 // open; Home's muted preview doesn't count. Then the main process allows it once per launch
-// (`updates.showReminder`), and records display only once the popup mounts: an answer that arrives after the
-// viewer started playing waits in the UI store for the next time they browse. Download and Not now
-// both close it, Escape too, and the keyboard returns where it was. The top bar's Update stays.
+// (`updates.showReminder`), and records display only once the popup mounts. An answer that
+// arrives after the viewer started playing waits in the UI store for the next time they browse.
+// Download and Not now both close it, Escape too, and the keyboard returns where it was. The top
+// bar's Update stays.
 import { Dialog } from "@base-ui/react/dialog";
 import { useEffect } from "react";
 import { t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { call } from "../../lib/ipc.ts";
-import { NOTE_LINES } from "./UpdateNotice.tsx";
+import { NOTE_LINES, useKeptUpdate } from "./UpdateNotice.tsx";
 import { noteItems } from "./notes.ts";
 import { useUpdates } from "./use-updates.ts";
 
@@ -30,37 +31,59 @@ const covered = (ui: Ui) =>
 const browsing = (ui: Ui) => !covered(ui) && ui.updateDialog === null;
 
 export function UpdateReminder() {
-  const { status, download } = useUpdates();
+  const {
+    status,
+    statusRead: { refetch },
+    download,
+  } = useUpdates();
   const reminder = useUi((state) => state.updateReminder);
   const free = useUi(browsing);
   const blocked = useUi(covered);
   const open = useUi((state) => state.updateDialog === "reminder");
+  const version = useKeptUpdate();
+  // The service names only the release on offer, so a due reminder is always downloadable.
   const due = status?.reminder?.version ?? null;
-  const offered = status?.update.kind === "available" ? status.update.version : null;
 
-  // Asked once a reminder is due and the viewer browses; the answer stands for the launch.
+  // Validate the offer when browsing. A stale answer refreshes status before another attempt.
   useEffect(() => {
-    if (reminder !== null || !due || !offered || !free) return;
+    if (reminder !== null || !due || !free) return;
     useUi.setState({ updateReminder: "asking" });
-    const settle = (allowed: boolean) =>
+    const settle = (next: Ui["updateReminder"]) =>
       useUi.setState((state) =>
-        state.updateReminder === "asking" ? { updateReminder: allowed ? "allowed" : "done" } : {},
+        state.updateReminder === "asking" ? { updateReminder: next } : {},
       );
-    call("updates.showReminder", { version: due }).then(settle, () => settle(false));
-  }, [reminder, due, offered, free]);
+    call("updates.showReminder", { version: due }).then(
+      async (allowed) => {
+        if (allowed) settle({ allowed: due });
+        else {
+          const refreshed = await refetch();
+          settle(refreshed.isError ? "done" : null);
+        }
+      },
+      () => settle("done"),
+    );
+  }, [reminder, due, free, refetch]);
 
-  // Allowed, it shows as soon as the viewer browses, for the release on offer by then.
+  // Permission belongs to one version. Changed or withdrawn offers must be validated again.
   useEffect(() => {
-    if (reminder !== "allowed" || !due || due !== offered || !free) return;
-    useUi.setState({ updateReminder: { kept: offered }, updateDialog: "reminder" });
-  }, [reminder, due, offered, free]);
+    if (typeof reminder !== "object" || reminder === null || !("allowed" in reminder)) return;
+    if (due !== reminder.allowed) useUi.setState({ updateReminder: null });
+    else if (free) useUi.setState({ updateReminder: { kept: due }, updateDialog: "reminder" });
+  }, [reminder, due, free]);
 
-  // Playback, Settings or search opened over it some other way, as by a shortcut, closes it.
+  // Shortcuts and changed offers close the dialog; its Download must describe the current target.
   useEffect(() => {
-    if (open && blocked) useUi.setState({ updateDialog: null });
-  }, [open, blocked]);
+    if (
+      open &&
+      (blocked ||
+        status?.update.kind !== "available" ||
+        status.update.version !== version ||
+        status.checked?.failure != null)
+    ) {
+      useUi.setState({ updateDialog: null });
+    }
+  }, [open, blocked, status, version]);
 
-  const version = typeof reminder === "object" ? reminder?.kept : undefined;
   if (!status || !version) return null;
   const notes = status.offer?.version === version ? noteItems(status.offer.notes) : [];
   const close = () => useUi.setState({ updateDialog: null });

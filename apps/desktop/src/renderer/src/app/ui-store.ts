@@ -77,7 +77,8 @@ type UpdateDialog = "panel" | "restart" | "reminder";
  * or done. Once shown it keeps the top bar's Update for its version, even past an earlier Not now,
  * until the panel's own Not now or the next launch.
  */
-export type UpdateReminder = "asking" | "allowed" | "done" | { readonly kept: string };
+export type UpdateReminder =
+  "asking" | "done" | { readonly allowed: string } | { readonly kept: string };
 
 interface UiState {
   /**

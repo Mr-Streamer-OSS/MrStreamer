@@ -144,7 +144,9 @@ export class Updates extends Context.Service<
     readonly restart: Effect.Effect<void>;
     /** Closes the notice for `version`. Settings keeps offering it; a newer version notifies. */
     dismiss(version: string): Effect.Effect<UpdateStatus>;
+    /** Whether the window may show the launch's reminder for `version`; asking doesn't use it. */
     showReminder(version: string): Effect.Effect<boolean>;
+    /** Records that the allowed reminder for `version` is on screen: none again this process. */
     reminderShown(version: string): Effect.Effect<void>;
     /** Opens the app's page in the Microsoft Store, for a Store copy. Does nothing for other copies. */
     readonly openStore: Effect.Effect<void, Failed>;
@@ -194,6 +196,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
     let target: Offer | null = null;
     let checked: UpdateStatus["checked"] = null;
     let reminded: string | null = null;
+    let reminderWasShown = false;
     let allowedReminder: string | null = null;
     let nextCheckAt: number | null = null;
     /** The check whose result still counts; a newer check or a channel change voids it. */
@@ -225,9 +228,13 @@ function make(deps: UpdatesDeps & DirectUpdates) {
     /** Whether the chosen channel still receives `version`, checked before downloading or installing it. */
     const wanted = (version: string) => receives(channel, version);
 
+    /**
+     * The fresh Stable offer to remind of: the installed release is older than the one before it.
+     * None once this process showed a reminder, or for a development build or unknown history.
+     */
     const reminder = () => {
       const previous = target?.previousStable;
-      return reminded === null &&
+      return !reminderWasShown &&
         checking === null &&
         channel === "stable" &&
         !installed.nightly &&
@@ -235,9 +242,6 @@ function make(deps: UpdatesDeps & DirectUpdates) {
         update.kind === "available" &&
         checked?.failure === null &&
         previous &&
-        !previous.nightly &&
-        target &&
-        compareVersions(previous, target.version) < 0 &&
         compareVersions(installed, previous) < 0
         ? { version: update.version }
         : null;
@@ -487,6 +491,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
       dismiss: (version: string) =>
         Effect.gen(function* () {
           dismissed = version;
+          if (reminded === version) reminded = null;
           yield* save;
           yield* changed;
           return snapshot();
@@ -500,7 +505,8 @@ function make(deps: UpdatesDeps & DirectUpdates) {
         }),
       reminderShown: (version: string) =>
         Effect.gen(function* () {
-          if (reminded !== null || allowedReminder !== version) return;
+          if (reminderWasShown || allowedReminder !== version) return;
+          reminderWasShown = true;
           reminded = version;
           yield* changed;
         }),

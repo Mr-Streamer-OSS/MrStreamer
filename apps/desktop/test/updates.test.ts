@@ -986,6 +986,9 @@ describe("launch update reminders", () => {
     expect(await service.showReminder("0.1.0")).toBe(true);
     await service.reminderShown("0.1.0");
     expect((await service.check()).reminder).toBeNull();
+    expect((await service.status()).reminded).toBe("0.1.0");
+    expect((await service.dismiss("0.1.0")).reminded).toBeNull();
+    expect((await service.check()).reminder).toBeNull();
     releases = [{ ...offer("0.2.0"), previousStable: parseVersion("0.1.0")! }];
     expect((await service.check()).reminder).toBeNull();
     expect(await service.showReminder("0.2.0")).toBe(false);

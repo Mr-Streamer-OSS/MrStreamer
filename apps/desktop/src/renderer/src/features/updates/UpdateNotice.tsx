@@ -39,7 +39,7 @@ export function useKeptUpdate(): string | null {
 }
 
 function shownReminder(reminder: UpdateReminder | null): reminder is { readonly kept: string } {
-  return typeof reminder === "object" && reminder !== null;
+  return typeof reminder === "object" && reminder !== null && "kept" in reminder;
 }
 
 /** The visible notice's words, also used by the window bar when retrying its full labels. */
