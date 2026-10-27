@@ -1348,6 +1348,24 @@ describe("the top bar's word on the downloads", () => {
         expect(document.activeElement).toBe(button(bar, "Home"));
       },
     );
+
+    it("hands focus to folded Downloads when a first save adds Watchlist", async () => {
+      ipc.always("watchlist.list", { total: 0, entries: [] });
+      ipc.always("downloads.list", list([download()]));
+      useUi.setState({ view: "downloads" });
+      const layout = layOut(780);
+      const bar = await show(createElement(WindowBar), "header nav button");
+      await layout.resize();
+      const entry = button(bar, "Downloads")!;
+      expect(bar.querySelector("[data-downloads-notice]")).toBeNull();
+      entry.focus();
+
+      ipc.always("watchlist.list", { total: 1, entries: [] });
+      await act(async () => ipc.emit("watchlist.changed", null));
+      await until(() => labelled(bar, "Downloads") !== null);
+      expect(useUi.getState().view).toBe("downloads");
+      expect(document.activeElement).toBe(labelled(bar, "Downloads"));
+    });
   });
 
   it("names Downloads while main keeps any, and hides the last removal without leaving its page", async () => {

@@ -91,17 +91,24 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   );
   const home = useRef<HTMLButtonElement>(null);
   const focused = document.activeElement;
-  const losingFocus =
-    focused instanceof HTMLElement &&
-    home.current?.closest("header")?.contains(focused) &&
-    ((filled.watchlist === false && focused.dataset["view"] === "watchlist") ||
-      (filled.downloads === false &&
-        (focused.dataset["view"] === "downloads" ||
-          focused.hasAttribute("data-downloads-notice"))));
-  // A disappearing collection button hands its keyboard to Home without changing the page.
+  const focusedCollection =
+    focused instanceof HTMLElement && home.current?.closest("header")?.contains(focused)
+      ? focused.dataset["view"] === "watchlist"
+        ? "watchlist"
+        : focused.dataset["view"] === "downloads" || focused.hasAttribute("data-downloads-notice")
+          ? "downloads"
+          : null
+      : null;
+  // A removed entry hands focus to Home; a folded Downloads entry keeps it on its replacement.
   useLayoutEffect(() => {
-    if (losingFocus && !focused?.isConnected && document.activeElement === document.body)
-      home.current?.focus();
+    if (!focusedCollection || focused?.isConnected || document.activeElement !== document.body)
+      return;
+    if (filled[focusedCollection] === false) home.current?.focus();
+    else if (focusedCollection === "downloads")
+      home.current
+        ?.closest("header")
+        ?.querySelector<HTMLButtonElement>("[data-downloads-notice]")
+        ?.focus();
   });
   const names = shown.map((entry) => t(entry.label)).join();
   const [pages, fold] = useFolds(status?.text, updateWords, locale, names);
