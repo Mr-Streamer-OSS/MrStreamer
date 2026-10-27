@@ -640,6 +640,15 @@ it("keeps Watchlist availability through failed and obsolete reads, then hides t
   await act(async () => saved.resolve(page([meridian])));
   await settle();
   expect(nav()).toContain("Watchlist");
+
+  button("Watchlist")!.focus();
+  const removed = ipc.hold("watchlist.list");
+  await act(async () => ipc.emit("watchlist.changed", null));
+  await act(async () => removed.resolve(page([])));
+  await settle();
+  expect(nav()).not.toContain("Watchlist");
+  expect(useUi.getState().view).toBe("watchlist");
+  expect(document.activeElement).toBe(home);
 });
 
 it.each(["adult setting", "adult catalogue"] as const)(

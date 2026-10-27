@@ -1325,6 +1325,29 @@ describe("the top bar's word on the downloads", () => {
       expect(pages(bar)).toEqual(["Home", "Live TV", "Movies", "Series", "Downloads"]);
       expect(bar.querySelector("[data-downloads-notice]")).toBeNull();
     });
+
+    it.each([1300, 780])(
+      "hands focus to Home when the last Downloads entry goes at %s px",
+      async (width) => {
+        ipc.always("watchlist.list", { total: 1, entries: [] });
+        ipc.always("downloads.list", list([download()]));
+        useUi.setState({ view: "downloads" });
+        const layout = layOut(width);
+        const bar = await show(createElement(WindowBar), "header nav button");
+        await layout.resize();
+        const entry = labelled(bar, "Downloads") ?? button(bar, "Downloads");
+        expect(entry).toBeDefined();
+        entry!.focus();
+        expect(document.activeElement).toBe(entry);
+        await changed(
+          list([]),
+          () => labelled(bar, "Downloads") === null && !button(bar, "Downloads"),
+        );
+        await settle();
+        expect(useUi.getState().view).toBe("downloads");
+        expect(document.activeElement).toBe(button(bar, "Home"));
+      },
+    );
   });
 
   it("names Downloads while main keeps any, and hides the last removal without leaving its page", async () => {

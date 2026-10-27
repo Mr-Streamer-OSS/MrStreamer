@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type Ref,
   type ReactNode,
   type RefCallback,
 } from "react";
@@ -88,6 +89,20 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   const shown = VIEWS.filter(
     (entry) => (!liveOnly || withoutTitles(entry.view)) && filled[entry.view] !== false,
   );
+  const home = useRef<HTMLButtonElement>(null);
+  const focused = document.activeElement;
+  const losingFocus =
+    focused instanceof HTMLElement &&
+    home.current?.closest("header")?.contains(focused) &&
+    ((filled.watchlist === false && focused.dataset["view"] === "watchlist") ||
+      (filled.downloads === false &&
+        (focused.dataset["view"] === "downloads" ||
+          focused.hasAttribute("data-downloads-notice"))));
+  // A disappearing collection button hands its keyboard to Home without changing the page.
+  useLayoutEffect(() => {
+    if (losingFocus && !focused?.isConnected && document.activeElement === document.body)
+      home.current?.focus();
+  });
   const names = shown.map((entry) => t(entry.label)).join();
   const [pages, fold] = useFolds(status?.text, updateWords, locale, names);
   const [backRoom, backFold] = useFolds(status?.text, updateWords, locale);
@@ -122,7 +137,12 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
           {shown
             .filter((entry) => !(folded && entry.view === "downloads"))
             .map((entry) => (
-              <PageButton key={entry.view} view={entry.view} current={entry.view === view}>
+              <PageButton
+                key={entry.view}
+                ref={entry.view === "home" ? home : undefined}
+                view={entry.view}
+                current={entry.view === view}
+              >
                 {t(entry.label)}
               </PageButton>
             ))}
@@ -208,16 +228,20 @@ export function Brand() {
 
 /** A page's name in the bar: bold and white for the page on screen. */
 export function PageButton({
+  ref,
   view,
   current,
   children,
 }: {
+  ref?: Ref<HTMLButtonElement> | undefined;
   view: View;
   current: boolean;
   children: ReactNode;
 }) {
   return (
     <button
+      ref={ref}
+      data-view={view}
       aria-current={current ? "page" : undefined}
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => openView(view)}
