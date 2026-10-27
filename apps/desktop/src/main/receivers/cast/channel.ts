@@ -304,9 +304,19 @@ export function openChannel(options: ChannelOptions): Promise<Channel> {
   };
   const send: Channel["send"] = (destinationId, namespace, payload) => {
     if (state !== "open") return;
-    socket.write(
-      encodeFrame({ sourceId: SENDER, destinationId, namespace, payload: JSON.stringify(payload) }),
-    );
+    try {
+      socket.write(
+        encodeFrame({
+          sourceId: SENDER,
+          destinationId,
+          namespace,
+          payload: JSON.stringify(payload),
+        }),
+      );
+    } catch {
+      // Receiver identifiers can fit an incoming frame but leave no room for our reply.
+      fail();
+    }
   };
 
   const opening = setTimeout(fail, options.deadline);

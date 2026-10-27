@@ -160,6 +160,24 @@ describe("Cast adapter", () => {
     expect(receiver.connections).toBe(1);
   });
 
+  it("reconnects when a receiver's heartbeat cannot fit in a reply", async () => {
+    const { receiver, connection, events } = await connected();
+    await connection.load(film(1), never);
+    const fields = { sourceId: "r".repeat(65_000), namespace: HEARTBEAT };
+    const size = receiver.encode({ type: "PING" }, fields).length;
+    const heartbeat = receiver.encode(
+      { type: "PING" },
+      { ...fields, sourceId: fields.sourceId + "r".repeat(65_535 - size) },
+    );
+    expect(heartbeat).toHaveLength(65_535);
+
+    receiver.frame(heartbeat);
+
+    await expect.poll(() => receiver.connections).toBe(2);
+    await expect.poll(() => failure(connection.play(1))).toBeNull();
+    expect(ofType(events, "lost")).toEqual([]);
+  });
+
   it("refuses the system's picker, an unknown receiver and a receiver that won't start the app", async () => {
     const { receiver, adapter, events } = await setup();
     const id = receiver.receiver.id;
