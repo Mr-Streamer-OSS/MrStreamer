@@ -9,7 +9,6 @@ import {
 } from "react";
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
 import type { Locale } from "@mrstreamer/contracts/language";
-import type { WatchlistPage } from "@mrstreamer/contracts/watchlist";
 import { hasTitles } from "@mrstreamer/contracts/subscription";
 import { useLocale } from "../app/language.ts";
 import { isMac, useWindowFullScreen } from "../app/platform.ts";
@@ -27,7 +26,6 @@ import {
   updateNoticeLabel,
   useKeptUpdate,
 } from "../features/updates/UpdateNotice.tsx";
-import { PAGE } from "../features/titles/CollectionGrid.tsx";
 import { useQuery } from "@tanstack/react-query";
 import { type PlainKey, t } from "@mrstreamer/core/i18n";
 import { downloadsQuery } from "../lib/downloads.ts";
@@ -47,7 +45,6 @@ const VIEWS = [
   { view: "downloads", label: "Downloads" },
 ] as const satisfies readonly { readonly view: View; readonly label: PlainKey }[];
 
-const anySaved = (page: WatchlistPage) => page.total > 0;
 const anyKept = (list: DownloadList) => list.items.length > 0;
 
 /**
@@ -83,13 +80,10 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   const updateOpen = useUi((state) => state.updateDialog === "panel");
   const updateWords = updateNoticeLabel(update, updateOpen, useKeptUpdate());
   const filled: Partial<Record<View, boolean>> = {
-    // The Watchlist page's own first read: its total counts what the viewer sees there, also a
-    // title no provider lists now, and those for adults only while shown.
-    watchlist: useKnown(
-      useQuery({ ...queries.watchlist("saved", 0, PAGE), select: anySaved }).data,
-    ),
-    // Every download main keeps counts, in any state, also a complete one whose file went.
-    downloads: useKnown(useQuery({ ...downloadsQuery(), select: anyKept }).data),
+    // The owner counts visible saves, including unavailable titles and the adult setting.
+    watchlist: useQuery(queries.watchlistAvailability()).data ?? true,
+    // Every retained record counts, regardless of transfer or file state.
+    downloads: useQuery({ ...downloadsQuery(), select: anyKept }).data ?? true,
   };
   const shown = VIEWS.filter(
     (entry) => (!liveOnly || withoutTitles(entry.view)) && filled[entry.view] !== false,
@@ -235,16 +229,6 @@ export function PageButton({
       {children}
     </button>
   );
-}
-
-/**
- * What `answer` last said: held while it is read again or a read fails, and true before main first
- * answers, so a page is never taken for empty before main said so.
- */
-function useKnown(answer: boolean | undefined): boolean {
-  const [known, setKnown] = useState(true);
-  if (answer !== undefined && answer !== known) setKnown(answer);
-  return answer ?? known;
 }
 
 /**
