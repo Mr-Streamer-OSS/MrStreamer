@@ -21,6 +21,8 @@
 
 ## Is it for you?
 
+<a id="your-subscription"></a>
+
 Bring your own Xtream Codes login or M3U playlist; Mr. Streamer includes no channels and sells none. If it doesn't do what you need, the last column names players whose own sites say they do.
 
 | You want                                      | Mr. Streamer                                                      | Also documented by                                                                          |
@@ -39,6 +41,8 @@ Bring your own Xtream Codes login or M3U playlist; Mr. Streamer includes no chan
 
 Kodi is compared with its official [IPTV Simple](https://github.com/kodi-pvr/pvr.iptvsimple) add-on. VLC is a general media player. Not documented means the sources below don't say; it doesn't mean no.
 
+<a id="getting-set-up"></a>
+
 |                   | Platforms                                                                                         | Xtream / M3U                                 | Guide (XMLTV)                                                             | Movies and series                                   |
 | ----------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------- |
 | **Mr. Streamer**  | macOS 13 or later (Apple silicon), Windows 11, x86_64 Linux                                       | Xtream login, M3U link                       | Provider or playlist guide, then your own XMLTV guides; grid and catch-up | Library with TMDB details; M3U after mapping groups |
@@ -47,6 +51,8 @@ Kodi is compared with its official [IPTV Simple](https://github.com/kodi-pvr/pvr
 | **IPTVX**         | Apple silicon Mac, iPhone, iPad, Apple TV, Apple Vision, Android, Android TV; Fire OS by sideload | Xtream, M3U                                  | Server guide, or your own EPG URL                                         | Movies and series                                   |
 | **VLC**           | Windows, macOS, Linux, Android, iOS                                                               | Opens playlists; Xtream login not documented | Not documented                                                            | Plays playlist entries                              |
 | **Kodi**          | Windows, macOS, Linux, Android, iOS, tvOS, webOS, Raspberry Pi                                    | M3U file or URL; Xtream login not documented | XMLTV file or URL, compressed too                                         | VOD entries from M3U, listed under Recordings       |
+
+<a id="watching-later-and-elsewhere"></a>
 
 |                   | Downloads                                         | Live TV recording                                  | Casting                                             | Price, source                                                              |
 | ----------------- | ------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------- |
