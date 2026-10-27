@@ -1119,6 +1119,38 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(nativeSecrets()).toEqual([]);
   });
 
+  it("does not call an uninterrupted transfer restarted after saving its progress", async () => {
+    await install();
+    const app = await launch();
+    const { a } = await withProviders(app);
+    one.replaceMovieFile(movie().id, fixture("title-receiver.mp4"));
+    one.stallMovieFile(movie().id, 300_000, 1_000);
+    const readNow = Date.now;
+    let elapsed = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => readNow() + elapsed);
+    let advanced = false;
+    const off = app.onDownloads(() => {
+      if (
+        !advanced &&
+        app
+          .downloadList()
+          .items.some((item) => item.status.kind === "transferring" && item.status.received > 0)
+      ) {
+        advanced = true;
+        elapsed = 6_000;
+      }
+    });
+    onTestFinished(() => {
+      off();
+      clock.mockRestore();
+      one.replaceMovieFile(movie().id, fixture(movie().fixture!));
+    });
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 300_000, "the uninterrupted transfer to stall");
+    expect(statusOf(app, film.id)).toMatchObject({ kind: "transferring", restarted: false });
+    expect(native.requests).toHaveLength(1);
+  });
+
   it("starts again, and says so, when the provider's file changed while it was paused", async () => {
     await install();
     const app = await launch();

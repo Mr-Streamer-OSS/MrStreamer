@@ -4,7 +4,7 @@
 
 Download a movie, a whole series or a single episode from its details, a persistent queue with one transfer at a time, pausing and resuming one download or the whole queue, moving waiting downloads up or down, the top bar's notice of how it stands, the Downloads page with queue and copies, a series' copies together by season, offline playback of a copy in the title player and going on to the next episode's copy, playback of the same subscription taking the connection, cancel, retry, delete, interrupted and replaced files, and copies kept after their subscription is removed.
 
-On iOS, a transfer that starts from zero again says **started again**. That state also covers unusable or absent resume data; it does not establish that the provider changed the file. Check through ordinary Downloads Retry with the same fixture bytes and ETag, then compare the final media hash. Native resume requires its own native attempt and wire-range binding.
+On iOS, a transfer that starts from zero again says **started again**. That state also covers unusable or absent resume data; it does not establish that the provider changed the file. Check through ordinary Downloads Retry with the same fixture bytes and ETag, then compare the final media hash. An uninterrupted transfer must keep its normal progress text after saving progress. Native resume requires its own native attempt and wire-range binding.
 
 ## How to get to it (user POV)
 

@@ -552,7 +552,7 @@ function moved(progress: Progress) {
     savedAt: now,
   };
   // A request that didn't go on from what this one had starts from zero, and says so.
-  seen.restarted ||= progress.restarted || (!progress.resumed && record.received > 0);
+  seen.restarted ||= progress.restarted || (first && !progress.resumed && record.received > 0);
   if (now - seen.measured.at >= 1000) {
     const rate = ((progress.received - seen.measured.received) * 1000) / (now - seen.measured.at);
     seen.rate = rate >= 0 ? rate : null;
