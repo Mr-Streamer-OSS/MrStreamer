@@ -1,16 +1,18 @@
 # Privacy policy
 
-Last updated 25 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
+Last updated 27 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
 
 Custom channel lists and programme reminders below are new in desktop 0.0.20, including its Nightly previews.
 
-Mr. Streamer is a free, open-source IPTV player for your computer. It has no account, shows no ads and doesn't sell data. Nothing you watch passes through us.
+Mr. Streamer is a free, open-source IPTV player for your computer and iPhone. It has no account, shows no ads and doesn't sell data. Nothing you watch passes through us.
 
 Wout Stiens in Belgium, publishing as Mr Streamer OSS, is responsible for the data we receive. Contact [privacy@mrstreamer.app](mailto:privacy@mrstreamer.app).
 
 ## Information we collect
 
 ### On your computer
+
+This section describes the desktop app.
 
 Most of what the app handles never reaches us. It stays in its data folder ([where it is](user/troubleshooting.md#where-your-data-is)):
 
@@ -28,7 +30,7 @@ Reminders stay locally until the app checks after the end of the day their progr
 
 **Diagnostics…** in Settings > About reconstructs an export from fixed fields, shows you the text before you save it and uploads nothing. Ordinary local console output is separate and can contain file paths or invalid values from damaged local files. Review console output before sharing it.
 
-### Usage statistics
+### Usage statistics on desktop
 
 **Share basic usage statistics** is on by default, in new and existing profiles, without a prompt. While it's on, desktop 0.0.15 sends a short event each time one of these happens. From 0.0.16, the same usage is counted in five-minute groups and playback is reported once at its end:
 
@@ -57,11 +59,19 @@ Statistics never include what you watch, title or channel names, your provider o
 
 ### Usage statistics on iPhone
 
-The iPhone app, in test builds through TestFlight, has its own **Share basic usage statistics** switch in Settings > Privacy. It is on by default, without a prompt. If you turned it off, it stays off, and while it's off the app records and sends nothing. Builds without a configured PostHog project send nothing.
+The iPhone app asks whether you want to share basic usage statistics. Statistics stay off until you choose to share them, except when an upgrade retains your earlier deliberate choice. Refusing does not stop you connecting a provider. You can change the choice in Settings > Privacy. Builds without a configured PostHog project send nothing.
+
+When an upgrade finds no deliberate choice, it discards the previous installation identity, unsent pre-consent events and unfinished playback statistics. Choosing to share later does not send that backlog. Turning sharing off stops new capture and delivery and clears unsent statistics. It cannot recall a request already received or delete statistics already held by PostHog.
 
 While it's on, the app sends the same kinds of events as above, for what the iPhone app has: the first and daily observations, opening Home, Live, Movies, Series, title details, Search, Settings, Downloads or the player, starting a search, switching to another channel, adding, removing or refreshing a subscription, a live channel or a movie or episode starting and stopping and for how many seconds it played, and playback failing with one of the fixed reasons. Only time you could see or hear it counts: in the player, Picture in Picture or AirPlay, or a preview on Home you unmuted. Not paused, loading or the silent preview.
 
-Each event carries a random installation identifier, an event identifier, the time it happened, the app version and build, that it came from iOS and iOS's major version. Not the device model, language or location. The exclusions above apply: never what you watch, your searches, your provider, its address or your login.
+Each event body carries a random installation identifier, an event identifier, the time it happened, the app version and build, that it came from iOS and iOS's major version. The explicit event body excludes device model, language, location, provider credentials and addresses, stream URLs, title and channel names, typed searches, and raw logs or errors. Separately, HTTP connections expose a connecting IP address to the receiving infrastructure and can include operating-system network metadata such as language and an app and system user-agent.
+
+### Local data on iPhone
+
+The iPhone app keeps provider details, preferences, catalogue and guide caches, favourites, watchlist, history, progress, downloads and its statistics choice on the device. Passwords use the iOS Keychain. Local app files can still contain provider addresses and usernames.
+
+Removing a provider clears its catalogue and guide caches. Keeping its history can retain its username. Remove downloads separately to delete their saved copies. Turning statistics off clears unsent statistics but retains the local installation identifier. These actions do not promise erasure from the Keychain, backups or services that already received data.
 
 ### The website
 
@@ -128,7 +138,7 @@ Your network operator and DNS provider can see which servers the app contacts.
 - **Casting** happens only after you open the receiver list and pick a device.
 - **TMDB and update checks** have no off switch. Settings only lets you choose whose TMDB key the app uses.
 
-### Deleting your data
+### Deleting your data on desktop
 
 - **Remove** on a subscription in Settings > Subscriptions deletes its login, provider lists, guide, mapped channels and reminders, and cancels its unfinished downloads. Favourites, watchlist, history, progress and membership of your custom lists stay for when you add the same account again. Tick **Also delete…** to delete those and its saved subtitles too. Your custom lists themselves and finished downloads stay until you delete them.
 - **Delete list** in a list's menu in Live TV deletes the list with its name and the channels it held. Your other lists, and lists a subscription's removal emptied, stay until you delete them.
@@ -149,6 +159,8 @@ Removing a subscription or turning statistics off keeps an installation identifi
 - **Messages:** as long as we need to answer and fix what you reported. GitHub issues stay public until deleted.
 
 ## Security
+
+The Electron storage and desktop network behavior in this section describe the desktop app.
 
 Passwords, playlist links, guide addresses and subtitle-service logins use Electron's system storage encryption: macOS Keychain, your Windows account, or GNOME Keyring or KWallet when selected on Linux. Linux can instead use `basic_text`, a fixed-key fallback that does not protect secrets from other programs running as you. Server addresses, subscription usernames and your own TMDB key aren't encrypted.
 
