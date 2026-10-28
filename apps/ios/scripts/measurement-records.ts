@@ -66,7 +66,7 @@ export function measurementRecords(
 ) {
   const started = now();
   const records: object[] = [];
-  let ended: "event-limit" | "elapsed-limit" | "byte-limit" | "write-failed" | null = null;
+  let ended: "event-limit" | "elapsed-limit" | "byte-limit" | "capture-failed" | null = null;
   let recordBytes = 0;
   const identity = new Map<number, number>();
   const scoped = (id: number | null) => {
@@ -108,41 +108,41 @@ export function measurementRecords(
   };
   return (input: Input) => {
     if (ended !== null) return;
-    const elapsed = now() - started;
-    if (elapsed >= maxElapsedMs) ended = "elapsed-limit";
-    else {
-      const entry = { jsReceiptElapsedMs: elapsed, ...detail(input) };
-      const bytes = JSON.stringify(entry).length; // Projected fields are ASCII enums, numbers and booleans.
-      if (recordBytes + bytes > 60_000) ended = "byte-limit";
-      else {
-        records.push(entry);
-        recordBytes += bytes;
-      }
-      if (records.length === maxEvents) ended = "event-limit";
-    }
-    // The terminal record is in the envelope, not evicted by the event limit. Later callbacks
-    // do no capture work. Their count is unknown, rather than a fabricated zero loss total.
-    const json = JSON.stringify({
-      version: 1,
-      artifact,
-      maxRecordBytes: 60_000,
-      mode: "fixture-overlay",
-      clock: "js-performance-now",
-      nativeCallbackTime: "unavailable",
-      startedJsMs: started,
-      records,
-      end: ended,
-      // Only the callback that crosses the elapsed limit is dropped; the event limit keeps its last.
-      droppedAtBoundary: ended === "elapsed-limit" || ended === "byte-limit" ? 1 : 0,
-      afterEnd: "not-observed",
-      maxEvents,
-      maxElapsedMs,
-      lifetime: "ends on first callback at/after limit; no idle timer",
-    });
     try {
+      const elapsed = now() - started;
+      if (elapsed >= maxElapsedMs) ended = "elapsed-limit";
+      else {
+        const entry = { jsReceiptElapsedMs: elapsed, ...detail(input) };
+        const bytes = JSON.stringify(entry).length; // Projected fields are ASCII enums, numbers and booleans.
+        if (recordBytes + bytes > 60_000) ended = "byte-limit";
+        else {
+          records.push(entry);
+          recordBytes += bytes;
+        }
+        if (records.length === maxEvents) ended = "event-limit";
+      }
+      // The terminal record is in the envelope, not evicted by the event limit. Later callbacks
+      // do no capture work. Their count is unknown, rather than a fabricated zero loss total.
+      const json = JSON.stringify({
+        version: 1,
+        artifact,
+        maxRecordBytes: 60_000,
+        mode: "fixture-overlay",
+        clock: "js-performance-now",
+        nativeCallbackTime: "unavailable",
+        startedJsMs: started,
+        records,
+        end: ended,
+        // Only the callback that crosses the elapsed limit is dropped; the event limit keeps its last.
+        droppedAtBoundary: ended === "elapsed-limit" || ended === "byte-limit" ? 1 : 0,
+        afterEnd: "not-observed",
+        maxEvents,
+        maxElapsedMs,
+        lifetime: "ends on first callback at/after limit; no idle timer",
+      });
       write(json);
     } catch {
-      ended = "write-failed";
+      ended = "capture-failed";
     }
   };
 }
