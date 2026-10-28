@@ -116,7 +116,7 @@ await writeFile(
       export:
         "Retrieve Documents/fixture-playback-observations.json from the task-owned app container. No telemetry or user-facing export.",
       limits:
-        "No native callback timestamp, physical first paint/audio or owned-buffer bytes. End is null until the event/elapsed boundary; killed/idle sessions remain incomplete. Window begins at module initialization including launch/navigation. Existing foreground callback starts lazily. No OS focus or continuous media sampling. Stop/play-item/retry/PiP control requests are not separately instrumented; pause/play toggle intents are captured. Context includes PiP/external.",
+        "No native callback timestamp, physical first paint/audio or owned-buffer bytes. End is null until the event, byte, or elapsed boundary; killed/idle sessions remain incomplete. Window begins at module initialization including launch/navigation. Existing foreground callback starts lazily. No OS focus or continuous media sampling. Stop/play-item/retry/PiP control requests are not separately instrumented; pause/play toggle intents are captured. Context includes PiP/external.",
       files: hashes,
     },
     null,
