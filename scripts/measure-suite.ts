@@ -4,7 +4,7 @@ import { spawnSync, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism, cpus, loadavg, platform, release } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { globSync } from "tinyglobby";
 import { include, exclude } from "../test/suites.ts";
@@ -23,17 +23,27 @@ if (!values.output || !values.conditions)
   );
 const runs = positiveCount(values.runs, "runs", 20);
 const output = resolve(values.output);
+const git = (...args: string[]) =>
+  execFileSync("git", args, { encoding: "utf8", maxBuffer: Infinity }).trim();
+const fromRoot = relative(git("rev-parse", "--show-toplevel"), output);
+const insideCheckout = !isAbsolute(fromRoot) && fromRoot !== ".." && !fromRoot.startsWith("../");
+if (insideCheckout && spawnSync("git", ["check-ignore", "--quiet", "--", output]).status !== 0)
+  throw new Error(
+    "Measurement output inside the checkout must be gitignored (use .local/measurements)",
+  );
 // Refuse reuse: failures and previous campaigns must never be silently overwritten.
 mkdirSync(output, { recursive: false });
-const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const sha256 = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
 const hashed = (paths: string[]) =>
   paths.map((path) => ({ path, sha256: sha256(readFileSync(path)) }));
 const identity = () => ({
   revision: git("rev-parse", "HEAD"),
-  trackedDiffSha256: sha256(git("diff", "HEAD")),
+  trackedDiffSha256: sha256(git("diff", "--binary", "--no-ext-diff", "HEAD")),
   untracked: hashed(
-    execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { encoding: "utf8" })
+    execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+      encoding: "utf8",
+      maxBuffer: Infinity,
+    })
       .split("\0")
       .filter(Boolean),
   ),
@@ -54,17 +64,15 @@ writeFileSync(
       cpu: cpus()[0]?.model,
       availableParallelism: availableParallelism(),
       logicalCpus: cpus().length,
-      // Only runner-related overrides, never arbitrary ambient environment or secrets.
-      runnerOverrides: Object.fromEntries(
-        Object.entries(process.env).filter(([name]) =>
-          [
-            "VITEST_MAX_WORKERS",
-            "VITEST_POOL_ID",
-            "NODE_OPTIONS",
-            "NODE_COMPILE_CACHE",
-            "CI",
-          ].includes(name),
-        ),
+      // Hash override values so custom Vitest variables cannot leak private inputs.
+      runnerOverrideSha256: Object.fromEntries(
+        Object.entries(process.env)
+          .filter(
+            ([name]) =>
+              name.startsWith("VITEST_") ||
+              ["NODE_OPTIONS", "NODE_COMPILE_CACHE", "CI"].includes(name),
+          )
+          .map(([name, value]) => [name, sha256(value ?? "")]),
       ),
     },
     null,
@@ -94,7 +102,13 @@ for (let index = 1; index <= runs; index++) {
   const validation = spawnSync(process.execPath, ["scripts/ci-test-results.ts", report], {
     encoding: "utf8",
   });
-  const unchanged = JSON.stringify(before) === JSON.stringify(identity());
+  let unchanged = false;
+  let identityError: string | undefined;
+  try {
+    unchanged = JSON.stringify(before) === JSON.stringify(identity());
+  } catch (error) {
+    identityError = error instanceof Error ? error.message : String(error);
+  }
   const complete = result.status === 0 && validation.status === 0 && unchanged;
   writeFileSync(
     join(output, `run-${index}.json`),
@@ -116,6 +130,7 @@ for (let index = 1; index <= runs; index++) {
           stderr: validation.stderr,
         },
         unchanged,
+        identityError,
         complete,
       },
       null,

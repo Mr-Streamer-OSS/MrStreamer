@@ -1,5 +1,6 @@
 # Complete default-suite measurements
 
+This command supports POSIX hosts (Linux and macOS), where `pnpm` is directly executable.
 Run from the repository root, after the frozen install, on the same hardware and with the
 same effective worker policy for both revisions:
 
@@ -8,8 +9,8 @@ node scripts/measure-suite.ts --output .local/measurements/baseline-suite \
   --conditions 'shared host; fresh install; first compile cache cold; later runs warm; no cache purge'
 ```
 
-The output's parent must exist. The output directory must be new. Default is five sequential
-attempts, without warmup or automatic retry. A failed test, incomplete CI report or changed
+The output's parent must exist. The output directory must be new and, when inside the checkout, gitignored. Default is five sequential
+attempts, without warmup or automatic retry. A failed test, incomplete CI report or changed/unreadable
 source identity stops the campaign, retains the attempt and suppresses its median. Do not
 replace a failed capture with a successful one. Investigate it and retain its disposition before
 starting a separate campaign. Smaller `--runs` captures are diagnostic, not five-run acceptance.
@@ -23,7 +24,7 @@ JSON's per-file start/end times describe overlapping file durations, not additiv
 savings. Compare repeat medians using exactly the same capture command on both sides.
 
 `environment.json` pins source revision, source diff hash, untracked-file hashes, test paths/hashes, policy inputs,
-runtime/CPU identity, declared cache conditions and runner environment overrides. Each
+runtime/CPU identity, declared cache conditions and runner environment override hashes. Each
 `run-N` retains raw stdout/stderr, Vitest JSON, resolved policy and outcome/validation receipt.
 `summary.json` reports success count and median only for a complete requested campaign.
 Retain original outputs and SHA-256 receipts outside mutable build output before review.
