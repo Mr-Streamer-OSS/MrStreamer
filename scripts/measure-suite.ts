@@ -64,7 +64,7 @@ writeFileSync(
       cpu: cpus()[0]?.model,
       availableParallelism: availableParallelism(),
       logicalCpus: cpus().length,
-      // Hash override values so custom Vitest variables cannot leak private inputs.
+      // Keep override values out of the receipt plaintext.
       runnerOverrideSha256: Object.fromEntries(
         Object.entries(process.env)
           .filter(
