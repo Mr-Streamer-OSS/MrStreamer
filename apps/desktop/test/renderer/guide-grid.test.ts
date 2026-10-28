@@ -804,7 +804,7 @@ it("opens a newly read list on the playing channel", async () => {
     ]),
   );
   await ready(() => expect(page.rows()).toEqual(["Other Two", "One", "Two", "Three"]));
-  expect(page.active()).toContain("Two");
+  await ready(() => expect(page.active()).toContain("Two"));
   await page.press("Enter");
   expect(player.state().channel).toMatchObject({ subscriptionId: SUBSCRIPTION, id: "2" });
 });
