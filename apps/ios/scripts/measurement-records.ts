@@ -17,12 +17,33 @@ type Input =
   | { kind: "screen"; watch: boolean }
   | { kind: "foreground"; active: boolean };
 
+const maxEvents = 256;
+const maxElapsedMs = 120_000;
+
+/** The fields kept per observation kind. Track, detach and failure details stay private. */
+function observed(event: PlaybackObservation) {
+  switch (event.kind) {
+    case "state":
+      return {
+        timeControl: event.timeControl,
+        mediaTimeSeconds: event.mediaTimeSeconds,
+        bufferEmpty: event.bufferEmpty,
+        likelyToKeepUp: event.likelyToKeepUp,
+      };
+    case "ready":
+      return { durationSeconds: event.durationSeconds };
+    case "failure":
+      return { terminal: event.terminal, failure: event.failure.kind };
+    default:
+      return {};
+  }
+}
+
 /** A bounded, synchronous diagnostic session. Clocks are JS receipt only, never native time. */
 export function measurementRecords(now: () => number, write: (json: string) => void) {
   const started = now();
   const records: object[] = [];
   let ended: "event-limit" | "elapsed-limit" | "write-failed" | null = null;
-  let dropped = 0;
   const identity = new Map<number, number>();
   const scoped = (id: number | null) => {
     if (id === null) return null;
@@ -33,51 +54,33 @@ export function measurementRecords(now: () => number, write: (json: string) => v
     }
     return value;
   };
-  return (input: Input) => {
-    if (ended !== null) return;
-    const elapsed = now() - started;
-    if (elapsed >= 120_000) {
-      ended = "elapsed-limit";
-      dropped++;
-    } else {
-      let detail: object;
-      if (input.kind === "native") {
-        const { event, context } = input;
-        const common = {
+  const scope = (context: Context) => ({ ...context, generation: scoped(context.generation) });
+  const detail = (input: Input) => {
+    switch (input.kind) {
+      case "native": {
+        const { event } = input;
+        return {
           kind: event.kind,
           sequence: event.sequence,
           attempt: scoped(event.attemptId),
           item: scoped(event.itemId),
-          context: { ...context, generation: scoped(context.generation) },
+          context: scope(input.context),
+          ...observed(event),
         };
-        switch (event.kind) {
-          case "state":
-            detail = {
-              ...common,
-              timeControl: event.timeControl,
-              mediaTimeSeconds: event.mediaTimeSeconds,
-              bufferEmpty: event.bufferEmpty,
-              likelyToKeepUp: event.likelyToKeepUp,
-            };
-            break;
-          case "ready":
-            detail = { ...common, durationSeconds: event.durationSeconds };
-            break;
-          case "failure":
-            detail = { ...common, terminal: event.terminal, failure: event.failure.kind };
-            break;
-          default:
-            detail = common;
-        }
-      } else if (input.kind === "intent") {
-        detail = {
-          kind: input.kind,
-          action: input.action,
-          context: { ...input.context, generation: scoped(input.context.generation) },
-        };
-      } else detail = input;
-      records.push({ jsReceiptElapsedMs: elapsed, ...detail });
-      if (records.length === 256) ended = "event-limit";
+      }
+      case "intent":
+        return { kind: input.kind, action: input.action, context: scope(input.context) };
+      default:
+        return input;
+    }
+  };
+  return (input: Input) => {
+    if (ended !== null) return;
+    const elapsed = now() - started;
+    if (elapsed >= maxElapsedMs) ended = "elapsed-limit";
+    else {
+      records.push({ jsReceiptElapsedMs: elapsed, ...detail(input) });
+      if (records.length === maxEvents) ended = "event-limit";
     }
     // The terminal record is in the envelope, not evicted by the event limit. Later callbacks
     // do no capture work. Their count is unknown, rather than a fabricated zero loss total.
@@ -89,10 +92,11 @@ export function measurementRecords(now: () => number, write: (json: string) => v
       startedJsMs: started,
       records,
       end: ended,
-      droppedAtBoundary: dropped,
+      // Only the callback that crosses the elapsed limit is dropped; the event limit keeps its last.
+      droppedAtBoundary: ended === "elapsed-limit" ? 1 : 0,
       afterEnd: "not-observed",
-      maxEvents: 256,
-      maxElapsedMs: 120_000,
+      maxEvents,
+      maxElapsedMs,
       lifetime: "ends on first callback at/after limit; no idle timer",
     });
     try {

@@ -27,55 +27,50 @@ function replace(text: string, anchor: string, replacement: string) {
   if (text.split(anchor).length !== 2) throw new Error(`Unsupported source seam: ${anchor}`);
   return text.replace(anchor, replacement);
 }
-for (const name of ["playback.ts", "loading.tsx"]) {
-  const path = `apps/ios/src/${name}`;
-  let text = execFileSync("git", ["show", `${source}:${path}`], { cwd: root, encoding: "utf8" });
-  text = 'import { recordMeasurement } from "./measurement-runtime.ts";\n' + text;
-  if (name === "playback.ts") {
-    const context =
-      "{ generation: current?.epoch.id ?? null, phase: state.get().phase.kind, watch: state.get().watch, aside: state.get().aside }";
-    text = replace(
-      text,
-      "function observe(event: PlaybackObservation) {",
-      `function observe(event: PlaybackObservation) {\n  recordMeasurement({ kind: "native", event, context: ${context} });`,
-    );
-    for (const [anchor, action] of [
+const context =
+  "{ generation: current?.epoch.id ?? null, phase: state.get().phase.kind, watch: state.get().watch, aside: state.get().aside }";
+const intent = (action: string) => `{ kind: "intent", action: ${action}, context: ${context} }`;
+/** Each instrumented source file and its anchored edits. */
+const overlays: Record<string, (text: string) => string> = {
+  "playback.ts": (text) => {
+    for (const [anchor, record] of [
+      [
+        "function observe(event: PlaybackObservation) {",
+        `{ kind: "native", event, context: ${context} }`,
+      ],
       [
         "export function togglePause() {",
-        '(state.get().phase.kind === "playing" || state.get().phase.kind === "loading") ? "pause" : state.get().phase.kind === "paused" ? "play" : "toggle-idle"',
+        intent(
+          '(state.get().phase.kind === "playing" || state.get().phase.kind === "loading") ? "pause" : state.get().phase.kind === "paused" ? "play" : "toggle-idle"',
+        ),
       ],
-      ["export function closeWatch(): Promise<Saved> {", '"close"'],
-      ["export function setAside() {", '"set-aside"'],
-      ["export function openWatch() {", '"open-watch"'],
-    ]) {
-      if (!anchor || !action) throw new Error("Invalid seam");
-      text = replace(
-        text,
-        anchor,
-        `${anchor}\n  recordMeasurement({ kind: "intent", action: ${action}, context: ${context} });`,
-      );
+      ["export function closeWatch(): Promise<Saved> {", intent('"close"')],
+      ["export function setAside() {", intent('"set-aside"')],
+      ["export function openWatch() {", intent('"open-watch"')],
+      // Do not retain route strings, which can contain private names/keys.
+      ["export function onScreen(path: string) {", '{ kind: "screen", watch: path === "/watch" }'],
+    ] as const) {
+      text = replace(text, anchor, `${anchor}\n  recordMeasurement(${record});`);
     }
-    // Do not retain route strings, which can contain private names/keys.
-    text = replace(
-      text,
-      "export function onScreen(path: string) {",
-      'export function onScreen(path: string) {\n  recordMeasurement({ kind: "screen", watch: path === "/watch" });',
-    );
-  } else {
-    text = replace(
-      text,
-      'foreground.set(AppState.currentState === "active");',
-      'recordMeasurement({ kind: "foreground", active: AppState.currentState === "active" });\n    foreground.set(AppState.currentState === "active");',
-    );
-    text = replace(
-      text,
+    return text;
+  },
+  "loading.tsx": (text) =>
+    replace(
+      replace(
+        text,
+        'foreground.set(AppState.currentState === "active");',
+        'recordMeasurement({ kind: "foreground", active: AppState.currentState === "active" });\n    foreground.set(AppState.currentState === "active");',
+      ),
       'AppState.addEventListener("change", (state) => foreground.set(state === "active"));',
       'AppState.addEventListener("change", (state) => {\n      recordMeasurement({ kind: "foreground", active: state === "active" });\n      foreground.set(state === "active");\n    });',
-    );
-  }
+    ),
+};
+for (const [name, overlay] of Object.entries(overlays)) {
+  const path = `apps/ios/src/${name}`;
+  const text = execFileSync("git", ["show", `${source}:${path}`], { cwd: root, encoding: "utf8" });
   await emit(
     name,
-    text,
+    overlay('import { recordMeasurement } from "./measurement-runtime.ts";\n' + text),
     `generated full-source overlay of ${source}:${path}; not pristine released source`,
   );
 }
