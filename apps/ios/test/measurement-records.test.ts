@@ -39,13 +39,75 @@ describe("fixture playback export", () => {
         itemId: 76,
         kind: "failure",
         terminal: true,
-        failure: { kind: "unknown", evidence: null },
+        failure: {
+          kind: "unknown",
+          evidence: {
+            kind: "system",
+            origin: "item",
+            code: { domain: "other", code: 987654321 },
+            underlying: [],
+          },
+        },
       },
     });
     record({
       kind: "native",
       context,
       event: { version: 1, sequence: 23, attemptId: 52, itemId: 76, kind: "ended" },
+    });
+    record({
+      kind: "native",
+      context,
+      event: {
+        version: 1,
+        sequence: 24,
+        attemptId: 52,
+        itemId: 76,
+        kind: "tracks",
+        tracks: {
+          attemptId: 52,
+          itemId: 76,
+          revision: 1,
+          audio: {
+            state: "ready",
+            options: [
+              {
+                attemptId: 52,
+                itemId: 76,
+                id: "PRIVATE_TRACK",
+                revision: 1,
+                isDefault: true,
+                isPlayable: true,
+                group: "audio",
+                label: "PRIVATE_LABEL",
+              },
+            ],
+          },
+          subtitles: { state: "absent", options: [] },
+          subtitleOffAllowed: true,
+          selectedAudioId: "PRIVATE_TRACK",
+          selectedSubtitleId: null,
+        },
+      },
+    });
+    record({
+      kind: "native",
+      context,
+      event: {
+        version: 1,
+        sequence: 25,
+        attemptId: 52,
+        itemId: null,
+        kind: "detached",
+        receipt: {
+          kind: "detached",
+          attemptId: 52,
+          itemId: 76,
+          localItemExcluded: true,
+          appWorkDrained: true,
+          providerDisconnect: "unobservable",
+        },
+      },
     });
     const result = JSON.parse(output);
     expect(result.nativeCallbackTime).toBe("unavailable");
@@ -70,6 +132,11 @@ describe("fixture playback export", () => {
     });
     expect(result.records[3]).toMatchObject({ kind: "ended" });
     expect(output).not.toContain('"item":76');
+    expect(output).not.toMatch(/987654321|PRIVATE_|receipt|evidence|selectedAudioId/);
+    expect(result.records[4]).toMatchObject({ kind: "tracks", attempt: 1, item: 2 });
+    expect(result.records[5]).toMatchObject({ kind: "detached", attempt: 1, item: null });
+    expect(result.records[0].context.generation).toBe(result.records[4].context.generation);
+    expect(result.records[0].context.generation).not.toBe(context.generation);
   });
   it.each([
     { end: "event-limit", start: 0, records: 256, dropped: 0, writes: 256 },
