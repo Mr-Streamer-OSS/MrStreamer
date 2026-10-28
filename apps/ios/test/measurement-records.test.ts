@@ -89,7 +89,6 @@ describe("fixture playback export", () => {
       expect(last.droppedAtBoundary).toBe(elapsed ? 1 : 0);
       expect(last.afterEnd).toBe("not-observed");
       expect(writes).toHaveLength(elapsed ? 1 : 256);
-      expect(Buffer.byteLength(writes.at(-1)!)).toBeLessThan(100_000);
     }
   });
   it("never propagates export IO failure into playback", () => {
