@@ -186,6 +186,39 @@ describe("fixture playback export", () => {
     }).not.toThrow();
     expect(attempts).toBe(1);
   });
+  it("stops capture after projection fails while playback can continue", () => {
+    const writes: string[] = [];
+    const record = measurementRecords(
+      () => 0,
+      (json) => {
+        writes.push(json);
+      },
+      { source: "synthetic", overlay: "test" },
+    );
+    record({ kind: "foreground", active: true });
+    expect(() => {
+      record({
+        kind: "native",
+        context,
+        event: {
+          version: 1,
+          sequence: 1,
+          attemptId: 52,
+          itemId: 76,
+          kind: "state",
+          timeControl: "waiting",
+          get mediaTimeSeconds(): number {
+            throw new Error("unreadable native payload");
+          },
+          bufferEmpty: true,
+          likelyToKeepUp: false,
+        },
+      });
+      record({ kind: "foreground", active: false });
+    }).not.toThrow();
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(writes[0]!).end).toBeNull();
+  });
   it("exports a truthful byte-limit boundary for populated failures", () => {
     let output = "";
     const record = measurementRecords(
