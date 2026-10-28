@@ -25,10 +25,11 @@ Container retrieval must not bypass a physical device's lock or consent.
 Native samples are captured at entry to `observe`, before its admission filters and UI mapping.
 A sample can therefore describe a retired item. Sequence is the native sequence; attempt, item
 and generation use a session-scoped numeric mapping. Failure kind and terminal flag survive;
-private track/error details are omitted. All observation kinds survive, including ended/reset.
+private track details are omitted. Supported failure codes survive with bounded underlying codes.
+All observation kinds survive, including ended/reset.
 UI phase in context is the phase **before** processing that event, not the resulting phase.
-Intent records describe requests at function entry, not acknowledged native pauses. Screen is
-only whether `onScreen` names Watch; it is not OS focus. Foreground comes from the existing
+Intent records describe requests at function entry, not acknowledged native pauses. Watch visibility
+is context from player state, not a route or OS focus. Foreground comes from the existing
 lazy loading observer; absence before that observer starts is unknown.
 
 `jsReceiptElapsedMs` is `performance.now()` relative to collector initialization. Native callback
@@ -48,3 +49,18 @@ independent on/off perturbation measurement is still required for baseline use.
 Synthetic replay tests prove export semantics only. Build/simulator proof does not establish
 physical-device waiting/recovery, first presentation, audio, power or original baseline acceptance.
 The owning 0.0.22 baseline remains Development / UNACCEPTED with downstream cards Blocked.
+
+The 120-second window begins at module initialization, including app launch, fixture login and
+navigation. It can end before playback starts; no minimum playback window is guaranteed.
+`mediaTimeSeconds` is emitted only when existing native state/buffer KVO observations change.
+Steady playing can produce no samples. Silence is unobserved, not proof of no advancement or
+advancement over fixed windows. Stop, play-item, retry and PiP control requests are not separately
+instrumented; do not infer their absence from this export. Context includes PiP/external state.
+
+The file envelope carries exact product source and deterministic overlay identity, also recorded
+in identity.json with generator commit/dirty state and generator byte hash. The generated runtime
+has that identity embedded; an ungenerated runtime is a template, never a measurement artifact.
+Failure evidence retains the supported enum/numeric codes, at most eight underlying codes, with
+an explicit omitted count. Records are additionally capped at 60,000 ASCII JSON record bytes
+(under 64,000 bytes including the fixed generated identity and envelope); crossing records are
+dropped with `byte-limit`. This cap includes all records, not just native samples.

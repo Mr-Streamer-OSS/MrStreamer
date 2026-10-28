@@ -28,7 +28,7 @@ function replace(text: string, anchor: string, replacement: string) {
   return text.replace(anchor, replacement);
 }
 const context =
-  "{ generation: current?.epoch.id ?? null, phase: state.get().phase.kind, watch: state.get().watch, aside: state.get().aside }";
+  "{ generation: current?.epoch.id ?? null, phase: state.get().phase.kind, pip: state.get().pip, external: state.get().external, watch: state.get().watch, aside: state.get().aside }";
 const intent = (action: string) => `{ kind: "intent", action: ${action}, context: ${context} }`;
 /** Each instrumented source file and its anchored edits. */
 const overlays: Record<string, (text: string) => string> = {
@@ -47,8 +47,6 @@ const overlays: Record<string, (text: string) => string> = {
       ["export function closeWatch(): Promise<Saved> {", intent('"close"')],
       ["export function setAside() {", intent('"set-aside"')],
       ["export function openWatch() {", intent('"open-watch"')],
-      // Do not retain route strings, which can contain private names/keys.
-      ["export function onScreen(path: string) {", '{ kind: "screen", watch: path === "/watch" }'],
     ] as const) {
       text = replace(text, anchor, `${anchor}\n  recordMeasurement(${record});`);
     }
@@ -74,12 +72,32 @@ for (const [name, overlay] of Object.entries(overlays)) {
     `generated full-source overlay of ${source}:${path}; not pristine released source`,
   );
 }
+const generatorCommit = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: root,
+  encoding: "utf8",
+}).trim();
+const generatorDirty =
+  execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+    cwd: root,
+    encoding: "utf8",
+  }).trim().length > 0;
+const generatorBytes = await readFile(fileURLToPath(import.meta.url));
+let overlayIdentity = "";
 for (const name of ["measurement-records.ts", "measurement-runtime.ts"]) {
-  await emit(
-    name,
-    await readFile(new URL(name, import.meta.url), "utf8"),
-    "dedicated authored support; exact copy",
-  );
+  let content = await readFile(new URL(name, import.meta.url), "utf8");
+  if (name === "measurement-runtime.ts") {
+    overlayIdentity = createHash("sha256")
+      .update(JSON.stringify({ source, hashes }))
+      .update(generatorBytes)
+      .update(content)
+      .digest("hex");
+    content = replace(
+      content,
+      '{ source: "UNGENERATED", overlay: "UNGENERATED" }',
+      JSON.stringify({ source, overlay: overlayIdentity }),
+    );
+  }
+  await emit(name, content, "dedicated authored support; exact copy");
 }
 await writeFile(
   resolve(destination, "identity.json"),
@@ -87,12 +105,18 @@ await writeFile(
     {
       source,
       fixtureOnly: true,
+      generator: {
+        commit: generatorCommit,
+        dirty: generatorDirty,
+        sha256: createHash("sha256").update(generatorBytes).digest("hex"),
+      },
+      overlay: overlayIdentity,
       apply:
         "Copy the four generated TS/TSX files into apps/ios/src in a disposable exact-source build checkout. Never apply to a daily-driver checkout. Hash the new bundle/Hermes separately.",
       export:
         "Retrieve Documents/fixture-playback-observations.json from the task-owned app container. No telemetry or user-facing export.",
       limits:
-        "No native callback timestamp, physical first paint/audio or owned-buffer bytes. End is null until the event/elapsed boundary; killed/idle sessions remain incomplete. Existing foreground callback starts lazily. Screen is onScreen navigation, not OS focus.",
+        "No native callback timestamp, physical first paint/audio or owned-buffer bytes. End is null until the event/elapsed boundary; killed/idle sessions remain incomplete. Window begins at module initialization including launch/navigation. Existing foreground callback starts lazily. No OS focus or continuous media sampling. Stop/play/retry/PiP intents not captured; context includes PiP/external.",
       files: hashes,
     },
     null,

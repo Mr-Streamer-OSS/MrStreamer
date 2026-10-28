@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { measurementRecords } from "../scripts/measurement-records.ts";
 
-const context = { generation: 8, phase: "paused", watch: true, aside: false };
+const context = {
+  generation: 8,
+  phase: "paused",
+  watch: true,
+  aside: false,
+  pip: false,
+  external: false,
+} as const;
 describe("fixture playback export", () => {
   it("retains native waiting independently of UI paused, sanitized identity and intent", () => {
     let output = "";
@@ -11,6 +18,7 @@ describe("fixture playback export", () => {
       (json) => {
         output = json;
       },
+      { source: "synthetic", overlay: "test" },
     );
     record({
       kind: "native",
@@ -130,9 +138,11 @@ describe("fixture playback export", () => {
       failure: "unknown",
       terminal: true,
     });
+    expect(result.records[2].evidence.code).toEqual({ domain: "other", code: 987654321 });
+    expect(result.artifact).toEqual({ source: "synthetic", overlay: "test" });
     expect(result.records[3]).toMatchObject({ kind: "ended" });
     expect(output).not.toContain('"item":76');
-    expect(output).not.toMatch(/987654321|PRIVATE_|receipt|evidence|selectedAudioId/);
+    expect(output).not.toMatch(/PRIVATE_|receipt|selectedAudioId/);
     expect(result.records[4]).toMatchObject({ kind: "tracks", attempt: 1, item: 2 });
     expect(result.records[5]).toMatchObject({ kind: "detached", attempt: 1, item: null });
     expect(result.records[0].context.generation).toBe(result.records[4].context.generation);
@@ -149,6 +159,7 @@ describe("fixture playback export", () => {
       (json) => {
         writes.push(json);
       },
+      { source: "synthetic", overlay: "test" },
     );
     time = bound.start;
     for (let i = 0; i < 300; i++) record({ kind: "foreground", active: true });
@@ -167,11 +178,69 @@ describe("fixture playback export", () => {
         attempts++;
         throw new Error("disk full");
       },
+      { source: "synthetic", overlay: "test" },
     );
     expect(() => {
       record({ kind: "foreground", active: true });
       record({ kind: "foreground", active: false });
     }).not.toThrow();
     expect(attempts).toBe(1);
+  });
+  it("exports a truthful byte-limit boundary for populated failures", () => {
+    let output = "";
+    const record = measurementRecords(
+      () => 0,
+      (json) => {
+        output = json;
+      },
+      { source: "synthetic", overlay: "test" },
+    );
+    for (let sequence = 1; sequence <= 300; sequence++)
+      record({
+        kind: "native",
+        context,
+        event: {
+          version: 1,
+          sequence,
+          attemptId: 52,
+          itemId: 76,
+          kind: "failure",
+          terminal: false,
+          failure: {
+            kind: "network",
+            evidence: {
+              kind: "system",
+              origin: "item",
+              code: { domain: "url", code: -1001 },
+              underlying: Array.from({ length: 12 }, () => ({ domain: "other", code: 987654321 })),
+            },
+          },
+        },
+      });
+    const result = JSON.parse(output);
+    expect(result.end).toBe("byte-limit");
+    expect(result.droppedAtBoundary).toBe(1);
+    expect(result.records[0].underlyingOmitted).toBe(4);
+    expect(result.records[0].evidence.underlying).toHaveLength(8);
+    expect(Buffer.byteLength(output)).toBeLessThan(64_000);
+  });
+  it("isolates a real adapter synchronous storage refusal without queueing async writes", async () => {
+    let attempts = 0;
+    vi.doMock("expo-file-system", () => ({
+      Paths: { document: "fixture-documents" },
+      File: class {
+        writeSync() {
+          attempts++;
+          throw new Error("refused");
+        }
+      },
+    }));
+    const { recordMeasurement } = await import("../scripts/measurement-runtime.ts");
+    expect(() => {
+      recordMeasurement({ kind: "foreground", active: true });
+      recordMeasurement({ kind: "foreground", active: false });
+    }).not.toThrow();
+    expect(attempts).toBe(1);
+    vi.doUnmock("expo-file-system");
   });
 });
