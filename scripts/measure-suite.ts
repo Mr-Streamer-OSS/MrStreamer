@@ -26,23 +26,19 @@ const output = resolve(values.output);
 // Refuse reuse: failures and previous campaigns must never be silently overwritten.
 mkdirSync(output, { recursive: false });
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
-const hash = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
-const files = () =>
-  globSync(include, { dot: true, ignore: exclude, expandDirectories: false }).sort();
+const sha256 = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
+const hashed = (paths: string[]) =>
+  paths.map((path) => ({ path, sha256: sha256(readFileSync(path)) }));
 const identity = () => ({
   revision: git("rev-parse", "HEAD"),
-  trackedDiffSha256: createHash("sha256").update(git("diff", "HEAD")).digest("hex"),
-  untracked: execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
-    encoding: "utf8",
-  })
-    .split("\0")
-    .filter(Boolean)
-    .map((path) => ({ path, sha256: hash(path) })),
-  files: files().map((path) => ({ path, sha256: hash(path) })),
-  policy: ["package.json", "pnpm-lock.yaml", "vitest.config.ts", "test/suites.ts"].map((path) => ({
-    path,
-    sha256: hash(path),
-  })),
+  trackedDiffSha256: sha256(git("diff", "HEAD")),
+  untracked: hashed(
+    execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { encoding: "utf8" })
+      .split("\0")
+      .filter(Boolean),
+  ),
+  files: hashed(globSync(include, { dot: true, ignore: exclude, expandDirectories: false }).sort()),
+  policy: hashed(["package.json", "pnpm-lock.yaml", "vitest.config.ts", "test/suites.ts"]),
 });
 const before = identity();
 writeFileSync(
@@ -76,7 +72,6 @@ writeFileSync(
   ),
 );
 const samples: number[] = [];
-let failed = false;
 for (let index = 1; index <= runs; index++) {
   const policy = join(output, `run-${index}.policy.json`);
   const report = join(output, `run-${index}.vitest.json`);
@@ -131,13 +126,10 @@ for (let index = 1; index <= runs; index++) {
   console.log(
     `Run ${index}: ${complete ? "complete" : "FAILED"}, ${wallMs.toFixed(0)} ms; ${output}`,
   );
-  if (!complete) {
-    failed = true;
-    break;
-  }
+  if (!complete) break;
   samples.push(wallMs);
 }
-const complete = !failed && samples.length === runs;
+const complete = samples.length === runs;
 writeFileSync(
   join(output, "summary.json"),
   JSON.stringify(
