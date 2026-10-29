@@ -699,7 +699,7 @@ describe("indexing a guide", () => {
     });
   });
 
-  it("works out what a catalogue covers for callers that ask while it is being worked out, and after", async () => {
+  it("answers repeated coverage requests correctly", async () => {
     const ids = Array.from({ length: 3 }, (_, n) => `c${n}.test`);
     const { guide } = await index(
       tv(...ids.map((id) => programme(id, stamp(NOON), stamp(NOON + HOUR), "Show"))),
@@ -930,7 +930,7 @@ describe("a subscription's guides in order", () => {
   /**
    * The subscription's own guide, then the sources "early" and "late": three guides that each
    * know "shared.test", with programmes for it in the last two only, and one that only "late"
-   * has programmes for.
+   * has programmes for. The early source also competes for own.test, so own-first is observable.
    */
   const guides = async () => {
     const own = await index(
@@ -1102,7 +1102,7 @@ describe("a subscription's guides in order", () => {
       ["Source current", fromSource],
       ["Source later", fromSource],
     ]);
-    // Pages side by side, one wholly past and one with now, or cut anywhere: the same slots.
+    // Pages side by side, one wholly past and one with now: the same slots.
     expect(await paged(NOON - 6 * HOUR, NOON - HOUR, NOON + 6 * HOUR)).toEqual(whole);
     // The own guide's past isn't shown beside the source's: one guide supplies the channel.
     expect(
