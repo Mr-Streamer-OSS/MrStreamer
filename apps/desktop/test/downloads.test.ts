@@ -1989,6 +1989,10 @@ describe.skipIf(!hasTools)("an episode's series", () => {
       episode: number,
     });
     const before = await downloads.add(ref(2));
+    // Finish the old copy before replacing its catalogue: a refresh can invalidate an in-flight file lookup.
+    await vi.waitFor(async () => expect((await find(before.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
     // The provider now lists another series under that id, with another TMDB id.
     provider.serveTitles((all) => ({
       ...all,

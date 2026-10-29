@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import { type } from "arktype";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ipcInputs } from "@mrstreamer/contracts/ipc";
 import { analyticsBuild, analyticsReleaseConfiguration } from "../src/main/analytics/build.ts";
 import {
@@ -14,26 +14,14 @@ import {
 } from "../src/main/analytics/model.ts";
 import { downloadFailure, checkFailure } from "../src/main/analytics/operations.ts";
 import { Analytics } from "../src/main/analytics/service.ts";
-import { analyticsStore, profileOrigin } from "../src/main/analytics/storage.ts";
+import { analyticsStore } from "../src/main/analytics/storage.ts";
 import {
   analyticsTransport,
   localCapture,
   type CaptureTransport,
 } from "../src/main/analytics/transport.ts";
 import { tempDir } from "./support.ts";
-
-const owners: Analytics[] = [];
-const servers: ReturnType<typeof createServer>[] = [];
-afterEach(async () => {
-  const closing = Promise.all(owners.splice(0).map((owner) => owner.close()));
-  if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1500);
-  await closing;
-  for (const server of servers.splice(0)) {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-  vi.useRealTimers();
-});
+import { analyticsFixture, memoryStore } from "./e2e/analytics-fixture.ts";
 
 const properties: BuildProperties = {
   app_version: "0.0.11-nightly.20261011.284",
@@ -44,52 +32,11 @@ const properties: BuildProperties = {
   distribution: "direct",
 };
 
-/** Lifecycle clock tests keep persistence immediate; disk and failure cases use real files. */
-function memoryStore(): ReturnType<typeof analyticsStore> {
-  let current: AnalyticsRecord | null = null;
-  return {
-    async load() {
-      return current && structuredClone(current);
-    },
-    async save(record) {
-      current = structuredClone(record);
-    },
-  };
-}
-
-async function start(
-  options: {
-    dataDir?: string;
-    properties?: BuildProperties;
-    transport?: Omit<CaptureTransport, "kind"> | null;
-    store?: ReturnType<typeof analyticsStore>;
-    monotonic?: () => number;
-  } = {},
-) {
-  const dataDir = options.dataDir ?? (await tempDir());
-  const events: CaptureEvent[] = [];
-  const transport =
-    options.transport === undefined
-      ? {
-          async send(event: CaptureEvent) {
-            // Version observations have their own complete wire/lifecycle contracts.
-            if (event.event !== "app_version_observed") events.push(structuredClone(event));
-            return "accepted" as const;
-          },
-        }
-      : options.transport;
-  const owner = new Analytics({
-    dataDir,
-    origin: profileOrigin(dataDir),
-    properties: options.properties ?? properties,
-    transport: transport ? { ...transport, kind: "local" } : null,
-    ...(options.store ? { store: options.store } : {}),
-    ...(options.monotonic ? { monotonic: options.monotonic } : {}),
-  });
-  owners.push(owner);
-  await owner.settings();
-  return { owner, dataDir, events };
-}
+// Version observations retain their complete wire/lifecycle contracts in the companion suite.
+const { start, servers, owners } = analyticsFixture(
+  properties,
+  (event) => event.event !== "app_version_observed",
+);
 
 async function saved(dataDir: string) {
   const record = AnalyticsRecord()(

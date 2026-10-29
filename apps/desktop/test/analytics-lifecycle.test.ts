@@ -3,18 +3,13 @@ import { createServer } from "node:http";
 import { cp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { Analytics } from "../src/main/analytics/service.ts";
-import { analyticsStore, profileOrigin } from "../src/main/analytics/storage.ts";
+import { describe, expect, it, vi } from "vitest";
+import { analyticsStore } from "../src/main/analytics/storage.ts";
 import { localCapture, type CaptureTransport } from "../src/main/analytics/transport.ts";
-import {
-  type AnalyticsRecord,
-  type BuildProperties,
-  CaptureEvent,
-  SUMMARY_TTL_MS,
-} from "../src/main/analytics/model.ts";
+import { type BuildProperties, CaptureEvent, SUMMARY_TTL_MS } from "../src/main/analytics/model.ts";
 import { type } from "arktype";
 import { tempDir } from "./support.ts";
+import { analyticsFixture, memoryStore } from "./e2e/analytics-fixture.ts";
 
 const properties: BuildProperties = {
   app_version: "0.0.19",
@@ -24,64 +19,13 @@ const properties: BuildProperties = {
   arch: "x64",
   distribution: "direct",
 };
-const owners: Analytics[] = [];
-const servers: ReturnType<typeof createServer>[] = [];
-afterEach(async () => {
-  const closing = Promise.all(owners.splice(0).map((owner) => owner.close()));
-  if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1500);
-  await closing;
-  for (const server of servers.splice(0)) {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-  vi.useRealTimers();
-});
+const { start, servers } = analyticsFixture(properties);
 async function until(check: () => boolean | Promise<boolean>) {
   for (let i = 0; i < 1000; i++) {
     if (await check()) return;
     await pause(5);
   }
   throw new Error("Lifecycle observation did not settle.");
-}
-function memory(initial: AnalyticsRecord | null = null): ReturnType<typeof analyticsStore> {
-  let current = initial;
-  return {
-    load: async () => structuredClone(current),
-    save: async (next) => {
-      current = structuredClone(next);
-    },
-  };
-}
-async function start(
-  options: {
-    directory?: string;
-    store?: ReturnType<typeof analyticsStore>;
-    properties?: Partial<BuildProperties>;
-    transport?: CaptureTransport | null;
-  } = {},
-) {
-  const directory = options.directory ?? (await tempDir());
-  const store = options.store ?? analyticsStore(directory);
-  const events: CaptureEvent[] = [];
-  const owner = new Analytics({
-    dataDir: directory,
-    origin: profileOrigin(directory),
-    properties: { ...properties, ...options.properties },
-    store,
-    transport:
-      options.transport === undefined
-        ? {
-            kind: "local",
-            send: async (event) => {
-              events.push(structuredClone(event));
-              return "accepted";
-            },
-          }
-        : options.transport,
-  });
-  owners.push(owner);
-  await owner.settings();
-  return { owner, events, store, directory, properties: { ...properties, ...options.properties } };
 }
 function versions(events: CaptureEvent[]) {
   return events.filter((event) => event.event === "app_version_observed");
@@ -117,14 +61,14 @@ describe("foreground version lifecycle", () => {
     first.owner.setForeground(false);
     first.owner.setForeground(true);
     await first.owner.close();
-    const retained = await start({ directory: first.directory });
+    const retained = await start({ dataDir: first.dataDir });
     await observed(retained);
     expect(retained.events).toEqual([]);
     expect((await retained.store.load())?.installationId).toBe(id);
     await retained.owner.close();
     const copy = await tempDir();
-    await cp(join(first.directory, "analytics.json"), join(copy, "analytics.json"));
-    const copied = await start({ directory: copy });
+    await cp(join(first.dataDir, "analytics.json"), join(copy, "analytics.json"));
+    const copied = await start({ dataDir: copy });
     await observed(copied);
     expect(copied.events).toEqual([]);
     expect((await copied.store.load())?.installationId).toBe(id);
@@ -134,7 +78,7 @@ describe("foreground version lifecycle", () => {
   });
 
   it("observes same-day upgrades, downgrades, re-upgrades and build/prerelease changes without recounting activity", async () => {
-    const store = memory();
+    const store = memoryStore();
     const history: CaptureEvent[] = [];
     const sequence = [
       { app_version: "0.0.18" },
@@ -167,7 +111,7 @@ describe("foreground version lifecycle", () => {
   it.each(["fresh", "upgrading", "unknown"] as const)(
     "does not infer prior versions from a %s profile with a missing baseline",
     async (origin) => {
-      const store = memory({
+      const store = memoryStore({
         format: 2,
         enabled: true,
         installationId: randomUUID(),
@@ -188,7 +132,7 @@ describe("foreground version lifecycle", () => {
   );
 
   it("clears all work and baseline on opt-out, stays off through restart, and observes only the re-enabled version", async () => {
-    const store = memory();
+    const store = memoryStore();
     const first = await start({ store });
     await observed(first);
     const id = (await store.load())?.installationId;
@@ -212,7 +156,7 @@ describe("foreground version lifecycle", () => {
   });
 
   it("uses unknown history after opt-out before the first observation, including restart", async () => {
-    const store = memory();
+    const store = memoryStore();
     const first = await start({ store });
     await first.owner.configure(false);
     await first.owner.close();
@@ -229,12 +173,11 @@ describe("foreground version lifecycle", () => {
   });
 
   it("aborts an active version body and clears it permanently when Privacy is disabled", async () => {
-    const store = memory();
+    const store = memoryStore();
     let active: AbortSignal | undefined;
     const session = await start({
       store,
       transport: {
-        kind: "local",
         send: async (event, signal) => {
           if (event.event !== "app_version_observed") return "accepted";
           active = signal;
@@ -275,7 +218,7 @@ describe("foreground version lifecycle", () => {
   });
 
   it("treats an unknown build version as unknown history at the next known observation", async () => {
-    const store = memory();
+    const store = memoryStore();
     const unknown = await start({ store, properties: { app_version: "unknown" } });
     await observed(unknown);
     await unknown.owner.close();
@@ -324,7 +267,7 @@ describe("foreground version lifecycle", () => {
         pending: [{ event, attempts: 1 }],
       });
       expect(loaded).not.toHaveProperty("lifecycle");
-      const session = await start({ directory });
+      const session = await start({ dataDir: directory });
       await observed(session);
       expect(session.events[0]).toEqual(event);
       expect(versions(session.events)[0]?.properties).toMatchObject({
@@ -335,12 +278,12 @@ describe("foreground version lifecycle", () => {
 
   it("bounds offline lifecycle work by shared count and bytes and expires it after seven days", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    const store = memory();
+    const store = memoryStore();
     for (let i = 0; i < 70; i++) {
       const session = await start({
         store,
         properties: { app_version: `0.0.${i}` },
-        transport: { kind: "local", send: async () => "not_sent" },
+        transport: { send: async () => "not_sent" },
       });
       session.owner.setForeground(true);
       await until(
@@ -375,7 +318,7 @@ describe("loopback lifecycle delivery", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     const directory = await tempDir();
     const store = analyticsStore(directory);
-    const first = await start({ directory, store, transport });
+    const first = await start({ dataDir: directory, store, transport });
     first.owner.setForeground(true);
     await until(
       async () =>
@@ -404,7 +347,7 @@ describe("loopback lifecycle delivery", () => {
       expected.push(bodies.at(-1)!);
     }
     bodies.length = 0;
-    const restarted = await start({ directory, store, transport });
+    const restarted = await start({ dataDir: directory, store, transport });
     await until(
       async () =>
         bodies.length === 3 &&
@@ -418,7 +361,7 @@ describe("loopback lifecycle delivery", () => {
     const { lifecycle: _lifecycle, ...legacy } = before!;
     await store.save(legacy);
     bodies.length = 0;
-    const oldQueue = await start({ directory, store, transport });
+    const oldQueue = await start({ dataDir: directory, store, transport });
     await until(() => bodies.length === 2);
     expect(bodies).toEqual(expected.slice(0, 2));
     await oldQueue.owner.close();
@@ -437,7 +380,7 @@ describe("loopback lifecycle delivery", () => {
     if (!address || typeof address === "string") throw new Error("No port.");
     const transport = localCapture(`http://127.0.0.1:${address.port}/i/v0/e/`)!;
     vi.useFakeTimers({ toFake: ["Date"] });
-    const store = memory();
+    const store = memoryStore();
     for (let attempt = 0; attempt < 3; attempt++) {
       const session = await start({ store, transport });
       session.owner.setForeground(true);
