@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { realpathSync, readFileSync, writeFileSync } from "node:fs";
 
 export const profile = "desktop-v1";
@@ -44,7 +44,10 @@ export function validationIdentity() {
       ".github/tests/validation-evidence.test.ts",
       ".github/workflows/checks.yml",
     ],
-    { cwd: resolve(import.meta.dirname, "../.."), encoding: "utf8" },
+    {
+      cwd: resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), "../.."),
+      encoding: "utf8",
+    },
   );
   return createHash("sha256")
     .update(

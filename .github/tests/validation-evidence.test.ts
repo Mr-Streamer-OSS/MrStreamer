@@ -72,20 +72,39 @@ test("only complete exact-source validation from a successful trusted main produ
   );
 });
 
-test("the verification CLI refuses invalid evidence through real and symlinked entry paths", () => {
+test("the verification CLI accepts complete and refuses invalid evidence through each entry path", () => {
   const dir = mkdtempSync(join(tmpdir(), "validation-cli-"));
   try {
     const script = resolve(import.meta.dirname, "../scripts/validation-evidence.ts");
     const link = join(dir, "verify.ts");
     const invalid = join(dir, "invalid.json");
+    const valid = join(dir, "valid.json");
+    const metadata = join(dir, "producer.json");
     symlinkSync(script, link);
     writeFileSync(invalid, "{}");
+    const identified = spawnSync(process.execPath, [script, "identity"], { encoding: "utf8" });
+    assert.equal(identified.status, 0, identified.stderr);
+    const identity = identified.stdout.trim();
+    writeFileSync(
+      valid,
+      JSON.stringify({
+        ...evidence,
+        identity,
+        identities: { check: identity, test: identity, website: "" },
+      }),
+    );
+    writeFileSync(metadata, JSON.stringify(producer));
     for (const entry of [script, link]) {
       for (const flags of [[], ["--preserve-symlinks-main"]]) {
         const result = spawnSync(process.execPath, [...flags, entry, "verify", invalid, invalid], {
           encoding: "utf8",
         });
         assert.equal(result.status, 1, result.stderr);
+        const accepted = spawnSync(process.execPath, [...flags, entry, "verify", valid, metadata], {
+          encoding: "utf8",
+          env: { ...process.env, VALIDATION_SHA: expected.sha },
+        });
+        assert.equal(accepted.status, 0, accepted.stderr);
       }
     }
   } finally {
