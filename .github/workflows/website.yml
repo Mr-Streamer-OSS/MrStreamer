@@ -1,7 +1,7 @@
 # The website, apps/marketing, on mrstreamer.app. docs/maintainers/ci.md shows when each job runs.
 #
 # - After a push to main that changes what the website is built from: builds and publishes it.
-#   A push that changes only the delivery files below builds it and publishes nothing.
+#   A push that changes only routing and runbook files, including the marketing README, builds it and publishes nothing.
 # - After a stable release's version commit: publish.yml calls this with deploy.
 # - By hand, from main: builds it, and publishes it with deploy.
 #
@@ -209,7 +209,7 @@ jobs:
         run: |
           git clone --quiet --bare --filter=blob:none --single-branch --branch main \
             "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$RUNNER_TEMP/main.git"
-          # The trigger's paths, as pathspecs that read ** as the trigger does.
+          # The deployment inputs, as Git glob pathspecs.
           read -ra paths <<<"$INPUTS"
           [ ${#paths[@]} -gt 0 ] || { echo "::error::The build named no website inputs."; exit 1; }
           changed=0
