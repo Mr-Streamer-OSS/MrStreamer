@@ -1,3 +1,8 @@
+import { mkdtemp, writeFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as windows from "./e2e/installed-upgrade-windows.ts";
+import { runCommand } from "./e2e/installed-upgrade.ts";
 import { zipSync, strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { producePackageReceipt, type PackageIdentity } from "../scripts/package-receipt.ts";
@@ -75,6 +80,85 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     expect(result.files.size).toBe(3);
   });
   // Receipt identity and archive bytes are package-receipt.test.ts's; these are the private input's own gates.
+  it("refuses a Fleet receipt from another repository before creating the journey or installing", async () => {
+    const { input, github } = fixture();
+    const temp = await mkdtemp(join(tmpdir(), "private-upgrade-"));
+    const runner = vi.spyOn(windows, "fleetRunner").mockReturnValue({
+      id: "test",
+      temp,
+      installRoot: join(temp, "install"),
+      executable: join(temp, "app.exe"),
+      tools: [],
+    });
+    try {
+      await writeFile(join(temp, "owner.json"), "{}");
+      await writeFile(join(temp, "private-input.json"), JSON.stringify(input));
+      for (const id of [30, 31])
+        await writeFile(
+          join(temp, `artifact-${id}.zip`),
+          await github.bytes(`/actions/artifacts/${id}/zip`),
+        );
+      const candidateTag = `v${input.request.appVersion}`;
+      const pkg = (stage: "stable" | "candidate") => {
+        const version = stage === "stable" ? "0.0.21" : input.request.appVersion;
+        return {
+          stage,
+          version,
+          source: stage === "stable" ? "d".repeat(40) : input.request.sourceCommit,
+          file: `${stage}-Mr-Streamer-${version}-win-x64-setup.exe`,
+          bytes: 1,
+          sha256: "0".repeat(64),
+          provenance: {
+            tag: `v${version}`,
+            releaseKind: stage === "stable" ? "stable" : "nightly",
+            publishedAt: "2026-10-29T00:00:00Z",
+            assetId: 1,
+            assetDigest: null,
+            metadata: {
+              sha256sums: "0".repeat(64),
+              latestYml: "0".repeat(64),
+              sha512: "synthetic",
+            },
+          },
+        };
+      };
+      await writeFile(
+        join(temp, "receipt.json"),
+        JSON.stringify({
+          repository: "another/player",
+          resolvedAt: "2026-10-29T00:00:00Z",
+          resolved: {
+            stableTag: "v0.0.21",
+            stableSha: "d".repeat(40),
+            candidateTag,
+            candidateSha: input.request.sourceCommit,
+          },
+          packages: [pkg("stable"), pkg("candidate")],
+          defaultBranch: "main",
+          candidateAheadBy: 1,
+          limits: [],
+        }),
+      );
+      await expect(
+        runCommand([
+          "--packages",
+          temp,
+          "--root",
+          join(temp, "journey"),
+          "--fleet-owner",
+          join(temp, "owner.json"),
+          "--repository",
+          input.repository,
+          "--verification-source",
+          "e".repeat(40),
+        ]),
+      ).rejects.toThrow("another repository");
+      await expect(stat(join(temp, "journey"))).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      runner.mockRestore();
+      await rm(temp, { recursive: true, force: true });
+    }
+  });
   it.each(["platform", "distribution", "attempt", "hash"])(
     "refuses a wrong %s before installation",
     async (field) => {
