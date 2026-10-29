@@ -430,7 +430,7 @@ async function run(scenario: Scenario, prior?: string) {
         const launch = ++catalogueLaunch;
         observed["runtimeExceptions"] = runtimeExceptions;
         page.on("Runtime.exceptionThrown", (event) => runtimeExceptions.push({ launch, event }));
-        await page.send("Runtime.enable");
+        await send("Runtime.enable");
       }
       if (scenario.startsWith("hls-compatibility")) {
         page.on("Runtime.consoleAPICalled", (entry) => log.push(JSON.stringify(entry) + "\n"));
