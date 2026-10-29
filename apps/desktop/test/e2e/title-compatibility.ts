@@ -311,6 +311,27 @@ try {
     };
     await shot("paused-buffer");
     if (after.appended !== before.appended) throw new Error("Title kept appending while paused");
+    const runs = deliveries.length;
+    await key(live, " ", 32);
+    await waitFor(async () => {
+      const resumed = await video();
+      return (
+        !resumed.paused &&
+        resumed.time > after.video.time + 0.25 &&
+        resumed.frames > after.video.frames
+      );
+    });
+    observations["heldRunResumed"] = await video();
+    await key(live, " ", 32);
+    await waitFor(async () => (await video()).paused);
+    await key(live, "ArrowLeft", 37);
+    await waitFor(async () => {
+      const sought = await video();
+      return sought.paused && sought.time < 0.1 && sought.width > 0;
+    });
+    observations["bufferedBackwardSeek"] = await video();
+    if (deliveries.length !== runs) throw new Error("Buffered seek or Play replaced the held run");
+
     await live.send("Network.emulateNetworkConditions", {
       offline: false,
       latency: 0,
