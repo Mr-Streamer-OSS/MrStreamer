@@ -1,3 +1,4 @@
+import { keychain } from "./keychain.ts";
 import { createRoot, window, document, type Root } from "./dom.ts";
 import { nativePlayer } from "./native-player.ts";
 import * as React from "react";
@@ -23,12 +24,7 @@ const scenario = vi.hoisted(() => ({
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
-vi.mock("expo-secure-store", () => ({
-  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
-  getItemAsync: async (key: string) => scenario.keychain.get(key) ?? null,
-  setItemAsync: async (key: string, value: string) => void scenario.keychain.set(key, value),
-  deleteItemAsync: async (key: string) => void scenario.keychain.delete(key),
-}));
+vi.mock("expo-secure-store", () => keychain(() => scenario.keychain));
 vi.mock("expo-video", () => ({
   createVideoPlayer: () =>
     nativePlayer((source) => {

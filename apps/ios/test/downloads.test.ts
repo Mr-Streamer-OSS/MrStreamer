@@ -1,3 +1,4 @@
+import { keychain } from "./keychain.ts";
 import { nativePlayer } from "./native-player.ts";
 import { guideFixture } from "./native-guide.ts";
 import type { Download, DownloadStatus } from "@mrstreamer/contracts/downloads";
@@ -91,7 +92,7 @@ vi.mock("react-native", () => ({
   },
 }));
 vi.mock("expo-secure-store", () => ({
-  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
+  ...keychain(() => memory.keychain),
   getItemAsync: async (key: string) => {
     if (memory.locked && key.includes("download")) throw new Error("Interaction not allowed");
     return memory.keychain.get(key) ?? null;
@@ -867,8 +868,10 @@ describe("downloads", { timeout: 30_000 }, () => {
         () => isComplete(started, copy.id) && item()?.posterUrl != null,
         "the copy's poster",
       );
-      await until(() => native.tasks.some((each) => each.url === wide), "its backdrop asked for");
-      await sleep(50);
+      await until(
+        () => native.tasks.some((each) => each.url === wide && each.state === "error"),
+        "its refused backdrop to settle",
+      );
       const kept = new DiskFile(native.root, "documents", "downloads", copy.id, "poster");
       expect(item()?.posterUrl).toBe(kept.uri);
       expect(kept.textSync()).toBe(`picture /p/${movie().id}.jpg`);

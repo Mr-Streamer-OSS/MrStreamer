@@ -1,3 +1,4 @@
+import { keychain as keychainStore } from "./keychain.ts";
 import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import { mkdirSync, rmSync } from "node:fs";
@@ -15,16 +16,7 @@ const sheets: Array<{ options: readonly string[]; pick: (index: number) => void 
 const alerts: string[][] = [];
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
-vi.mock("expo-secure-store", () => ({
-  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
-  getItemAsync: async (key: string) => keychain.get(key) ?? null,
-  setItemAsync: async (key: string, value: string) => {
-    keychain.set(key, value);
-  },
-  deleteItemAsync: async (key: string) => {
-    keychain.delete(key);
-  },
-}));
+vi.mock("expo-secure-store", () => keychainStore(() => keychain));
 vi.mock("@mrstreamer/core/xtream", async () => ({
   ...(await vi.importActual<typeof import("@mrstreamer/core/xtream")>("@mrstreamer/core/xtream")),
   xtreamProvider: () => provider,

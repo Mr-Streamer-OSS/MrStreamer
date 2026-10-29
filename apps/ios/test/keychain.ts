@@ -1,0 +1,13 @@
+/** Resolve the current map on every call: tests replace it across app-module relaunches. */
+export function keychain(items: () => Map<string, string>) {
+  return {
+    AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
+    getItemAsync: async (key: string) => items().get(key) ?? null,
+    setItemAsync: async (key: string, value: string) => {
+      items().set(key, value);
+    },
+    deleteItemAsync: async (key: string) => {
+      items().delete(key);
+    },
+  };
+}

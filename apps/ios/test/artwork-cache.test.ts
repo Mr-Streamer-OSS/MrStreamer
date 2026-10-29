@@ -223,7 +223,9 @@ describe("a picture shown again", () => {
     current.logos([at("/logo/1.png"), at("/logo/1.png")]);
     await settled(() => expect(current.shown().filter(isFile)).toHaveLength(2));
     expect(asked("/logo/1.png")).toBe(1);
-    expect(native.tasks).toEqual([{ url: at("/logo/1.png"), sessionType: "foreground" }]);
+    expect(native.tasks).toEqual([
+      { url: at("/logo/1.png"), sessionType: "foreground", state: "completed" },
+    ]);
 
     current = await relaunch();
     current.logos([at("/logo/1.png")]);

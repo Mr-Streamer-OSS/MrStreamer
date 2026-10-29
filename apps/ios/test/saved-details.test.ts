@@ -1,3 +1,4 @@
+import { keychain } from "./keychain.ts";
 import type { SeriesDetails, Title, TitleDetails } from "@mrstreamer/contracts/ondemand";
 import { kindOf } from "@mrstreamer/core/ondemand/catalogue";
 import {
@@ -64,8 +65,7 @@ vi.mock("expo-video", () => ({
   }),
 }));
 vi.mock("expo-secure-store", () => ({
-  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
-  getItemAsync: async (key: string) => memory.keychain.get(key) ?? null,
+  ...keychain(() => memory.keychain),
   setItemAsync: async (key: string, value: string) => {
     const failure = key.startsWith("s.") ? memory.secretFailure : null;
     if (failure === "before") throw new Error("The Keychain refused the item");
@@ -79,7 +79,6 @@ vi.mock("expo-secure-store", () => ({
       await new Promise<void>((go) => memory.heldSecrets.push(go));
     }
   },
-  deleteItemAsync: async (key: string) => void memory.keychain.delete(key),
 }));
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 

@@ -1,3 +1,4 @@
+import { keychain } from "./keychain.ts";
 import { nativePlayer } from "./native-player.ts";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,7 +29,7 @@ vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } }
 vi.mock("expo-video", () => ({ createVideoPlayer: () => nativePlayer() }));
 
 vi.mock("expo-secure-store", () => ({
-  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
+  ...keychain(() => memory.keychain),
   getItemAsync: async (key: string) => {
     const password = memory.keychain.get(key) ?? null;
     if (memory.holdPasswords.has(key)) {
@@ -36,12 +37,6 @@ vi.mock("expo-secure-store", () => ({
     }
     if (memory.refusedPasswords.has(key)) throw new Error("Keychain refused");
     return password;
-  },
-  setItemAsync: async (key: string, value: string) => {
-    memory.keychain.set(key, value);
-  },
-  deleteItemAsync: async (key: string) => {
-    memory.keychain.delete(key);
   },
 }));
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));

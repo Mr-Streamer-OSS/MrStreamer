@@ -27,7 +27,11 @@ interface Native {
   /** What `Paths.availableDiskSpace` answers. */
   free: number;
   /** Each request a `DownloadTask` made: its address and the URLSession it asked for. */
-  readonly tasks: { readonly url: string; readonly sessionType: "foreground" | "background" }[];
+  readonly tasks: {
+    readonly url: string;
+    readonly sessionType: "foreground" | "background";
+    readonly state: DownloadTask["state"];
+  }[];
   /** Each request a media transfer made: its address, the range it asked for, and when. */
   readonly requests: { readonly url: string; readonly range: string | null; readonly at: number }[];
   /** Media transfer requests not yet ended. */
@@ -203,7 +207,14 @@ export class DownloadTask {
     this.state = "active";
     const cancel = () => this.cancel();
     signal?.addEventListener("abort", cancel, { once: true });
-    native.tasks.push({ url: this.#url, sessionType });
+    const state = () => this.state;
+    native.tasks.push({
+      url: this.#url,
+      sessionType,
+      get state() {
+        return state();
+      },
+    });
     try {
       const response = await fetch(this.#url, {
         signal: this.#request.signal,
