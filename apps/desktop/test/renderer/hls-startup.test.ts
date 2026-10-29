@@ -28,13 +28,18 @@ vi.mock("hls.js", async (original) => {
         else super.once(event, listener);
       }
       getMediaDecodingInfo(level: Level) {
-        return Promise.resolve({ supported: !fixture.unsupported.has(level) });
+        return Promise.resolve({
+          supported: !fixture.unsupported.has(level),
+          decodingInfoResults: [],
+        });
       }
       override startLoad() {
         super.startLoad();
         const level = this.levels[this.startLevel === -1 ? this.firstAutoLevel : this.startLevel]!;
         fixture.starts.push(level);
-        this.variant({ audio: fixture.groups.get(level.audioGroupIds?.[0] ?? "") ?? [] });
+        this.variant({
+          audio: (level.audioGroups ?? []).flatMap((group) => fixture.groups.get(group) ?? []),
+        });
       }
     },
   };
@@ -159,4 +164,16 @@ it("validates an unvisited lower decoder profile before overriding startup", asy
   open();
   await settle();
   expect(fixture.starts).toEqual([high]);
+});
+
+it("preserves every merged audio group containing the requested language", () => {
+  const low = level(128, "english");
+  const high = level(512, "english");
+  high.addGroupId("audio", "spanish");
+  fixture.levels = [low, high];
+  fixture.groups.set("english", [{ name: "English", lang: "en" }]);
+  fixture.groups.set("spanish", [{ name: "Español", lang: "es" }]);
+  open();
+  expect(fixture.starts).toEqual([high]);
+  expect(streams.latest().audioTrack).toBe(1);
 });

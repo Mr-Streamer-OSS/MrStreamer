@@ -251,20 +251,23 @@ function hlsEngine(
           const tier = hls.levels[initial];
           // Keep the initial audio groups, including their stable rendition identities. Starting
           // in another group can lose the requested language before ABR ever reaches this tier.
-          if (tier && tier.supportedResult?.supported !== false) {
+          if (
+            tier &&
+            tier.supportedResult?.supported !== false &&
+            (!tier.supportedPromise || tier.supportedResult?.supported === true)
+          ) {
             const lowest = hls.levels.reduce(
               (lowest, level, index, levels) =>
                 level.supportedResult?.supported !== false &&
+                !level.supportedResult?.decodingInfoResults.some((info) => info.smooth === false) &&
                 validated.get(level) !== false &&
                 (!level.supportedPromise || level.supportedResult?.supported === true) &&
                 level.codecSet === tier.codecSet &&
                 level.videoRange === tier.videoRange &&
                 level.frameRate <= tier.frameRate &&
                 (index <= initial || level.frameRate === tier.frameRate) &&
-                level.audioGroupIds?.length === tier.audioGroupIds?.length &&
-                (level.audioGroupIds ?? []).every(
-                  (group, i) => group === tier.audioGroupIds?.[i],
-                ) &&
+                level.audioGroups?.length === tier.audioGroups?.length &&
+                (level.audioGroups ?? []).every((group) => tier.audioGroups?.includes(group)) &&
                 level.bitrate < levels[lowest]!.bitrate
                   ? index
                   : lowest,
@@ -280,7 +283,9 @@ function hlsEngine(
               // query for that candidate rather than treating an absent promise as support.
               const result = await Promise.race([
                 hls.getMediaDecodingInfo(candidate).then(
-                  (info) => info.supported,
+                  (info) =>
+                    info.supported &&
+                    !info.decodingInfoResults.some((result) => result.smooth === false),
                   () => false,
                 ),
                 deadline,
@@ -299,12 +304,16 @@ function hlsEngine(
           return;
         }
       }
-      // A rejected capability query leaves selection to hls.js; failures in startup follow the
-      // engine's existing failure path rather than escaping an async event listener.
+      // Selection is optional. Unexpected selection errors fall back to normal loading; a
+      // loader failure still uses the engine's existing failure path.
       void start()
         .catch(() => {
-          if (!released)
+          if (released) return;
+          try {
+            hls.startLoad();
+          } catch {
             life.fail({ kind: "media", detail: t("The stream could not be decoded.") });
+          }
         })
         .finally(() => clearTimeout(supportTimer));
     });
