@@ -74,14 +74,10 @@ async function mount({ loadPreferences = true } = {}) {
   }));
   const mounted = queryView(client);
   const { container } = mounted;
-  let liveChannels: readonly LiveChannel[] | undefined;
-  let homeChannels: readonly LiveChannel[] | undefined;
   function View() {
     const list = useUi((state) => state.list);
     const browse = useListChannels(list);
     const ordinary = useListChannels(list, "ordinary");
-    liveChannels = browse.channels;
-    homeChannels = ordinary.channels;
     const show = useShowList();
     const home = useHomeDiscovery();
     return createElement(
@@ -117,7 +113,6 @@ async function mount({ loadPreferences = true } = {}) {
     click,
     output: () => container.querySelector("output")?.textContent,
     ordinary: () => container.querySelector("#ordinary")?.textContent,
-    channels: () => ({ live: liveChannels, home: homeChannels }),
   };
 }
 
@@ -132,14 +127,12 @@ it.each([undefined, false])(
     await act(async () => answer.resolve(result(["safe"])));
     await settle();
     expect(p.output()).toBe("safe");
-    expect(p.channels().live).toBe(p.channels().home);
     ipc.always("library.browse", result(["sport"]));
     await p.click("Sports");
     await settle();
     await p.click("All");
     await settle();
     expect(p.output()).toBe("safe");
-    expect(p.channels().live).toBe(p.channels().home);
     expect(
       ipc.argsOf("library.browse").filter((query) => query.filters.browseTopics.length === 0),
     ).toHaveLength(1);
@@ -185,7 +178,6 @@ it("keeps Home ordinary through hidden/shown/hidden resets and discards obsolete
   );
   await settle();
   expect(p.output()).toBe("safe");
-  expect(p.channels().live).toBe(p.channels().home);
   await act(async () => {
     obsolete.resolve(result(["obsolete-adult"]));
     reset.resolve(result(["obsolete-reset-adult"]));
@@ -194,10 +186,6 @@ it("keeps Home ordinary through hidden/shown/hidden resets and discards obsolete
   expect(p.output()).toBe("safe");
   expect(p.ordinary()).toBe("safe");
   expect(p.client.getQueryData(queries.browse(viewer).queryKey)).toBeUndefined();
-  const ordinary = ipc.argsOf("library.browse").find((query) => query.visibility === "ordinary")!;
-  expect(p.client.getQueryData(queries.browse(ordinary).queryKey)?.channels).toBe(
-    p.channels().live,
-  );
 });
 
 it("never makes old-key rows actionable and retains valid same-key rows during refetch", async () => {

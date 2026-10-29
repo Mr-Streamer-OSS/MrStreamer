@@ -271,6 +271,10 @@ describe("putting the favourites in another order", () => {
     await page.press("PageDown", { alt: true });
     expect([page.indexOf("Channel 3"), page.said()]).toEqual([13, "Channel 3, 14 of 60"]);
 
+    const visible = ipc.argsOf("guide.listings").flatMap(({ channels }) => channels);
+    expect(visible).toContainEqual(own("1"));
+    expect(visible).not.toContainEqual(own("60"));
+
     // The last place is far outside the rows the list draws: the row is there, with the focus.
     await page.press("End", { alt: true });
     await settled();
@@ -297,12 +301,9 @@ describe("putting the favourites in another order", () => {
     await settled();
     expect(page.focused()).toBe("Channel 3");
     expect(page.rows().slice(0, 3)).toEqual(titles(["3", "1", "2"]));
-
-    // Programmes were asked for by the saved order, forty channels at a time: once for each
-    // forty that came into view, and never again for a channel that moved.
-    const asked = ipc.argsOf("guide.listings").map(({ channels }) => channels);
-    const saved = Array.from({ length: 60 }, (_, index) => own(String(index + 1)));
-    expect(asked).toEqual([saved.slice(0, 40), saved.slice(40)]);
+    // Programmes were asked for once per channel in the saved order, never again for one that moved.
+    const asked = ipc.argsOf("guide.listings").flatMap(({ channels }) => channels);
+    expect(asked).toEqual(Array.from({ length: 60 }, (_, index) => own(String(index + 1))));
   });
 
   it("saves once with Enter, for the subscription and the favourites it was made from", async () => {

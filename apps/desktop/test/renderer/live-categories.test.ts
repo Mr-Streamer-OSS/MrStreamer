@@ -194,7 +194,6 @@ describe("fixed topics and Provider lists", () => {
     });
     await act(async () => p.client.setQueryData(queries.categories().queryKey, CATEGORIES));
     await vi.waitFor(() => expect(p.rows()[1]?.getAttribute("aria-current")).toBe("true"));
-    expect(p.rows()[1]?.getAttribute("aria-current")).toBe("true");
     await act(async () => p.client.setQueryData(queries.categories().queryKey, [CATEGORIES[3]!]));
     await vi.waitFor(() => expect(p.rows().map((row) => row.title)).toEqual(["United Kingdom"]));
   });
