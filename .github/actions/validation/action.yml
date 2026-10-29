@@ -15,6 +15,10 @@ inputs:
     description: Unique report label for callers validating more than one candidate
     default: ${{ github.run_id }}
 
+  test-shard:
+    description: Temporary paired Actions trial shard
+    default: ""
+
 outputs:
   identity:
     description: Effective validation identity observed on this job's runner
@@ -110,7 +114,12 @@ runs:
       shell: bash
     - name: Test
       if: inputs.part == 'test'
-      run: pnpm test --reporter=default --reporter=github-actions --reporter=json --outputFile.json="$RUNNER_TEMP/test-results.json"
+      env:
+        TEST_SHARD: ${{ inputs.test-shard }}
+      run: |
+        args=()
+        if [[ -n "$TEST_SHARD" ]]; then args+=("--shard=$TEST_SHARD"); fi
+        pnpm test --reporter=default --reporter=github-actions --reporter=json --outputFile.json="$RUNNER_TEMP/test-results.json" "${args[@]}"
       shell: bash
     # The report, to look into a failure or a slow file. Missing when the tests never ran, which
     # the next step fails on.
@@ -124,7 +133,7 @@ runs:
     # Every test file in the report, each test passed: a suite that skipped for want of ffmpeg
     # fails here.
     - name: Require complete test results
-      if: always() && inputs.part == 'test'
+      if: always() && inputs.part == 'test' && inputs.test-shard == ''
       run: node scripts/ci-test-results.ts "$RUNNER_TEMP/test-results.json"
       shell: bash
 
