@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
-import Hls, { AttrList, Level } from "hls.js";
+import { AttrList, Level } from "hls.js";
 import { createEngine, type Engine } from "../../src/renderer/src/player/engine.ts";
 import { streams, type Rendition } from "./hls-stand-in.ts";
 
@@ -109,7 +109,7 @@ it.each([false, true])(
     const playing = open();
     expect(fixture.starts).toEqual([]);
     if (stop) playing.destroy();
-    check.resolve({ supported: false, decodingInfoResults: [], error: undefined });
+    check.resolve({ supported: false, decodingInfoResults: [], configurations: [] });
     await settle();
     expect(fixture.starts).toEqual(stop ? [] : [middle]);
   },
