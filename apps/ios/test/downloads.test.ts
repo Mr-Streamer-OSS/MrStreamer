@@ -339,6 +339,18 @@ async function install() {
 }
 
 /**
+ * A fresh install launched a second ago, so its first request skips the launch's 1s admission
+ * wait. Only that timestamp moves: request-close grace, provider release and later launches still
+ * use real time. Use when a test needs downloads under way, not that first admission window.
+ */
+async function installedApp() {
+  await install();
+  const app = await launch();
+  background.launchedAt -= 1_000;
+  return app;
+}
+
+/**
  * Adds the first provider, and the second when `both`, then waits until the combined index lists
  * the titles the tests ask each for: lists can be ready while the index still is an older one.
  */
@@ -709,8 +721,7 @@ describe("downloads", { timeout: 30_000 }, () => {
   );
 
   it("applies a saved copy's original language through the real play action without establishing provider-file facts", async () => {
-    await install();
-    let app = await launch();
+    let app = await installedApp();
     const { a } = await withProviders(app);
     const copy = await app.addDownload(movieRef(a));
     await until(() => isComplete(app, copy.id), "the saved copy");
@@ -894,8 +905,7 @@ describe("downloads", { timeout: 30_000 }, () => {
   });
 
   it("answers a title asked for twice with one download, and keeps two providers' same id apart", async () => {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a, b } = await withProviders(app, true);
     one.stallMovieFile(movie().id, 20_000, 30_000);
     const [first, second] = await Promise.all([
@@ -914,8 +924,7 @@ describe("downloads", { timeout: 30_000 }, () => {
   });
 
   it("cancels a transfer under way: its request ends and nothing of it stays", async () => {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a } = await withProviders(app);
     one.stallMovieFile(movie().id, 20_000, 30_000);
     const film = await app.addDownload(movieRef(a));
@@ -1461,8 +1470,7 @@ describe("downloads", { timeout: 30_000 }, () => {
   });
 
   it("ends a removed provider's unfinished downloads; its copy stays, plays offline and keeps its progress", async () => {
-    await install();
-    let app = await launch();
+    let app = await installedApp();
     const { a, b } = await withProviders(app, true);
     const kept = await app.addDownload(movieRef(a));
     await until(() => isComplete(app, kept.id), "the copy");
@@ -1577,8 +1585,7 @@ describe("downloads", { timeout: 30_000 }, () => {
   });
 
   it("plays a copy again from where Close just left it", async () => {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a } = await withProviders(app);
     const kept = await app.addDownload(movieRef(a));
     await until(() => isComplete(app, kept.id), "the copy");
@@ -1657,8 +1664,7 @@ describe("downloads", { timeout: 30_000 }, () => {
   });
 
   it("replaces a missing copy only once the copy playing stops", async () => {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a } = await withProviders(app);
     const { version, details } = await seriesDetails(app, a);
     const season = details.seasons[0]!;
@@ -1702,8 +1708,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     ["Cancel remaining", 2],
   ] as const) {
     it(`replaces a missing copy, once its removal ends, only while the run stands: ${change}, ${count} missing`, async () => {
-      await install();
-      const app = await launch();
+      const app = await installedApp();
       const { a } = await withProviders(app);
       const { version, details } = await seriesDetails(app, a);
       const season = details.seasons[0]!;
@@ -1878,8 +1883,7 @@ const episodeOf = (each: SeriesEpisode): TitleRef => ({
 describe("offline Next", { timeout: 30_000 }, () => {
   /** MP4 neighbours in the provider's first season, downloaded by the real queue. */
   async function pair() {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a } = await withProviders(app);
     const { details } = await seriesDetails(app, a);
     const [first, second] = details.seasons[0]!.episodes.slice(1, 3);
@@ -1925,8 +1929,7 @@ describe("offline Next", { timeout: 30_000 }, () => {
   });
 
   it("stops at a missing episode instead of skipping to a later saved one", async () => {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a } = await withProviders(app);
     const { details } = await seriesDetails(app, a);
     const last = details.seasons[0]!.episodes.at(-1)!;
@@ -1949,8 +1952,7 @@ describe("offline Next", { timeout: 30_000 }, () => {
   });
 
   it("never borrows the same episode id from another provider", async () => {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a, b } = await withProviders(app, true);
     const theirs = await seriesDetails(app, b!);
     const ours = await seriesDetails(app, a);
@@ -2223,8 +2225,7 @@ describe("the native queue's contract", { timeout: 40_000 }, () => {
   });
 
   it("deletes a copy only once its player's readers closed, and opens it for no tap meanwhile", async () => {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a } = await withProviders(app);
     const kept = await app.addDownload(movieRef(a));
     await until(() => isComplete(app, kept.id), "the copy");
@@ -2248,8 +2249,7 @@ describe("the native queue's contract", { timeout: 40_000 }, () => {
   });
 
   it("keeps a deleted copy's folder while its reader's closure is refused, until a later launch", async () => {
-    await install();
-    let app = await launch();
+    let app = await installedApp();
     const { a } = await withProviders(app);
     const kept = await app.addDownload(movieRef(a));
     await until(() => isComplete(app, kept.id), "the copy");
@@ -2266,8 +2266,7 @@ describe("the native queue's contract", { timeout: 40_000 }, () => {
   });
 
   it("waits for a copy's reader still retiring after another copy played", async () => {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a } = await withProviders(app);
     const first = await app.addDownload(movieRef(a));
     const other = await app.addDownload(movieRef(a, otherMovie().id));
@@ -2290,8 +2289,7 @@ describe("the native queue's contract", { timeout: 40_000 }, () => {
   });
 
   it("erases a subscription's downloads for its reset, copies too, with saves and readers apart", async () => {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a, b } = await withProviders(app, true);
     const copy = await app.addDownload(movieRef(a));
     await until(() => isComplete(app, copy.id), "the copy");
@@ -2331,8 +2329,7 @@ describe("the native queue's contract", { timeout: 40_000 }, () => {
   });
 
   it("stops Watch showing a removed copy that failed, so Try again can't open it again", async () => {
-    await install();
-    const app = await launch();
+    const app = await installedApp();
     const { a } = await withProviders(app);
     const kept = await app.addDownload(movieRef(a));
     await until(() => isComplete(app, kept.id), "the copy");
