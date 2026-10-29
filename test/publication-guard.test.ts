@@ -557,11 +557,23 @@ describe("the website", () => {
     const script = (id: string) => steps.find((step) => step.id === id)!.run!;
     const dir = mkdtempSync(join(tmpdir(), "website-delivery-"));
     const output = join(dir, "output");
+    const gitEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+    );
     const git = (...args: string[]) =>
-      execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", ...args], {
-        cwd: dir,
-        encoding: "utf8",
-      }).trim();
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.com",
+          "-c",
+          "commit.gpgsign=false",
+          ...args,
+        ],
+        { cwd: dir, env: gitEnv, encoding: "utf8" },
+      ).trim();
     try {
       git("init", "-q");
       mkdirSync(join(dir, ".github/workflows"), { recursive: true });
@@ -574,7 +586,7 @@ describe("the website", () => {
       const base = git("rev-parse", "HEAD");
       execFileSync("bash", ["-e", "-c", script("inputs")], {
         cwd: dir,
-        env: { ...process.env, GITHUB_OUTPUT: output },
+        env: { ...gitEnv, GITHUB_OUTPUT: output },
       });
       const inputs = readFileSync(output, "utf8")
         .trim()
@@ -584,7 +596,7 @@ describe("the website", () => {
         const run = spawnSync("bash", ["-e", "-c", script("delivery")], {
           cwd: dir,
           env: {
-            ...process.env,
+            ...gitEnv,
             GITHUB_OUTPUT: output,
             EVENT: event,
             REQUESTED: requested,

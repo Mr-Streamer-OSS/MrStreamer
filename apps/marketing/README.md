@@ -211,7 +211,7 @@ The jobs of `.github/workflows/website.yml` publish the page from GitHub Actions
 
 4. After the Publish step succeeds, IndexNow verifies the matching build on the public domain and notifies canonical pages in a separate job without owner secrets.
 
-Publications queue without replacing pending ones and none is cancelled halfway, using the same `queue: max` policy as the release workflow. Builds don't wait for each other: each builds `main` as it is when it starts. Before it publishes, a run asks git whether `main` has changed the website since its build, over the push trigger's paths. If it has, the run leaves publishing to the run that change started. If git can't tell, the run fails and publishes nothing.
+Publications queue without replacing pending ones and none is cancelled halfway, using the same `queue: max` policy as the release workflow. Builds don't wait for each other: each builds `main` as it is when it starts. Before it publishes, a run asks git whether `main` has changed the website since its build, over the website deployment inputs: the push trigger's paths without routing and runbook files or this README. If it has, the run leaves publishing to the run that change started. If git can't tell, the run fails and publishes nothing.
 
 Publishing is off until you turn it on. Until then a run builds, says publishing is off, and stops. Every pull request also builds the page in the **Website** job of `.github/workflows/checks.yml`, without secrets.
 
