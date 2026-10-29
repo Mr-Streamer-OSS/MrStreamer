@@ -26,7 +26,7 @@ interface Native {
   readonly root: string;
   /** What `Paths.availableDiskSpace` answers. */
   free: number;
-  /** Each request a `DownloadTask` made: its address and the URLSession it asked for. */
+  /** Each request a `DownloadTask` made: its address, the URLSession it asked for and its current state. */
   readonly tasks: {
     readonly url: string;
     readonly sessionType: "foreground" | "background";

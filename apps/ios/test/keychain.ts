@@ -1,4 +1,4 @@
-/** Resolve the current map on every call: tests replace it across app-module relaunches. */
+/** Read the map lazily: the mock factory can run before the test file declares its state. */
 export function keychain(items: () => Map<string, string>) {
   return {
     AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
