@@ -1,6 +1,6 @@
 import { preferenceValues } from "./preference-reply.ts";
 // The Windows installed upgrade check, which a stable release run makes before publishing and
-// `.github/workflows/upgrade-check.yml` makes by hand from main, on a disposable GitHub-hosted
+// `.github/workflows/release.yml` makes by hand from main, on a disposable GitHub-hosted
 // runner. It installs the newest published stable release, then the published candidate nightly
 // over it with the per-user NSIS setup into the same folder, and starts the app three times on
 // one profile of its own:

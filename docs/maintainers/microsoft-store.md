@@ -67,7 +67,7 @@ To see the names Windows uses before any of that, sideload a dry run's package a
 ## How a release reaches the Store
 
 1. The stable release run builds the MSIX, tests it installed, and keeps it as the artifact `msix-<version>` with a record of its release, commit and SHA-256 ([releasing](releasing.md#microsoft-store-package)).
-2. Once the release is published and the package passed every check, the run's **Microsoft Store** job starts, in `.github/workflows/publish.yml`. Only a stable release started from `main` gets there: never a nightly, a dry run, a push or a tag. It's a job of the release run because GitHub starts no workflow for a release the workflow's own token created.
+2. Once the release is published and the package passed every check, the run's **Microsoft Store** job starts, in `.github/workflows/release.yml`. Only a stable release started from `main` gets there: never a nightly, a dry run, a push or a tag. It's a job of the release run because GitHub starts no workflow for a release the workflow's own token created.
 3. `scripts/store-release.ts` checks, before anything signs in:
    - the release is published, neither a draft nor a pre-release, and its tag points at the commit the run built, which `main` contains
    - the package is that run's own artifact, and its checksum is the one the build job reported and the one in its record
@@ -110,7 +110,7 @@ Don't edit a draft the automation made in Partner Center. Once someone has, Micr
 
 ## Checking and repeating
 
-Run the **Publish** workflow on `main` with target **store**, and one of three actions under **store-action**:
+Run the **Release** workflow on `main` with operation **store**, and one of three actions under **store-action**:
 
 - **preflight** signs in and lists what the account holds: the application, the published submission with its audience and publishing mode, its packages, listings and trailers, and any submission in progress. With a version it also checks that release's package and says what a submission would do. It reads only, and works before submissions are turned on.
 - **status**, with a version, says where that release stands in the Store. Run it a few days after a release to see whether certification passed. It finds a package uploaded by hand too, by its version, and says so. It reads only.

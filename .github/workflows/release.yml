@@ -1,35 +1,50 @@
-# Plans and runs releases; docs/maintainers/releasing.md describes the process and
-# docs/maintainers/ci.md how the workflows fit together. scripts/release-plan.ts plans each run,
-# package.yml builds and checks each release's files, and publish.yml publishes them.
-#
-# - Nightly: every six hours, a nightly when main has new commits and the last nightly is at least
-#   five hours old, so a nightly that took an hour to publish doesn't push the next one to twelve
-#   hours. Started by hand, it builds main right away.
-# - Stable: by hand, naming the tested nightly. When main has commits no published nightly holds,
-#   the run first publishes a nightly of main and updates the feed, so Nightly users have every
-#   change before Stable users get any. Then it rebuilds the tested nightly's commit with a stable
-#   version, checks that the newest stable release upgrades to the tested nightly on Windows, and
-#   publishes the stable release as the latest.
-# - Dry run: labelling a pull request "release dry run" builds, signs and tests its head commit
-#   once, and so does a run by hand with dry-run ticked, on its branch. It keeps the files as
-#   workflow artifacts and publishes nothing.
-#
-# Every job checks out the commit the plan resolved, so main moving during a run changes nothing.
+# One candidate per Release run. Maintenance operations use existing releases and never package.
 name: Release
 
 on:
   schedule:
     # Away from the top of the hour, when scheduled runs start late.
-    - cron: "17 */6 * * *"
+    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
+      operation:
+        description: Release or maintenance on an existing release
+        type: choice
+        options: [release, feed, store, upgrade]
+        default: release
+      candidate-sha:
+        description: Optional full source SHA for installed upgrade proof
+        type: string
+      native_case:
+        description: Installed telemetry coverage
+        type: choice
+        options: [all, compatibility]
+        default: all
+      candidate:
+        description: Published nightly for an installed upgrade check
+        type: string
+      allow-regress:
+        description: Feed repair only; permit explicit version regression
+        type: boolean
+        default: false
+      store-action:
+        description: Store maintenance only; preflight, status or submit
+        type: choice
+        options: [preflight, status, submit]
+        default: preflight
+      draft:
+        description: Store maintenance only; existing Partner Center draft ID
+        type: string
+      draft-metadata-sha256:
+        description: Store maintenance only; preflight fingerprint for the draft
+        type: string
       channel:
         description: Channel
         type: choice
         options: [nightly, stable]
         default: nightly
       version:
-        description: Stable version, such as 0.1.0. Empty releases the version the nightly previewed, unless a stable release has it already.
+        description: Stable release version override, or existing version for Store maintenance
         type: string
         required: false
       nightly:
@@ -51,12 +66,12 @@ permissions:
 # stable release is never dropped. Sharing the queue keeps a nightly from being planned while a
 # stable release builds: it would preview the same version as the stable release, from newer
 # code, and sort before it. A scheduled check decides whether a nightly is due once its turn
-# comes. The nightly a stable run publishes first is a job of that run, not a run of its own, so
-# it never waits in the queue behind the run that needs it.
+# comes. Maintenance operations get a group of their own, and their jobs serialize on their own
+# feed, Store and upgrade-check groups.
 concurrency:
   group: >-
     release-${{ github.event_name == 'pull_request' && format('dry-run-{0}', github.event.pull_request.number)
-    || inputs.dry-run && format('dry-run-{0}', github.ref_name) || 'main' }}
+    || inputs.dry-run && format('dry-run-{0}', github.ref_name) || inputs.operation != '' && inputs.operation != 'release' && format('maintenance-{0}-{1}', inputs.operation, github.run_id) || 'main' }}
   cancel-in-progress: false
   queue: max
 
@@ -66,8 +81,8 @@ jobs:
     # Dry runs of pull requests only for branches of this repository: forks get no signing
     # secrets.
     if: >-
-      github.event_name != 'pull_request' || (github.event.label.name == 'release dry run'
-      && github.event.pull_request.head.repo.full_name == github.repository)
+      (inputs.operation == '' || inputs.operation == 'release') && (github.event_name != 'pull_request' || (github.event.label.name == 'release dry run'
+      && github.event.pull_request.head.repo.full_name == github.repository))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -83,11 +98,6 @@ jobs:
       previous-tag: ${{ steps.plan.outputs.previous-tag }}
       # The tested nightly a stable release promotes, which the upgrade check installs.
       promoted: ${{ steps.plan.outputs.promoted }}
-      # The nightly a stable run publishes first; empty when none is needed.
-      first-version: ${{ steps.plan.outputs.first-version }}
-      first-tag: ${{ steps.plan.outputs.first-tag }}
-      first-sha: ${{ steps.plan.outputs.first-sha }}
-      first-previous-tag: ${{ steps.plan.outputs.first-previous-tag }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -95,6 +105,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
@@ -117,89 +128,1237 @@ jobs:
           [ "$DRY_RUN" = true ] && args+=(--dry-run)
           node scripts/release-plan.ts plan "${args[@]}"
 
-  # A stable run's nightly of main, published and in the feed before the stable release builds.
-  # Planned only for stable runs, never for dry runs.
-  nightly-first:
-    name: Nightly first
+  validation:
+    name: Find trusted validation
     needs: plan
-    if: needs.plan.outputs.first-tag != ''
-    uses: ./.github/workflows/package.yml
-    with:
-      channel: nightly
-      version: ${{ needs.plan.outputs.first-version }}
-      sha: ${{ needs.plan.outputs.first-sha }}
-      dry-run: false
-    secrets: inherit
-
-  nightly-first-publish:
-    name: Publish the nightly first
-    needs: [plan, nightly-first]
-    if: needs.plan.outputs.dry-run == 'false'
-    uses: ./.github/workflows/publish.yml
-    with:
-      channel: nightly
-      version: ${{ needs.plan.outputs.first-version }}
-      tag: ${{ needs.plan.outputs.first-tag }}
-      sha: ${{ needs.plan.outputs.first-sha }}
-      previous-tag: ${{ needs.plan.outputs.first-previous-tag }}
-      sources: ${{ needs.nightly-first.outputs.sources }}
-      feed-required: true
-    secrets: inherit
+    if: needs.plan.outputs.skip == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
-      contents: write
-      pull-requests: read
-      pages: write
-      id-token: write
+      contents: read
       actions: read
+    outputs:
+      reused: ${{ steps.evidence.outputs.reused }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .local/validation-tools
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - id: evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_SHA: ${{ needs.plan.outputs.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: node .local/validation-tools/.github/scripts/release-validation.ts
 
-  # The release the run is for: a nightly, a dry run or a stable release. A stable release waits
-  # for the nightly first and builds only once that one is published and in the feed.
+  check:
+    name: Release check
+    needs: [plan, validation]
+    if: needs.validation.outputs.reused != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .local/validation-tools
+          persist-credentials: false
+      - uses: ./.local/validation-tools/.github/actions/validation
+        with:
+          part: check
+          build: "false"
+          report-name: ${{ needs.plan.outputs.version }}
+
+  test:
+    name: Release test
+    needs: [plan, validation]
+    if: needs.validation.outputs.reused != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .local/validation-tools
+          persist-credentials: false
+      - uses: ./.local/validation-tools/.github/actions/validation
+        with:
+          part: test
+          report-name: ${{ needs.plan.outputs.version }}
+
+  # The JavaScript is the same on every platform: built once, packaged three times.
+  bundle:
+    name: Build JS bundle
+    needs: plan
+    if: needs.plan.outputs.skip == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      - uses: ./.workflow/.github/actions/setup
+        with:
+          version: ${{ needs.plan.outputs.version }}
+          bundle: "false"
+      - run: pnpm build
+        env:
+          # The app's TMDB key, built into the main bundle; see docs/maintainers/releasing.md.
+          MR_STREAMER_TMDB_KEY: ${{ secrets.TMDB_API_KEY }}
+          # Optional public write-only project token and approved region. Missing setup disables
+          # analytics. Dry runs and normal CI/development builds never compile capture on.
+          MR_STREAMER_ANALYTICS_PROJECT_TOKEN: ${{ needs.plan.outputs.dry-run != 'true' && secrets.POSTHOG_PROJECT_TOKEN || '' }}
+          MR_STREAMER_ANALYTICS_HOST: ${{ vars.POSTHOG_HOST }}
+          MR_STREAMER_ANALYTICS_RELEASE_BUILD: ${{ needs.plan.outputs.dry-run != 'true' && '1' || '0' }}
+      # The receipt travels with the exact JS bytes all packages and the UI job consume.
+      - name: Record release UI bundle identity
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: node scripts/release-ui.ts record "$SHA" "$VERSION"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: js-bundle-${{ needs.plan.outputs.version }}
+          path: apps/desktop/out/
+          retention-days: 1
+          if-no-files-found: error
+
+  # Bounded Linux source-build proof on dry runs only. The installed checks below keep their own
+  # acceptance.
+  release-ui:
+    name: Release UI proof
+    needs: [plan, bundle]
+    if: needs.plan.outputs.dry-run == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SHA: ${{ needs.plan.outputs.sha }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      - uses: ./.workflow/.github/actions/setup
+        with:
+          version: ${{ needs.plan.outputs.version }}
+      - run: pnpm --filter mrstreamer exec node node_modules/electron/install.js
+      - run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg xvfb
+      - name: Verify required release UI scenarios
+        run: xvfb-run -a node scripts/release-ui.ts run "$SHA" "$VERSION" .local/release-ui
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ui-proof-${{ needs.plan.outputs.version }}-${{ github.run_attempt }}
+          path: .local/release-ui/
+          retention-days: 14
+          if-no-files-found: error
+
+  # macOS and Linux. Windows has its own job below.
   package:
-    name: Package
-    needs: [plan, nightly-first, nightly-first-publish]
-    if: >-
-      !cancelled() && needs.plan.outputs.skip == 'false'
-      && (needs.nightly-first.result == 'skipped' || needs.nightly-first-publish.result == 'success')
-    uses: ./.github/workflows/package.yml
-    with:
-      channel: ${{ needs.plan.outputs.channel }}
-      version: ${{ needs.plan.outputs.version }}
-      sha: ${{ needs.plan.outputs.sha }}
-      dry-run: ${{ needs.plan.outputs.dry-run == 'true' }}
-    secrets: inherit
+    name: Package ${{ matrix.target }}
+    needs: [plan, bundle]
+    strategy:
+      # Every platform reports its own result; the release still needs all of them.
+      fail-fast: false
+      matrix:
+        include:
+          - { target: mac-arm64, runner: macos-15, builder: --mac --arm64 }
+          - { target: linux-x64, runner: ubuntu-24.04, builder: --linux --x64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      KEEP_DAYS: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SHA: ${{ needs.plan.outputs.sha }}
+    # The app, its scripts and its tests live in apps/desktop. Action paths stay relative to the
+    # repository root.
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      - uses: ./.workflow/.github/actions/setup
+        with:
+          version: ${{ needs.plan.outputs.version }}
 
-  # A stable release's installed upgrade on Windows: the newest stable release, then the tested
-  # nightly it promotes. It runs beside packaging; publishing waits for it.
-  upgrade-check:
-    name: Upgrade check
+      # The bundled ffmpeg, rebuilt only when build-ffmpeg.sh changes.
+      - id: ffmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/vendor/ffmpeg/${{ matrix.target }}
+          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('apps/desktop/scripts/build-ffmpeg.sh') }}
+      - name: Build ffmpeg on Linux
+        # Ubuntu 22.04, so the binary also runs on older systems.
+        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD":/repo -w /repo ubuntu:22.04 bash -c '
+            apt-get update -qq &&
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+              build-essential nasm pkg-config meson ninja-build git curl ca-certificates xz-utils >/dev/null &&
+            scripts/build-ffmpeg.sh linux-x64 &&
+            chown -R '"$(id -u):$(id -g)"' vendor'
+      - name: Build ffmpeg on macOS
+        if: steps.ffmpeg.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        run: |
+          brew install --quiet nasm pkg-config meson ninja
+          scripts/build-ffmpeg.sh mac-arm64
+      - name: Check bundled media features and decode fixtures
+        # Check cached binaries too; a flag in the build script is not proof of decoding.
+        run: |
+          if [[ -f scripts/verify-ffmpeg.ts ]]; then
+            node scripts/verify-ffmpeg.ts ${{ matrix.target }} > "$RUNNER_TEMP/ffmpeg-codecs.json"
+          else
+            # An older nightly keeps its original segment check. Modern sources must have the
+            # full decoder proof; promoting an older source as 0.0.16 cannot bypass it.
+            node -e 'if (!/^0[.]0[.]([0-9]|1[0-5])(-|$)/.test(require("./package.json").version)) throw new Error("Missing bundled decoder verification")'
+            muxers=$(vendor/ffmpeg/${{ matrix.target }}/ffmpeg -hide_banner -muxers)
+            grep -qw segment <<<"$muxers"
+            echo '{"target":"${{ matrix.target }}","legacySegmentOnly":true}' > "$RUNNER_TEMP/ffmpeg-codecs.json"
+          fi
+          cat "$RUNNER_TEMP/ffmpeg-codecs.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ffmpeg-codecs-${{ matrix.target }}-${{ needs.plan.outputs.version }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ffmpeg-codecs.json
+          retention-days: ${{ env.KEEP_DAYS }}
+          if-no-files-found: error
+
+      # The AirPlay helper as it comes from the compiler, rebuilt only when what the script hashes
+      # changes: its sources, Info.plist and flags, and the Swift compiler and SDK of this runner
+      # image. Packaging signs a copy inside the app, so no release signature is ever cached.
+      - name: Find the AirPlay helper's inputs
+        id: airplay-key
+        if: runner.os == 'macOS'
+        # Assigned first, so the script's failure stops the step and cannot leave one empty key
+        # shared by every build.
+        run: |
+          inputs=$(scripts/build-airplay-helper.sh --key ${{ matrix.target }})
+          echo "key=airplay-${{ matrix.target }}-$inputs" >> "$GITHUB_OUTPUT"
+      - id: airplay
+        if: runner.os == 'macOS'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/vendor/airplay/${{ matrix.target }}
+          key: ${{ steps.airplay-key.outputs.key }}
+      - name: Build the AirPlay helper
+        if: runner.os == 'macOS' && steps.airplay.outputs.cache-hit != 'true'
+        run: scripts/build-airplay-helper.sh mac-arm64
+
+      # The build and the disk image's notarization print their phases, which the last command
+      # times: the runner's own work apart from the waits on Apple, in the job summary.
+      - name: Build for macOS, signed and notarized
+        if: runner.os == 'macOS'
+        env:
+          DEBUG: electron-notarize*
+          # Dry runs happen on this repository's own labelled pull requests, so they sign too.
+          CSC_FOR_PULL_REQUEST: "true"
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            [ -n "${!name}" ] || { echo "::error::The $name secret is missing; see docs/maintainers/signing.md"; exit 1; }
+          done
+          export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$APPLE_API_KEY"
+          {
+            pnpm exec electron-builder ${{ matrix.builder }} --publish never
+            node scripts/notarize-dmg.ts dist/*.dmg
+          } 2>&1 | node scripts/mac-release-phases.ts "Mac release phases, $VERSION from ${SHA::12}"
+          rm -f "$APPLE_API_KEY"
+
+      - name: Check the macOS signature
+        if: runner.os == 'macOS'
+        env:
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          app="dist/mac-arm64/Mr. Streamer.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv "$app" 2>&1 | grep -qx "TeamIdentifier=$TEAM_ID"
+          codesign -dv "$app" 2>&1 | grep -q "flags=0x10000(runtime)"
+          spctl --assess --type execute --verbose "$app"
+          spctl --assess --type open --context context:primary-signature --verbose dist/*.dmg
+          node scripts/stapler-ticket.ts validate "$app"
+          node scripts/stapler-ticket.ts validate dist/*.dmg
+
+      - name: Check the AirPlay helper starts
+        if: runner.os == 'macOS'
+        # Signed and under the hardened runtime, as it ships. With nothing to read it says hello
+        # and exits.
+        run: |
+          said=$("dist/mac-arm64/Mr. Streamer.app/Contents/Resources/airplay/MrStreamerAirPlay" </dev/null)
+          grep -q '"type":"hello"' <<<"$said"
+
+      - name: Build for Linux
+        if: runner.os == 'Linux'
+        run: pnpm exec electron-builder ${{ matrix.builder }} --publish never
+
+      - name: Check the update metadata
+        run: |
+          for file in dist/latest*.yml; do
+            grep -qx "version: $VERSION" "$file" || { echo "::error::$file does not name $VERSION"; exit 1; }
+          done
+
+      - name: Smoke test the installed app on macOS
+        if: runner.os == 'macOS'
+        run: |
+          mount=$(hdiutil attach -nobrowse -readonly dist/*.dmg | tail -1 | cut -f3)
+          ditto "$mount/Mr. Streamer.app" "/Applications/Mr. Streamer.app"
+          hdiutil detach "$mount"
+          node test/e2e/packaged-app.ts "/Applications/Mr. Streamer.app/Contents/MacOS/Mr. Streamer" -- --use-mock-keychain
+          if [[ -f test/e2e/analytics-options.ts ]]; then
+            MR_STREAMER_FFMPEG="$PWD/vendor/ffmpeg/mac-arm64/ffmpeg" MR_STREAMER_VERIFICATION_OUTPUT="$RUNNER_TEMP/analytics-mac" \
+              node test/e2e/analytics-app.ts --expected-version="$VERSION" --expected-source="$SHA" "/Applications/Mr. Streamer.app/Contents/MacOS/Mr. Streamer"
+          else
+            node -e 'if (!/^0[.]0[.]([0-9]|1[0-5])(-|$)/.test(require("./package.json").version)) throw new Error("Missing native telemetry verifier"); console.log("Historical source predates native telemetry acceptance")'
+          fi
+
+      - name: Smoke test the installed app on Linux
+        if: runner.os == 'Linux'
+        run: |
+          # AppImages need FUSE 2, as on a user's Ubuntu.
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libfuse2t64 ./dist/*.deb
+          xvfb-run -a node test/e2e/packaged-app.ts "/opt/Mr. Streamer/mrstreamer" -- --no-sandbox
+          xvfb-run -a node test/e2e/packaged-app.ts dist/*.AppImage -- --no-sandbox
+          if [[ -f test/e2e/analytics-options.ts ]]; then
+            MR_STREAMER_FFMPEG="$PWD/vendor/ffmpeg/linux-x64/ffmpeg" MR_STREAMER_VERIFICATION_OUTPUT="$RUNNER_TEMP/analytics-deb" \
+              xvfb-run -a node test/e2e/analytics-app.ts --expected-version="$VERSION" --expected-source="$SHA" "/opt/Mr. Streamer/mrstreamer"
+            MR_STREAMER_FFMPEG="$PWD/vendor/ffmpeg/linux-x64/ffmpeg" MR_STREAMER_VERIFICATION_OUTPUT="$RUNNER_TEMP/analytics-appimage" \
+              xvfb-run -a node test/e2e/analytics-app.ts --expected-version="$VERSION" --expected-source="$SHA" dist/*.AppImage
+          else
+            node -e 'if (!/^0[.]0[.]([0-9]|1[0-5])(-|$)/.test(require("./package.json").version)) throw new Error("Missing native telemetry verifier"); console.log("Historical source predates native telemetry acceptance")'
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: analytics-${{ matrix.target }}-${{ needs.plan.outputs.version }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/analytics-*/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - id: package-artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ matrix.target }}-${{ needs.plan.outputs.version }}
+          path: |
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.zip
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.deb
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/latest*.yml
+          retention-days: ${{ env.KEEP_DAYS }}
+          if-no-files-found: error
+      - uses: ./.workflow/.github/actions/package-receipt
+        with:
+          platform: ${{ matrix.target }}
+          version: ${{ needs.plan.outputs.version }}
+          sha: ${{ needs.plan.outputs.sha }}
+          artifact-name: release-${{ matrix.target }}-${{ needs.plan.outputs.version }}
+          artifact-id: ${{ steps.package-artifact.outputs.artifact-id }}
+          artifact-digest: ${{ steps.package-artifact.outputs.artifact-digest }}
+          retention-days: ${{ env.KEEP_DAYS }}
+
+  # The Windows installer, in a job of its own: the Store package needs the ffmpeg this job caches,
+  # and waits for it and for no other platform.
+  package-windows:
+    name: Package win-x64
+    needs: [plan, bundle]
+    runs-on: windows-2025
+    timeout-minutes: 60
+    outputs:
+      # The cache the msix job restores. It exists once this job has succeeded, built or found.
+      ffmpeg-key: ${{ steps.ffmpeg-key.outputs.key }}
+    env:
+      KEEP_DAYS: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SHA: ${{ needs.plan.outputs.sha }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow
+          sparse-checkout: |
+            .github/actions
+            apps/desktop/scripts/windows-ffmpeg-toolchain
+          persist-credentials: false
+      - uses: ./.workflow/.github/actions/setup
+        with:
+          version: ${{ needs.plan.outputs.version }}
+
+      # The cache hashes the toolchain action, from the workflow commit, and the release's own
+      # build script. No restore prefix: a UCRT64 build must never restore an old MINGW64 binary.
+      - id: ffmpeg-key
+        run: |
+          test -f ../../.workflow/apps/desktop/scripts/windows-ffmpeg-toolchain/action.yml
+          test -f scripts/build-ffmpeg.sh
+          echo "key=ffmpeg-win-x64-ucrt64-${{ hashFiles('.workflow/apps/desktop/scripts/windows-ffmpeg-toolchain/action.yml', 'apps/desktop/scripts/build-ffmpeg.sh') }}" >> "$GITHUB_OUTPUT"
+      - id: ffmpeg
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/vendor/ffmpeg/win-x64
+          key: ${{ steps.ffmpeg-key.outputs.key }}
+      - if: steps.ffmpeg.outputs.cache-hit != 'true'
+        uses: ./.workflow/apps/desktop/scripts/windows-ffmpeg-toolchain
+      - name: Build ffmpeg on Windows
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: scripts/build-ffmpeg.sh win-x64
+      - name: Check and record Windows ffmpeg provenance
+        # README.txt is cached with both binaries, including on a warm-cache run.
+        run: |
+          grep -q 'C runtime UCRT; MSYS2 UCRT64; packages ' vendor/ffmpeg/win-x64/README.txt
+          grep -q 'mingw-w64-ucrt-x86_64-gcc ' vendor/ffmpeg/win-x64/README.txt
+          cat vendor/ffmpeg/win-x64/README.txt
+      - name: Check bundled media features and decode fixtures
+        run: |
+          if [[ -f scripts/verify-ffmpeg.ts ]]; then
+            node scripts/verify-ffmpeg.ts win-x64 > "$RUNNER_TEMP/ffmpeg-codecs.json"
+          else
+            # An older nightly keeps its original segment check. Modern sources must have the
+            # full decoder proof; promoting an older source as 0.0.16 cannot bypass it.
+            node -e 'if (!/^0[.]0[.]([0-9]|1[0-5])(-|$)/.test(require("./package.json").version)) throw new Error("Missing bundled decoder verification")'
+            muxers=$(vendor/ffmpeg/win-x64/ffmpeg -hide_banner -muxers)
+            grep -qw segment <<<"$muxers"
+            echo '{"target":"win-x64","legacySegmentOnly":true}' > "$RUNNER_TEMP/ffmpeg-codecs.json"
+          fi
+          cat "$RUNNER_TEMP/ffmpeg-codecs.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ffmpeg-codecs-win-x64-${{ needs.plan.outputs.version }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ffmpeg-codecs.json
+          retention-days: ${{ env.KEEP_DAYS }}
+          if-no-files-found: error
+
+      # Windows installers are unsigned for now. Signing belongs here, as its own step with its
+      # own secrets, without touching the Mac certificate; docs/maintainers/signing.md.
+      - name: Build for Windows
+        run: pnpm exec electron-builder --win --x64 --publish never
+
+      # About has a notice for each plug-in NSIS puts in the setup and its uninstaller, and the
+      # release attaches their sources. A plug-in added or changed since they were reviewed stops
+      # the build here; docs/maintainers/licences.md#windows-setup-program.
+      - name: Check the setup's plug-ins
+        run: node scripts/installer-plugins.ts dist/*-setup.exe
+
+      - name: Check the update metadata
+        run: |
+          for file in dist/latest*.yml; do
+            grep -qx "version: $VERSION" "$file" || { echo "::error::$file does not name $VERSION"; exit 1; }
+          done
+
+      - name: Smoke test the installed app on Windows
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist/*-setup.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
+          node test/e2e/packaged-app.ts "$env:LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Test-Path 'test/e2e/analytics-options.ts') {
+            $env:MR_STREAMER_FFMPEG = "$PWD\vendor\ffmpeg\win-x64\ffmpeg.exe"
+            $env:MR_STREAMER_VERIFICATION_OUTPUT = "$env:RUNNER_TEMP\analytics-nsis"
+            node test/e2e/analytics-app.ts --expected-version="$env:VERSION" --expected-source="$env:SHA" "$env:LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $env:MR_STREAMER_VERIFICATION_OUTPUT = "$env:RUNNER_TEMP\analytics-windows-retry"
+            node test/e2e/analytics-app.ts --native-telemetry --native-case=windows-retry --expected-version="$env:VERSION" --expected-source="$env:SHA" "$env:LOCALAPPDATA\Programs\mrstreamer\Mr. Streamer.exe"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            node -e 'if (!/^0[.]0[.]([0-9]|1[0-5])(-|$)/.test(require("./package.json").version)) throw new Error("Missing native telemetry verifier"); console.log("Historical source predates native telemetry acceptance")'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: analytics-win-x64-${{ needs.plan.outputs.version }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/analytics-nsis/
+            ${{ runner.temp }}/analytics-windows-retry/
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: warn
+
+      - id: package-artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-win-x64-${{ needs.plan.outputs.version }}
+          path: |
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/latest*.yml
+          retention-days: ${{ env.KEEP_DAYS }}
+          if-no-files-found: error
+      - uses: ./.workflow/.github/actions/package-receipt
+        with:
+          platform: win-x64
+          version: ${{ needs.plan.outputs.version }}
+          sha: ${{ needs.plan.outputs.sha }}
+          artifact-name: release-win-x64-${{ needs.plan.outputs.version }}
+          artifact-id: ${{ steps.package-artifact.outputs.artifact-id }}
+          artifact-digest: ${{ steps.package-artifact.outputs.artifact-digest }}
+          retention-days: ${{ env.KEEP_DAYS }}
+
+  # The Microsoft Store package, an MSIX of the same app, for dry runs and stable releases: only
+  # stable releases go to the Store, through Release. It waits for the Windows installer and
+  # no other platform. Outside a dry run its failure doesn't fail the release: Release's Store
+  # gate skips automatic submission without a successful MSIX and checksum. Its file stays a workflow
+  # artifact: never on the release or in the update feed.
+  msix:
+    name: Package Microsoft Store MSIX
+    needs: [plan, package-windows]
+    if: needs.plan.outputs.dry-run == 'true' || needs.plan.outputs.channel == 'stable'
+    continue-on-error: ${{ needs.plan.outputs.dry-run != 'true' }}
+    runs-on: windows-2025
+    timeout-minutes: 45
+    outputs:
+      # Exposed only after installed acceptance, package upload and receipt all pass.
+      sha256: ${{ steps.accepted.outputs.sha256 }}
+    env:
+      KEEP_DAYS: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      SHA: ${{ needs.plan.outputs.sha }}
+      # A release's package is the one the Store gets, at once or in a later run, so it's kept
+      # longer.
+      MSIX_DAYS: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 90 }}
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      # The setup, and the Store's identity that the package check holds the package to.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow
+          sparse-checkout: |
+            .github/actions
+            scripts
+            packages/contracts/src
+          persist-credentials: false
+      - uses: ./.workflow/.github/actions/setup
+        with:
+          version: ${{ needs.plan.outputs.version }}
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/vendor/ffmpeg/win-x64
+          key: ${{ needs.package-windows.outputs.ffmpeg-key }}
+          fail-on-cache-miss: true
+      - name: Build the MSIX
+        run: pnpm exec electron-builder --win appx --x64 --publish never
+
+      # Partner Center's identity exactly, the Store name, the Store version for this release
+      # (scripts/store-release.ts holds all three), and what the app needs at run time: ffmpeg,
+      # ffprobe and the notices Settings > About reads. The record the check writes beside the
+      # package ties the file to the release and its commit by checksum.
+      - name: Check the package
+        id: check
+        run: |
+          $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" | Sort-Object FullName | Select-Object -Last 1
+          & $makeappx.FullName unpack /p "dist/Mr-Streamer-$env:VERSION-win-x64.msix" /d "$env:RUNNER_TEMP\msix" /o | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node ../../.workflow/scripts/store-release.ts package --manifest "$env:RUNNER_TEMP\msix\AppxManifest.xml" `
+            --dir dist --version $env:VERSION --sha $env:SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($file in "Mr. Streamer.exe", "resources\app.asar", "resources\ffmpeg\ffmpeg.exe",
+              "resources\ffmpeg\ffprobe.exe", "LICENSES.chromium.html", "LICENSE.electron.txt") {
+            if (-not (Test-Path -LiteralPath "$env:RUNNER_TEMP\msix\app\$file")) { echo "::error::The package has no $file."; exit 1 }
+          }
+
+      # Windows installs only signed packages. A certificate made here, with the package's
+      # publisher as its subject and trusted on this runner alone, signs a copy to install; the
+      # artifact stays unsigned for the Store to sign. Installing proves nothing about Store trust;
+      # docs/maintainers/signing.md#microsoft-store-package.
+      - name: Install a test-signed copy
+        run: |
+          [xml]$manifest = Get-Content "$env:RUNNER_TEMP\msix\AppxManifest.xml"
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $manifest.Package.Identity.Publisher `
+            -KeyUsage DigitalSignature -CertStoreLocation Cert:\CurrentUser\My `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          Export-Certificate -Cert $cert -FilePath "$env:RUNNER_TEMP\test.cer" | Out-Null
+          Import-Certificate -FilePath "$env:RUNNER_TEMP\test.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          Copy-Item "dist/Mr-Streamer-$env:VERSION-win-x64.msix" "$env:RUNNER_TEMP\test.msix"
+          & $signtool.FullName sign /q /fd SHA256 /sha1 $cert.Thumbprint "$env:RUNNER_TEMP\test.msix"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-AppxPackage "$env:RUNNER_TEMP\test.msix"
+          # Windows derives the family name from the identity: it must be the one Partner Center gave.
+          $family = (Get-AppxPackage "${{ steps.check.outputs.identity-name }}").PackageFamilyName
+          if ($family -cne "${{ steps.check.outputs.family-name }}") { echo "::error::Installed as $family."; exit 1 }
+
+      # Started by its path, the app runs with the package's identity, as it does from Start, so
+      # the test also expects it to leave updates to the Store.
+      - name: Smoke test the installed package
+        run: |
+          $package = Get-AppxPackage "${{ steps.check.outputs.identity-name }}"
+          node test/e2e/packaged-app.ts (Join-Path $package.InstallLocation "app\Mr. Streamer.exe")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Test-Path 'test/e2e/analytics-options.ts') {
+            $env:MR_STREAMER_FFMPEG = "$PWD\vendor\ffmpeg\win-x64\ffmpeg.exe"
+            $env:MR_STREAMER_VERIFICATION_OUTPUT = "$env:RUNNER_TEMP\analytics-msix"
+            node test/e2e/analytics-app.ts --expected-version="$env:VERSION" --expected-source="$env:SHA" (Join-Path $package.InstallLocation "app\Mr. Streamer.exe")
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            node -e 'if (!/^0[.]0[.]([0-9]|1[0-5])(-|$)/.test(require("./package.json").version)) throw new Error("Missing native telemetry verifier"); console.log("Historical source predates native telemetry acceptance")'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: analytics-msix-${{ needs.plan.outputs.version }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/analytics-msix/
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Started as a user would, a Store copy keeps its data in a folder of its own inside the
+      # package's, apart from a direct copy's; docs/contributing/architecture.md#data.
+      - name: Check where the Store copy keeps its data
+        run: |
+          $package = Get-AppxPackage "${{ steps.check.outputs.identity-name }}"
+          Start-Process -FilePath (Join-Path $package.InstallLocation "app\Mr. Streamer.exe")
+          Start-Sleep 15
+          Get-Process "Mr. Streamer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          $own = "$env:LOCALAPPDATA\Packages\$($package.PackageFamilyName)\LocalCache\Roaming\Mr. Streamer Store"
+          if (-not (Test-Path "$own\Local State")) { echo "::error::Nothing in $own."; exit 1 }
+          if (Test-Path "$env:APPDATA\Mr. Streamer Store") { echo "::error::The Store copy wrote to the real AppData."; exit 1 }
+
+      # The kit's report goes with the package. Its optional "Blocked executables" test fails: it
+      # flags strings such as "cmd" and "reg" inside Electron's and ffmpeg's files. The overall
+      # result has to pass.
+      - name: Windows App Certification Kit
+        run: |
+          $appcert = "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit\appcert.exe"
+          # The kit takes only a full path for its report.
+          $report = Join-Path (Resolve-Path dist) "Mr-Streamer-$env:VERSION-win-x64.wack.xml"
+          & $appcert reset | Out-Null
+          & $appcert test -appxpackagepath "$env:RUNNER_TEMP\test.msix" -reportoutputpath $report
+          [xml]$xml = Get-Content $report
+          foreach ($test in $xml.SelectNodes("//TEST[RESULT != 'PASS']")) {
+            $optional = if ($test.OPTIONAL -eq "TRUE") { " (optional)" } else { "" }
+            echo "$($test.SelectSingleNode('RESULT').InnerText) $($test.NAME)$optional"
+          }
+          $overall = $xml.REPORT.OVERALL_RESULT
+          Add-Content $env:GITHUB_STEP_SUMMARY "Windows App Certification Kit: $overall"
+          if ($overall -ne "PASS") { echo "::error::The certification kit's result is $overall."; exit 1 }
+
+      # Uninstalling removes what the package wrote to AppData along with it.
+      - name: Uninstall
+        run: |
+          $package = Get-AppxPackage "${{ steps.check.outputs.identity-name }}"
+          Remove-AppxPackage $package.PackageFullName
+          if (Test-Path "$env:LOCALAPPDATA\Packages\$($package.PackageFamilyName)") {
+            echo "::error::Uninstalling left the package's data behind."
+            exit 1
+          }
+
+      # Only a package that passed every step above gets this name, which is the one the Store
+      # job and a submission by hand take it under.
+      - id: package-artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: msix-${{ needs.plan.outputs.version }}
+          path: |
+            apps/desktop/dist/*.msix
+            apps/desktop/dist/*.msix.json
+            apps/desktop/dist/*.wack.xml
+          retention-days: ${{ env.MSIX_DAYS }}
+          if-no-files-found: error
+      - uses: ./.workflow/.github/actions/package-receipt
+        with:
+          platform: win-x64
+          distribution: store
+          version: ${{ needs.plan.outputs.version }}
+          package-version: ${{ steps.check.outputs.package-version }}
+          sha: ${{ needs.plan.outputs.sha }}
+          artifact-name: msix-${{ needs.plan.outputs.version }}
+          artifact-id: ${{ steps.package-artifact.outputs.artifact-id }}
+          artifact-digest: ${{ steps.package-artifact.outputs.artifact-digest }}
+          retention-days: ${{ env.MSIX_DAYS }}
+      - name: Expose the accepted Store package
+        id: accepted
+        env:
+          SHA256: ${{ steps.check.outputs.sha256 }}
+        run: Add-Content $env:GITHUB_OUTPUT "sha256=$env:SHA256"
+      # What a failed check left, to look at. Never submitted.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: msix-failed-${{ needs.plan.outputs.version }}
+          path: |
+            apps/desktop/dist/*.msix
+            apps/desktop/dist/*.msix.json
+            apps/desktop/dist/*.wack.xml
+          retention-days: 14
+
+  # The source archives the installers' licences ask for, which every release attaches: FFmpeg and
+  # x264, Chromium's FFmpeg and Electron, and the Windows setup's plug-ins. Each is checked against
+  # its pinned SHA-256 or commit, and the notices built into the app have to link exactly these
+  # files; docs/maintainers/licences.md#sources-on-every-release. Dry runs prepare and check them
+  # too, so a missing or changed source shows before a release needs it. As a release-* artifact,
+  # the archives reach publish with the installers.
+  sources:
+    name: Prepare sources
+    needs: [plan, bundle]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      KEEP_DAYS: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
+    outputs:
+      files: ${{ steps.prepare.outputs.files }}
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      # The notices link the sources on the release of this version.
+      - uses: ./.workflow/.github/actions/setup
+        with:
+          version: ${{ needs.plan.outputs.version }}
+      - id: prepare
+        run: node scripts/release-sources.ts "$RUNNER_TEMP/sources"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-sources-${{ needs.plan.outputs.version }}
+          path: ${{ runner.temp }}/sources/
+          retention-days: ${{ env.KEEP_DAYS }}
+          if-no-files-found: error
+
+  upgrade:
+    name: Install and upgrade on Windows
     needs: plan
-    if: needs.plan.outputs.promoted != ''
-    uses: ./.github/workflows/upgrade-check.yml
-    with:
-      candidate: ${{ needs.plan.outputs.promoted }}
-      # The commit the release builds, so the check proves that source.
-      sha: ${{ needs.plan.outputs.sha }}
-
-  publish:
-    name: Publish
-    needs: [plan, package, upgrade-check]
     if: >-
-      !cancelled() && needs.plan.outputs.dry-run == 'false' && needs.package.result == 'success'
-      && (needs.upgrade-check.result == 'success' || needs.upgrade-check.result == 'skipped')
-    uses: ./.github/workflows/publish.yml
-    with:
-      channel: ${{ needs.plan.outputs.channel }}
-      version: ${{ needs.plan.outputs.version }}
-      tag: ${{ needs.plan.outputs.tag }}
-      sha: ${{ needs.plan.outputs.sha }}
-      previous-tag: ${{ needs.plan.outputs.previous-tag }}
-      sources: ${{ needs.package.outputs.sources }}
-      msix-sha256: ${{ needs.package.outputs.msix-sha256 }}
-    secrets: inherit
+      !cancelled() && (needs.plan.outputs.promoted != '' || (inputs.operation == 'upgrade' && !inputs.dry-run && github.event_name == 'workflow_dispatch')) && github.repository == 'Mr-Streamer-OSS/MrStreamer' && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    timeout-minutes: 90
+    # One at a time, and never cancelled: a run cut short could leave its firewall rules on its
+    # runner. Every request waits its turn, so one by hand never replaces a release's.
+    concurrency:
+      group: upgrade-check
+      cancel-in-progress: false
+      queue: max
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      # The check drives the installed app; it needs no Electron of its own.
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Find and check the two installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE: ${{ (needs.plan.outputs.promoted || inputs.candidate) }}
+          SHA: ${{ needs.plan.outputs.sha || inputs.candidate-sha }}
+          NATIVE_CASE: ${{ inputs.operation == 'upgrade' && inputs.native_case || 'all' }}
+        run: |
+          case "$NATIVE_CASE" in
+            all) ;;
+            compatibility)
+              [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Focused compatibility requires a full candidate SHA'; exit 1; }
+              [[ "$CANDIDATE" == v0.0.16-nightly.* ]] || { echo 'Focused compatibility requires a .16 nightly'; exit 1; }
+              ;;
+            *) echo 'Unknown native telemetry selection'; exit 1 ;;
+          esac
+          args=(--candidate "$CANDIDATE" --out "$RUNNER_TEMP/installed-upgrade-packages")
+          [ -n "$SHA" ] && args+=(--sha "$SHA")
+          node apps/desktop/test/e2e/installed-upgrade.ts resolve "${args[@]}"
+      - name: Install, retain state and check offline copies
+        run: |
+          node apps/desktop/test/e2e/installed-upgrade.ts run \
+            --packages "$RUNNER_TEMP/installed-upgrade-packages" --root "$RUNNER_TEMP/installed-upgrade"
+      # Explicit long native acceptance stays outside the bounded release-UI aggregate.
+      - name: Native telemetry and installed .15 compatibility
+        if: startsWith((needs.plan.outputs.promoted || inputs.candidate), 'v0.0.16-nightly.')
+        env:
+          NATIVE_CASE: ${{ inputs.operation == 'upgrade' && inputs.native_case || 'all' }}
+          SHA: ${{ needs.plan.outputs.sha || inputs.candidate-sha }}
+        run: |
+          args=(--native-case "$NATIVE_CASE")
+          [ -n "$SHA" ] && args+=(--sha "$SHA")
+          node apps/desktop/test/e2e/installed-upgrade.ts telemetry \
+            --packages "$RUNNER_TEMP/installed-upgrade-packages" --root "$RUNNER_TEMP/native-telemetry" "${args[@]}"
+      - name: Installed AV1 and copied-video recovery
+        if: startsWith((needs.plan.outputs.promoted || inputs.candidate), 'v0.0.16-nightly.')
+        env:
+          SHA: ${{ needs.plan.outputs.sha || inputs.candidate-sha }}
+        run: |
+          args=()
+          [ -n "$SHA" ] && args+=(--sha "$SHA")
+          node apps/desktop/test/e2e/installed-media.ts \
+            --packages "$RUNNER_TEMP/installed-upgrade-packages" --out "$RUNNER_TEMP/installed-media" "${args[@]}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: installed-media-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/installed-media/evidence/
+          retention-days: 14
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: installed-media-profiles-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/installed-media/profiles/
+            !${{ runner.temp }}/installed-media/profiles/**/Cache/
+            !${{ runner.temp }}/installed-media/profiles/**/Code Cache/
+            !${{ runner.temp }}/installed-media/profiles/**/GPUCache/
+            !${{ runner.temp }}/installed-media/profiles/**/DawnGraphiteCache/
+            !${{ runner.temp }}/installed-media/profiles/**/DawnWebGPUCache/
+          retention-days: 7
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: native-telemetry-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/native-telemetry/evidence/
+          retention-days: 14
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: native-telemetry-profiles-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/native-telemetry/profiles/
+            !${{ runner.temp }}/native-telemetry/profiles/**/Cache/
+            !${{ runner.temp }}/native-telemetry/profiles/**/Code Cache/
+            !${{ runner.temp }}/native-telemetry/profiles/**/GPUCache/
+          retention-days: 7
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: installed-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/installed-upgrade-packages/receipt.json
+            ${{ runner.temp }}/installed-upgrade/evidence/
+            ${{ runner.temp }}/installed-upgrade/profile.lock
+          retention-days: 14
+          if-no-files-found: warn
+      # What a failure left, to look at: the fake subscription's profile, without Chromium's caches.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: installed-upgrade-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/installed-upgrade/profile/
+            !${{ runner.temp }}/installed-upgrade/profile/**/Cache/
+            !${{ runner.temp }}/installed-upgrade/profile/**/Code Cache/
+            !${{ runner.temp }}/installed-upgrade/profile/**/GPUCache/
+            !${{ runner.temp }}/installed-upgrade/profile/**/DawnGraphiteCache/
+            !${{ runner.temp }}/installed-upgrade/profile/**/DawnWebGPUCache/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # The GitHub release, published only once every platform's files and every source are here and
+  # the version still sorts after every release.
+  publish:
+    name: GitHub release
+    needs:
+      [
+        plan,
+        validation,
+        check,
+        test,
+        bundle,
+        release-ui,
+        package,
+        package-windows,
+        msix,
+        sources,
+        upgrade,
+      ]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.dry-run == 'false' && needs.plan.outputs.skip == 'false'
+      && github.event_name != 'pull_request'
+      && needs.validation.result == 'success'
+      && needs.bundle.result == 'success' && needs.package.result == 'success'
+      && needs.package-windows.result == 'success' && needs.sources.result == 'success'
+      && (needs.validation.outputs.reused == 'true' || (needs.check.result == 'success' && needs.test.result == 'success'))
+      && (needs.plan.outputs.channel != 'stable' || needs.upgrade.result == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: write
+      # The notes list the pull requests behind each commit.
       pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      SHA: ${{ needs.plan.outputs.sha }}
+      PREVIOUS_TAG: ${{ needs.plan.outputs.previous-tag }}
+      SOURCES: ${{ needs.sources.outputs.files }}
+    steps:
+      # The workflow's scripts. The release's files come from the jobs that built them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # The installers of every platform, and the sources that go with them.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*-${{ needs.plan.outputs.version }}
+          path: release
+          merge-multiple: true
+      - name: Check the release is complete and still new
+        run: node scripts/release-plan.ts check --version "$VERSION" --dir release --sources "$SOURCES"
+      - name: Write checksums and notes
+        run: |
+          (cd release && sha256sum -- * > SHA256SUMS.txt)
+          {
+            echo "**${CHANNEL^}** · built from \`${SHA::12}\`"
+            echo
+            echo "Download the DMG on Mac, the setup .exe on Windows, and the AppImage or .deb on Linux. SHA256SUMS.txt lists every file's checksum."
+            echo
+            node scripts/release-plan.ts notes --tag "$TAG" --sha "$SHA" --previous-tag "$PREVIOUS_TAG"
+          } > notes.md
+      # A failed or repeated attempt can leave a draft with this tag. Users never saw it.
+      - name: Remove an unfinished attempt
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id" |
+            while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; done
+      # Uploads into a draft, which the app can't see, and publishes once every file is in.
+      - name: Publish
+        run: |
+          nightly=$([ "$CHANNEL" = nightly ] && echo true || echo false)
+          gh release create "$TAG" release/* --draft --prerelease="$nightly" --target "$SHA" \
+            --title "Mr. Streamer $VERSION" --notes-file notes.md
+          if [ "$nightly" = true ]; then
+            gh release edit "$TAG" --draft=false --latest=false
+          else
+            gh release edit "$TAG" --draft=false --latest
+          fi
+
+  # The release's post in #releases or #nightly, sent once the GitHub release is out, whatever the
+  # feed, Store and website do. It is optional: a failure here never fails the run.
+  discord:
+    name: Discord announcement
+    needs: [plan, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Announce the published release
+        env:
+          CHANNEL: ${{ needs.plan.outputs.channel }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          DISCORD_STABLE_WEBHOOK_URL: ${{ secrets.DISCORD_STABLE_WEBHOOK_URL }}
+          DISCORD_NIGHTLY_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
+        run: node scripts/discord-release.ts
+
+  # The update feed, updates.json at the root of the GitHub Pages site, which names the newest
+  # release on each channel. It never moves a channel down unless allow-regress says so. The
+  # release is out by now, so a failure here shows on this job without failing the run.
+  # Pages must be enabled once, with source "GitHub Actions"; docs/maintainers/releasing.md.
+  feed:
+    name: Update feed
+    needs: [plan, publish]
+    if: >-
+      !cancelled() && (needs.publish.result == 'success'
+      || (inputs.operation == 'feed' && !inputs.dry-run && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    continue-on-error: ${{ needs.plan.outputs.tag != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
       pages: write
       id-token: write
-      # The Store job reads the run's own package and the environment's branch rule.
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    # Each publication reads the releases after the previous one deployed.
+    concurrency:
+      group: update-feed
+      cancel-in-progress: false
+      queue: max
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Write the feed
+        env:
+          ALLOW_REGRESS: ${{ inputs.operation == 'feed' && inputs.allow-regress == true }}
+        run: |
+          # The site's address, custom domain or not. None before Pages is enabled; any other
+          # failure stops here, since without the deployed feed the releases could take a
+          # channel back.
+          if site=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url 2>"$RUNNER_TEMP/pages-error"); then
+            :
+          elif grep -q "HTTP 404" "$RUNNER_TEMP/pages-error"; then
+            echo "::warning::No GitHub Pages site found, so deploying will fail. Enable Pages: docs/maintainers/releasing.md#enabling-pages"
+            site=""
+          else
+            echo "::error::Couldn't look up the GitHub Pages site: $(cat "$RUNNER_TEMP/pages-error"). Run this again."
+            exit 1
+          fi
+          args=(--out site/updates.json)
+          [ -n "$site" ] && args+=(--current "${site%/}/updates.json")
+          [ "$ALLOW_REGRESS" = true ] && args+=(--allow-regress)
+          mkdir -p site
+          touch site/.nojekyll
+          node scripts/release-plan.ts feed "${args[@]}"
+      # Named per release and per attempt, so re-running this job never meets an earlier artifact.
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+          name: github-pages-${{ needs.plan.outputs.tag || 'regenerated' }}-${{ github.run_attempt }}
+          include-hidden-files: true
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: github-pages-${{ needs.plan.outputs.tag || 'regenerated' }}-${{ github.run_attempt }}
+
+  # Whether the Store job may run, read before any job names the microsoft-store environment:
+  # GitHub creates a missing environment, open to every branch, for the first job that does. A
+  # stable release's own call submits; while STORE_AUTOMATION_ENABLED isn't "true" it stops here
+  # with a notice and stays green. docs/maintainers/microsoft-store.md has the setup.
+  store-gate:
+    name: Check the Store setup
+    needs: [plan, publish, msix]
+    if: >-
+      !cancelled() && ((needs.publish.result == 'success' && needs.plan.outputs.channel == 'stable'
+      && needs.msix.result == 'success' && needs.msix.outputs.sha256 != '')
+      || (inputs.operation == 'store' && !inputs.dry-run && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # Reads the environment's branch rule.
       actions: read
+    outputs:
+      ready: ${{ steps.gate.outputs.ready }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENABLED: ${{ vars.STORE_AUTOMATION_ENABLED }}
+          # A release's own call names no action: it submits.
+          ACTION: ${{ needs.plan.outputs.tag != '' && 'submit' || inputs.store-action }}
+          RELEASE_RUN: ${{ needs.plan.outputs.tag != '' }}
+        run: |
+          args=(--action "$ACTION" --ref "$GITHUB_REF" --enabled "$ENABLED")
+          [ "$RELEASE_RUN" = true ] && args+=(--release-run)
+          node scripts/store-release.ts gate "${args[@]}"
+
+  # Sends a stable release's Store package to Partner Center and reads back what the Store did
+  # with it: the package the release run built and tested, never built again. It waits for
+  # Microsoft to take the upload, a few minutes, and not for certification. The release is out by
+  # then, so a failure here changes nothing about it. main's dependency-free scripts run with
+  # node alone, and only the last step holds the credential.
+  store:
+    name: Microsoft Store
+    needs: [plan, store-gate, msix]
+    if: ${{ !cancelled() && needs.store-gate.outputs.ready == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: microsoft-store
+    concurrency:
+      group: microsoft-store
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+      # Finds a release run's package when started by hand.
+      actions: read
+    env:
+      ACTION: ${{ needs.plan.outputs.tag != '' && 'submit' || inputs.store-action }}
+      VERSION: ${{ needs.plan.outputs.version || inputs.version }}
+      # Set by a release's own call alone: the commit it built.
+      SHA: ${{ needs.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # A release's own call takes the package its run built. Started by hand, the script finds
+      # the release run that still holds it. status needs no package.
+      - name: Check the release
+        id: release
+        if: needs.plan.outputs.version != '' || inputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=(--version "$VERSION" --out "$RUNNER_TEMP/store-release.json")
+          [ -n "$SHA" ] && args+=(--sha "$SHA" --run "$GITHUB_RUN_ID")
+          [ "$ACTION" != status ] && args+=(--package)
+          node scripts/store-release.ts release "${args[@]}"
+      # Another run's artifact needs the token; this run's own doesn't.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.release.outputs.run-id != ''
+        with:
+          name: msix-${{ needs.plan.outputs.version || inputs.version }}
+          path: ${{ runner.temp }}/msix
+          run-id: ${{ steps.release.outputs.run-id }}
+          github-token: ${{ steps.release.outputs.run-id != github.run_id && github.token || '' }}
+      - name: Check the package
+        if: steps.release.outputs.run-id != ''
+        env:
+          SHA256: ${{ needs.msix.outputs.sha256 }}
+        run: |
+          args=(--release "$RUNNER_TEMP/store-release.json" --dir "$RUNNER_TEMP/msix")
+          [ -n "$SHA" ] && args+=(--sha256 "$SHA256")
+          node scripts/store-release.ts verify "${args[@]}"
+      # The only step that holds the credential.
+      - name: Microsoft Store
+        env:
+          STORE_TENANT_ID: ${{ vars.STORE_TENANT_ID }}
+          STORE_CLIENT_ID: ${{ vars.STORE_CLIENT_ID }}
+          STORE_CLIENT_SECRET: ${{ secrets.STORE_CLIENT_SECRET }}
+          STORE_CLIENT_SECRET_EXPIRES: ${{ vars.STORE_CLIENT_SECRET_EXPIRES }}
+          # Set by hand alone: a draft made in Partner Center, and its fingerprint for submit.
+          DRAFT: ${{ inputs.operation == 'store' && inputs.draft || '' }}
+          DRAFT_METADATA_SHA256: ${{ inputs.operation == 'store' && inputs.draft-metadata-sha256 || '' }}
+        run: |
+          args=()
+          [ -n "$VERSION" ] && args+=(--release "$RUNNER_TEMP/store-release.json")
+          [ -n "$DRAFT" ] && args+=(--draft "$DRAFT")
+          [ -n "$DRAFT_METADATA_SHA256" ] && args+=(--draft-metadata-sha256 "$DRAFT_METADATA_SHA256")
+          node scripts/store-submission.ts "$ACTION" "${args[@]}"
+
+  # Records a published stable release in apps/desktop/package.json on main, so later nightlies
+  # preview the patch after it.
+  finalize:
+    name: Record the stable version on main
+    needs: [plan, publish]
+    if: ${{ !cancelled() && needs.plan.outputs.channel == 'stable' && needs.publish.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # Main may move while this runs: start again from its newest commit when a push is refused.
+      - name: Commit the version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3; do
+            git fetch -q --depth 1 origin "$GITHUB_REF_NAME" && git reset -q --hard FETCH_HEAD
+            node scripts/release-plan.ts record --version "$VERSION"
+            git diff --quiet && exit 0
+            git commit -qam "chore(release): prepare v$VERSION"
+            git push -q origin "HEAD:$GITHUB_REF_NAME" && exit 0
+            sleep $((attempt * 5))
+          done
+          echo "::error::Main kept moving; run this job again."
+          exit 1
+
+  # The website, once the version commit is on main, whatever the feed and the Store did. The
+  # version commit is the workflow token's push, which starts no workflow, so this call is the
+  # website's only cue. website.yml reads its Vercel token from its own environment.
+  website-refresh:
+    name: Website
+    needs: [plan, finalize]
+    uses: ./.github/workflows/website.yml
+    if: ${{ !cancelled() && needs.finalize.result == 'success' }}
+    with:
+      deploy: true

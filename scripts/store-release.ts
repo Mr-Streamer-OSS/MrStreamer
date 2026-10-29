@@ -165,7 +165,7 @@ export function storeFilePrefix(release: Pick<StoreRelease, "version" | "commit"
 }
 
 /**
- * Whether publish.yml's Store gate may go on to the job that names the environment. Null when it may,
+ * Whether release.yml's Store gate may go on to the job that names the environment. Null when it may,
  * and otherwise why a release's own run leaves the Store alone, which is no failure. Throws when
  * the setup is wrong or someone asked by hand for what is turned off.
  */

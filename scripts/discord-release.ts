@@ -1,4 +1,4 @@
-// publish.yml calls this only after GitHub publication. Discord is optional: delivery problems
+// release.yml calls this only after GitHub publication. Discord is optional: delivery problems
 // warn without failing the publisher. No response body, credential or network error is logged.
 import { parseArgs } from "node:util";
 

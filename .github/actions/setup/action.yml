@@ -1,7 +1,6 @@
-# What every job of package.yml starts with, after checking out the release's commit: Node, pnpm
-# and the commit's dependencies, the release version in the app's package.json, and the JS
-# bundle the bundle job built for it. Jobs load it from the workflow commit's tools in .workflow,
-# so a stable release of a nightly tested earlier sets up the way the workflow does.
+# Sets up Release's bundle, packaging, source and UI-proof jobs: candidate dependencies and
+# version, with the shared JS bundle unless this job builds it. Jobs load this action from
+# the workflow commit's .workflow checkout so an older candidate uses the current release setup.
 name: Set up a release job
 description: Install the release commit's dependencies, stamp the version and take the JS bundle
 
