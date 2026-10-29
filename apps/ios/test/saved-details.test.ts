@@ -337,6 +337,9 @@ async function withSeries() {
   return { app, series: await first(app, "series") };
 }
 
+/** A replacement password the panel accepts as ONE's. */
+const NEW = "canaryNew9";
+
 describe("saved title language", () => {
   it("keeps an unlisted device language until changed, then cold-reads before indexing", async () => {
     const resolved = Intl.DateTimeFormat.prototype.resolvedOptions;
@@ -504,7 +507,6 @@ describe("R77 source and language authority", () => {
   });
 
   it("persists a current caller after password replacement and language A-B-A compose with an old read", async () => {
-    const NEW = "canaryNew9";
     memory.aliases = [[NEW, ONE.password]];
     memory.details = (body) => episodePlots(body, "Old source episode.");
     const app = await launch({ withTmdb: true });
@@ -812,9 +814,11 @@ describe("playback", () => {
 });
 
 describe("a login replaced or removed", () => {
-  it("never shows or saves what the old password read once a new one is saved", async () => {
-    const NEW = "canaryNew9";
+  beforeEach(() => {
     memory.aliases = [[NEW, ONE.password]];
+  });
+
+  it("never shows or saves what the old password read once a new one is saved", async () => {
     const app = await launch();
     const id = await added(app);
     const series = await first(app, "series");
@@ -834,8 +838,6 @@ describe("a login replaced or removed", () => {
   });
 
   it("never shows, saves or plays from a read under the old password", async () => {
-    const NEW = "canaryNew9";
-    memory.aliases = [[NEW, ONE.password]];
     const app = await launch();
     const id = await added(app);
     const series = await first(app, "series");
@@ -883,8 +885,6 @@ describe("a login replaced or removed", () => {
   });
 
   it("shows nothing of the old password read while TMDB answered during a new one", async () => {
-    const NEW = "canaryNew9";
-    memory.aliases = [[NEW, ONE.password]];
     memory.details = (body) => episodePlots(body, "Old login's episode.");
     tmdb.refuse(true);
     const app = await launch({ withTmdb: true });
@@ -957,8 +957,6 @@ describe("a login replaced or removed", () => {
 
   for (const how of ["given a new password", "added again"] as const) {
     it(`reads under the old password when the Keychain refuses the new one, ${how}`, async () => {
-      const NEW = "canaryNew9";
-      memory.aliases = [[NEW, ONE.password]];
       const app = await launch();
       const id = await added(app);
       const series = await first(app, "series");
@@ -980,8 +978,6 @@ describe("a login replaced or removed", () => {
 
   for (const failure of ["before", "lost"] as const) {
     it(`settles channels loading when the Keychain refused a new password, ${failure === "lost" ? "losing the old one" : "keeping the old one"}`, async () => {
-      const NEW = "canaryNew9";
-      memory.aliases = [[NEW, ONE.password]];
       const app = await launch();
       const id = await added(app);
       await until(() => app.members()[0]?.live.kind === "ready", "the channels");
@@ -1023,8 +1019,6 @@ describe("a login replaced or removed", () => {
   }
 
   it("reads under the new password when the Keychain stored it though it answered with a failure", async () => {
-    const NEW = "canaryNew9";
-    memory.aliases = [[NEW, ONE.password]];
     const app = await launch();
     const id = await added(app);
     const series = await first(app, "series");
@@ -1041,14 +1035,13 @@ describe("a login replaced or removed", () => {
   });
 
   it("asks for the password when the Keychain lost it refusing the new one", async () => {
-    memory.aliases = [["canaryNew9", ONE.password]];
     const app = await launch();
     const id = await added(app);
     const series = await first(app, "series");
     await opened(app, series);
 
     memory.secretFailure = "lost";
-    await expect(app.update(id, { password: "canaryNew9" })).rejects.toMatchObject({
+    await expect(app.update(id, { password: NEW })).rejects.toMatchObject({
       error: { kind: "keychain-refused" },
     });
     await expect(app.detailsOf(series)).rejects.toMatchObject({
@@ -1058,12 +1051,11 @@ describe("a login replaced or removed", () => {
   });
 
   it("keeps the old password when its saved details can't be deleted", async () => {
-    memory.aliases = [["canaryNew9", ONE.password]];
     const app = await launch();
     const id = await added(app);
     await opened(app, await first(app, "movie"));
     native.undeletable = (path) => path.includes(`${join("details", "providers")}`);
-    await expect(app.update(id, { password: "canaryNew9" })).rejects.toMatchObject({
+    await expect(app.update(id, { password: NEW })).rejects.toMatchObject({
       error: { kind: "unexpected" },
     });
     expect(memory.keychain.get(`s.${id}`)).toBe(ONE.password);

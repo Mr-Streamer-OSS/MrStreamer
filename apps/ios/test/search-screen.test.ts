@@ -988,13 +988,6 @@ describe("Search over the tabs", () => {
     expect(text()).toContain('Nothing named "zzx".');
     expect(text()).toContain("Searched 2 channels, 1 movie and 0 series.");
   });
-
-  it("says nothing has the name only with everything in, and how much it looked through", async () => {
-    await open();
-    await type("zzq");
-    expect(text()).toContain('Nothing named "zzq".');
-    expect(text()).toContain("Searched 2 channels, 1 movie and 0 series.");
-  });
 });
 
 describe("Every movie and series that matches", () => {
