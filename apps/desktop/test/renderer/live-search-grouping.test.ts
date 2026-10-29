@@ -1573,6 +1573,7 @@ describe("searching the list Live TV shows", () => {
     expect(document.activeElement).toBe(p.field());
     // In the field a digit is text, not a channel number.
     await p.press("4");
+    await settled(1300);
     expect(p.watch).not.toHaveBeenCalled();
     await searched(p, "4", ["Channel 4"]);
 
