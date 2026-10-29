@@ -650,7 +650,7 @@ jobs:
   # The Microsoft Store package, an MSIX of the same app, for dry runs and stable releases: only
   # stable releases go to the Store, through Release. It waits for the Windows installer and
   # no other platform. Outside a dry run its failure doesn't fail the release: Release's Store
-  # job then has no checksum and says so, after the release is out. Its file stays a workflow
+  # gate skips automatic submission without a successful MSIX and checksum. Its file stays a workflow
   # artifact: never on the release or in the update feed.
   msix:
     name: Package Microsoft Store MSIX
