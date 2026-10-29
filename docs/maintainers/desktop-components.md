@@ -49,4 +49,4 @@ Run `pnpm install --frozen-lockfile`, `pnpm check`, the complete CI test suite/r
 
 The release card still owns native Windows/macOS packaging, actual bundled-tool hashes/provenance, installed stable-to-candidate upgrades, signatures/notarization, codec/audio/GPU acceptance and final component-to-notice/source-archive matching. A Linux source build and mocked installer tests do not prove those checks. The exact candidate must repeat the installed updater paths because its shipped updater changed. No installed 0.0.21 acceptance is claimed here.
 
-Changes to root `package.json`, `pnpm-workspace.yaml` and `pnpm-lock.yaml` match the push-to-main website publication paths in `.github/workflows/publish.yml`. Production deployment also depends on `MARKETING_DEPLOY_ENABLED` and the `marketing-production` environment; local builds do not deploy the website.
+Changes to root `package.json`, `pnpm-workspace.yaml` and `pnpm-lock.yaml` match the push-to-main website publication paths in `.github/workflows/website.yml`. Production deployment also depends on `MARKETING_DEPLOY_ENABLED` and the `marketing-production` environment; local builds do not deploy the website.

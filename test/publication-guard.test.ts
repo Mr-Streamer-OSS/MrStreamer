@@ -1,4 +1,7 @@
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { devNull, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
@@ -20,6 +23,7 @@ interface Job {
   readonly needs?: string | readonly string[];
   readonly uses?: string;
   readonly with?: Record<string, unknown>;
+  readonly steps?: readonly { readonly id?: string; readonly run?: string }[];
   readonly outputs?: Record<string, unknown>;
 }
 
@@ -419,7 +423,7 @@ const passed = (run: Partial<Run>): Run => ({
 
 describe("publishing", { timeout: 120_000 }, () => {
   it("never starts on a pull request event of its own", () => {
-    expect(Object.keys(publish.on)).toEqual(["workflow_call", "push", "workflow_dispatch"]);
+    expect(Object.keys(publish.on)).toEqual(["workflow_call", "workflow_dispatch"]);
   });
 
   it("runs no job of a release's call for a dry run or a pull request event, whatever else happened", () => {
@@ -449,8 +453,7 @@ describe("publishing", { timeout: 120_000 }, () => {
         "feed",
         "store",
         "finalize",
-        "website-publish",
-        "indexnow",
+        "website-refresh",
       ]),
     );
   });
@@ -469,15 +472,22 @@ describe("publishing", { timeout: 120_000 }, () => {
     expect(publish.jobs["discord"]?.["continue-on-error"]).toBe(true);
   });
 
-  it("publishes the website alone after a push to main that changes it", () => {
-    expect(simulate(publish, {}, "push", false)).toEqual([
-      "website",
-      "website-publish",
-      "indexnow",
-    ]);
-    expect(simulate(publish, {}, "push", true)).toEqual([]);
+  it("calls the website after a stable release's version commit, whatever the feed and Store did", () => {
+    const stable = { channel: "stable", tag: "v0.0.22" };
+    for (const feed of RESULTS)
+      for (const store of RESULTS)
+        expect(simulate(publish, stable, "workflow_dispatch", false, { feed, store })).toContain(
+          "website-refresh",
+        );
+    for (const finalize of RESULTS.filter((result) => result !== "success"))
+      expect(simulate(publish, stable, "workflow_dispatch", false, { finalize })).not.toContain(
+        "website-refresh",
+      );
+    expect(publish.jobs["website-refresh"]).toMatchObject({
+      uses: "./.github/workflows/website.yml",
+      with: { deploy: true },
+    });
   });
-
   it("publishes nothing once the run is cancelled, or the package call failed", () => {
     const jobs = (run: Run) => Object.values(publishedBy(release, publish, run)).flat();
     const ok = passed({});
@@ -525,6 +535,107 @@ describe("publishing", { timeout: 120_000 }, () => {
   it("is called by no other workflow", () => {
     for (const name of ["checks.yml", "package.yml", "upgrade-check.yml"]) {
       expect(Object.values(read(name).jobs).map((job) => job.uses)).not.toContain(PUBLISH);
+    }
+  });
+});
+
+describe("the website", () => {
+  const website = read("website.yml");
+
+  it("publishes after a push to main or a run by hand, never for a pull request event", () => {
+    expect(Object.keys(website.on)).toEqual(["workflow_call", "push", "workflow_dispatch"]);
+    const published = ["website", "website-publish", "indexnow"];
+    expect(simulate(website, {}, "push", false)).toEqual(published);
+    expect(simulate(website, { deploy: true }, "workflow_dispatch", false)).toEqual(published);
+    expect(simulate(website, {}, "push", true)).toEqual([]);
+    expect(simulate(website, { deploy: true }, "pull_request", false)).toEqual([]);
+  });
+
+  // Runs the build job's real inputs and decision steps on a scratch repository, one push each.
+  it("publishes a push only when it changes what the website is built from", () => {
+    const steps = website.jobs["website"]!.steps!;
+    const script = (id: string) => steps.find((step) => step.id === id)!.run!;
+    const dir = mkdtempSync(join(tmpdir(), "website-delivery-"));
+    const output = join(dir, "output");
+    const gitEnv = {
+      ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
+      GIT_CONFIG_GLOBAL: devNull,
+      GIT_CONFIG_NOSYSTEM: "1",
+    };
+    const git = (...args: string[]) =>
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.com",
+          "-c",
+          "commit.gpgsign=false",
+          ...args,
+        ],
+        { cwd: dir, env: gitEnv, encoding: "utf8" },
+      ).trim();
+    try {
+      git("init", "-q");
+      mkdirSync(join(dir, ".github/workflows"), { recursive: true });
+      writeFileSync(
+        join(dir, ".github/workflows/website.yml"),
+        readFileSync(".github/workflows/website.yml"),
+      );
+      git("add", ".");
+      git("commit", "-qm", "base");
+      const base = git("rev-parse", "HEAD");
+      execFileSync("bash", ["-e", "-c", script("inputs")], {
+        cwd: dir,
+        env: { ...gitEnv, GITHUB_OUTPUT: output },
+      });
+      const inputs = readFileSync(output, "utf8")
+        .trim()
+        .replace(/^paths=/, "");
+      const decide = (before: string, after: string, event = "push", requested = "") => {
+        writeFileSync(output, "");
+        const run = spawnSync("bash", ["-e", "-c", script("delivery")], {
+          cwd: dir,
+          env: {
+            ...gitEnv,
+            GITHUB_OUTPUT: output,
+            EVENT: event,
+            REQUESTED: requested,
+            BEFORE: before,
+            AFTER: after,
+            INPUTS: inputs,
+          },
+        });
+        return { status: run.status, output: readFileSync(output, "utf8") };
+      };
+      for (const [path, deploy] of [
+        [".github/workflows/publish.yml", false],
+        ["docs/maintainers/ci.md", false],
+        ["apps/marketing/src/page.ts", true],
+        ["apps/marketing/README.md", false],
+        [".cursor/skills/verify-mrstreamer/features/website.md", false],
+        ["pnpm-lock.yaml", true],
+      ] as const) {
+        git("reset", "-q", "--hard", base);
+        mkdirSync(dirname(join(dir, path)), { recursive: true });
+        writeFileSync(join(dir, path), "changed");
+        git("add", path);
+        git("commit", "-qm", path);
+        expect(decide(base, git("rev-parse", "HEAD")), path).toEqual({
+          status: 0,
+          output: `deploy=${deploy}\n`,
+        });
+      }
+      expect(decide("missing", "HEAD")).toMatchObject({ status: 1, output: "" });
+      for (const requested of ["true", "false", ""]) {
+        expect(decide("", "", "workflow_dispatch", requested)).toEqual({
+          status: 0,
+          output: `deploy=${requested === "true"}\n`,
+        });
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
