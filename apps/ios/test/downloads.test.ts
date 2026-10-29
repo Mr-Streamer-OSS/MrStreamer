@@ -2175,6 +2175,7 @@ describe("the native queue's contract", { timeout: 40_000 }, () => {
     app = await launch();
     await until(() => doc().items.length === 0, "the removal to finish");
     await until(() => background.receipts.length === 0, "its receipt acknowledged after");
+    await until(() => !folder(film.id).exists, "its files to be removed after native drainage");
     await sleep(1_500);
     expect(native.requests).toHaveLength(asked);
     expect(folder(film.id).exists).toBe(false);

@@ -118,14 +118,16 @@ export function createEngine(
       const { default: mpegts } = await import("mpegts.js");
       return () => mpegtsEngine(mpegts, video, url, ends);
     }
-    const [{ default: Hls }, { hlsTracks }] = await Promise.all([
-      import("hls.js"),
-      import("./hls-tracks.ts"),
-    ]);
-    return () =>
-      Hls.isSupported()
-        ? hlsEngine(Hls, hlsTracks, video, url, sound, ends)
-        : nativeEngine(video, url, ends, { kind: "hls", requestId: null });
+    try {
+      const { default: Hls } = await import("hls.js");
+      if (Hls.isSupported()) {
+        const { hlsTracks } = await import("./hls-tracks.ts");
+        return () => hlsEngine(Hls, hlsTracks, video, url, sound, ends);
+      }
+    } catch {
+      // A missing optional chunk must still allow the browser's own HLS playback.
+    }
+    return () => nativeEngine(video, url, ends, { kind: "hls", requestId: null });
   });
 }
 
