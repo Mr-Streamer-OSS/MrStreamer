@@ -154,3 +154,8 @@ export function testConfig(dataDir: string): MainConfig {
     },
   };
 }
+
+/** Default fake-provider credentials; each call returns a fresh editable login. */
+export function demoLogin(provider: Pick<FakeProvider, "url">) {
+  return { server: provider.url, username: "demo", password: "demo" };
+}

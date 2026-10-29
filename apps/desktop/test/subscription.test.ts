@@ -6,6 +6,7 @@ import { Failed } from "@mrstreamer/core/failure";
 import type { Secrets } from "../src/main/platform/secrets.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import {
+  demoLogin,
   fakeProvider,
   holdableFetch,
   promised,
@@ -86,11 +87,7 @@ describe("subscriptions", () => {
     const provider = await fakeProvider();
     const { service } = await subscriptions();
 
-    const summary = await service.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
+    const summary = await service.add(demoLogin(provider));
 
     expect(summary).toMatchObject({ kind: "xtream", server: provider.url, username: "demo" });
     expect(summary.account.state).toBe("active");
@@ -127,9 +124,7 @@ describe("subscriptions", () => {
     const provider = await fakeProvider({ accountStatus: "Expired" });
     const { service } = await subscriptions();
 
-    const error = await failure(
-      service.add({ server: provider.url, username: "demo", password: "demo" }),
-    );
+    const error = await failure(service.add(demoLogin(provider)));
 
     expect(error).toMatchObject({ kind: "account-inactive", state: "expired" });
   });
@@ -139,9 +134,7 @@ describe("subscriptions", () => {
     await provider.close();
     const { service } = await subscriptions();
 
-    const error = await failure(
-      service.add({ server: provider.url, username: "demo", password: "demo" }),
-    );
+    const error = await failure(service.add(demoLogin(provider)));
 
     expect(error).toMatchObject({ kind: "unreachable", server: provider.url });
   });
@@ -179,7 +172,7 @@ describe("subscriptions", () => {
     const provider = await fakeProvider();
     const holdable = holdableFetch();
     const { create, service } = await subscriptions(holdable.fetch);
-    const { id } = await service.add({ server: provider.url, username: "demo", password: "demo" });
+    const { id } = await service.add(demoLogin(provider));
 
     const held = holdable.holdNext();
     const check = service.recheck(id);
@@ -196,7 +189,7 @@ describe("subscriptions", () => {
     const provider = await fakeProvider();
     const holdable = holdableFetch();
     const { create, service } = await subscriptions(holdable.fetch);
-    const login = { server: provider.url, username: "demo", password: "demo" };
+    const login = demoLogin(provider);
     const { id } = await service.add(login);
     const before = await onlySource(service);
 
@@ -257,7 +250,7 @@ describe("subscriptions", () => {
   it("asks for the password again when the keychain no longer opens it", async () => {
     const provider = await fakeProvider();
     const { create, service } = await subscriptions();
-    const login = { server: provider.url, username: "demo", password: "demo" };
+    const login = demoLogin(provider);
     await service.add(login);
 
     // What a new app signature or a reset keychain looks like to the app.
@@ -335,7 +328,7 @@ describe("a subscription's id", () => {
   it("stays when the same login is entered again, and another account gets its own", async () => {
     const [first, second] = [await fakeProvider(), await fakeProvider()];
     const { create, service } = await subscriptions();
-    const login = { server: first.url, username: "demo", password: "demo" };
+    const login = demoLogin(first);
     const { id } = await service.add(login);
     const before = await onlySource(service);
 

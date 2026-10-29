@@ -8,7 +8,7 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { Updates } from "../src/main/services/updates.ts";
 import { parseVersion } from "@mrstreamer/contracts/version";
 import { homeRows } from "@mrstreamer/core/home/rows";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 describe("committed fixed usage observations", () => {
   it("counts source commits, a shared refresh and a favourite command once despite variants, duplicate command IDs and no-op preferences", async () => {
@@ -32,7 +32,7 @@ describe("committed fixed usage observations", () => {
     const library = await promised(runtime, Library);
     const viewing = await promised(runtime, ViewingRecord);
     const preferences = await promised(runtime, Settings);
-    const login = { server: provider.url, username: "demo", password: "demo" };
+    const login = demoLogin(provider);
     const source = await sources.add(login);
     await sources.add(login);
     expect(actions).toEqual(["playlist_added"]);

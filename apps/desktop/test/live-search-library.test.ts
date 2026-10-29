@@ -13,7 +13,15 @@ import {
 import { Library } from "../src/main/services/library.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
+import {
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testSecrets,
+  userAgent,
+} from "./support.ts";
 
 const stampsOf = (groups: LiveSearchGroups) =>
   Object.fromEntries(
@@ -61,11 +69,7 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   const { library, subscriptions } = await started(dataDir);
   const ids = [];
   for (const provider of providers) {
-    const subscription = await subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
+    const subscription = await subscriptions.add(demoLogin(provider));
     ids.push(subscription.id);
     await library.refresh(subscription.id);
   }
@@ -167,11 +171,7 @@ it("catalogue stamps change after a hidden guide conflict without fetching on re
   const { library, subscriptions } = await started(await tempDir());
   const ids: string[] = [];
   for (const provider of providers) {
-    const saved = await subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
+    const saved = await subscriptions.add(demoLogin(provider));
     ids.push(saved.id);
     await library.refresh(saved.id);
   }
@@ -208,11 +208,7 @@ it("palette responses retain full-catalogue ambiguity when the query excludes a 
   }
   const { library, subscriptions } = await started(await tempDir());
   for (const provider of providers) {
-    const saved = await subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
+    const saved = await subscriptions.add(demoLogin(provider));
     await library.refresh(saved.id);
   }
   const whole = await library.channels({ query: "vrt 1" });
@@ -247,11 +243,7 @@ it("ranks exact displayed channel names before prefixes and finds joined punctua
     })),
   );
   const { library, subscriptions } = await started(await tempDir());
-  const subscription = await subscriptions.add({
-    server: provider.url,
-    username: "demo",
-    password: "demo",
-  });
+  const subscription = await subscriptions.add(demoLogin(provider));
   await library.refresh(subscription.id);
   expect((await library.channels({ query: "heat" })).map((channel) => channel.title)).toEqual([
     "Heat",

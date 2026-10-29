@@ -17,7 +17,7 @@ import {
   type FakeProvider,
   type FakeProviderOptions,
 } from "./fake-provider.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 // Each guide download is indexed in a worker thread started from source, which strips the types
 // of what it imports anew: a few hundred milliseconds each on a busy machine.
@@ -44,12 +44,6 @@ function started(dataDir: string) {
   return runtimeFor(mainLayer(testConfig(dataDir)).pipe(Layer.provideMerge(clock)));
 }
 
-const login = (provider: { readonly url: string }) => ({
-  server: provider.url,
-  username: "demo",
-  password: "demo",
-});
-
 async function connectedGuide(options: FakeProviderOptions = {}) {
   const provider = await fakeProvider(options);
   provider.serveGuide(fakeGuide(provider.catalogue, NOW));
@@ -58,7 +52,7 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
   const create = async () => {
     const runtime = started(dataDir);
     const subscriptions = await runtime.runPromise(Subscriptions);
-    const connect = subscriptions.add(login(provider));
+    const connect = subscriptions.add(demoLogin(provider));
     const owner = (subscriptionId ??= (await runtime.runPromise(connect)).id);
     const guide = await runtime.runPromise(Guide);
     const roster = await runtime.runPromise(Roster);
@@ -536,8 +530,8 @@ describe("the guides of several subscriptions", () => {
     };
     const services = await create();
     const { run, subscriptions } = services;
-    const a = (await run(subscriptions.add(login(first)))).id;
-    const b = (await run(subscriptions.add(login(second)))).id;
+    const a = (await run(subscriptions.add(demoLogin(first)))).id;
+    const b = (await run(subscriptions.add(demoLogin(second)))).id;
     return { ...services, create, first, second, a, b };
   }
   const channel = (subscriptionId: string) => ({ subscriptionId, id: "1000" });

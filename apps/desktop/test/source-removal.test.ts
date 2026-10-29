@@ -16,7 +16,7 @@ import { Library } from "../src/main/services/library.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 const boundary = vi.hoisted(() => ({
   next: null as null | { directory: string; arrived: () => void; released: Promise<void> },
@@ -80,11 +80,7 @@ it("settles a refresh before its first scheduler turn and lets the saved source 
   const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
   const subscriptions = await promised(runtime, Subscriptions);
   const provider = await fakeProvider();
-  const { id } = await subscriptions.add({
-    server: provider.url,
-    username: "demo",
-    password: "demo",
-  });
+  const { id } = await subscriptions.add(demoLogin(provider));
   const result = await runtime.runPromise(
     Effect.gen(function* () {
       const library = yield* Library;
@@ -229,11 +225,7 @@ it("finishes removing a source whose cache deletion fails after its login went",
   const library = await promised(runtime, Library);
   const onDemand = await promised(runtime, OnDemand);
   const provider = await fakeProvider();
-  const { id } = await subscriptions.add({
-    server: provider.url,
-    username: "demo",
-    password: "demo",
-  });
+  const { id } = await subscriptions.add(demoLogin(provider));
   await library.refresh(id);
   await onDemand.refresh(id);
   const arrived = Promise.withResolvers<void>();
@@ -291,11 +283,7 @@ it.each([false, true])(
     const onDemand = await promised(runtime, OnDemand);
     const roster = await runtime.runPromise(Roster);
     const provider = await fakeProvider();
-    const { id } = await subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
+    const { id } = await subscriptions.add(demoLogin(provider));
     await library.refresh(id);
     await onDemand.refresh(id);
     const viewing = await promised(runtime, ViewingRecord);
@@ -354,11 +342,10 @@ it.each(["original", "added"])(
     const library = await promised(runtime, Library);
     const roster = await promised(runtime, Roster);
     const first = await fakeProvider();
-    let id = (await subscriptions.add({ server: first.url, username: "demo", password: "demo" }))
-      .id;
+    let id = (await subscriptions.add(demoLogin(first))).id;
     if (kind === "added") {
       const second = await fakeProvider({ second: true });
-      id = (await subscriptions.add({ server: second.url, username: "demo", password: "demo" })).id;
+      id = (await subscriptions.add(demoLogin(second))).id;
     }
     await library.refresh(id);
     const folder = kind === "original" ? dataDir : join(dataDir, "subscriptions", id);
@@ -421,10 +408,8 @@ it.each(["login", "folder"])(
     const rawRoster = await runtime.runPromise(Roster);
     const first = await fakeProvider();
     const second = await fakeProvider({ second: true });
-    const a = (await subscriptions.add({ server: first.url, username: "demo", password: "demo" }))
-      .id;
-    const b = (await subscriptions.add({ server: second.url, username: "demo", password: "demo" }))
-      .id;
+    const a = (await subscriptions.add(demoLogin(first))).id;
+    const b = (await subscriptions.add(demoLogin(second))).id;
     await library.refresh(b);
     const folder = join(dataDir, "subscriptions", b);
     const arrived = Promise.withResolvers<void>();
@@ -465,11 +450,7 @@ it("cancelling the reversible erase restores the source before any cache teardow
   const library = await promised(runtime, Library);
   const titles = await promised(runtime, OnDemand);
   const provider = await fakeProvider();
-  const { id } = await subscriptions.add({
-    server: provider.url,
-    username: "demo",
-    password: "demo",
-  });
+  const { id } = await subscriptions.add(demoLogin(provider));
   await library.refresh(id);
   await titles.refresh(id);
   const raw = await runtime.runPromise(Subscriptions);
@@ -500,7 +481,7 @@ it.each([
     const library = await promised(runtime, Library);
     const rawSettings = await runtime.runPromise(Settings);
     const provider = await fakeProvider({ second: true });
-    const providerLogin = { server: provider.url, username: "demo", password: "demo" };
+    const providerLogin = demoLogin(provider);
     const playlistLogin = { server: playlist.link, username: "", password: "" };
     const first = (await subscriptions.add(original ? providerLogin : playlistLogin)).id;
     const second = (await subscriptions.add(original ? playlistLogin : providerLogin)).id;
@@ -585,9 +566,8 @@ it("logs a refused added-folder cleanup and startup finishes its committed remov
   let subscriptions = await promised(runtime, Subscriptions);
   const first = await fakeProvider();
   const second = await fakeProvider({ second: true });
-  const a = (await subscriptions.add({ server: first.url, username: "demo", password: "demo" })).id;
-  const b = (await subscriptions.add({ server: second.url, username: "demo", password: "demo" }))
-    .id;
+  const a = (await subscriptions.add(demoLogin(first))).id;
+  const b = (await subscriptions.add(demoLogin(second))).id;
   const library = await promised(runtime, Library);
   await library.refresh(b);
   const folder = join(dataDir, "subscriptions", b);

@@ -9,7 +9,15 @@ import { Preferences, SubscriptionPreferences } from "@mrstreamer/contracts/pref
 import { ipcInputs } from "@mrstreamer/contracts/ipc";
 import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
+import {
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testSecrets,
+  userAgent,
+} from "./support.ts";
 
 /** What writes of preferences.json wait for before they reach the disk, as on a slow one. */
 const disk = vi.hoisted<{ ready: Promise<void>; arrived?: () => void }>(() => ({
@@ -54,7 +62,7 @@ async function connected() {
   const provider = await fakeProvider();
   const dataDir = await tempDir();
   const { settings, subscriptions } = await start(dataDir);
-  const login = { server: provider.url, username: "demo", password: "demo" };
+  const login = demoLogin(provider);
   const { id } = await subscriptions.add(login);
   return { dataDir, settings, subscriptions, id, login };
 }
@@ -197,11 +205,7 @@ describe("preferences", () => {
   it("keeps what was left at an added subscription in its own folder, apart from every other's", async () => {
     const { dataDir, settings, subscriptions, id } = await connected();
     const other = await fakeProvider();
-    const added = await subscriptions.add({
-      server: other.url,
-      username: "demo",
-      password: "demo",
-    });
+    const added = await subscriptions.add(demoLogin(other));
     await settings.updateSubscription(id, { lastChannelId: "818" });
 
     // The same ids as the first one's, which mean another channel and another film here.
@@ -679,11 +683,9 @@ it.each(["general", "added"] as const)(
     let subscriptionId: string | null = null;
     if (kind === "added") {
       const original = await fakeProvider();
-      await subscriptions.add({ server: original.url, username: "demo", password: "demo" });
+      await subscriptions.add(demoLogin(original));
       const added = await fakeProvider({ second: true });
-      subscriptionId = (
-        await subscriptions.add({ server: added.url, username: "demo", password: "demo" })
-      ).id;
+      subscriptionId = (await subscriptions.add(demoLogin(added))).id;
       await settings.ofSubscription(subscriptionId);
     } else await settings.get();
     const raw = await runtime.runPromise(Settings);

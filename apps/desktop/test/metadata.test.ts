@@ -16,6 +16,7 @@ import { Settings } from "../src/main/services/preferences.ts";
 import { startFakeTmdb, tmdbName, type FakeTmdb } from "./fake-tmdb.ts";
 import {
   collect,
+  demoLogin,
   fakeProvider,
   promised,
   runtimeFor,
@@ -55,11 +56,7 @@ async function metadataApp(key: string | null = "test-key") {
     );
     if (!subscriptionId) {
       const subscriptions = await promised(runtime, Subscriptions);
-      ({ id: subscriptionId } = await subscriptions.add({
-        server: provider.url,
-        username: "demo",
-        password: "demo",
-      }));
+      ({ id: subscriptionId } = await subscriptions.add(demoLogin(provider)));
     }
     const onDemand = await promised(runtime, OnDemand);
     // Any list loads the catalogue, and with it the metadata.
@@ -142,13 +139,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
       }),
     );
     try {
-      await (
-        await promised(runtime, Subscriptions)
-      ).add({
-        server: provider.url,
-        username: "demo",
-        password: "demo",
-      });
+      await (await promised(runtime, Subscriptions)).add(demoLogin(provider));
       const onDemand = await promised(runtime, OnDemand);
       const movie = await knownMovie(onDemand);
       const settings = await promised(runtime, Settings);
@@ -1076,9 +1067,7 @@ describe("TMDB's progress to the UI", { timeout: 30_000 }, () => {
       }),
     );
     try {
-      await (
-        await promised(runtime, Subscriptions)
-      ).add({ server: provider.url, username: "demo", password: "demo" });
+      await (await promised(runtime, Subscriptions)).add(demoLogin(provider));
       const onDemand = await promised(runtime, OnDemand);
       // The first call starts the worker, which is listened to from then on.
       await onDemand.status();

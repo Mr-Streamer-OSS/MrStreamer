@@ -8,7 +8,15 @@ import { mainLayer } from "../src/main/runtime.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { startFakePlaylist } from "./fake-playlist.ts";
-import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import {
+  collect,
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testConfig,
+} from "./support.ts";
 
 /** The app's services on `dataDir`, as a start of the app reads them. */
 async function started(dataDir: string) {
@@ -21,12 +29,6 @@ async function started(dataDir: string) {
     settings: await promised(runtime, Settings),
   };
 }
-
-const login = (provider: { readonly url: string }) => ({
-  server: provider.url,
-  username: "demo",
-  password: "demo",
-});
 
 /**
  * The app's movie and series service on a fake provider, restartable on the same data folder.
@@ -59,7 +61,7 @@ async function onDemandApp(options: { titles?: number } = {}) {
     return { ...app, onDemand };
   };
   const app = await start();
-  const reconnect = () => app.subscriptions.add(login(provider));
+  const reconnect = () => app.subscriptions.add(demoLogin(provider));
   subscriptionId = (await reconnect()).id;
   const own = (id: string) => ({ subscriptionId, id });
   return { provider, dataDir, start, own, reconnect, subscriptionId, ...app };
@@ -389,7 +391,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
     const settings = await promised(runtime, Settings);
     const subscriptions = await promised(runtime, Subscriptions);
     const provider = await fakeProvider();
-    const { id } = await subscriptions.add(login(provider));
+    const { id } = await subscriptions.add(demoLogin(provider));
     await onDemand.refresh(id);
     const fetchedAt = (await onDemand.status()).lists[0]?.fetchedAt;
     const told = await collect(runtime, onDemand.changes);
@@ -489,8 +491,8 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     const dataDir = await tempDir();
     const [first, second] = [await fakeProvider(), await fakeProvider({ second: true })];
     const app = await started(dataDir);
-    const a = (await app.subscriptions.add(login(first))).id;
-    const b = (await app.subscriptions.add(login(second))).id;
+    const a = (await app.subscriptions.add(demoLogin(first))).id;
+    const b = (await app.subscriptions.add(demoLogin(second))).id;
     await app.service.refresh(a);
     await app.service.refresh(b);
     return { ...app, dataDir, first, second, a, b };
@@ -694,7 +696,7 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     const app = await two();
     // A third, loaded last: the app quits with the lists of several still to be written.
     const third = await fakeProvider({ titles: 40 });
-    const c = (await app.subscriptions.add(login(third))).id;
+    const c = (await app.subscriptions.add(demoLogin(third))).id;
     await app.service.refresh(c);
     const before = await all(app.service, "movie");
     const { lists } = await app.service.status();
@@ -715,13 +717,13 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     const dataDir = await tempDir();
     const [first, second] = [await fakeProvider(), await fakeProvider({ second: true })];
     const app = await started(dataDir);
-    const a = (await app.subscriptions.add(login(first))).id;
+    const a = (await app.subscriptions.add(demoLogin(first))).id;
     await app.service.refresh(a);
     const alone = await all(app.service, "movie");
     const told = await collect(app.runtime, app.service.changes);
     const held = second.hold("titles");
 
-    const b = (await app.roster.add(login(second))).id;
+    const b = (await app.roster.add(demoLogin(second))).id;
     await held.arrived;
     // Asked for while the new lists are on their way: no wait, and nothing missing.
     expect(await all(app.service, "movie")).toEqual(alone);

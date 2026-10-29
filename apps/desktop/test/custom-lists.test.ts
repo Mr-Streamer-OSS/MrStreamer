@@ -18,7 +18,7 @@ import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import type { FakeChannel, FakeProvider } from "./fake-provider.ts";
 import { QUALITY_STREAM_IDS } from "./fake-provider.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 /** The app's services on `dataDir`, as a start of the app has them. */
 async function started(dataDir: string) {
@@ -76,21 +76,15 @@ const refused = new Failed({
   error: { kind: "unexpected", detail: "The record can't be erased." },
 });
 
-const login = (provider: FakeProvider) => ({
-  server: provider.url,
-  username: "demo",
-  password: "demo",
-});
-
 /** Two subscriptions saved with their channels, each of a provider that numbers channels alike. */
 async function withTwo(options: { adultChannels?: boolean } = {}) {
   const dataDir = await tempDir();
   const first = await fakeProvider({ adultChannels: options.adultChannels ?? false });
   const second = await fakeProvider({ channels: 200, second: true });
   const app = await started(dataDir);
-  const a = (await app.roster.add(login(first))).id;
+  const a = (await app.roster.add(demoLogin(first))).id;
   await app.library.refresh(a);
-  const b = (await app.roster.add(login(second))).id;
+  const b = (await app.roster.add(demoLogin(second))).id;
   await app.library.refresh(b);
   return { ...app, dataDir, first, second, a, b };
 }
@@ -204,7 +198,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     await lists.remove(id);
     const again = randomUUID();
     await lists.create({ id: again, name: "Late sport" });
-    const back = (await roster.add(login(second))).id;
+    const back = (await roster.add(demoLogin(second))).id;
     await app.library.refresh(back);
     expect(shown((await lists.lists())[0])).toEqual({ members: [], away: 0 });
     await expect(
@@ -232,7 +226,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
 
     // Added again, under another id, its account's channel is back where it was.
-    const back = (await roster.add(login(second))).id;
+    const back = (await roster.add(demoLogin(second))).id;
     expect(back).not.toBe(b);
     await app.library.refresh(back);
     expect(shown((await lists.lists())[0])).toEqual({
@@ -268,7 +262,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
       ["Two", { members: [`${a}:2014`], away: 0 }],
     ]);
     // Added again, its account has none of what it had.
-    const back = (await roster.add(login(second))).id;
+    const back = (await roster.add(demoLogin(second))).id;
     await app.library.refresh(back);
     expect((await lists.lists()).map((list) => shown(list).members)).toEqual([[], [`${a}:2014`]]);
   });
@@ -456,7 +450,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     const v = away.members[3]?.member;
     if (!v) throw new Error("The list holds the new channel");
     await lists.arrange({ list: id, revision: away.revision, order: [v, z, y, w] });
-    const back = (await roster.add(login(second))).id;
+    const back = (await roster.add(demoLogin(second))).id;
     await app.library.refresh(back);
     expect(shown(await read()).members).toEqual([
       `${a}:2017`,
@@ -481,7 +475,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
       removal.release();
       await removal.done;
 
-      const back = (await roster.add(login(second))).id;
+      const back = (await roster.add(demoLogin(second))).id;
       await app.library.refresh(back);
       expect(shown((await lists.lists())[0])).toEqual({ members: [`${a}:2014`], away: 0 });
     },
@@ -503,7 +497,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
       for (let turns = 0; turns <= 32; turns++) {
         // Each round adds the account the round before removed with Also delete, as the viewer
         // can: its list holds none of that account's channels.
-        const owner = (await app.roster.add(login(provider))).id;
+        const owner = (await app.roster.add(demoLogin(provider))).id;
         await app.library.refresh(owner);
         if (made !== null) {
           const last = (await app.lists.lists()).find((each) => each.id === made);

@@ -4,7 +4,7 @@ import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { VerifiedFiles } from "../src/main/platform/verified-files.ts";
 import { Settings } from "../src/main/services/preferences.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 describe("current movie and series filters", { timeout: 20000 }, () => {
   it("ranks the whole filtered search before its page cap, counts both totals, and keeps companion versions", async () => {
@@ -31,16 +31,8 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     const runtime = runtimeFor(mainLayer(testConfig(await tempDir())));
     const subscriptions = await promised(runtime, Subscriptions);
     const titles = await promised(runtime, OnDemand);
-    const first = await subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
-    const second = await subscriptions.add({
-      server: other.url,
-      username: "demo",
-      password: "demo",
-    });
+    const first = await subscriptions.add(demoLogin(provider));
+    const second = await subscriptions.add(demoLogin(other));
     await titles.refresh(first.id);
     await titles.refresh(second.id);
 
@@ -109,16 +101,8 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       const titles = await promised(runtime, OnDemand);
       const files = await promised(runtime, VerifiedFiles);
       const settings = await promised(runtime, Settings);
-      const first = await subscriptions.add({
-        server: provider.url,
-        username: "demo",
-        password: "demo",
-      });
-      const second = await subscriptions.add({
-        server: other.url,
-        username: "demo",
-        password: "demo",
-      });
+      const first = await subscriptions.add(demoLogin(provider));
+      const second = await subscriptions.add(demoLogin(other));
       await titles.refresh(first.id);
       await titles.refresh(second.id);
       const choices = {
@@ -232,11 +216,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     try {
       const subscriptions = await promised(runtime, Subscriptions);
       const titles = await promised(runtime, OnDemand);
-      const saved = await subscriptions.add({
-        server: provider.url,
-        username: "demo",
-        password: "demo",
-      });
+      const saved = await subscriptions.add(demoLogin(provider));
       const empty = { qualities: [], languages: [], verified: [], files: 0 };
       expect(await titles.filterOptions("movie")).toEqual(empty);
       const held = provider.hold("titles");
@@ -269,11 +249,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     try {
       const subscriptions = await promised(runtime, Subscriptions);
       const titles = await promised(runtime, OnDemand);
-      const saved = await subscriptions.add({
-        server: provider.url,
-        username: "demo",
-        password: "demo",
-      });
+      const saved = await subscriptions.add(demoLogin(provider));
       const target = { subscriptionId: saved.id, id: String(seed.id) };
       await titles.refresh(saved.id);
       await titles.details("series", target);
@@ -326,11 +302,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     const subscriptions = await promised(runtime, Subscriptions);
     const titles = await promised(runtime, OnDemand);
     const files = await promised(runtime, VerifiedFiles);
-    const saved = await subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
+    const saved = await subscriptions.add(demoLogin(provider));
     await titles.refresh(saved.id);
     const [source] = await subscriptions.saved();
     if (!source) throw new Error("Expected saved subscription");
@@ -411,11 +383,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       };
     };
     let app = await start();
-    const subscription = await app.subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
+    const subscription = await app.subscriptions.add(demoLogin(provider));
     expect((await app.titles.filterOptions("movie")).qualities).toEqual([]);
     expect(provider.titleListRequests()).toBe(0);
     await app.titles.refresh(subscription.id);
@@ -518,11 +486,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       };
     };
     let app = await start();
-    const subscription = await app.subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
+    const subscription = await app.subscriptions.add(demoLogin(provider));
     await app.titles.refresh(subscription.id);
     const [source] = await app.subscriptions.saved();
     if (!source) throw new Error("Expected saved subscription");

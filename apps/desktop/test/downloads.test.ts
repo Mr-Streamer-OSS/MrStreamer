@@ -28,7 +28,15 @@ import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture, type FakeProvider, type FakeProviderOptions } from "./fake-provider.ts";
 import { startFakeTmdb, type FakeTmdb } from "./fake-tmdb.ts";
-import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import {
+  collect,
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testConfig,
+} from "./support.ts";
 
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
@@ -86,11 +94,7 @@ async function connected(
   const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50, ...options });
   const dataDir = await tempDir();
   const started = await app(dataDir, disk, undefined, observeTransfer);
-  const saved = await started.subscriptions.add({
-    server: provider.url,
-    username: "demo",
-    password: "demo",
-  });
+  const saved = await started.subscriptions.add(demoLogin(provider));
   await started.onDemand.refresh(saved.id);
   return { provider, dataDir, subscriptionId: saved.id, ...started };
 }
@@ -810,11 +814,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       undefined,
       tmdb,
     );
-    const saved = await subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
+    const saved = await subscriptions.add(demoLogin(provider));
     await onDemand.refresh(saved.id);
     tmdb.failSeasons("hold");
     const asked = tmdb.seasonRequests().length;
@@ -957,11 +957,7 @@ describe.skipIf(!hasTools)("downloads", () => {
     const { provider, subscriptionId, downloads, subscriptions, onDemand, playback, find } =
       await connected();
     const other = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
-    const second = await subscriptions.add({
-      server: other.url,
-      username: "demo",
-      password: "demo",
-    });
+    const second = await subscriptions.add(demoLogin(other));
     await onDemand.refresh(second.id);
     const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
     // The download pauses while the other plays, then goes on once the clock is moved past it.
@@ -1757,11 +1753,7 @@ describe.skipIf(!hasTools)("the queue", () => {
       find,
     } = await connected();
     const other = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
-    const elsewhere = await subscriptions.add({
-      server: other.url,
-      username: "demo",
-      password: "demo",
-    });
+    const elsewhere = await subscriptions.add(demoLogin(other));
     await onDemand.refresh(elsewhere.id);
     const here = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
     const there = movie(other, elsewhere.id, "TEST | Old AVI");
@@ -1812,11 +1804,7 @@ describe.skipIf(!hasTools)("the queue", () => {
       find,
     } = await connected();
     const other = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
-    const elsewhere = await subscriptions.add({
-      server: other.url,
-      username: "demo",
-      password: "demo",
-    });
+    const elsewhere = await subscriptions.add(demoLogin(other));
     await onDemand.refresh(elsewhere.id);
     const here = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
     const there = movie(other, elsewhere.id, "TEST | Old AVI");
@@ -1950,11 +1938,7 @@ describe.skipIf(!hasTools)("an episode's series", () => {
 
     // The same ids and TMDB id of another account's series stand apart.
     const elsewhere = await fakeProvider({ maxConnections: 1, second: true });
-    const saved = await subscriptions.add({
-      server: elsewhere.url,
-      username: "demo",
-      password: "demo",
-    });
+    const saved = await subscriptions.add(demoLogin(elsewhere));
     await onDemand.refresh(saved.id);
     const german = elsewhere.titles.series.find((each) => each.name === "TEST | Formats (DE)")!;
     expect(german.id).toBe(dutch.id);

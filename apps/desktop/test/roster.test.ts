@@ -19,7 +19,7 @@ import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { Watchlist } from "../src/main/services/watchlist.ts";
 import type { FakeProvider } from "./fake-provider.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 const DECODERS: readonly Codec[] = ["h264", "aac"];
 
@@ -85,12 +85,6 @@ async function started(dataDir: string, now?: number) {
   };
 }
 
-const login = (provider: FakeProvider) => ({
-  server: provider.url,
-  username: "demo",
-  password: "demo",
-});
-
 /** A channel of `provider` that streams without end, by the id both providers use. */
 const live = (provider: FakeProvider) =>
   String(provider.catalogue.channels.find((each) => !each.offline && !each.fixture)?.streamId);
@@ -114,7 +108,7 @@ async function withOne() {
     await fakeProvider({ slotReleaseMs: 0, channels: 200, second: true }),
   ];
   const app = await started(dataDir);
-  const a = (await app.subscriptions.add(login(first))).id;
+  const a = (await app.subscriptions.add(demoLogin(first))).id;
   await app.library.refresh(a);
   return { ...app, dataDir, first, second, a };
 }
@@ -122,7 +116,7 @@ async function withOne() {
 /** The same with both saved, and every list of both loaded. */
 async function withTwo() {
   const app = await withOne();
-  const b = (await app.subscriptions.add(login(app.second))).id;
+  const b = (await app.subscriptions.add(demoLogin(app.second))).id;
   await app.library.refresh(b);
   await app.onDemand.refresh(app.a);
   await app.onDemand.refresh(b);
@@ -136,7 +130,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     const channels = provider.hold("channels");
     const guide = provider.hold("guide");
     try {
-      const saved = await app.roster.add(login(provider));
+      const saved = await app.roster.add(demoLogin(provider));
       await channels.arrived;
       expect(provider.guideRequests()).toBe(0);
       expect((await app.onDemand.status()).lists[0]?.fetchedAt).toBeNull();
@@ -165,7 +159,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     const session = await playback.open({ subscriptionId: a, id: live(first) }, DECODERS);
     const stream = await watching(session.url);
 
-    const added = await roster.add({ ...login(second), name: "Holiday house" });
+    const added = await roster.add({ ...demoLogin(second), name: "Holiday house" });
 
     expect(added).toMatchObject({ name: "Holiday house", needsSecret: false });
     // Fetched in the background: its channels, then its movies and series, join what shows.
@@ -196,8 +190,8 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
       const second = await fakeProvider({ second: true });
       const dataDir = await tempDir();
       let app = await started(dataDir);
-      const a = (await app.subscriptions.add(login(first))).id;
-      const b = (await app.subscriptions.add(login(second))).id;
+      const a = (await app.subscriptions.add(demoLogin(first))).id;
+      const b = (await app.subscriptions.add(demoLogin(second))).id;
       const before = new Map<string, number>();
       if (trigger === "startup") {
         for (const id of [a, b]) {
@@ -281,7 +275,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     stream.stop();
 
     // Its record was kept: added again, its favourite is back, and nothing it was left at.
-    const back = await roster.add(login(second));
+    const back = await roster.add(demoLogin(second));
     expect((await viewing.state()).favourites).toContainEqual({
       subscriptionId: back.id,
       id: "2014",
@@ -349,7 +343,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     const accounts = db.prepare("select distinct account from events").all();
     db.close();
     expect(accounts.map((row) => row["account"])).toEqual([`${first.url}|demo`]);
-    const back = await roster.add(login(second));
+    const back = await roster.add(demoLogin(second));
     expect((await viewing.state()).favourites).toEqual([{ subscriptionId: a, id: "2014" }]);
     expect(back.id).not.toBe(b);
   });
@@ -376,7 +370,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
       await removal.done;
 
       // Added again, its account finds nothing of either, and the other's is whole.
-      await roster.add(login(second));
+      await roster.add(demoLogin(second));
       expect((await viewing.state()).favourites).toEqual([{ subscriptionId: a, id: "2014" }]);
       expect((await saved()).entries).toMatchObject([kept]);
     },
@@ -410,7 +404,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     await roster.remove(b, true);
 
     expect((await subscriptions.list()).map((each) => each.id)).toEqual([a]);
-    await roster.add(login(second));
+    await roster.add(demoLogin(second));
     expect((await viewing.state()).favourites).toEqual([]);
     expect(await saved()).toEqual({ total: 0, entries: [] });
   });
@@ -419,8 +413,8 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     const dataDir = await tempDir();
     const [down, up] = [await fakeProvider(), await fakeProvider({ channels: 200 })];
     const app = await started(dataDir);
-    const a = (await app.subscriptions.add(login(down))).id;
-    const b = (await app.subscriptions.add(login(up))).id;
+    const a = (await app.subscriptions.add(demoLogin(down))).id;
+    const b = (await app.subscriptions.add(demoLogin(up))).id;
     down.failCatalogue(500);
     down.serveGuide(500);
     down.failTitles(500);
