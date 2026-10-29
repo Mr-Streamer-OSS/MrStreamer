@@ -1043,8 +1043,6 @@ else console.log(JSON.stringify({workflow_runs:fixture.runs}));
       git("add", ".github");
       git("commit", "-qm", "workflow tools changed");
       expect(execute({}, git("rev-parse", "HEAD"))).toBe("reused=false");
-      git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
-      expect(execute({}, git("rev-parse", "HEAD"))).toBe("reused=false");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

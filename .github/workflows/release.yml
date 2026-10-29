@@ -660,8 +660,8 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 45
     outputs:
-      # The package's checksum, which the Store job compares with the file it downloads.
-      sha256: ${{ steps.check.outputs.sha256 }}
+      # Exposed only after installed acceptance, package upload and receipt all pass.
+      sha256: ${{ steps.accepted.outputs.sha256 }}
     env:
       KEEP_DAYS: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
       VERSION: ${{ needs.plan.outputs.version }}
@@ -826,6 +826,11 @@ jobs:
           artifact-id: ${{ steps.package-artifact.outputs.artifact-id }}
           artifact-digest: ${{ steps.package-artifact.outputs.artifact-digest }}
           retention-days: ${{ env.MSIX_DAYS }}
+      - name: Expose the accepted Store package
+        id: accepted
+        env:
+          SHA256: ${{ steps.check.outputs.sha256 }}
+        run: Add-Content $env:GITHUB_OUTPUT "sha256=$env:SHA256"
       # What a failed check left, to look at. Never submitted.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()

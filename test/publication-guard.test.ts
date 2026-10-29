@@ -303,6 +303,7 @@ function publication(
 ) {
   const event = options.event ?? "schedule";
   const results = new Map<string, Result>();
+  const actual = new Map<string, Result>();
   const plan = {
     skip: "false",
     "dry-run": options.dry ?? "false",
@@ -313,7 +314,7 @@ function publication(
   const outputs = (job: string, output: string): Value => {
     if (!(output in (workflow.jobs[job]?.outputs ?? {})))
       return unmodelled(`needs.${job}.outputs.${output}`);
-    if (results.get(job) !== "success") return "";
+    if (actual.get(job) !== "success") return "";
     if (job === "plan") return plan[output as keyof typeof plan] ?? unmodelled(output);
     if (job === "validation") return options.reused ? "true" : "false";
     return "true";
@@ -332,10 +333,17 @@ function publication(
   for (const [name, job] of Object.entries(workflow.jobs)) {
     const forced = PUBLIC.includes(name) ? undefined : options.outcomes?.[name];
     const scope = jobScope(workflow, name, results, outputs, context, options.cancelled ?? false);
-    results.set(
-      name,
-      forced ?? (runs(job.if, scope) ? (options.outcomes?.[name] ?? "success") : "skipped"),
-    );
+    const result =
+      forced ?? (runs(job.if, scope) ? (options.outcomes?.[name] ?? "success") : "skipped");
+    actual.set(name, result);
+    const tolerated = job["continue-on-error"];
+    const continuing =
+      typeof tolerated === "boolean"
+        ? tolerated
+        : tolerated
+          ? truthy(evaluate(tolerated.replace(/^\$\{\{(.*)\}\}$/s, "$1").trim(), scope))
+          : false;
+    results.set(name, result === "failure" && continuing ? "success" : result);
   }
   return PUBLIC.filter((name) => results.get(name) === "success");
 }
@@ -421,31 +429,36 @@ describe("publication boundaries", () => {
   });
   it("recovery options cannot weaken normal release acceptance", () => {
     const selected = (job: string, key: string, operation: string) => {
-      const expression = release.jobs[job]!.steps?.find((step) => step.env?.[key])?.env?.[key];
-      if (!expression) throw new Error(`Missing ${job}/${key}`);
-      return evaluate(expression.replace(/^\$\{\{(.*)\}\}$/s, "$1").trim(), {
-        path: (path) =>
-          (
-            ({
-              "inputs.operation": operation,
-              "inputs.native_case": "compatibility",
-              "inputs.allow-regress": true,
-              "inputs.draft": "draft-id",
-              "inputs.draft-metadata-sha256": "fingerprint",
-            }) as Record<string, Value>
-          )[path] ?? unmodelled(path),
-        needsSucceeded: true,
-        ancestorFailed: false,
-        cancelled: false,
-      });
+      const expressions = release.jobs[job]!.steps?.flatMap((step) => step.env?.[key] ?? []) ?? [];
+      if (!expressions.length) throw new Error(`Missing ${job}/${key}`);
+      return expressions.map((expression) =>
+        evaluate(expression.replace(/^\$\{\{(.*)\}\}$/s, "$1").trim(), {
+          path: (path) =>
+            (
+              ({
+                "inputs.operation": operation,
+                "inputs.native_case": "compatibility",
+                "inputs.allow-regress": true,
+                "inputs.draft": "draft-id",
+                "inputs.draft-metadata-sha256": "fingerprint",
+              }) as Record<string, Value>
+            )[path] ?? unmodelled(path),
+          needsSucceeded: true,
+          ancestorFailed: false,
+          cancelled: false,
+        }),
+      );
     };
-    expect(selected("upgrade", "NATIVE_CASE", "release")).toBe("all");
-    expect(selected("upgrade", "NATIVE_CASE", "upgrade")).toBe("compatibility");
-    expect(selected("feed", "ALLOW_REGRESS", "release")).toBe(false);
-    expect(selected("feed", "ALLOW_REGRESS", "feed")).toBe(true);
+    expect(selected("upgrade", "NATIVE_CASE", "release")).toEqual(["all", "all"]);
+    expect(selected("upgrade", "NATIVE_CASE", "upgrade")).toEqual([
+      "compatibility",
+      "compatibility",
+    ]);
+    expect(selected("feed", "ALLOW_REGRESS", "release")).toEqual([false]);
+    expect(selected("feed", "ALLOW_REGRESS", "feed")).toEqual([true]);
     for (const key of ["DRAFT", "DRAFT_METADATA_SHA256"]) {
-      expect(selected("store", key, "release")).toBe("");
-      expect(selected("store", key, "store")).not.toBe("");
+      expect(selected("store", key, "release")).toEqual([""]);
+      expect(selected("store", key, "store")).not.toEqual([""]);
     }
   });
   it("maintenance dry runs publish nothing", () => {

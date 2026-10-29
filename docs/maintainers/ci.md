@@ -59,3 +59,7 @@ JS bundle stays one day. Failed native profiles keep their existing seven-day bo
 | Store maintenance  | operation=store, store-action, version, draft, draft-metadata-sha256 | STORE_AUTOMATION_ENABLED; microsoft-store holds STORE_CLIENT_SECRET and STORE_TENANT_ID/CLIENT_ID/CLIENT_SECRET_EXPIRES |
 | Installed upgrade  | operation=upgrade, candidate, candidate-sha, native_case             | Read-only, no secrets; focused coverage is maintenance-only                                                             |
 | Website            | deploy                                                               | MARKETING_DEPLOY_ENABLED and public analytics variables; marketing-production holds VERCEL_TOKEN/ORG_ID/PROJECT_ID      |
+
+Maintenance with dry-run selected deliberately performs no operation and remains green. Choose
+operation=release for signed nonpublishing packaging proof. The MSIX checksum is exposed only
+after installed acceptance, upload and receipt succeed, independently of job-level error tolerance.
