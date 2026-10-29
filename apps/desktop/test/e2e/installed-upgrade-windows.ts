@@ -2,15 +2,15 @@
 // install, the process tree of each app instance it starts, and the outbound block on the
 // installed app and its bundled ffmpeg for the offline part. It refuses anywhere but a
 // GitHub-hosted runner or explicitly owned disposable Fleet VM with no Mr. Streamer installed,
-// never stops a process it didn't start, and
-// takes back only the firewall rules, profile and audit settings it changed. The runner's disposal
-// is the outer boundary for anything a failure leaves behind.
+// never stops a process it didn't start, and takes back only the firewall rules, profile and audit
+// settings it changed. The runner's disposal is the outer boundary for anything a failure leaves
+// behind.
 import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
 import { join, win32 } from "node:path";
-import { type } from "arktype";
 import { setTimeout as delay } from "node:timers/promises";
+import { type } from "arktype";
 
 /** The disposable runner and the install this run owns on it. */
 export interface Runner {

@@ -5,7 +5,8 @@
 //
 // - stable: the newest published stable release by version. Drafts, prereleases and nightlies
 //   never count.
-// - candidate: the published nightly the tag names.
+// - candidate: the published nightly the tag names, or an explicit unpublished nightly that
+//   `verifyPrivateCandidate` binds through its package receipt instead of a release.
 //
 // Both commits come from their tags and must be on main, the candidate must descend from stable
 // with a higher version, and each setup must match its asset size and digest, its release's
@@ -19,6 +20,18 @@ import {
   resolvePackageReceipt,
   type PackageRequest,
 } from "../../scripts/package-receipt.ts";
+import {
+  compareVersions,
+  formatVersion,
+  parseVersion,
+  type Version,
+} from "../../../../packages/contracts/src/version.ts";
+import {
+  promotionProblem,
+  type Ancestry as History,
+} from "../../../../packages/contracts/src/promotion.ts";
+
+const ANCESTRIES: readonly History[] = ["ahead", "identical", "behind", "diverged"];
 
 const PrivateInput = type({
   repository: type(/^[\w.-]+\/[\w.-]+$/),
@@ -81,18 +94,6 @@ export async function verifyPrivateCandidate(github: GitHub, input: unknown, aut
 }
 
 type PrivateCandidate = Awaited<ReturnType<typeof verifyPrivateCandidate>>;
-import {
-  compareVersions,
-  formatVersion,
-  parseVersion,
-  type Version,
-} from "../../../../packages/contracts/src/version.ts";
-import {
-  promotionProblem,
-  type Ancestry as History,
-} from "../../../../packages/contracts/src/promotion.ts";
-
-const ANCESTRIES: readonly History[] = ["ahead", "identical", "behind", "diverged"];
 
 /** The read-only GitHub REST answers the check takes. Tests answer from fixtures. */
 export interface GitHub {
@@ -205,7 +206,7 @@ export const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).
 const setupName = (version: string) => `Mr-Streamer-${version}-win-x64-setup.exe`;
 
 /** The version a canonical `v`-prefixed release tag of `kind` names, or undefined. */
-function tagVersion(tag: string, kind: "stable" | "nightly"): Version | undefined {
+function tagVersion(tag: string, kind: Package["provenance"]["releaseKind"]): Version | undefined {
   const version = parseVersion(tag);
   return tag.startsWith("v") &&
     version &&

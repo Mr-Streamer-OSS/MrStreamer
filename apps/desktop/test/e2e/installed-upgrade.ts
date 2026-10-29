@@ -1090,7 +1090,7 @@ async function resolveCommand(args: string[]) {
         true,
       )
     : undefined;
-  const { receipt, files } = await resolvePackages(restGitHub(repository, token), {
+  const { receipt, files } = await resolvePackages(github, {
     tag: values.candidate ?? `v${privateCandidate!.receipt.appVersion}`,
     private: privateCandidate,
     sha: values.sha || undefined,
@@ -1474,7 +1474,7 @@ export async function runCommand(args: string[]) {
             return readFile(join(values.packages!, `artifact-${id}.zip`));
           },
         },
-        JSON.parse(await readFile(join(values.packages!, "private-input.json"), "utf8")),
+        JSON.parse(await readFile(join(values.packages, "private-input.json"), "utf8")),
       )
     : undefined;
   const receipt = readReceipt(raw, privateCandidate);

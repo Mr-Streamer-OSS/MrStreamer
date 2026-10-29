@@ -72,16 +72,14 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     const { input, github } = fixture();
     const result = await verifyPrivateCandidate(github, input, true);
     expect(result.receipt.appVersion).toBe(input.request.appVersion);
-    expect(result.receipt.workflowCommit).not.toBe(result.receipt.sourceCommit);
     expect(result.files.size).toBe(3);
   });
-  it.each(["sourceCommit", "workflowCommit", "platform", "distribution", "attempt", "hash"])(
+  // Receipt identity and archive bytes are package-receipt.test.ts's; these are the private input's own gates.
+  it.each(["platform", "distribution", "attempt", "hash"])(
     "refuses a wrong %s before installation",
     async (field) => {
       const { input, github } = fixture();
       const bad = structuredClone(input);
-      if (field === "sourceCommit" || field === "workflowCommit")
-        bad.request[field] = "d".repeat(40);
       if (field === "platform") Object.assign(bad.request, { platform: "mac-arm64" });
       if (field === "distribution") Object.assign(bad.request, { distribution: "store" });
       if (field === "attempt") bad.request.run.attempt++;
