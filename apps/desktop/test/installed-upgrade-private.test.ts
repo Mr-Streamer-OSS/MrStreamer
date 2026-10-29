@@ -85,6 +85,55 @@ function fixture() {
   return { input, github, run };
 }
 
+async function resolvedFixture() {
+  const { input, github } = fixture();
+  const verified = await verifyPrivateCandidate(github, input, true);
+  const setup = strToU8("published Stable installer");
+  const hash = sha256(setup);
+  const sha512 = createHash("sha512").update(setup).digest("base64");
+  const name = "Mr-Streamer-0.0.21-win-x64-setup.exe";
+  const metadata = {
+    version: "0.0.21",
+    path: name,
+    sha512,
+    files: [{ url: name, sha512, size: setup.length }],
+  };
+  const sums = strToU8(`${hash}  ${name}`);
+  const assets = [
+    { id: 1, name, bytes: setup },
+    { id: 2, name: "SHA256SUMS.txt", bytes: sums },
+    { id: 3, name: "latest.yml", bytes: strToU8(JSON.stringify(metadata)) },
+  ];
+  const release = {
+    tag_name: "v0.0.21",
+    draft: false,
+    prerelease: false,
+    published_at: "2026-10-29T00:00:00Z",
+    assets: assets.map(({ id, name, bytes }) => ({ id, name, size: bytes.length })),
+  };
+  const api = {
+    repository: input.repository,
+    json: async (path: string) => {
+      if (path === "") return { default_branch: "main" };
+      if (path === "/releases?per_page=100&page=1") return [release];
+      if (path === "/commits/v0.0.21") return { sha: "d".repeat(40) };
+      if (path.startsWith("/compare/")) return { status: "ahead", ahead_by: 1, behind_by: 0 };
+      if (path === "/releases/tags/v0.0.21") return release;
+      throw new Error(`Unexpected published lookup: ${path}`);
+    },
+    bytes: async (path: string) => {
+      const asset = assets.find((each) => path === `/releases/assets/${each.id}`);
+      if (!asset) throw new Error(path);
+      return asset.bytes;
+    },
+  };
+  const { receipt } = await resolvePackages(api, {
+    tag: `v${input.request.appVersion}`,
+    private: verified,
+  });
+  return { input, github, verified, setup, receipt, api };
+}
+
 describe("explicit unpublished Windows upgrade inputs", () => {
   it("verifies exact receipt identities and all bytes without a published candidate release", async () => {
     const { input, github } = fixture();
@@ -104,52 +153,8 @@ describe("explicit unpublished Windows upgrade inputs", () => {
       );
     },
   );
-  it("uses verified published Stable with a private candidate and refuses private receipts in published mode or with a changed installer hash", async () => {
-    const { input, github } = fixture();
-    const verified = await verifyPrivateCandidate(github, input, true);
-    const setup = strToU8("published Stable installer");
-    const hash = sha256(setup);
-    const sha512 = createHash("sha512").update(setup).digest("base64");
-    const name = "Mr-Streamer-0.0.21-win-x64-setup.exe";
-    const metadata = {
-      version: "0.0.21",
-      path: name,
-      sha512,
-      files: [{ url: name, sha512, size: setup.length }],
-    };
-    const sums = strToU8(`${hash}  ${name}`);
-    const assets = [
-      { id: 1, name, bytes: setup },
-      { id: 2, name: "SHA256SUMS.txt", bytes: sums },
-      { id: 3, name: "latest.yml", bytes: strToU8(JSON.stringify(metadata)) },
-    ];
-    const release = {
-      tag_name: "v0.0.21",
-      draft: false,
-      prerelease: false,
-      published_at: "2026-10-29T00:00:00Z",
-      assets: assets.map(({ id, name, bytes }) => ({ id, name, size: bytes.length })),
-    };
-    const api = {
-      repository: input.repository,
-      json: async (path: string) => {
-        if (path === "") return { default_branch: "main" };
-        if (path === "/releases?per_page=100&page=1") return [release];
-        if (path === "/commits/v0.0.21") return { sha: "d".repeat(40) };
-        if (path.startsWith("/compare/")) return { status: "ahead", ahead_by: 1, behind_by: 0 };
-        if (path === "/releases/tags/v0.0.21") return release;
-        throw new Error(`Unexpected published lookup: ${path}`);
-      },
-      bytes: async (path: string) => {
-        const asset = assets.find((each) => path === `/releases/assets/${each.id}`);
-        if (!asset) throw new Error(path);
-        return asset.bytes;
-      },
-    };
-    const { receipt } = await resolvePackages(api, {
-      tag: `v${input.request.appVersion}`,
-      private: verified,
-    });
+  it("uses verified published Stable with private inputs and refuses tampered identities", async () => {
+    const { input, verified, receipt, api } = await resolvedFixture();
     expect(
       readReceipt(receipt, verified).packages.map((each) => each.provenance.releaseKind),
     ).toEqual(["stable", "private"]);
@@ -165,6 +170,68 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     await expect(
       resolvePackages(api, { tag: `v${input.request.appVersion}`, private: verified }),
     ).rejects.toThrow(`main does not contain ${input.request.run.headCommit}`);
+  });
+  it("refuses missing audit privileges before creating a journey or installing", async () => {
+    const { input, github, verified, setup, receipt } = await resolvedFixture();
+    // A capability refusal must leave the owned machine untouched, after all package gates.
+    const temp = await mkdtemp(join(tmpdir(), "audit-preflight-"));
+    const root = join(temp, "journey");
+    const runner = vi.spyOn(windows, "fleetRunner").mockReturnValue({
+      id: "audit-preflight",
+      temp,
+      installRoot: join(temp, "install"),
+      executable: join(temp, "app.exe"),
+      tools: [],
+    });
+    const execute = childProcess.execFileSync;
+    const auditError = Object.assign(new Error("auditpol 0x00000522"), { status: 1314 });
+    const command = vi
+      .spyOn(childProcess, "execFileSync")
+      .mockImplementation((file, args, options) => {
+        if (file === "git") return args?.[0] === "rev-parse" ? "e".repeat(40) : "";
+        if (file === "powershell.exe") throw auditError;
+        return execute(file, args, options);
+      });
+    try {
+      await writeFile(join(temp, "owner.json"), "{}");
+      await writeFile(join(temp, "receipt.json"), JSON.stringify(receipt));
+      await writeFile(join(temp, "private-input.json"), JSON.stringify(input));
+      for (const id of [30, 31])
+        await writeFile(
+          join(temp, `artifact-${id}.zip`),
+          await github.bytes(`/actions/artifacts/${id}/zip`),
+        );
+      for (const pkg of receipt.packages)
+        await writeFile(
+          join(temp, pkg.file),
+          pkg.stage === "stable"
+            ? setup
+            : verified.files.get(`Mr-Streamer-${input.request.appVersion}-win-x64-setup.exe`)!,
+        );
+      await expect(
+        runCommand([
+          "--packages",
+          temp,
+          "--root",
+          root,
+          "--fleet-owner",
+          join(temp, "owner.json"),
+          "--repository",
+          input.repository,
+          "--verification-source",
+          "e".repeat(40),
+        ]),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining("Start-Process powershell -Verb RunAs"),
+        cause: auditError,
+      });
+      await expect(stat(root)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(command.mock.calls.filter(([file]) => file === "powershell.exe")).toHaveLength(1);
+    } finally {
+      command.mockRestore();
+      runner.mockRestore();
+      await rm(temp, { recursive: true, force: true });
+    }
   });
   it("refuses a changed runtime fixture even with the correct verification commit pin", async () => {
     const checkout = await mkdtemp(join(tmpdir(), "verification-source-"));

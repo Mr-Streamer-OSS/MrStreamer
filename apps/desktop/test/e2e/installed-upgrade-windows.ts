@@ -413,6 +413,22 @@ export function outboundBlock(runner: Runner) {
 
   return {
     programs,
+    /** Read-only capability check before installers, profiles, fixtures or firewall changes. */
+    preflight() {
+      try {
+        readAudit();
+        powershell(`$principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+          if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw 'An elevated administrator token is required'
+          }
+          Get-WinEvent -ListLog Security -ErrorAction Stop | Out-Null`);
+      } catch (cause) {
+        throw new Error(
+          "Windows audit preflight failed before installation. An elevated administrator token with audit policy and Security log access is required. For GitHub-hosted execution, inspect the underlying error and runner context. In an owned disposable Fleet VM, open PowerShell with Start-Process powershell -Verb RunAs, accept UAC for the existing agent administrator, and run the read-only audit preflight documented in docs/contributing/testing.md from that interactive window, then rerun the journey there. Do not grant account rights or change UAC/audit permissions.",
+          { cause },
+        );
+      }
+    },
     /** Adds the rules and turns on what makes them work, then reads back what is in force. */
     apply() {
       profiles = readProfiles("PersistentStore");
