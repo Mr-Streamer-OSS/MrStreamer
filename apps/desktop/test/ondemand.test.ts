@@ -668,8 +668,8 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     const app = await started(await tempDir());
     const slow = await fakeProvider();
     const healthy = await fakeProvider({ second: true });
-    const a = (await app.subscriptions.add(login(slow))).id;
-    const b = (await app.subscriptions.add(login(healthy))).id;
+    const a = (await app.subscriptions.add(demoLogin(slow))).id;
+    const b = (await app.subscriptions.add(demoLogin(healthy))).id;
     const held = slow.hold("titles");
     let page: Awaited<ReturnType<typeof all>> | undefined;
     let search: Awaited<ReturnType<typeof app.service.search>> | undefined;
