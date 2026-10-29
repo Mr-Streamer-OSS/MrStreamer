@@ -1228,7 +1228,6 @@ describe("observed playback runs", () => {
     owner.endPlayback(token);
     const fresh = owner.remotePlayback("vod", current.control);
     physical.state("playing");
-    physical.stop();
     owner.receiverLoadFailureObserver(current.control, frame)("network");
     fresh.failure("credentials");
     owner.endControlledPlayback(current.control, frame);

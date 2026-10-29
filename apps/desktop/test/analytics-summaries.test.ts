@@ -291,7 +291,10 @@ describe("durable usage and logical-play summaries", () => {
     const { token, binding } = run(first.owner);
     await vi.advanceTimersByTimeAsync(0);
     const admitted = (await first.store.load())?.summaries?.unfinished;
-    expect(admitted).toMatchObject({ watchMs: 0 });
+    expect(admitted).toMatchObject({
+      watchMs: 0,
+      event: { properties: { watch_duration_seconds: 0 } },
+    });
     let sequence = 1;
     for (let tick = 1; tick <= 120; tick++) {
       await vi.advanceTimersByTimeAsync(1000);
