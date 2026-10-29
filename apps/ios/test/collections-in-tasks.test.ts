@@ -572,7 +572,10 @@ describe("the collections Movies, Series, Home and details show", () => {
 
   it("are of the new lists once they show, and those being made for the old never show", async () => {
     subscribe("a");
-    await until(() => titles.collectionsOf("movie") !== null, "the first collections");
+    expect(titles.collectionsOf("movie")).toBeNull();
+    const initial = await watch(() => indexed() !== null, "the first lists");
+    expect(initial.bare).toBe(0);
+    expect(initial.views).toHaveLength(1);
     const before = indexed();
     const first = titles.collectionsOf("movie");
     // Another subscription's lists are indexed while metadata changes the old lists' collections.
