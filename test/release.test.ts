@@ -1,3 +1,7 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
@@ -156,6 +160,7 @@ describe("scheduled nightlies", () => {
     );
     expect(desktopReleaseChanged(["unknown.config"])).toBe(true);
     expect(desktopReleaseChanged(null)).toBe(true);
+    expect(desktopReleaseChanged([])).toBe(false);
     const last = "v0.0.1-nightly.20261001.30";
     const { repo } = repository({
       releases: [published(last, 25)],
@@ -929,3 +934,153 @@ describe("release versions", () => {
     expect(parseVersion("0.2")).toBeNull();
   });
 });
+
+describe("Release validation lookup CLI", () => {
+  it("reuses only the current successful trusted attempt and falls back on lookup failures", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-lookup-"));
+    const script = resolve(".github/scripts/release-validation.ts");
+    const identityScript = resolve(".github/scripts/validation-evidence.ts");
+    const git = (...args: string[]) =>
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.com",
+          "-c",
+          "commit.gpgsign=false",
+          ...args,
+        ],
+        { cwd: dir, encoding: "utf8" },
+      ).trim();
+    try {
+      git("init", "-q");
+      git("commit", "--allow-empty", "-qm", "candidate");
+      const sha = git("rev-parse", "HEAD");
+      git("update-ref", "refs/remotes/origin/main", sha);
+      const identity = execFileSync(process.execPath, [identityScript, "identity"], {
+        cwd: dir,
+        encoding: "utf8",
+      }).trim();
+      const evidence = {
+        version: 1,
+        sha,
+        identity,
+        profile: "desktop-v1",
+        identities: { check: identity, test: identity, website: "" },
+        results: { check: "success", test: "success", website: "skipped" },
+      };
+      // The external GitHub transport is stubbed; Git trust checks and archive extraction are real.
+      const gh = join(dir, "gh");
+      writeFileSync(
+        gh,
+        `#!/usr/bin/env node
+const fixture = JSON.parse(process.env.LOOKUP_FIXTURE);
+const path = process.argv[3];
+if (fixture.error) process.exit(1);
+if (path.endsWith('/zip')) process.stdout.write(Buffer.from(fixture.zip,'base64'));
+else if (path.includes('/artifacts?')) console.log(JSON.stringify({artifacts:fixture.artifacts}));
+else console.log(JSON.stringify({workflow_runs:fixture.runs}));
+`,
+        { mode: 0o755 },
+      );
+      const run = {
+        id: 123,
+        run_attempt: 2,
+        head_sha: sha,
+        head_branch: "main",
+        event: "push",
+        path: ".github/workflows/checks.yml@refs/heads/main",
+        status: "completed",
+        conclusion: "success",
+        repository: { full_name: "Mr-Streamer-OSS/MrStreamer" },
+        head_repository: { full_name: "Mr-Streamer-OSS/MrStreamer" },
+      };
+      const artifact = { id: 456, name: "validation-123-2", expired: false };
+      const fixture = {
+        runs: [run],
+        artifacts: [artifact],
+        zip: validationArchive(evidence).toString("base64"),
+      };
+      const execute = (patch: Record<string, unknown> = {}, workflowSha = sha) => {
+        const output = join(dir, "output");
+        writeFileSync(output, "");
+        const result = spawnSync(process.execPath, [script], {
+          cwd: dir,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PATH: `${dir}${delimiter}${process.env.PATH}`,
+            VALIDATION_SHA: sha,
+            WORKFLOW_SHA: workflowSha,
+            GITHUB_OUTPUT: output,
+            GITHUB_STEP_SUMMARY: join(dir, "summary"),
+            LOOKUP_FIXTURE: JSON.stringify({ ...fixture, ...patch }),
+          },
+        });
+        expect(result.status, result.stderr).toBe(0);
+        return readFileSync(output, "utf8").trim();
+      };
+      expect(execute()).toBe("reused=true");
+      for (const patch of [
+        { runs: [] },
+        { error: true },
+        { artifacts: [{ ...artifact, expired: true }] },
+        { artifacts: [{ ...artifact, name: "validation-123-1" }] },
+        { runs: [{ ...run, event: "pull_request" }] },
+        { runs: [{ ...run, conclusion: "failure" }] },
+        { runs: [{ ...run, head_repository: { full_name: "fork/repo" } }] },
+        { zip: validationArchive({ ...evidence, identity: "wrong" }).toString("base64") },
+      ])
+        expect(execute(patch)).toBe("reused=false");
+      const unrelated = git("commit-tree", "HEAD^{tree}", "-m", "unrelated main");
+      git("update-ref", "refs/remotes/origin/main", unrelated);
+      expect(execute()).toBe("reused=false");
+      git("update-ref", "refs/remotes/origin/main", sha);
+      mkdirSync(join(dir, ".github/actions/validation"), { recursive: true });
+      writeFileSync(join(dir, ".github/actions/validation/action.yml"), "changed");
+      git("add", ".github");
+      git("commit", "-qm", "workflow tools changed");
+      expect(execute({}, git("rev-parse", "HEAD"))).toBe("reused=false");
+      git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"));
+      expect(execute({}, git("rev-parse", "HEAD"))).toBe("reused=false");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/** A stored ZIP fixture with one JSON file, without an additional test tool dependency. */
+function validationArchive(value: unknown): Buffer {
+  const name = Buffer.from("validation.json");
+  const data = Buffer.from(JSON.stringify(value));
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  crc = (crc ^ 0xffffffff) >>> 0;
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt32LE(crc, 14);
+  local.writeUInt32LE(data.length, 18);
+  local.writeUInt32LE(data.length, 22);
+  local.writeUInt16LE(name.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt32LE(crc, 16);
+  central.writeUInt32LE(data.length, 20);
+  central.writeUInt32LE(data.length, 24);
+  central.writeUInt16LE(name.length, 28);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + name.length, 12);
+  end.writeUInt32LE(local.length + name.length + data.length, 16);
+  return Buffer.concat([local, name, data, central, name, end]);
+}

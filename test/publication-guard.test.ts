@@ -16,7 +16,11 @@ interface Job {
   readonly needs?: string | readonly string[];
   readonly uses?: string;
   readonly with?: Record<string, unknown>;
-  readonly steps?: readonly { readonly id?: string; readonly run?: string }[];
+  readonly steps?: readonly {
+    readonly id?: string;
+    readonly run?: string;
+    readonly env?: Record<string, string>;
+  }[];
   readonly outputs?: Record<string, unknown>;
 }
 
@@ -169,9 +173,9 @@ const needsOf = (job: Job) =>
   job.needs === undefined ? [] : typeof job.needs === "string" ? [job.needs] : job.needs;
 
 /** Every job `name` needs, directly or through the jobs it needs. */
-function ancestors(workflow: Workflow, name: string): Set<string> {
+function ancestorsOf(workflow: Workflow, name: string): Set<string> {
   return new Set(
-    needsOf(workflow.jobs[name]!).flatMap((need) => [need, ...ancestors(workflow, need)]),
+    needsOf(workflow.jobs[name]!).flatMap((need) => [need, ...ancestorsOf(workflow, need)]),
   );
 }
 
@@ -207,8 +211,8 @@ function jobScope(
     },
     // GitHub's implicit success() skips a job when any job it waits for, however indirectly, didn't
     // succeed: a skipped grandparent skips it even after its own need ran.
-    needsSucceeded: [...ancestors(workflow, name)].every((job) => results.get(job) === "success"),
-    ancestorFailed: [...ancestors(workflow, name)].some((job) => results.get(job) === "failure"),
+    needsSucceeded: [...ancestorsOf(workflow, name)].every((job) => results.get(job) === "success"),
+    ancestorFailed: [...ancestorsOf(workflow, name)].some((job) => results.get(job) === "failure"),
     cancelled,
   };
 }
@@ -320,6 +324,7 @@ function publication(
     if (path === "github.repository" || path === "github.event.pull_request.head.repo.full_name")
       return "Mr-Streamer-OSS/MrStreamer";
     if (path === "github.event.label.name") return "release dry run";
+    if (path === "inputs.dry-run") return options.dry === "true";
     if (path === "inputs.operation")
       return options.operation ?? (event === "workflow_dispatch" ? "release" : "");
     return unmodelled(path);
@@ -336,13 +341,32 @@ function publication(
 }
 
 describe("publication boundaries", () => {
-  it("never publishes a PR or dry run, even with successful packaging and reuse", () => {
+  it("never publishes PRs or dry runs across ancestor outcomes and cancellation", () => {
+    const ancestors = [
+      ...new Set(PUBLIC.flatMap((name) => [...ancestorsOf(release, name)])),
+    ].filter((name) => name !== "plan" && !PUBLIC.includes(name));
+    const outcomes: Record<string, Result>[] = [
+      {},
+      ...ancestors.flatMap((name) => RESULTS.map((result) => ({ [name]: result }))),
+      ...RESULTS.map((result) => Object.fromEntries(ancestors.map((name) => [name, result]))),
+    ];
     for (const event of ["schedule", "workflow_dispatch", "pull_request"])
       for (const dry of ["true", "false"])
         for (const channel of ["stable", "nightly"])
           for (const reused of [true, false])
-            if (dry === "true" || event === "pull_request")
-              expect(publication(release, { event, dry, channel, reused })).toEqual([]);
+            for (const cancelled of [true, false])
+              for (const outcome of outcomes)
+                if (dry === "true" || event === "pull_request")
+                  expect(
+                    publication(release, {
+                      event,
+                      dry,
+                      channel,
+                      reused,
+                      cancelled,
+                      outcomes: outcome,
+                    }),
+                  ).toEqual([]);
   });
   it("publishes one nightly or the selected stable after all mandatory gates", () => {
     expect(publication(release)).toEqual(["publish", "discord", "feed"]);
@@ -395,11 +419,49 @@ describe("publication boundaries", () => {
     expect(publication(release, { event, operation: "store" })).toEqual(["store-gate", "store"]);
     expect(publication(release, { event, operation: "upgrade" })).toEqual([]);
   });
-  it("detects removal of the dry-run or PR boundary", () => {
+  it("recovery options cannot weaken normal release acceptance", () => {
+    const selected = (job: string, key: string, operation: string) => {
+      const expression = release.jobs[job]!.steps?.find((step) => step.env?.[key])?.env?.[key];
+      if (!expression) throw new Error(`Missing ${job}/${key}`);
+      return evaluate(expression.replace(/^\$\{\{(.*)\}\}$/s, "$1").trim(), {
+        path: (path) =>
+          (
+            ({
+              "inputs.operation": operation,
+              "inputs.native_case": "compatibility",
+              "inputs.allow-regress": true,
+              "inputs.draft": "draft-id",
+              "inputs.draft-metadata-sha256": "fingerprint",
+            }) as Record<string, Value>
+          )[path] ?? unmodelled(path),
+        needsSucceeded: true,
+        ancestorFailed: false,
+        cancelled: false,
+      });
+    };
+    expect(selected("upgrade", "NATIVE_CASE", "release")).toBe("all");
+    expect(selected("upgrade", "NATIVE_CASE", "upgrade")).toBe("compatibility");
+    expect(selected("feed", "ALLOW_REGRESS", "release")).toBe(false);
+    expect(selected("feed", "ALLOW_REGRESS", "feed")).toBe(true);
+    for (const key of ["DRAFT", "DRAFT_METADATA_SHA256"]) {
+      expect(selected("store", key, "release")).toBe("");
+      expect(selected("store", key, "store")).not.toBe("");
+    }
+  });
+  it("maintenance dry runs publish nothing", () => {
+    for (const operation of ["feed", "store", "upgrade"])
+      expect(publication(release, { event: "workflow_dispatch", operation, dry: "true" })).toEqual(
+        [],
+      );
+  });
+  it("detects missing boundaries and failure-only publication leaks", () => {
+    const original = release.jobs["publish"]!.if!;
     for (const condition of [
       "!cancelled()",
       "needs.plan.outputs.dry-run == 'false' && !cancelled()",
       "github.event_name != 'pull_request' && !cancelled()",
+      `${original} || (failure() && needs.plan.outputs.dry-run == 'true')`,
+      `${original} || (always() && needs.plan.outputs.channel == 'nightly' && needs.plan.outputs.dry-run == 'true')`,
     ]) {
       const copy = structuredClone(release);
       copy.jobs["publish"] = { ...copy.jobs["publish"]!, if: condition };
@@ -407,6 +469,11 @@ describe("publication boundaries", () => {
         [
           publication(copy, { event: "pull_request", dry: "false" }),
           publication(copy, { event: "workflow_dispatch", dry: "true" }),
+          publication(copy, {
+            event: "workflow_dispatch",
+            dry: "true",
+            outcomes: { bundle: "failure" },
+          }),
         ].some((jobs) => jobs.includes("publish")),
       ).toBe(true);
     }

@@ -55,7 +55,7 @@ async function reusable(): Promise<boolean> {
       run.head_sha !== sha ||
       run.head_branch !== "main" ||
       run.event !== "push" ||
-      run.path !== ".github/workflows/checks.yml" ||
+      run.path.split("@")[0] !== ".github/workflows/checks.yml" ||
       run.conclusion !== "success" ||
       run.status !== "completed"
     )
@@ -106,7 +106,7 @@ async function reusable(): Promise<boolean> {
           repository: run.repository.full_name,
           event: run.event,
           branch: run.head_branch,
-          workflow: run.path,
+          workflow: run.path.split("@")[0]!,
           sha: run.head_sha,
           conclusion: run.conclusion,
         },

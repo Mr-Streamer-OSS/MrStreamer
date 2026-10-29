@@ -24,15 +24,19 @@ on:
         description: Published nightly for an installed upgrade check
         type: string
       allow-regress:
+        description: Feed repair only; permit explicit version regression
         type: boolean
         default: false
       store-action:
+        description: Store maintenance only; preflight, status or submit
         type: choice
         options: [preflight, status, submit]
         default: preflight
       draft:
+        description: Store maintenance only; existing Partner Center draft ID
         type: string
       draft-metadata-sha256:
+        description: Store maintenance only; preflight fingerprint for the draft
         type: string
       channel:
         description: Channel
@@ -40,7 +44,7 @@ on:
         options: [nightly, stable]
         default: nightly
       version:
-        description: Stable version, such as 0.1.0. Empty releases the version the nightly previewed, unless a stable release has it already.
+        description: Stable release version override, or existing version for Store maintenance
         type: string
         required: false
       nightly:
@@ -197,7 +201,6 @@ jobs:
       - uses: ./.local/validation-tools/.github/actions/validation
         with:
           part: test
-          build: "false"
           report-name: ${{ needs.plan.outputs.version }}
 
   # The JavaScript is the same on every platform: built once, packaged three times.
@@ -879,7 +882,7 @@ jobs:
     name: Install and upgrade on Windows
     needs: plan
     if: >-
-      !cancelled() && (needs.plan.outputs.promoted != '' || inputs.operation == 'upgrade') && github.repository == 'Mr-Streamer-OSS/MrStreamer' && github.ref == 'refs/heads/main'
+      !cancelled() && (needs.plan.outputs.promoted != '' || (inputs.operation == 'upgrade' && !inputs.dry-run && github.event_name == 'workflow_dispatch')) && github.repository == 'Mr-Streamer-OSS/MrStreamer' && github.ref == 'refs/heads/main'
     runs-on: windows-2025
     timeout-minutes: 90
     # One at a time, and never cancelled: a run cut short could leave its firewall rules on its
@@ -909,7 +912,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE: ${{ (needs.plan.outputs.promoted || inputs.candidate) }}
           SHA: ${{ needs.plan.outputs.sha || inputs.candidate-sha }}
-          NATIVE_CASE: ${{ inputs.native_case || 'all' }}
+          NATIVE_CASE: ${{ inputs.operation == 'upgrade' && inputs.native_case || 'all' }}
         run: |
           case "$NATIVE_CASE" in
             all) ;;
@@ -930,7 +933,7 @@ jobs:
       - name: Native telemetry and installed .15 compatibility
         if: startsWith((needs.plan.outputs.promoted || inputs.candidate), 'v0.0.16-nightly.')
         env:
-          NATIVE_CASE: ${{ inputs.native_case || 'all' }}
+          NATIVE_CASE: ${{ inputs.operation == 'upgrade' && inputs.native_case || 'all' }}
           SHA: ${{ needs.plan.outputs.sha || inputs.candidate-sha }}
         run: |
           args=(--native-case "$NATIVE_CASE")
@@ -1132,7 +1135,7 @@ jobs:
     needs: [plan, publish]
     if: >-
       !cancelled() && (needs.publish.result == 'success'
-      || (inputs.operation == 'feed' && github.ref == 'refs/heads/main'))
+      || (inputs.operation == 'feed' && !inputs.dry-run && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     continue-on-error: ${{ needs.plan.outputs.tag != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -1160,7 +1163,7 @@ jobs:
           node-version: 24
       - name: Write the feed
         env:
-          ALLOW_REGRESS: ${{ inputs.allow-regress == true }}
+          ALLOW_REGRESS: ${{ inputs.operation == 'feed' && inputs.allow-regress == true }}
         run: |
           # The site's address, custom domain or not. None before Pages is enabled; any other
           # failure stops here, since without the deployed feed the releases could take a
@@ -1201,7 +1204,7 @@ jobs:
     if: >-
       !cancelled() && ((needs.publish.result == 'success' && needs.plan.outputs.channel == 'stable'
       && needs.msix.result == 'success' && needs.msix.outputs.sha256 != '')
-      || inputs.operation == 'store')
+      || (inputs.operation == 'store' && !inputs.dry-run && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -1300,8 +1303,8 @@ jobs:
           STORE_CLIENT_SECRET: ${{ secrets.STORE_CLIENT_SECRET }}
           STORE_CLIENT_SECRET_EXPIRES: ${{ vars.STORE_CLIENT_SECRET_EXPIRES }}
           # Set by hand alone: a draft made in Partner Center, and its fingerprint for submit.
-          DRAFT: ${{ inputs.draft }}
-          DRAFT_METADATA_SHA256: ${{ inputs.draft-metadata-sha256 }}
+          DRAFT: ${{ inputs.operation == 'store' && inputs.draft || '' }}
+          DRAFT_METADATA_SHA256: ${{ inputs.operation == 'store' && inputs.draft-metadata-sha256 || '' }}
         run: |
           args=()
           [ -n "$VERSION" ] && args+=(--release "$RUNNER_TEMP/store-release.json")

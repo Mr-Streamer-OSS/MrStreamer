@@ -40,3 +40,22 @@ Product build/scripts/tests and receipts come from the candidate. Validation and
 The bundle reads TMDB and public analytics inputs; dry runs compile capture off. Only macOS signing reads signing/notarization secrets. Feed retains the `github-pages` environment and Pages permissions. Store preflight checks its kill switch and branch restrictions before any job names `microsoft-store`; only its final step reads the credential. Website retains its own `marketing-production` environment. No settings, secrets, apps or runner installation is required by this graph change.
 
 `pnpm actionlint` checks the workflow and shell contracts. `test/release.test.ts` covers public planning/publication rules; `test/publication-guard.test.ts` evaluates real publication job conditions, skipped fallback handling, failures, PR/dry-run boundaries and the independent Website decision steps. Source checks and local proof do not establish actual publication integration. That requires separately approved maintainer acceptance.
+
+Changes to Release workflow or shared packaging actions require a signed nonpublishing PR dry run
+on the final reviewed head before merge acceptance. A PR head cannot prove main-push validation
+reuse; retain that actual Checks-to-Release handoff on the maintainer acceptance card for the next
+approved operation, without publishing solely to fill proof.
+
+Test JSON reports remain seven days. Dry-run packages, receipts and native/UI evidence remain
+14 days. Published-run packages/receipts stay three days, with Store packages 90 days; the shared
+JS bundle stays one day. Failed native profiles keep their existing seven-day bounds.
+
+| Workflow/operation | Inputs                                                               | Credentials and environments                                                                                            |
+| ------------------ | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Checks             | Called legacy contract: sha, report-name                             | Read-only source; Website part reads release history                                                                    |
+| Release candidate  | operation=release, channel, nightly, version, dry-run                | Bundle TMDB_API_KEY; POSTHOG_PROJECT_TOKEN/HOST only enable capture outside dry runs                                    |
+| macOS packaging    | Resolved candidate source/version                                    | MAC_CERTIFICATE_P12/PASSWORD, APPLE_API_KEY_P8/ID/ISSUER, APPLE_TEAM_ID                                                 |
+| Feed maintenance   | operation=feed, allow-regress                                        | Read contents, write Pages/id-token; github-pages environment                                                           |
+| Store maintenance  | operation=store, store-action, version, draft, draft-metadata-sha256 | STORE_AUTOMATION_ENABLED; microsoft-store holds STORE_CLIENT_SECRET and STORE_TENANT_ID/CLIENT_ID/CLIENT_SECRET_EXPIRES |
+| Installed upgrade  | operation=upgrade, candidate, candidate-sha, native_case             | Read-only, no secrets; focused coverage is maintenance-only                                                             |
+| Website            | deploy                                                               | MARKETING_DEPLOY_ENABLED and public analytics variables; marketing-production holds VERCEL_TOKEN/ORG_ID/PROJECT_ID      |

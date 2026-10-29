@@ -438,7 +438,7 @@ node scripts/ci-test-results.ts .local/test-results.json
 
 Run it from the repository's root. Without ffmpeg the media files fail it, and on Windows so do the files that skip there: the rule is CI's, on Linux.
 
-The Test job uploads the report as the artifact `test-results-<run id>-<attempt>`, kept seven days, whether or not the tests passed. Release runs name it `test-results-<version>-<attempt>`, identifying the one candidate. The report's paths are the runner's, so read a downloaded one with `jq` rather than the check:
+The Test job uploads the report as the artifact `test-results-<run id>-<attempt>`, kept seven days, whether or not the tests passed. Release fallback names it `test-results-<version>-<attempt>`, identifying the one candidate. When Release reuses validation, no new Test report is uploaded; the run summary names the producer Checks run, attempt and immutable validation artifact. The report's paths are the runner's, so read a downloaded one with `jq` rather than the check:
 
 ```sh
 gh run download <run id> -n test-results-<run id>-<attempt> -D .local/ci-report

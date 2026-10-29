@@ -402,9 +402,10 @@ async function nightlySkip(repo: Repository, sha: string, now: number): Promise<
   }
 }
 
-/** Known independent editorial/website inputs cannot cause an automatic desktop release. */
+/** Release inputs differ from Checks selection: marketing tests run in Checks but do not ship in desktop. */
 export function desktopReleaseChanged(paths: readonly string[] | null): boolean {
-  if (!paths?.length) return true;
+  if (paths === null) return true;
+  if (paths.length === 0) return false;
   return paths.some(
     (path) =>
       !(
