@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -66,4 +70,23 @@ test("only complete exact-source validation from a successful trusted main produ
     ),
     false,
   );
+});
+
+test("the verification CLI refuses invalid evidence through real and symlinked entry paths", () => {
+  const dir = mkdtempSync(join(tmpdir(), "validation-cli-"));
+  try {
+    const script = resolve(import.meta.dirname, "../scripts/validation-evidence.ts");
+    const link = join(dir, "verify.ts");
+    const invalid = join(dir, "invalid.json");
+    symlinkSync(script, link);
+    writeFileSync(invalid, "{}");
+    for (const entry of [script, link]) {
+      const result = spawnSync(process.execPath, [entry, "verify", invalid, invalid], {
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 1, result.stderr);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

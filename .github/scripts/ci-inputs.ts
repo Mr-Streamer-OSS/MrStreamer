@@ -1,7 +1,6 @@
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { realpathSync, appendFileSync, readFileSync } from "node:fs";
 
 /** Only known independent inputs may omit expensive work. Unknown inputs fail closed. */
 export function selectChecks(paths: readonly string[] | null) {
@@ -46,7 +45,7 @@ export function changedPaths(base: string, head: string, pullRequest: boolean): 
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const event = JSON.parse(readFileSync(process.env["GITHUB_EVENT_PATH"]!, "utf8"));
   const pr = process.env["GITHUB_EVENT_NAME"] === "pull_request";
   const paths = changedPaths(

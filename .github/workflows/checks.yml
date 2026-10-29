@@ -89,7 +89,7 @@ jobs:
     needs: inputs
     outputs:
       identity: ${{ steps.validate.outputs.identity }}
-    if: ${{ !cancelled() && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop == 'true') }}
+    if: ${{ !cancelled() && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -112,7 +112,7 @@ jobs:
     needs: inputs
     outputs:
       identity: ${{ steps.validate.outputs.identity }}
-    if: ${{ !cancelled() && !inputs.sha && (needs.inputs.result != 'success' || needs.inputs.outputs.website == 'true') }}
+    if: ${{ !cancelled() && !inputs.sha && (needs.inputs.result != 'success' || needs.inputs.outputs.website != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

@@ -39,6 +39,7 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: |
         identity=$(node "$ACTION_PATH/../../scripts/validation-evidence.ts" identity)
+        [[ "$identity" =~ ^[a-f0-9]{64}$ ]]
         echo "identity=$identity" >> "$GITHUB_OUTPUT"
     # The website installs only what it declares, as publishing does.
     - run: pnpm install --frozen-lockfile ${{ inputs.part == 'website' && '--filter mrstreamer-marketing...' || '' }}
