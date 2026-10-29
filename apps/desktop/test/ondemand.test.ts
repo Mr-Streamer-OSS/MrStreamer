@@ -698,7 +698,18 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
       );
       expect(search?.movies.every((title) => title.subscriptionId === b)).toBe(true);
       expect(searchKind?.titles.every((title) => title.subscriptionId === b)).toBe(true);
+      const exact = app.service.titles("movie", [of(a, 91_001)]);
+      expect(await app.service.titles("movie", [of(b, 91_001)])).toHaveLength(1);
+      expect(
+        await Promise.race([
+          exact.then(() => "settled"),
+          new Promise<string>((resolve) => setTimeout(() => resolve("pending"), 100)),
+        ]),
+      ).toBe("pending");
       held.release();
+      expect(await exact).toMatchObject([
+        { versions: expect.arrayContaining([expect.objectContaining(of(a, 91_001))]) },
+      ]);
       // The slow fetch the catalogue stopped waiting for still lands, without asking again.
       await vi.waitFor(
         async () =>
@@ -707,6 +718,9 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
           ).toEqual(expect.any(Number)),
         { timeout: 10_000 },
       );
+      expect(
+        (await all(app.service, "movie")).titles.some((title) => title.subscriptionId === a),
+      ).toBe(true);
       expect(slow.titleListRequests()).toBe(4);
     } finally {
       held.release();

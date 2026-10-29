@@ -634,9 +634,9 @@ function make(deps: OnDemandDeps) {
      * subscription without lists yet fetches its own beside what shows, and the lists say when
      * it is in. With nothing to show at all, browsing waits for the first fetch that succeeds
      * and fails with what went wrong when none does; one that failed a moment ago fails with that rather
-     * than asking again. Exact-title reads still wait for the initial lists to settle.
+     * than asking again. Exact-title reads wait only for their requested subscriptions' initial lists.
      */
-    const owners = (browsing: boolean) =>
+    const owners = (read: true | ReadonlySet<string>) =>
       Effect.gen(function* () {
         if ((yield* subscriptions.saved).length === 0) return yield* noSubscription;
         const found = yield* held;
@@ -649,13 +649,29 @@ function make(deps: OnDemandDeps) {
         const due = missing.flatMap((subscription) => {
           const failed = failures.get(subscription.id);
           const source = sources.get(subscription.id);
-          return source && !(failed && Date.now() - failed.at < RETRY_AFTER_MS) ? [source] : [];
+          return source &&
+            (refreshing.has(source.id) || !(failed && Date.now() - failed.at < RETRY_AFTER_MS))
+            ? [source]
+            : [];
         });
+        const browsing = read === true;
         if (missing.length < found.length) {
           for (const source of due) {
             // One that failed waits for its own refresh, or the next start.
             if (!failures.has(source.id))
               yield* Effect.forkIn(Effect.ignore(refreshOf(source)), scope);
+          }
+          if (!browsing) {
+            yield* Effect.forEach(
+              due.filter(
+                (source) =>
+                  read.has(source.id) && (!failures.has(source.id) || refreshing.has(source.id)),
+              ),
+              (source) => refreshOf(source).pipe(Effect.ignore),
+              { concurrency: "unbounded" },
+            );
+            for (const source of due.filter((source) => read.has(source.id)))
+              if (!(yield* stands(source))) return yield* switched;
           }
           return all;
         }
@@ -669,14 +685,22 @@ function make(deps: OnDemandDeps) {
           if (failed) return yield* failed;
           return all;
         }
+        if (!browsing) {
+          for (const source of due) yield* Effect.forkIn(Effect.ignore(refreshOf(source)), scope);
+          if (!missing.some((subscription) => read.has(subscription.id))) return all;
+        }
+        const waiting = browsing ? due : due.filter((source) => read.has(source.id));
         const failed = yield* Effect.forEach(
-          due,
+          waiting,
           (source) =>
             Effect.match(refreshOf(source), { onFailure: (cause) => cause, onSuccess: () => null }),
           { concurrency: "unbounded" },
         );
+        for (const source of waiting) if (!(yield* stands(source))) return yield* switched;
         if (failed.includes(null)) return all;
-        const [first] = missing;
+        const first = browsing
+          ? missing[0]
+          : missing.find((subscription) => read.has(subscription.id));
         return yield* failed.find((each) => each !== null) ??
           new Failed({
             error: (first && failures.get(first.id)?.error) ?? {
@@ -689,10 +713,10 @@ function make(deps: OnDemandDeps) {
     /** Runs a call on the catalogue in the viewer's language, once it has something to show. */
     const loaded = <A>(
       run: (owners: readonly CatalogueOwner[], language: string) => Effect.Effect<A, Failed>,
-      browsing = false,
+      read: true | ReadonlySet<string>,
     ) =>
       Effect.gen(function* () {
-        const made = yield* owners(browsing);
+        const made = yield* owners(read);
         return yield* run(made, yield* language);
       });
 
@@ -772,8 +796,10 @@ function make(deps: OnDemandDeps) {
       });
 
     const listedTitle = (source: SavedSubscription, kind: TitleKind, id: string) =>
-      loaded((owners, language) =>
-        call("byIds", { owners, language, kind, versions: [{ subscriptionId: source.id, id }] }),
+      loaded(
+        (owners, language) =>
+          call("byIds", { owners, language, kind, versions: [{ subscriptionId: source.id, id }] }),
+        new Set([source.id]),
       ).pipe(Effect.map(([title]) => title));
 
     const currentDetails = (
@@ -1263,16 +1289,18 @@ function make(deps: OnDemandDeps) {
         versions.length === 0
           ? Effect.succeed([])
           : // Versions of a subscription that isn't saved are in no lists, whatever their ids.
-            loaded((owners, language) =>
-              Effect.gen(function* () {
-                return yield* call("byIds", {
-                  owners,
-                  language,
-                  kind,
-                  versions,
-                  files: yield* knownFiles(kind, true),
-                });
-              }),
+            loaded(
+              (owners, language) =>
+                Effect.gen(function* () {
+                  return yield* call("byIds", {
+                    owners,
+                    language,
+                    kind,
+                    versions,
+                    files: yield* knownFiles(kind, true),
+                  });
+                }),
+              new Set(versions.map((version) => version.subscriptionId)),
             ),
 
       saved: (saved: readonly SavedSubscription[], query: SavedQuery) =>
@@ -1307,8 +1335,9 @@ function make(deps: OnDemandDeps) {
             subscriptionId: ref.subscriptionId,
             id: ref.kind === "movie" ? ref.id : ref.seriesId,
           };
-          const [title] = yield* loaded((owners, language) =>
-            call("byIds", { owners, language, kind, versions: [version] }),
+          const [title] = yield* loaded(
+            (owners, language) => call("byIds", { owners, language, kind, versions: [version] }),
+            new Set([version.subscriptionId]),
           );
           if (!title) return null;
           if (ref.kind === "movie") {
