@@ -573,8 +573,8 @@ describe("the collections Movies, Series, Home and details show", () => {
     }
     await until(
       () =>
-        ["movie", "series"].every(
-          (kind) => titles.collectionsOf(kind as TitleKind)?.services().length === 1,
+        (["movie", "series"] as const).every(
+          (kind) => titles.collectionsOf(kind)?.services().length === 1,
         ),
       "latest metadata",
     );
@@ -712,16 +712,27 @@ describe("the collections Movies, Series, Home and details show", () => {
     });
   });
 
-  it("are made again once time passes what they hold, the last made showing meanwhile", async () => {
+  it("are made again once metadata expires or time passes what they hold, the last made showing meanwhile", async () => {
+    const start = Date.now();
+    edges.known = tmdbOf(0);
+    edges.expiry = () => start + 5_000;
     subscribe("a");
     await until(() => titles.collectionsOf("movie") !== null, "the first collections");
     const index = indexed();
     const first = titles.collectionsOf("movie");
     if (!index || !first) throw new Error("No collections");
+    expect(first.validAt(start + 4_000)).toBe(true);
     expect(first.size("new-week")).toBeGreaterThan(0);
+    // The metadata they were made with expires; once made again, they hold.
+    shift = 6_000;
+    expect(titles.collectionsOf("movie")).toBe(first);
+    await until(() => titles.collectionsOf("movie") !== first, "collections made again");
+    const remade = titles.collectionsOf("movie");
+    for (let task = 0; task < 100; task++) await new Promise((done) => setTimeout(done, 1));
+    expect(titles.collectionsOf("movie")).toBe(remade);
     // Six days on, what was new this week no longer is.
     shift = 6 * 86_400_000;
-    expect(titles.collectionsOf("movie")).toBe(first);
+    expect(titles.collectionsOf("movie")).toBe(remade);
     await latest("movie", index);
     expect(titles.collectionsOf("movie")?.size("new-week")).toBe(0);
     // The clock goes back a day: what was made for later is made again for now.
@@ -731,25 +742,6 @@ describe("the collections Movies, Series, Home and details show", () => {
     await until(() => titles.collectionsOf("movie") !== later, "collections for now");
     await latest("movie", index);
     expect(titles.collectionsOf("movie")?.size("new-week")).toBeGreaterThan(0);
-  });
-
-  it("are made again once the metadata they were made with expires, and then hold", async () => {
-    const made = Date.now();
-    edges.known = tmdbOf(0);
-    edges.expiry = () => made + 5_000;
-    subscribe("a");
-    await until(() => titles.collectionsOf("movie") !== null, "the first collections");
-    const index = indexed();
-    const first = titles.collectionsOf("movie");
-    if (!index || !first) throw new Error("No collections");
-    expect(first.validAt(made + 4_000)).toBe(true);
-    shift = 6_000;
-    expect(titles.collectionsOf("movie")).toBe(first);
-    await until(() => titles.collectionsOf("movie") !== first, "collections made again");
-    // Expired metadata doesn't make them again on every read.
-    const again = titles.collectionsOf("movie");
-    for (let task = 0; task < 100; task++) await new Promise((done) => setTimeout(done, 1));
-    expect(titles.collectionsOf("movie")).toBe(again);
   });
 
   describe("on screen", () => {
@@ -988,44 +980,33 @@ describe("the collections Movies, Series, Home and details show", () => {
       expect(edges.opened).toEqual([]);
     });
 
-    it("keeps pending pushed collection controls without failure copy or an invented count", async () => {
-      const { CollectionScreen } = await import("../src/titles-screen.tsx");
-      edges.members = [
-        { entry: { id: "a" }, needsSecret: false, titles: { kind: "loading", last: null } },
-      ];
-      for (const listener of edges.roster) listener();
-      await draw(React.createElement(CollectionScreen, { kind: "movie", id: "all" }));
-      expect(titles.titleLists().kind).toBe("loading");
-      expect(container.querySelector('[role="status"]')?.textContent).toBe("Loading movies.");
-      expect(container.textContent).not.toContain("Catalogue unavailable");
-      expect(container.textContent).not.toContain(" of ");
-      await click("Sort & filter");
-      expect(container.textContent).not.toContain("Catalogue unavailable");
-      expect(container.textContent).not.toContain(" of ");
-      await click("Reset");
-      await click("Done");
-    });
-
-    it.each(["All", "4K"] as const)(
-      "keeps truthful loading feedback on a pending %s tab",
-      async (tab) => {
-        const { TitlesHome } = await import("../src/titles-screen.tsx");
-        list([["a", browseFixture("movie").catalogue]]);
-        await until(() => titles.collectionsOf("movie") !== null, "collections");
-        await draw(React.createElement(TitlesHome, { kind: "movie" }));
-        await click(tab);
-        await React.act(async () => {
+    it.each(["pushed collection", "All tab", "4K tab"] as const)(
+      "keeps truthful pending feedback and controls on a %s",
+      async (place) => {
+        const { CollectionScreen, TitlesHome } = await import("../src/titles-screen.tsx");
+        const pending = () => {
           edges.members = [
             { entry: { id: "a" }, needsSecret: false, titles: { kind: "loading", last: null } },
           ];
           for (const listener of edges.roster) listener();
-        });
+        };
+        if (place === "pushed collection") {
+          pending();
+          await draw(React.createElement(CollectionScreen, { kind: "movie", id: "all" }));
+        } else {
+          list([["a", browseFixture("movie").catalogue]]);
+          await until(() => titles.collectionsOf("movie") !== null, "collections");
+          await draw(React.createElement(TitlesHome, { kind: "movie" }));
+          await click(place === "All tab" ? "All" : "4K");
+          await React.act(async () => pending());
+        }
         expect(titles.titleLists().kind).toBe("loading");
         expect(container.querySelector('[role="status"]')?.textContent).toBe("Loading movies.");
         expect(container.textContent).not.toContain("Catalogue unavailable");
         expect(container.textContent).not.toContain(" of ");
         await click("Sort & filter");
         expect(container.textContent).not.toContain("Catalogue unavailable");
+        expect(container.textContent).not.toContain(" of ");
         await click("Reset");
         await click("Done");
       },
