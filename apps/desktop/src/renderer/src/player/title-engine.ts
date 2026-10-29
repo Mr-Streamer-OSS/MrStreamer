@@ -298,11 +298,11 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   /** Resolves once playback needs more data, or the run is cancelled. */
   const room = () =>
     new Promise<void>((done) => {
-      if (!holding() && ahead() < AHEAD_S.stop) return done();
+      if (!holding() && (video.paused || ahead() < AHEAD_S.stop)) return done();
       // Only a full buffer needs to drain to the lower threshold before reading again.
       const resumeAt = ahead() >= AHEAD_S.stop ? AHEAD_S.resume : AHEAD_S.stop;
       const check = () => {
-        if (abort.signal.aborted || (!holding() && ahead() < resumeAt)) {
+        if (abort.signal.aborted || (!holding() && (video.paused || ahead() < resumeAt))) {
           clearInterval(rechecking);
           video.removeEventListener("timeupdate", check);
           video.removeEventListener("seeking", check);

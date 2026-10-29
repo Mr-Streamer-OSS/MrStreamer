@@ -320,12 +320,15 @@ it.each([
   { end: 50, wake: "play" },
   { end: 60, wake: "play" },
   { end: 50, wake: "readiness" },
+  { end: 60, wake: "readiness" },
+  { end: 100, wake: "seek" },
 ])(
   "holds paused reads at $end seconds, wakes on $wake, and cancels while held",
   async ({ end, wake }) => {
     vi.stubGlobal("HTMLMediaElement", { HAVE_CURRENT_DATA: 2 });
     let paused = true;
     let readyState = 2;
+    let seeking = false;
     let reads = 0;
     const cancelled = vi.fn();
     vi.stubGlobal(
@@ -340,6 +343,7 @@ it.each([
                 // Pause again after one resumed read, rather than producing an unbounded mock stream.
                 paused = true;
                 readyState = 2;
+                seeking = false;
                 controller.enqueue(new Uint8Array([1]));
               },
               cancel: cancelled,
@@ -351,24 +355,30 @@ it.each([
     const video = document.createElement("video");
     Object.defineProperties(video, {
       paused: { get: () => paused },
-      seeking: { value: false },
+      seeking: { get: () => seeking },
       readyState: { get: () => readyState },
       buffered: { get: () => ({ length: 1, start: () => 0, end: () => end }) },
     });
-    engine = titleEngine(video, { ...run, paused: true });
+    const title = titleEngine(video, { ...run, paused: true });
+    engine = title;
     await vi.advanceTimersByTimeAsync(0);
     expect(reads).toBe(0);
     if (wake === "play") {
       paused = false;
       video.dispatchEvent(new Event("play"));
       await vi.advanceTimersByTimeAsync(0);
+    } else if (wake === "seek") {
+      expect(title.seekWithin(5)).toBe(true);
+      seeking = true;
+      readyState = 1;
+      video.dispatchEvent(new Event("seeking"));
+      await vi.advanceTimersByTimeAsync(0);
     } else {
       // Eviction can remove the current picture without Play, seeking or a clock update.
       readyState = 1;
-      end = 0;
       await vi.advanceTimersByTimeAsync(1000);
     }
-    if (end === 60) {
+    if (end === 60 && wake === "play") {
       expect(reads).toBe(0);
       video.currentTime = 10;
       video.dispatchEvent(new Event("timeupdate"));
@@ -378,6 +388,8 @@ it.each([
       video.dispatchEvent(new Event("timeupdate"));
       await vi.advanceTimersByTimeAsync(0);
     }
+    expect(reads).toBe(1);
+    await vi.advanceTimersByTimeAsync(5000);
     expect(reads).toBe(1);
     engine.destroy();
     await vi.advanceTimersByTimeAsync(0);

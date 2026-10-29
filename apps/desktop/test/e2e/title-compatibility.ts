@@ -139,6 +139,29 @@ try {
   await live.evaluate(
     `window.__compatibility.appended = 0; const add = MediaSource.prototype.addSourceBuffer; MediaSource.prototype.addSourceBuffer = function(type) { const buffer = add.call(this, type); window.__compatibility.buffer = buffer; const append = buffer.appendBuffer.bind(buffer); buffer.appendBuffer = data => { window.__compatibility.appended += data.byteLength; return append(data); }; return buffer; };`,
   );
+  await live.evaluate(`
+    window.__compatibility.pendingReads = 0;
+    const fetchTitle = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await fetchTitle(...args);
+      if (!response.url) return response;
+      const url = new URL(response.url);
+      if (url.pathname.startsWith('/title/') && !url.searchParams.has('only') && response.body) {
+        const getReader = response.body.getReader.bind(response.body);
+        response.body.getReader = (...options) => {
+          const reader = getReader(...options);
+          const read = reader.read.bind(reader);
+          reader.read = async (...options) => {
+            window.__compatibility.pendingReads++;
+            try { return await read(...options); }
+            finally { window.__compatibility.pendingReads--; }
+          };
+          return reader;
+        };
+      }
+      return response;
+    };
+  `);
   await login(live, provider);
   const click = async (description: string, expression: string) => {
     await waitFor(() => live.evaluate<boolean>(`!!(${expression})`), 30_000);
@@ -299,21 +322,58 @@ try {
       requests: provider.fileRequests(),
       active: provider.activeStreams(),
     });
-    // Let the one read already pending at Pause complete before the held interval.
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    const before = await sample();
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    const after = await sample();
+    const attempts: unknown[] = [];
+    observations["pausedBufferAttempts"] = attempts;
+    const { before, after, picture } = await (async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        // Observe the reader and SourceBuffer directly: a throttled chunk may take over 8 seconds.
+        await waitFor(() =>
+          live.evaluate<boolean>(`(() => {
+        const v = document.querySelector('video');
+        return v.paused && v.readyState >= 2 && !v.seeking &&
+          window.__compatibility.pendingReads === 0 && !window.__compatibility.buffer.updating;
+      })()`),
+        );
+        const before = await sample();
+        const picture = await live.evaluate<{ losses: number; ready: boolean }>(`
+        new Promise(resolve => {
+          const v = document.querySelector('video');
+          let losses = 0;
+          const check = () => { if (v.readyState < 2 || v.seeking) losses++; };
+          const events = ['seeking', 'waiting', 'emptied', 'loadeddata', 'seeked'];
+          events.forEach(event => v.addEventListener(event, check));
+          const timer = setInterval(check, 20);
+          check();
+          setTimeout(() => {
+            check();
+            clearInterval(timer);
+            events.forEach(event => v.removeEventListener(event, check));
+            resolve({ losses, ready: v.readyState >= 2 && !v.seeking });
+          }, 5000);
+        })
+      `);
+        const after = await sample();
+        attempts.push({ before, after, picture });
+        if (picture.losses === 0) return { before, after, picture };
+        await waitFor(async () => {
+          const recovered = await video();
+          return recovered.paused && recovered.readyState >= 2 && !recovered.seeking;
+        });
+      }
+      throw new Error("No uninterrupted held-picture interval after three attempts");
+    })();
     observations["pausedBuffer"] = {
       before,
       after,
       appendedWhileHeld: after.appended - before.appended,
       throughputBytesPerSecond: 2048,
-      settleMs: 3000,
+      picture,
+      attempts,
       heldMs: 5000,
     };
     await shot("paused-buffer");
-    if (after.appended !== before.appended) throw new Error("Title kept appending while paused");
+    if (after.appended !== before.appended)
+      throw new Error("Title kept appending while paused with its picture available");
     if (after.runs !== before.runs) throw new Error("Paused interval replaced the held run");
     const runs = after.runs;
     await key(live, " ", 32);
