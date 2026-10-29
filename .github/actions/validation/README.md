@@ -41,3 +41,6 @@ The action runs candidate checks/build/tests, and its own validation contract te
 The Test job covers the root suite, including marketing tests; website inputs therefore select both
 Test and Website. Main runs selected Website validation even though publication may also build it.
 This keeps an independent secretless validation result during the Website workflow transition.
+
+Website identity is diagnostic; the desktop-v1 reuse profile requires only Check and Test identities.
+The top-level identity names the required desktop profile and repeats the Check identity for lookup.

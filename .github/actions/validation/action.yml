@@ -28,7 +28,9 @@ runs:
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
-      run: echo "identity=$(node "$ACTION_PATH/../../scripts/validation-evidence.ts" identity)" >> "$GITHUB_OUTPUT"
+      run: |
+        identity=$(node "$ACTION_PATH/../../scripts/validation-evidence.ts" identity)
+        echo "identity=$identity" >> "$GITHUB_OUTPUT"
     # The website installs only what it declares, as publishing does.
     - run: pnpm install --frozen-lockfile ${{ inputs.part == 'website' && '--filter mrstreamer-marketing...' || '' }}
       shell: bash
