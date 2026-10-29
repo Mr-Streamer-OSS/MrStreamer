@@ -1,5 +1,5 @@
 import { zipSync, strToU8 } from "fflate";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { producePackageReceipt, type PackageIdentity } from "../scripts/package-receipt.ts";
 import { sha256, verifyPrivateCandidate } from "./e2e/installed-upgrade-packages.ts";
 import { fleetRunner } from "./e2e/installed-upgrade-windows.ts";
@@ -85,6 +85,33 @@ describe("explicit unpublished Windows upgrade inputs", () => {
       if (field === "attempt") bad.request.run.attempt++;
       if (field === "hash") bad.artifacts[0]!.digest = `sha256:${"0".repeat(64)}`;
       await expect(verifyPrivateCandidate(github, bad, true)).rejects.toThrow();
+    },
+  );
+  it.each(["C:\\Users\\agent", "C:\\Users\\agent\\AppData\\Local\\Temp\\..\\shared"])(
+    "refuses unsafe Fleet temp %s before executing Windows commands",
+    (temp) => {
+      const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+      Object.defineProperty(process, "platform", { value: "win32" });
+      vi.stubEnv("GITHUB_ACTIONS", undefined);
+      vi.stubEnv("GH_TOKEN", undefined);
+      vi.stubEnv("GITHUB_TOKEN", undefined);
+      vi.stubEnv("USERNAME", "agent");
+      vi.stubEnv("LOCALAPPDATA", "C:\\Users\\agent\\AppData\\Local");
+      vi.stubEnv("APPDATA", "C:\\Users\\agent\\AppData\\Roaming");
+      try {
+        expect(() =>
+          fleetRunner({
+            vmId: "abc123",
+            task: "upgrade",
+            nonce: "a".repeat(64),
+            disposable: true,
+            temp,
+          }),
+        ).toThrow("isolated task root");
+      } finally {
+        Object.defineProperty(process, "platform", platform);
+        vi.unstubAllEnvs();
+      }
     },
   );
   it("refuses a non-Fleet ownership declaration", () => {
