@@ -319,6 +319,10 @@ describe("durable usage and logical-play summaries", () => {
     for (let tick = 0; tick < 302; tick++) {
       await vi.advanceTimersByTimeAsync(1000);
       first.owner.notePlaybackState(token, binding, ++sequence, "playing");
+      if (tick === 119) {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(await first.store.load()).toEqual(paused);
+      }
     }
     await vi.advanceTimersByTimeAsync(0);
     const threshold = await first.store.load();
@@ -372,6 +376,9 @@ describe("durable usage and logical-play summaries", () => {
       ]);
       expect(current?.summaries?.unfinished).toBeNull();
     }
+    first.owner.notePlaybackState(token, binding, ++sequence, "paused");
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await first.store.load())?.summaries?.unfinished?.watchMs).toBe(362_000);
     first.owner.endPlayback(token);
     await vi.advanceTimersByTimeAsync(0);
     expect(first.events.filter((event) => event.event === "stream_summary")).toMatchObject([
