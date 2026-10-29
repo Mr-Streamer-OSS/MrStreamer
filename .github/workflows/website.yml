@@ -139,6 +139,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: marketing-output
+          overwrite: true
           path: apps/marketing/.vercel/output/
           # The package sits in a folder whose name starts with a dot.
           include-hidden-files: true
@@ -148,6 +149,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: marketing-indexnow
+          overwrite: true
           path: apps/marketing/scripts/indexnow.ts
           retention-days: 1
           if-no-files-found: error

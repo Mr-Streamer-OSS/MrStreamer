@@ -192,7 +192,7 @@ A build compiles analytics in from these variables only (`scripts/site-analytics
 
 | Variable                                    | Value                                                                                                                                                                        |
 | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MR_STREAMER_SITE_ANALYTICS_RELEASE_BUILD`  | `1`, set only by the publishing build in `website.yml`                                                                                                                       |
+| `MR_STREAMER_SITE_ANALYTICS_RELEASE_BUILD`  | `1`, set only by the build job in `website.yml`                                                                                                                              |
 | `MR_STREAMER_SITE_ANALYTICS_HOST`           | `https://eu.i.posthog.com`, from the repository variable `POSTHOG_HOST`, which the app also uses. It selects EU; pages still send to `/ingest`. Any other host sends nothing |
 | `MR_STREAMER_SITE_ANALYTICS_PROJECT_TOKEN`  | The project's public `phc_` key, from the repository variable `POSTHOG_PROJECT_TOKEN`                                                                                        |
 | `MR_STREAMER_SITE_ANALYTICS_LOCAL_ENDPOINT` | A literal `http://127.0.0.1:<port>/i/v0/e/` for verification. It replaces production                                                                                         |
