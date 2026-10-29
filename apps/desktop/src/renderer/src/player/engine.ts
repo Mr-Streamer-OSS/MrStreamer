@@ -215,12 +215,114 @@ function hlsEngine(
   const hls = new Hls({
     enableWorker: true,
     renderTextTracksNatively: false,
-    ...(ends === null ? {} : { startPosition: 0 }),
+    ...(ends === null ? { autoStartLoad: false } : { startPosition: 0 }),
   });
   const tracks = hlsTracks(hls, video, sound);
+  let released = false;
+  let supportTimer: ReturnType<typeof setTimeout> | undefined;
+  if (ends === null) {
+    hls.once(Hls.Events.MANIFEST_PARSED, () => {
+      // Reading firstAutoLevel starts hls.js's own capability checks. Let their handlers remove
+      // unsupported levels before using any index; another read can start further checks.
+      const checked = new Set<Promise<unknown>>();
+      const validated = new Map<(typeof hls.levels)[number], boolean>();
+      // Capability services are advisory: a slow service must not consume the start watchdog.
+      const deadline = new Promise<"timeout">((resolve) => {
+        supportTimer = setTimeout(() => resolve("timeout"), 1000);
+      });
+      async function start(): Promise<void> {
+        while (!released) {
+          const initial = hls.firstAutoLevel;
+          const pending = hls.levels.flatMap((level) =>
+            level.supportedPromise && !checked.has(level.supportedPromise)
+              ? [level.supportedPromise]
+              : [],
+          );
+          if (pending.length) {
+            pending.forEach((promise) => checked.add(promise));
+            const result = await Promise.race([Promise.allSettled(pending), deadline]);
+            if (released) return;
+            if (result === "timeout") {
+              hls.startLoad();
+              return;
+            }
+            continue;
+          }
+          const tier = hls.levels[initial];
+          // Keep the initial audio groups, including their stable rendition identities. Starting
+          // in another group can lose the requested language before ABR ever reaches this tier.
+          if (
+            tier &&
+            tier.supportedResult?.supported !== false &&
+            (!tier.supportedPromise || tier.supportedResult?.supported === true)
+          ) {
+            const lowest = hls.levels.reduce(
+              (lowest, level, index, levels) =>
+                level.supportedResult?.supported !== false &&
+                !level.supportedResult?.decodingInfoResults.some((info) => info.smooth === false) &&
+                validated.get(level) !== false &&
+                (!level.supportedPromise || level.supportedResult?.supported === true) &&
+                level.codecSet === tier.codecSet &&
+                level.videoRange === tier.videoRange &&
+                level.frameRate <= tier.frameRate &&
+                (index <= initial || level.frameRate === tier.frameRate) &&
+                level.audioGroups?.length === tier.audioGroups?.length &&
+                (level.audioGroups ?? []).every((group) => tier.audioGroups?.includes(group)) &&
+                level.bitrate < levels[lowest]!.bitrate
+                  ? index
+                  : lowest,
+              initial,
+            );
+            const candidate = hls.levels[lowest]!;
+            if (
+              lowest !== initial &&
+              candidate.supportedResult?.supported !== true &&
+              !validated.has(candidate)
+            ) {
+              // ABR may return before visiting lower levels. Use hls.js's public capability
+              // query for that candidate rather than treating an absent promise as support.
+              const result = await Promise.race([
+                hls.getMediaDecodingInfo(candidate).then(
+                  (info) =>
+                    info.supported &&
+                    !info.decodingInfoResults.some((result) => result.smooth === false),
+                  () => false,
+                ),
+                deadline,
+              ]);
+              if (released) return;
+              if (result === "timeout") {
+                hls.startLoad();
+                return;
+              }
+              validated.set(candidate, result);
+              continue;
+            }
+            hls.startLevel = lowest;
+          }
+          hls.startLoad();
+          return;
+        }
+      }
+      // Selection is optional. Unexpected selection errors fall back to normal loading; a
+      // loader failure still uses the engine's existing failure path.
+      void start()
+        .catch(() => {
+          if (released) return;
+          try {
+            hls.startLoad();
+          } catch {
+            life.fail({ kind: "media", detail: t("The stream could not be decoded.") });
+          }
+        })
+        .finally(() => clearTimeout(supportTimer));
+    });
+  }
   const life = lifecycle(
     video,
     () => {
+      released = true;
+      clearTimeout(supportTimer);
       tracks.release();
       hls.destroy();
     },
