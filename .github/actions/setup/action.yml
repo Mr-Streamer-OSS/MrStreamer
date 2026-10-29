@@ -17,13 +17,23 @@ runs:
   steps:
     # The workflow's tools sit beside the release's checkout in .workflow. Kept out of what git
     # reports, the release UI receipt still finds the checkout holding nothing but the commit.
-    - run: echo ".workflow/" >> "$(git rev-parse --git-path info/exclude)"
+    - run: |
+        test -f .workflow/.github/actions/setup/action.yml
+        echo ".workflow/" >> "$(git rev-parse --git-path info/exclude)"
       shell: bash
     - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: 24
         cache: pnpm
+        # The website's filtered install can save the lockfile-only key first and leave every
+        # release downloading the rest. Key this full store on the candidate's lockfile, package
+        # manager and workspace policy, and on this action from .workflow.
+        cache-dependency-path: |
+          pnpm-lock.yaml
+          package.json
+          pnpm-workspace.yaml
+          .workflow/.github/actions/setup/action.yml
     - run: pnpm install --frozen-lockfile
       shell: bash
     - run: npm pkg set version="$VERSION"
