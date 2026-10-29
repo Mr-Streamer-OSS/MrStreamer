@@ -54,29 +54,3 @@ bundle gates publication. This omits only the duplicate Check build, leaving all
 checks and the full Test contract intact. Default PR/main callers keep `build: "true"`.
 Fallback does not emit reusable desktop-v1 evidence: that profile still means the producer Check
 and Test both executed under the recorded identities, including the default Check build.
-
-## Temporary paired test-job trial
-
-On pull requests only, Checks currently also runs two trial shards on the same candidate as the unchanged full Test
-job. The optional `test-shard` input takes `index/count` (for example `1/2`) and skips the per-job
-completeness gate; its caller must validate the merged reports. Each shard has independent setup and
-an artifact labelled by shard and attempt. Their union must pass the candidate completeness gate,
-and both shard jobs must succeed. Release evidence still comes only from the unchanged full Test
-job; pushes to main and release calls skip the trial.
-
-For a new measurement use **Re-run all jobs**. The collector refuses an attempt without both
-reports from that attempt and gives this instruction. A partial rerun can diagnose a failure but
-cannot recover the union or count as a matched timing sample. Never combine reports or timings
-across attempts. Compare all setup, report upload and post-job teardown, queue gaps, union
-collection, downstream evidence and every applicable non-trial PR check. Keep two jobs only for
-at least 30% faster end-to-end PR green with at most 20% additional combined Test runner minutes;
-report the extra collector cost too. Otherwise remove the trial and retain one job. Boat timings
-alone cannot establish GitHub latency. Later suite/input changes invalidate the measured result.
-
-For the full PR-green comparison, read every check run and commit status on the exact PR head,
-plus the branch rules' required checks. Keep hosted review and other applicable validation in
-both paths and exclude experimental jobs from the one-job path. Record job creation/start/end
-and step times, including collector install and post-job steps. The existing evidence job waits
-for full Test: model the split path with the union completion plus the observed evidence-job
-queue and duration. Label this counterfactual path as modelled, not an independently observed
-split PR-green timestamp. A later hosted review or unrelated check can erase the test speedup.
