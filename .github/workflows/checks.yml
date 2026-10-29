@@ -1,15 +1,5 @@
-# The app's and the website's checks, on every pull request and push to main;
-# docs/maintainers/ci.md shows how the workflows fit together.
-#
-# A release calls this with the commit it builds (`sha`). That call checks and tests the commit,
-# and leaves out what the release does elsewhere or what has no say in it: the production build
-# is the release's own bundle job, the workflows are main's and linted there, and a page that
-# doesn't build never holds back an app release. On main, publish.yml builds the website after
-# every change to what it is built from, so the website job runs on pull requests alone.
-#
-# No secrets, so pull requests from forks run all of it.
+# Always report Check; only omit expensive work for known independent inputs.
 name: Checks
-
 on:
   pull_request:
   push:
@@ -17,116 +7,104 @@ on:
   workflow_call:
     inputs:
       sha:
-        description: The commit a release builds
+        description: The exact commit a release validates
         type: string
         required: true
       report-name:
-        description: Names this call's test report apart from another call's in the same run
+        description: Legacy caller report label
         type: string
         required: true
-
 permissions:
   contents: read
-
-# A new push to a pull request replaces its running checks. A release's checks get a group of
-# their own, so they never wait for or cancel the checks of a pull request.
 concurrency:
   group: >-
     checks-${{ inputs.sha && format('release-{0}-{1}', github.run_id, inputs.sha)
     || github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && !inputs.sha }}
-
 jobs:
+  inputs:
+    name: Inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      desktop: ${{ steps.paths.outputs.desktop }}
+      website: ${{ steps.paths.outputs.website }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - id: paths
+        env:
+          VALIDATION_SHA: ${{ inputs.sha }}
+        run: node .github/scripts/ci-inputs.ts
   check:
     name: Check
+    needs: inputs
+    if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/validation
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Unused code
-        run: pnpm knip
-      - name: Lint
-        run: pnpm lint
-      - name: Format
-        run: pnpm fmt:check
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Workflows
-        if: inputs.sha == ''
-        run: pnpm actionlint
-      - name: Build
-        if: inputs.sha == ''
-        run: pnpm build
-
+          part: check
+      - name: Require input selection
+        env:
+          INPUT_RESULT: ${{ needs.inputs.result }}
+        run: test "$INPUT_RESULT" = success
   test:
     name: Test
+    needs: inputs
+    if: always() && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/validation
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      # Keep the complete distro toolchain. A different runner image or week gets fresh packages.
-      - id: multimedia-key
-        run: |
-          sources=$(find /etc/apt/sources.list.d -type f -exec sha256sum {} + | sha256sum | cut -d' ' -f1)
-          echo "key=test-ffmpeg-${ImageOS}-${ImageVersion}-$(date -u +%G-W%V)-$sources" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ runner.temp }}/ffmpeg-packages/*.deb
-            ${{ runner.temp }}/ffmpeg-packages/SHA256SUMS
-          key: ${{ steps.multimedia-key.outputs.key }}-${{ hashFiles('apps/desktop/scripts/ci-ffmpeg.sh') }}
-      - name: Multimedia tools
-        run: bash apps/desktop/scripts/ci-ffmpeg.sh "$RUNNER_TEMP/ffmpeg-packages"
-      - name: Test
-        run: pnpm test --reporter=default --reporter=github-actions --reporter=json --outputFile.json="$RUNNER_TEMP/test-results.json"
-      # The report, to look into a failure or a slow file. Missing when the tests never ran, which
-      # the next step fails on.
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: test-results-${{ inputs.report-name || github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/test-results.json
-          retention-days: 7
-          if-no-files-found: warn
-      # Every test file in the report, each test passed: a suite that skipped for want of ffmpeg
-      # fails here.
-      - name: Require complete test results
-        if: always()
-        run: node scripts/ci-test-results.ts "$RUNNER_TEMP/test-results.json"
-
-  # The pictures from the captures, the page, and the package Vercel takes, which checks itself.
-  # It installs only what the website declares, as publishing does; a read-only workflow token
-  # fetches release history.
+          part: test
   website:
     name: Website
-    if: inputs.sha == '' && github.event_name == 'pull_request'
+    needs: inputs
+    if: always() && !inputs.sha && (needs.inputs.result != 'success' || needs.inputs.outputs.website == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: ./.github/actions/validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          part: website
+  evidence:
+    name: Validation evidence
+    needs: [inputs, check, test, website]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --filter mrstreamer-marketing...
-      - name: Build
+      - name: Record executed results
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: pnpm --filter mrstreamer-marketing build
+          CHECK_RESULT: ${{ needs.check.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          WEBSITE_RESULT: ${{ needs.website.result }}
+        run: node .github/scripts/validation-evidence.ts record "$RUNNER_TEMP/validation.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/validation.json
+          retention-days: 14
+          if-no-files-found: error

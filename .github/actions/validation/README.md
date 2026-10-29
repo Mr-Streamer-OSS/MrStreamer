@@ -1,0 +1,32 @@
+# Secretless validation contract
+
+After checking out the exact candidate and trusted validation tools, call this composite action
+with `part: check`, `test`, or `website`. Run Check and Test in separate jobs, with the existing
+10/15-minute bounds. Check includes the production desktop build and workflow validation.
+Test preserves the full suite, multimedia setup, JSON artifact and completeness gate. Website
+requires only a read-only `GH_TOKEN` for release history. There are no signing or publishing steps.
+
+The caller must execute trusted action code: for an older candidate, check out the workflow's
+reviewed tools separately and refer to that action path. Run from the candidate workspace.
+Do not load validation code from arbitrary forks in a privileged release workflow.
+
+`node .github/scripts/validation-evidence.ts record <file>` records schema version 1,
+exact checked-out `sha`, `identity`, `profile: desktop-v1` and `results: {check,test,website}`.
+Results come from job conclusions via CHECK_RESULT, TEST_RESULT and WEBSITE_RESULT. A skipped
+Test is recorded as skipped and cannot satisfy the desktop profile. The identity hashes validation
+inputs, lockfile, package manager declaration, actual Node version, OS/architecture and runner image.
+Main always checks its actual merged source; PR evidence is diagnostic only.
+
+Release consumers find the immutable `validation-<run-id>-<attempt>` artifact on a completed
+Checks run, authenticate its repository, workflow path, event, branch, source SHA and conclusion
+against GitHub's API, and download that exact run attempt's artifact. Never take producer metadata
+from the artifact itself. Do not accept artifacts from a different run, an expired/missing artifact,
+a fork, a PR, a failed/cancelled run or an untrusted workflow revision. The consumer must verify
+that the producing workflow revision is trusted under its release policy before calling verify.
+
+Use `node .github/scripts/validation-evidence.ts verify <file> <producer.json>` with VALIDATION_SHA
+set to the exact candidate. Producer JSON uses API-verified `repository`, `event`, `branch`,
+`workflow` (workflow path), `sha`, and `conclusion`. Exit 0 permits reuse; nonzero means run the
+shared Check/Test action instead. Identity is recomputed from the current trusted validation
+checkout and toolchain. Toolchain/image drift deliberately falls back. Website failures cannot be
+reused; an intentionally skipped Website does not constitute executed website validation.
