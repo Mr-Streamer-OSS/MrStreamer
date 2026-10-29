@@ -2658,11 +2658,12 @@ describe("the native queue's boundaries", { timeout: 40_000 }, () => {
       if (intent === "resumed") await app.remove(a, { keepHistory: true });
       const size = asBuild14Completion(film, intent === "resumed" ? "source-removed" : undefined);
       const asked = native.requests.length;
+      const started = background.events.filter((each) => each.startsWith("start:"));
       const blocked = new Folder(native.root, "documents", "downloads.json.next");
       blocked.create();
       app = await launch();
-      // Its receipt is read and refused by downloads.json, which then takes writes again.
-      await sleep(1_000);
+      // This launch has tried its receipt while downloads.json still refuses writes.
+      await until(() => background.barrier.kind === "finished", "the foreground reconciliation");
       blocked.delete();
       if (intent === "fresh") await app.remove(a, { keepHistory: true });
       else await app.update(b!, { name: "Renamed" });
@@ -2680,6 +2681,7 @@ describe("the native queue's boundaries", { timeout: 40_000 }, () => {
       expect(doc().items[0].removal).toBeUndefined();
       expect(mediaFile(film.id)?.size).toBe(size);
       expect(native.requests).toHaveLength(asked);
+      expect(background.events.filter((each) => each.startsWith("start:"))).toEqual(started);
       await until(() => background.legacyReceipts.length === 0, "its receipt acknowledged");
     });
   }
@@ -2695,7 +2697,7 @@ describe("the native queue's boundaries", { timeout: 40_000 }, () => {
       const blocked = new Folder(native.root, "documents", "downloads.json.next");
       blocked.create();
       app = await launch();
-      await sleep(1_000);
+      await until(() => background.barrier.kind === "finished", "the foreground reconciliation");
       blocked.delete();
       if (how === "user") await app.removeDownload(film.id);
       else {
