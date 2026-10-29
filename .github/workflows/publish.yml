@@ -1,4 +1,18 @@
-# GitHub publication, feed repair and Store operations. Website delivery lives in website.yml.
+# The GitHub release, its Discord announcement, the update feed and the Microsoft Store.
+# docs/maintainers/ci.md shows when each job runs.
+#
+# - After a release's files are built: release.yml calls this with the release, never for a
+#   dry run. The GitHub release goes out first; Discord, the feed, the Store (stable only) and the
+#   version commit on main (stable only) follow it, and a stable release then calls website.yml.
+# - By hand, from main: the feed (regenerate, or allow-regress after deleting a bad release) or the
+#   Store (preflight, status, or submit a release's package).
+#
+# No pull request event starts this workflow, and the release job, which every other job of a
+# release's call waits for, also refuses one. Each public surface keeps its kill switch and
+# environment: the feed deploys through github-pages; the Store needs STORE_AUTOMATION_ENABLED and
+# the microsoft-store environment. Jobs that hold a credential check out nothing they run, or run
+# only the workflow commit's dependency-free scripts. Each surface takes one publication at a
+# time and cancels none.
 name: Publish
 
 on:
@@ -381,14 +395,12 @@ jobs:
           echo "::error::Main kept moving; run this job again."
           exit 1
 
-  # Explicit stable refresh. Feed and Store failures do not block this call, and it never
-  # packages desktop artifacts. Website also has independent main and manual entry points.
+  # The website, once the version commit is on main, whatever the feed and the Store did. The
+  # version commit is the workflow token's push, which starts no workflow, so this call is the
+  # website's only cue. website.yml reads its Vercel token from its own environment.
   website-refresh:
+    name: Website
     needs: finalize
-    if: "!cancelled() && needs.finalize.result == 'success'"
     uses: ./.github/workflows/website.yml
     with:
       deploy: true
-    secrets: inherit
-    permissions:
-      contents: read

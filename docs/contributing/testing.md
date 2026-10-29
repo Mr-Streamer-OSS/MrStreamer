@@ -479,5 +479,3 @@ The [Privacy feature entry](../../.cursor/skills/verify-mrstreamer/features/priv
 A source-built Linux native-mode run establishes actual process and filesystem behavior only for those source bytes. Exact installed Mac/Windows/Linux candidate evidence, native installer transitions, Store-delivered updates and actual nightly production ingestion remain separate release checks. Controlled filesystem promise delay is not measured native slow-disk latency.
 
 For complete default-suite wall-time receipts, see [suite measurements](suite-measurements.md).
-
-CI publication routing changes require secretless publication-guard contracts and independent review before a signed, non-publishing PR dry run. Website workflow and maintainer-doc-only pushes build without production deployment. Real deployment and stable handoff acceptance remain on the separately approved delivery card.

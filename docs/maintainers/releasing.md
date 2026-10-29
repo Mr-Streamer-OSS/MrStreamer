@@ -309,7 +309,7 @@ Once a stable release is published and its package passed every check, the run's
 
 - The publish job creates releases with the workflow token (`contents: write`) and reads the pull requests behind each commit for the notes (`pull-requests: read`).
 - The finalize job pushes to `main` with the same token (`contents: write`). `main` has no branch protection or rulesets. If one is added, let GitHub Actions bypass it or give finalize a GitHub App token, or the push is refused.
-- Pushes by the workflow token start no workflows, so the version commit does not run CI. After successful stable finalization, Publish explicitly calls Website. This refresh is independent of later feed or Store failures and rebuilds no desktop packages. Website has an independent manual retry on `main`; build-only validation leaves **deploy** unticked. Workflow-only and maintainer-doc-only pushes validate without deploying.
+- Pushes by the workflow token start no workflows, so the version commit doesn't run CI. Publish calls **Website** after it instead, whatever the feed and the Store did.
 - The plan job removes the dry-run label (`pull-requests: write`).
 - The upgrade check reads releases and commits (`contents: read`) and holds no secret.
 - The feed job reads the releases (`contents: read`) and deploys to Pages (`pages: write`, `id-token: write`) through the `github-pages` environment.
