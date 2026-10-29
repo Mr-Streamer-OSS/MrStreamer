@@ -271,9 +271,9 @@ describe("putting the favourites in another order", () => {
     await page.press("PageDown", { alt: true });
     expect([page.indexOf("Channel 3"), page.said()]).toEqual([13, "Channel 3, 14 of 60"]);
 
-    expect(ipc.argsOf("guide.listings").flatMap(({ channels }) => channels)).not.toContainEqual(
-      own("60"),
-    );
+    const visible = ipc.argsOf("guide.listings").flatMap(({ channels }) => channels);
+    expect(visible).toContainEqual(own("1"));
+    expect(visible).not.toContainEqual(own("60"));
 
     // The last place is far outside the rows the list draws: the row is there, with the focus.
     await page.press("End", { alt: true });
