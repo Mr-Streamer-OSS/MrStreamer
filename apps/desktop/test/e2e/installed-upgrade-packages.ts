@@ -15,6 +15,73 @@ import { createHash } from "node:crypto";
 import { type } from "arktype";
 import { parse } from "yaml";
 import {
+  Artifact,
+  resolvePackageReceipt,
+  type PackageRequest,
+} from "../../scripts/package-receipt.ts";
+
+const PrivateInput = type({
+  repository: type(/^[\w.-]+\/[\w.-]+$/),
+  request: {
+    sourceCommit: type(/^[0-9a-f]{40}$/),
+    workflowCommit: type(/^[0-9a-f]{40}$/),
+    appVersion: type(/^\d+\.\d+\.\d+-nightly\.\d{8}\.\d+$/),
+    packageVersion: "string",
+    platform: "'win-x64'",
+    distribution: "'direct'",
+    run: {
+      id: "number.integer > 0",
+      attempt: "number.integer > 0",
+      headCommit: type(/^[0-9a-f]{40}$/),
+    },
+  },
+  artifacts: Artifact.array(),
+});
+
+/** Explicit private input. The shared verifier binds all identities and archive/file hashes. */
+export async function verifyPrivateCandidate(github: GitHub, input: unknown, authenticate = false) {
+  const value = PrivateInput.assert(input);
+  check(value.repository === github.repository, "Private input belongs to another repository.");
+  if (authenticate) {
+    const run = type({
+      id: "number",
+      run_attempt: "number",
+      head_sha: "string",
+      status: "string",
+      conclusion: "string | null",
+    }).assert(
+      await github.json(
+        `/actions/runs/${value.request.run.id}/attempts/${value.request.run.attempt}`,
+      ),
+    );
+    check(
+      run.id === value.request.run.id &&
+        run.run_attempt === value.request.run.attempt &&
+        run.head_sha === value.request.run.headCommit &&
+        run.status === "completed" &&
+        run.conclusion === "success",
+      "Private run identity or success does not match.",
+    );
+    for (const expected of value.artifacts) {
+      const actual = Artifact.assert(await github.json(`/actions/artifacts/${expected.id}`));
+      check(
+        actual.id === expected.id &&
+          actual.name === expected.name &&
+          actual.digest === expected.digest &&
+          actual.expired === expected.expired &&
+          actual.expires_at === expected.expires_at &&
+          actual.workflow_run.id === expected.workflow_run.id &&
+          actual.workflow_run.head_sha === expected.workflow_run.head_sha,
+        "Private artifact metadata differs from authenticated GitHub metadata.",
+      );
+    }
+  }
+  const request: PackageRequest = value.request;
+  return resolvePackageReceipt(github, request, value.artifacts);
+}
+
+type PrivateCandidate = Awaited<ReturnType<typeof verifyPrivateCandidate>>;
+import {
   compareVersions,
   formatVersion,
   parseVersion,
@@ -70,6 +137,17 @@ const Package = type({
 });
 /** One checked installer, with what vouches for it. */
 export type Package = typeof Package.infer;
+const UpgradePackage = Package.or(
+  Package.omit("provenance").and({
+    provenance: {
+      releaseKind: "'private'",
+      tag: "string",
+      artifactId: "number.integer > 0",
+      receiptArtifactId: "number.integer > 0",
+    },
+  }),
+);
+export type UpgradePackage = typeof UpgradePackage.infer;
 const Receipt = type({
   repository: "string",
   resolvedAt: "string",
@@ -81,6 +159,9 @@ const Receipt = type({
 });
 /** receipt.json beside the downloaded setups: what `run` installs, in order. */
 export type Receipt = typeof Receipt.infer;
+
+const UpgradeReceipt = Receipt.omit("packages").and({ packages: [UpgradePackage, UpgradePackage] });
+type UpgradeReceipt = typeof UpgradeReceipt.infer;
 
 const Asset = type({
   id: "number.integer > 0",
@@ -124,7 +205,7 @@ export const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).
 const setupName = (version: string) => `Mr-Streamer-${version}-win-x64-setup.exe`;
 
 /** The version a canonical `v`-prefixed release tag of `kind` names, or undefined. */
-function tagVersion(tag: string, kind: Package["provenance"]["releaseKind"]): Version | undefined {
+function tagVersion(tag: string, kind: "stable" | "nightly"): Version | undefined {
   const version = parseVersion(tag);
   return tag.startsWith("v") &&
     version &&
@@ -185,9 +266,27 @@ async function newestStable(github: GitHub): Promise<string> {
  * that commit, so the check proves the source the release builds; without it, as when dispatched
  * alone, the tag's commit is taken. `now` stamps the receipt.
  */
-export async function resolvePackages(
+export function resolvePackages(
   github: GitHub,
   candidate: { readonly tag: string; readonly sha?: string | undefined },
+  now?: number,
+): Promise<{ receipt: Receipt; files: Map<string, Uint8Array> }>;
+export function resolvePackages(
+  github: GitHub,
+  candidate: {
+    readonly tag: string;
+    readonly sha?: string | undefined;
+    readonly private: PrivateCandidate | undefined;
+  },
+  now?: number,
+): Promise<{ receipt: UpgradeReceipt; files: Map<string, Uint8Array> }>;
+export async function resolvePackages(
+  github: GitHub,
+  candidate: {
+    readonly tag: string;
+    readonly sha?: string | undefined;
+    readonly private?: PrivateCandidate | undefined;
+  },
   now = Date.now(),
 ) {
   const candidateTag = candidate.tag;
@@ -199,7 +298,7 @@ export async function resolvePackages(
   const stableTag = await newestStable(github);
   const commitOf = async (tag: string) =>
     type({ sha: FullSha }).assert(await github.json(`/commits/${encodeURIComponent(tag)}`)).sha;
-  const candidateSha = await commitOf(candidateTag);
+  const candidateSha = candidate.private?.receipt.sourceCommit ?? (await commitOf(candidateTag));
   check(
     candidate.sha === undefined || candidateSha === candidate.sha,
     `${candidateTag} names ${candidateSha}, not ${candidate.sha}, the commit the release planned.`,
@@ -232,6 +331,35 @@ export async function resolvePackages(
 
   const files = new Map<string, Uint8Array>();
   const resolve = async (stage: Package["stage"], tag: string, source: string) => {
+    if (stage === "candidate" && candidate.private) {
+      const verified = candidate.private;
+      check(
+        verified.receipt.platform === "win-x64" &&
+          verified.receipt.distribution === "direct" &&
+          verified.receipt.appVersion === tag.slice(1) &&
+          verified.receipt.sourceCommit === source,
+        "Private candidate identity differs from the upgrade pair.",
+      );
+      const name = setupName(verified.receipt.appVersion);
+      const bytes = verified.files.get(name);
+      check(bytes, "Private candidate has no Windows installer.");
+      const file = `candidate-${name}`;
+      files.set(file, bytes);
+      return UpgradePackage.assert({
+        stage,
+        version: tag.slice(1),
+        source,
+        file,
+        bytes: bytes.length,
+        sha256: sha256(bytes),
+        provenance: {
+          releaseKind: "private",
+          tag,
+          artifactId: verified.artifact.id,
+          receiptArtifactId: verified.receiptArtifact.id,
+        },
+      });
+    }
     const kind = stage === "stable" ? "stable" : "nightly";
     const version = tag.slice(1);
     const release = Release.assert(await github.json(`/releases/tags/${encodeURIComponent(tag)}`));
@@ -303,7 +431,7 @@ export async function resolvePackages(
       },
     });
   };
-  const receipt: Receipt = {
+  const receipt: UpgradeReceipt = {
     repository: github.repository,
     resolvedAt: new Date(now).toISOString(),
     resolved,
@@ -314,7 +442,9 @@ export async function resolvePackages(
     defaultBranch: "main",
     candidateAheadBy: diff.ahead_by,
     limits: [
-      "Published tags, SHA256SUMS.txt and latest.yml bind each setup. Package receipts are not read.",
+      candidate.private
+        ? "Published Stable remains the predecessor. The unpublished candidate is bound by its package receipt and is not a published release."
+        : "Published tags, SHA256SUMS.txt and latest.yml bind each setup. Package receipts are not read.",
       "The last phase restarts the same candidate. It does not prove a second version upgrade.",
     ],
   };
@@ -322,8 +452,13 @@ export async function resolvePackages(
 }
 
 /** Refuses a receipt of another shape or with inconsistent identities before anything installs. */
-export function readReceipt(value: unknown): Receipt {
-  const receipt = Receipt.assert(value);
+export function readReceipt(value: unknown): Receipt;
+export function readReceipt(
+  value: unknown,
+  privateCandidate: PrivateCandidate | undefined,
+): UpgradeReceipt;
+export function readReceipt(value: unknown, privateCandidate?: PrivateCandidate): UpgradeReceipt {
+  const receipt = UpgradeReceipt.assert(value);
   const pair = checkPair(receipt.resolved);
   for (const [index, stage, tag, source] of [
     [0, "stable", pair.stableTag, pair.stableSha],
@@ -336,7 +471,15 @@ export function readReceipt(value: unknown): Receipt {
         pkg.source === source &&
         pkg.file === `${stage}-${setupName(pkg.version)}` &&
         pkg.provenance.tag === tag &&
-        pkg.provenance.releaseKind === (stage === "stable" ? "stable" : "nightly"),
+        (pkg.provenance.releaseKind === (stage === "stable" ? "stable" : "nightly") ||
+          (stage === "candidate" &&
+            privateCandidate &&
+            pkg.provenance.releaseKind === "private" &&
+            pkg.source === privateCandidate.receipt.sourceCommit &&
+            pkg.version === privateCandidate.receipt.appVersion &&
+            pkg.provenance.artifactId === privateCandidate.artifact.id &&
+            pkg.provenance.receiptArtifactId === privateCandidate.receiptArtifact.id &&
+            pkg.sha256 === sha256(privateCandidate.files.get(setupName(pkg.version))!))),
       "The receipt's package identity does not match its resolved tags.",
     );
   }

@@ -1,13 +1,15 @@
 // What the installed upgrade check does to the Windows machine it runs on: the per-user NSIS
 // install, the process tree of each app instance it starts, and the outbound block on the
 // installed app and its bundled ffmpeg for the offline part. It refuses anywhere but a
-// GitHub-hosted runner with no Mr. Streamer installed, never stops a process it didn't start, and
+// GitHub-hosted runner or explicitly owned disposable Fleet VM with no Mr. Streamer installed,
+// never stops a process it didn't start, and
 // takes back only the firewall rules, profile and audit settings it changed. The runner's disposal
 // is the outer boundary for anything a failure leaves behind.
 import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
+import { type } from "arktype";
 import { setTimeout as delay } from "node:timers/promises";
 
 /** The disposable runner and the install this run owns on it. */
@@ -45,6 +47,67 @@ export function disposableRunner(): Runner {
       join(installRoot, "resources", "ffmpeg", name),
     ),
   };
+}
+
+const FleetOwner = type({
+  vmId: type(/^[a-z0-9-]{6,64}$/),
+  task: type(/^[a-zA-Z0-9-]{1,80}$/),
+  nonce: type(/^[0-9a-f]{64}$/),
+  disposable: "true",
+  temp: "string",
+  "+": "reject",
+});
+
+/**
+ * Explicit operator attestation, created on Forge only after fleet-winvm start. This is a
+ * separate trust boundary from Actions, not an environment-variable bypass. The VM must be a
+ * clean QEMU guest under agent, with absent app/profile roots and a task-specific temp directory.
+ */
+export function fleetRunner(input: unknown): Runner {
+  const owner = FleetOwner.assert(input);
+  const env = process.env;
+  if (process.platform !== "win32") throw new Error("This check installs on Windows only.");
+  if (env["GITHUB_ACTIONS"] || env["GH_TOKEN"] || env["GITHUB_TOKEN"])
+    throw new Error("Fleet mode must not impersonate Actions or receive GitHub tokens.");
+  const local = env["LOCALAPPDATA"];
+  const roaming = env["APPDATA"];
+  if (!local || !roaming || env["USERNAME"]?.toLowerCase() !== "agent")
+    throw new Error("Fleet mode requires its disposable agent account.");
+  const expected = win32.join(local, "Temp", `mrstreamer-${owner.task}-${owner.nonce}`);
+  if (owner.temp !== expected) throw new Error("Fleet temp must be the isolated task root.");
+  const model = powershell("(Get-CimInstance Win32_ComputerSystem).Manufacturer");
+  if (!/QEMU/i.test(model)) throw new Error("Fleet mode requires a disposable QEMU guest.");
+  const installRoot = join(local, "Programs", "mrstreamer");
+  for (const path of [installRoot, join(roaming, "mrstreamer"), join(roaming, "Mr. Streamer")])
+    if (existsSync(path)) throw new Error("Fleet app/profile roots must be absent.");
+  // Refuse reparse points in every existing ancestor before cleanup can traverse any path.
+  powershell(
+    `$ErrorActionPreference = 'Stop'
+    foreach ($root in @($env:MRS_TEMP, $env:MRS_INSTALL, $env:MRS_ROAMING)) {
+      $path = $root
+      while ($path) {
+        if (Test-Path -LiteralPath $path) {
+          $item = Get-Item -Force -LiteralPath $path
+          if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse root refused' }
+        }
+        $path = Split-Path -Parent $path
+      }
+    }`,
+    { MRS_TEMP: owner.temp, MRS_INSTALL: installRoot, MRS_ROAMING: roaming },
+  );
+  if (!existsSync(owner.temp)) throw new Error("Provision the task temp in the owned VM first.");
+  const runner = {
+    id: `mrstreamer-fleet-${owner.vmId}-${owner.nonce.slice(0, 16)}`,
+    temp: owner.temp,
+    installRoot,
+    executable: join(installRoot, "Mr. Streamer.exe"),
+    tools: ["ffmpeg.exe", "ffprobe.exe"].map((name) =>
+      join(installRoot, "resources", "ffmpeg", name),
+    ),
+  };
+  assertNoAppRunning(runner, "Before Fleet execution");
+  if (uninstallEntries().length) throw new Error("Fleet VM already has an installation.");
+  return runner;
 }
 
 /** Runs a PowerShell script, with values passed as environment variables rather than quoted in. */

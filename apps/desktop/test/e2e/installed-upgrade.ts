@@ -32,7 +32,7 @@ import { preferenceValues } from "./preference-reply.ts";
 //   node apps/desktop/test/e2e/installed-upgrade.ts run --packages <folder> --root <new folder under RUNNER_TEMP>
 //
 // `resolve` needs GH_TOKEN and GITHUB_REPOSITORY and runs anywhere; installed-upgrade-packages.ts
-// says what it checks. `run` runs only on that runner, from main.
+// says what it checks. The explicit private-input/Fleet mode is documented in testing.md.
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -68,12 +68,14 @@ import {
   check,
   readReceipt,
   resolvePackages,
+  verifyPrivateCandidate,
   restGitHub,
   sha256,
-  type Package,
+  type UpgradePackage as Package,
 } from "./installed-upgrade-packages.ts";
 import {
   disposableRunner,
+  fleetRunner,
   fileSha256,
   install,
   outboundBlock,
@@ -1053,16 +1055,55 @@ const usage = `Usage:
 async function resolveCommand(args: string[]) {
   const { values } = parseArgs({
     args,
-    options: { candidate: { type: "string" }, sha: { type: "string" }, out: { type: "string" } },
+    options: {
+      candidate: { type: "string" },
+      sha: { type: "string" },
+      out: { type: "string" },
+      "private-input": { type: "string" },
+    },
   });
   const [token, repository] = [process.env["GH_TOKEN"], process.env["GITHUB_REPOSITORY"]];
   if (!token || !repository) throw new Error("Set GH_TOKEN and GITHUB_REPOSITORY.");
-  if (!values.candidate || !values.out || !isAbsolute(values.out)) throw new Error(usage);
+  if (
+    (!values.candidate && !values["private-input"]) ||
+    (values.candidate && values["private-input"]) ||
+    !values.out ||
+    !isAbsolute(values.out)
+  )
+    throw new Error(usage);
+  const github = restGitHub(repository, token);
+  const archives = new Map<string, Uint8Array>();
+  const privateInput: unknown = values["private-input"]
+    ? JSON.parse(await readFile(values["private-input"], "utf8"))
+    : undefined;
+  const privateCandidate = privateInput
+    ? await verifyPrivateCandidate(
+        {
+          ...github,
+          bytes: async (path) => {
+            const bytes = await github.bytes(path);
+            archives.set(path, bytes);
+            return bytes;
+          },
+        },
+        privateInput,
+        true,
+      )
+    : undefined;
   const { receipt, files } = await resolvePackages(restGitHub(repository, token), {
-    tag: values.candidate,
+    tag: values.candidate ?? `v${privateCandidate!.receipt.appVersion}`,
+    private: privateCandidate,
     sha: values.sha || undefined,
   });
   await mkdir(values.out);
+  if (privateCandidate) {
+    await writeFile(join(values.out, "private-input.json"), JSON.stringify(privateInput, null, 2));
+    for (const [path, bytes] of archives) {
+      const id = /^\/actions\/artifacts\/(\d+)\/zip$/.exec(path)?.[1];
+      check(id, "Unexpected private download path.");
+      await writeFile(join(values.out, `artifact-${id}.zip`), bytes);
+    }
+  }
   for (const [name, bytes] of files) await writeFile(join(values.out, name), bytes);
   await writeFile(join(values.out, "receipt.json"), JSON.stringify(receipt, null, 2));
   for (const each of receipt.packages)
@@ -1389,14 +1430,24 @@ export async function cleanUp(failure: unknown, left: Leftovers) {
 /**
  * Stable, the candidate over it and the candidate's restart on the disposable runner, with their
  * evidence and cleanup. Refuses before installing anything unless it runs from main in the
- * receipt's repository and both setups still match the receipt.
+ * receipt's repository and both setups still match the receipt. Explicit Fleet mode instead
+ * requires a clean owned disposable VM and offline private package revalidation.
  */
 export async function runCommand(args: string[]) {
   const { values } = parseArgs({
     args,
-    options: { packages: { type: "string" }, root: { type: "string" } },
+    options: {
+      packages: { type: "string" },
+      root: { type: "string" },
+      "fleet-owner": { type: "string" },
+      repository: { type: "string" },
+      "verification-source": { type: "string" },
+    },
   });
-  const runner = disposableRunner();
+  const fleet = values["fleet-owner"];
+  const runner = fleet
+    ? fleetRunner(JSON.parse(await readFile(fleet, "utf8")))
+    : disposableRunner();
   const root = values.root ?? "";
   const under = relative(runner.temp, root);
   if (
@@ -1408,19 +1459,48 @@ export async function runCommand(args: string[]) {
   )
     throw new Error(`${usage}\nThe root must be a new folder under RUNNER_TEMP.`);
   const raw: unknown = JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8"));
-  const receipt = readReceipt(raw);
-  check(
-    /^[0-9a-f]{40}$/.test(process.env["GITHUB_SHA"] ?? ""),
-    "GITHUB_SHA must name the verification workflow's commit.",
-  );
-  check(
-    process.env["GITHUB_REF"] === "refs/heads/main",
-    "The installed upgrade check runs only from main.",
-  );
-  check(
-    receipt.repository === process.env["GITHUB_REPOSITORY"],
-    "The receipt belongs to another repository.",
-  );
+  const repository = fleet ? values.repository : process.env["GITHUB_REPOSITORY"];
+  check(repository, "A repository is required.");
+  const privateCandidate = fleet
+    ? await verifyPrivateCandidate(
+        {
+          repository,
+          json: async () => {
+            throw new Error("Offline only");
+          },
+          bytes: async (path) => {
+            const id = /^\/actions\/artifacts\/(\d+)\/zip$/.exec(path)?.[1];
+            check(id, "Unexpected private archive path.");
+            return readFile(join(values.packages!, `artifact-${id}.zip`));
+          },
+        },
+        JSON.parse(await readFile(join(values.packages!, "private-input.json"), "utf8")),
+      )
+    : undefined;
+  const receipt = readReceipt(raw, privateCandidate);
+  if (fleet) {
+    check(
+      /^[0-9a-f]{40}$/.test(values["verification-source"] ?? ""),
+      "Pin the verification checkout source separately.",
+    );
+    check(
+      receipt.packages[1].provenance.releaseKind === "private",
+      "Fleet mode requires an explicit private candidate.",
+    );
+  } else {
+    check(
+      /^[0-9a-f]{40}$/.test(process.env["GITHUB_SHA"] ?? ""),
+      "GITHUB_SHA must name the verification workflow's commit.",
+    );
+    check(
+      process.env["GITHUB_REF"] === "refs/heads/main",
+      "The installed upgrade check runs only from main.",
+    );
+    check(
+      receipt.repository === process.env["GITHUB_REPOSITORY"],
+      "The receipt belongs to another repository.",
+    );
+  }
   // Both packages must still match before the first setup starts.
   for (const pkg of receipt.packages) {
     const bytes = await readFile(join(values.packages, pkg.file));
@@ -1429,8 +1509,9 @@ export async function runCommand(args: string[]) {
       `${pkg.file} changed since resolution.`,
     );
     check(
-      (!pkg.provenance.assetDigest || pkg.provenance.assetDigest === `sha256:${pkg.sha256}`) &&
-        pkg.provenance.metadata.sha512 === createHash("sha512").update(bytes).digest("base64"),
+      pkg.provenance.releaseKind === "private" ||
+        ((!pkg.provenance.assetDigest || pkg.provenance.assetDigest === `sha256:${pkg.sha256}`) &&
+          pkg.provenance.metadata.sha512 === createHash("sha512").update(bytes).digest("base64")),
       `${pkg.file} no longer matches its resolved published metadata.`,
     );
   }
@@ -1465,7 +1546,9 @@ export async function runCommand(args: string[]) {
   const proof = {
     runner: runner.id,
     verification: {
-      workflowCommit: process.env["GITHUB_SHA"] ?? null,
+      mode: fleet ? "owned-fleet" : "github-hosted",
+      checkoutSource: fleet ? values["verification-source"] : process.env["GITHUB_SHA"],
+      workflowCommit: fleet ? null : (process.env["GITHUB_SHA"] ?? null),
       runId: process.env["GITHUB_RUN_ID"] ?? null,
       runAttempt: process.env["GITHUB_RUN_ATTEMPT"] ?? null,
       driverSha256: sha256(await readFile(fileURLToPath(import.meta.url))),
