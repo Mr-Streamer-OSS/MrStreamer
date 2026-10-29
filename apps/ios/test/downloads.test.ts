@@ -860,6 +860,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       const { a } = await withProviders(started);
       const poster = `https://image.example/p/${movie().id}.jpg`;
       const wide = `https://image.example/b/m${movie().id}.jpg`;
+      const tasksBefore = native.tasks.length;
       const copy = await started.addDownload(movieRef(a));
       film = copy;
       const item = () => started.downloadList().items.find((each) => each.id === copy.id);
@@ -868,7 +869,10 @@ describe("downloads", { timeout: 30_000 }, () => {
         "the copy's poster",
       );
       await until(
-        () => native.tasks.some((each) => each.url === wide && each.state === "error"),
+        () =>
+          native.tasks
+            .slice(tasksBefore)
+            .some((each) => each.url === wide && each.state === "error"),
         "its refused backdrop to settle",
       );
       const kept = new DiskFile(native.root, "documents", "downloads", copy.id, "poster");
