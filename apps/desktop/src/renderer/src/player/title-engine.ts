@@ -303,6 +303,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       const resumeAt = ahead() >= AHEAD_S.stop ? AHEAD_S.resume : AHEAD_S.stop;
       const check = () => {
         if (abort.signal.aborted || (!holding() && ahead() < resumeAt)) {
+          clearInterval(rechecking);
           video.removeEventListener("timeupdate", check);
           video.removeEventListener("seeking", check);
           video.removeEventListener("play", check);
@@ -310,6 +311,8 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
           done();
         }
       };
+      // Eviction can lose a paused picture without a playback event to wake this wait.
+      const rechecking = setInterval(check, 1000);
       video.addEventListener("timeupdate", check);
       video.addEventListener("seeking", check);
       video.addEventListener("play", check);

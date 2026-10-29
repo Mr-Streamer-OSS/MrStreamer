@@ -315,55 +315,72 @@ it("retains delivery facts on a rejection after playback started", async () => {
   );
 });
 
-it.each([10, 50, 60])("holds paused reads at %ss, resumes, and cancels while held", async (end) => {
-  vi.stubGlobal("HTMLMediaElement", { HAVE_CURRENT_DATA: 2 });
-  let paused = true;
-  let reads = 0;
-  const cancelled = vi.fn();
-  vi.stubGlobal(
-    "fetch",
-    async () =>
-      new Response(
-        new ReadableStream<Uint8Array>(
-          {
-            pull(controller) {
-              if (reads >= 4) return new Promise<void>(() => {});
-              reads++;
-              // Pause again after one resumed read, rather than producing an unbounded mock stream.
-              paused = true;
-              controller.enqueue(new Uint8Array([1]));
+it.each([
+  { end: 10, wake: "play" },
+  { end: 50, wake: "play" },
+  { end: 60, wake: "play" },
+  { end: 50, wake: "readiness" },
+])(
+  "holds paused reads at $end seconds, wakes on $wake, and cancels while held",
+  async ({ end, wake }) => {
+    vi.stubGlobal("HTMLMediaElement", { HAVE_CURRENT_DATA: 2 });
+    let paused = true;
+    let readyState = 2;
+    let reads = 0;
+    const cancelled = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull(controller) {
+                if (reads >= 4) return new Promise<void>(() => {});
+                reads++;
+                // Pause again after one resumed read, rather than producing an unbounded mock stream.
+                paused = true;
+                readyState = 2;
+                controller.enqueue(new Uint8Array([1]));
+              },
+              cancel: cancelled,
             },
-            cancel: cancelled,
-          },
-          { highWaterMark: 0 },
+            { highWaterMark: 0 },
+          ),
         ),
-      ),
-  );
-  const video = document.createElement("video");
-  Object.defineProperties(video, {
-    paused: { get: () => paused },
-    seeking: { value: false },
-    readyState: { value: 2 },
-    buffered: { get: () => ({ length: 1, start: () => 0, end: () => end }) },
-  });
-  engine = titleEngine(video, { ...run, paused: true });
-  await vi.advanceTimersByTimeAsync(0);
-  expect(reads).toBe(0);
-  paused = false;
-  video.dispatchEvent(new Event("play"));
-  await vi.advanceTimersByTimeAsync(0);
-  if (end === 60) {
-    expect(reads).toBe(0);
-    video.currentTime = 10;
-    video.dispatchEvent(new Event("timeupdate"));
+    );
+    const video = document.createElement("video");
+    Object.defineProperties(video, {
+      paused: { get: () => paused },
+      seeking: { value: false },
+      readyState: { get: () => readyState },
+      buffered: { get: () => ({ length: 1, start: () => 0, end: () => end }) },
+    });
+    engine = titleEngine(video, { ...run, paused: true });
     await vi.advanceTimersByTimeAsync(0);
     expect(reads).toBe(0);
-    video.currentTime = 21;
-    video.dispatchEvent(new Event("timeupdate"));
+    if (wake === "play") {
+      paused = false;
+      video.dispatchEvent(new Event("play"));
+      await vi.advanceTimersByTimeAsync(0);
+    } else {
+      // Eviction can remove the current picture without Play, seeking or a clock update.
+      readyState = 1;
+      end = 0;
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    if (end === 60) {
+      expect(reads).toBe(0);
+      video.currentTime = 10;
+      video.dispatchEvent(new Event("timeupdate"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(reads).toBe(0);
+      video.currentTime = 21;
+      video.dispatchEvent(new Event("timeupdate"));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(reads).toBe(1);
+    engine.destroy();
     await vi.advanceTimersByTimeAsync(0);
-  }
-  expect(reads).toBe(1);
-  engine.destroy();
-  await vi.advanceTimersByTimeAsync(0);
-  expect(cancelled).toHaveBeenCalledOnce();
-});
+    expect(cancelled).toHaveBeenCalledOnce();
+  },
+);

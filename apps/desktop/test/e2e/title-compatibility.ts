@@ -137,7 +137,7 @@ try {
     `window.__compatibility = { checks: [], errors: [] }; const original = MediaSource.isTypeSupported.bind(MediaSource); MediaSource.isTypeSupported = (type) => { const supported = original(type); window.__compatibility.checks.push({ type, supported }); return supported; }; document.addEventListener('error', e => { if (e.target instanceof HTMLVideoElement) window.__compatibility.errors.push({ code: e.target.error?.code, message: e.target.error?.message, time: e.target.currentTime }); }, true);`,
   );
   await live.evaluate(
-    `const add = MediaSource.prototype.addSourceBuffer; MediaSource.prototype.addSourceBuffer = function(type) { const buffer = add.call(this, type); window.__compatibility.buffer = buffer; window.__compatibility.appended = 0; const append = buffer.appendBuffer.bind(buffer); buffer.appendBuffer = data => { window.__compatibility.appended += data.byteLength; return append(data); }; return buffer; };`,
+    `window.__compatibility.appended = 0; const add = MediaSource.prototype.addSourceBuffer; MediaSource.prototype.addSourceBuffer = function(type) { const buffer = add.call(this, type); window.__compatibility.buffer = buffer; const append = buffer.appendBuffer.bind(buffer); buffer.appendBuffer = data => { window.__compatibility.appended += data.byteLength; return append(data); }; return buffer; };`,
   );
   await login(live, provider);
   const click = async (description: string, expression: string) => {
@@ -178,6 +178,8 @@ try {
       frames: number;
       paused: boolean;
       same: boolean;
+      readyState: number;
+      seeking: boolean;
     }>(
       `(() => { const v = document.querySelector('video');
     let energy = 0;
@@ -203,7 +205,7 @@ try {
         energy = samples.reduce((sum, value) => sum + value * value, 0);
       }
     }
-    return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, audio: v?.webkitAudioDecodedByteCount ?? 0, audioEnergy: energy, frames: v?.getVideoPlaybackQuality().totalVideoFrames ?? 0, paused: v?.paused ?? true, same: !window.__compatibility.node || window.__compatibility.node === v }; })()`,
+    return { readyState: v?.readyState ?? 0, seeking: v?.seeking ?? false, time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, audio: v?.webkitAudioDecodedByteCount ?? 0, audioEnergy: energy, frames: v?.getVideoPlaybackQuality().totalVideoFrames ?? 0, paused: v?.paused ?? true, same: !window.__compatibility.node || window.__compatibility.node === v }; })()`,
     );
   const moving = () =>
     waitFor(async () => {
@@ -290,6 +292,7 @@ try {
   if (variant === "paused-buffer") {
     const sample = async () => ({
       video: await video(),
+      runs: deliveries.length,
       appended: await live.evaluate<number>("window.__compatibility.appended"),
       bufferedEnd: await live.evaluate<number>("document.querySelector('video').buffered.end(0)"),
       providerBytes: provider.fileBytes(),
@@ -311,23 +314,36 @@ try {
     };
     await shot("paused-buffer");
     if (after.appended !== before.appended) throw new Error("Title kept appending while paused");
-    const runs = deliveries.length;
+    if (after.runs !== before.runs) throw new Error("Paused interval replaced the held run");
+    const runs = after.runs;
     await key(live, " ", 32);
     await waitFor(async () => {
       const resumed = await video();
       return (
         !resumed.paused &&
         resumed.time > after.video.time + 0.25 &&
-        resumed.frames > after.video.frames
+        resumed.frames > after.video.frames &&
+        (await live.evaluate<number>("window.__compatibility.appended")) > after.appended &&
+        deliveries.length === runs
       );
     });
-    observations["heldRunResumed"] = await video();
+    observations["heldRunResumed"] = {
+      ...(await video()),
+      appended: await live.evaluate<number>("window.__compatibility.appended"),
+      runs: deliveries.length,
+    };
     await key(live, " ", 32);
     await waitFor(async () => (await video()).paused);
     await key(live, "ArrowLeft", 37);
     await waitFor(async () => {
       const sought = await video();
-      return sought.paused && sought.time < 0.1 && sought.width > 0;
+      return (
+        sought.paused &&
+        sought.time < 0.1 &&
+        sought.width > 0 &&
+        sought.readyState >= 2 &&
+        !sought.seeking
+      );
     });
     observations["bufferedBackwardSeek"] = await video();
     if (deliveries.length !== runs) throw new Error("Buffered seek or Play replaced the held run");
@@ -342,7 +358,13 @@ try {
   await key(live, "ArrowRight", 39);
   await waitFor(async () => {
     const v = await video();
-    return v.paused && (variant === "paused-buffer" ? v.time >= 10 : v.time > 10) && v.width > 0;
+    return (
+      v.paused &&
+      (variant === "paused-buffer" ? v.time >= 10 : v.time > 10) &&
+      v.width > 0 &&
+      v.readyState >= 2 &&
+      !v.seeking
+    );
   });
   observations["pausedSeek"] = await video();
   if (variant !== "paused-buffer") {
