@@ -199,6 +199,8 @@ async function run(scenario: Scenario, prior?: string) {
   process.once("SIGTERM", interrupt);
   const actions: { action: string; at: string }[] = [];
   const observed: Record<string, unknown> = {};
+  const runtimeExceptions: { launch: number; event: unknown }[] = [];
+  let catalogueLaunch = 0;
   let profile: string | undefined;
   let provider: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
   let playlist:
@@ -424,6 +426,12 @@ async function run(scenario: Scenario, prior?: string) {
       for (const stream of [started.stdout, started.stderr])
         stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
       page = await connect(port);
+      if (scenario === "slow-catalogue") {
+        const launch = ++catalogueLaunch;
+        observed["runtimeExceptions"] = runtimeExceptions;
+        page.on("Runtime.exceptionThrown", (event) => runtimeExceptions.push({ launch, event }));
+        await page.send("Runtime.enable");
+      }
       if (scenario.startsWith("hls-compatibility")) {
         page.on("Runtime.consoleAPICalled", (entry) => log.push(JSON.stringify(entry) + "\n"));
         page.on("Runtime.exceptionThrown", (entry) => log.push(JSON.stringify(entry) + "\n"));
@@ -496,12 +504,6 @@ async function run(scenario: Scenario, prior?: string) {
       };
     };
     await launch();
-    if (scenario === "slow-catalogue") {
-      const exceptions: unknown[] = [];
-      observed["runtimeExceptions"] = exceptions;
-      live().on("Runtime.exceptionThrown", (event) => exceptions.push(event));
-      await send("Runtime.enable");
-    }
     const livePage = {
       evaluate: <T>(expression: string) => live().evaluate<T>(expression),
     };
@@ -1285,6 +1287,8 @@ async function run(scenario: Scenario, prior?: string) {
     if (!profileFiles.includes("mrstreamer.db")) throw new Error("No persisted app database.");
     await capture("result");
     await doctor();
+    if (scenario === "slow-catalogue" && runtimeExceptions.length > 0)
+      throw new Error("Slow catalogue raised renderer runtime exceptions; see runtimeExceptions.");
   } catch (error) {
     failed = error;
     if (scenario === "live-categories" && page)
