@@ -738,17 +738,20 @@ describe("the collections Movies, Series, Home and details show", () => {
     const start = Date.now();
     edges.known = tmdbOf(0);
     edges.expiry = () => start + 5_000;
+    edges.sources.set("a", { provider: { titleFile: () => null } });
     subscribe("a");
     await until(() => titles.collectionsOf("movie") !== null, "the first collections");
     const index = indexed();
     const first = titles.collectionsOf("movie");
     if (!index || !first) throw new Error("No collections");
+    const firstSelection = titles.collectionSelection("movie", first);
     expect(first.validAt(start + 4_000)).toBe(true);
     expect(first.validAt(start + 6_000)).toBe(false);
     expect(first.size("new-week")).toBeGreaterThan(0);
     // Metadata expiry rebuilds a valid view; its public output then stays stable.
     shift = 6_000;
     expect(titles.collectionsOf("movie")?.list("all")).toEqual(first.list("all"));
+    expect(firstSelection(first.list("all")[0]!)).toBe(true);
     await until(
       () => titles.collectionsOf("movie")?.validAt(Date.now()) === true,
       "collections made again",
@@ -762,9 +765,13 @@ describe("the collections Movies, Series, Home and details show", () => {
     await latest("movie", index);
     expect(titles.collectionsOf("movie")?.size("new-week")).toBe(0);
     // The clock goes back a day: what was made for later is made again for now.
-    const later = titles.collectionsOf("movie")?.list("all");
+    const laterView = titles.collectionsOf("movie");
+    if (!laterView) throw new Error("No collections");
+    const later = laterView.list("all");
+    const laterSelection = titles.collectionSelection("movie", laterView);
     shift = -86_400_000;
     expect(titles.collectionsOf("movie")?.list("all")).toEqual(later);
+    expect(laterSelection(later[0]!)).toBe(true);
     await until(
       () => titles.collectionsOf("movie")?.validAt(Date.now()) === true,
       "collections for now",
