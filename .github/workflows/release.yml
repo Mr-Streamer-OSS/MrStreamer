@@ -12,6 +12,14 @@ on:
         type: choice
         options: [release, feed, store, upgrade]
         default: release
+      candidate-sha:
+        description: Optional full source SHA for installed upgrade proof
+        type: string
+      native_case:
+        description: Installed telemetry coverage
+        type: choice
+        options: [all, compatibility]
+        default: all
       candidate:
         description: Published nightly for an installed upgrade check
         type: string
@@ -900,8 +908,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE: ${{ (needs.plan.outputs.promoted || inputs.candidate) }}
-          SHA: ${{ needs.plan.outputs.sha }}
-          NATIVE_CASE: all
+          SHA: ${{ needs.plan.outputs.sha || inputs.candidate-sha }}
+          NATIVE_CASE: ${{ inputs.native_case || 'all' }}
         run: |
           case "$NATIVE_CASE" in
             all) ;;
@@ -922,8 +930,8 @@ jobs:
       - name: Native telemetry and installed .15 compatibility
         if: startsWith((needs.plan.outputs.promoted || inputs.candidate), 'v0.0.16-nightly.')
         env:
-          NATIVE_CASE: all
-          SHA: ${{ needs.plan.outputs.sha }}
+          NATIVE_CASE: ${{ inputs.native_case || 'all' }}
+          SHA: ${{ needs.plan.outputs.sha || inputs.candidate-sha }}
         run: |
           args=(--native-case "$NATIVE_CASE")
           [ -n "$SHA" ] && args+=(--sha "$SHA")
@@ -932,7 +940,7 @@ jobs:
       - name: Installed AV1 and copied-video recovery
         if: startsWith((needs.plan.outputs.promoted || inputs.candidate), 'v0.0.16-nightly.')
         env:
-          SHA: ${{ needs.plan.outputs.sha }}
+          SHA: ${{ needs.plan.outputs.sha || inputs.candidate-sha }}
         run: |
           args=()
           [ -n "$SHA" ] && args+=(--sha "$SHA")

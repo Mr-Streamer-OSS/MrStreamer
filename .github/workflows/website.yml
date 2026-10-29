@@ -2,7 +2,7 @@
 #
 # - After a push to main that changes what the website is built from: builds and publishes it.
 #   A push that changes only routing and runbook files, including the marketing README, builds it and publishes nothing.
-# - After a stable release's version commit: publish.yml calls this with deploy.
+# - After a stable release's version commit: release.yml calls this with deploy.
 # - By hand, from main: builds it, and publishes it with deploy.
 #
 # Pull requests build the website in checks.yml, without secrets; nothing here runs for one.
@@ -37,7 +37,7 @@ on:
       - pnpm-lock.yaml
       # Build only. The inputs step excludes these routing and runbook paths from deployment.
       - .github/workflows/website.yml
-      - .github/workflows/publish.yml
+      - .github/workflows/release.yml
       - docs/maintainers/**
       - docs/contributing/testing.md
       - .cursor/skills/verify-mrstreamer/features/website.md
@@ -100,7 +100,7 @@ jobs:
             console.log(`paths=${paths.join(" ")}`);
           ' >> "$GITHUB_OUTPUT"
       # A push publishes when it changed what the website is built from; a run by hand or
-      # publish.yml's call when it asks to. A comparison that fails publishes nothing.
+      # release.yml's call when it asks to. A comparison that fails publishes nothing.
       - name: Decide whether to publish
         id: delivery
         env:

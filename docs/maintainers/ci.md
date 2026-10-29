@@ -20,16 +20,16 @@ The bundle is built once per candidate. macOS/Linux and Windows package independ
 
 ## Operations
 
-| Operation         | Entry point                                                          | Result                                                                                                                       |
-| ----------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Automatic nightly | Daily 03:17 UTC                                                      | At least 24 hours since the latest nightly, only desktop release-input changes across the full range; unknown inputs qualify |
-| Manual nightly    | Release on main, operation release, channel nightly                  | Immediate one-candidate build                                                                                                |
-| Stable            | Release on main, operation release, channel stable, nightly selected | Rebuild selected source, upgrade proof, publish                                                                              |
-| Dry run           | Same-repository PR label `release dry run`, or manual dry-run        | Signed nonpublishing packages, UI proof, MSIX and receipts, kept 14 days                                                     |
-| Feed repair       | Release on main, operation feed                                      | Regenerate existing releases' feed without packaging; allow-regress is explicit                                              |
-| Store             | Release on main, operation store                                     | Preflight/status/submit an existing release package; no rebuild                                                              |
-| Installed upgrade | Release on main, operation upgrade, candidate tag                    | Disposable Windows installed proof, no publication                                                                           |
-| Website           | Website workflow                                                     | Independent build/delivery; stable finalization explicitly calls it                                                          |
+| Operation         | Entry point                                                          | Result                                                                                                                           |
+| ----------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Automatic nightly | Daily 03:17 UTC                                                      | Latest nightly published on an earlier UTC day, only desktop release-input changes across the full range; unknown inputs qualify |
+| Manual nightly    | Release on main, operation release, channel nightly                  | Immediate one-candidate build                                                                                                    |
+| Stable            | Release on main, operation release, channel stable, nightly selected | Rebuild selected source, upgrade proof, publish                                                                                  |
+| Dry run           | Same-repository PR label `release dry run`, or manual dry-run        | Signed nonpublishing packages, UI proof, MSIX and receipts, kept 14 days                                                         |
+| Feed repair       | Release on main, operation feed                                      | Regenerate existing releases' feed without packaging; allow-regress is explicit                                                  |
+| Store             | Release on main, operation store                                     | Preflight/status/submit an existing release package; no rebuild                                                                  |
+| Installed upgrade | Release on main, operation upgrade, candidate tag                    | Disposable Windows installed proof, no publication                                                                               |
+| Website           | Website workflow                                                     | Independent build/delivery; stable finalization explicitly calls it                                                              |
 
 Nightly and Stable share the release queue. Dry runs queue per PR/branch. Maintenance runs do not block packaging, and feed, Store and installed-upgrade jobs retain independent noncancelling serialization. A failed publication can leave an unpublished draft; rerunning removes only that unfinished attempt. After GitHub publication, feed and Discord failures do not undo the release. Store and website have separate outcomes.
 

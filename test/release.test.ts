@@ -180,11 +180,11 @@ describe("scheduled nightlies", () => {
     });
   });
 
-  it("waits 24 hours after the previous nightly, then builds when main has new commits", async () => {
+  it("waits until the next UTC day, allowing a daily build that published after yesterday’s cron", async () => {
     const last = "v0.0.1-nightly.20261002.30";
-    const early = repository({ releases: [published(last, 23.99)] });
+    const early = repository({ releases: [published(last, 0.01)] });
     const due = repository({
-      releases: [published(last, 24)],
+      releases: [published(last, 23)],
       histories: { [`${last}...head`]: "ahead" },
     });
 

@@ -478,7 +478,7 @@ describe("the website", () => {
         return { status: run.status, output: readFileSync(output, "utf8") };
       };
       for (const [path, deploy] of [
-        [".github/workflows/publish.yml", false],
+        [".github/workflows/release.yml", false],
         ["docs/maintainers/ci.md", false],
         ["apps/marketing/src/page.ts", true],
         ["apps/marketing/README.md", false],

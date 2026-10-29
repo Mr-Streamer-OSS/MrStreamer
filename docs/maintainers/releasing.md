@@ -49,7 +49,7 @@ Releases come from `.github/workflows/release.yml`, which plans, builds, checks 
 
 ## Nightly builds
 
-- A daily check builds only when the last published nightly is at least 24 hours old and the full Git range since it changes desktop release inputs. Marketing, docs and known editorial-only inputs do not qualify. Unknown paths or unavailable diffs conservatively qualify. No elapsed speedup is implied.
+- A daily check builds only when the last published nightly is from an earlier UTC day and the full Git range since it changes desktop release inputs. Marketing, docs and known editorial-only inputs do not qualify. Unknown paths or unavailable diffs conservatively qualify. No elapsed speedup is implied.
   - No nightly yet: builds.
   - Nothing new since the last nightly, or `main` older than it: skipped.
   - `main` no longer contains the last nightly, after its history was rewritten: skipped with a warning. Start a nightly by hand to continue from `main`.

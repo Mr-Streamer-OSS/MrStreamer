@@ -48,9 +48,6 @@ import {
 /** The app's manifest, whose version records the newest stable release. */
 const MANIFEST = "apps/desktop/package.json";
 
-/** Automatic nightlies are separated by at least one day. */
-export const NIGHTLY_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
 const HISTORIES = ["ahead", "behind", "identical", "diverged"] as const;
 
 /** How a head commit relates to a base, as GitHub's compare API reports it. */
@@ -383,8 +380,8 @@ function pinnedNightly(releases: readonly GitHubRelease[], text: string): GitHub
 async function nightlySkip(repo: Repository, sha: string, now: number): Promise<Skip | null> {
   const last = latestNightly(repo.releases);
   if (!last) return null;
-  if (now - Date.parse(last.publishedAt!) < NIGHTLY_INTERVAL_MS) {
-    return { skip: `${last.tag} was published less than 24 hours ago.`, warning: false };
+  if (utcDate(now) <= utcDate(Date.parse(last.publishedAt!))) {
+    return { skip: `${last.tag} was already published today (UTC).`, warning: false };
   }
   switch (await repo.compare(last.tag, sha)) {
     case "ahead": {
