@@ -131,6 +131,17 @@ export function standIn(real: typeof Hls) {
       this.#listeners.set(event, [...(this.#listeners.get(event) ?? []), listener]);
     }
 
+    once(event: string, listener: Listener): void {
+      const first: Listener = (name, data) => {
+        this.#listeners.set(
+          event,
+          this.#listeners.get(event)!.filter((each) => each !== first),
+        );
+        listener(name, data);
+      };
+      this.on(event, first);
+    }
+
     #tell(event: string, data: unknown = {}): void {
       for (const listener of this.#listeners.get(event) ?? []) listener(event, data);
     }
