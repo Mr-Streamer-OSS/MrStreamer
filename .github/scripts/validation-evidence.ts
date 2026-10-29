@@ -108,7 +108,10 @@ export function acceptsEvidence(
   );
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const [command, file] = process.argv.slice(2);
   if (command === "identity") console.log(validationIdentity());
   else if (command === "record" && file) {

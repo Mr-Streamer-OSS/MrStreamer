@@ -81,10 +81,12 @@ test("the verification CLI refuses invalid evidence through real and symlinked e
     symlinkSync(script, link);
     writeFileSync(invalid, "{}");
     for (const entry of [script, link]) {
-      const result = spawnSync(process.execPath, [entry, "verify", invalid, invalid], {
-        encoding: "utf8",
-      });
-      assert.equal(result.status, 1, result.stderr);
+      for (const flags of [[], ["--preserve-symlinks-main"]]) {
+        const result = spawnSync(process.execPath, [...flags, entry, "verify", invalid, invalid], {
+          encoding: "utf8",
+        });
+        assert.equal(result.status, 1, result.stderr);
+      }
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

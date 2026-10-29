@@ -45,7 +45,10 @@ export function changedPaths(base: string, head: string, pullRequest: boolean): 
   }
 }
 
-if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   const event = JSON.parse(readFileSync(process.env["GITHUB_EVENT_PATH"]!, "utf8"));
   const pr = process.env["GITHUB_EVENT_NAME"] === "pull_request";
   const paths = changedPaths(
