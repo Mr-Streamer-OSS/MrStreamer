@@ -1029,7 +1029,7 @@ jobs:
         upgrade,
       ]
     if: >-
-      !cancelled() && !failure() && needs.plan.outputs.dry-run == 'false' && needs.plan.outputs.skip == 'false'
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.dry-run == 'false' && needs.plan.outputs.skip == 'false'
       && github.event_name != 'pull_request'
       && needs.validation.result == 'success'
       && needs.bundle.result == 'success' && needs.package.result == 'success'
@@ -1197,9 +1197,10 @@ jobs:
   # with a notice and stays green. docs/maintainers/microsoft-store.md has the setup.
   store-gate:
     name: Check the Store setup
-    needs: [plan, publish]
+    needs: [plan, publish, msix]
     if: >-
-      !cancelled() && ((needs.publish.result == 'success' && needs.plan.outputs.channel == 'stable')
+      !cancelled() && ((needs.publish.result == 'success' && needs.plan.outputs.channel == 'stable'
+      && needs.msix.result == 'success' && needs.msix.outputs.sha256 != '')
       || inputs.operation == 'store')
     runs-on: ubuntu-24.04
     timeout-minutes: 5

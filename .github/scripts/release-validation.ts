@@ -5,6 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acceptsEvidence, validationIdentity } from "./validation-evidence.ts";
 
+// One budget covers every candidate run, API call and artifact download.
+const deadline = Date.now() + 5 * 60_000;
+function timeout() {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("Validation lookup budget exhausted");
+  return Math.min(30_000, remaining);
+}
+
 const repository = "Mr-Streamer-OSS/MrStreamer";
 interface Run {
   id: number;
@@ -20,7 +28,10 @@ interface Run {
 }
 function api<T>(path: string): T {
   return JSON.parse(
-    execFileSync("gh", ["api", `repos/${repository}/${path}`], { encoding: "utf8" }),
+    execFileSync("gh", ["api", `repos/${repository}/${path}`], {
+      encoding: "utf8",
+      timeout: timeout(),
+    }),
   ) as T;
 }
 
@@ -31,11 +42,11 @@ async function reusable(): Promise<boolean> {
     `actions/workflows/checks.yml/runs?event=push&branch=main&head_sha=${sha}&per_page=100`,
   ).workflow_runs;
   for (const found of runs) {
+    if (Date.now() >= deadline) return false;
     let run = found;
     // Bound the wait; fallback retains independent 10/15 minute validation limits.
-    const deadline = Date.now() + 5 * 60_000;
     while (run.status !== "completed" && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      await new Promise((resolve) => setTimeout(resolve, Math.min(15_000, timeout())));
       run = api<Run>(`actions/runs/${run.id}`);
     }
     if (
@@ -51,19 +62,25 @@ async function reusable(): Promise<boolean> {
       continue;
     // Push workflows execute their source revision. Only main ancestors with identical trusted
     // validation tooling are accepted; artifact metadata cannot vouch for its producer.
-    execFileSync("git", ["merge-base", "--is-ancestor", sha, "origin/main"]);
-    execFileSync("git", [
-      "diff",
-      "--exit-code",
-      sha,
-      process.env["WORKFLOW_SHA"]!,
-      "--",
-      ".github/workflows/checks.yml",
-      ".github/actions/validation",
-      ".github/scripts/validation-evidence.ts",
-      ".github/scripts/ci-inputs.ts",
-      ".github/tests",
-    ]);
+    execFileSync("git", ["merge-base", "--is-ancestor", sha, "origin/main"], {
+      timeout: timeout(),
+    });
+    execFileSync(
+      "git",
+      [
+        "diff",
+        "--exit-code",
+        sha,
+        process.env["WORKFLOW_SHA"]!,
+        "--",
+        ".github/workflows/checks.yml",
+        ".github/actions/validation",
+        ".github/scripts/validation-evidence.ts",
+        ".github/scripts/ci-inputs.ts",
+        ".github/tests",
+      ],
+      { timeout: timeout() },
+    );
     const artifacts = api<{ artifacts: { id: number; name: string; expired: boolean }[] }>(
       `actions/runs/${run.id}/artifacts?per_page=100`,
     ).artifacts;
@@ -75,9 +92,11 @@ async function reusable(): Promise<boolean> {
     const zip = join(dir, "evidence.zip");
     writeFileSync(
       zip,
-      execFileSync("gh", ["api", `repos/${repository}/actions/artifacts/${artifact.id}/zip`]),
+      execFileSync("gh", ["api", `repos/${repository}/actions/artifacts/${artifact.id}/zip`], {
+        timeout: timeout(),
+      }),
     );
-    execFileSync("unzip", ["-q", zip, "-d", dir]);
+    execFileSync("unzip", ["-q", zip, "-d", dir], { timeout: timeout() });
     const evidence: unknown = JSON.parse(readFileSync(join(dir, "validation.json"), "utf8"));
     if (
       acceptsEvidence(

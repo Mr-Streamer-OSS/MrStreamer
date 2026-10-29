@@ -347,7 +347,13 @@ describe("publication boundaries", () => {
   it("publishes one nightly or the selected stable after all mandatory gates", () => {
     expect(publication(release)).toEqual(["publish", "discord", "feed"]);
     expect(publication(release, { channel: "stable" })).toEqual(PUBLIC);
-    expect(publication(release, { channel: "stable", outcomes: { msix: "failure" } })).toEqual([]);
+    expect(publication(release, { channel: "stable", outcomes: { msix: "failure" } })).toEqual([
+      "publish",
+      "discord",
+      "feed",
+      "finalize",
+      "website-refresh",
+    ]);
     for (const job of [
       "check",
       "test",
