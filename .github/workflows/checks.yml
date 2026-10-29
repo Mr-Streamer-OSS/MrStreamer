@@ -21,7 +21,7 @@ on:
         type: string
         required: true
       report-name:
-        description: Legacy caller report label
+        description: Unique report label for each candidate in the calling run
         type: string
         required: true
 
