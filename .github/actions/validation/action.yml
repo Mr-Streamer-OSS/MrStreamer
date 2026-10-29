@@ -16,7 +16,7 @@ inputs:
     default: ${{ github.run_id }}
 
   test-shard:
-    description: Temporary paired Actions trial shard
+    description: Temporary index/count (e.g. 1/2); skips completeness, so the caller must validate the merged reports
     default: ""
 
 outputs:

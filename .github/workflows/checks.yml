@@ -110,11 +110,12 @@ jobs:
           part: test
           report-name: ${{ inputs.report-name || github.run_id }}
 
-  # Paired trial on the same source as Test. Remove unless both decision gates pass.
+  # PR-only paired trial on the same source as Test. Re-run all jobs for a new matched pair.
+  # Partial attempts are diagnostic only. Remove unless both decision gates pass.
   trial-test:
     name: Trial Test ${{ matrix.shard }}
     needs: inputs
-    if: ${{ !cancelled() && !inputs.sha && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop != 'false') }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && !inputs.sha && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -139,7 +140,7 @@ jobs:
 
   trial-union:
     name: Trial complete results
-    needs: [inputs, trial-test]
+    needs: trial-test
     if: ${{ !cancelled() && needs.trial-test.result != 'skipped' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
