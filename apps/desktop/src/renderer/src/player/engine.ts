@@ -231,6 +231,7 @@ function hlsEngine(
             level.codecSet === tier.codecSet &&
             level.videoRange === tier.videoRange &&
             level.frameRate <= tier.frameRate &&
+            (index <= initial || level.frameRate === tier.frameRate) &&
             level.bitrate < levels[lowest]!.bitrate
               ? index
               : lowest,
