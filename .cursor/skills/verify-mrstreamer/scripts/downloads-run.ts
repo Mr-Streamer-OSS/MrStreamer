@@ -1,8 +1,7 @@
 // The owned run the downloads scenarios of `pnpm verify:desktop` share: one profile, the fake
 // provider, TMDB and a picture server, starts of the built app checked to be this run's, window
 // driving, the failure screenshot, cleanup in order and `proof.json`. Each scenario keeps its own
-// steps, observations and limits. `style` keeps each scenario's start and input exactly as before:
-// "single" is the downloads scenario's, "builds" the one that can start an earlier build too.
+// steps, observations and limits.
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -56,10 +55,11 @@ export function now(): string {
 /** The window driving every downloads scenario uses, with real pointer and key input. */
 function baseDriver(
   page: Page,
-  run: Pick<Run<unknown>, "abort" | "evidence" | "action">,
   style: Style,
+  abort: AbortController,
+  evidence: string,
+  action: (label: string) => void,
 ) {
-  const { abort, evidence, action } = run;
   const wait = async (check: () => Promise<boolean>, timeout = 30_000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
@@ -155,22 +155,23 @@ function baseDriver(
 }
 export type BaseDriver = ReturnType<typeof baseDriver>;
 
+/**
+ * Keeps each scenario's start and input exactly as before: "single" is the downloads scenario's;
+ * "builds" can start an earlier build too, and "series" does that with letter keys and modifiers.
+ */
 type Style = "single" | "builds" | "series";
 
-/** What a scenario's steps are handed: the run's fixtures, profile, evidence and starts. */
+/** What a scenario's steps are handed: the run's fixtures, profile, records and starts. */
 export interface Run<D> {
-  readonly evidence: string;
   readonly profile: string;
   readonly abort: AbortController;
   readonly actions: { action: string; at: string }[];
   readonly observed: Record<string, unknown>;
-  readonly log: string[];
   readonly networkLog: string;
   readonly windowRequests: { at: number; url: string }[];
   readonly provider: FakeProvider;
   readonly tmdb: FakeTmdb;
   readonly pictures: Server;
-  readonly starts: Record<string, unknown>[];
   action(label: string): void;
   /** Starts `which` on the run's profile and checks the window is that build's, on that profile. */
   start(label: string, which?: Build): Promise<D>;
@@ -353,7 +354,7 @@ export async function ownedRun<D>(
           ? `Start the app (${label}) on the run's profile`
           : `Start ${which.kind === "candidate" ? "this build" : "the earlier build"} (${label}) on the run's profile`,
       );
-      return options.driver(page, baseDriver(page, { abort, evidence, action }, style));
+      return options.driver(page, baseDriver(page, style, abort, evidence, action));
     };
     const quit = async (label: string) => {
       if (!running) return;
@@ -364,8 +365,8 @@ export async function ownedRun<D>(
     };
 
     await steps({
-      ...{ evidence, profile, abort, actions, observed, log, networkLog, windowRequests },
-      ...{ provider, tmdb, pictures, starts, action, start, quit },
+      ...{ profile, abort, actions, observed, networkLog, windowRequests },
+      ...{ provider, tmdb, pictures, action, start, quit },
     });
   } catch (error) {
     failed = error;

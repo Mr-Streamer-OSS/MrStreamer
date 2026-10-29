@@ -435,14 +435,14 @@ export async function runDownloadsQueue(
       observed: { build },
       pictures: pictureServer,
       driver,
-      describe: ({ which, ...started }) => ({
-        label: started.label,
+      describe: ({ label, which, executable, pid, port, profile, url }) => ({
+        label,
         build: which.kind,
-        executable: started.executable,
-        pid: started.pid,
-        port: started.port,
-        profile: started.profile,
-        url: started.url,
+        executable,
+        pid,
+        port,
+        profile,
+        url,
         at: now(),
       }),
       prepare: async (observed) => {
