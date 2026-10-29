@@ -219,11 +219,16 @@ function hlsEngine(
   });
   const tracks = hlsTracks(hls, video, sound);
   let released = false;
+  let supportTimer: ReturnType<typeof setTimeout> | undefined;
   if (ends === null) {
     hls.once(Hls.Events.MANIFEST_PARSED, () => {
       // Reading firstAutoLevel starts hls.js's own capability checks. Let their handlers remove
       // unsupported levels before using any index; another read can start further checks.
       const checked = new Set<Promise<unknown>>();
+      // Capability services are advisory: a slow service must not consume the start watchdog.
+      const deadline = new Promise<"timeout">((resolve) => {
+        supportTimer = setTimeout(() => resolve("timeout"), 1000);
+      });
       async function start(): Promise<void> {
         while (!released) {
           const initial = hls.firstAutoLevel;
@@ -234,7 +239,12 @@ function hlsEngine(
           );
           if (pending.length) {
             pending.forEach((promise) => checked.add(promise));
-            await Promise.allSettled(pending);
+            const result = await Promise.race([Promise.allSettled(pending), deadline]);
+            if (released) return;
+            if (result === "timeout") {
+              hls.startLoad();
+              return;
+            }
             continue;
           }
           const tier = hls.levels[initial];
@@ -265,15 +275,19 @@ function hlsEngine(
       }
       // A rejected capability query leaves selection to hls.js; failures in startup follow the
       // engine's existing failure path rather than escaping an async event listener.
-      void start().catch(() => {
-        if (!released) life.fail({ kind: "media", detail: t("The stream could not be decoded.") });
-      });
+      void start()
+        .catch(() => {
+          if (!released)
+            life.fail({ kind: "media", detail: t("The stream could not be decoded.") });
+        })
+        .finally(() => clearTimeout(supportTimer));
     });
   }
   const life = lifecycle(
     video,
     () => {
       released = true;
+      clearTimeout(supportTimer);
       tracks.release();
       hls.destroy();
     },

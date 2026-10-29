@@ -126,3 +126,20 @@ it("leaves startup to hls.js when a capability query rejects", async () => {
   await settle();
   expect(fixture.starts).toEqual([high]);
 });
+
+it("uses default startup when capability service stays pending", async () => {
+  vi.useFakeTimers();
+  try {
+    const low = level(128);
+    const high = level(512);
+    fixture.levels = [low, high];
+    low.supportedPromise = new Promise(() => {});
+    open();
+    expect(fixture.starts).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fixture.starts).toEqual([high]);
+  } finally {
+    engine?.destroy();
+    vi.useRealTimers();
+  }
+});
