@@ -25,6 +25,38 @@ import {
 } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 
+const HOUR = 60 * 60 * 1000;
+
+const channel = (id: string, title: string, name = title): LiveChannel => ({
+  subscriptionId: SUBSCRIPTION,
+  id,
+  name,
+  title,
+  tags: [],
+  number: Number(id),
+  logoUrl: null,
+  categoryIds: ["uk"],
+  catchupDays: null,
+  variants: [{ id, name, tags: [], quality: null }],
+});
+
+const CHANNELS = [
+  channel("1", "BBC One"),
+  channel("2", "ITV1"),
+  channel("3", "Channel 4"),
+  channel("4", "BBC News"),
+  channel("5", "Euronews"),
+  channel("6", "Dave", "UK | DAVE HD (COMEDY)"),
+  channel("7", "Één"),
+];
+/** Names a channel or category by the provider's id, as the one subscription lists it. */
+const own = (id: string) => ({ subscriptionId: SUBSCRIPTION, id });
+/** Favourites, in the order they were starred. */
+const FAVOURITES = ["4", "2", "1"].map(own);
+/** What a search found per channel, as the main process answers: by each channel's own key. */
+const found = (matches: Record<string, ListingMatch>): Record<string, ListingMatch> =>
+  Object.fromEntries(Object.entries(matches).map(([id, match]) => [ownedKey(own(id)), match]));
+
 const GREEN = "3f6c1b5e-2a47-4d0e-9c1f-7b8a5d2e4f11";
 const catalogue = liveChannels(
   normalizeCatalogue({
@@ -248,7 +280,31 @@ async function page(
     answer.resolve(matches);
     await settled();
   };
-  return { client, watch, field, press, rows, button, click, type, search, scope };
+  return {
+    client,
+    watch,
+    field,
+    press,
+    rows,
+    button,
+    click,
+    type,
+    search,
+    scope,
+    names: () => rows().map((row) => row.querySelector("[data-name]")?.textContent),
+    row: (title: string) =>
+      [...container.querySelectorAll("[data-index]")].find(
+        (row) => row.querySelector("[data-name]")?.textContent === title,
+      ),
+    text: () => container.querySelector("main")?.textContent ?? "",
+    notice: () => container.querySelector('[role="status"]')?.textContent ?? "",
+    choose: (label: string) =>
+      click(
+        [...container.querySelectorAll("button")].find((button) =>
+          button.textContent?.trim().startsWith(label),
+        )!,
+      ),
+  };
 }
 
 /** The palette's programme results: its rows that aren't a channel's. */
@@ -1374,4 +1430,276 @@ it("keeps a selected movie's owned version when channels arrive and opens that v
     id: "movie-fixture",
   });
   expect(p.watch).not.toHaveBeenCalled();
+});
+
+/** Live TV on its own channels, which no other subscription's copies group with. */
+async function live(channels: readonly LiveChannel[] = CHANNELS, list?: ChannelList) {
+  const p = await page("guide", "", false, channels, list);
+  ipc.always("library.searchGroups", []);
+  return p;
+}
+/** Flushes React until `check` passes; the fake clock moves 10 ms between tries. */
+const ready = (check: () => void) =>
+  vi.waitFor(
+    async () => {
+      await act(async () => {});
+      check();
+    },
+    { interval: 10 },
+  );
+/** Types a search and answers it with the programme matches, keyed by provider channel id. */
+async function searched(
+  p: Awaited<ReturnType<typeof page>>,
+  text: string,
+  rows: string[],
+  matches: Record<string, ListingMatch> = {},
+) {
+  const asked = ipc.argsOf("guide.searchList").length;
+  const answer = ipc.hold("guide.searchList");
+  await p.type(text);
+  await ready(() => {
+    expect(ipc.argsOf("guide.searchList")).toHaveLength(asked + 1);
+    expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({ query: text });
+  });
+  await act(async () => answer.resolve(found(matches)));
+  await ready(() => expect(p.names()).toEqual(rows));
+}
+
+const laterMatch = (title: string): ListingMatch => ({
+  now: false,
+  later: { start: Date.now() + 2 * HOUR, title },
+});
+
+describe("searching the list Live TV shows", () => {
+  it("shows All channels and names a removed category after refresh, then clears the message on another list", async () => {
+    const p = await live();
+    await act(async () => {
+      p.client.setQueryData(queries.categories().queryKey, [
+        {
+          ...own("uk"),
+          members: [own("uk")],
+          name: "UK | NEWS",
+          group: null,
+          title: "News",
+          channelCount: CHANNELS.length,
+        },
+      ]);
+      p.client.setQueryData(browseChannels(own("uk")).queryKey, browseResult(CHANNELS));
+      useUi.setState({ list: { kind: "category", category: own("uk") } });
+    });
+    await settled();
+    expect(p.text()).toContain("News");
+    await act(async () =>
+      p.client.setQueryData(queries.categories().queryKey, [
+        {
+          ...own("other"),
+          members: [own("other")],
+          name: "Other",
+          title: "Other",
+          group: null,
+          channelCount: 1,
+        },
+      ]),
+    );
+    await ready(() => expect(useUi.getState().list).toEqual({ kind: "all" }));
+    expect(p.notice()).toContain("News is no longer listed. Showing all channels.");
+    await p.choose("Favourites");
+    await ready(() => expect(p.notice()).not.toContain("is no longer listed"));
+  });
+
+  it("shows names before programmes, then combines them in list order", async () => {
+    const p = await live();
+    const answer = ipc.hold("guide.searchList");
+
+    await p.type("News");
+    await ready(() =>
+      expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({ query: "News" }),
+    );
+
+    // Current name matches remain usable while the guide is still searching.
+    expect(p.names()).toEqual(["BBC News", "Euronews"]);
+    expect(p.text()).toContain("Searching");
+    await p.click(p.rows()[0]!);
+    expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(own("4")));
+    await act(async () => useUi.setState({ watching: false }));
+    expect(ipc.argsOf("guide.searchList")).toEqual([
+      {
+        query: "News",
+        channels: CHANNELS.map(ownedId),
+        until: expect.any(Number),
+        request: { view: "live", id: expect.any(String) },
+      },
+    ]);
+
+    await act(async () =>
+      answer.resolve(
+        found({
+          "1": { now: true, later: null },
+          "2": laterMatch("ITV News at Ten"),
+          "4": laterMatch("Newsnight"),
+        }),
+      ),
+    );
+    await ready(() => expect(p.names()).toEqual(["BBC One", "ITV1", "BBC News", "Euronews"]));
+    expect(p.text()).toContain("4 channels · 4 streams");
+    expect(p.row("ITV1")?.textContent).toContain("ITV News at Ten");
+    // What matched is marked: in a name, inside a word, and in the later programme.
+    const marked = (title: string) =>
+      [...(p.row(title)?.querySelectorAll("mark") ?? [])].map((mark) => mark.textContent);
+    expect(marked("BBC News")).toEqual(["News", "News"]);
+    expect(marked("Euronews")).toEqual(["news"]);
+    expect(marked("ITV1")).toEqual(["News"]);
+  });
+
+  it("finds names without a guide, by the provider's name too and whatever the accents", async () => {
+    const p = await live();
+    const answer = ipc.hold("guide.searchList");
+    await p.type("comedy");
+    await ready(() =>
+      expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({ query: "comedy" }),
+    );
+    answer.reject({ kind: "unexpected", detail: "No guide." });
+    await ready(() => expect(p.names()).toEqual(["Dave"]));
+
+    await searched(p, "EEN", ["Één"]);
+
+    await searched(p, "bbc news", ["BBC News"]);
+  });
+
+  it("goes to the field with /, hands the keys to the channels found, and clears before it leaves", async () => {
+    const p = await live();
+
+    await p.press("/", window);
+    expect(document.activeElement).toBe(p.field());
+    // In the field a digit is text, not a channel number.
+    await p.press("4");
+    await settled(1300);
+    expect(p.watch).not.toHaveBeenCalled();
+    await searched(p, "4", ["Channel 4"]);
+
+    await searched(p, "bbc", ["BBC One", "BBC News"]);
+    await p.press("ArrowDown");
+    expect(document.activeElement).not.toBe(p.field());
+    await p.press("ArrowDown");
+    await p.press("Enter");
+    expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(own("4")));
+    expect(useUi.getState().watching).toBe(true);
+
+    // Back from Watch, the search stands. Escape clears it first, and only then goes Home.
+    await act(async () => useUi.setState({ watching: false }));
+    expect(p.names()).toEqual(["BBC One", "BBC News"]);
+    await p.press("Escape");
+    expect(p.field().value).toBe("");
+    expect(p.names()).toHaveLength(CHANNELS.length);
+    expect(useUi.getState().view).toBe("live");
+    await p.press("Escape");
+    expect(useUi.getState().view).toBe("home");
+  });
+
+  it("clears and leaves the field on Escape there, and watches the first channel found on Enter twice", async () => {
+    const p = await live();
+    await p.press("/", window);
+    await searched(p, "itv", ["ITV1"]);
+
+    await p.press("Escape");
+    expect(p.field().value).toBe("");
+    expect(document.activeElement).not.toBe(p.field());
+    expect(useUi.getState().view).toBe("live");
+
+    await p.press("/", window);
+    await searched(p, "euro", ["Euronews"]);
+    await p.press("Enter");
+    expect(useUi.getState().watching).toBe(false);
+    expect(p.watch).not.toHaveBeenCalled();
+    await p.press("Enter");
+    expect(p.watch).toHaveBeenLastCalledWith(expect.objectContaining(own("5")));
+  });
+
+  it("searches the favourites alone, and every channel for the same once asked", async () => {
+    const favourites = FAVOURITES.map(({ id }) => CHANNELS.find((channel) => channel.id === id)!);
+    const p = await live(favourites, { kind: "favourites" });
+    p.client.setQueryData(browseChannels(null).queryKey, browseResult(CHANNELS));
+    expect(p.field().placeholder).toBe("Search Favourites");
+
+    await searched(p, "bbc", ["BBC News", "BBC One"]);
+    expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({
+      query: "bbc",
+      channels: FAVOURITES,
+    });
+
+    await searched(p, "dave", []);
+    expect(p.text()).toContain("Nothing in Favourites for dave.");
+    expect(useUi.getState().searchFrom).toBe("dave");
+
+    const asked = ipc.argsOf("guide.searchList").length;
+    const everywhere = ipc.hold("guide.searchList");
+    await p.choose("Search all channels");
+    await ready(() => expect(ipc.argsOf("guide.searchList")).toHaveLength(asked + 1));
+    everywhere.resolve({});
+    await ready(() => expect(p.names()).toEqual(["Dave"]));
+    expect(useUi.getState().list).toEqual({ kind: "all" });
+    expect(p.field().value).toBe("dave");
+    expect(ipc.argsOf("guide.searchList").at(-1)).toEqual({
+      query: "dave",
+      channels: CHANNELS.map(ownedId),
+      request: { view: "live", id: expect.any(String) },
+      until: expect.any(Number),
+    });
+
+    // Another list starts without the search.
+    await p.choose("Favourites");
+    expect(p.field().value).toBe("");
+    expect(p.names()).toEqual(["BBC News", "ITV1", "BBC One"]);
+  });
+
+  it("opens the rest of the day on the later programme found, with its description", async () => {
+    const p = await live();
+    const start = Date.now() + 2 * HOUR;
+    const at = (from: number, title: string, description: string): Programme => ({
+      start: from,
+      stop: from + HOUR,
+      title,
+      description,
+    });
+    await searched(p, "ten", ["ITV1"], {
+      "2": { now: false, later: { start, title: "News at Ten" } },
+    });
+
+    const day = ipc.hold("guide.schedule");
+    await p.press("ArrowRight");
+    await ready(() => expect(ipc.argsOf("guide.schedule")).toHaveLength(1));
+    day.resolve([
+      at(start - 2 * HOUR, "Emmerdale", "On now."),
+      at(start - HOUR, "Trigger Point", "Not what was searched for."),
+      at(start, "News at Ten", "The day's news."),
+    ]);
+    await ready(() => expect(p.row("ITV1")?.textContent).toContain("The day's news."));
+
+    expect(ipc.argsOf("guide.schedule")).toEqual([
+      // The viewer's day: the main process reads no further.
+      {
+        channel: { subscriptionId: SUBSCRIPTION, id: "2" },
+        from: expect.any(Number),
+        until: expect.any(Number),
+      },
+    ]);
+    expect(p.row("ITV1")?.textContent).not.toContain("Not what was searched for.");
+    // A programme still to come opens with Remind me under its description.
+    expect(p.row("ITV1")?.textContent).toContain("The day's news.Remind me");
+    // Opening it plays nothing: only the row itself watches the channel.
+    expect(useUi.getState().watching).toBe(false);
+    expect(p.watch).not.toHaveBeenCalled();
+  });
+});
+
+it("finds joined channel spellings in Live without changing list order or programme scope", async () => {
+  const p = await live([
+    channel("1", "O’Brien"),
+    channel("2", "Spider-Man"),
+    channel("3", "Spider Man"),
+  ]);
+  await searched(p, "spiderman", ["Spider-Man"]);
+  expect(p.row("Spider-Man")?.querySelector("mark")?.textContent).toBe("Spider-Man");
+  await searched(p, "obrien", ["O’Brien"]);
+  expect(p.row("O’Brien")?.querySelector("mark")?.textContent).toBe("O’Brien");
 });
