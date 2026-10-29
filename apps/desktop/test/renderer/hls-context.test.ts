@@ -147,6 +147,8 @@ it.each([
     ipc.always("playback.playing", null);
     player.preview(channel);
     await vi.advanceTimersByTimeAsync(0);
+    // Timer callbacks do not wait for the engine's optional HLS imports and error listener.
+    await vi.dynamicImportSettled();
     events.error(makeError());
     await vi.advanceTimersByTimeAsync(0);
     expect(ipc.argsOf("playback.failure")).toEqual([

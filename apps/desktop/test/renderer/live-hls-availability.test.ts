@@ -128,6 +128,8 @@ it("keeps captions hidden until their picture data arrives and respects Off", as
 /** Advances a moving picture, so discovery is checked independently of stall recovery. */
 async function playingFor(ms: number) {
   for (let elapsed = 0; elapsed < ms; elapsed += 1000) {
+    // A reconnect loads its engine asynchronously. Attach it before advancing its picture.
+    await vi.dynamicImportSettled();
     player.element.currentTime += 1;
     await vi.advanceTimersByTimeAsync(Math.min(1000, ms - elapsed));
   }
