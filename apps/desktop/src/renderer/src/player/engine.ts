@@ -225,6 +225,7 @@ function hlsEngine(
       // Reading firstAutoLevel starts hls.js's own capability checks. Let their handlers remove
       // unsupported levels before using any index; another read can start further checks.
       const checked = new Set<Promise<unknown>>();
+      const validated = new Map<(typeof hls.levels)[number], boolean>();
       // Capability services are advisory: a slow service must not consume the start watchdog.
       const deadline = new Promise<"timeout">((resolve) => {
         supportTimer = setTimeout(() => resolve("timeout"), 1000);
@@ -251,9 +252,10 @@ function hlsEngine(
           // Keep the initial audio groups, including their stable rendition identities. Starting
           // in another group can lose the requested language before ABR ever reaches this tier.
           if (tier && tier.supportedResult?.supported !== false) {
-            hls.startLevel = hls.levels.reduce(
+            const lowest = hls.levels.reduce(
               (lowest, level, index, levels) =>
                 level.supportedResult?.supported !== false &&
+                validated.get(level) !== false &&
                 (!level.supportedPromise || level.supportedResult?.supported === true) &&
                 level.codecSet === tier.codecSet &&
                 level.videoRange === tier.videoRange &&
@@ -268,6 +270,30 @@ function hlsEngine(
                   : lowest,
               initial,
             );
+            const candidate = hls.levels[lowest]!;
+            if (
+              lowest !== initial &&
+              candidate.supportedResult?.supported !== true &&
+              !validated.has(candidate)
+            ) {
+              // ABR may return before visiting lower levels. Use hls.js's public capability
+              // query for that candidate rather than treating an absent promise as support.
+              const result = await Promise.race([
+                hls.getMediaDecodingInfo(candidate).then(
+                  (info) => info.supported,
+                  () => false,
+                ),
+                deadline,
+              ]);
+              if (released) return;
+              if (result === "timeout") {
+                hls.startLoad();
+                return;
+              }
+              validated.set(candidate, result);
+              continue;
+            }
+            hls.startLevel = lowest;
           }
           hls.startLoad();
           return;

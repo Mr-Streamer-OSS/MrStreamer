@@ -9,6 +9,7 @@ const fixture = vi.hoisted(() => ({
   levels: [] as Level[],
   starts: [] as Level[],
   groups: new Map<string, readonly Rendition[]>(),
+  unsupported: new Set<Level>(),
 }));
 vi.mock("hls.js", async (original) => {
   const real = await original<typeof import("hls.js")>();
@@ -26,6 +27,9 @@ vi.mock("hls.js", async (original) => {
           fixture.parsed = () => listener(event, {});
         else super.once(event, listener);
       }
+      getMediaDecodingInfo(level: Level) {
+        return Promise.resolve({ supported: !fixture.unsupported.has(level) });
+      }
       override startLoad() {
         super.startLoad();
         const level = this.levels[this.startLevel === -1 ? this.firstAutoLevel : this.startLevel]!;
@@ -41,14 +45,15 @@ afterEach(() => {
   engine?.destroy();
   fixture.starts = [];
   fixture.groups.clear();
+  fixture.unsupported.clear();
 });
-function level(bitrate: number, group?: string) {
+function level(bitrate: number, group?: string, videoCodec = "avc1.42e01e") {
   return new Level({
     bitrate,
     name: "fixture",
     url: "http://localhost/fixture.m3u8",
     attrs: new AttrList({ "FRAME-RATE": "25", ...(group ? { AUDIO: group } : {}) }),
-    videoCodec: "avc1.42e01e",
+    videoCodec,
     audioCodec: "mp4a.40.2",
   });
 }
@@ -61,7 +66,7 @@ function open() {
   return engine;
 }
 const settle = async () => {
-  for (let i = 0; i < 5; i++) await Promise.resolve();
+  for (let i = 0; i < 15; i++) await Promise.resolve();
 };
 
 it("keeps the initial audio group and the requested sound through ABR and a later choice", () => {
@@ -86,10 +91,11 @@ it("keeps the initial audio group and the requested sound through ABR and a late
   expect(streams.latest().audioTrack).toBe(0);
 });
 
-it("starts with the lowest bitrate when no audio group changes", () => {
+it("starts with the lowest bitrate when no audio group changes", async () => {
   const low = level(128);
   fixture.levels = [low, level(512)];
   open();
+  await settle();
   expect(fixture.starts).toEqual([low]);
 });
 
@@ -142,4 +148,15 @@ it("uses default startup when capability service stays pending", async () => {
     engine?.destroy();
     vi.useRealTimers();
   }
+});
+
+// Only the initial higher level has been visited by ABR; the lower profile is unqueried.
+it("validates an unvisited lower decoder profile before overriding startup", async () => {
+  const low = level(128, undefined, "hvc1.2.4.L93.B0");
+  const high = level(512, undefined, "hvc1.1.6.L93.B0");
+  fixture.levels = [low, high];
+  fixture.unsupported.add(low);
+  open();
+  await settle();
+  expect(fixture.starts).toEqual([high]);
 });
