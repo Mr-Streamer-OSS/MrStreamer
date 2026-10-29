@@ -297,6 +297,9 @@ describe("putting the favourites in another order", () => {
     await settled();
     expect(page.focused()).toBe("Channel 3");
     expect(page.rows().slice(0, 3)).toEqual(titles(["3", "1", "2"]));
+    // Programmes were asked for once per channel in the saved order, never again for one that moved.
+    const asked = ipc.argsOf("guide.listings").flatMap(({ channels }) => channels);
+    expect(asked).toEqual(Array.from({ length: 60 }, (_, index) => own(String(index + 1))));
   });
 
   it("saves once with Enter, for the subscription and the favourites it was made from", async () => {

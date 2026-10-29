@@ -1221,6 +1221,14 @@ it("blocks old palette rows immediately within the input event, and respects IME
   });
   expect(p.watch).not.toHaveBeenCalled();
   expect(p.scope().querySelector('[role="tree"]')?.getAttribute("aria-disabled")).toBe("true");
+  // An empty answer replaces the old rows once the typing delay ends.
+  ipc.always("library.channels", []);
+  ipc.always("guide.search", []);
+  ipc.always("ondemand.search", { movies: [], series: [] });
+  await settled(150);
+  await settled();
+  expect(p.rows()).toHaveLength(0);
+  expect(p.scope().textContent).toContain("No matches");
   await p.type("");
   expect(p.scope().querySelector('[role="tree"]')).toBeNull();
 });
