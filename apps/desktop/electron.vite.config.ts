@@ -43,6 +43,9 @@ export default defineConfig(({ command }) => {
     renderer: {
       plugins: [react(), tailwindcss(), notices("renderer")],
       define: { __BUILD_COMMIT__: commit },
+      // electron-vite leaves the renderer unminified, and Vite's esbuild drops licence comments.
+      esbuild: { legalComments: "inline" },
+      build: { minify: "esbuild" },
     },
   };
 });
