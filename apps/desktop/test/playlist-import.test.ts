@@ -259,6 +259,9 @@ describe("saved M3U movie mapping", () => {
     await app.subscriptions.mapPlaylist(saved.id, films, "live");
     await app.subscriptions.mapPlaylist(saved.id, playlistGroupId("Shows"), "skip");
     await app.roster.refreshPlaylist(saved.id);
+    expect(
+      (await app.subscriptions.list()).find((each) => each.id === unmapped.id)?.playlistMapped,
+    ).toBe(false);
     const without = await app.watchlist.list(page);
     expect(without.entries).toMatchObject([
       { ...filmEntry, name: "Restored film", title: null, listed: true },
