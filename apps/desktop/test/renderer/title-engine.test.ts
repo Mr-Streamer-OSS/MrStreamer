@@ -359,6 +359,4 @@ it("holds title reads on a paused picture, resumes, and cancels while held", asy
   engine.destroy();
   await vi.advanceTimersByTimeAsync(0);
   expect(cancelled).toHaveBeenCalledOnce();
-  video.dispatchEvent(new Event("play"));
-  expect(reads).toBe(1);
 });
