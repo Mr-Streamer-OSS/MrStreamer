@@ -8,7 +8,7 @@ import { byIds, indexCatalogue, type IndexedCatalogue } from "@mrstreamer/core/o
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // A film's details while the providers listing it change: a version picked from a provider that
 // is removed meanwhile gives way to one still listed. And its download: the button queues the
@@ -540,8 +540,8 @@ const copy: Download = {
 };
 
 describe("a film's version picked", () => {
+  beforeEach(() => providers("a", "b"));
   it("plays again when the film is opened again, and after a relaunch", async () => {
-    providers("a", "b");
     const page = mount();
     page.openVersions()("Cabin");
     unmount();
@@ -553,7 +553,6 @@ describe("a film's version picked", () => {
   });
 
   it("goes with Automatic, which plays the film's own choice from then on", () => {
-    providers("a", "b");
     const page = mount();
     page.openVersions()("Cabin");
     expect(page.play()).toBe("b");
@@ -564,7 +563,6 @@ describe("a film's version picked", () => {
   });
 
   it("gives way to a version asked for, as a 4K tile asks, which doesn't replace it", () => {
-    providers("a", "b");
     const page = mount();
     page.openVersions()("Cabin");
     unmount();
@@ -581,7 +579,6 @@ describe("a film's version picked", () => {
   });
 
   it("goes with the film's own choice on Automatic, over the version asked for", () => {
-    providers("a", "b");
     const page = mount({ version: "b:1", asked: true });
     expect(page.play()).toBe("b");
     page.openVersions()("Automatic");
@@ -589,7 +586,6 @@ describe("a film's version picked", () => {
   });
 
   it("reads picks in a shape it doesn't know as none, keeping the rest of what was saved", async () => {
-    providers("a", "b");
     const saved = { subscription: null, recent: [], region: "NL", titleVersions: { b: 7 } };
     writeFileSync(join(native.root, "documents", "state.json"), JSON.stringify(saved));
     const again = await relaunch();
@@ -598,7 +594,6 @@ describe("a film's version picked", () => {
   });
 
   it("plays the pick over another version a list names without asking for it", () => {
-    providers("a", "b");
     expect(mount({ version: "b:1" }).play()).toBe("b");
     unmount();
     const page = mount();
@@ -608,14 +603,20 @@ describe("a film's version picked", () => {
   });
 });
 
+/** The versions whose details are read from now on, each read left unanswered. */
+function unansweredReads() {
+  const read: string[] = [];
+  scenario.details = (version) => {
+    read.push(version);
+    return new Promise(() => undefined);
+  };
+  return read;
+}
+
 describe("a film's version picked from a provider that lost its password", () => {
   it("gives way to the version another provider opened, and comes back with the password", () => {
     providers("a", "b");
-    const read: string[] = [];
-    scenario.details = (version) => {
-      read.push(version);
-      return new Promise(() => undefined);
-    };
+    const read = unansweredReads();
     mount().openVersions()("Home");
     unmount();
     // Opened through Cabin, as the Watchlist opens a title Home lists too: the pick still wins.
@@ -635,11 +636,7 @@ describe("a film's version picked from a provider that lost its password", () =>
 
   it("goes with the version opened over progress on a provider that lost its password", async () => {
     providers("a", "b");
-    const read: string[] = [];
-    scenario.details = (version) => {
-      read.push(version);
-      return new Promise(() => undefined);
-    };
+    const read = unansweredReads();
     // Stopped partway in Cabin's version.
     const partway = { position: 600, duration: 6000, finished: false, at: 1, since: 1 };
     scenario.progress = [{ title: { kind: "movie", subscriptionId: "b", id: "1" }, ...partway }];
@@ -688,11 +685,7 @@ describe("a film's version picked from a provider that lost its password", () =>
 
   it("goes with Automatic to a provider that signs in when the film's own lost its password", async () => {
     providers("a", "b", "c");
-    const read: string[] = [];
-    scenario.details = (version) => {
-      read.push(version);
-      return new Promise(() => undefined);
-    };
+    const read = unansweredReads();
     // Home's version is the film's own; Home lost its password. Opened through Cabin, as the
     // watchlist opens it, then Automatic chosen.
     lost("a");
@@ -731,11 +724,7 @@ describe("a film's version picked from a provider that lost its password", () =>
 
   it("goes with Automatic over progress on a provider that lost its password, and not a version chosen", async () => {
     providers("a", "b");
-    const read: string[] = [];
-    scenario.details = (version) => {
-      read.push(version);
-      return new Promise(() => undefined);
-    };
+    const read = unansweredReads();
     scenario.progress = [
       {
         title: { kind: "movie", subscriptionId: "b", id: "1" },
@@ -832,17 +821,7 @@ describe("a film's facts", () => {
     expect(page.has("Try again")).toBe(false);
     expect(page.has("placeholder-lines")).toBe(true);
 
-    await React.act(async () =>
-      answer({
-        kind: "movie",
-        plot: "A film that answered the second time.",
-        directors: [],
-        cast: [],
-        genres: [],
-        duration: null,
-        backdropUrl: null,
-      }),
-    );
+    await React.act(async () => answer(factsOf("A film that answered the second time.")));
     expect(page.text()).toContain("A film that answered the second time.");
     expect(page.has("placeholder-lines")).toBe(false);
   });
@@ -987,6 +966,17 @@ function answer(label: string) {
   React.act(() => button.onPress?.());
 }
 
+/** Series 2 with Season 1's run confirmed, its first episode's addition held until `release`. */
+async function heldRun() {
+  const held = Promise.withResolvers<void>();
+  scenario.adding = (ref) => (ref.id === "101" ? held.promise : undefined);
+  const page = await mountSeries();
+  page.press("bulk-season-start");
+  choose("Download 3 episodes");
+  await ran();
+  return { page, release: () => React.act(async () => held.resolve()) };
+}
+
 describe("a series' bulk download", () => {
   it("counts the season shown and queues its remaining episodes of the version shown", async () => {
     providers("a", "b");
@@ -1109,15 +1099,10 @@ describe("a series' bulk download", () => {
 
   it("stops at Cancel remaining, the addition already asked settling", async () => {
     providers("a");
-    const held = Promise.withResolvers<void>();
-    scenario.adding = (ref) => (ref.id === "101" ? held.promise : undefined);
-    const page = await mountSeries();
-    page.press("bulk-season-start");
-    choose("Download 3 episodes");
-    await ran();
+    const { page, release } = await heldRun();
     expect(page.text()).toContain("Adding 1 of 3");
     page.press("bulk-season-cancel");
-    await React.act(async () => held.resolve());
+    await release();
     await ran();
     expect(scenario.asked).toEqual(["add a:101"]);
     expect(scenario.episodes.get("a:101")?.status.kind).toBe("queued");
@@ -1149,35 +1134,37 @@ describe("a series' bulk download", () => {
     expect(scenario.asked).toEqual(["add a:101", "add a:102", "add a:103"]);
   });
 
-  it("does nothing for a sheet answered once another version shows", async () => {
-    providers("a", "b");
-    const page = await mountSeries();
-    page.press("bulk-season-start");
-    const sheet = scenario.menu!;
-    page.openVersions()("Cabin");
-    await settled();
-    React.act(() => sheet.pick(0));
-    await ran();
-    expect(scenario.asked).toEqual([]);
-    expect(scenario.alerts.at(-1)?.message).toBe("The version or its provider changed. Try again.");
-  });
+  for (const [choice, when] of [
+    ["Cabin", "another version shows"],
+    ["Home", "the version shown was accepted again"],
+  ] as const) {
+    it(`does nothing for a sheet answered once ${when}`, async () => {
+      providers("a", "b");
+      const page = await mountSeries();
+      page.press("bulk-season-start");
+      const sheet = scenario.menu!;
+      page.openVersions()(choice);
+      await settled();
+      React.act(() => sheet.pick(0));
+      await ran();
+      expect(scenario.asked).toEqual([]);
+      expect(scenario.alerts.at(-1)?.message).toBe(
+        "The version or its provider changed. Try again.",
+      );
+    });
+  }
 
   for (const change of ["another version", "a new login", "the provider's removal", "leaving"]) {
     it(`stops before the next episode on ${change}`, async () => {
       providers("a", "b");
-      const held = Promise.withResolvers<void>();
-      scenario.adding = (ref) => (ref.id === "101" ? held.promise : undefined);
-      const page = await mountSeries();
-      page.press("bulk-season-start");
-      choose("Download 3 episodes");
-      await ran();
+      const { page, release } = await heldRun();
       if (change === "another version") {
         page.openVersions()("Cabin");
         await settled();
       } else if (change === "a new login") scenario.sources.set("a", {});
       else if (change === "the provider's removal") scenario.sources.delete("a");
       else unmount();
-      await React.act(async () => held.resolve());
+      await release();
       await ran();
       expect(scenario.asked).toEqual(["add a:101"]);
       expect(scenario.episodes.get("a:101")?.status.kind).toBe("queued");
@@ -1187,15 +1174,10 @@ describe("a series' bulk download", () => {
   for (const choice of ["Automatic", "Home"]) {
     it(`stops before the next episode once ${choice} is accepted, the same version still shown`, async () => {
       providers("a", "b");
-      const held = Promise.withResolvers<void>();
-      scenario.adding = (ref) => (ref.id === "101" ? held.promise : undefined);
-      const page = await mountSeries();
-      page.press("bulk-season-start");
-      choose("Download 3 episodes");
-      await ran();
+      const { page, release } = await heldRun();
       page.openVersions()(choice);
       await settled();
-      await React.act(async () => held.resolve());
+      await release();
       await ran();
       expect(scenario.asked).toEqual(["add a:101"]);
       expect(scenario.alerts.at(-1)?.message).toBe(
@@ -1211,47 +1193,24 @@ describe("a series' bulk download", () => {
     });
   }
 
-  it("does nothing for a sheet answered once the version shown was accepted again", async () => {
-    providers("a", "b");
-    const page = await mountSeries();
-    page.press("bulk-season-start");
-    const sheet = scenario.menu!;
-    page.openVersions()("Home");
-    await settled();
-    React.act(() => sheet.pick(0));
-    await ran();
-    expect(scenario.asked).toEqual([]);
-    expect(scenario.alerts.at(-1)?.message).toBe("The version or its provider changed. Try again.");
-  });
-
   it("keeps going when the version menu is cancelled", async () => {
     providers("a", "b");
-    const held = Promise.withResolvers<void>();
-    scenario.adding = (ref) => (ref.id === "101" ? held.promise : undefined);
-    const page = await mountSeries();
-    page.press("bulk-season-start");
-    choose("Download 3 episodes");
-    await ran();
+    const { page, release } = await heldRun();
     page.openVersions()("Cancel");
     await settled();
-    await React.act(async () => held.resolve());
+    await release();
     await ran();
     expect(scenario.asked).toEqual(["add a:101", "add a:102", "add a:103"]);
   });
 
   it("keeps going while the same version's details are drawn again", async () => {
     providers("a");
-    const held = Promise.withResolvers<void>();
-    scenario.adding = (ref) => (ref.id === "101" ? held.promise : undefined);
-    const page = await mountSeries();
-    page.press("bulk-season-start");
-    choose("Download 3 episodes");
-    await ran();
+    const { page, release } = await heldRun();
     // TMDB's metadata renames titles: the lists and the screen draw again.
     providers("a");
     page.render();
     await settled();
-    await React.act(async () => held.resolve());
+    await release();
     await ran();
     expect(scenario.asked).toEqual(["add a:101", "add a:102", "add a:103"]);
   });

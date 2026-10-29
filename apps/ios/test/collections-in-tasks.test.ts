@@ -534,25 +534,6 @@ describe("the collections Movies, Series, Home and details show", () => {
     edges.notify?.({ content: true });
   };
 
-  it("show the lists only with both kinds' collections made of them, as making them at once gives", async () => {
-    // Until then screens show Loading, and never make any while they draw.
-    subscribe("a");
-    expect(titles.collectionsOf("movie")).toBeNull();
-    const { views, bare } = await watch(() => indexed() !== null, "the lists");
-    expect(bare).toBe(0);
-    expect(views).toHaveLength(1);
-    const [view] = views;
-    const index = indexed();
-    if (!view || !index) throw new Error("No lists");
-    expect(view.index).toBe(index);
-    for (const kind of ["movie", "series"] as const) {
-      const made = view[kind];
-      if (!made) throw new Error("No collections");
-      expect(titles.collectionsOf(kind)).toBe(made);
-      expect(shown(made, undefined)).toEqual(shown(atOnce(kind, index), undefined));
-    }
-  });
-
   it("keep the last made while newer metadata's are made, then show the latest, with no screen open", async () => {
     subscribe("a");
     await until(() => titles.collectionsOf("movie") !== null, "the first collections");
@@ -591,8 +572,19 @@ describe("the collections Movies, Series, Home and details show", () => {
 
   it("are of the new lists once they show, and those being made for the old never show", async () => {
     subscribe("a");
-    await until(() => titles.collectionsOf("movie") !== null, "the first collections");
+    expect(titles.collectionsOf("movie")).toBeNull();
+    const initial = await watch(() => indexed() !== null, "the first lists");
+    expect(initial.bare).toBe(0);
+    expect(initial.views).toHaveLength(1);
     const before = indexed();
+    if (!before) throw new Error("No initial lists");
+    expect(initial.views[0]?.index).toBe(before);
+    for (const kind of ["movie", "series"] as const) {
+      const made = initial.views[0]?.[kind];
+      if (!made) throw new Error("No initial collections");
+      expect(titles.collectionsOf(kind)).toBe(made);
+      expect(shown(made, undefined)).toEqual(shown(atOnce(kind, before), undefined));
+    }
     const first = titles.collectionsOf("movie");
     // Another subscription's lists are indexed while metadata changes the old lists' collections.
     subscribe("a", "b");
@@ -616,6 +608,11 @@ describe("the collections Movies, Series, Home and details show", () => {
     if (!index) throw new Error("No lists");
     for (const made of seen) expect(listsFrom(made, "b")).toBe(true);
     await latest("movie", index);
+    for (const kind of ["movie", "series"] as const) {
+      const made = titles.collectionsOf(kind);
+      if (!made) throw new Error("No collections");
+      expect(shown(made, undefined)).toEqual(shown(atOnce(kind, index), undefined));
+    }
   });
 
   it("keep what shows while a subscription's lists come again, metadata changing meanwhile", async () => {
