@@ -725,21 +725,27 @@ describe("the collections Movies, Series, Home and details show", () => {
     expect(first.size("new-week")).toBeGreaterThan(0);
     // The metadata they were made with expires; once made again, they hold.
     shift = 6_000;
-    expect(titles.collectionsOf("movie")).toBe(first);
-    await until(() => titles.collectionsOf("movie") !== first, "collections made again");
-    const remade = titles.collectionsOf("movie");
+    expect(titles.collectionsOf("movie")?.list("all")).toEqual(first.list("all"));
+    await until(
+      () => titles.collectionsOf("movie")?.validAt(Date.now()) === true,
+      "collections made again",
+    );
+    const remade = titles.collectionsOf("movie")?.list("all");
     for (let task = 0; task < 100; task++) await new Promise((done) => setTimeout(done, 1));
-    expect(titles.collectionsOf("movie")).toBe(remade);
+    expect(titles.collectionsOf("movie")?.list("all")).toEqual(remade);
     // Six days on, what was new this week no longer is.
     shift = 6 * 86_400_000;
-    expect(titles.collectionsOf("movie")).toBe(remade);
+    expect(titles.collectionsOf("movie")?.list("all")).toEqual(remade);
     await latest("movie", index);
     expect(titles.collectionsOf("movie")?.size("new-week")).toBe(0);
     // The clock goes back a day: what was made for later is made again for now.
-    const later = titles.collectionsOf("movie");
+    const later = titles.collectionsOf("movie")?.list("all");
     shift = -86_400_000;
-    expect(titles.collectionsOf("movie")).toBe(later);
-    await until(() => titles.collectionsOf("movie") !== later, "collections for now");
+    expect(titles.collectionsOf("movie")?.list("all")).toEqual(later);
+    await until(
+      () => titles.collectionsOf("movie")?.validAt(Date.now()) === true,
+      "collections for now",
+    );
     await latest("movie", index);
     expect(titles.collectionsOf("movie")?.size("new-week")).toBeGreaterThan(0);
   });
