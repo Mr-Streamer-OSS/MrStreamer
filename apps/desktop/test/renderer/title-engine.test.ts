@@ -314,3 +314,51 @@ it("retains delivery facts on a rejection after playback started", async () => {
     expect.objectContaining({ kind: "media", video: "copy", audio: "convert" }),
   );
 });
+
+it("holds title reads on a paused picture, resumes, and cancels while held", async () => {
+  vi.stubGlobal("HTMLMediaElement", { HAVE_CURRENT_DATA: 2 });
+  let paused = true;
+  let reads = 0;
+  const cancelled = vi.fn();
+  vi.stubGlobal(
+    "fetch",
+    async () =>
+      new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              if (reads >= 4) return new Promise<void>(() => {});
+              reads++;
+              controller.enqueue(new Uint8Array([1]));
+            },
+            cancel: cancelled,
+          },
+          { highWaterMark: 0 },
+        ),
+      ),
+  );
+  const video = document.createElement("video");
+  Object.defineProperties(video, {
+    paused: { get: () => paused },
+    seeking: { value: false },
+    readyState: { value: 2 },
+    buffered: { get: () => ({ length: 1, start: () => 0, end: () => 10 }) },
+  });
+  engine = titleEngine(video, { ...run, paused: true });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(reads).toBe(0);
+  paused = false;
+  // Pause after one resumed append, rather than producing an unbounded mock stream.
+  vi.spyOn(Buffer.prototype, "appendBuffer").mockImplementation(function (this: Buffer) {
+    paused = true;
+    queueMicrotask(() => this.dispatchEvent(new Event("updateend")));
+  });
+  video.dispatchEvent(new Event("play"));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(reads).toBe(1);
+  engine.destroy();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(cancelled).toHaveBeenCalledOnce();
+  video.dispatchEvent(new Event("play"));
+  expect(reads).toBe(1);
+});

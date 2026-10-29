@@ -18,7 +18,15 @@ import { startFakeTmdb } from "../fake-tmdb.ts";
 import { connect, key, login, waitFor, type Page } from "./app.ts";
 
 const variant = process.argv[2] ?? "h264-10bit";
-if (!["h264-10bit", "hevc-12bit", "h264-rejected-copy", "h264-later-rejection"].includes(variant))
+if (
+  ![
+    "h264-10bit",
+    "hevc-12bit",
+    "h264-rejected-copy",
+    "h264-later-rejection",
+    "paused-buffer",
+  ].includes(variant)
+)
   throw new Error("Unknown fixture");
 const executable = await electronExecutable();
 const desktop = resolve("apps/desktop");
@@ -28,7 +36,11 @@ const provider = await startFakeProvider({ channels: 60, titles: 30, live: true 
 const tmdb = await startFakeTmdb();
 const movie = provider.titles.movies.find((each) => each.name.includes("Two sound tracks"))!;
 const clip = Buffer.from(
-  fixture(`title-${variant.startsWith("h264-") ? "h264-10bit" : variant}.mkv`),
+  fixture(
+    variant === "paused-buffer"
+      ? "title-long-subs.mkv"
+      : `title-${variant.startsWith("h264-") ? "h264-10bit" : variant}.mkv`,
+  ),
 );
 if (variant === "h264-rejected-copy") {
   // Invalid AVC configuration profile, valid High 10 SPS/pictures. Copy preserves that invalid
@@ -125,7 +137,7 @@ try {
     `window.__compatibility = { checks: [], errors: [] }; const original = MediaSource.isTypeSupported.bind(MediaSource); MediaSource.isTypeSupported = (type) => { const supported = original(type); window.__compatibility.checks.push({ type, supported }); return supported; }; document.addEventListener('error', e => { if (e.target instanceof HTMLVideoElement) window.__compatibility.errors.push({ code: e.target.error?.code, message: e.target.error?.message, time: e.target.currentTime }); }, true);`,
   );
   await live.evaluate(
-    `const add = MediaSource.prototype.addSourceBuffer; MediaSource.prototype.addSourceBuffer = function(type) { const buffer = add.call(this, type); window.__compatibility.buffer = buffer; return buffer; };`,
+    `const add = MediaSource.prototype.addSourceBuffer; MediaSource.prototype.addSourceBuffer = function(type) { const buffer = add.call(this, type); window.__compatibility.buffer = buffer; window.__compatibility.appended = 0; const append = buffer.appendBuffer.bind(buffer); buffer.appendBuffer = data => { window.__compatibility.appended += data.byteLength; return append(data); }; return buffer; };`,
   );
   await login(live, provider);
   const click = async (description: string, expression: string) => {
@@ -223,6 +235,13 @@ try {
       ),
     30_000,
   );
+  if (variant === "paused-buffer")
+    await live.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: 0,
+      downloadThroughput: 2048,
+      uploadThroughput: -1,
+    });
   await click(
     "Play provider file",
     `[...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent.trim() === 'Play')`,
@@ -268,22 +287,55 @@ try {
 
   await key(live, " ", 32);
   await waitFor(async () => (await video()).paused);
+  if (variant === "paused-buffer") {
+    const sample = async () => ({
+      video: await video(),
+      appended: await live.evaluate<number>("window.__compatibility.appended"),
+      bufferedEnd: await live.evaluate<number>("document.querySelector('video').buffered.end(0)"),
+      providerBytes: provider.fileBytes(),
+      requests: provider.fileRequests(),
+      active: provider.activeStreams(),
+    });
+    // Let the one read already pending at Pause complete before the held interval.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    const before = await sample();
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    const after = await sample();
+    observations["pausedBuffer"] = {
+      before,
+      after,
+      appendedWhileHeld: after.appended - before.appended,
+      throughputBytesPerSecond: 2048,
+      settleMs: 3000,
+      heldMs: 5000,
+    };
+    await shot("paused-buffer");
+    if (after.appended !== before.appended) throw new Error("Title kept appending while paused");
+    await live.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: 0,
+      downloadThroughput: -1,
+      uploadThroughput: -1,
+    });
+  }
   await key(live, "ArrowRight", 39);
   await waitFor(async () => {
     const v = await video();
     return v.paused && v.time > 10 && v.width > 0;
   });
   observations["pausedSeek"] = await video();
-  await click("Sound", `document.querySelector('[aria-label=Sound]')`);
-  await click(
-    "Other audio track while paused",
-    `[...document.querySelectorAll('[role=dialog] button[aria-pressed=false], [role=dialog] [role=menuitemradio][aria-checked=false]')][0]`,
-  );
-  await waitFor(async () => {
-    const v = await video();
-    return v.paused && v.time > 10 && v.width > 0;
-  });
-  observations["pausedOtherTrack"] = await video();
+  if (variant !== "paused-buffer") {
+    await click("Sound", `document.querySelector('[aria-label=Sound]')`);
+    await click(
+      "Other audio track while paused",
+      `[...document.querySelectorAll('[role=dialog] button[aria-pressed=false], [role=dialog] [role=menuitemradio][aria-checked=false]')][0]`,
+    );
+    await waitFor(async () => {
+      const v = await video();
+      return v.paused && v.time > 10 && v.width > 0;
+    });
+    observations["pausedOtherTrack"] = await video();
+  }
   await key(live, "p", 80);
   await waitFor(() => live.evaluate<boolean>("!!document.querySelector('[data-mini]')"));
   if (!(await video()).same) throw new Error("Mini player replaced media node");

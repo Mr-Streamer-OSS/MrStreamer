@@ -291,20 +291,26 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     return 0;
   }
 
-  /** Resolves once the element has room to buffer more. */
+  /** A paused seek still needs data until its requested picture can be decoded. */
+  const holding = () =>
+    video.paused && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !video.seeking;
+
+  /** Resolves once playback needs more data, or the run is cancelled. */
   const room = () =>
     new Promise<void>((done) => {
-      if (ahead() < AHEAD_S.stop) return done();
+      if (!holding() && ahead() < AHEAD_S.stop) return done();
       const check = () => {
-        if (abort.signal.aborted || ahead() < AHEAD_S.resume) {
+        if (abort.signal.aborted || (!holding() && ahead() < AHEAD_S.resume)) {
           video.removeEventListener("timeupdate", check);
           video.removeEventListener("seeking", check);
+          video.removeEventListener("play", check);
           abort.signal.removeEventListener("abort", check);
           done();
         }
       };
       video.addEventListener("timeupdate", check);
       video.addEventListener("seeking", check);
+      video.addEventListener("play", check);
       abort.signal.addEventListener("abort", check, { once: true });
     });
 
