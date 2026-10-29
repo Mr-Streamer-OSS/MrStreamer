@@ -6,6 +6,7 @@
 # (`sha`), which always checks and tests that commit. The validation evidence artifact records
 # what ran on the exact source; .github/actions/validation/README.md has its contract.
 #
+# Website checks here are secretless; the independent Website workflow owns deployment.
 # No secrets, so pull requests from forks run all of it.
 name: Checks
 
@@ -60,7 +61,9 @@ jobs:
   check:
     name: Check
     needs: inputs
-    if: always()
+    outputs:
+      identity: ${{ steps.validate.outputs.identity }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -72,7 +75,8 @@ jobs:
           ref: ${{ github.workflow_sha }}
           path: .local/validation-tools
           persist-credentials: false
-      - uses: ./.local/validation-tools/.github/actions/validation
+      - id: validate
+        uses: ./.local/validation-tools/.github/actions/validation
         with:
           part: check
       - name: Require input selection
@@ -83,7 +87,9 @@ jobs:
   test:
     name: Test
     needs: inputs
-    if: always() && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop == 'true')
+    outputs:
+      identity: ${{ steps.validate.outputs.identity }}
+    if: ${{ !cancelled() && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -95,7 +101,8 @@ jobs:
           ref: ${{ github.workflow_sha }}
           path: .local/validation-tools
           persist-credentials: false
-      - uses: ./.local/validation-tools/.github/actions/validation
+      - id: validate
+        uses: ./.local/validation-tools/.github/actions/validation
         with:
           part: test
           report-name: ${{ inputs.report-name || github.run_id }}
@@ -103,7 +110,9 @@ jobs:
   website:
     name: Website
     needs: inputs
-    if: always() && !inputs.sha && (needs.inputs.result != 'success' || needs.inputs.outputs.website == 'true')
+    outputs:
+      identity: ${{ steps.validate.outputs.identity }}
+    if: ${{ !cancelled() && !inputs.sha && (needs.inputs.result != 'success' || needs.inputs.outputs.website == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -113,7 +122,8 @@ jobs:
           ref: ${{ github.workflow_sha }}
           path: .local/validation-tools
           persist-credentials: false
-      - uses: ./.local/validation-tools/.github/actions/validation
+      - id: validate
+        uses: ./.local/validation-tools/.github/actions/validation
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -122,7 +132,7 @@ jobs:
   evidence:
     name: Validation evidence
     needs: [check, test, website]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -139,6 +149,9 @@ jobs:
           persist-credentials: false
       - name: Record executed results
         env:
+          CHECK_IDENTITY: ${{ needs.check.outputs.identity }}
+          TEST_IDENTITY: ${{ needs.test.outputs.identity }}
+          WEBSITE_IDENTITY: ${{ needs.website.outputs.identity }}
           CHECK_RESULT: ${{ needs.check.result }}
           TEST_RESULT: ${{ needs.test.result }}
           WEBSITE_RESULT: ${{ needs.website.result }}

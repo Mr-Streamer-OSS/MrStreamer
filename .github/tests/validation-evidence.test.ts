@@ -20,6 +20,7 @@ const evidence: Evidence = {
   version: 1,
   ...expected,
   profile,
+  identities: { check: expected.identity, test: expected.identity, website: "" },
   results: { check: "success", test: "success", website: "skipped" },
 };
 
@@ -38,6 +39,9 @@ test("only complete exact-source validation from a successful trusted main produ
     null,
     {},
     { ...evidence, version: 2 },
+    { ...evidence, identities: undefined },
+    { ...evidence, identities: { ...evidence.identities, test: "different runner" } },
+    { ...evidence, identities: { ...evidence.identities, check: "different runner" } },
     { ...evidence, sha: "c".repeat(40) },
     { ...evidence, identity: "c".repeat(64) },
     { ...evidence, profile: "other" },

@@ -18,7 +18,7 @@ export function selectChecks(paths: readonly string[] | null) {
     } else if (path.startsWith("apps/desktop/")) desktop = true;
     else if (
       path.startsWith("docs/") ||
-      ["README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "LICENSE"].includes(path)
+      ["README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md"].includes(path)
     )
       continue;
     else return { desktop: true, website: true };

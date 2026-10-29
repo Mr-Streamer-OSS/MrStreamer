@@ -11,6 +11,7 @@ test("select expensive work by known inputs; shared, unknown and incomplete chan
     null,
     [],
     ["pnpm-lock.yaml"],
+    ["LICENSE"],
     ["packages/core/src/index.ts"],
     ["new/config"],
   ])

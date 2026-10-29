@@ -72,6 +72,7 @@ export interface Evidence {
   sha: string;
   identity: string;
   profile: typeof profile;
+  identities: { check: string; test: string; website: string };
   results: { check: string; test: string; website: string };
 }
 
@@ -95,6 +96,8 @@ export function acceptsEvidence(
     evidence.sha === expected.sha &&
     evidence.identity === expected.identity &&
     evidence.profile === profile &&
+    evidence.identities?.check === expected.identity &&
+    evidence.identities.test === expected.identity &&
     evidence.results?.check === "success" &&
     evidence.results.test === "success" &&
     ["success", "skipped"].includes(evidence.results.website ?? "")
@@ -103,11 +106,18 @@ export function acceptsEvidence(
 
 if (import.meta.main) {
   const [command, file] = process.argv.slice(2);
-  if (command === "record" && file) {
+  if (command === "identity") console.log(validationIdentity());
+  else if (command === "record" && file) {
     const evidence: Evidence = {
       version: 1,
       sha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
-      identity: validationIdentity(),
+      // The collector does not perform validation. Preserve the producer jobs' identities.
+      identity: process.env["CHECK_IDENTITY"] ?? "",
+      identities: {
+        check: process.env["CHECK_IDENTITY"] ?? "",
+        test: process.env["TEST_IDENTITY"] ?? "",
+        website: process.env["WEBSITE_IDENTITY"] ?? "",
+      },
       profile,
       results: {
         check: process.env["CHECK_RESULT"] ?? "unknown",
@@ -128,5 +138,6 @@ if (import.meta.main) {
     )
       ? 0
       : 1;
-  } else throw new Error("Use record <file> or verify <evidence> <API producer metadata>");
+  } else
+    throw new Error("Use identity, record <file> or verify <evidence> <API producer metadata>");
 }

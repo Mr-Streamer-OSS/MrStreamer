@@ -11,6 +11,11 @@ inputs:
     description: Unique report label for callers validating more than one candidate
     default: ${{ github.run_id }}
 
+outputs:
+  identity:
+    description: Effective validation identity observed on this job's runner
+    value: ${{ steps.identity.outputs.identity }}
+
 runs:
   using: composite
   steps:
@@ -19,6 +24,11 @@ runs:
       with:
         node-version: 24
         cache: pnpm
+    - id: identity
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: echo "identity=$(node "$ACTION_PATH/../../scripts/validation-evidence.ts" identity)" >> "$GITHUB_OUTPUT"
     # The website installs only what it declares, as publishing does.
     - run: pnpm install --frozen-lockfile ${{ inputs.part == 'website' && '--filter mrstreamer-marketing...' || '' }}
       shell: bash
