@@ -13,26 +13,17 @@
 // start finds the unfinished ones paused and in their places again.
 //   Main's connections are recorded by network-hook.cjs for this build's starts; the window of
 // either build resolves no host but loopback. Proof stays in `.local/verification/`.
-import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { access, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { connect, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
-import { fixture, startFakeProvider } from "../../../../apps/desktop/test/fake-provider.ts";
-import { startFakeTmdb } from "../../../../apps/desktop/test/fake-tmdb.ts";
+import type { Page } from "../../../../apps/desktop/test/e2e/app.ts";
+import { fixture } from "../../../../apps/desktop/test/fake-provider.ts";
 import { SOURCE_LOCALE } from "../../../../packages/contracts/src/language.ts";
 import { setLanguage, t } from "../../../../packages/core/src/i18n.ts";
-import { evidenceDirectory, freePort, injectedFailure, record, stop } from "./session.ts";
-
-const root = fileURLToPath(new URL("../../../../", import.meta.url));
-const desktop = join(root, "apps/desktop");
-const hook = fileURLToPath(new URL("./network-hook.cjs", import.meta.url));
+import { now, ownedRun, type BaseDriver, type Run } from "./downloads-run.ts";
+import { injectedFailure } from "./session.ts";
 
 /** A download as main lists it to the window: read as an observation, never changed. */
 interface Listed {
@@ -42,297 +33,47 @@ interface Listed {
   readonly title: { readonly kind: string; readonly id: string };
 }
 
-/** Which build a start runs: this checkout's, or an earlier one's packaged executable. */
-type Build =
-  { readonly kind: "candidate" } | { readonly kind: "previous"; readonly executable: string };
+/** Window driving for this scenario; observations read the DOM or main's list. */
+const driver = (page: Page, base: BaseDriver) => {
+  const video = () =>
+    page.evaluate<{ time: number; width: number; paused: boolean; title: boolean }>(`(() => {
+        const v = document.querySelector('video');
+        return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, paused: v?.paused ?? true,
+          title: !!document.querySelector('[data-view=title]') };
+      })()`);
+  const listed = () =>
+    page.evaluate<Listed[]>(
+      "window.mrStreamer.invoke('downloads.list').then(r => r.ok ? r.value.items : [])",
+    );
+  /** The download rows in the order the page draws them. */
+  const rows = () =>
+    page.evaluate<string[]>(
+      "[...document.querySelectorAll('[data-download]')].map(r => r.dataset.download)",
+    );
+  /** What has the keyboard: its aria-label, else its words. */
+  const focused = () =>
+    page.evaluate<string | null>(
+      "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent?.trim() ?? null",
+    );
+  return { ...base, video, listed, rows, focused };
+};
+type Driver = ReturnType<typeof driver>;
 
 export async function runDownloadsQueue(
   build: Record<string, unknown> & { executable: string },
   previous?: string,
 ) {
   setLanguage({ locale: SOURCE_LOCALE, formats: SOURCE_LOCALE });
-  const evidence = await evidenceDirectory(
-    join(root, ".local/verification"),
-    previous ? "downloads-queue-previous-" : "downloads-queue-",
-  );
-  const abort = new AbortController();
-  const interrupt = () => abort.abort(new Error("Verification interrupted."));
-  process.once("SIGINT", interrupt);
-  process.once("SIGTERM", interrupt);
-  const actions: { action: string; at: string }[] = [];
-  const observed: Record<string, unknown> = { build };
-  const log: string[] = [];
-  const networkLog = join(evidence, "main-network.jsonl");
-  let profile: string | undefined;
-  let provider: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
-  let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
-  let pictures: Server | undefined;
-  let running: { app: ChildProcess; page?: Page } | undefined;
-  let failed: unknown;
-  const cleanupErrors: string[] = [];
-  const now = () => new Date().toISOString();
-  const action = (label: string) => actions.push({ action: label, at: now() });
-  try {
-    if (previous) {
-      const executable = previous;
-      await access(executable);
-      const asar = await readFile(join(dirname(executable), "resources/app.asar"));
-      observed["previous"] = {
-        executable,
-        appAsarSha256: createHash("sha256").update(asar).digest("hex"),
-        // What the earlier build's record knows: no pause or place among its keys.
-        declaresPausedAt: asar.includes("pausedAt"),
-        states: asar.includes("'queued' | 'failed' | 'complete'"),
-      };
-    }
-    profile = await mkdtemp(join(tmpdir(), "mrstreamer-verify-"));
-    provider = await startFakeProvider({ channels: 20, titles: 10, live: true });
-    tmdb = await startFakeTmdb();
-    pictures = await pictureServer();
-    const picturesUrl = `http://127.0.0.1:${(pictures.address() as AddressInfo).port}`;
-    const fixturePorts = [provider.url, tmdb.url, picturesUrl].map((url) =>
-      Number(new URL(url).port),
-    );
-    observed["fixturePorts"] = fixturePorts;
-    const starts: Record<string, unknown>[] = [];
-    observed["starts"] = starts;
+  const steps = async ({
+    start,
+    quit,
+    action,
+    observed,
+    provider,
+    profile,
+    abort,
+  }: Run<Driver>) => {
     const ownedProvider = provider;
-
-    /** Starts `which` on the run's profile and checks the window is that build's, on that profile. */
-    const start = async (label: string, which: Build) => {
-      const port = await freePort();
-      const env = Object.fromEntries(
-        Object.entries(process.env).filter(
-          ([name]) =>
-            !name.startsWith("MR_STREAMER_") &&
-            name !== "ELECTRON_RUN_AS_NODE" &&
-            name !== "NODE_OPTIONS" &&
-            !/^(LANGUAGE|LANG|LC_ALL|LC_MESSAGES)$/.test(name),
-        ),
-      );
-      const executable = which.kind === "candidate" ? build.executable : which.executable;
-      const app = spawn(
-        executable,
-        [
-          `--remote-debugging-port=${port}`,
-          "--remote-debugging-address=127.0.0.1",
-          `--user-data-dir=${profile}`,
-          "--enable-automation",
-          "--use-mock-keychain",
-          // The window reaches loopback only: no artwork host, whichever build draws it.
-          "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
-          ...(process.platform === "linux" ? ["--no-sandbox"] : []),
-          ...(which.kind === "candidate" ? [desktop] : []),
-        ],
-        {
-          cwd: root,
-          detached: process.platform !== "win32",
-          stdio: ["ignore", "pipe", "pipe"],
-          env: {
-            ...env,
-            ...(which.kind === "candidate" && process.env["MR_STREAMER_FFMPEG"]
-              ? { MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] }
-              : {}),
-            LANGUAGE: "en_US",
-            LANG: "en_US.UTF-8",
-            MR_STREAMER_UPDATE_CHECKS: "off",
-            MR_STREAMER_TMDB_API: tmdb!.url,
-            MR_STREAMER_TMDB_KEY: "test-key",
-            // A packaged build takes no --require: its main's requests are only the fixtures'.
-            ...(which.kind === "candidate"
-              ? {
-                  NODE_OPTIONS: `--require ${JSON.stringify(hook).slice(1, -1)}`,
-                  VERIFY_NETWORK_LOG: networkLog,
-                  VERIFY_IMAGES: picturesUrl,
-                }
-              : {}),
-          },
-        },
-      );
-      running = { app };
-      for (const stream of [app.stdout, app.stderr])
-        stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
-      const page = await Promise.race([
-        connect(port, "page", { app }),
-        new Promise<never>((_, reject) => {
-          app.on("error", reject);
-          abort.signal.addEventListener("abort", () => reject(abort.signal.reason), {
-            once: true,
-          });
-        }),
-      ]);
-      running = { app, page };
-      const command = await page.send("Browser.getBrowserCommandLine");
-      const args = record(command.result) ? command.result["arguments"] : null;
-      if (
-        !Array.isArray(args) ||
-        !args.includes(`--user-data-dir=${profile}`) ||
-        !args.includes(`--remote-debugging-port=${port}`) ||
-        (which.kind === "candidate" && !args.includes(desktop))
-      )
-        throw new Error("CDP belongs to a different app instance.");
-      const renderer =
-        which.kind === "candidate"
-          ? pathToFileURL(join(desktop, "out/renderer/")).href
-          : pathToFileURL(join(dirname(which.executable), "resources/app.asar/")).href;
-      const deadline = Date.now() + 30_000;
-      let url = "";
-      while (Date.now() < deadline && !url.startsWith(renderer)) {
-        url = await page.evaluate<string>("location.href").catch(() => "");
-        if (!url.startsWith(renderer)) await delay(150, undefined, { signal: abort.signal });
-      }
-      if (!url.startsWith(renderer)) throw new Error(`Wrong renderer: ${url}`);
-      starts.push({
-        label,
-        build: which.kind,
-        executable,
-        pid: app.pid,
-        port,
-        profile,
-        url,
-        at: now(),
-      });
-      await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-      action(
-        `Start ${which.kind === "candidate" ? "this build" : "the earlier build"} (${label}) on the run's profile`,
-      );
-      return driver(page);
-    };
-    const quit = async (label: string) => {
-      if (!running) return;
-      action(`Quit the app (${label})`);
-      await stop(running.app, running.page);
-      running.page?.close();
-      running = undefined;
-    };
-
-    /** Window driving with real pointer and key input; observations read the DOM or main's list. */
-    const driver = (page: Page) => {
-      const wait = async (check: () => Promise<boolean>, timeout = 30_000) => {
-        const deadline = Date.now() + timeout;
-        while (Date.now() < deadline) {
-          abort.signal.throwIfAborted();
-          if (await check().catch(() => false)) return;
-          await delay(150, undefined, { signal: abort.signal });
-        }
-        throw new Error(`Timed out waiting for ${check.toString()}`);
-      };
-      const exists = (expression: string) => page.evaluate<boolean>(`!!(${expression})`);
-      const capture = async (name: string) => {
-        await page.evaluate(
-          "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
-        );
-        const shot = await page.send("Page.captureScreenshot", { format: "png" });
-        if (!record(shot.result) || typeof shot.result["data"] !== "string")
-          throw new Error("No screenshot returned.");
-        await writeFile(join(evidence, `${name}.png`), Buffer.from(shot.result["data"], "base64"));
-        const tree = await page.send("Accessibility.getFullAXTree");
-        await writeFile(join(evidence, `${name}.ax.json`), JSON.stringify(tree.result, null, 2));
-      };
-      const click = async (label: string, element: string) => {
-        await wait(() => exists(element));
-        await page.evaluate(`${element}.scrollIntoView({ block: "nearest" })`);
-        // Pressed only where the pointer reaches it: a closing dialog can still cover it.
-        await wait(() =>
-          page.evaluate<boolean>(`(() => {
-            const target = ${element};
-            if (!target || target.matches(":disabled")) return false;
-            const box = target.getBoundingClientRect();
-            return box.width > 0 && box.height > 0 &&
-              target.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
-          })()`),
-        );
-        action(label);
-        const point = await page.evaluate<{ x: number; y: number }>(`(() => {
-          const box = ${element}.getBoundingClientRect();
-          return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-        })()`);
-        for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
-          await page.send("Input.dispatchMouseEvent", {
-            type,
-            ...point,
-            button: "left",
-            clickCount: 1,
-          });
-      };
-      const key = async (name: string, code: number) => {
-        action(`Press ${name}`);
-        for (const type of ["rawKeyDown", "keyUp"])
-          await page.send("Input.dispatchKeyEvent", {
-            type,
-            key: name,
-            code: name,
-            windowsVirtualKeyCode: code,
-          });
-      };
-      /** Enter or Space as a keyboard sends it, which presses a focused button. */
-      const press = async (name: "Enter" | " ") => {
-        action(`Press ${name === " " ? "Space" : name}`);
-        const which =
-          name === " "
-            ? { key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " }
-            : { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" };
-        await page.send("Input.dispatchKeyEvent", { type: "keyDown", ...which });
-        await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...which });
-      };
-      /** Tab, as the viewer presses it, until `element` has the keyboard. */
-      const tabTo = async (label: string, element: string) => {
-        for (let tabs = 0; tabs < 150; tabs++) {
-          if (await exists(`(${element}) === document.activeElement`)) {
-            action(`${label} (${tabs} Tab presses)`);
-            return;
-          }
-          await page.send("Input.dispatchKeyEvent", {
-            type: "rawKeyDown",
-            key: "Tab",
-            code: "Tab",
-            windowsVirtualKeyCode: 9,
-          });
-          await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab" });
-        }
-        throw new Error(`Tab never reached ${element}`);
-      };
-      const text = (selector = "body") =>
-        page.evaluate<string>(
-          `document.querySelector(${JSON.stringify(selector)})?.innerText ?? ""`,
-        );
-      const video = () =>
-        page.evaluate<{ time: number; width: number; paused: boolean; title: boolean }>(`(() => {
-          const v = document.querySelector('video');
-          return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, paused: v?.paused ?? true,
-            title: !!document.querySelector('[data-view=title]') };
-        })()`);
-      const listed = () =>
-        page.evaluate<Listed[]>(
-          "window.mrStreamer.invoke('downloads.list').then(r => r.ok ? r.value.items : [])",
-        );
-      /** The download rows in the order the page draws them. */
-      const rows = () =>
-        page.evaluate<string[]>(
-          "[...document.querySelectorAll('[data-download]')].map(r => r.dataset.download)",
-        );
-      /** What has the keyboard: its aria-label, else its words. */
-      const focused = () =>
-        page.evaluate<string | null>(
-          "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent?.trim() ?? null",
-        );
-      return {
-        page,
-        wait,
-        exists,
-        capture,
-        click,
-        key,
-        press,
-        tabTo,
-        text,
-        video,
-        listed,
-        rows,
-        focused,
-      };
-    };
-    type Driver = ReturnType<typeof driver>;
 
     const button = (selector: string, words: string) =>
       `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
@@ -684,102 +425,49 @@ export async function runDownloadsQueue(
     if (ownedProvider.mostFilesAtOnce() !== 1)
       throw new Error("The provider sent two files at once.");
     await quit("again");
-  } catch (error) {
-    failed = error;
-    if (running?.page) {
-      const shot = await running.page
-        .send("Page.captureScreenshot", { format: "png" })
-        .catch(() => undefined);
-      if (record(shot?.result) && typeof shot.result["data"] === "string")
-        await writeFile(join(evidence, "failure.png"), Buffer.from(shot.result["data"], "base64"));
-    }
-  } finally {
-    const clean = async (operation: () => Promise<unknown>) => {
-      try {
-        await operation();
-      } catch (error) {
-        cleanupErrors.push(String(error));
-      }
-    };
-    if (running) {
-      const owned = running;
-      await clean(() => stop(owned.app, owned.page));
-      owned.page?.close();
-    }
-    if (provider) {
-      observed["streamsAfterExit"] = provider.activeStreams();
-      await clean(() => provider!.close());
-    }
-    if (tmdb) await clean(() => tmdb!.close());
-    if (pictures?.listening)
-      await clean(() => new Promise<void>((resolve) => pictures!.close(() => resolve())));
-    observed["mainNetwork"] = summarise(networkLog, observed["fixturePorts"]);
-    if (profile && (!running || running.app.exitCode !== null || running.app.signalCode !== null))
-      await clean(() => rm(profile!, { recursive: true, force: true, maxRetries: 5 }));
-    process.off("SIGINT", interrupt);
-    process.off("SIGTERM", interrupt);
-    if (cleanupErrors.length) failed ??= new Error(cleanupErrors.join("\n"));
-    await writeFile(join(evidence, "electron.log"), log.join(""));
-    await writeFile(
-      join(evidence, "proof.json"),
-      JSON.stringify(
-        {
-          scenario: "downloads-queue",
-          build,
-          previous: previous ?? null,
-          status: failed ? "failed" : "passed",
-          actions,
-          observed,
-          error: failed ? String(failed) : null,
-          cleanup: {
-            fixturesClosed: cleanupErrors.length === 0,
-            appExited: !running || running.app.exitCode !== null || running.app.signalCode !== null,
-            profileRemoved: profile
-              ? await access(profile).then(
-                  () => false,
-                  () => true,
-                )
-              : true,
-            errors: cleanupErrors,
-          },
-          limits: [
-            "Fake provider/TMDB and a loopback picture server; no real subscription acceptance",
-            "Development build on this platform; no installer or native-platform proof",
-            "A receiver taking the connection is covered by the service tests, not this window",
-            "Main's connections are recorded for this build's starts only; a packaged earlier build takes no --require",
-          ],
-        },
-        null,
-        2,
-      ),
-    );
-    console.log(`${failed ? "FAIL" : "PASS"} downloads-queue: ${evidence}`);
-  }
-  if (failed) throw failed;
-}
-
-/** Main's connections by where they went, with the fixtures named. */
-export function summarise(path: string, fixtures: unknown) {
-  const ports = new Set(Array.isArray(fixtures) ? fixtures : []);
-  const by = new Map<string, number>();
-  let lines: { kind: string; host?: string; port?: number }[] = [];
-  try {
-    lines = readFileSync(path, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as { kind: string; host?: string; port?: number });
-  } catch {
-    // No connection written down.
-  }
-  for (const line of lines) {
-    if (line.kind === "ipc") continue;
-    const where =
-      line.kind === "artwork"
-        ? `artwork ${line.host}`
-        : `${line.kind} ${line.host}:${line.port}${ports.has(line.port) ? " (fixture)" : ""}`;
-    by.set(where, (by.get(where) ?? 0) + 1);
-  }
-  return Object.fromEntries(by);
+  };
+  await ownedRun(
+    {
+      build,
+      style: "builds",
+      watchWindow: false,
+      prefix: previous ? "downloads-queue-previous-" : "downloads-queue-",
+      observed: { build },
+      pictures: pictureServer,
+      driver,
+      describe: ({ label, which, executable, pid, port, profile, url }) => ({
+        label,
+        build: which.kind,
+        executable,
+        pid,
+        port,
+        profile,
+        url,
+        at: now(),
+      }),
+      prepare: async (observed) => {
+        if (previous) {
+          const executable = previous;
+          await access(executable);
+          const asar = await readFile(join(dirname(executable), "resources/app.asar"));
+          observed["previous"] = {
+            executable,
+            appAsarSha256: createHash("sha256").update(asar).digest("hex"),
+            // What the earlier build's record knows: no pause or place among its keys.
+            declaresPausedAt: asar.includes("pausedAt"),
+            states: asar.includes("'queued' | 'failed' | 'complete'"),
+          };
+        }
+      },
+      proof: { scenario: "downloads-queue", build, previous: previous ?? null },
+      limits: [
+        "A receiver taking the connection is covered by the service tests, not this window",
+        "Main's connections are recorded for this build's starts only; a packaged earlier build takes no --require",
+      ],
+      done: "downloads-queue",
+    },
+    steps,
+  );
 }
 
 /** Answers every path with the same small picture, as an artwork CDN would. */

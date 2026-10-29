@@ -15,29 +15,19 @@
 // those writes, and 0.0.19's own copy alone, playing with nothing next.
 //   Main's connections are recorded by network-hook.cjs for this build's starts; the window of
 // either build resolves no host but loopback. Proof stays in `.local/verification/`.
-import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { access, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import type { Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
+import { access, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { connect, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
-import { startFakeProvider } from "../../../../apps/desktop/test/fake-provider.ts";
-import { startFakeTmdb } from "../../../../apps/desktop/test/fake-tmdb.ts";
+import type { Page } from "../../../../apps/desktop/test/e2e/app.ts";
 import { SOURCE_LOCALE } from "../../../../packages/contracts/src/language.ts";
 import { setLanguage, t } from "../../../../packages/core/src/i18n.ts";
 import { episodeLabel } from "../../../../packages/core/src/ondemand/names.ts";
-import { pictureServer, summarise } from "./downloads-queue.ts";
-import { evidenceDirectory, freePort, injectedFailure, record, stop } from "./session.ts";
+import { pictureServer } from "./downloads-queue.ts";
+import { ownedRun, readLines, type BaseDriver, type Run } from "./downloads-run.ts";
+import { injectedFailure } from "./session.ts";
 
-const root = fileURLToPath(new URL("../../../../", import.meta.url));
-const desktop = join(root, "apps/desktop");
-const hook = fileURLToPath(new URL("./network-hook.cjs", import.meta.url));
 /** The next-episode delay the run saves through Settings: short, yet long enough to act in. */
 const DELAY = 4;
 
@@ -50,256 +40,52 @@ interface Listed {
   readonly series?: string | null;
 }
 
-/** Which build a start runs: this checkout's, or an earlier one's packaged executable. */
-type Build =
-  { readonly kind: "candidate" } | { readonly kind: "previous"; readonly executable: string };
+/** Window driving for this scenario; observations read the DOM or main's list. */
+const driver = (page: Page, base: BaseDriver) => {
+  const video = () =>
+    page.evaluate<{
+      time: number;
+      duration: number;
+      width: number;
+      paused: boolean;
+      frames: number;
+      title: string | null;
+    }>(`(() => {
+        const v = document.querySelector('video');
+        return { time: v?.currentTime ?? 0, duration: v?.duration ?? 0, width: v?.videoWidth ?? 0,
+          paused: v?.paused ?? true, frames: v?.getVideoPlaybackQuality().totalVideoFrames ?? 0,
+          title: document.querySelector('[data-view=title]')?.innerText ?? null };
+      })()`);
+  const listed = () =>
+    page.evaluate<Listed[]>(
+      "window.mrStreamer.invoke('downloads.list').then(r => r.ok ? r.value.items : [])",
+    );
+  return { ...base, video, listed };
+};
+type Driver = ReturnType<typeof driver>;
 
 export async function runDownloadsSeries(
   build: Record<string, unknown> & { executable: string },
   previous?: string,
 ) {
   setLanguage({ locale: SOURCE_LOCALE, formats: SOURCE_LOCALE });
-  const evidence = await evidenceDirectory(
-    join(root, ".local/verification"),
-    previous ? "downloads-series-previous-" : "downloads-series-",
-  );
-  const abort = new AbortController();
-  const interrupt = () => abort.abort(new Error("Verification interrupted."));
-  process.once("SIGINT", interrupt);
-  process.once("SIGTERM", interrupt);
-  const actions: { action: string; at: string }[] = [];
-  const observed: Record<string, unknown> = { build };
-  const log: string[] = [];
-  const networkLog = join(evidence, "main-network.jsonl");
-  const windowRequests: { at: number; url: string }[] = [];
-  let profile: string | undefined;
-  let provider: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
-  let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
-  let pictures: Server | undefined;
-  let running: { app: ChildProcess; page?: Page } | undefined;
   /** Another connection to the run's profile database, holding its write lock while set. */
   let locked: DatabaseSync | undefined;
-  let failed: unknown;
-  const cleanupErrors: string[] = [];
-  const now = () => new Date().toISOString();
-  const action = (label: string) => actions.push({ action: label, at: now() });
-  try {
-    if (previous) {
-      await access(previous);
-      const asar = await readFile(join(dirname(previous), "resources/app.asar"));
-      // The earlier build's download record, from its first key to its last.
-      const from = asar.indexOf('sourceStamp: "string"');
-      const declared = asar.subarray(from, asar.indexOf("completedAt", from)).toString();
-      observed["previous"] = {
-        executable: previous,
-        appAsarSha256: createHash("sha256").update(asar).digest("hex"),
-        recordFound: from >= 0,
-        // What its record knows: no series among its keys.
-        recordDeclaresSeries: declared.includes("series"),
-      };
-    }
-    profile = await mkdtemp(join(tmpdir(), "mrstreamer-verify-"));
-    provider = await startFakeProvider({ channels: 20, titles: 10, live: true });
-    tmdb = await startFakeTmdb();
-    pictures = await pictureServer();
-    const picturesUrl = `http://127.0.0.1:${(pictures.address() as AddressInfo).port}`;
-    const fixturePorts = [provider.url, tmdb.url, picturesUrl].map((url) =>
-      Number(new URL(url).port),
-    );
-    observed["fixturePorts"] = fixturePorts;
-    const starts: Record<string, unknown>[] = [];
-    observed["starts"] = starts;
+  const observed: Record<string, unknown> = { build };
+  const steps = async ({
+    start,
+    quit,
+    action,
+    observed,
+    provider,
+    tmdb,
+    pictures,
+    profile,
+    abort,
+    networkLog,
+    windowRequests,
+  }: Run<Driver>) => {
     const ownedProvider = provider;
-
-    /** Starts `which` on the run's profile and checks the window is that build's, on that profile. */
-    const start = async (label: string, which: Build) => {
-      const port = await freePort();
-      const env = Object.fromEntries(
-        Object.entries(process.env).filter(
-          ([name]) =>
-            !name.startsWith("MR_STREAMER_") &&
-            name !== "ELECTRON_RUN_AS_NODE" &&
-            name !== "NODE_OPTIONS" &&
-            !/^(LANGUAGE|LANG|LC_ALL|LC_MESSAGES)$/.test(name),
-        ),
-      );
-      const executable = which.kind === "candidate" ? build.executable : which.executable;
-      const app = spawn(
-        executable,
-        [
-          `--remote-debugging-port=${port}`,
-          "--remote-debugging-address=127.0.0.1",
-          `--user-data-dir=${profile}`,
-          "--enable-automation",
-          "--use-mock-keychain",
-          // The window reaches loopback only: no artwork host, whichever build draws it.
-          "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
-          ...(process.platform === "linux" ? ["--no-sandbox"] : []),
-          ...(which.kind === "candidate" ? [desktop] : []),
-        ],
-        {
-          cwd: root,
-          detached: process.platform !== "win32",
-          stdio: ["ignore", "pipe", "pipe"],
-          env: {
-            ...env,
-            ...(which.kind === "candidate" && process.env["MR_STREAMER_FFMPEG"]
-              ? { MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] }
-              : {}),
-            LANGUAGE: "en_US",
-            LANG: "en_US.UTF-8",
-            MR_STREAMER_UPDATE_CHECKS: "off",
-            MR_STREAMER_TMDB_API: tmdb!.url,
-            MR_STREAMER_TMDB_KEY: "test-key",
-            // A packaged build takes no --require: its main's requests are only the fixtures'.
-            ...(which.kind === "candidate"
-              ? {
-                  NODE_OPTIONS: `--require ${JSON.stringify(hook).slice(1, -1)}`,
-                  VERIFY_NETWORK_LOG: networkLog,
-                  VERIFY_IMAGES: picturesUrl,
-                }
-              : {}),
-          },
-        },
-      );
-      running = { app };
-      for (const stream of [app.stdout, app.stderr])
-        stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
-      const page = await Promise.race([
-        connect(port, "page", { app }),
-        new Promise<never>((_, reject) => {
-          app.on("error", reject);
-          abort.signal.addEventListener("abort", () => reject(abort.signal.reason), {
-            once: true,
-          });
-        }),
-      ]);
-      running = { app, page };
-      const command = await page.send("Browser.getBrowserCommandLine");
-      const args = record(command.result) ? command.result["arguments"] : null;
-      if (
-        !Array.isArray(args) ||
-        !args.includes(`--user-data-dir=${profile}`) ||
-        !args.includes(`--remote-debugging-port=${port}`) ||
-        (which.kind === "candidate" && !args.includes(desktop))
-      )
-        throw new Error("CDP belongs to a different app instance.");
-      const renderer =
-        which.kind === "candidate"
-          ? pathToFileURL(join(desktop, "out/renderer/")).href
-          : pathToFileURL(join(dirname(which.executable), "resources/app.asar/")).href;
-      const deadline = Date.now() + 30_000;
-      let url = "";
-      while (Date.now() < deadline && !url.startsWith(renderer)) {
-        url = await page.evaluate<string>("location.href").catch(() => "");
-        if (!url.startsWith(renderer)) await delay(150, undefined, { signal: abort.signal });
-      }
-      if (!url.startsWith(renderer)) throw new Error(`Wrong renderer: ${url}`);
-      starts.push({ label, build: which.kind, executable, pid: app.pid, port, profile, url });
-      await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-      await page.send("Network.enable");
-      page.on("Network.requestWillBeSent", (params) => {
-        if (record(params) && record(params["request"]))
-          windowRequests.push({ at: Date.now(), url: String(params["request"]["url"]) });
-      });
-      action(
-        `Start ${which.kind === "candidate" ? "this build" : "the earlier build"} (${label}) on the run's profile`,
-      );
-      return driver(page);
-    };
-    const quit = async (label: string) => {
-      if (!running) return;
-      action(`Quit the app (${label})`);
-      await stop(running.app, running.page);
-      running.page?.close();
-      running = undefined;
-    };
-
-    /** Window driving with real pointer and key input; observations read the DOM or main's list. */
-    const driver = (page: Page) => {
-      const wait = async (check: () => Promise<boolean>, timeout = 30_000) => {
-        const deadline = Date.now() + timeout;
-        while (Date.now() < deadline) {
-          abort.signal.throwIfAborted();
-          if (await check().catch(() => false)) return;
-          await delay(150, undefined, { signal: abort.signal });
-        }
-        throw new Error(`Timed out waiting for ${check.toString()}`);
-      };
-      const exists = (expression: string) => page.evaluate<boolean>(`!!(${expression})`);
-      const capture = async (name: string) => {
-        await page.evaluate(
-          "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
-        );
-        const shot = await page.send("Page.captureScreenshot", { format: "png" });
-        if (!record(shot.result) || typeof shot.result["data"] !== "string")
-          throw new Error("No screenshot returned.");
-        await writeFile(join(evidence, `${name}.png`), Buffer.from(shot.result["data"], "base64"));
-        const tree = await page.send("Accessibility.getFullAXTree");
-        await writeFile(join(evidence, `${name}.ax.json`), JSON.stringify(tree.result, null, 2));
-      };
-      const click = async (label: string, element: string) => {
-        await wait(() => exists(element));
-        await page.evaluate(`${element}.scrollIntoView({ block: "nearest" })`);
-        // Pressed only where the pointer reaches it: a closing dialog can still cover it.
-        await wait(() =>
-          page.evaluate<boolean>(`(() => {
-            const target = ${element};
-            if (!target || target.matches(":disabled")) return false;
-            const box = target.getBoundingClientRect();
-            return box.width > 0 && box.height > 0 &&
-              target.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
-          })()`),
-        );
-        action(label);
-        const point = await page.evaluate<{ x: number; y: number }>(`(() => {
-          const box = ${element}.getBoundingClientRect();
-          return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-        })()`);
-        for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
-          await page.send("Input.dispatchMouseEvent", {
-            type,
-            ...point,
-            button: "left",
-            clickCount: 1,
-          });
-      };
-      const key = async (name: string, code: number, modifiers = 0) => {
-        action(`Press ${name}`);
-        for (const type of ["rawKeyDown", "keyUp"])
-          await page.send("Input.dispatchKeyEvent", {
-            type,
-            key: name,
-            code: name.length === 1 ? `Key${name.toUpperCase()}` : name,
-            windowsVirtualKeyCode: code,
-            modifiers,
-          });
-      };
-      const text = (selector = "body") =>
-        page.evaluate<string>(
-          `document.querySelector(${JSON.stringify(selector)})?.innerText ?? ""`,
-        );
-      const video = () =>
-        page.evaluate<{
-          time: number;
-          duration: number;
-          width: number;
-          paused: boolean;
-          frames: number;
-          title: string | null;
-        }>(`(() => {
-          const v = document.querySelector('video');
-          return { time: v?.currentTime ?? 0, duration: v?.duration ?? 0, width: v?.videoWidth ?? 0,
-            paused: v?.paused ?? true, frames: v?.getVideoPlaybackQuality().totalVideoFrames ?? 0,
-            title: document.querySelector('[data-view=title]')?.innerText ?? null };
-        })()`);
-      const listed = () =>
-        page.evaluate<Listed[]>(
-          "window.mrStreamer.invoke('downloads.list').then(r => r.ok ? r.value.items : [])",
-        );
-      return { page, wait, exists, capture, click, key, text, video, listed };
-    };
-    type Driver = ReturnType<typeof driver>;
 
     const button = (selector: string, words: string) =>
       `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
@@ -951,98 +737,60 @@ export async function runDownloadsSeries(
       if (seen.main.length > 0 || seen.window.length > 0)
         throw new Error(`${name} reached beyond the app's loopback proxy: ${JSON.stringify(seen)}`);
     }
-  } catch (error) {
-    failed = error;
-    if (running?.page) {
-      const shot = await running.page
-        .send("Page.captureScreenshot", { format: "png" })
-        .catch(() => undefined);
-      if (record(shot?.result) && typeof shot.result["data"] === "string")
-        await writeFile(join(evidence, "failure.png"), Buffer.from(shot.result["data"], "base64"));
-    }
-  } finally {
-    const clean = async (operation: () => Promise<unknown>) => {
-      try {
-        await operation();
-      } catch (error) {
-        cleanupErrors.push(String(error));
-      }
-    };
-    // The app's own writes as it quits wait on the lock: it goes first.
-    if (locked) {
-      const held = locked;
-      await clean(async () => {
-        held.exec("rollback");
-        held.close();
-      });
-      locked = undefined;
-    }
-    observed["lockReleased"] = locked === undefined;
-    if (running) {
-      const owned = running;
-      await clean(() => stop(owned.app, owned.page));
-      owned.page?.close();
-    }
-    if (provider) {
-      observed["streamsAfterExit"] = provider.activeStreams();
-      await clean(() => provider!.close());
-    }
-    if (tmdb) await clean(() => tmdb!.close());
-    if (pictures?.listening)
-      await clean(() => new Promise<void>((resolve) => pictures!.close(() => resolve())));
-    observed["mainNetwork"] = summarise(networkLog, observed["fixturePorts"]);
-    if (profile && (!running || running.app.exitCode !== null || running.app.signalCode !== null))
-      await clean(() => rm(profile!, { recursive: true, force: true, maxRetries: 5 }));
-    process.off("SIGINT", interrupt);
-    process.off("SIGTERM", interrupt);
-    if (cleanupErrors.length) failed ??= new Error(cleanupErrors.join("\n"));
-    await writeFile(join(evidence, "electron.log"), log.join(""));
-    await writeFile(
-      join(evidence, "proof.json"),
-      JSON.stringify(
-        {
-          scenario: "downloads-series",
-          build,
-          previous: previous ?? null,
-          status: failed ? "failed" : "passed",
-          actions,
-          observed,
-          error: failed ? String(failed) : null,
-          cleanup: {
-            fixturesClosed: cleanupErrors.length === 0,
-            appExited: !running || running.app.exitCode !== null || running.app.signalCode !== null,
-            profileRemoved: profile
-              ? await access(profile).then(
-                  () => false,
-                  () => true,
-                )
-              : true,
-            errors: cleanupErrors,
-          },
-          limits: [
-            "Fake provider/TMDB and a loopback picture server; no real subscription acceptance",
-            "Development build on this platform; no installer or native-platform proof",
-            "Main's connections are recorded for this build's starts only; a packaged earlier build takes no --require",
-            "A copy's identity is observed through main's list, which keeps progress by copy, and the player's words",
-          ],
-        },
-        null,
-        2,
-      ),
-    );
-    console.log(`${failed ? "FAIL" : "PASS"} downloads-series: ${evidence}`);
-  }
-  if (failed) throw failed;
-}
-
-/** The network hook's lines, or none before it wrote any. */
-function readLines(path: string): { at: number; kind: string }[] {
-  try {
-    return readFileSync(path, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as { at: number; kind: string });
-  } catch {
-    return [];
-  }
+  };
+  await ownedRun(
+    {
+      build,
+      style: "series",
+      watchWindow: true,
+      prefix: previous ? "downloads-series-previous-" : "downloads-series-",
+      observed,
+      pictures: pictureServer,
+      driver,
+      describe: ({ label, which, executable, pid, port, profile, url }) => ({
+        label,
+        build: which.kind,
+        executable,
+        pid,
+        port,
+        profile,
+        url,
+      }),
+      prepare: async (observed) => {
+        if (previous) {
+          await access(previous);
+          const asar = await readFile(join(dirname(previous), "resources/app.asar"));
+          // The earlier build's download record, from its first key to its last.
+          const from = asar.indexOf('sourceStamp: "string"');
+          const declared = asar.subarray(from, asar.indexOf("completedAt", from)).toString();
+          observed["previous"] = {
+            executable: previous,
+            appAsarSha256: createHash("sha256").update(asar).digest("hex"),
+            recordFound: from >= 0,
+            // What its record knows: no series among its keys.
+            recordDeclaresSeries: declared.includes("series"),
+          };
+        }
+      },
+      // The app's own writes as it quits wait on the lock: it goes first.
+      release: async (clean) => {
+        if (locked) {
+          const held = locked;
+          await clean(async () => {
+            held.exec("rollback");
+            held.close();
+          });
+          locked = undefined;
+        }
+        observed["lockReleased"] = locked === undefined;
+      },
+      proof: { scenario: "downloads-series", build, previous: previous ?? null },
+      limits: [
+        "Main's connections are recorded for this build's starts only; a packaged earlier build takes no --require",
+        "A copy's identity is observed through main's list, which keeps progress by copy, and the player's words",
+      ],
+      done: "downloads-series",
+    },
+    steps,
+  );
 }

@@ -13,46 +13,50 @@
 // none but the window's own loopback proxy requests. It runs in the interface language it is
 // given, English unless asked for another, by starting the app on a system in that language:
 // what it looks for is the catalogue's text in it, so untranslated text fails the run.
-import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { access, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
-import { connect, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
+import type { Page } from "../../../../apps/desktop/test/e2e/app.ts";
 import { SOURCE_LOCALE, type Locale } from "../../../../packages/contracts/src/language.ts";
 import { setLanguage, t } from "../../../../packages/core/src/i18n.ts";
 import { episodeLabel } from "../../../../packages/core/src/ondemand/names.ts";
-import {
-  startFakeProvider,
-  type FakeProvider,
-} from "../../../../apps/desktop/test/fake-provider.ts";
-import { startFakeTmdb, type FakeTmdb } from "../../../../apps/desktop/test/fake-tmdb.ts";
-import { evidenceDirectory, injectedFailure, freePort, record, stop } from "./session.ts";
+import { now, ownedRun, readLines, type BaseDriver, type Run } from "./downloads-run.ts";
+import { injectedFailure } from "./session.ts";
 
-const root = fileURLToPath(new URL("../../../../", import.meta.url));
-const desktop = join(root, "apps/desktop");
-const hook = fileURLToPath(new URL("./network-hook.cjs", import.meta.url));
-
-/** One connection a main process made, as network-hook.cjs wrote it. */
-interface Connection {
-  readonly at: number;
-  readonly kind: "tcp" | "udp" | "ipc" | "artwork";
-  readonly host?: string;
-  readonly port?: number;
-  readonly path?: string;
-}
-
-/** A request the window made, as CDP said it. */
-interface WindowRequest {
-  readonly at: number;
-  readonly url: string;
-}
+/** Window driving for this scenario; observations read the DOM. */
+const driver = (page: Page, base: BaseDriver) => {
+  const video = () =>
+    page.evaluate<{
+      time: number;
+      width: number;
+      audio: number;
+      paused: boolean;
+      title: boolean;
+    }>(`(() => {
+        const v = document.querySelector('video');
+        return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0,
+          audio: v?.webkitAudioDecodedByteCount ?? 0, paused: v?.paused ?? true,
+          title: !!document.querySelector('[data-view=title]') };
+      })()`);
+  /** Main's list, read as the window reads it: an observation, never a change. */
+  const listed = () =>
+    page.evaluate<
+      {
+        id: string;
+        name: string;
+        status: { kind: string };
+        subscription: { id: string } | null;
+        progress: { position: number; duration: number } | null;
+        posterUrl: string | null;
+        title: { kind: "movie" | "episode"; id: string };
+      }[]
+    >("window.mrStreamer.invoke('downloads.list').then(r => r.ok ? r.value.items : [])");
+  return { ...base, video, listed };
+};
+type Driver = ReturnType<typeof driver>;
 
 export async function runDownloads(
   build: Record<string, unknown> & { executable: string },
@@ -60,252 +64,19 @@ export async function runDownloads(
 ) {
   // The text expected below, in the language the app shows.
   setLanguage({ locale, formats: locale });
-  const evidenceRoot = join(root, ".local/verification");
-  const evidence = await evidenceDirectory(
-    evidenceRoot,
-    locale === SOURCE_LOCALE ? "downloads-" : `downloads-${locale}-`,
-  );
-  const abort = new AbortController();
-  const interrupt = () => abort.abort(new Error("Verification interrupted."));
-  process.once("SIGINT", interrupt);
-  process.once("SIGTERM", interrupt);
-  const actions: { action: string; at: string }[] = [];
-  const observed: Record<string, unknown> = { build, locale };
-  const log: string[] = [];
-  const networkLog = join(evidence, "main-network.jsonl");
-  const windowRequests: WindowRequest[] = [];
-  let profile: string | undefined;
-  let provider: FakeProvider | undefined;
-  let tmdb: FakeTmdb | undefined;
-  let pictures: Server | undefined;
-  /** The started app, owned from spawn on; its page only once CDP answers. */
-  let running: { app: ChildProcess; page?: Page } | undefined;
-  let failed: unknown;
-  const cleanupErrors: string[] = [];
-  try {
-    profile = await mkdtemp(join(tmpdir(), "mrstreamer-verify-"));
-    provider = await startFakeProvider({ channels: 20, titles: 10, live: true });
-    tmdb = await startFakeTmdb();
-    pictures = await pictureServer();
-    const picturesUrl = `http://127.0.0.1:${(pictures.address() as AddressInfo).port}`;
-    const fixturePorts = [provider.url, tmdb.url, picturesUrl].map((url) =>
-      Number(new URL(url).port),
-    );
-    observed["fixturePorts"] = fixturePorts;
-    /** Each start's own process, debugging port, profile and renderer, as checked. */
-    const starts: Record<string, unknown>[] = [];
-    observed["starts"] = starts;
-
-    /** Starts the app on the run's profile, its main process recorded, and checks it is ours. */
-    const start = async (label: string) => {
-      const port = await freePort();
-      const env = Object.fromEntries(
-        Object.entries(process.env).filter(
-          ([name]) =>
-            !name.startsWith("MR_STREAMER_") &&
-            name !== "ELECTRON_RUN_AS_NODE" &&
-            name !== "NODE_OPTIONS" &&
-            !/^(LANGUAGE|LANG|LC_ALL|LC_MESSAGES)$/.test(name),
-        ),
-      );
-      // The system's language, as Linux reads it: System default shows the app in `locale`.
-      const system = locale.replace("-", "_");
-      const app = spawn(
-        build.executable,
-        [
-          `--remote-debugging-port=${port}`,
-          "--remote-debugging-address=127.0.0.1",
-          `--user-data-dir=${profile}`,
-          "--enable-automation",
-          "--use-mock-keychain",
-          ...(process.platform === "linux" ? ["--no-sandbox"] : []),
-          desktop,
-        ],
-        {
-          cwd: root,
-          detached: process.platform !== "win32",
-          stdio: ["ignore", "pipe", "pipe"],
-          env: {
-            ...env,
-            ...(process.env["MR_STREAMER_FFMPEG"]
-              ? { MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] }
-              : {}),
-            LANGUAGE: system,
-            LANG: `${system}.UTF-8`,
-            MR_STREAMER_UPDATE_CHECKS: "off",
-            MR_STREAMER_TMDB_API: tmdb!.url,
-            MR_STREAMER_TMDB_KEY: "test-key",
-            NODE_OPTIONS: `--require ${JSON.stringify(hook).slice(1, -1)}`,
-            VERIFY_NETWORK_LOG: networkLog,
-            VERIFY_IMAGES: picturesUrl,
-          },
-        },
-      );
-      running = { app };
-      for (const stream of [app.stdout, app.stderr])
-        stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
-      // A spawn error or an interrupt ends the wait for the window as the run's failure.
-      const page = await Promise.race([
-        connect(port),
-        new Promise<never>((_, reject) => {
-          app.on("error", reject);
-          abort.signal.addEventListener("abort", () => reject(abort.signal.reason), {
-            once: true,
-          });
-        }),
-      ]);
-      running = { app, page };
-      const command = await page.send("Browser.getBrowserCommandLine");
-      const args = record(command.result) ? command.result["arguments"] : null;
-      if (
-        !Array.isArray(args) ||
-        !args.includes(`--user-data-dir=${profile}`) ||
-        !args.includes(desktop)
-      )
-        throw new Error("CDP belongs to a different app instance.");
-      const url = await page.evaluate<string>("location.href");
-      if (!url.startsWith(pathToFileURL(join(desktop, "out/renderer/")).href))
-        throw new Error(`Wrong renderer: ${url}`);
-      starts.push({ label, pid: app.pid, port, profile, renderer: url, at: now() });
-      await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
-      await page.send("Network.enable");
-      page.on("Network.requestWillBeSent", (params) => {
-        if (record(params) && record(params["request"]))
-          windowRequests.push({ at: Date.now(), url: String(params["request"]["url"]) });
-      });
-      actions.push({ action: `Start the app (${label}) on the run's profile`, at: now() });
-      return driver(page);
-    };
-
-    const quit = async (label: string) => {
-      if (!running) return;
-      actions.push({ action: `Quit the app (${label})`, at: now() });
-      await stop(running.app, running.page);
-      running.page?.close();
-      running = undefined;
-    };
-
-    /** Window driving with real pointer and key input; observations read the DOM. */
-    const driver = (page: Page) => {
-      const wait = async (check: () => Promise<boolean>, timeout = 30_000) => {
-        const deadline = Date.now() + timeout;
-        while (Date.now() < deadline) {
-          abort.signal.throwIfAborted();
-          if (await check().catch(() => false)) return;
-          await delay(150, undefined, { signal: abort.signal });
-        }
-        throw new Error(`Timed out waiting for ${check.toString()}`);
-      };
-      const exists = (expression: string) => page.evaluate<boolean>(`!!(${expression})`);
-      const capture = async (name: string) => {
-        const shot = await page.send("Page.captureScreenshot", { format: "png" });
-        if (!record(shot.result) || typeof shot.result["data"] !== "string")
-          throw new Error("No screenshot returned.");
-        await writeFile(join(evidence, `${name}.png`), Buffer.from(shot.result["data"], "base64"));
-        const tree = await page.send("Accessibility.getFullAXTree");
-        await writeFile(join(evidence, `${name}.ax.json`), JSON.stringify(tree.result, null, 2));
-      };
-      const click = async (label: string, element: string) => {
-        await wait(() => exists(element));
-        actions.push({ action: label, at: now() });
-        await page.evaluate(`${element}.scrollIntoView({ block: "nearest" })`);
-        // A dismissed search can still cover the newly mounted details during its exit.
-        // Wait until the real pointer can reach the control, rather than clicking its scrim.
-        await wait(() =>
-          page.evaluate<boolean>(`(() => {
-            const target = ${element};
-            if (!target || target.matches(":disabled")) return false;
-            // Outer targets can intentionally dismiss a dialog through its backdrop.
-            if (!target.closest('[role="dialog"]')) return true;
-            const box = target.getBoundingClientRect();
-            return box.width > 0 && box.height > 0 &&
-              target.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
-          })()`),
-        );
-        const point = await page.evaluate<{ x: number; y: number }>(`(() => {
-          const box = ${element}.getBoundingClientRect();
-          return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-        })()`);
-        for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
-          await page.send("Input.dispatchMouseEvent", {
-            type,
-            ...point,
-            button: "left",
-            clickCount: 1,
-          });
-        }
-      };
-      const key = async (name: string, code: number) => {
-        actions.push({ action: `Press ${name}`, at: now() });
-        for (const type of ["rawKeyDown", "keyUp"])
-          await page.send("Input.dispatchKeyEvent", {
-            type,
-            key: name,
-            code: name,
-            windowsVirtualKeyCode: code,
-          });
-      };
-      /** Enter or Space as a keyboard sends it, with its character, which presses a focused button. */
-      const press = async (name: "Enter" | " ") => {
-        actions.push({ action: `Press ${name === " " ? "Space" : name}`, at: now() });
-        const which =
-          name === " "
-            ? { key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " }
-            : { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" };
-        await page.send("Input.dispatchKeyEvent", { type: "keyDown", ...which });
-        await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...which });
-      };
-      /** Tab, as the viewer presses it, until `element` has the keyboard. */
-      const tabTo = async (label: string, element: string) => {
-        for (let tabs = 0; tabs < 150; tabs++) {
-          if (await exists(`(${element}) === document.activeElement`)) {
-            actions.push({ action: `${label} (${tabs} Tab presses)`, at: now() });
-            return;
-          }
-          await page.send("Input.dispatchKeyEvent", {
-            type: "rawKeyDown",
-            key: "Tab",
-            code: "Tab",
-            windowsVirtualKeyCode: 9,
-          });
-          await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab" });
-        }
-        throw new Error(`Tab never reached ${element}`);
-      };
-      const text = (selector = "body") =>
-        page.evaluate<string>(
-          `document.querySelector(${JSON.stringify(selector)})?.innerText ?? ""`,
-        );
-      const video = () =>
-        page.evaluate<{
-          time: number;
-          width: number;
-          audio: number;
-          paused: boolean;
-          title: boolean;
-        }>(`(() => {
-          const v = document.querySelector('video');
-          return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0,
-            audio: v?.webkitAudioDecodedByteCount ?? 0, paused: v?.paused ?? true,
-            title: !!document.querySelector('[data-view=title]') };
-        })()`);
-      /** Main's list, read as the window reads it: an observation, never a change. */
-      const listed = () =>
-        page.evaluate<
-          {
-            id: string;
-            name: string;
-            status: { kind: string };
-            subscription: { id: string } | null;
-            progress: { position: number; duration: number } | null;
-            posterUrl: string | null;
-            title: { kind: "movie" | "episode"; id: string };
-          }[]
-        >("window.mrStreamer.invoke('downloads.list').then(r => r.ok ? r.value.items : [])");
-      return { page, wait, exists, capture, click, key, press, tabTo, text, video, listed };
-    };
-    type Driver = ReturnType<typeof driver>;
-
+  const steps = async ({
+    start,
+    quit,
+    actions,
+    observed,
+    provider,
+    tmdb,
+    pictures,
+    profile,
+    abort,
+    networkLog,
+    windowRequests,
+  }: Run<Driver>) => {
     const button = (selector: string, words: string) =>
       `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
     const labelled = (label: string) =>
@@ -1178,107 +949,35 @@ export async function runDownloads(
           .length,
       };
     }
-  } catch (error) {
-    failed = error;
-    if (running?.page) {
-      const shot = await running.page
-        .send("Page.captureScreenshot", { format: "png" })
-        .catch(() => undefined);
-      if (record(shot?.result) && typeof shot.result["data"] === "string")
-        await writeFile(join(evidence, "failure.png"), Buffer.from(shot.result["data"], "base64"));
-    }
-  } finally {
-    const clean = async (operation: () => Promise<unknown>) => {
-      try {
-        await operation();
-      } catch (error) {
-        cleanupErrors.push(String(error));
-      }
-    };
-    if (running) {
-      const owned = running;
-      await clean(() => stop(owned.app, owned.page));
-      owned.page?.close();
-    }
-    if (provider) await clean(() => provider!.close());
-    if (tmdb) await clean(() => tmdb!.close());
-    if (pictures?.listening)
-      await clean(() => new Promise<void>((resolve) => pictures!.close(() => resolve())));
-    observed["mainNetwork"] = summarise(readLines(networkLog), observed["fixturePorts"]);
-    if (profile && (!running || running.app.exitCode !== null || running.app.signalCode !== null))
-      await clean(() => rm(profile!, { recursive: true, force: true, maxRetries: 5 }));
-    process.off("SIGINT", interrupt);
-    process.off("SIGTERM", interrupt);
-    if (cleanupErrors.length) failed ??= new Error(cleanupErrors.join("\n"));
-    await writeFile(join(evidence, "electron.log"), log.join(""));
-    await writeFile(
-      join(evidence, "proof.json"),
-      JSON.stringify(
-        {
-          scenario: "downloads",
-          build,
-          locale,
-          status: failed ? "failed" : "passed",
-          actions,
-          observed,
-          error: failed ? String(failed) : null,
-          cleanup: {
-            fixturesClosed: cleanupErrors.length === 0,
-            appExited: !running || running.app.exitCode !== null || running.app.signalCode !== null,
-            profileRemoved: profile
-              ? await access(profile).then(
-                  () => false,
-                  () => true,
-                )
-              : true,
-            errors: cleanupErrors,
-          },
-          limits: [
-            "Fake provider/TMDB and a loopback picture server; no real subscription acceptance",
-            "Development build on this platform; no installer or native-platform proof",
-            "Decoded audio does not prove audible output",
-            "Main's connections are recorded in JavaScript; Chromium's own, over CDP",
-            "Bars narrower than the window's 960 px least width are CDP viewport emulation",
-          ],
-        },
-        null,
-        2,
-      ),
-    );
-    console.log(`${failed ? "FAIL" : "PASS"} downloads ${locale}: ${evidence}`);
-  }
-  if (failed) throw failed;
-}
-
-function now(): string {
-  return new Date().toISOString();
-}
-
-/** Every connection network-hook.cjs wrote down. */
-function readLines(path: string): Connection[] {
-  try {
-    return readFileSync(path, "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as Connection);
-  } catch {
-    return [];
-  }
-}
-
-/** Main's connections by where they went, with the fixtures named. */
-function summarise(lines: readonly Connection[], fixtures: unknown) {
-  const ports = new Set(Array.isArray(fixtures) ? fixtures : []);
-  const by = new Map<string, number>();
-  for (const line of lines) {
-    if (line.kind === "ipc") continue;
-    const where =
-      line.kind === "artwork"
-        ? `artwork ${line.host}`
-        : `${line.kind} ${line.host}:${line.port}${ports.has(line.port) ? " (fixture)" : ""}`;
-    by.set(where, (by.get(where) ?? 0) + 1);
-  }
-  return Object.fromEntries(by);
+  };
+  await ownedRun(
+    {
+      build,
+      style: "single",
+      watchWindow: true,
+      prefix: locale === SOURCE_LOCALE ? "downloads-" : `downloads-${locale}-`,
+      locale,
+      observed: { build, locale },
+      pictures: pictureServer,
+      driver,
+      describe: ({ label, pid, port, profile, url }) => ({
+        label,
+        pid,
+        port,
+        profile,
+        renderer: url,
+        at: now(),
+      }),
+      proof: { scenario: "downloads", build, locale },
+      limits: [
+        "Decoded audio does not prove audible output",
+        "Main's connections are recorded in JavaScript; Chromium's own, over CDP",
+        "Bars narrower than the window's 960 px least width are CDP viewport emulation",
+      ],
+      done: `downloads ${locale}`,
+    },
+    steps,
+  );
 }
 
 /** Answers every path with a picture of its own colour, as an artwork CDN would. */
