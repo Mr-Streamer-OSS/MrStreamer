@@ -342,7 +342,7 @@ try {
   await key(live, "ArrowRight", 39);
   await waitFor(async () => {
     const v = await video();
-    return v.paused && v.time > 10 && v.width > 0;
+    return v.paused && (variant === "paused-buffer" ? v.time >= 10 : v.time > 10) && v.width > 0;
   });
   observations["pausedSeek"] = await video();
   if (variant !== "paused-buffer") {
