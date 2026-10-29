@@ -560,7 +560,7 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
   // It says when they change (`playback.tracksChanged`), as captions begin whenever they do.
   if (!engine.tracks) {
     // Deferred HLS may have queued the selection before choosing the native fallback.
-    restartSubtitles();
+    if (store.getState().subtitleLoading) restartSubtitles();
     void loadTracks(mine, session.sessionId);
   }
   void call("viewing.recordWatch", {
