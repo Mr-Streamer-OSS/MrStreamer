@@ -24,6 +24,14 @@ runs:
       with:
         node-version: 24
         cache: pnpm
+        # The website installs only its filtered dependencies. Its lockfile-only cache can win
+        # the first save and leave every release downloading the rest. Scope this full store to
+        # this setup policy, the candidate package manager and its dependency/build policy.
+        cache-dependency-path: |
+          pnpm-lock.yaml
+          package.json
+          pnpm-workspace.yaml
+          ${{ github.action_path }}/action.yml
     - run: pnpm install --frozen-lockfile
       shell: bash
     - run: npm pkg set version="$VERSION"
