@@ -285,91 +285,112 @@ describe("durable usage and logical-play summaries", () => {
     expect((await store.load())?.installationId).toBe(id);
   });
 
-  it.each(["steady", "waiting-and-seeking"] as const)(
-    "checkpoints %s playback only at explicit pause or counted thresholds, preserving recovery duration",
-    async (cadence) => {
-      clock("2026-10-25T00:00:00Z");
-      const first = await start();
-      const { token, binding } = run(first.owner);
-      await vi.advanceTimersByTimeAsync(0);
-      const admitted = (await first.store.load())?.summaries?.unfinished;
-      expect(admitted).toMatchObject({
-        watchMs: 0,
-        event: { properties: { watch_duration_seconds: 0 } },
-      });
-      const writes = first.writes.length;
-      for (let tick = 1; tick <= 120; tick++) {
-        await vi.advanceTimersByTimeAsync(1000);
-        first.owner.notePlaybackState(
-          token,
-          binding,
-          tick + 1,
-          cadence === "steady" || tick % 2 === 0
-            ? "playing"
-            : tick % 4 === 1
-              ? "waiting"
-              : "seeking",
-        );
-      }
-      await vi.advanceTimersByTimeAsync(0);
-      expect(first.writes.length).toBe(writes);
-      let sequence = 122;
-      first.owner.notePlaybackState(token, binding, sequence, "paused");
-      await vi.advanceTimersByTimeAsync(0);
-      const counted = cadence === "steady" ? 120 : 60;
-      expect(first.writes.length).toBe(writes + 1);
-      const paused = await first.store.load();
-      expect(paused?.summaries?.unfinished).toMatchObject({ watchMs: counted * 1000 });
-      const recover = async (snapshot: AnalyticsRecord | null, seconds: number) => {
-        const recovered = await start({
-          store: { load: async () => structuredClone(snapshot), save: async () => {} },
-        });
-        await vi.advanceTimersByTimeAsync(0);
-        expect(recovered.events.filter((event) => event.event === "stream_summary")).toMatchObject([
-          {
-            uuid: admitted?.event.uuid,
-            properties: { end_reason: "interrupted", watch_duration_seconds: seconds },
-          },
-        ]);
-      };
-      await recover(paused, counted);
-      for (let tick = 1; tick <= 60; tick++) {
-        await vi.advanceTimersByTimeAsync(1000);
-        first.owner.notePlaybackState(token, binding, ++sequence, "seeking");
-        first.owner.notePlaybackState(token, binding, ++sequence, "waiting");
-        first.owner.notePlaybackState(token, binding, ++sequence, "paused");
-      }
-      await vi.advanceTimersByTimeAsync(0);
-      expect(first.writes.length).toBe(writes + 1);
-      expect(await first.store.load()).toEqual(paused);
-      await recover(await first.store.load(), counted);
-      first.owner.notePlaybackState(token, binding, ++sequence, "playing");
+  it("recovers pause and five-minute checkpoints with playing-only time and responsive consent reads", async () => {
+    clock("2026-10-25T00:00:00Z");
+    const first = await start();
+    const { token, binding } = run(first.owner);
+    await vi.advanceTimersByTimeAsync(0);
+    const admitted = (await first.store.load())?.summaries?.unfinished;
+    expect(admitted).toMatchObject({
+      watchMs: 0,
+      event: { properties: { watch_duration_seconds: 0 } },
+    });
+    let sequence = 1;
+    for (let tick = 1; tick <= 120; tick++) {
       await vi.advanceTimersByTimeAsync(1000);
-      first.owner.notePlaybackState(token, binding, ++sequence, "paused");
-      await vi.advanceTimersByTimeAsync(0);
-      expect(first.writes.length).toBe(writes + 2);
-      expect((await first.store.load())?.summaries?.unfinished?.watchMs).toBe((counted + 1) * 1000);
-      await recover(await first.store.load(), counted + 1);
+      first.owner.notePlaybackState(
+        token,
+        binding,
+        ++sequence,
+        tick % 2 === 0 ? "playing" : tick % 4 === 1 ? "waiting" : "seeking",
+      );
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await first.store.load())?.summaries?.unfinished).toEqual(admitted);
+    first.owner.notePlaybackState(token, binding, ++sequence, "paused");
+    await vi.advanceTimersByTimeAsync(0);
+    const paused = await first.store.load();
+    expect(paused?.summaries?.unfinished?.watchMs).toBe(60_000);
+    for (let tick = 0; tick < 60; tick++) {
+      await vi.advanceTimersByTimeAsync(1000);
+      for (const state of ["waiting", "seeking", "paused"] as const)
+        first.owner.notePlaybackState(token, binding, ++sequence, state);
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await first.store.load()).toEqual(paused);
+    first.owner.notePlaybackState(token, binding, ++sequence, "playing");
+    for (let tick = 0; tick < 302; tick++) {
+      await vi.advanceTimersByTimeAsync(1000);
       first.owner.notePlaybackState(token, binding, ++sequence, "playing");
-      for (let tick = 1; tick <= 300; tick++) {
-        await vi.advanceTimersByTimeAsync(1000);
-        first.owner.notePlaybackState(token, binding, ++sequence, "playing");
+      if (tick === 119) {
+        await vi.advanceTimersByTimeAsync(0);
+        expect(await first.store.load()).toEqual(paused);
       }
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    const threshold = await first.store.load();
+    expect(threshold?.summaries?.unfinished?.watchMs).toBe(360_000);
+    expect(first.events.filter((event) => event.event === "stream_summary")).toEqual([]);
+    vi.setSystemTime(new Date("2026-10-25T06:00:00Z"));
+    for (const [snapshot, seconds, timestamp] of [
+      [paused, 60, "2026-10-25T00:02:00.000Z"],
+      [threshold, 360, "2026-10-25T00:08:00.000Z"],
+    ] as const) {
+      const gate = Promise.withResolvers<void>();
+      let current = snapshot;
+      const events: CaptureEvent[] = [];
+      const owner = new Analytics({
+        dataDir: first.directory,
+        origin: Promise.resolve("unknown"),
+        properties: { ...properties, app_version: "0.0.17", update_channel: "nightly" },
+        store: {
+          load: async () => structuredClone(current),
+          save: async (next) => {
+            await gate.promise;
+            current = structuredClone(next);
+          },
+        },
+        transport: {
+          kind: "local",
+          send: async (event) => {
+            events.push(event);
+            return "accepted";
+          },
+        },
+      });
+      owners.push(owner);
+      expect(await owner.settings()).toEqual({ enabled: true, transport: "local" });
+      gate.resolve();
       await vi.advanceTimersByTimeAsync(0);
-      expect(first.writes.length).toBe(writes + 3);
-      const threshold = await first.store.load();
-      expect(threshold?.summaries?.unfinished).toMatchObject({ watchMs: (counted + 301) * 1000 });
-      await recover(threshold, counted + 301);
-      first.owner.endPlayback(token);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(first.events.filter((event) => event.event === "stream_summary")).toMatchObject([
+      expect(events.filter((event) => event.event === "stream_summary")).toMatchObject([
         {
           uuid: admitted?.event.uuid,
-          properties: { end_reason: "ended", watch_duration_seconds: counted + 301 },
+          timestamp,
+          properties: {
+            app_version: "0.0.16",
+            build_channel: "stable",
+            update_channel: "stable",
+            started_update_channel: "stable",
+            started_at: "2026-10-25T00:00:00.000Z",
+            watch_duration_seconds: seconds,
+            end_reason: "interrupted",
+          },
         },
       ]);
-    },
-  );
+      expect(current?.summaries?.unfinished).toBeNull();
+    }
+    first.owner.notePlaybackState(token, binding, ++sequence, "paused");
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await first.store.load())?.summaries?.unfinished?.watchMs).toBe(362_000);
+    first.owner.endPlayback(token);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.events.filter((event) => event.event === "stream_summary")).toMatchObject([
+      {
+        uuid: admitted?.event.uuid,
+        properties: { end_reason: "ended", watch_duration_seconds: 362 },
+      },
+    ]);
+  });
 
   it("persists an admitted burst once, sends only at UTC boundaries and preserves sparse delta totals through channel changes and rollback", async () => {
     clock();
@@ -412,73 +433,6 @@ describe("durable usage and logical-play summaries", () => {
     expect(summaries.find((event) => event.properties.counts.feature_home)).toMatchObject({
       properties: { update_channel: "stable" },
     });
-  });
-
-  it("checkpoints counted progress every five minutes, recovers the same interrupted UUID without dead time, and keeps consent reads independent of recovery", async () => {
-    clock("2026-10-25T00:00:00Z");
-    const first = await start();
-    const { token, binding } = run(first.owner);
-    await vi.advanceTimersByTimeAsync(0);
-    const admitted = (await first.store.load())?.summaries?.unfinished;
-    const before = first.writes.length;
-    for (let second = 1; second <= 302; second++) {
-      await vi.advanceTimersByTimeAsync(1000);
-      first.owner.notePlaybackState(token, binding, second + 1, "playing");
-    }
-    await vi.advanceTimersByTimeAsync(0);
-    expect(first.writes.length - before).toBe(1);
-    expect(first.events.filter((event) => event.event === "stream_summary")).toEqual([]);
-    const crash = structuredClone(await first.store.load());
-    first.owner.notePlaybackState(token, binding, 304, "paused");
-    await vi.advanceTimersByTimeAsync(0);
-    const pausedWrites = first.writes.length;
-    for (let poll = 305; poll < 365; poll++) {
-      first.owner.notePlaybackState(token, binding, poll, "paused");
-      await vi.advanceTimersByTimeAsync(1000);
-    }
-    expect(first.writes.length).toBe(pausedWrites);
-    vi.setSystemTime(new Date("2026-10-25T06:00:00Z"));
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let current = crash;
-    const events: CaptureEvent[] = [];
-    const owner = new Analytics({
-      dataDir: first.directory,
-      origin: Promise.resolve("unknown"),
-      properties: { ...properties, app_version: "0.0.17" },
-      store: {
-        load: async () => current,
-        save: async (next) => {
-          await gate;
-          current = structuredClone(next);
-        },
-      },
-      transport: {
-        kind: "local",
-        send: async (event) => {
-          events.push(event);
-          return "accepted";
-        },
-      },
-    });
-    owners.push(owner);
-    expect(await owner.settings()).toEqual({ enabled: true, transport: "local" });
-    release?.();
-    await vi.advanceTimersByTimeAsync(0);
-    const recovered = events.find((event) => event.event === "stream_summary");
-    expect(recovered).toMatchObject({
-      uuid: admitted?.event.uuid,
-      timestamp: "2026-10-25T00:05:00.000Z",
-      properties: {
-        app_version: "0.0.16",
-        started_at: "2026-10-25T00:00:00.000Z",
-        watch_duration_seconds: 300,
-        end_reason: "interrupted",
-      },
-    });
-    expect(current?.summaries?.unfinished).toBeNull();
   });
 
   it("admits summaries separately from usage/reliability budgets, never reports continuations, and keeps an admitted end despite later rate saturation", async () => {
