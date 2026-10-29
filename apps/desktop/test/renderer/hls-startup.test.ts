@@ -38,7 +38,9 @@ vi.mock("hls.js", async (original) => {
         const level = this.levels[this.startLevel === -1 ? this.firstAutoLevel : this.startLevel]!;
         fixture.starts.push(level);
         this.variant({
-          audio: (level.audioGroups ?? []).flatMap((group) => fixture.groups.get(group) ?? []),
+          audio: (level.audioGroups ?? []).flatMap(
+            (group) => fixture.groups.get(group ?? "") ?? [],
+          ),
         });
       }
     },
