@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { ownedId, ownedKey } from "@mrstreamer/contracts/subscription";
 import { tmdb as tmdbClient } from "@mrstreamer/core/metadata/tmdb";
-import { metadataStore, type Wanted } from "../src/main/ondemand/metadata.ts";
+import { metadataStore, type MetadataDeps, type Wanted } from "../src/main/ondemand/metadata.ts";
 import type { WorkerEvent, WorkerRequest } from "../src/main/ondemand/protocol.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
@@ -610,6 +610,17 @@ function slowTmdb(
 const settled = (store: ReturnType<typeof metadataStore>) =>
   vi.waitFor(() => expect(store.status().fetching).toBe(false), { timeout: 20_000 });
 
+/** A new metadata file's path, in a folder of its own. */
+const newFile = async () => join(await tempDir(), "metadata.json.gz");
+
+/** The store on `path`, on `tmdb`'s clock, asking its client unless given another or none. */
+const open = (
+  path: string,
+  tmdb: ReturnType<typeof slowTmdb>,
+  onChange: MetadataDeps["onChange"] = () => {},
+  client: ReturnType<typeof slowTmdb>["client"] | null = tmdb.client,
+) => metadataStore({ path, client, region: "NL", onChange, now: tmdb.now });
+
 describe("TMDB metadata store", { timeout: 30_000 }, () => {
   it("fetches a list given while an earlier one is being fetched", async () => {
     let store: ReturnType<typeof metadataStore> | null = null;
@@ -619,20 +630,14 @@ describe("TMDB metadata store", { timeout: 30_000 }, () => {
         if (requests === 5) store?.want(wantedTitles(60));
       },
     });
-    store = metadataStore({
-      path: join(await tempDir(), "metadata.json.gz"),
-      client: tmdb.client,
-      region: "NL",
-      onChange: () => {},
-      now: tmdb.now,
-    });
+    store = open(await newFile(), tmdb);
     store.want(wantedTitles(40));
     await settled(store);
     expect(store.status()).toMatchObject({ known: 60, wanted: 60, fetching: false });
   });
 
   it("says it stopped when TMDB can't be reached, with titles still unanswered", async () => {
-    const path = join(await tempDir(), "metadata.json.gz");
+    const path = await newFile();
     // No request gets through, and the waits before each is tried again pass on a fake clock.
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
@@ -663,7 +668,7 @@ describe("TMDB metadata store", { timeout: 30_000 }, () => {
   });
 
   it("leaves out what TMDB said more than six months ago", async () => {
-    const path = join(await tempDir(), "metadata.json.gz");
+    const path = await newFile();
     const entry = (at: number) => ({ at, genres: [35], language: "en", popularity: 1 });
     await writeFile(
       path,
@@ -699,14 +704,8 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
 
   /** The file a store leaves after asking about `count` titles of `tmdb`, which answers `status`. */
   async function kept(tmdb: ReturnType<typeof slowTmdb>, count: number) {
-    const path = join(await tempDir(), "metadata.json.gz");
-    const first = metadataStore({
-      path,
-      client: tmdb.client,
-      region: "NL",
-      onChange: () => {},
-      now: tmdb.now,
-    });
+    const path = await newFile();
+    const first = open(path, tmdb);
     first.want(wantedTitles(count));
     await settled(first);
     await first.flush();
@@ -714,11 +713,9 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
   }
 
   it("tells lists nothing when TMDB's answers are the same as before, and still keeps them", async () => {
-    const path = join(await tempDir(), "metadata.json.gz");
+    const path = await newFile();
     const tmdb = slowTmdb();
-    const open = (onChange: (change: { content: boolean }) => void, client = tmdb.client) =>
-      metadataStore({ path, client, region: "NL", onChange, now: tmdb.now });
-    const first = open(() => {});
+    const first = open(path, tmdb);
     first.want(wantedTitles(20));
     await settled(first);
     await first.flush();
@@ -727,7 +724,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     tmdb.clock.time += 151 * DAY;
     const same = notices(tmdb.clock);
     const reopened = tmdb.clock.time;
-    const again = open(same.onChange);
+    const again = open(path, tmdb, same.onChange);
     again.want(wantedTitles(20));
     await settled(again);
     await again.flush();
@@ -737,7 +734,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
 
     // Their new time was saved: well past the first answers' six months, they are still used.
     tmdb.clock.time += 100 * DAY;
-    const kept = open(() => {}, null as never);
+    const kept = open(path, tmdb, () => {}, null);
     kept.want(wantedTitles(20));
     await vi.waitFor(() => expect(kept.get("movie", "1")).not.toBeNull());
 
@@ -746,13 +743,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     const popular = slowTmdb({ popularity: (id) => id + 1 });
     popular.clock.time = tmdb.clock.time;
     const changed = notices(popular.clock);
-    const changing = metadataStore({
-      path,
-      client: popular.client,
-      region: "NL",
-      onChange: changed.onChange,
-      now: popular.now,
-    });
+    const changing = open(path, popular, changed.onChange);
     changing.want(wantedTitles(20));
     await settled(changing);
     expect(changed.told.some(({ content }) => content)).toBe(true);
@@ -761,13 +752,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
   it("tells lists less often as a run goes on, status as before, and ends with them current", async () => {
     const tmdb = slowTmdb();
     const seen = notices(tmdb.clock);
-    const store = metadataStore({
-      path: join(await tempDir(), "metadata.json.gz"),
-      client: tmdb.client,
-      region: "NL",
-      onChange: seen.onChange,
-      now: tmdb.now,
-    });
+    const store = open(await newFile(), tmdb, seen.onChange);
     store.want(wantedTitles(200));
     await settled(store);
 
@@ -798,13 +783,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
   it("tells the status alone of an id TMDB doesn't know, and of a refused key", async () => {
     const unknown = slowTmdb({ status: () => 404 });
     const missing = notices(unknown.clock);
-    const store = metadataStore({
-      path: join(await tempDir(), "metadata.json.gz"),
-      client: unknown.client,
-      region: "NL",
-      onChange: missing.onChange,
-      now: unknown.now,
-    });
+    const store = open(await newFile(), unknown, missing.onChange);
     store.want(wantedTitles(3));
     await settled(store);
     expect(store.status()).toMatchObject({ known: 3, fetching: false });
@@ -813,13 +792,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
 
     const refusing = slowTmdb({ status: () => 401 });
     const refused = notices(refusing.clock);
-    const blocked = metadataStore({
-      path: join(await tempDir(), "metadata.json.gz"),
-      client: refusing.client,
-      region: "NL",
-      onChange: refused.onChange,
-      now: refusing.now,
-    });
+    const blocked = open(await newFile(), refusing, refused.onChange);
     blocked.want(wantedTitles(3));
     await settled(blocked);
     expect(blocked.status()).toMatchObject({ refused: true, fetching: false });
@@ -836,19 +809,13 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     const tmdb = slowTmdb();
     const seen = notices(tmdb.clock);
     let switchedAt: number | null = null;
-    const store = metadataStore({
-      path: join(await tempDir(), "metadata.json.gz"),
-      client: tmdb.client,
-      region: "NL",
-      onChange: (notice) => {
-        seen.onChange(notice);
-        // With the gap grown to 30 s, as a long run does.
-        if (switchedAt === null && seen.told.filter(({ content }) => content).length === 6) {
-          switchedAt = tmdb.clock.time;
-          change(store);
-        }
-      },
-      now: tmdb.now,
+    const store = open(await newFile(), tmdb, (notice) => {
+      seen.onChange(notice);
+      // With the gap grown to 30 s, as a long run does.
+      if (switchedAt === null && seen.told.filter(({ content }) => content).length === 6) {
+        switchedAt = tmdb.clock.time;
+        change(store);
+      }
     });
     store.want(wantedTitles(200));
     await settled(store);
@@ -868,15 +835,9 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     tmdb.clock.time += 10 * DAY;
     const seen = notices(tmdb.clock);
     const heard: (string | null)[] = [];
-    const store: ReturnType<typeof metadataStore> = metadataStore({
-      path,
-      client: tmdb.client,
-      region: "NL",
-      onChange: (notice) => {
-        seen.onChange(notice);
-        heard.push(store.name("movie", "1", "en")?.name ?? null);
-      },
-      now: tmdb.now,
+    const store: ReturnType<typeof metadataStore> = open(path, tmdb, (notice) => {
+      seen.onChange(notice);
+      heard.push(store.name("movie", "1", "en")?.name ?? null);
     });
     store.want(wantedTitles(3));
     await settled(store);
@@ -887,12 +848,12 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
 
     // Without a key it is the same: the store answers from disk.
     const keyless = notices(tmdb.clock);
-    metadataStore({ path, client: null, region: "NL", onChange: keyless.onChange, now: tmdb.now });
+    open(path, tmdb, keyless.onChange, null);
     await vi.waitFor(() => expect(keyless.told).toEqual([{ content: true, at: tmdb.clock.time }]));
   });
 
   it("keeps independent raw search aliases, including punctuation, within their validity", async () => {
-    const path = join(await tempDir(), "metadata.json.gz");
+    const path = await newFile();
     let now = Date.now();
     await writeFile(
       path,
@@ -932,13 +893,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     const tmdb = slowTmdb();
     const path = await kept(tmdb, 3);
     const seen = notices(tmdb.clock);
-    const store = metadataStore({
-      path,
-      client: null,
-      region: "NL",
-      onChange: seen.onChange,
-      now: tmdb.now,
-    });
+    const store = open(path, tmdb, seen.onChange, null);
 
     // Searched while the file is still being read: no names yet.
     expect(store.searchName("movie", "1")).toBe("");
@@ -950,13 +905,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     const quiet = async (path: string, client: ReturnType<typeof slowTmdb>["client"] | null) => {
       const tmdb = slowTmdb();
       const seen = notices(tmdb.clock);
-      const store = metadataStore({
-        path,
-        client,
-        region: "NL",
-        onChange: seen.onChange,
-        now: tmdb.now,
-      });
+      const store = open(path, tmdb, seen.onChange, client);
       // Long enough for the file to have loaded.
       await new Promise((done) => setTimeout(done, 100));
       expect(store.get("movie", "1")).toBeNull();
@@ -982,19 +931,13 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     changing.clock.time = tmdb.clock.time;
     const start = changing.clock.time;
     const told: { at: number; shown: number | undefined }[] = [];
-    const store: ReturnType<typeof metadataStore> = metadataStore({
-      path,
-      client: changing.client,
-      region: "NL",
-      onChange: ({ content }) => {
-        if (content) {
-          told.push({
-            at: changing.clock.time - start,
-            shown: store.get("movie", "195")?.popularity,
-          });
-        }
-      },
-      now: changing.now,
+    const store: ReturnType<typeof metadataStore> = open(path, changing, ({ content }) => {
+      if (content) {
+        told.push({
+          at: changing.clock.time - start,
+          shown: store.get("movie", "195")?.popularity,
+        });
+      }
     });
     store.want(wantedTitles(200));
     await settled(store);
@@ -1016,13 +959,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     const again = slowTmdb(options);
     again.clock.time = tmdb.clock.time;
     const seen = notices(again.clock);
-    const store = metadataStore({
-      path,
-      client: again.client,
-      region: "NL",
-      onChange: seen.onChange,
-      now: again.now,
-    });
+    const store = open(path, again, seen.onChange);
     await vi.waitFor(() => expect(store.get("movie", "1")?.popularity).toBe(1));
     again.clock.time += 83 * DAY;
     expect(store.get("movie", "1")).toBeNull();
