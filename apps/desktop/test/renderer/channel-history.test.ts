@@ -6,8 +6,9 @@ import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { expect, it } from "vitest";
 import type { Viewing } from "@mrstreamer/contracts/viewing";
+import { useListOrder } from "../../src/renderer/src/features/live/reorder.ts";
 import { useListChannels } from "../../src/renderer/src/features/live/lists.ts";
-import { queries, useFavouriteKeys } from "../../src/renderer/src/lib/queries.ts";
+import { queries, useFavouriteKeys, useLastChannel } from "../../src/renderer/src/lib/queries.ts";
 
 it("keeps channel subscribers still for title progress but publishes changed channel history", async () => {
   ipc.reset();
@@ -18,7 +19,7 @@ it("keeps channel subscribers still for title progress but publishes changed cha
   const own = (id: string) => ({ subscriptionId: SAVED.id, id });
   let snapshot: Viewing = {
     sequence: 1,
-    favourites: [own("1")],
+    favourites: [own("1"), own("3")],
     recent: [own("2")],
     continueWatching: [],
     marked: [],
@@ -29,6 +30,8 @@ it("keeps channel subscribers still for title progress but publishes changed cha
   function Channels() {
     useListChannels({ kind: "favourites" });
     useListChannels({ kind: "recent" });
+    useLastChannel();
+    useListOrder({ kind: "favourites" }, false, []);
     const favourites = useFavouriteKeys();
     renders++;
     return createElement("output", null, [...favourites].join(","));
@@ -61,8 +64,8 @@ it("keeps channel subscribers still for title progress but publishes changed cha
       ],
     });
     expect(renders).toBe(settled);
-    await publish({ favourites: [own("3")] });
-    expect(view.container.textContent).toBe(`${SAVED.id}:3`);
+    await publish({ favourites: [own("3"), own("1")] });
+    expect(view.container.textContent).toBe(`${SAVED.id}:3,${SAVED.id}:1`);
     expect(browsed("3")).toBe(true);
     await publish({ recent: [own("4")] });
     expect(browsed("4")).toBe(true);
