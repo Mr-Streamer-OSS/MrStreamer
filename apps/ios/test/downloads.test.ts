@@ -1,4 +1,3 @@
-import { keychain } from "./keychain.ts";
 import { nativePlayer } from "./native-player.ts";
 import { guideFixture } from "./native-guide.ts";
 import type { Download, DownloadStatus } from "@mrstreamer/contracts/downloads";
@@ -92,7 +91,7 @@ vi.mock("react-native", () => ({
   },
 }));
 vi.mock("expo-secure-store", () => ({
-  ...keychain(() => memory.keychain),
+  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
   getItemAsync: async (key: string) => {
     if (memory.locked && key.includes("download")) throw new Error("Interaction not allowed");
     return memory.keychain.get(key) ?? null;
