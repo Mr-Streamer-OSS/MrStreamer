@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { devNull, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
@@ -557,9 +557,11 @@ describe("the website", () => {
     const script = (id: string) => steps.find((step) => step.id === id)!.run!;
     const dir = mkdtempSync(join(tmpdir(), "website-delivery-"));
     const output = join(dir, "output");
-    const gitEnv = Object.fromEntries(
-      Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
-    );
+    const gitEnv = {
+      ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
+      GIT_CONFIG_GLOBAL: devNull,
+      GIT_CONFIG_NOSYSTEM: "1",
+    };
     const git = (...args: string[]) =>
       execFileSync(
         "git",
