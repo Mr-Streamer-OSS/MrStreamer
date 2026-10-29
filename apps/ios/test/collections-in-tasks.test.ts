@@ -577,6 +577,12 @@ describe("the collections Movies, Series, Home and details show", () => {
     expect(initial.bare).toBe(0);
     expect(initial.views).toHaveLength(1);
     const before = indexed();
+    if (!before) throw new Error("No initial lists");
+    for (const kind of ["movie", "series"] as const) {
+      const made = initial.views[0]?.[kind];
+      if (!made) throw new Error("No initial collections");
+      expect(shown(made, undefined)).toEqual(shown(atOnce(kind, before), undefined));
+    }
     const first = titles.collectionsOf("movie");
     // Another subscription's lists are indexed while metadata changes the old lists' collections.
     subscribe("a", "b");

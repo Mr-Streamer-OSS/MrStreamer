@@ -43,8 +43,6 @@ describe.each(["movie", "series"] as const)("%s collection browsing", (kind) => 
     const { made } = browseFixture(kind);
     const all = browseCollection(made, "all", DEFAULT_BROWSE);
     expect(all.total).toBe(4);
-    expect(all.verified).toEqual([]);
-    expect(all.files).toBe(0);
     expect(all.qualities).toEqual([
       { value: "4k", count: 2 },
       { value: "hd", count: 1 },
@@ -115,5 +113,8 @@ describe.each(["movie", "series"] as const)("%s collection browsing", (kind) => 
     expect(fourK.titles).toEqual([]);
     expect(fourK.verified).toEqual([]);
     expect(fourK.files).toBe(0);
+    const declared = browseCollection(made, "all", DEFAULT_BROWSE);
+    expect(declared.verified).toEqual([]);
+    expect(declared.files).toBe(0);
   });
 });
