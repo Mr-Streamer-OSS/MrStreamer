@@ -218,32 +218,62 @@ function hlsEngine(
     ...(ends === null ? { autoStartLoad: false } : { startPosition: 0 }),
   });
   const tracks = hlsTracks(hls, video, sound);
+  let released = false;
   if (ends === null) {
     hls.once(Hls.Events.MANIFEST_PARSED, () => {
-      const initial = hls.firstAutoLevel;
-      const tier = hls.levels[initial];
-      // Keep ABR's codec/range choice and its ability to climb back to that level. Level order
-      // also considers size and codec, so select by declared bitrate within that compatible tier.
-      // This affects startup only, never a provider feed choice or a persistent quality cap.
-      if (tier) {
-        hls.startLevel = hls.levels.reduce(
-          (lowest, level, index, levels) =>
-            level.codecSet === tier.codecSet &&
-            level.videoRange === tier.videoRange &&
-            level.frameRate <= tier.frameRate &&
-            (index <= initial || level.frameRate === tier.frameRate) &&
-            level.bitrate < levels[lowest]!.bitrate
-              ? index
-              : lowest,
-          initial,
-        );
+      // Reading firstAutoLevel starts hls.js's own capability checks. Let their handlers remove
+      // unsupported levels before using any index; another read can start further checks.
+      const checked = new Set<Promise<unknown>>();
+      async function start(): Promise<void> {
+        while (!released) {
+          const initial = hls.firstAutoLevel;
+          const pending = hls.levels.flatMap((level) =>
+            level.supportedPromise && !checked.has(level.supportedPromise)
+              ? [level.supportedPromise]
+              : [],
+          );
+          if (pending.length) {
+            pending.forEach((promise) => checked.add(promise));
+            await Promise.allSettled(pending);
+            continue;
+          }
+          const tier = hls.levels[initial];
+          // Keep the initial audio groups, including their stable rendition identities. Starting
+          // in another group can lose the requested language before ABR ever reaches this tier.
+          if (tier && tier.supportedResult?.supported !== false) {
+            hls.startLevel = hls.levels.reduce(
+              (lowest, level, index, levels) =>
+                level.supportedResult?.supported !== false &&
+                (!level.supportedPromise || level.supportedResult?.supported === true) &&
+                level.codecSet === tier.codecSet &&
+                level.videoRange === tier.videoRange &&
+                level.frameRate <= tier.frameRate &&
+                (index <= initial || level.frameRate === tier.frameRate) &&
+                level.audioGroupIds?.length === tier.audioGroupIds?.length &&
+                (level.audioGroupIds ?? []).every(
+                  (group, i) => group === tier.audioGroupIds?.[i],
+                ) &&
+                level.bitrate < levels[lowest]!.bitrate
+                  ? index
+                  : lowest,
+              initial,
+            );
+          }
+          hls.startLoad();
+          return;
+        }
       }
-      hls.startLoad();
+      // A rejected capability query leaves selection to hls.js; failures in startup follow the
+      // engine's existing failure path rather than escaping an async event listener.
+      void start().catch(() => {
+        if (!released) life.fail({ kind: "media", detail: t("The stream could not be decoded.") });
+      });
     });
   }
   const life = lifecycle(
     video,
     () => {
+      released = true;
       tracks.release();
       hls.destroy();
     },

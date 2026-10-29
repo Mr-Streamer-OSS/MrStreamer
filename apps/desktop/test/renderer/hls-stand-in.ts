@@ -106,7 +106,7 @@ export function standIn(real: typeof Hls) {
 
     destroyed = false;
     loading = true;
-    levels: never[] = [];
+    levels: Hls["levels"] = [];
     currentLevel = -1;
     audioTracks: Listed[] = [];
     subtitleTracks: Listed[] = [];
