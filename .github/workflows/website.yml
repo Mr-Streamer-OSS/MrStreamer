@@ -95,6 +95,7 @@ jobs:
               .filter((path) => !path.startsWith(".github/") && !path.startsWith("docs/maintainers/")
                 && path !== "docs/contributing/testing.md" && !path.startsWith(".cursor/"))
               .map((path) => `:(glob)${path}`);
+            if (paths.length === 0) throw new Error("No website deployment inputs.");
             paths.push(":(exclude,glob)apps/marketing/README.md");
             console.log(`paths=${paths.join(" ")}`);
           ' >> "$GITHUB_OUTPUT"
@@ -112,6 +113,7 @@ jobs:
           deploy=false
           if [ "$EVENT" = push ]; then
             read -ra paths <<<"$INPUTS"
+            [ ${#paths[@]} -gt 0 ] || { echo "::error::The build named no website inputs."; exit 1; }
             changed=0
             git diff --quiet --no-renames "$BEFORE" "$AFTER" -- "${paths[@]}" || changed=$?
             if [ "$changed" -eq 1 ]; then
@@ -150,11 +152,11 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: Say that publishing is off
-        if: vars.MARKETING_DEPLOY_ENABLED != 'true'
+        if: vars.MARKETING_DEPLOY_ENABLED != 'true' || steps.delivery.outputs.deploy != 'true'
         run: |
           {
             echo "### Not published"
-            echo "The website built, and publishing is off: the repository variable \`MARKETING_DEPLOY_ENABLED\` isn't \`true\`."
+            echo "The website built without publishing: delivery files only, deploy unticked, or MARKETING_DEPLOY_ENABLED is not true."
             echo "\`apps/marketing/README.md\` lists what to set up first."
           } >> "$GITHUB_STEP_SUMMARY"
 

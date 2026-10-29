@@ -579,14 +579,15 @@ describe("the website", () => {
       const inputs = readFileSync(output, "utf8")
         .trim()
         .replace(/^paths=/, "");
-      const decide = (before: string, after: string) => {
+      const decide = (before: string, after: string, event = "push", requested = "") => {
         writeFileSync(output, "");
         const run = spawnSync("bash", ["-e", "-c", script("delivery")], {
           cwd: dir,
           env: {
             ...process.env,
             GITHUB_OUTPUT: output,
-            EVENT: "push",
+            EVENT: event,
+            REQUESTED: requested,
             BEFORE: before,
             AFTER: after,
             INPUTS: inputs,
@@ -613,6 +614,12 @@ describe("the website", () => {
         });
       }
       expect(decide("missing", "HEAD")).toMatchObject({ status: 1, output: "" });
+      for (const requested of ["true", "false", ""]) {
+        expect(decide("", "", "workflow_dispatch", requested)).toEqual({
+          status: 0,
+          output: `deploy=${requested === "true"}\n`,
+        });
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

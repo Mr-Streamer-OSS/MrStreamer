@@ -44,6 +44,7 @@ flowchart LR
   release -- stable --> finalize
   finalize -- explicit reusable call --> web
   main -- website inputs changed --> web
+  hand3([By hand: Website]) --> web
   web --> deploy --> indexnow
   hand2([By hand: feed or Store]) --> pub
 ```
