@@ -663,7 +663,7 @@ describe("putting a release in a draft made in Partner Center", () => {
     store.fail("PUT block", 403, "AuthenticationFailed");
 
     expect(await refusal(submit(store.access(), release, draft))).toContain(
-      `with submit, the draft ${id} and the same fingerprint`,
+      `store-action=submit, the draft ${id} and the same fingerprint`,
     );
     const interrupted = store.requests.length;
     // The draft lists the package, and still a run that doesn't name it sends nothing.

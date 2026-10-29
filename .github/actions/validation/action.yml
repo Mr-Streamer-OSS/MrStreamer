@@ -70,7 +70,7 @@ runs:
       run: pnpm actionlint
       shell: bash
     - name: Build
-      if: inputs.part == 'check' && inputs.build == 'true'
+      if: inputs.part == 'check' && inputs.build != 'false'
       run: pnpm build
       shell: bash
     - name: Locate trusted tools

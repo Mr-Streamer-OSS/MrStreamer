@@ -124,7 +124,10 @@ async function reusable(): Promise<boolean> {
 
 try {
   appendFileSync(process.env["GITHUB_OUTPUT"]!, `reused=${await reusable()}\n`);
-} catch {
-  console.log("Validation evidence unavailable or incompatible; running shared fallback.");
+} catch (error) {
+  console.log(
+    "Validation evidence unavailable or incompatible; running shared fallback. " +
+      (error instanceof Error ? error.message : String(error)),
+  );
   appendFileSync(process.env["GITHUB_OUTPUT"]!, "reused=false\n");
 }

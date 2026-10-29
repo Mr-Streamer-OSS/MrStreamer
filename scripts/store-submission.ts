@@ -91,7 +91,7 @@ const WORKING = [
   "PendingPublication",
 ];
 
-const RECOVER = "run the Release workflow on main, operation=store, with submit";
+const RECOVER = "run the Release workflow on main with operation=store and store-action=submit";
 
 /** A draft's fingerprint as a preflight prints it. */
 const FINGERPRINT = /^[0-9a-f]{64}$/;
