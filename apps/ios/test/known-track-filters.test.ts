@@ -1,3 +1,4 @@
+import { keychain } from "./keychain.ts";
 import { createRoot, window, type Root } from "./dom.ts";
 import * as React from "react";
 import type { CollectionId, TitleKind } from "@mrstreamer/contracts/ondemand";
@@ -30,15 +31,13 @@ vi.mock("expo-video", () => ({
   }),
 }));
 vi.mock("expo-secure-store", () => ({
-  AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
-  getItemAsync: async (key: string) => memory.secrets.get(key) ?? null,
+  ...keychain(() => memory.secrets),
   setItemAsync: async (key: string, value: string) => {
     memory.secrets.set(key, value);
     if (memory.holdSecrets && key.startsWith("s.")) {
       await new Promise<void>((go) => memory.heldSecrets.push(go));
     }
   },
-  deleteItemAsync: async (key: string) => void memory.secrets.delete(key),
 }));
 vi.mock("expo-router", () => ({ router: { push: (route: string) => memory.routes.push(route) } }));
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
