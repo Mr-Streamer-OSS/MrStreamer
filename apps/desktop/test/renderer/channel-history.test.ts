@@ -40,6 +40,10 @@ it("keeps channel subscribers still for title progress but publishes changed cha
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
   };
+  const browsed = (id: string) =>
+    ipc
+      .argsOf("library.browse")
+      .some((request) => request.scope.kind === "channels" && request.scope.channels[0]?.id === id);
   try {
     await view.render(createElement(Channels));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
@@ -58,22 +62,10 @@ it("keeps channel subscribers still for title progress but publishes changed cha
     });
     expect(renders).toBe(settled);
     await publish({ favourites: [own("3")] });
-    expect(view.container.textContent).toContain("3");
-    expect(
-      ipc
-        .argsOf("library.browse")
-        .some(
-          (request) => request.scope.kind === "channels" && request.scope.channels[0]?.id === "3",
-        ),
-    ).toBe(true);
+    expect(view.container.textContent).toBe(`${SAVED.id}:3`);
+    expect(browsed("3")).toBe(true);
     await publish({ recent: [own("4")] });
-    expect(
-      ipc
-        .argsOf("library.browse")
-        .some(
-          (request) => request.scope.kind === "channels" && request.scope.channels[0]?.id === "4",
-        ),
-    ).toBe(true);
+    expect(browsed("4")).toBe(true);
   } finally {
     view.unmount();
     ipc.reset();
