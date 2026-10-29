@@ -14,9 +14,14 @@ import {
   type Measurement,
 } from "../scripts/measurement.ts";
 
-/** Runs a Node script to its end, as CI would, without holding the test worker meanwhile. */
-async function run(args: readonly string[]) {
-  const child = spawn(process.execPath, args);
+/**
+ * Runs a Node script to its end, as CI would, without holding the test worker meanwhile.
+ * Its job summary goes to `summary`, or nowhere, never to the job summary of the run hosting the suite.
+ */
+async function run(args: readonly string[], summary?: string) {
+  const child = spawn(process.execPath, args, {
+    env: { ...process.env, GITHUB_STEP_SUMMARY: summary },
+  });
   let stdout = "",
     stderr = "";
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
@@ -164,20 +169,18 @@ it("comparison CLI retains a warning verdict but exits nonzero for invalid instr
     /** Compares the baseline with `candidate` offline, each into its own retained folder. */
     const compare = async (name: string, candidate: Measurement) => {
       const after = join(directory, `${name}.json`),
-        output = join(directory, name);
+        output = join(directory, name),
+        summary = join(directory, `${name}-summary.md`);
+      writeFileSync(summary, "");
       writeFileSync(after, JSON.stringify(candidate));
-      const result = await run([
-        compareBuilds,
-        "--baseline-json",
-        before,
-        "--candidate-json",
-        after,
-        "--output",
-        output,
-      ]);
+      const result = await run(
+        [compareBuilds, "--baseline-json", before, "--candidate-json", after, "--output", output],
+        summary,
+      );
       return {
         after,
         result,
+        summary: readFileSync(summary, "utf8"),
         saved: JSON.parse(readFileSync(join(output, "comparison.json"), "utf8")),
       };
     };
@@ -194,6 +197,10 @@ it("comparison CLI retains a warning verdict but exits nonzero for invalid instr
       minimumSamplesPerSide: 5,
       rawFiles: [before, valid.after],
     });
+    expect(valid.summary).toContain("Instrumentation valid; verdict warning; insufficient samples");
+    expect(valid.summary).toContain(
+      "| time to picture | ms | 100.0 [100.0, 100.0] | 140.0 [140.0, 140.0] |",
+    );
     expect(valid.result.stdout).toContain("insufficient samples");
     expect(valid.result.stdout).toContain("1/1 (insufficient; minimum 5)");
     expect(valid.result.stdout).toContain(
@@ -208,6 +215,7 @@ it("comparison CLI retains a warning verdict but exits nonzero for invalid instr
     expect(inconclusive.result.stdout).toContain(
       "Instrumentation valid; verdict inconclusive; insufficient samples",
     );
+    expect(invalid.summary).toBe("");
     expect(invalid.result.status).toBe(1);
     expect(invalid.saved).toMatchObject({
       status: "invalid-instrumentation",
