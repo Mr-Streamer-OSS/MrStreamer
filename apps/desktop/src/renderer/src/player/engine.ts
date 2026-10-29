@@ -215,7 +215,10 @@ function hlsEngine(
   const hls = new Hls({
     enableWorker: true,
     renderTextTracksNatively: false,
-    ...(ends === null ? {} : { startPosition: 0 }),
+    // Start live at the lowest declared bitrate, then let ABR use measured throughput. Its
+    // initial bandwidth guess can otherwise spend the startup window on an unsustainable
+    // rendition. This selects within one HLS feed, never another provider quality or a cap.
+    ...(ends === null ? { startLevel: 0 } : { startPosition: 0 }),
   });
   const tracks = hlsTracks(hls, video, sound);
   const life = lifecycle(
