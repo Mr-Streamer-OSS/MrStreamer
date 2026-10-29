@@ -1078,7 +1078,7 @@ async function resolveCommand(args: string[]) {
   const privateInput: unknown = values["private-input"]
     ? JSON.parse(await readFile(values["private-input"], "utf8"))
     : undefined;
-  const privateCandidate = privateInput
+  const privateCandidate = values["private-input"]
     ? await verifyPrivateCandidate(
         {
           ...github,
@@ -1459,7 +1459,9 @@ export async function runCommand(args: string[]) {
     under.startsWith("..") ||
     isAbsolute(under)
   )
-    throw new Error(`${usage}\nThe root must be a new folder under RUNNER_TEMP.`);
+    throw new Error(
+      `${usage}\nThe root must be a new folder under ${fleet ? "the owned task temp" : "RUNNER_TEMP"}.`,
+    );
   const raw: unknown = JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8"));
   const repository = fleet ? values.repository : process.env["GITHUB_REPOSITORY"];
   check(repository, "A repository is required.");
@@ -1491,18 +1493,26 @@ export async function runCommand(args: string[]) {
       source === values["verification-source"],
       "Verification source differs from the actual checkout.",
     );
-    execFileSync(
-      "git",
-      [
-        "diff",
-        "--exit-code",
-        "HEAD",
-        "--",
-        "apps/desktop/test/e2e",
-        "apps/desktop/scripts/package-receipt.ts",
-      ],
-      { cwd: checkout, stdio: "pipe" },
-    );
+    try {
+      execFileSync(
+        "git",
+        [
+          "diff",
+          "--quiet",
+          "HEAD",
+          "--",
+          "apps/desktop/test/e2e",
+          "apps/desktop/scripts/package-receipt.ts",
+          "apps/desktop/scripts/msix-version.ts",
+          "packages/contracts",
+        ],
+        { cwd: checkout, stdio: "pipe" },
+      );
+    } catch {
+      throw new Error(
+        "Refused: verification helpers have local changes; copy a clean checkout before running.",
+      );
+    }
     check(
       /^[0-9a-f]{40}$/.test(values["verification-source"] ?? ""),
       "Pin the verification checkout source separately.",

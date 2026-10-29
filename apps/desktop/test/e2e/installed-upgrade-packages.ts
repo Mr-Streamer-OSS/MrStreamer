@@ -8,7 +8,8 @@
 // - candidate: the published nightly the tag names, or an explicit unpublished nightly that
 //   `verifyPrivateCandidate` binds through its package receipt instead of a release.
 //
-// Both commits come from their tags and must be on main, the candidate must descend from stable
+// Published commits come from tags; private candidate source comes from its verified receipt.
+// Both sources must be on main, and the candidate must descend from stable
 // with a higher version, and each setup must match its asset size and digest, its release's
 // SHA256SUMS.txt and its latest.yml exactly. `resolvePackages` writes nothing; `readReceipt`
 // re-checks the receipt it produced before the runner installs anything.
@@ -59,6 +60,9 @@ export async function verifyPrivateCandidate(github: GitHub, input: unknown, aut
     const run = type({
       id: "number",
       run_attempt: "number",
+      run_number: "number",
+      path: "string",
+      head_repository: { full_name: "string" },
       head_sha: "string",
       status: "string",
       conclusion: "string | null",
@@ -68,7 +72,10 @@ export async function verifyPrivateCandidate(github: GitHub, input: unknown, aut
       ),
     );
     check(
-      run.id === value.request.run.id &&
+      run.path === ".github/workflows/release.yml" &&
+        run.head_repository.full_name === github.repository &&
+        run.run_number === parseVersion(value.request.appVersion)?.nightly?.run &&
+        run.id === value.request.run.id &&
         run.run_attempt === value.request.run.attempt &&
         run.head_sha === value.request.run.headCommit &&
         run.status === "completed" &&
@@ -114,7 +121,7 @@ const Resolved = type({
   candidateSha: FullSha,
   "+": "reject",
 });
-/** The tags and the commits they named when the check resolved them. */
+/** Stable tag, candidate label (not necessarily a published tag), and their resolved sources. */
 export type Resolved = typeof Resolved.infer;
 const Package = type({
   stage: "'stable' | 'candidate'",

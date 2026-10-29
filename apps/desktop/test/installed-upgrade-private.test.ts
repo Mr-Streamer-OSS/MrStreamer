@@ -3,10 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as windows from "./e2e/installed-upgrade-windows.ts";
 import { runCommand } from "./e2e/installed-upgrade.ts";
+import { createHash } from "node:crypto";
 import { zipSync, strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { producePackageReceipt, type PackageIdentity } from "../scripts/package-receipt.ts";
-import { sha256, verifyPrivateCandidate } from "./e2e/installed-upgrade-packages.ts";
+import {
+  sha256,
+  verifyPrivateCandidate,
+  readReceipt,
+  resolvePackages,
+} from "./e2e/installed-upgrade-packages.ts";
 import { fleetRunner } from "./e2e/installed-upgrade-windows.ts";
 
 function fixture() {
@@ -50,17 +56,20 @@ function fixture() {
     },
   ];
   const input = { repository: identity.repository, request: { ...identity }, artifacts };
+  const run = {
+    id: 900,
+    run_attempt: 1,
+    head_sha: identity.run.headCommit,
+    status: "completed",
+    conclusion: "success",
+    run_number: 447,
+    path: ".github/workflows/release.yml",
+    head_repository: { full_name: identity.repository },
+  };
   const github = {
     repository: identity.repository,
     json: async (path: string) => {
-      if (path === "/actions/runs/900/attempts/1")
-        return {
-          id: 900,
-          run_attempt: 1,
-          head_sha: identity.run.headCommit,
-          status: "completed",
-          conclusion: "success",
-        };
+      if (path.startsWith("/actions/runs/900/attempts/")) return run;
       return artifacts.find((each) => path === `/actions/artifacts/${each.id}`);
     },
     bytes: async (path: string) => {
@@ -69,7 +78,7 @@ function fixture() {
       throw new Error(path);
     },
   };
-  return { input, github };
+  return { input, github, run };
 }
 
 describe("explicit unpublished Windows upgrade inputs", () => {
@@ -78,6 +87,72 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     const result = await verifyPrivateCandidate(github, input, true);
     expect(result.receipt.appVersion).toBe(input.request.appVersion);
     expect(result.files.size).toBe(3);
+  });
+  it.each(["workflow", "fork", "run number"])(
+    "refuses a successful run with the wrong %s",
+    async (field) => {
+      const { input, github, run } = fixture();
+      if (field === "workflow") run.path = ".github/workflows/other.yml";
+      if (field === "fork") run.head_repository.full_name = "fork/player";
+      if (field === "run number") run.run_number++;
+      await expect(verifyPrivateCandidate(github, input, true)).rejects.toThrow(
+        "Private run identity",
+      );
+    },
+  );
+  it("uses verified published Stable with a private candidate and refuses private receipts in published mode or with a changed installer hash", async () => {
+    const { input, github } = fixture();
+    const verified = await verifyPrivateCandidate(github, input, true);
+    const setup = strToU8("published Stable installer");
+    const hash = sha256(setup);
+    const sha512 = createHash("sha512").update(setup).digest("base64");
+    const name = "Mr-Streamer-0.0.21-win-x64-setup.exe";
+    const metadata = {
+      version: "0.0.21",
+      path: name,
+      sha512,
+      files: [{ url: name, sha512, size: setup.length }],
+    };
+    const sums = strToU8(`${hash}  ${name}`);
+    const assets = [
+      { id: 1, name, bytes: setup },
+      { id: 2, name: "SHA256SUMS.txt", bytes: sums },
+      { id: 3, name: "latest.yml", bytes: strToU8(JSON.stringify(metadata)) },
+    ];
+    const release = {
+      tag_name: "v0.0.21",
+      draft: false,
+      prerelease: false,
+      published_at: "2026-10-29T00:00:00Z",
+      assets: assets.map(({ id, name, bytes }) => ({ id, name, size: bytes.length })),
+    };
+    const api = {
+      repository: input.repository,
+      json: async (path: string) => {
+        if (path === "") return { default_branch: "main" };
+        if (path === "/releases?per_page=100&page=1") return [release];
+        if (path === "/commits/v0.0.21") return { sha: "d".repeat(40) };
+        if (path.startsWith("/compare/")) return { status: "ahead", ahead_by: 1, behind_by: 0 };
+        if (path === "/releases/tags/v0.0.21") return release;
+        throw new Error(`Unexpected published lookup: ${path}`);
+      },
+      bytes: async (path: string) => {
+        const asset = assets.find((each) => path === `/releases/assets/${each.id}`);
+        if (!asset) throw new Error(path);
+        return asset.bytes;
+      },
+    };
+    const { receipt } = await resolvePackages(api, {
+      tag: `v${input.request.appVersion}`,
+      private: verified,
+    });
+    expect(
+      readReceipt(receipt, verified).packages.map((each) => each.provenance.releaseKind),
+    ).toEqual(["stable", "private"]);
+    expect(() => readReceipt(receipt)).toThrow("identity");
+    const tampered = structuredClone(receipt);
+    tampered.packages[1].sha256 = "0".repeat(64);
+    expect(() => readReceipt(tampered, verified)).toThrow("identity");
   });
   // Receipt identity and archive bytes are package-receipt.test.ts's; these are the private input's own gates.
   it("refuses a Fleet receipt from another repository before creating the journey or installing", async () => {
@@ -168,7 +243,13 @@ describe("explicit unpublished Windows upgrade inputs", () => {
       if (field === "distribution") Object.assign(bad.request, { distribution: "store" });
       if (field === "attempt") bad.request.run.attempt++;
       if (field === "hash") bad.artifacts[0]!.digest = `sha256:${"0".repeat(64)}`;
-      await expect(verifyPrivateCandidate(github, bad, true)).rejects.toThrow();
+      const message = {
+        platform: /win-x64/,
+        distribution: /direct/,
+        attempt: /Private run identity/,
+        hash: /artifact metadata differs/,
+      }[field];
+      await expect(verifyPrivateCandidate(github, bad, true)).rejects.toThrow(message);
     },
   );
   it.each(["C:\\Users\\agent", "C:\\Users\\agent\\AppData\\Local\\Temp\\..\\shared"])(
@@ -199,6 +280,14 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     },
   );
   it("refuses a non-Fleet ownership declaration", () => {
-    expect(() => fleetRunner({ disposable: false })).toThrow();
+    expect(() =>
+      fleetRunner({
+        vmId: "abc123",
+        task: "upgrade",
+        nonce: "a".repeat(64),
+        temp: "C:\\task",
+        disposable: false,
+      }),
+    ).toThrow(/disposable/);
   });
 });
