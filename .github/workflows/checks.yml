@@ -1,5 +1,14 @@
-# Always report Check; only omit expensive work for known independent inputs.
+# The app's and the website's checks, on every pull request and push to main;
+# docs/maintainers/ci.md shows how the workflows fit together.
+#
+# Check always runs and reports. Test and Website run when their inputs changed, and whenever the
+# changed paths are unknown or couldn't be read. A release calls this with the commit it builds
+# (`sha`), which always checks and tests that commit. The validation evidence artifact records
+# what ran on the exact source; .github/actions/validation/README.md has its contract.
+#
+# No secrets, so pull requests from forks run all of it.
 name: Checks
+
 on:
   pull_request:
   push:
@@ -14,13 +23,18 @@ on:
         description: Legacy caller report label
         type: string
         required: true
+
 permissions:
   contents: read
+
+# A new push to a pull request replaces its running checks. A release's checks get a group of
+# their own, so they never wait for or cancel the checks of a pull request.
 concurrency:
   group: >-
     checks-${{ inputs.sha && format('release-{0}-{1}', github.run_id, inputs.sha)
     || github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && !inputs.sha }}
+
 jobs:
   inputs:
     name: Inputs
@@ -33,6 +47,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ github.workflow_sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
@@ -40,6 +55,8 @@ jobs:
         env:
           VALIDATION_SHA: ${{ inputs.sha }}
         run: node .github/scripts/ci-inputs.ts
+
+  # Runs even when Inputs failed, and then fails itself, so the protected check always reports.
   check:
     name: Check
     needs: inputs
@@ -50,13 +67,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
-      - uses: ./.github/actions/validation
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .local/validation-tools
+          persist-credentials: false
+      - uses: ./.local/validation-tools/.github/actions/validation
         with:
           part: check
       - name: Require input selection
         env:
           INPUT_RESULT: ${{ needs.inputs.result }}
         run: test "$INPUT_RESULT" = success
+
   test:
     name: Test
     needs: inputs
@@ -67,9 +90,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
-      - uses: ./.github/actions/validation
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .local/validation-tools
+          persist-credentials: false
+      - uses: ./.local/validation-tools/.github/actions/validation
         with:
           part: test
+          report-name: ${{ inputs.report-name || github.run_id }}
+
   website:
     name: Website
     needs: inputs
@@ -78,14 +108,20 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/validation
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .local/validation-tools
+          persist-credentials: false
+      - uses: ./.local/validation-tools/.github/actions/validation
         env:
           GH_TOKEN: ${{ github.token }}
         with:
           part: website
+
   evidence:
     name: Validation evidence
-    needs: [inputs, check, test, website]
+    needs: [check, test, website]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -96,15 +132,20 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .local/validation-tools
+          persist-credentials: false
       - name: Record executed results
         env:
           CHECK_RESULT: ${{ needs.check.result }}
           TEST_RESULT: ${{ needs.test.result }}
           WEBSITE_RESULT: ${{ needs.website.result }}
-        run: node .github/scripts/validation-evidence.ts record "$RUNNER_TEMP/validation.json"
+        run: node .local/validation-tools/.github/scripts/validation-evidence.ts record "$RUNNER_TEMP/validation.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: validation-${{ github.run_id }}-${{ github.run_attempt }}
+          name: validation-${{ inputs.report-name || github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/validation.json
           retention-days: 14
           if-no-files-found: error

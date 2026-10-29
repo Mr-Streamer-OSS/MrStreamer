@@ -3,13 +3,24 @@ import { appendFileSync, readFileSync } from "node:fs";
 
 /** Only known independent inputs may omit expensive work. Unknown inputs fail closed. */
 export function selectChecks(paths: readonly string[] | null) {
-  if (!paths?.length || paths.length > 3000) return { desktop: true, website: true };
+  if (!paths?.length) return { desktop: true, website: true };
   let desktop = false;
   let website = false;
   for (const path of paths) {
-    if (path.startsWith("apps/desktop/")) desktop = true;
-    else if (path.startsWith("apps/marketing/")) website = true;
-    else if (/^(docs\/|.*\.md$)/.test(path)) continue;
+    const websiteInput =
+      path.startsWith("apps/marketing/") ||
+      /^docs\/(assets\/|user\/|(?:privacy|about|security)\.md$)/.test(path) ||
+      path === "apps/desktop/assets/brand/mark.svg";
+    // The root test suite includes marketing tests as well as desktop and shared tests.
+    if (websiteInput) {
+      desktop = true;
+      website = true;
+    } else if (path.startsWith("apps/desktop/")) desktop = true;
+    else if (
+      path.startsWith("docs/") ||
+      ["README.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md", "LICENSE"].includes(path)
+    )
+      continue;
     else return { desktop: true, website: true };
   }
   return { desktop, website };

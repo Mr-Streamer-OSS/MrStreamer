@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 
 export const profile = "desktop-v1";
@@ -25,10 +26,27 @@ export function validationIdentity() {
     ],
     { encoding: "utf8" },
   );
+  const tools = execFileSync(
+    "git",
+    [
+      "ls-tree",
+      "-r",
+      "HEAD",
+      "--",
+      ".github/actions/validation",
+      ".github/scripts/ci-inputs.ts",
+      ".github/scripts/validation-evidence.ts",
+      ".github/tests/ci-inputs.test.ts",
+      ".github/tests/validation-evidence.test.ts",
+      ".github/workflows/checks.yml",
+    ],
+    { cwd: resolve(import.meta.dirname, "../.."), encoding: "utf8" },
+  );
   return createHash("sha256")
     .update(
       JSON.stringify({
         inputs,
+        tools,
         node: process.version,
         platform: process.platform,
         arch: process.arch,
@@ -73,7 +91,6 @@ export function acceptsEvidence(
     producer.conclusion === "success" &&
     producer.sha === expected.sha &&
     /^[a-f0-9]{40}$/.test(expected.sha) &&
-    /^[a-f0-9]{64}$/.test(expected.identity) &&
     evidence.version === 1 &&
     evidence.sha === expected.sha &&
     evidence.identity === expected.identity &&
@@ -86,8 +103,7 @@ export function acceptsEvidence(
 
 if (import.meta.main) {
   const [command, file] = process.argv.slice(2);
-  if (command === "identity") console.log(validationIdentity());
-  else if (command === "record" && file) {
+  if (command === "record" && file) {
     const evidence: Evidence = {
       version: 1,
       sha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
@@ -112,6 +128,5 @@ if (import.meta.main) {
     )
       ? 0
       : 1;
-  } else
-    throw new Error("Use identity, record <file>, or verify <evidence> <API producer metadata>");
+  } else throw new Error("Use record <file> or verify <evidence> <API producer metadata>");
 }

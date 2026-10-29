@@ -13,15 +13,24 @@ test("select expensive work by known inputs; shared, unknown and incomplete chan
     ["pnpm-lock.yaml"],
     ["packages/core/src/index.ts"],
     ["new/config"],
-    Array(3001).fill("docs/a.md"),
   ])
     assert.deepEqual(selectChecks(paths), { desktop: true, website: true });
   assert.deepEqual(selectChecks(["docs/guide.md"]), { desktop: false, website: false });
   assert.deepEqual(selectChecks(["apps/desktop/src/main.ts"]), { desktop: true, website: false });
   assert.deepEqual(selectChecks(["apps/marketing/src/index.ts"]), {
-    desktop: false,
+    desktop: true,
     website: true,
   });
+  for (const path of [
+    "docs/privacy.md",
+    "docs/about.md",
+    "docs/security.md",
+    "docs/user/live.md",
+    "docs/assets/image.png",
+    "apps/desktop/assets/brand/mark.svg",
+    "apps/marketing/test/site.test.ts",
+  ])
+    assert.deepEqual(selectChecks([path]), { desktop: true, website: true });
   assert.deepEqual(selectChecks(["apps/desktop/a", "apps/marketing/b"]), {
     desktop: true,
     website: true,

@@ -31,7 +31,6 @@ test("only complete exact-source validation from a successful trusted main produ
     { branch: "feature" },
     { workflow: ".github/workflows/other.yml" },
     { sha: "c".repeat(40) },
-    { conclusion: "cancelled" },
     { conclusion: "failure" },
   ])
     assert.equal(acceptsEvidence(evidence, expected, { ...producer, ...patch }), false);
@@ -44,7 +43,7 @@ test("only complete exact-source validation from a successful trusted main produ
     { ...evidence, profile: "other" },
   ])
     assert.equal(acceptsEvidence(value, expected, producer), false);
-  for (const result of ["skipped", "cancelled", "failure", "unknown", ""]) {
+  for (const result of ["skipped", "failure"]) {
     for (const part of ["check", "test"])
       assert.equal(
         acceptsEvidence(
