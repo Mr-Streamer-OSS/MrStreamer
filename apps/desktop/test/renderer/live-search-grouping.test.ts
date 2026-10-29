@@ -362,6 +362,7 @@ describe("real search components with two subscriptions", () => {
     await settled();
     expect(p.rows()).toHaveLength(1);
     await p.type("");
+    expect(p.scope().querySelector('[role="tree"]')).toBeNull();
     await settled(150);
     ipc.always("library.channels", responses(all));
     ipc.always("guide.search", []);
@@ -1221,6 +1222,7 @@ it("blocks old palette rows immediately within the input event, and respects IME
   });
   expect(p.watch).not.toHaveBeenCalled();
   expect(p.scope().querySelector('[role="tree"]')?.getAttribute("aria-disabled")).toBe("true");
+  expect(p.rows()).not.toHaveLength(0);
   // An empty answer replaces the old rows once the typing delay ends.
   ipc.always("library.channels", []);
   ipc.always("guide.search", []);
@@ -1229,8 +1231,6 @@ it("blocks old palette rows immediately within the input event, and respects IME
   await settled();
   expect(p.rows()).toHaveLength(0);
   expect(p.scope().textContent).toContain("No matches");
-  await p.type("");
-  expect(p.scope().querySelector('[role="tree"]')).toBeNull();
 });
 
 it("blocks old Live rows in the raw debounce window and keeps names usable on guide failure", async () => {
