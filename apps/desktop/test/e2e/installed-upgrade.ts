@@ -34,7 +34,7 @@ import { preferenceValues } from "./preference-reply.ts";
 // `resolve` needs GH_TOKEN and GITHUB_REPOSITORY and runs anywhere; installed-upgrade-packages.ts
 // says what it checks. The explicit private-input/Fleet mode is documented in testing.md.
 import { once } from "node:events";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { existsSync } from "node:fs";
@@ -1046,6 +1046,8 @@ export async function restartCandidate(
 const usage = `Usage:
   node apps/desktop/test/e2e/installed-upgrade.ts resolve --candidate <nightly tag> [--sha <its commit>] --out <new folder>
   node apps/desktop/test/e2e/installed-upgrade.ts run --packages <folder> --root <new folder under RUNNER_TEMP>
+  node apps/desktop/test/e2e/installed-upgrade.ts resolve --private-input <JSON> --out <new folder>
+  node apps/desktop/test/e2e/installed-upgrade.ts run --packages <folder> --root <new folder under owned task temp> --fleet-owner <JSON> --repository <owner/repo> --verification-source <checkout commit>
   node apps/desktop/test/e2e/installed-upgrade.ts telemetry --packages <resolved .15 pair> --root <new folder under RUNNER_TEMP>`;
 
 /**
@@ -1478,7 +1480,29 @@ export async function runCommand(args: string[]) {
       )
     : undefined;
   const receipt = readReceipt(raw, privateCandidate);
+  check(receipt.repository === repository, "The receipt belongs to another repository.");
   if (fleet) {
+    const checkout = fileURLToPath(new URL("../../../../", import.meta.url));
+    const source = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: checkout,
+      encoding: "utf8",
+    }).trim();
+    check(
+      source === values["verification-source"],
+      "Verification source differs from the actual checkout.",
+    );
+    execFileSync(
+      "git",
+      [
+        "diff",
+        "--exit-code",
+        "HEAD",
+        "--",
+        "apps/desktop/test/e2e",
+        "apps/desktop/scripts/package-receipt.ts",
+      ],
+      { cwd: checkout, stdio: "pipe" },
+    );
     check(
       /^[0-9a-f]{40}$/.test(values["verification-source"] ?? ""),
       "Pin the verification checkout source separately.",
@@ -1495,10 +1519,6 @@ export async function runCommand(args: string[]) {
     check(
       process.env["GITHUB_REF"] === "refs/heads/main",
       "The installed upgrade check runs only from main.",
-    );
-    check(
-      receipt.repository === process.env["GITHUB_REPOSITORY"],
-      "The receipt belongs to another repository.",
     );
   }
   // Both packages must still match before the first setup starts.
@@ -1567,6 +1587,13 @@ export async function runCommand(args: string[]) {
       ),
     },
     receipt,
+    privatePackage: privateCandidate
+      ? {
+          receipt: privateCandidate.receipt,
+          artifact: privateCandidate.artifact,
+          receiptArtifact: privateCandidate.receiptArtifact,
+        }
+      : null,
     installs: {} as ByStage,
     starts: {} as ByStage,
     about: {} as ByStage,
