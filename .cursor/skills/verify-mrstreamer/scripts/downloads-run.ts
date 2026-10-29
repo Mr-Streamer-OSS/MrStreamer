@@ -384,7 +384,7 @@ export async function ownedRun<D>(
         cleanupErrors.push(String(error));
       }
     };
-    await options.release?.(clean);
+    await clean(async () => options.release?.(clean));
     if (running) {
       const owned = running;
       await clean(() => stop(owned.app, owned.page));
