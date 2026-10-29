@@ -598,7 +598,9 @@ describe("the website", () => {
         [".github/workflows/publish.yml", false],
         ["docs/maintainers/ci.md", false],
         ["apps/marketing/src/page.ts", true],
-        ["apps/desktop/package.json", true],
+        ["apps/marketing/README.md", false],
+        [".cursor/skills/verify-mrstreamer/features/website.md", false],
+        ["pnpm-lock.yaml", true],
       ] as const) {
         git("reset", "-q", "--hard", base);
         mkdirSync(dirname(join(dir, path)), { recursive: true });

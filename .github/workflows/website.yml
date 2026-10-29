@@ -35,13 +35,12 @@ on:
       - package.json
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
-      - apps/desktop/package.json
-      # Build only. The inputs step reads the paths above and stops at this comment, so a push
-      # that changes nothing but these builds the website and publishes nothing.
+      # Build only. The inputs step excludes these routing and runbook paths from deployment.
       - .github/workflows/website.yml
       - .github/workflows/publish.yml
       - docs/maintainers/**
       - docs/contributing/testing.md
+      - .cursor/skills/verify-mrstreamer/features/website.md
   workflow_dispatch:
     inputs:
       deploy:
@@ -81,8 +80,8 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      # The push trigger's paths up to its build-only comment, at this commit: what a push must
-      # change to publish, and what website-publish compares main over.
+      # Deployment pathspecs exclude routing/runbook changes, including the marketing README.
+      # Comments in the trigger list never change deployment selection.
       - name: Note what the website is built from
         id: inputs
         run: |
@@ -90,9 +89,13 @@ jobs:
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const workflow = readFileSync(".github/workflows/website.yml", "utf8");
-            const list = /^    paths:\n((?:      - .+\n)+)/m.exec(workflow)?.[1];
+            const list = /^    paths:\n((?:      (?:- .+|#.*)\n)+)/m.exec(workflow)?.[1];
             if (!list) throw new Error("website.yml names no push paths.");
-            const paths = list.trim().split("\n").map((line) => line.replace(/^\s*- /, ""));
+            const paths = list.split("\n").flatMap((line) => /^      - (.+)$/.exec(line)?.[1] ?? [])
+              .filter((path) => !path.startsWith(".github/") && !path.startsWith("docs/maintainers/")
+                && path !== "docs/contributing/testing.md" && !path.startsWith(".cursor/"))
+              .map((path) => `:(glob)${path}`);
+            paths.push(":(exclude,glob)apps/marketing/README.md");
             console.log(`paths=${paths.join(" ")}`);
           ' >> "$GITHUB_OUTPUT"
       # A push publishes when it changed what the website is built from; a run by hand or
@@ -110,7 +113,7 @@ jobs:
           if [ "$EVENT" = push ]; then
             read -ra paths <<<"$INPUTS"
             changed=0
-            git diff --quiet --no-renames "$BEFORE" "$AFTER" -- "${paths[@]/#/:(glob)}" || changed=$?
+            git diff --quiet --no-renames "$BEFORE" "$AFTER" -- "${paths[@]}" || changed=$?
             if [ "$changed" -eq 1 ]; then
               deploy=true
             elif [ "$changed" -ne 0 ]; then
@@ -208,7 +211,7 @@ jobs:
           read -ra paths <<<"$INPUTS"
           [ ${#paths[@]} -gt 0 ] || { echo "::error::The build named no website inputs."; exit 1; }
           changed=0
-          git --git-dir="$RUNNER_TEMP/main.git" diff --quiet --no-renames "$BUILT" main -- "${paths[@]/#/:(glob)}" || changed=$?
+          git --git-dir="$RUNNER_TEMP/main.git" diff --quiet --no-renames "$BUILT" main -- "${paths[@]}" || changed=$?
           if [ "$changed" -eq 1 ]; then
             echo "::notice::main changed the website after $BUILT was built. The run for that change publishes it."
             echo "superseded=true" >> "$GITHUB_OUTPUT"
