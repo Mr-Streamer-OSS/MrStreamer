@@ -2658,6 +2658,7 @@ describe("the native queue's boundaries", { timeout: 40_000 }, () => {
       if (intent === "resumed") await app.remove(a, { keepHistory: true });
       const size = asBuild14Completion(film, intent === "resumed" ? "source-removed" : undefined);
       const asked = native.requests.length;
+      const started = background.events.filter((each) => each.startsWith("start:"));
       const blocked = new Folder(native.root, "documents", "downloads.json.next");
       blocked.create();
       app = await launch();
@@ -2680,6 +2681,7 @@ describe("the native queue's boundaries", { timeout: 40_000 }, () => {
       expect(doc().items[0].removal).toBeUndefined();
       expect(mediaFile(film.id)?.size).toBe(size);
       expect(native.requests).toHaveLength(asked);
+      expect(background.events.filter((each) => each.startsWith("start:"))).toEqual(started);
       await until(() => background.legacyReceipts.length === 0, "its receipt acknowledged");
     });
   }
