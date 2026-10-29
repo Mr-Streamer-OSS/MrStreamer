@@ -58,7 +58,7 @@ function listedIn(customLists: readonly CustomList[] | undefined, id: string): r
 /** The single renderer adapter from semantic discovery/personal choices to exact IPC scopes. */
 export function browseQuery(
   list: ChannelList,
-  viewing: Viewing | undefined,
+  viewing: Pick<Viewing, "favourites" | "recent"> | undefined,
   visibility: "viewer" | "ordinary",
   preferences: Preferences | undefined,
   customLists: readonly CustomList[] | undefined,
@@ -91,9 +91,12 @@ export function browseQuery(
   };
 }
 
+const channelHistory = ({ favourites, recent }: Viewing) => ({ favourites, recent });
+
 /** Membership and facets always belong to the current descriptor, including personal order. */
 export function useListChannels(list: ChannelList, visibility: "viewer" | "ordinary" = "viewer") {
-  const viewing = useQuery(queries.viewing());
+  // Title progress and episode marks do not change channel membership or order.
+  const viewing = useQuery({ ...queries.viewing(), select: channelHistory });
   const customLists = useQuery(queries.customLists());
   const preferences = useQuery(queries.preferences());
   // Favourites and Recently watched are the record's, a list of the viewer's is its own: what

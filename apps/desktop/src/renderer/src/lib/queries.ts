@@ -694,10 +694,12 @@ export function useLastChannel(): LiveChannel | null {
   return (last !== null && data) || null;
 }
 
+const favouriteChannels = (viewing: Viewing) => viewing.favourites;
+
 /** The favourite channels, by `ownedKey`, in their saved order. */
 export function useFavouriteKeys(): ReadonlySet<string> {
-  const { data } = useQuery(queries.viewing());
-  return useMemo(() => new Set(data?.favourites.map(ownedKey)), [data]);
+  const { data } = useQuery({ ...queries.viewing(), select: favouriteChannels });
+  return useMemo(() => new Set(data?.map(ownedKey)), [data]);
 }
 
 function useCategories() {
