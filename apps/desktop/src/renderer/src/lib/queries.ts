@@ -672,13 +672,15 @@ export function useSubscriptionPreferences(
   });
 }
 
+const lastWatched = (viewing: Viewing) => viewing.recent[0];
+
 /**
  * The channel watched last, whichever subscription it is of, or null before the first or once its
  * catalogue no longer has it. The viewing record says which; where it has none, as when it can't
  * be read, the channel a subscription was left at stands in.
  */
 export function useLastChannel(): LiveChannel | null {
-  const [watched] = useQuery(queries.viewing()).data?.recent ?? [];
+  const watched = useQuery({ ...queries.viewing(), select: lastWatched }).data;
   const left = useSubscriptionPreferences();
   const last = useMemo((): OwnedId | null => {
     if (watched) return watched;
@@ -694,10 +696,12 @@ export function useLastChannel(): LiveChannel | null {
   return (last !== null && data) || null;
 }
 
+export const favouriteChannels = (viewing: Viewing) => viewing.favourites;
+
 /** The favourite channels, by `ownedKey`, in their saved order. */
 export function useFavouriteKeys(): ReadonlySet<string> {
-  const { data } = useQuery(queries.viewing());
-  return useMemo(() => new Set(data?.favourites.map(ownedKey)), [data]);
+  const { data } = useQuery({ ...queries.viewing(), select: favouriteChannels });
+  return useMemo(() => new Set(data?.map(ownedKey)), [data]);
 }
 
 function useCategories() {

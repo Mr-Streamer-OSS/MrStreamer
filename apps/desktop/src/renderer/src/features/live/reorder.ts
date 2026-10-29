@@ -26,7 +26,14 @@ import { call } from "../../lib/ipc.ts";
 import { currentPreferences } from "../../lib/preferences.ts";
 import { browseQuery } from "./lists.ts";
 import { useUi, type ChannelList } from "../../app/ui-store.ts";
-import { keepViewing, queries, rosterOf, savedAs, useSubscriptions } from "../../lib/queries.ts";
+import {
+  favouriteChannels,
+  keepViewing,
+  queries,
+  rosterOf,
+  savedAs,
+  useSubscriptions,
+} from "../../lib/queries.ts";
 
 /** What of a row holds the focus: the row itself, or one of its two buttons. */
 export type RowPart = "row" | "up" | "down";
@@ -182,7 +189,7 @@ export function useListOrder(
 ): OrderEditor {
   const client = useQueryClient();
   const saved = savedAs(useSubscriptions());
-  const favourites = useQuery(queries.viewing()).data?.favourites;
+  const favourites = useQuery({ ...queries.viewing(), select: favouriteChannels }).data;
   const customLists = useQuery(queries.customLists()).data;
   const [held, setDraft] = useState<Draft | null>(null);
   /** What the list to order is now, as read; undefined while unknown. */
