@@ -421,7 +421,7 @@ The Windows installed package smoke also runs the focused `windows-retry` teleme
 
 - **Check:** unused files, exports and dependencies (`pnpm knip`), lint (`pnpm lint`), format, typecheck, the workflows (`pnpm actionlint`) and the production build. Lint, typecheck and tests cover the website's code too.
 - **Test:** installs Ubuntu's complete ffmpeg and ffprobe (`apps/desktop/scripts/ci-ffmpeg.sh` fails unless both run and their codecs are there), runs the suite with Vitest's JSON reporter, keeps the report and checks it.
-- **Website:** on pull requests, builds the website, installing only what `apps/marketing` declares. On `main`, `publish.yml` builds it after every change to what the page is built from; [the website's README](../../apps/marketing/README.md#how-it-gets-published) describes publishing.
+- **Website:** on pull requests, builds the website, installing only what `apps/marketing` declares. On `main`, `website.yml` builds it after every change to what the page is built from; [the website's README](../../apps/marketing/README.md#how-it-gets-published) describes publishing.
 
 The [release workflow](../maintainers/releasing.md) runs Check and Test on the exact commit it releases, next to the packaged-app test on every installed package. There the production build is the release's own bundle job, the workflows are main's, and the website has no say, so those are left out. CI needs no secrets, so pull requests from forks run it too.
 
@@ -479,3 +479,5 @@ The [Privacy feature entry](../../.cursor/skills/verify-mrstreamer/features/priv
 A source-built Linux native-mode run establishes actual process and filesystem behavior only for those source bytes. Exact installed Mac/Windows/Linux candidate evidence, native installer transitions, Store-delivered updates and actual nightly production ingestion remain separate release checks. Controlled filesystem promise delay is not measured native slow-disk latency.
 
 For complete default-suite wall-time receipts, see [suite measurements](suite-measurements.md).
+
+CI publication routing changes require secretless publication-guard contracts and independent review before a signed, non-publishing PR dry run. Website workflow and maintainer-doc-only pushes build without production deployment. Real deployment and stable handoff acceptance remain on the separately approved delivery card.

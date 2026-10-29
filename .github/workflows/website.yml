@@ -1,0 +1,262 @@
+# Independent website delivery. PR validation stays secretless in Checks.
+name: Website
+
+on:
+  workflow_call:
+    inputs:
+      deploy:
+        description: Refresh after successful stable finalization
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    # What the website is built from. The website-publish job compares main with its build over
+    # these too.
+    paths:
+      - apps/marketing/**
+      - docs/assets/**
+      - docs/privacy.md
+      - docs/about.md
+      - docs/security.md
+      - docs/user/**
+      - packages/contracts/src/update-feed.ts
+      - packages/contracts/src/release-files.ts
+      - packages/contracts/src/version.ts
+      - apps/desktop/assets/brand/mark.svg
+      - package.json
+      - pnpm-workspace.yaml
+      - pnpm-lock.yaml
+      - apps/desktop/package.json
+      # Validate delivery changes without publishing them.
+      - .github/workflows/website.yml
+      - .github/workflows/publish.yml
+      - docs/maintainers/**
+      - docs/contributing/testing.md
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Publish the checked prebuilt website (main only)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The website, apps/marketing, built from main as it is when the job starts: after a stable
+  # release is recorded, after a push that changes what it is built from, or by hand. It holds no
+  # owner secrets: a read-only token fetches release history, and analytics take the public
+  # PostHog host and key from repository variables. It checks the package Vercel takes
+  # (apps/marketing/scripts/package-vercel.ts) and hands over only .vercel/output.
+  website:
+    name: Build the website
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      commit: ${{ steps.commit.outputs.sha }}
+      inputs: ${{ steps.inputs.outputs.paths }}
+      deploy: ${{ steps.delivery.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Note the commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      # The push trigger's paths at this commit, which website-publish compares main over.
+      - name: Note what the website is built from
+        id: inputs
+        run: |
+          # shellcheck disable=SC2016 # The quoted script is JavaScript, for node to read.
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const workflow = readFileSync(".github/workflows/website.yml", "utf8");
+            const list = /^    paths:\n((?:      - .+\n)+)/m.exec(workflow)?.[1];
+            if (!list) throw new Error("website.yml names no push paths.");
+            const paths = list.trim().split("\n").map((line) => line.replace(/^\s*- /, ""));
+            console.log(`paths=${paths.join(" ")}`);
+          ' >> "$GITHUB_OUTPUT"
+      - name: Decide whether this build may deploy
+        id: delivery
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          REQUESTED: ${{ inputs.deploy }}
+          INPUTS: ${{ steps.inputs.outputs.paths }}
+        run: |
+          deploy=false
+          if [ "$EVENT" = push ]; then
+            read -ra paths <<<"$INPUTS"
+            changed=0
+            git diff --quiet --no-renames "$BEFORE" "$AFTER" -- "${paths[@]/#/:(glob)}" || changed=$?
+            if [ "$changed" -eq 1 ]; then deploy=true;
+            elif [ "$changed" -ne 0 ]; then
+              echo "::error::Cannot determine website changes; refusing publication."
+              exit 1
+            fi
+          elif [ "$REQUESTED" = true ]; then
+            deploy=true
+          fi
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+      - run: pnpm install --frozen-lockfile --filter mrstreamer-marketing...
+      - name: Build and check the package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Website analytics: on only with PostHog's EU host and the public phc_ project key.
+          # Missing or other values build a site that sends nothing (scripts/site-analytics.ts).
+          MR_STREAMER_SITE_ANALYTICS_RELEASE_BUILD: "1"
+          MR_STREAMER_SITE_ANALYTICS_HOST: ${{ vars.POSTHOG_HOST }}
+          MR_STREAMER_SITE_ANALYTICS_PROJECT_TOKEN: ${{ vars.POSTHOG_PROJECT_TOKEN }}
+        run: pnpm --filter mrstreamer-marketing build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: marketing-output
+          path: apps/marketing/.vercel/output/
+          # The package sits in a folder whose name starts with a dot.
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
+      # Dependency-free notifier from the same checked build, never executed beside owner secrets.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: marketing-indexnow
+          path: apps/marketing/scripts/indexnow.ts
+          retention-days: 1
+          if-no-files-found: error
+      - name: Say that publishing is off
+        if: vars.MARKETING_DEPLOY_ENABLED != 'true'
+        run: |
+          {
+            echo "### Not published"
+            echo "The website built, and publishing is off: the repository variable \`MARKETING_DEPLOY_ENABLED\` isn't \`true\`."
+            echo "\`apps/marketing/README.md\` lists what to set up first."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Publishes the website's package to mrstreamer.app on Vercel. It checks out nothing: it holds
+  # the package and the token, and runs the pinned Vercel CLI on it. The Vercel project has no Git
+  # connection, so this is the only thing that publishes.
+  website-publish:
+    name: Publish the website
+    needs: website
+    if: >-
+      !cancelled() && needs.website.result == 'success' && needs.website.outputs.deploy == 'true'
+      && vars.MARKETING_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      deployed: ${{ steps.deployment.outputs.deployed }}
+    environment:
+      name: marketing-production
+      url: https://mrstreamer.app
+    concurrency:
+      group: marketing-production
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Check the setup
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: |
+          missing=()
+          [ -n "$VERCEL_TOKEN" ] || missing+=("the secret VERCEL_TOKEN")
+          [ -n "$VERCEL_ORG_ID" ] || missing+=("the variable VERCEL_ORG_ID")
+          [ -n "$VERCEL_PROJECT_ID" ] || missing+=("the variable VERCEL_PROJECT_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            printf -v list '%s, ' "${missing[@]}"
+            echo "::error::The marketing-production environment lacks ${list%, }."
+            exit 1
+          fi
+      # One publication at a time, but builds run side by side: a build that main has moved past
+      # leaves publishing to the run that move started, so an older page is never published over
+      # a newer one. git compares the whole of both commits; GitHub's comparison names 300
+      # changed files at most. The copy of main holds its history and no files, so there is still
+      # nothing from the repository here to run. A comparison that fails publishes nothing.
+      - name: Leave it to a newer run when main changed the website since the build
+        id: newest
+        env:
+          BUILT: ${{ needs.website.outputs.commit }}
+          INPUTS: ${{ needs.website.outputs.inputs }}
+        run: |
+          git clone --quiet --bare --filter=blob:none --single-branch --branch main \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$RUNNER_TEMP/main.git"
+          # The trigger's paths, as pathspecs that read ** as the trigger does.
+          read -ra paths <<<"$INPUTS"
+          [ ${#paths[@]} -gt 0 ] || { echo "::error::The build named no website inputs."; exit 1; }
+          changed=0
+          git --git-dir="$RUNNER_TEMP/main.git" diff --quiet --no-renames "$BUILT" main -- "${paths[@]/#/:(glob)}" || changed=$?
+          if [ "$changed" -eq 1 ]; then
+            echo "::notice::main changed the website after $BUILT was built. The run for that change publishes it."
+            echo "superseded=true" >> "$GITHUB_OUTPUT"
+          elif [ "$changed" -ne 0 ]; then
+            echo "::error::Couldn't compare $BUILT with main, so this run publishes nothing."
+            exit 1
+          fi
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.newest.outputs.superseded != 'true'
+        with:
+          name: marketing-output
+          path: apps/marketing/.vercel/output
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.newest.outputs.superseded != 'true'
+        with:
+          node-version: 24
+      # The project and account come from VERCEL_PROJECT_ID and VERCEL_ORG_ID. --prebuilt uploads
+      # the package as it is, and Vercel runs nothing from the repository. --archive=tgz sends it
+      # as one file. Only this step and the check hold the token.
+      - name: Publish
+        id: deployment
+        if: steps.newest.outputs.superseded != 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          BUILT: ${{ needs.website.outputs.commit }}
+        run: |
+          url=$(npx --yes vercel@62.2.0 deploy --prebuilt --archive=tgz --prod --cwd apps/marketing --token "$VERCEL_TOKEN")
+          {
+            echo "### Deployed"
+            echo "$BUILT is a production deployment at $url."
+            echo "Vercel points the project's domains at it, unless the project is rolled back: then they stay on the earlier deployment until Undo Rollback."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "deployed=true" >> "$GITHUB_OUTPUT"
+
+  # Tells search engines what changed, once a publication actually went out, after checking the
+  # public site carries the build's marker. No owner secrets and no checkout.
+  indexnow:
+    name: Notify IndexNow after publication
+    needs: [website, website-publish]
+    if: "!cancelled() && needs.website-publish.outputs.deployed == 'true'"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: marketing-output
+          path: marketing-output
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: marketing-indexnow
+          path: marketing-indexnow
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Verify the public build and notify
+        env:
+          BUILT: ${{ needs.website.outputs.commit }}
+        run: node marketing-indexnow/indexnow.ts marketing-output/static "$BUILT"
+      - name: Report notification job failure
+        if: failure()
+        run: |
+          echo "::error::The website is already deployed. IndexNow notification failed; inspect this job before rerunning."
+          echo "The website is already deployed. IndexNow notification failed; no rollback was performed." >> "$GITHUB_STEP_SUMMARY"

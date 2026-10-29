@@ -1,4 +1,7 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
@@ -20,6 +23,7 @@ interface Job {
   readonly needs?: string | readonly string[];
   readonly uses?: string;
   readonly with?: Record<string, unknown>;
+  readonly steps?: readonly { readonly id?: string; readonly run?: string }[];
   readonly outputs?: Record<string, unknown>;
 }
 
@@ -419,7 +423,7 @@ const passed = (run: Partial<Run>): Run => ({
 
 describe("publishing", { timeout: 120_000 }, () => {
   it("never starts on a pull request event of its own", () => {
-    expect(Object.keys(publish.on)).toEqual(["workflow_call", "push", "workflow_dispatch"]);
+    expect(Object.keys(publish.on)).toEqual(["workflow_call", "workflow_dispatch"]);
   });
 
   it("runs no job of a release's call for a dry run or a pull request event, whatever else happened", () => {
@@ -449,8 +453,7 @@ describe("publishing", { timeout: 120_000 }, () => {
         "feed",
         "store",
         "finalize",
-        "website-publish",
-        "indexnow",
+        "website-refresh",
       ]),
     );
   });
@@ -470,12 +473,116 @@ describe("publishing", { timeout: 120_000 }, () => {
   });
 
   it("publishes the website alone after a push to main that changes it", () => {
-    expect(simulate(publish, {}, "push", false)).toEqual([
+    expect(simulate(read("website.yml"), { deploy: true }, "push", false)).toEqual([
       "website",
       "website-publish",
       "indexnow",
     ]);
-    expect(simulate(publish, {}, "push", true)).toEqual([]);
+    expect(simulate(read("website.yml"), { deploy: true }, "push", true)).toEqual([]);
+  });
+
+  it("refreshes stable independently of feed and Store outcomes, only after finalization", () => {
+    const given = { channel: "stable", tag: "v0.0.22" };
+    for (const feed of RESULTS)
+      for (const store of RESULTS)
+        expect(simulate(publish, given, "workflow_dispatch", false, { feed, store })).toContain(
+          "website-refresh",
+        );
+    for (const finalize of RESULTS.filter((result) => result !== "success"))
+      expect(simulate(publish, given, "workflow_dispatch", false, { finalize })).not.toContain(
+        "website-refresh",
+      );
+    expect(publish.jobs["website-refresh"]?.uses).toBe("./.github/workflows/website.yml");
+    expect(publish.jobs["website-refresh"]?.with).toEqual({ deploy: true });
+  });
+
+  it("keeps independent website manual delivery and refuses PR entry", () => {
+    const website = read("website.yml");
+    expect(Object.keys(website.on)).toEqual(["workflow_call", "push", "workflow_dispatch"]);
+    expect(simulate(website, { deploy: true }, "workflow_dispatch", false)).toEqual([
+      "website",
+      "website-publish",
+      "indexnow",
+    ]);
+    expect(simulate(website, { deploy: true }, "pull_request", false)).toEqual([]);
+  });
+
+  it("validates workflow/docs pushes without deploying, and still deploys website inputs", () => {
+    const workflow = read("website.yml");
+    const steps = workflow.jobs["website"]!.steps!;
+    const extract = steps.find((step) => step.id === "inputs")!.run!;
+    const decide = steps.find((step) => step.id === "delivery")!.run!;
+    const dir = mkdtempSync(join(tmpdir(), "website-delivery-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+    try {
+      git("init", "-q");
+      git("config", "user.name", "Test");
+      git("config", "user.email", "test@example.com");
+      mkdirSync(join(dir, ".github/workflows"), { recursive: true });
+      writeFileSync(
+        join(dir, ".github/workflows/website.yml"),
+        readFileSync(".github/workflows/website.yml"),
+      );
+      git("add", ".");
+      git("commit", "-qm", "base");
+      const before = git("rev-parse", "HEAD");
+      const output = join(dir, "output");
+      execFileSync("bash", ["-e", "-c", extract], {
+        cwd: dir,
+        env: { ...process.env, GITHUB_OUTPUT: output },
+      });
+      const inputs = readFileSync(output, "utf8")
+        .trim()
+        .replace(/^paths=/, "");
+      for (const [path, deploy] of [
+        [".github/workflows/publish.yml", false],
+        ["docs/maintainers/ci.md", false],
+        ["docs/contributing/testing.md", false],
+        ["apps/marketing/src/test.txt", true],
+        ["docs/user/test.md", true],
+        ["apps/desktop/package.json", true],
+        ["pnpm-lock.yaml", true],
+      ] as const) {
+        git("reset", "--hard", before);
+        mkdirSync(dirname(join(dir, path)), { recursive: true });
+        writeFileSync(join(dir, path), "changed");
+        git("add", path);
+        git("commit", "-qm", "change");
+        writeFileSync(output, "");
+        const result = spawnSync("bash", ["-e", "-c", decide], {
+          cwd: dir,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            EVENT: "push",
+            BEFORE: before,
+            AFTER: git("rev-parse", "HEAD"),
+            INPUTS: inputs,
+            REQUESTED: "",
+            GITHUB_OUTPUT: output,
+          },
+        });
+        expect(result.status, result.stderr).toBe(0);
+        expect(readFileSync(output, "utf8"), path).toBe(`deploy=${deploy}\n`);
+      }
+      writeFileSync(output, "");
+      const refused = spawnSync("bash", ["-e", "-c", decide], {
+        cwd: dir,
+        env: {
+          ...process.env,
+          EVENT: "push",
+          BEFORE: "missing",
+          AFTER: "HEAD",
+          INPUTS: inputs,
+          GITHUB_OUTPUT: output,
+        },
+      });
+      expect(refused.status).not.toBe(0);
+      expect(readFileSync(output, "utf8")).toBe("");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("publishes nothing once the run is cancelled, or the package call failed", () => {
