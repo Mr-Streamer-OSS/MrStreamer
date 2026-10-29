@@ -1204,6 +1204,7 @@ it("keeps a selected programme when channel results arrive before it", async () 
 
 it("blocks old palette rows immediately within the input event, and respects IME keys", async () => {
   const p = await page("palette");
+  const oldNames = p.rows().map((row) => row.textContent);
   const old = p.rows()[0]!;
   await act(async () => {
     p.field().dispatchEvent(
@@ -1223,6 +1224,7 @@ it("blocks old palette rows immediately within the input event, and respects IME
   expect(p.watch).not.toHaveBeenCalled();
   expect(p.scope().querySelector('[role="tree"]')?.getAttribute("aria-disabled")).toBe("true");
   expect(p.rows()).not.toHaveLength(0);
+  expect(p.rows().map((row) => row.textContent)).toEqual(oldNames);
   // An empty answer replaces the old rows once the typing delay ends.
   ipc.always("library.channels", []);
   ipc.always("guide.search", []);
