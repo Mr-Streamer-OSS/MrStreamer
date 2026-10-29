@@ -744,6 +744,7 @@ describe("the collections Movies, Series, Home and details show", () => {
     const first = titles.collectionsOf("movie");
     if (!index || !first) throw new Error("No collections");
     expect(first.validAt(start + 4_000)).toBe(true);
+    expect(first.validAt(start + 6_000)).toBe(false);
     expect(first.size("new-week")).toBeGreaterThan(0);
     // Metadata expiry rebuilds a valid view; its public output then stays stable.
     shift = 6_000;
