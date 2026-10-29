@@ -215,12 +215,22 @@ function hlsEngine(
   const hls = new Hls({
     enableWorker: true,
     renderTextTracksNatively: false,
-    // Start live at the lowest declared bitrate, then let ABR use measured throughput. Its
-    // initial bandwidth guess can otherwise spend the startup window on an unsustainable
-    // rendition. This selects within one HLS feed, never another provider quality or a cap.
-    ...(ends === null ? { startLevel: 0 } : { startPosition: 0 }),
+    ...(ends === null ? { autoStartLoad: false } : { startPosition: 0 }),
   });
   const tracks = hlsTracks(hls, video, sound);
+  if (ends === null) {
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      // Levels have already passed hls.js's codec checks. Their order also considers picture
+      // size and codec, so level zero need not have the lowest declared bitrate. Start there
+      // before ABR has throughput evidence, without capping it or choosing another provider feed.
+      hls.startLevel = hls.levels.reduce(
+        (lowest, level, index, levels) =>
+          level.bitrate < levels[lowest]!.bitrate ? index : lowest,
+        0,
+      );
+      hls.startLoad();
+    });
+  }
   const life = lifecycle(
     video,
     () => {
