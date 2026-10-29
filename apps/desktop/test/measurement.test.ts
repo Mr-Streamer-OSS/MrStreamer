@@ -14,7 +14,10 @@ import {
   type Measurement,
 } from "../scripts/measurement.ts";
 
-/** Runs a Node script to its end, as CI would, without holding the test worker meanwhile. */
+/**
+ * Runs a Node script to its end, as CI would, without holding the test worker meanwhile.
+ * Its job summary goes to `summary`, or nowhere, never to the job summary of the run hosting the suite.
+ */
 async function run(args: readonly string[], summary?: string) {
   const child = spawn(process.execPath, args, {
     env: { ...process.env, GITHUB_STEP_SUMMARY: summary },
@@ -198,7 +201,6 @@ it("comparison CLI retains a warning verdict but exits nonzero for invalid instr
     expect(valid.summary).toContain(
       "| time to picture | ms | 100.0 [100.0, 100.0] | 140.0 [140.0, 140.0] |",
     );
-    expect(valid.summary).toContain("1/1 (insufficient; minimum 5)");
     expect(valid.result.stdout).toContain("insufficient samples");
     expect(valid.result.stdout).toContain("1/1 (insufficient; minimum 5)");
     expect(valid.result.stdout).toContain(
@@ -211,9 +213,6 @@ it("comparison CLI retains a warning verdict but exits nonzero for invalid instr
       insufficientSamples: true,
     });
     expect(inconclusive.result.stdout).toContain(
-      "Instrumentation valid; verdict inconclusive; insufficient samples",
-    );
-    expect(inconclusive.summary).toContain(
       "Instrumentation valid; verdict inconclusive; insufficient samples",
     );
     expect(invalid.summary).toBe("");
