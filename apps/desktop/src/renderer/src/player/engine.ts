@@ -2,12 +2,12 @@ import type { AnalyticsPlaybackState, PlaybackDiagnostic } from "@mrstreamer/con
 import { observeMediaPlayback } from "./analytics.ts";
 // Playback engines behind one interface, so the rest of the UI only ever talks to `Engine`. The
 // main process delivers each stream in codecs these engines decode; see src/main/playback.
-import Hls, { type ErrorData } from "hls.js";
+import type { ErrorData } from "hls.js";
 import type { PlaybackFailureSelector } from "@mrstreamer/contracts/ipc";
-import mpegts from "mpegts.js";
+import type mpegts from "mpegts.js";
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
 import { t } from "@mrstreamer/core/i18n";
-import { hlsTracks, type EngineTracks, type SoundChoice } from "./hls-tracks.ts";
+import type { EngineTracks, SoundChoice } from "./hls-tracks.ts";
 
 /** The picture may run this far behind the newest data before it jumps forward. */
 const LIVE_MAX_LATENCY_S = 8;
@@ -109,12 +109,96 @@ export function createEngine(
   sound: SoundChoice,
   ends: number | null = null,
 ): Engine {
-  if (format === "mpegts") return mpegtsEngine(video, url, ends);
-  if (Hls.isSupported()) return hlsEngine(video, url, sound, ends);
-  return nativeEngine(video, url, ends, { kind: "hls", requestId: null });
+  return loadingEngine(format, video, async () => {
+    if (format === "mpegts") {
+      const { default: mpegts } = await import("mpegts.js");
+      return () => mpegtsEngine(mpegts, video, url, ends);
+    }
+    const [{ default: Hls }, { hlsTracks }] = await Promise.all([
+      import("hls.js"),
+      import("./hls-tracks.ts"),
+    ]);
+    return () =>
+      Hls.isSupported()
+        ? hlsEngine(Hls, hlsTracks, video, url, sound, ends)
+        : nativeEngine(video, url, ends, { kind: "hls", requestId: null });
+  });
 }
 
-function mpegtsEngine(video: HTMLVideoElement, url: string, ends: number | null): Engine {
+/** Keeps the public handle usable while optional libraries load. Destroy wins before creation. */
+function loadingEngine(
+  format: StreamFormat,
+  video: HTMLVideoElement,
+  load: () => Promise<() => Engine>,
+): Engine {
+  let current: Engine | null = null;
+  let destroyed = false;
+  const pending: ((engine: Engine) => void)[] = [];
+  const { promise: started, resolve, reject } = Promise.withResolvers<void>();
+  started.catch(() => {});
+  const forward = (action: (engine: Engine) => void): void => {
+    if (destroyed) return;
+    if (current) action(current);
+    else pending.push(action);
+  };
+  const tracks: EngineTracks = {
+    onChange: (listener) => forward((engine) => engine.tracks?.onChange(listener)),
+    setAudio: (id) => forward((engine) => engine.tracks?.setAudio(id)),
+    setSubtitle: (track) => forward((engine) => engine.tracks?.setSubtitle(track)),
+    onLine: (listener) => forward((engine) => engine.tracks?.onLine(listener)),
+    onSubtitleLoaded: (listener) => forward((engine) => engine.tracks?.onSubtitleLoaded(listener)),
+    onSubtitleUnavailable: (listener) =>
+      forward((engine) => engine.tracks?.onSubtitleUnavailable(listener)),
+    onSubtitleAvailable: (listener, language, known) =>
+      forward((engine) => engine.tracks?.onSubtitleAvailable(listener, language, known)),
+  };
+  void load()
+    .then((create) => {
+      if (destroyed) return;
+      current = create();
+      for (const action of pending.splice(0)) {
+        if (destroyed) break;
+        action(current);
+      }
+      void current.started.then(resolve, reject);
+    })
+    .catch(() =>
+      reject({
+        kind: "unsupported",
+        detail: t("The stream could not be decoded."),
+      } satisfies EngineError),
+    );
+  return {
+    get name() {
+      return current?.name ?? (format === "mpegts" ? "mpegts.js" : "hls.js");
+    },
+    started,
+    onPlayback: (listener) => forward((engine) => engine.onPlayback?.(listener)),
+    onFailure: (listener) => forward((engine) => engine.onFailure(listener)),
+    onEnded: (listener) => forward((engine) => engine.onEnded(listener)),
+    played: () => current?.played() ?? 0,
+    onWaiting: (listener) => forward((engine) => engine.onWaiting(listener)),
+    onPrivateData: (listener) => forward((engine) => engine.onPrivateData(listener)),
+    get tracks() {
+      return current ? current.tracks : format === "hls" ? tracks : null;
+    },
+    info: () => current?.info() ?? elementInfo(video),
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      pending.length = 0;
+      reject({ kind: "network", detail: "Stopped." } satisfies EngineError);
+      current?.destroy();
+    },
+  };
+}
+
+function mpegtsEngine(
+  mpegts: typeof import("mpegts.js").default,
+  video: HTMLVideoElement,
+  url: string,
+  ends: number | null,
+): Engine {
   if (!mpegts.getFeatureList().mseLivePlayback) {
     return failedEngine("mpegts.js", video, {
       kind: "unsupported",
@@ -147,7 +231,7 @@ function mpegtsEngine(video: HTMLVideoElement, url: string, ends: number | null)
     ends,
   );
   player.on(mpegts.Events.ERROR, (type: unknown, detail: unknown, info: unknown) => {
-    life.fail(mpegtsError(type, detail, info));
+    life.fail(mpegtsError(mpegts, type, detail, info));
   });
   // A recording's end plays out what arrived, and the element says when it is over.
   player.on(mpegts.Events.LOADING_COMPLETE, () => {
@@ -188,7 +272,12 @@ function mpegtsEngine(video: HTMLVideoElement, url: string, ends: number | null)
   };
 }
 
-function mpegtsError(type: unknown, detail: unknown, info: unknown): EngineError {
+function mpegtsError(
+  mpegts: typeof import("mpegts.js").default,
+  type: unknown,
+  detail: unknown,
+  info: unknown,
+): EngineError {
   const message =
     info && typeof info === "object" && "msg" in info && typeof info.msg === "string"
       ? info.msg
@@ -202,6 +291,8 @@ function mpegtsError(type: unknown, detail: unknown, info: unknown): EngineError
 }
 
 function hlsEngine(
+  Hls: typeof import("hls.js").default,
+  hlsTracks: typeof import("./hls-tracks.ts").hlsTracks,
   video: HTMLVideoElement,
   url: string,
   sound: SoundChoice,
@@ -331,7 +422,7 @@ function hlsEngine(
   );
   hls.on(Hls.Events.ERROR, (_event, data) => {
     if (tracks.subtitleError(data) || !data.fatal) return;
-    life.fail(hlsError(data, url));
+    life.fail(hlsError(Hls, data, url));
   });
   hls.loadSource(url);
   hls.attachMedia(video);
@@ -356,7 +447,11 @@ function hlsEngine(
 }
 
 /** Maps an HLS failure before teardown discards its loader and fragment context. */
-function hlsError(data: ErrorData, source: string): EngineError {
+function hlsError(
+  Hls: typeof import("hls.js").default,
+  data: ErrorData,
+  source: string,
+): EngineError {
   // hls.js also groups malformed/empty playlist content under NETWORK_ERROR.
   const parsing = [
     Hls.ErrorDetails.MANIFEST_PARSING_ERROR,

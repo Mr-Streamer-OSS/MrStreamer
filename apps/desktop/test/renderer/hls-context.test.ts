@@ -74,6 +74,7 @@ it.each([
 ])("keeps invalid playlist content on media recovery: %s", async (details) => {
   const video = document.createElement("video");
   engine = createEngine("hls", video, SOURCE, { audio: null, audioLanguage: null });
+  await vi.dynamicImportSettled();
   // hls.js reports these successful-response parser failures under NETWORK_ERROR.
   events.error(error(details, { url: SOURCE, response: { url: SOURCE, code: 200 } }));
   await expect(engine.started).rejects.toMatchObject({
@@ -160,6 +161,7 @@ it.each(["parser", "native", "watchdog"] as const)(
   async (source) => {
     const video = document.createElement("video");
     engine = createEngine("hls", video, SOURCE, { audio: null, audioLanguage: null });
+    await vi.dynamicImportSettled();
     if (source === "parser")
       events.error(
         error(Hls.ErrorDetails.FRAG_PARSING_ERROR, {

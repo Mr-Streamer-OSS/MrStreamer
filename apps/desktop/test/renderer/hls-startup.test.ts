@@ -64,11 +64,12 @@ function level(bitrate: number, group?: string, videoCodec = "avc1.42e01e") {
     audioCodec: "mp4a.40.2",
   });
 }
-function open() {
+async function open() {
   engine = createEngine("hls", document.createElement("video"), "http://localhost/master.m3u8", {
     audio: null,
     audioLanguage: "es",
   });
+  await vi.dynamicImportSettled();
   fixture.parsed();
   return engine;
 }
@@ -76,7 +77,7 @@ const settle = async () => {
   for (let i = 0; i < 15; i++) await Promise.resolve();
 };
 
-it("keeps the initial audio group and the requested sound through ABR and a later choice", () => {
+it("keeps the initial audio group and the requested sound through ABR and a later choice", async () => {
   const low = level(128, "english-only");
   const high = level(512, "multilingual");
   fixture.levels = [low, high];
@@ -85,7 +86,7 @@ it("keeps the initial audio group and the requested sound through ABR and a late
     { name: "English", lang: "en" },
     { name: "Español", lang: "es" },
   ]);
-  const playing = open();
+  const playing = await open();
   expect(fixture.starts).toEqual([high]);
   expect(streams.latest().audioTrack).toBe(1);
   let audioId: number | undefined;
@@ -101,7 +102,7 @@ it("keeps the initial audio group and the requested sound through ABR and a late
 it("starts with the lowest bitrate when no audio group changes", async () => {
   const low = level(128);
   fixture.levels = [low, level(512)];
-  open();
+  await open();
   await settle();
   expect(fixture.starts).toEqual([low]);
 });
@@ -119,7 +120,7 @@ it.each([false, true])(
       low.supportedResult = result;
       fixture.levels.splice(fixture.levels.indexOf(low), 1);
     });
-    const playing = open();
+    const playing = await open();
     expect(fixture.starts).toEqual([]);
     if (stop) playing.destroy();
     check.resolve({ supported: false, decodingInfoResults: [], configurations: [] });
@@ -134,7 +135,7 @@ it("leaves startup to hls.js when a capability query rejects", async () => {
   fixture.levels = [low, high];
   const check = Promise.withResolvers<NonNullable<Level["supportedResult"]>>();
   low.supportedPromise = check.promise;
-  open();
+  await open();
   check.reject(new Error("Capability service unavailable"));
   await settle();
   expect(fixture.starts).toEqual([high]);
@@ -147,7 +148,7 @@ it("uses default startup when capability service stays pending", async () => {
     const high = level(512);
     fixture.levels = [low, high];
     low.supportedPromise = new Promise(() => {});
-    open();
+    await open();
     expect(fixture.starts).toEqual([]);
     await vi.advanceTimersByTimeAsync(1000);
     expect(fixture.starts).toEqual([high]);
@@ -163,19 +164,19 @@ it("validates an unvisited lower decoder profile before overriding startup", asy
   const high = level(512, undefined, "hvc1.1.6.L93.B0");
   fixture.levels = [low, high];
   fixture.unsupported.add(low);
-  open();
+  await open();
   await settle();
   expect(fixture.starts).toEqual([high]);
 });
 
-it("preserves every merged audio group containing the requested language", () => {
+it("preserves every merged audio group containing the requested language", async () => {
   const low = level(128, "english");
   const high = level(512, "english");
   high.addGroupId("audio", "spanish");
   fixture.levels = [low, high];
   fixture.groups.set("english", [{ name: "English", lang: "en" }]);
   fixture.groups.set("spanish", [{ name: "Español", lang: "es" }]);
-  open();
+  await open();
   expect(fixture.starts).toEqual([high]);
   expect(streams.latest().audioTrack).toBe(1);
 });

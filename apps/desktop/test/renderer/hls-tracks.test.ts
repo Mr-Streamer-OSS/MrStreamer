@@ -58,6 +58,7 @@ async function open(id: string) {
     format: "hls",
   });
   await wait();
+  await vi.dynamicImportSettled();
   return streams.latest();
 }
 
@@ -86,6 +87,7 @@ async function reopened(id: string) {
     format: "hls",
   });
   await wait();
+  await vi.dynamicImportSettled();
   return streams.latest();
 }
 

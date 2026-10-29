@@ -34,6 +34,7 @@ async function open(id = "one") {
   });
   player.play(channel(id));
   await wait();
+  await vi.dynamicImportSettled();
   const stream = streams.latest();
   stream.variant({
     subtitles: [
@@ -235,6 +236,7 @@ it("waits for picture before discovery, permits a six-second reload, and retries
   });
   player.play(channel("slow"));
   await wait();
+  await vi.dynamicImportSettled();
   const stream = streams.latest();
   stream.variant({ subtitles: [{ name: "English", lang: "en" }] });
   await vi.advanceTimersByTimeAsync(6000);

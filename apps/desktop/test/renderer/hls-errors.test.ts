@@ -28,6 +28,7 @@ it.each(["subtitle-playlist", "subtitle-segment"] as const)(
       audio: null,
       audioLanguage: null,
     });
+    await vi.dynamicImportSettled();
     const failures: EngineError[] = [];
     engine.onFailure((error) => failures.push(error));
     engine.tracks!.onSubtitleAvailable(() => {});
@@ -51,6 +52,7 @@ it("still rejects genuine audio failures before the first picture", async () => 
     audio: null,
     audioLanguage: null,
   });
+  await vi.dynamicImportSettled();
   streams.latest().error("audio");
   await expect(engine.started).rejects.toEqual({
     kind: "network",
