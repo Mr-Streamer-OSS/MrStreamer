@@ -40,7 +40,7 @@ import { createServer, type Server } from "node:http";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
-import { isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
@@ -1457,10 +1457,11 @@ export async function runCommand(args: string[]) {
     !isAbsolute(root) ||
     !under ||
     under.startsWith("..") ||
-    isAbsolute(under)
+    isAbsolute(under) ||
+    (fleet && dirname(root).toLowerCase() !== runner.temp.toLowerCase())
   )
     throw new Error(
-      `${usage}\nThe root must be a new folder under ${fleet ? "the owned task temp" : "RUNNER_TEMP"}.`,
+      `${usage}\nThe root must be ${fleet ? "a new direct child of the owned task temp" : "a new folder under RUNNER_TEMP"}.`,
     );
   const raw: unknown = JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8"));
   const repository = fleet ? values.repository : process.env["GITHUB_REPOSITORY"];
