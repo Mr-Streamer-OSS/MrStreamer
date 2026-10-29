@@ -8,7 +8,15 @@ import { PlaybackCoordination } from "../src/main/services/playback-coordination
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture } from "./fake-provider.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig, userAgent } from "./support.ts";
+import {
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testConfig,
+  userAgent,
+} from "./support.ts";
 
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
@@ -57,11 +65,7 @@ async function connected() {
   const gates = fileResponses(provider.url);
   const dir = await tempDir();
   const app = await start(dir);
-  const saved = await app.subscriptions.add({
-    server: provider.url,
-    username: "demo",
-    password: "demo",
-  });
+  const saved = await app.subscriptions.add(demoLogin(provider));
   await app.titles.refresh(saved.id);
   const movie = provider.titles.movies.find((title) =>
     title.name.startsWith("TEST | Long subtitles"),

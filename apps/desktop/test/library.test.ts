@@ -8,6 +8,7 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { QUALITY_STREAM_IDS } from "./fake-provider.ts";
 import {
   collect,
+  demoLogin,
   fakeProvider,
   promised,
   runtimeFor,
@@ -39,12 +40,6 @@ async function started(dataDir: string, fetchImpl?: typeof fetch) {
   };
 }
 
-const login = (provider: { readonly url: string }) => ({
-  server: provider.url,
-  username: "demo",
-  password: "demo",
-});
-
 /**
  * A library on a connected fake provider, and the statuses it reports. `own` names a channel or
  * category of the connected subscription by the provider's id, and the library's calls about one
@@ -54,7 +49,7 @@ async function connectedLibrary(channels = 300, adultChannels = false) {
   const provider = await fakeProvider({ channels, adultChannels });
   const dataDir = await tempDir();
   const { library: all, settings, subscriptions, updates } = await started(dataDir);
-  const { id: subscriptionId } = await subscriptions.add(login(provider));
+  const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
   const own = (id: string) => ({ subscriptionId, id });
   const ofOwn = (library: typeof all) => ({
     ...library,
@@ -104,7 +99,7 @@ describe("live library", () => {
       if (action === "get_live_streams") return Response.json(channels);
       return fetch(input, init);
     });
-    const { id: subscriptionId } = await services.subscriptions.add(login(provider));
+    const { id: subscriptionId } = await services.subscriptions.add(demoLogin(provider));
     const category = { subscriptionId, id: "001" };
     const ids = async (library: typeof services.library) =>
       (await library.channels({ category })).map((channel) => channel.id);
@@ -271,7 +266,7 @@ describe("live library", () => {
     first.catch(() => {});
     await held.arrived;
     await subscriptions.remove(subscriptionId);
-    const replaced = await subscriptions.add(login(other));
+    const replaced = await subscriptions.add(demoLogin(other));
     held.release();
 
     await expect(first).rejects.toMatchObject({ error: { kind: "unexpected" } });
@@ -296,7 +291,7 @@ describe("live library", () => {
     const late = library.refresh();
     late.catch(() => {});
     await held.arrived;
-    await subscriptions.add(login(provider));
+    await subscriptions.add(demoLogin(provider));
     held.release();
 
     await expect(late).rejects.toMatchObject({ error: { kind: "unexpected" } });
@@ -482,8 +477,8 @@ describe("the channels of several subscriptions", () => {
     ];
     const dataDir = await tempDir();
     const services = await started(dataDir);
-    const a = (await services.subscriptions.add(login(first))).id;
-    const b = (await services.subscriptions.add(login(second))).id;
+    const a = (await services.subscriptions.add(demoLogin(first))).id;
+    const b = (await services.subscriptions.add(demoLogin(second))).id;
     const statusOf = async (subscriptionId: string) =>
       (await services.library.status()).find((each) => each.subscriptionId === subscriptionId);
     return { ...services, dataDir, first, second, a, b, statusOf };
@@ -604,8 +599,8 @@ describe("the channels of several subscriptions", () => {
     few.serveChannels((all) =>
       all.map((each, at) => ({ ...each, name: at < 3 ? `Ravo ${at}` : `Other ${at}` })),
     );
-    const a = (await subscriptions.add(login(many))).id;
-    const b = (await subscriptions.add(login(few))).id;
+    const a = (await subscriptions.add(demoLogin(many))).id;
+    const b = (await subscriptions.add(demoLogin(few))).id;
     await library.refresh(a);
     await library.refresh(b);
 
@@ -646,11 +641,11 @@ describe("the channels of several subscriptions", () => {
     const other = await fakeProvider({ channels: 200 });
     const dataDir = await tempDir();
     const { library, subscriptions, updates } = await started(dataDir);
-    const a = (await subscriptions.add(login(provider))).id;
+    const a = (await subscriptions.add(demoLogin(provider))).id;
     const first = await library.channels({});
     const held = other.hold("channels");
 
-    const b = (await subscriptions.add(login(other))).id;
+    const b = (await subscriptions.add(demoLogin(other))).id;
     // Asked for while the new one's list is still on its way: no wait, and nothing missing.
     expect(await library.channels({})).toEqual(first);
     await held.arrived;
@@ -666,7 +661,7 @@ describe("the channels of several subscriptions", () => {
     const down = await fakeProvider({ channels: 200 });
     const dataDir = await tempDir();
     const { library, subscriptions, updates } = await started(dataDir);
-    const b = (await subscriptions.add(login(down))).id;
+    const b = (await subscriptions.add(demoLogin(down))).id;
     down.failCatalogue(500);
 
     // Alone, it has nothing to show but why.
@@ -674,7 +669,7 @@ describe("the channels of several subscriptions", () => {
       error: { kind: "provider-error", status: 500 },
     });
 
-    const a = (await subscriptions.add(login(provider))).id;
+    const a = (await subscriptions.add(demoLogin(provider))).id;
     await library.refresh(a);
 
     const channels = await library.channels({});
@@ -710,9 +705,9 @@ it("browses exact ordered scope with OR/AND facets, uncertain facts and main-enf
       ]);
     return fetch(input, init);
   });
-  const first = await services.subscriptions.add(login(provider));
+  const first = await services.subscriptions.add(demoLogin(provider));
   const otherProvider = await fakeProvider({ channels: 60 });
-  const second = await services.subscriptions.add(login(otherProvider));
+  const second = await services.subscriptions.add(demoLogin(otherProvider));
   await services.library.refresh(first.id);
   await services.library.refresh(second.id);
   const scope = { kind: "all" as const };

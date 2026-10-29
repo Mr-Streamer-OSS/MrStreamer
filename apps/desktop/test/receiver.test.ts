@@ -13,6 +13,7 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture, type FakeProviderOptions } from "./fake-provider.ts";
 import { withIndexEntries, withIndexEntryAt } from "./matroska-index.ts";
 import {
+  demoLogin,
   fakeProvider,
   holdableFetch,
   promised,
@@ -59,7 +60,7 @@ async function receiver(
     ),
   );
   const subscriptions = await promised(runtime, Subscriptions);
-  await subscriptions.add({ server: provider.url, username: "demo", password: "demo" });
+  await subscriptions.add(demoLogin(provider));
   const [source] = await subscriptions.sources();
   const own = (id: string) => ({ subscriptionId: source?.id ?? "no-subscription", id });
   const playback = await promised(runtime, Playback);

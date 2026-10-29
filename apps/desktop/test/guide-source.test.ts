@@ -43,6 +43,7 @@ import { GUIDE_KEY, startGuideHost, type GuideHost } from "./fake-guide-host.ts"
 import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import type { FakeProvider } from "./fake-provider.ts";
 import {
+  demoLogin,
   fakeProvider,
   guideIndexWorker,
   guideSearchWorker,
@@ -85,12 +86,6 @@ const named = (id: string, name: string) =>
   `<channel id="${id}"><display-name>${name}</display-name></channel>`;
 const tv = (...elements: string[]) =>
   `<?xml version="1.0" encoding="utf-8"?><tv>${elements.join("")}</tv>`;
-
-const login = (provider: { readonly url: string }) => ({
-  server: provider.url,
-  username: "demo",
-  password: "demo",
-});
 
 /** Why `promise` failed, as the window is told. */
 const failureOf = (promise: Promise<unknown>) =>
@@ -226,7 +221,7 @@ async function connected() {
   );
   const dataDir = await tempDir();
   const services = await app(dataDir);
-  const { id } = await services.run(services.subscriptions.add(login(provider)));
+  const { id } = await services.run(services.subscriptions.add(demoLogin(provider)));
   const channel = (channelId: string): OwnedId => ({ subscriptionId: id, id: channelId });
   await services.run(services.guide.refresh(id));
   const catalogue = await services.run(services.library.guideChannels(id));
@@ -542,8 +537,8 @@ describe("one source for every subscription", () => {
     );
     const dataDir = await tempDir();
     const { run, guide, roster, subscriptions, status, sources, add } = await app(dataDir);
-    const a = (await run(subscriptions.add(login(first)))).id;
-    const b = (await run(subscriptions.add(login(second)))).id;
+    const a = (await run(subscriptions.add(demoLogin(first)))).id;
+    const b = (await run(subscriptions.add(demoLogin(second)))).id;
     const channel = (subscriptionId: string) => ({ subscriptionId, id: "1000" });
     await run(guide.refresh(a));
     await run(guide.refresh(b));
@@ -836,8 +831,8 @@ describe("work that finishes after what it was for changed", () => {
     host.serve("/guide.xml", tv(named("spare.test", "Spare"), slot("spare.test", "Elsewhere")));
     const dataDir = await tempDir();
     const { run, guide, roster, subscriptions, sources, add } = await app(dataDir);
-    const a = (await run(subscriptions.add(login(first)))).id;
-    const b = (await run(subscriptions.add(login(second)))).id;
+    const a = (await run(subscriptions.add(demoLogin(first)))).id;
+    const b = (await run(subscriptions.add(demoLogin(second)))).id;
     const folder = join(dataDir, "subscriptions", b);
     const source = await add(host.address());
     const page = (id: string) =>
@@ -876,7 +871,7 @@ describe("a subscription removed while its guide takes its time", () => {
     const provider = await fakeProvider();
     const dataDir = await tempDir();
     const before = await app(dataDir);
-    const { id } = await before.run(before.subscriptions.add(login(provider)));
+    const { id } = await before.run(before.subscriptions.add(demoLogin(provider)));
     await before.run(before.guide.refresh(id));
     await before.close();
     // What 0.0.12 kept: the document itself, named by a guide.json without an index.
@@ -908,7 +903,7 @@ describe("a subscription removed while its guide takes its time", () => {
     const provider = await fakeProvider();
     const dataDir = await tempDir();
     const { run, guide, roster, subscriptions } = await app(dataDir);
-    const { id } = await run(subscriptions.add(login(provider)));
+    const { id } = await run(subscriptions.add(demoLogin(provider)));
     const held = provider.hold("guide");
     const before = failureOf(run(guide.refresh(id)));
     await held.arrived;
@@ -1287,7 +1282,7 @@ describe("an address a release before gave one subscription", () => {
       await connected();
     const second = await fakeProvider({ channels: 200 });
     second.serveGuide(tv(slot("nothing.test", "Nothing")));
-    const other = (await run(subscriptions.add(login(second)))).id;
+    const other = (await run(subscriptions.add(demoLogin(second)))).id;
     await run(guide.refresh(other));
     await close();
     const otherFolder = join(dataDir, "subscriptions", other);

@@ -6,7 +6,15 @@ import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { OnlineSubtitles } from "../src/main/services/online-subtitles.ts";
-import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import {
+  collect,
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testConfig,
+} from "./support.ts";
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
 /** What the window decodes: the movie's FLAC sound plays as it is, with nothing to convert. */
@@ -59,11 +67,7 @@ async function started(listed = 1) {
   const titles = await promised(runtime, OnDemand);
   const playback = await promised(runtime, Playback);
   const subtitles = await promised(runtime, OnlineSubtitles);
-  const saved = await subscriptions.add({
-    server: provider.url,
-    username: "demo",
-    password: "demo",
-  });
+  const saved = await subscriptions.add(demoLogin(provider));
   await titles.refresh(saved.id);
   await subtitles.configure(
     { enabled: true, service: "subdl", languages: ["en"] },

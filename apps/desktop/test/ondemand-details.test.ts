@@ -15,7 +15,7 @@ import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { DetailCache } from "../src/main/platform/detail-cache.ts";
 import { startFakeTmdb, type FakeTmdb } from "./fake-tmdb.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
@@ -50,7 +50,7 @@ async function app({ metadata = false } = {}) {
     };
   };
   const first = await start();
-  const login = { server: provider.url, username: "demo", password: "demo" };
+  const login = demoLogin(provider);
   const { id: subscriptionId } = await first.subscriptions.add(login);
   const own = (id: string) => ({ subscriptionId, id });
   const series = own("80000");
@@ -596,11 +596,7 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
   it("keeps current details separate for colliding provider ids through restart and removal", async () => {
     const a = await app();
     const second = await fakeProvider({ titles: 5, second: true });
-    const { id: other } = await a.subscriptions.add({
-      server: second.url,
-      username: "demo",
-      password: "demo",
-    });
+    const { id: other } = await a.subscriptions.add(demoLogin(second));
     const theirs = { subscriptionId: other, id: a.series.id };
     expect(episodeIds(await a.service.details("series", a.series))).toHaveLength(5);
     expect(episodeIds(await a.service.details("series", theirs))).toHaveLength(2);

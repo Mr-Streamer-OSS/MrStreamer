@@ -15,7 +15,7 @@ import { Reminders, type Notifier } from "../src/main/services/reminders.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import type { FakeProvider } from "./fake-provider.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 // Each guide download is indexed in a worker thread started from source.
 vi.setConfig({ testTimeout: 20_000 });
@@ -83,12 +83,6 @@ function fakeNotifier(file: string, supported = true) {
   };
 }
 
-const login = (provider: { readonly url: string }) => ({
-  server: provider.url,
-  username: "demo",
-  password: "demo",
-});
-
 /** A channel of the provider with a guide id, by its stream id and guide id. */
 function guidedChannel(provider: FakeProvider) {
   const channel = provider.catalogue.channels.find(
@@ -120,7 +114,7 @@ async function reminding(options: { adultChannels?: boolean; supported?: boolean
       ),
     );
     const subscriptions = await promised(runtime, Subscriptions);
-    owner ??= (await subscriptions.add(login(provider))).id;
+    owner ??= (await subscriptions.add(demoLogin(provider))).id;
     const subscriptionId = owner;
     const reminders = await promised(runtime, Reminders);
     const guide = await promised(runtime, Guide);

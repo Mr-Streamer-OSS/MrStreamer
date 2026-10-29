@@ -17,7 +17,15 @@ import { Settings } from "../src/main/services/preferences.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import { fixture, type FakeProviderOptions } from "./fake-provider.ts";
-import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
+import {
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testSecrets,
+  userAgent,
+} from "./support.ts";
 
 const LINUX: readonly Codec[] = ["h264", "aac", "mp3", "opus"];
 const MINUTE = 60 * 1000;
@@ -46,11 +54,7 @@ async function connected(options: FakeProviderOptions = {}) {
     ),
   );
   const subscriptions = await promised(runtime, Subscriptions);
-  const { id: subscriptionId } = await subscriptions.add({
-    server: provider.url,
-    username: "demo",
-    password: "demo",
-  });
+  const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
   return {
     provider,
     library: await promised(runtime, Library),

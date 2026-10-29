@@ -6,7 +6,15 @@ import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { startFakeTmdb, type FakeTmdb } from "./fake-tmdb.ts";
-import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import {
+  collect,
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testConfig,
+} from "./support.ts";
 
 let tmdb: FakeTmdb | null = null;
 afterEach(async () => {
@@ -22,12 +30,8 @@ describe("related titles from available subscriptions", { timeout: 20_000 }, () 
     const subscriptions = await promised(runtime, Subscriptions);
     const service = await promised(runtime, OnDemand);
     const roster = await promised(runtime, Roster);
-    const one = await subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
-    const two = await subscriptions.add({ server: other.url, username: "demo", password: "demo" });
+    const one = await subscriptions.add(demoLogin(provider));
+    const two = await subscriptions.add(demoLogin(other));
     const seed = { kind: "movie" as const, version: { subscriptionId: one.id, id: "90000" } };
     expect(await service.recommendations([])).toEqual([]);
     expect(await service.recommendations([seed])).toEqual([]);
@@ -202,11 +206,7 @@ http://127.0.0.1/neighbour.mp4
         password: "",
       });
       await subscriptions.mapPlaylist(own.id, playlistGroupId("Films"), "movie");
-      const other = await subscriptions.add({
-        server: provider.url,
-        username: "demo",
-        password: "demo",
-      });
+      const other = await subscriptions.add(demoLogin(provider));
       await roster.refreshPlaylist(own.id);
       await service.refresh(other.id);
       await vi.waitFor(
@@ -277,11 +277,7 @@ http://127.0.0.1/neighbour.mp4
     const runtime = runtimeFor(mainLayer(testConfig(await tempDir())));
     const subscriptions = await promised(runtime, Subscriptions);
     const service = await promised(runtime, OnDemand);
-    const own = await subscriptions.add({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
+    const own = await subscriptions.add(demoLogin(provider));
     const rows = provider.titles.movies;
     const set = (match: number) =>
       provider.serveTitles(() => ({

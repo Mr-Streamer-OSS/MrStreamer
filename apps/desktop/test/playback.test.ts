@@ -11,6 +11,7 @@ import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import { fixture, type FakeProvider } from "./fake-provider.ts";
 import {
   collect,
+  demoLogin,
   fakeProvider,
   holdableFetch,
   promised,
@@ -54,11 +55,7 @@ async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boo
     ),
   );
   const subscriptions = await promised(runtime, Subscriptions);
-  const { id: subscriptionId } = await subscriptions.add({
-    server: provider.url,
-    username: "demo",
-    password: "demo",
-  });
+  const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
   const service = await promised(runtime, Playback);
   const tracksChanged = await collect(runtime, service.tracksChanged);
   const playback = {
@@ -575,14 +572,9 @@ describe("one stream across several subscriptions", () => {
       ),
     );
     const subscriptions = await promised(runtime, Subscriptions);
-    const login = (provider: FakeProvider) => ({
-      server: provider.url,
-      username: "demo",
-      password: "demo",
-    });
     const [id = ""] = liveChannels(second);
-    const a = { subscriptionId: (await subscriptions.add(login(first))).id, id };
-    const b = { subscriptionId: (await subscriptions.add(login(second))).id, id };
+    const a = { subscriptionId: (await subscriptions.add(demoLogin(first))).id, id };
+    const b = { subscriptionId: (await subscriptions.add(demoLogin(second))).id, id };
     return { first, second, subscriptions, playback: await promised(runtime, Playback), a, b };
   }
 
@@ -731,7 +723,7 @@ describe("one stream across several subscriptions", () => {
     };
     const { id: subscriptionId } = await (
       await start(testSecrets.open)
-    ).subscriptions.add({ server: provider.url, username: "demo", password: "demo" });
+    ).subscriptions.add(demoLogin(provider));
 
     const locked = await start(() => {
       throw new Error("The keychain opens nothing.");

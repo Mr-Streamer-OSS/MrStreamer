@@ -18,7 +18,15 @@ import { PlaybackCoordination } from "../src/main/services/playback-coordination
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { startFakeAirplayHelper } from "./fake-airplay-helper.ts";
 import { startFakeCastReceiver } from "./fake-cast-receiver.ts";
-import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import {
+  collect,
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testConfig,
+} from "./support.ts";
 
 // CI points this at the bundled build, with ffprobe beside it; locally the ones on PATH do.
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
@@ -101,7 +109,7 @@ async function casting(
     }),
   );
   const subscriptions = await promised(runtime, Subscriptions);
-  await subscriptions.add({ server: provider.url, username: "demo", password: "demo" });
+  await subscriptions.add(demoLogin(provider));
   const [source] = await subscriptions.sources();
   const playback = await promised(runtime, Playback);
   const coordination = await promised(runtime, PlaybackCoordination);
@@ -469,11 +477,7 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
   it("saves a receiver's progress under the account it began with, and ends it when that subscription goes", async () => {
     const { tv, output, subscriptions, connect, play, state, saved, own } = await casting();
     const other = await fakeProvider({ maxConnections: 1 });
-    const next = await subscriptions.add({
-      server: other.url,
-      username: "demo",
-      password: "demo",
-    });
+    const next = await subscriptions.add(demoLogin(other));
     await connect();
     const { media } = await play(10);
     tv.status({ playerState: "PLAYING", currentTime: 80 });
@@ -551,11 +555,7 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
     // The subscription goes, and another is saved, while the receiver still plays the first
     // one's movie.
     await subscriptions.remove(own("").subscriptionId);
-    const next = await subscriptions.add({
-      server: other.url,
-      username: "demo",
-      password: "demo",
-    });
+    const next = await subscriptions.add(demoLogin(other));
     // A pause saves how far it got: that is the first subscription's, which is gone.
     tv.status({ playerState: "PAUSED", currentTime: 120 });
     await eventually(async () =>

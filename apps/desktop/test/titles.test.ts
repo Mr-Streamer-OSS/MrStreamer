@@ -19,6 +19,7 @@ import { readMp4Start } from "../src/renderer/src/player/mp4.ts";
 import { fixture, type FakeProviderOptions } from "./fake-provider.ts";
 import {
   collect,
+  demoLogin,
   fakeProvider,
   holdableFetch,
   promised,
@@ -61,7 +62,7 @@ async function titles(
     ),
   );
   const subscriptions = await promised(runtime, Subscriptions);
-  await subscriptions.add({ server: provider.url, username: "demo", password: "demo" });
+  await subscriptions.add(demoLogin(provider));
   const [source] = await subscriptions.sources();
   const playback = await promised(runtime, Playback);
   /**
