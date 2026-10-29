@@ -299,8 +299,10 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   const room = () =>
     new Promise<void>((done) => {
       if (!holding() && ahead() < AHEAD_S.stop) return done();
+      // Only a full buffer needs to drain to the lower threshold before reading again.
+      const resumeAt = ahead() >= AHEAD_S.stop ? AHEAD_S.resume : AHEAD_S.stop;
       const check = () => {
-        if (abort.signal.aborted || (!holding() && ahead() < AHEAD_S.resume)) {
+        if (abort.signal.aborted || (!holding() && ahead() < resumeAt)) {
           video.removeEventListener("timeupdate", check);
           video.removeEventListener("seeking", check);
           video.removeEventListener("play", check);

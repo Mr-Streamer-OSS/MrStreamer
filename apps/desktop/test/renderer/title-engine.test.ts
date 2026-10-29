@@ -315,7 +315,7 @@ it("retains delivery facts on a rejection after playback started", async () => {
   );
 });
 
-it("holds title reads on a paused picture, resumes, and cancels while held", async () => {
+it.each([10, 50, 60])("holds paused reads at %ss, resumes, and cancels while held", async (end) => {
   vi.stubGlobal("HTMLMediaElement", { HAVE_CURRENT_DATA: 2 });
   let paused = true;
   let reads = 0;
@@ -344,7 +344,7 @@ it("holds title reads on a paused picture, resumes, and cancels while held", asy
     paused: { get: () => paused },
     seeking: { value: false },
     readyState: { value: 2 },
-    buffered: { get: () => ({ length: 1, start: () => 0, end: () => 10 }) },
+    buffered: { get: () => ({ length: 1, start: () => 0, end: () => end }) },
   });
   engine = titleEngine(video, { ...run, paused: true });
   await vi.advanceTimersByTimeAsync(0);
@@ -352,6 +352,16 @@ it("holds title reads on a paused picture, resumes, and cancels while held", asy
   paused = false;
   video.dispatchEvent(new Event("play"));
   await vi.advanceTimersByTimeAsync(0);
+  if (end === 60) {
+    expect(reads).toBe(0);
+    video.currentTime = 10;
+    video.dispatchEvent(new Event("timeupdate"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads).toBe(0);
+    video.currentTime = 21;
+    video.dispatchEvent(new Event("timeupdate"));
+    await vi.advanceTimersByTimeAsync(0);
+  }
   expect(reads).toBe(1);
   engine.destroy();
   await vi.advanceTimersByTimeAsync(0);
