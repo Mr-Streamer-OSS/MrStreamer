@@ -322,9 +322,8 @@ export async function ownedRun<D>(
         which.kind === "candidate"
           ? pathToFileURL(join(desktop, "out/renderer/")).href
           : pathToFileURL(join(dirname(which.executable), "resources/app.asar/")).href;
-      // "single" reads the renderer once; "builds" waits for an earlier build's window to load.
-      const deadline = style !== "single" ? Date.now() + 30_000 : 0;
-      let url = style !== "single" ? "" : await page.evaluate<string>("location.href");
+      const deadline = Date.now() + 30_000;
+      let url = "";
       while (Date.now() < deadline && !url.startsWith(renderer)) {
         url = await page.evaluate<string>("location.href").catch(() => "");
         if (!url.startsWith(renderer)) await delay(150, undefined, { signal: abort.signal });
