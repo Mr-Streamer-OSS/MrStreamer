@@ -18,7 +18,15 @@ import { startFakeTmdb } from "../fake-tmdb.ts";
 import { connect, key, login, waitFor, type Page } from "./app.ts";
 
 const variant = process.argv[2] ?? "h264-10bit";
-if (!["h264-10bit", "hevc-12bit", "h264-rejected-copy", "h264-later-rejection"].includes(variant))
+if (
+  ![
+    "h264-10bit",
+    "hevc-12bit",
+    "h264-rejected-copy",
+    "h264-later-rejection",
+    "paused-buffer",
+  ].includes(variant)
+)
   throw new Error("Unknown fixture");
 const executable = await electronExecutable();
 const desktop = resolve("apps/desktop");
@@ -28,7 +36,11 @@ const provider = await startFakeProvider({ channels: 60, titles: 30, live: true 
 const tmdb = await startFakeTmdb();
 const movie = provider.titles.movies.find((each) => each.name.includes("Two sound tracks"))!;
 const clip = Buffer.from(
-  fixture(`title-${variant.startsWith("h264-") ? "h264-10bit" : variant}.mkv`),
+  fixture(
+    variant === "paused-buffer"
+      ? "title-long-subs.mkv"
+      : `title-${variant.startsWith("h264-") ? "h264-10bit" : variant}.mkv`,
+  ),
 );
 if (variant === "h264-rejected-copy") {
   // Invalid AVC configuration profile, valid High 10 SPS/pictures. Copy preserves that invalid
@@ -125,8 +137,31 @@ try {
     `window.__compatibility = { checks: [], errors: [] }; const original = MediaSource.isTypeSupported.bind(MediaSource); MediaSource.isTypeSupported = (type) => { const supported = original(type); window.__compatibility.checks.push({ type, supported }); return supported; }; document.addEventListener('error', e => { if (e.target instanceof HTMLVideoElement) window.__compatibility.errors.push({ code: e.target.error?.code, message: e.target.error?.message, time: e.target.currentTime }); }, true);`,
   );
   await live.evaluate(
-    `const add = MediaSource.prototype.addSourceBuffer; MediaSource.prototype.addSourceBuffer = function(type) { const buffer = add.call(this, type); window.__compatibility.buffer = buffer; return buffer; };`,
+    `window.__compatibility.appended = 0; const add = MediaSource.prototype.addSourceBuffer; MediaSource.prototype.addSourceBuffer = function(type) { const buffer = add.call(this, type); window.__compatibility.buffer = buffer; const append = buffer.appendBuffer.bind(buffer); buffer.appendBuffer = data => { window.__compatibility.appended += data.byteLength; return append(data); }; return buffer; };`,
   );
+  await live.evaluate(`
+    window.__compatibility.pendingReads = 0;
+    const fetchTitle = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await fetchTitle(...args);
+      if (!response.url) return response;
+      const url = new URL(response.url);
+      if (url.pathname.startsWith('/title/') && !url.searchParams.has('only') && response.body) {
+        const getReader = response.body.getReader.bind(response.body);
+        response.body.getReader = (...options) => {
+          const reader = getReader(...options);
+          const read = reader.read.bind(reader);
+          reader.read = async (...options) => {
+            window.__compatibility.pendingReads++;
+            try { return await read(...options); }
+            finally { window.__compatibility.pendingReads--; }
+          };
+          return reader;
+        };
+      }
+      return response;
+    };
+  `);
   await login(live, provider);
   const click = async (description: string, expression: string) => {
     await waitFor(() => live.evaluate<boolean>(`!!(${expression})`), 30_000);
@@ -166,6 +201,8 @@ try {
       frames: number;
       paused: boolean;
       same: boolean;
+      readyState: number;
+      seeking: boolean;
     }>(
       `(() => { const v = document.querySelector('video');
     let energy = 0;
@@ -191,7 +228,7 @@ try {
         energy = samples.reduce((sum, value) => sum + value * value, 0);
       }
     }
-    return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, audio: v?.webkitAudioDecodedByteCount ?? 0, audioEnergy: energy, frames: v?.getVideoPlaybackQuality().totalVideoFrames ?? 0, paused: v?.paused ?? true, same: !window.__compatibility.node || window.__compatibility.node === v }; })()`,
+    return { readyState: v?.readyState ?? 0, seeking: v?.seeking ?? false, time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, audio: v?.webkitAudioDecodedByteCount ?? 0, audioEnergy: energy, frames: v?.getVideoPlaybackQuality().totalVideoFrames ?? 0, paused: v?.paused ?? true, same: !window.__compatibility.node || window.__compatibility.node === v }; })()`,
     );
   const moving = () =>
     waitFor(async () => {
@@ -223,6 +260,13 @@ try {
       ),
     30_000,
   );
+  if (variant === "paused-buffer")
+    await live.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: 0,
+      downloadThroughput: 2048,
+      uploadThroughput: -1,
+    });
   await click(
     "Play provider file",
     `[...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent.trim() === 'Play')`,
@@ -268,22 +312,133 @@ try {
 
   await key(live, " ", 32);
   await waitFor(async () => (await video()).paused);
+  if (variant === "paused-buffer") {
+    const sample = async () => ({
+      video: await video(),
+      runs: deliveries.length,
+      appended: await live.evaluate<number>("window.__compatibility.appended"),
+      bufferedEnd: await live.evaluate<number>("document.querySelector('video').buffered.end(0)"),
+      providerBytes: provider.fileBytes(),
+      requests: provider.fileRequests(),
+      active: provider.activeStreams(),
+    });
+    const attempts: unknown[] = [];
+    observations["pausedBufferAttempts"] = attempts;
+    const { before, after, picture } = await (async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        // Observe the reader and SourceBuffer directly: a throttled chunk may take over 8 seconds.
+        await waitFor(() =>
+          live.evaluate<boolean>(`(() => {
+        const v = document.querySelector('video');
+        return v.paused && v.readyState >= 2 && !v.seeking &&
+          window.__compatibility.pendingReads === 0 && !window.__compatibility.buffer.updating;
+      })()`),
+        );
+        const before = await sample();
+        const picture = await live.evaluate<{ losses: number; ready: boolean }>(`
+        new Promise(resolve => {
+          const v = document.querySelector('video');
+          let losses = 0;
+          const check = () => { if (v.readyState < 2 || v.seeking) losses++; };
+          const events = ['seeking', 'waiting', 'emptied', 'loadeddata', 'seeked'];
+          events.forEach(event => v.addEventListener(event, check));
+          const timer = setInterval(check, 20);
+          check();
+          setTimeout(() => {
+            check();
+            clearInterval(timer);
+            events.forEach(event => v.removeEventListener(event, check));
+            resolve({ losses, ready: v.readyState >= 2 && !v.seeking });
+          }, 5000);
+        })
+      `);
+        const after = await sample();
+        attempts.push({ before, after, picture });
+        if (picture.losses === 0) return { before, after, picture };
+        await waitFor(async () => {
+          const recovered = await video();
+          return recovered.paused && recovered.readyState >= 2 && !recovered.seeking;
+        });
+      }
+      throw new Error("No uninterrupted held-picture interval after three attempts");
+    })();
+    observations["pausedBuffer"] = {
+      before,
+      after,
+      appendedWhileHeld: after.appended - before.appended,
+      throughputBytesPerSecond: 2048,
+      picture,
+      attempts,
+      heldMs: 5000,
+    };
+    await shot("paused-buffer");
+    if (after.appended !== before.appended)
+      throw new Error("Title kept appending while paused with its picture available");
+    if (after.runs !== before.runs) throw new Error("Paused interval replaced the held run");
+    const runs = after.runs;
+    await key(live, " ", 32);
+    await waitFor(async () => {
+      const resumed = await video();
+      return (
+        !resumed.paused &&
+        resumed.time > after.video.time + 0.25 &&
+        resumed.frames > after.video.frames &&
+        (await live.evaluate<number>("window.__compatibility.appended")) > after.appended &&
+        deliveries.length === runs
+      );
+    });
+    observations["heldRunResumed"] = {
+      ...(await video()),
+      appended: await live.evaluate<number>("window.__compatibility.appended"),
+      runs: deliveries.length,
+    };
+    await key(live, " ", 32);
+    await waitFor(async () => (await video()).paused);
+    await key(live, "ArrowLeft", 37);
+    await waitFor(async () => {
+      const sought = await video();
+      return (
+        sought.paused &&
+        sought.time < 0.1 &&
+        sought.width > 0 &&
+        sought.readyState >= 2 &&
+        !sought.seeking
+      );
+    });
+    observations["bufferedBackwardSeek"] = await video();
+    if (deliveries.length !== runs) throw new Error("Buffered seek or Play replaced the held run");
+
+    await live.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: 0,
+      downloadThroughput: -1,
+      uploadThroughput: -1,
+    });
+  }
   await key(live, "ArrowRight", 39);
   await waitFor(async () => {
     const v = await video();
-    return v.paused && v.time > 10 && v.width > 0;
+    return (
+      v.paused &&
+      (variant === "paused-buffer" ? v.time >= 10 : v.time > 10) &&
+      v.width > 0 &&
+      v.readyState >= 2 &&
+      !v.seeking
+    );
   });
   observations["pausedSeek"] = await video();
-  await click("Sound", `document.querySelector('[aria-label=Sound]')`);
-  await click(
-    "Other audio track while paused",
-    `[...document.querySelectorAll('[role=dialog] button[aria-pressed=false], [role=dialog] [role=menuitemradio][aria-checked=false]')][0]`,
-  );
-  await waitFor(async () => {
-    const v = await video();
-    return v.paused && v.time > 10 && v.width > 0;
-  });
-  observations["pausedOtherTrack"] = await video();
+  if (variant !== "paused-buffer") {
+    await click("Sound", `document.querySelector('[aria-label=Sound]')`);
+    await click(
+      "Other audio track while paused",
+      `[...document.querySelectorAll('[role=dialog] button[aria-pressed=false], [role=dialog] [role=menuitemradio][aria-checked=false]')][0]`,
+    );
+    await waitFor(async () => {
+      const v = await video();
+      return v.paused && v.time > 10 && v.width > 0;
+    });
+    observations["pausedOtherTrack"] = await video();
+  }
   await key(live, "p", 80);
   await waitFor(() => live.evaluate<boolean>("!!document.querySelector('[data-mini]')"));
   if (!(await video()).same) throw new Error("Mini player replaced media node");

@@ -31,7 +31,7 @@ import {
   subtitlesDue,
 } from "./subtitles.ts";
 
-/** Stop reading once this much is buffered ahead, and read again below the second value. */
+/** Stop at the first limit; a wait entered full drains below the second before reading again. */
 const AHEAD_S = { stop: 60, resume: 40 } as const;
 /** No picture within this long counts as a failed start. */
 const START_TIMEOUT_MS = 30_000;
@@ -291,20 +291,31 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     return 0;
   }
 
-  /** Resolves once the element has room to buffer more. */
+  /** A paused seek still needs data until its requested picture can be decoded. */
+  const holding = () =>
+    video.paused && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !video.seeking;
+
+  /** Resolves once playback needs more data, or the run is cancelled. */
   const room = () =>
     new Promise<void>((done) => {
-      if (ahead() < AHEAD_S.stop) return done();
+      if (!holding() && (video.paused || ahead() < AHEAD_S.stop)) return done();
+      // Only a full buffer needs to drain to the lower threshold before reading again.
+      const resumeAt = ahead() >= AHEAD_S.stop ? AHEAD_S.resume : AHEAD_S.stop;
       const check = () => {
-        if (abort.signal.aborted || ahead() < AHEAD_S.resume) {
+        if (abort.signal.aborted || (!holding() && (video.paused || ahead() < resumeAt))) {
+          clearInterval(rechecking);
           video.removeEventListener("timeupdate", check);
           video.removeEventListener("seeking", check);
+          video.removeEventListener("play", check);
           abort.signal.removeEventListener("abort", check);
           done();
         }
       };
+      // Eviction can lose a paused picture without a playback event to wake this wait.
+      const rechecking = setInterval(check, 1000);
       video.addEventListener("timeupdate", check);
       video.addEventListener("seeking", check);
+      video.addEventListener("play", check);
       abort.signal.addEventListener("abort", check, { once: true });
     });
 
