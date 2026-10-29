@@ -386,7 +386,7 @@ describe("the collections Movies, Series, Home and details show", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("keeps the prior complete view through sliced A-B-A language rebuilds of unchanged lists", async () => {
+  it("keeps the prior complete view through sliced A-B-A language rebuilds while superseded lists come and go", async () => {
     const prefs = await import("../src/media-preferences.ts");
     prefs.updateMediaPreferences("titleLanguage", "en");
     subscribe("a", "b");
@@ -395,6 +395,8 @@ describe("the collections Movies, Series, Home and details show", () => {
     const oldMovie = titles.collectionsOf("movie");
     const oldSeries = titles.collectionsOf("series");
     expect(before).not.toBeNull();
+    const obsolete: Array<IndexedCatalogue | null> = [];
+    const stop = titles.onTitleLists(() => obsolete.push(indexed()));
     subscribe("a", "b", "retired");
     prefs.updateMediaPreferences("titleLanguage", "nl");
     expect(indexed()).toBe(before);
@@ -411,6 +413,16 @@ describe("the collections Movies, Series, Home and details show", () => {
       () => indexed() !== before && titles.titlesWorkedOut(),
       "replacement English index",
     );
+    stop();
+    expect(
+      obsolete.every(
+        (index) =>
+          !index ||
+          (["movie", "series"] as const).every(
+            (kind) => !holds(kindOf(index, kind).titles, "retired"),
+          ),
+      ),
+    ).toBe(true);
     expect(bare).toBe(0);
     expect(views.length).toBeGreaterThan(0);
     const permitted = {
@@ -528,37 +540,30 @@ describe("the collections Movies, Series, Home and details show", () => {
   };
 
   it("publishes refreshed lists and late metadata while keeping both prior views usable", async () => {
-    subscribe("a");
-    await until(() => titles.titlesWorkedOut(), "initial collections");
+    const fresh = {
+      ...catalogue,
+      movies: [...catalogue.movies, ...browseFixture("movie").catalogue.movies],
+      series: [...catalogue.series, ...browseFixture("series").catalogue.series],
+    };
+    expect(titles.collectionsOf("movie")).toBeNull();
+    list([["a", fresh]]);
+    const initial = await watch(() => titles.titlesWorkedOut(), "initial collections");
+    expect(initial.bare).toBe(0);
+    expect(initial.views.length).toBeGreaterThan(0);
+    for (const view of initial.views) {
+      for (const kind of ["movie", "series"] as const)
+        expect(madeOf(view[kind], kind, view.index)).toBe(true);
+    }
     const before = indexed();
     const prior = [titles.collectionsOf("movie"), titles.collectionsOf("series")];
-    const snapshot = prior.map((made) => made?.list("all").map(ownedKey));
+    const snapshot = JSON.stringify(prior.map((made) => made?.list("all")));
     list([
-      ["a", again()],
-      ["b", catalogue],
+      ["a", { ...fresh }],
+      ["b", fresh],
     ]);
     learn(1);
     learn(2);
     expect([titles.collectionsOf("movie"), titles.collectionsOf("series")]).toEqual(prior);
-    await new Promise((done) => setTimeout(done, 0));
-    // Distinct from same-turn bursts: this answer supersedes work already running.
-    edges.known = (_kind, id) => ({
-      ...tmdbOf(0)("movie", "2"),
-      language: "en",
-      popularity: id === "90000" ? 99 : 1,
-    });
-    edges.services = [
-      {
-        id: 8,
-        name: "Netflix",
-        ids: new Set(
-          [...catalogue.movies, ...catalogue.series].flatMap((row) =>
-            row.tmdbId ? [row.tmdbId] : [],
-          ),
-        ),
-      },
-    ];
-    edges.notify?.({ content: true });
     const { views, bare } = await watch(
       () => indexed() !== before && titles.titlesWorkedOut(),
       "refresh",
@@ -571,23 +576,33 @@ describe("the collections Movies, Series, Home and details show", () => {
         expect(view[kind] && listsFrom(view[kind], "b")).toBe(true);
       }
     }
+    // Metadata-only work must publish the late answer without another catalogue refresh.
+    const sameIndex = indexed();
+    learn(3);
+    await new Promise((done) => setTimeout(done, 0));
+    edges.known = (_kind, id) => ({
+      ...tmdbOf(0)("movie", "2"),
+      language: "en",
+      popularity: id === "2" ? 99 : id === "1" ? 98 : 1,
+    });
+    edges.services = [{ id: 8, name: "Netflix", ids: new Set(["1"]) }];
+    edges.notify?.({ content: true });
     await until(
       () =>
         (["movie", "series"] as const).every(
-          (kind) => titles.collectionsOf(kind)?.services().length === 1,
+          (kind) =>
+            titles.collectionsOf(kind)?.list("popular")[0]?.tmdbId === "2" &&
+            titles.collectionsOf(kind)?.services().length === 1,
         ),
       "latest metadata",
     );
+    expect(indexed()).toBe(sameIndex);
     for (const kind of ["movie", "series"] as const) {
       const made = titles.collectionsOf(kind);
       if (!made) throw new Error("No collections");
       expect(made.services()).toMatchObject([{ id: 8, name: "Netflix" }]);
-      expect(made.list("service:8").length).toBeGreaterThan(0);
-      expect(
-        made
-          .list("service:8")
-          .every((title) => title.tmdbId && edges.services[0]?.ids.has(title.tmdbId)),
-      ).toBe(true);
+      expect(made.list("service:8").map(ownedKey)).toEqual(["a:en-hd"]);
+      expect(made.list("popular").slice(0, 2).map(ownedKey)).toEqual(["a:en-4k", "a:en-hd"]);
       expect(made.list("popular").length).toBeGreaterThan(0);
       expect(made.list("popular").every((title) => title.originalLanguage === "en")).toBe(true);
       expect(made.list("popular")[0]?.genres).toEqual(["Drama", "Crime"]);
@@ -596,10 +611,12 @@ describe("the collections Movies, Series, Home and details show", () => {
       expect(made.list(`like:${ownedKey(seed)}`).length).toBeGreaterThan(0);
     }
     // Previously published collections must never be mutated by later work.
-    expect(prior.map((made) => made?.list("all").map(ownedKey))).toEqual(snapshot);
+    expect(JSON.stringify(prior.map((made) => made?.list("all")))).toBe(snapshot);
     const stable = [titles.collectionsOf("movie"), titles.collectionsOf("series")].map((made) =>
       made?.list("all").map(ownedKey),
     );
+    const notices: unknown[] = [];
+    const stop = titles.onTitleLists(() => notices.push(titles.titleLists()));
     edges.members = edges.members.map((member) => ({
       ...member,
       titles: {
@@ -610,7 +627,12 @@ describe("the collections Movies, Series, Home and details show", () => {
       },
     }));
     for (const listener of edges.roster) listener();
-    for (let task = 0; task < 100; task++) await new Promise((done) => setTimeout(done, 1));
+    try {
+      for (let task = 0; task < 100; task++) await new Promise((done) => setTimeout(done, 1));
+      expect(notices).toEqual([]);
+    } finally {
+      stop();
+    }
     expect(
       [titles.collectionsOf("movie"), titles.collectionsOf("series")].map((made) =>
         made?.list("all").map(ownedKey),
@@ -723,7 +745,7 @@ describe("the collections Movies, Series, Home and details show", () => {
     if (!index || !first) throw new Error("No collections");
     expect(first.validAt(start + 4_000)).toBe(true);
     expect(first.size("new-week")).toBeGreaterThan(0);
-    // The metadata they were made with expires; once made again, they hold.
+    // Metadata expiry rebuilds a valid view; its public output then stays stable.
     shift = 6_000;
     expect(titles.collectionsOf("movie")?.list("all")).toEqual(first.list("all"));
     await until(
@@ -976,11 +998,16 @@ describe("the collections Movies, Series, Home and details show", () => {
       expect(edges.opened).toEqual([]);
       await settled(() => titles.titlesWorkedOut(), "refresh");
       const leaving = edges.presses.get("tile:en-4k")!;
+      expect(leaving).not.toBe(filteredTap);
       await draw(React.createElement("div"));
       await React.act(async () => leaving());
       expect(edges.opened).toEqual([]);
       await draw(React.createElement(TitlesHome, { kind }));
       const removed = edges.presses.get("tile:en-4k")!;
+      expect(removed).not.toBe(leaving);
+      await React.act(async () => removed());
+      expect(edges.opened.at(-1)).toMatchObject({ title: { id: "en-4k" }, asked: true });
+      edges.opened = [];
       await React.act(async () => list([]));
       await React.act(async () => removed());
       expect(edges.opened).toEqual([]);
