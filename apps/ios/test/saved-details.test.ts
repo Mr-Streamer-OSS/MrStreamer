@@ -330,6 +330,13 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/** A signed-in launch with a series whose details TMDB can enrich. */
+async function withSeries() {
+  const app = await launch({ withTmdb: true });
+  await added(app);
+  return { app, series: await first(app, "series") };
+}
+
 describe("saved title language", () => {
   it("keeps an unlisted device language until changed, then cold-reads before indexing", async () => {
     const resolved = Intl.DateTimeFormat.prototype.resolvedOptions;
@@ -635,9 +642,7 @@ describe("details saved on the phone", () => {
   );
 
   it("ask TMDB again at the next open after a season or about failed", async () => {
-    const app = await launch({ withTmdb: true });
-    await added(app);
-    const series = await first(app, "series");
+    const { app, series } = await withSeries();
     tmdb.refuse(true);
     // The provider's facts show when TMDB doesn't answer.
     expect(await app.detailsOf(series)).toMatchObject({
@@ -727,9 +732,7 @@ describe("details while they are asked again", () => {
   });
 
   it("show the provider's facts while TMDB is slow, then TMDB's", async () => {
-    const app = await launch({ withTmdb: true });
-    await added(app);
-    const series = await first(app, "series");
+    const { app, series } = await withSeries();
     tmdb.holdAbout(true);
     const shown: (string | null)[] = [];
     const reading = app.detailsOf(series, (details) => shown.push(details.plot));
@@ -743,9 +746,7 @@ describe("details while they are asked again", () => {
   it("show a season with what TMDB said before while TMDB is asked again", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const start = Date.now();
-    const app = await launch({ withTmdb: true });
-    await added(app);
-    const series = await first(app, "series");
+    const { app, series } = await withSeries();
     const [season] = seriesOf(await opened(app, series)).seasons;
     if (!season) throw new Error("No season");
     const told = await app.episodesOf(series, season);

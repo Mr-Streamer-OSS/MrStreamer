@@ -459,16 +459,6 @@ describe("Search over the tabs", () => {
     ]);
   });
 
-  it("opens again on the query it closed with", async () => {
-    await open();
-    await type("bbc");
-    await press("text-Cancel");
-    unmount();
-    await open();
-    expect(field().value).toBe("bbc");
-    expect(text()).toContain("BBC One");
-  });
-
   it("says what still loads, not that nothing has the name", async () => {
     await subscriptions([
       member("a", "Northwind", {}, duneOnly()),
@@ -1098,7 +1088,7 @@ describe("Every movie and series that matches", () => {
     expect(scenario.did).toEqual([]);
   });
 
-  it("starts again at 20 of each for new text", async () => {
+  async function searchOcean() {
     await subscriptions([
       member(
         "a",
@@ -1109,6 +1099,10 @@ describe("Every movie and series that matches", () => {
     ]);
     await open();
     await type("ocean");
+  }
+
+  it("starts again at 20 of each for new text", async () => {
+    await searchOcean();
     await press(moreOf("movie", 20));
     await press(moreOf("movie", 20));
     await press(moreOf("series", 20));
@@ -1127,16 +1121,7 @@ describe("Every movie and series that matches", () => {
   });
 
   it("opens again on the text it closed with, at 20 of each", async () => {
-    await subscriptions([
-      member(
-        "a",
-        "Northwind",
-        {},
-        lists(titled("movie", "m", "Ocean", 125), titled("series", "s", "Ocean", 125)),
-      ),
-    ]);
-    await open();
-    await type("ocean");
+    await searchOcean();
     await press(moreOf("movie", 20));
     await press(moreOf("series", 20));
     await press(moreOf("series", 20));

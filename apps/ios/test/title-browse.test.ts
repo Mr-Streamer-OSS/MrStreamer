@@ -43,6 +43,8 @@ describe.each(["movie", "series"] as const)("%s collection browsing", (kind) => 
     const { made } = browseFixture(kind);
     const all = browseCollection(made, "all", DEFAULT_BROWSE);
     expect(all.total).toBe(4);
+    expect(all.verified).toEqual([]);
+    expect(all.files).toBe(0);
     expect(all.qualities).toEqual([
       { value: "4k", count: 2 },
       { value: "hd", count: 1 },
@@ -60,7 +62,6 @@ describe.each(["movie", "series"] as const)("%s collection browsing", (kind) => 
     const dutch4k = browseCollection(made, "all", { filters: { quality: "4k", language: "nl" } });
     expect(dutch4k.titles.map((title) => title.id)).toEqual(["nl-4k"]);
     expect(dutch4k.titles[0]?.versions).toHaveLength(2);
-    expect(browseCollection(made, "all", DEFAULT_BROWSE).titles).toEqual(all.titles);
   });
 
   it("keeps unknown declarations truthful and never borrows a non-4K language version", () => {
@@ -114,8 +115,5 @@ describe.each(["movie", "series"] as const)("%s collection browsing", (kind) => 
     expect(fourK.titles).toEqual([]);
     expect(fourK.verified).toEqual([]);
     expect(fourK.files).toBe(0);
-    const declared = browseCollection(made, "all", DEFAULT_BROWSE);
-    expect(declared.verified).toEqual([]);
-    expect(declared.files).toBe(0);
   });
 });

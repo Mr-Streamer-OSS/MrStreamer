@@ -8,7 +8,7 @@ import { byIds, indexCatalogue, type IndexedCatalogue } from "@mrstreamer/core/o
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // A film's details while the providers listing it change: a version picked from a provider that
 // is removed meanwhile gives way to one still listed. And its download: the button queues the
@@ -540,8 +540,8 @@ const copy: Download = {
 };
 
 describe("a film's version picked", () => {
+  beforeEach(() => providers("a", "b"));
   it("plays again when the film is opened again, and after a relaunch", async () => {
-    providers("a", "b");
     const page = mount();
     page.openVersions()("Cabin");
     unmount();
@@ -553,7 +553,6 @@ describe("a film's version picked", () => {
   });
 
   it("goes with Automatic, which plays the film's own choice from then on", () => {
-    providers("a", "b");
     const page = mount();
     page.openVersions()("Cabin");
     expect(page.play()).toBe("b");
@@ -564,7 +563,6 @@ describe("a film's version picked", () => {
   });
 
   it("gives way to a version asked for, as a 4K tile asks, which doesn't replace it", () => {
-    providers("a", "b");
     const page = mount();
     page.openVersions()("Cabin");
     unmount();
@@ -581,7 +579,6 @@ describe("a film's version picked", () => {
   });
 
   it("goes with the film's own choice on Automatic, over the version asked for", () => {
-    providers("a", "b");
     const page = mount({ version: "b:1", asked: true });
     expect(page.play()).toBe("b");
     page.openVersions()("Automatic");
@@ -589,7 +586,6 @@ describe("a film's version picked", () => {
   });
 
   it("reads picks in a shape it doesn't know as none, keeping the rest of what was saved", async () => {
-    providers("a", "b");
     const saved = { subscription: null, recent: [], region: "NL", titleVersions: { b: 7 } };
     writeFileSync(join(native.root, "documents", "state.json"), JSON.stringify(saved));
     const again = await relaunch();
@@ -598,7 +594,6 @@ describe("a film's version picked", () => {
   });
 
   it("plays the pick over another version a list names without asking for it", () => {
-    providers("a", "b");
     expect(mount({ version: "b:1" }).play()).toBe("b");
     unmount();
     const page = mount();
@@ -832,17 +827,7 @@ describe("a film's facts", () => {
     expect(page.has("Try again")).toBe(false);
     expect(page.has("placeholder-lines")).toBe(true);
 
-    await React.act(async () =>
-      answer({
-        kind: "movie",
-        plot: "A film that answered the second time.",
-        directors: [],
-        cast: [],
-        genres: [],
-        duration: null,
-        backdropUrl: null,
-      }),
-    );
+    await React.act(async () => answer(factsOf("A film that answered the second time.")));
     expect(page.text()).toContain("A film that answered the second time.");
     expect(page.has("placeholder-lines")).toBe(false);
   });
