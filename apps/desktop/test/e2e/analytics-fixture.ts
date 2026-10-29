@@ -44,7 +44,7 @@ export function analyticsFixture(
     options: {
       dataDir?: string;
       properties?: Partial<BuildProperties>;
-      transport?: (Omit<CaptureTransport, "kind"> & { kind?: CaptureTransport["kind"] }) | null;
+      transport?: Omit<CaptureTransport, "kind"> | null;
       store?: ReturnType<typeof analyticsStore>;
       monotonic?: () => number;
     } = {},
@@ -67,7 +67,7 @@ export function analyticsFixture(
       origin: profileOrigin(dataDir),
       properties: build,
       store,
-      transport: transport ? { kind: "local", ...transport } : null,
+      transport: transport ? { ...transport, kind: "local" } : null,
       ...(options.monotonic ? { monotonic: options.monotonic } : {}),
     });
     owners.push(owner);
