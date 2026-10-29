@@ -578,6 +578,7 @@ describe("the collections Movies, Series, Home and details show", () => {
     expect(initial.views).toHaveLength(1);
     const before = indexed();
     if (!before) throw new Error("No initial lists");
+    expect(initial.views[0]?.index).toBe(before);
     for (const kind of ["movie", "series"] as const) {
       const made = initial.views[0]?.[kind];
       if (!made) throw new Error("No initial collections");
