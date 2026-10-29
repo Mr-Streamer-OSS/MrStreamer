@@ -1432,6 +1432,13 @@ it("keeps a selected movie's owned version when channels arrive and opens that v
   expect(p.watch).not.toHaveBeenCalled();
 });
 
+/** Live TV on its own channels, which no other subscription's copies group with. */
+async function live(channels: readonly LiveChannel[] = CHANNELS, list?: ChannelList) {
+  const p = await page("guide", "", false, channels, list);
+  ipc.always("library.searchGroups", []);
+  return p;
+}
+/** Flushes React until `check` passes; the fake clock moves 10 ms between tries. */
 const ready = (check: () => void) =>
   vi.waitFor(
     async () => {
@@ -1440,6 +1447,7 @@ const ready = (check: () => void) =>
     },
     { interval: 10 },
   );
+/** Types a search and answers it with the programme matches, keyed by provider channel id. */
 async function searched(
   p: Awaited<ReturnType<typeof page>>,
   text: string,
@@ -1464,8 +1472,7 @@ const laterMatch = (title: string): ListingMatch => ({
 
 describe("searching the list Live TV shows", () => {
   it("shows All channels and names a removed category after refresh, then clears the message on another list", async () => {
-    const p = await page("guide", "", false, CHANNELS);
-    ipc.always("library.searchGroups", []);
+    const p = await live();
     await act(async () => {
       p.client.setQueryData(queries.categories().queryKey, [
         {
@@ -1501,8 +1508,7 @@ describe("searching the list Live TV shows", () => {
   });
 
   it("shows names before programmes, then combines them in list order", async () => {
-    const p = await page("guide", "", false, CHANNELS);
-    ipc.always("library.searchGroups", []);
+    const p = await live();
     const answer = ipc.hold("guide.searchList");
 
     await p.type("News");
@@ -1546,8 +1552,7 @@ describe("searching the list Live TV shows", () => {
   });
 
   it("finds names without a guide, by the provider's name too and whatever the accents", async () => {
-    const p = await page("guide", "", false, CHANNELS);
-    ipc.always("library.searchGroups", []);
+    const p = await live();
     const answer = ipc.hold("guide.searchList");
     await p.type("comedy");
     await ready(() =>
@@ -1562,8 +1567,7 @@ describe("searching the list Live TV shows", () => {
   });
 
   it("goes to the field with /, hands the keys to the channels found, and clears before it leaves", async () => {
-    const p = await page("guide", "", false, CHANNELS);
-    ipc.always("library.searchGroups", []);
+    const p = await live();
 
     await p.press("/", window);
     expect(document.activeElement).toBe(p.field());
@@ -1592,8 +1596,7 @@ describe("searching the list Live TV shows", () => {
   });
 
   it("clears and leaves the field on Escape there, and watches the first channel found on Enter twice", async () => {
-    const p = await page("guide", "", false, CHANNELS);
-    ipc.always("library.searchGroups", []);
+    const p = await live();
     await p.press("/", window);
     await searched(p, "itv", ["ITV1"]);
 
@@ -1613,8 +1616,7 @@ describe("searching the list Live TV shows", () => {
 
   it("searches the favourites alone, and every channel for the same once asked", async () => {
     const favourites = FAVOURITES.map(({ id }) => CHANNELS.find((channel) => channel.id === id)!);
-    const p = await page("guide", "", false, favourites, { kind: "favourites" });
-    ipc.always("library.searchGroups", []);
+    const p = await live(favourites, { kind: "favourites" });
     p.client.setQueryData(browseChannels(null).queryKey, browseResult(CHANNELS));
     expect(p.field().placeholder).toBe("Search Favourites");
 
@@ -1650,8 +1652,7 @@ describe("searching the list Live TV shows", () => {
   });
 
   it("opens the rest of the day on the later programme found, with its description", async () => {
-    const p = await page("guide", "", false, CHANNELS);
-    ipc.always("library.searchGroups", []);
+    const p = await live();
     const start = Date.now() + 2 * HOUR;
     const at = (from: number, title: string, description: string): Programme => ({
       start: from,
@@ -1681,7 +1682,6 @@ describe("searching the list Live TV shows", () => {
         until: expect.any(Number),
       },
     ]);
-    expect(p.row("ITV1")?.textContent).toContain("The day's news.");
     expect(p.row("ITV1")?.textContent).not.toContain("Not what was searched for.");
     // A programme still to come opens with Remind me under its description.
     expect(p.row("ITV1")?.textContent).toContain("The day's news.Remind me");
@@ -1692,12 +1692,11 @@ describe("searching the list Live TV shows", () => {
 });
 
 it("finds joined channel spellings in Live without changing list order or programme scope", async () => {
-  const p = await page("guide", "", false, [
+  const p = await live([
     channel("1", "O’Brien"),
     channel("2", "Spider-Man"),
     channel("3", "Spider Man"),
   ]);
-  ipc.always("library.searchGroups", []);
   await searched(p, "spiderman", ["Spider-Man"]);
   expect(p.row("Spider-Man")?.querySelector("mark")?.textContent).toBe("Spider-Man");
   await searched(p, "obrien", ["O’Brien"]);
