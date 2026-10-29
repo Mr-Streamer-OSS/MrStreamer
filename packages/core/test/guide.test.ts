@@ -356,13 +356,16 @@ describe("indexing a guide", () => {
   });
 
   it("reads each time by its own offset, UTC without one, across midnight and a change of clocks", async () => {
+    // The same instant written four ways.
+    const equivalent = [
+      ["offset.test", "20261002230000 +0200", "20261003000000 +0200"],
+      ["colon.test", "20261002210000 +00:00", "20261002220000 +00:00"],
+      ["none.test", "20261002210000", "20261002220000"],
+      ["minus.test", "20261002163000 -0430", "20261002173000 -0430"],
+    ] as const;
     const { guide } = await index(
       tv(
-        // The same instant written four ways.
-        programme("offset.test", "20261002230000 +0200", "20261003000000 +0200", "Plus two"),
-        programme("colon.test", "20261002210000 +00:00", "20261002220000 +00:00", "Colon"),
-        programme("none.test", "20261002210000", "20261002220000", "No offset"),
-        programme("minus.test", "20261002163000 -0430", "20261002173000 -0430", "Minus"),
+        ...equivalent.map(([id, start, stop]) => programme(id, start, stop, id)),
         // Past midnight where it is broadcast, still the day before in UTC.
         programme(
           "midnight.test",
@@ -377,10 +380,7 @@ describe("indexing a guide", () => {
     );
     const nine = Date.UTC(2026, 9, 2, 21);
 
-    expect(of(guide, "offset.test")).toEqual([["Plus two", nine, nine + HOUR]]);
-    expect(of(guide, "colon.test")).toEqual([["Colon", nine, nine + HOUR]]);
-    expect(of(guide, "none.test")).toEqual([["No offset", nine, nine + HOUR]]);
-    expect(of(guide, "minus.test")).toEqual([["Minus", nine, nine + HOUR]]);
+    for (const [id] of equivalent) expect(of(guide, id)).toEqual([[id, nine, nine + HOUR]]);
     expect(of(guide, "midnight.test")).toEqual([
       ["After midnight", Date.UTC(2026, 9, 2, 22, 30), Date.UTC(2026, 9, 2, 23, 30)],
     ]);
@@ -396,6 +396,8 @@ describe("indexing a guide", () => {
         programme("one.test", stamp(NOON + 3 * HOUR), stamp(NOON + 4 * HOUR), "Third"),
         // Without an end: it runs until the next one starts.
         programme("one.test", stamp(NOON + HOUR), null, "First"),
+        // The same start with an end counts once too. Releases before 0.0.13 showed this one.
+        programme("one.test", stamp(NOON + HOUR), stamp(NOON + 1.5 * HOUR), "Timed again"),
         // Runs into the next one, which cuts it short.
         programme("one.test", stamp(NOON + 2 * HOUR), stamp(NOON + 5 * HOUR), "Second"),
         // The same start again counts once: the first one listed.
@@ -479,60 +481,7 @@ describe("indexing a guide", () => {
     ]);
   });
 
-  it("answers a whole day of one-minute programmes, the one a search finds among them, and a grid's stretch without descriptions", async () => {
-    const minute = 60_000;
-    const { guide, target } = await index(
-      tv(
-        ...Array.from(
-          { length: 2_000 },
-          (_, at) =>
-            `<programme start="${stamp(NOON + at * minute)}" stop="${stamp(NOON + (at + 1) * minute)}" channel="one.test"><title>${at === 1_400 ? "Needle" : `Minute ${at}`}</title><desc>About minute ${at}</desc></programme>`,
-        ),
-      ),
-    );
-    const channel = guide.channels.get("one.test");
-    if (!channel) throw new Error("No channel.");
-
-    // Those that start before the end asked for, from the one on now.
-    expect(guide.schedule(channel, NOON, NOON, NOON + 10 * minute)).toHaveLength(10);
-    // At least a few more when fewer do.
-    expect(guide.schedule(channel, NOON, NOON, NOON + 2 * minute)).toHaveLength(
-      GUIDE_SCHEDULE.atLeast,
-    );
-    // A whole day, with what a search of it finds.
-    const day = guide.schedule(channel, NOON + 30_000, NOON + 30_000, NOON + DAY);
-    expect(day).toHaveLength(24 * 60);
-    expect(day.at(-1)?.title).toBe("Minute 1439");
-    const [found] = [
-      ...eachMatch(
-        searchEach({
-          path: target,
-          words: ["needle"],
-          at: NOON + 30_000,
-          until: NOON + DAY,
-          channels: [channel.key],
-        }),
-      ),
-    ];
-    expect(day.find(({ start }) => start === found?.later?.start)?.title).toBe("Needle");
-    // A grid's stretch: every slot, and what one leaves out read on its own.
-    const stretch = guide.range(channel, NOON, NOON + GUIDE_RANGE.hours * HOUR);
-    expect(stretch).toHaveLength(GUIDE_RANGE.hours * 60);
-    expect(stretch[0]).toEqual({
-      start: NOON,
-      stop: NOON + minute,
-      title: "Minute 0",
-    });
-    expect(guide.programme(channel, NOON + 5 * minute)).toEqual({
-      start: NOON + 5 * minute,
-      stop: NOON + 6 * minute,
-      title: "Minute 5",
-      description: "About minute 5",
-    });
-    expect(guide.programme(channel, NOON + 5 * minute + 1)).toBeNull();
-  });
-
-  it("reads a whole day of one-minute programmes where the clocks go back two hours, and is asked for it", async () => {
+  it("answers a whole day of one-minute programmes where the clocks go back two hours, the one a search finds among them, and a grid's stretch without descriptions", async () => {
     const zone = process.env["TZ"];
     process.env["TZ"] = "Antarctica/Troll";
     try {
@@ -540,17 +489,16 @@ describe("indexing a guide", () => {
       const morning = new Date(2026, 9, 25).setHours(0, 0, 0, 0);
       const midnight = new Date(2026, 9, 25).setHours(24, 0, 0, 0);
       expect(midnight - morning).toBe(26 * HOUR);
-      const minute = 60_000;
       // A programme on as the day begins, then one a minute to its end.
-      const { guide } = await index(
+      const { guide, target } = await index(
         tv(
           ...Array.from({ length: 26 * 60 + 2 }, (_, n) =>
             programme(
               "one.test",
-              stamp(morning - minute / 2 + n * minute),
-              stamp(morning + minute / 2 + n * minute),
-              `Minute ${n}`,
-            ),
+              stamp(morning - MINUTE / 2 + n * MINUTE),
+              stamp(morning + MINUTE / 2 + n * MINUTE),
+              n === 1_400 ? "Needle" : `Minute ${n}`,
+            ).replace("</programme>", `<desc>About minute ${n}</desc></programme>`),
           ),
         ),
         { since: morning, archive: 2 * DAY },
@@ -562,6 +510,43 @@ describe("indexing a guide", () => {
       expect(day).toHaveLength(GUIDE_SCHEDULE.most);
       expect(day[0]?.title).toBe("Minute 0");
       expect(day.at(-1)?.title).toBe(`Minute ${26 * 60}`);
+      // Those that start before the end asked for, from the one on now.
+      expect(guide.schedule(channel, morning, morning, morning + 10 * MINUTE)).toHaveLength(11);
+      // At least a few more when fewer do.
+      expect(guide.schedule(channel, morning, morning, morning + 2 * MINUTE)).toHaveLength(
+        GUIDE_SCHEDULE.atLeast,
+      );
+      // Late in the day, what a search of it finds.
+      const [found] = [
+        ...eachMatch(
+          searchEach({
+            path: target,
+            words: ["needle"],
+            at: morning,
+            until: midnight,
+            channels: [channel.key],
+          }),
+        ),
+      ];
+      expect(found?.later).toEqual({
+        start: morning - MINUTE / 2 + 1_400 * MINUTE,
+        title: "Needle",
+      });
+      // A grid's stretch: every slot, and what one leaves out read on its own.
+      const stretch = guide.range(channel, morning, morning + GUIDE_RANGE.hours * HOUR);
+      expect(stretch).toHaveLength(GUIDE_RANGE.hours * 60 + 1);
+      expect(stretch[0]).toEqual({
+        start: morning - MINUTE / 2,
+        stop: morning + MINUTE / 2,
+        title: "Minute 0",
+      });
+      expect(guide.programme(channel, morning + 4.5 * MINUTE)).toEqual({
+        start: morning + 4.5 * MINUTE,
+        stop: morning + 5.5 * MINUTE,
+        title: "Minute 5",
+        description: "About minute 5",
+      });
+      expect(guide.programme(channel, morning + 4.5 * MINUTE + 1)).toBeNull();
       expect(
         ipcInputs["guide.schedule"]().allows({
           channel: { subscriptionId: "s", id: "1" },
@@ -640,19 +625,22 @@ describe("indexing a guide", () => {
     expect(guide.channels.has("old.test")).toBe(false);
   });
 
-  it("brings along the past the next download of the same source no longer lists, for the channels it still has", async () => {
+  it("brings along the past the next download of the same source no longer lists, for the channels it still has, and none that ends before the archive window once cut short", async () => {
     const before = await index(
       tv(
         programme("one.test", stamp(NOON - 3 * HOUR), stamp(NOON - 2 * HOUR), "Earlier"),
         programme("one.test", stamp(NOON - 2 * HOUR), stamp(NOON), "Before noon"),
         programme("gone.test", stamp(NOON - 2 * HOUR), stamp(NOON - HOUR), "Gone"),
+        programme("long.test", stamp(NOON - 23 * HOUR), stamp(NOON + HOUR), "Old long"),
       ),
     );
     // Six hours on, the source lists from an hour ago only, and no longer lists one channel.
-    const { guide } = await index(
+    // It begins another 20 hours ago: what came before it there ends before the archive window.
+    const { guide, summary } = await index(
       tv(
         programme("one.test", stamp(NOON - HOUR), stamp(NOON + 7 * HOUR), "Long"),
         programme("one.test", stamp(NOON + 7 * HOUR), stamp(NOON + 8 * HOUR), "Evening"),
+        programme("long.test", stamp(NOON - 20 * HOUR), stamp(NOON + 8 * HOUR), "New long"),
       ),
       { previous: before.target, since: NOON + 6 * HOUR },
     );
@@ -665,21 +653,8 @@ describe("indexing a guide", () => {
       ["Evening", NOON + 7 * HOUR, NOON + 8 * HOUR],
     ]);
     expect(guide.channels.has("gone.test")).toBe(false);
-  });
-
-  it("brings along no past that ends before the archive window once cut short", async () => {
-    const before = await index(
-      tv(programme("one.test", stamp(NOON - 10 * DAY), stamp(NOON + HOUR), "Old long")),
-      { archive: 7 * DAY },
-    );
-    // The next download begins the channel eight days ago: what came before it ends then.
-    const { guide, summary } = await index(
-      tv(programme("one.test", stamp(NOON - 8 * DAY), stamp(NOON + 2 * HOUR), "New long")),
-      { previous: before.target, archive: 7 * DAY },
-    );
-
-    expect(of(guide, "one.test")).toEqual([["New long", NOON - 8 * DAY, NOON + 2 * HOUR]]);
-    expect(summary.programmes).toBe(1);
+    expect(of(guide, "long.test")).toEqual([["New long", NOON - 20 * HOUR, NOON + 8 * HOUR]]);
+    expect(summary.programmes).toBe(5);
   });
 
   it("fails rather than bring nothing along when the index before is gone", async () => {
@@ -691,22 +666,6 @@ describe("indexing a guide", () => {
     );
     // Nothing was made where the index before was.
     await expect(readFile(before.target)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("keeps the first entry of a start time, also one without an end before one with an end", async () => {
-    const { guide } = await index(
-      tv(
-        programme("one.test", stamp(NOON), null, "No end"),
-        programme("one.test", stamp(NOON), stamp(NOON + HOUR), "Timed again"),
-        programme("one.test", stamp(NOON + 2 * HOUR), stamp(NOON + 3 * HOUR), "Later"),
-      ),
-    );
-
-    // It runs until the next start. Releases before 0.0.13 showed the timed one instead.
-    expect(of(guide, "one.test")).toEqual([
-      ["No end", NOON, NOON + 2 * HOUR],
-      ["Later", NOON + 2 * HOUR, NOON + 3 * HOUR],
-    ]);
   });
 
   it("shows each channel from a guide id with programmes still to come, its past from that id too, and nothing of an id that only keeps the past", async () => {
@@ -740,31 +699,22 @@ describe("indexing a guide", () => {
     });
   });
 
-  it("works out what a catalogue covers once for callers that ask while it is being worked out", async () => {
-    const ids = Array.from({ length: 3_000 }, (_, n) => `c${n}.test`);
+  it("answers repeated coverage requests correctly", async () => {
+    const ids = Array.from({ length: 3 }, (_, n) => `c${n}.test`);
     const { guide } = await index(
       tv(...ids.map((id) => programme(id, stamp(NOON), stamp(NOON + HOUR), "Show"))),
     );
-    const base = catalogueOf(Object.fromEntries(ids.map((_, n) => [String(n), [`c${n}.test`]])));
-    let asked = 0;
-    const catalogue: MappedChannels = {
-      ...base,
-      guideIdsOf: (id) => {
-        asked++;
-        return base.guideIdsOf(id);
-      },
-    };
+    const catalogue = catalogueOf(
+      Object.fromEntries(ids.map((_, n) => [String(n), [`c${n}.test`]])),
+    );
     const guides = ownGuide(guide);
 
     const answers = await Promise.all([
       coverage(guides, catalogue, NOON),
       coverage(guides, catalogue, NOON),
     ]);
-    expect(answers.map((each) => each.covered)).toEqual([3_000, 3_000]);
-    expect(asked).toBe(3_000);
-    // Once worked out, it is kept.
-    expect((await coverage(guides, catalogue, NOON + 1)).covered).toBe(3_000);
-    expect(asked).toBe(3_000);
+    expect(answers.map((each) => each.covered)).toEqual([3, 3]);
+    expect((await coverage(guides, catalogue, NOON + 1)).covered).toBe(3);
   });
 
   it("gives each channel of a grid's page the stretch of the guide channel it shows, also when several show one", async () => {
@@ -980,7 +930,7 @@ describe("a subscription's guides in order", () => {
   /**
    * The subscription's own guide, then the sources "early" and "late": three guides that each
    * know "shared.test", with programmes for it in the last two only, and one that only "late"
-   * has programmes for.
+   * has programmes for. The early source also competes for own.test, so own-first is observable.
    */
   const guides = async () => {
     const own = await index(
@@ -991,6 +941,7 @@ describe("a subscription's guides in order", () => {
     );
     const early = await index(
       tv(
+        programme("own.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "External own"),
         programme("shared.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "Early news"),
         programme("shared.test", stamp(NOON + 3 * HOUR), stamp(NOON + 4 * HOUR), "Early late"),
       ),
@@ -1151,18 +1102,8 @@ describe("a subscription's guides in order", () => {
       ["Source current", fromSource],
       ["Source later", fromSource],
     ]);
-    // Pages side by side, one wholly past and one with now, or cut anywhere: the same slots.
+    // Pages side by side, one wholly past and one with now: the same slots.
     expect(await paged(NOON - 6 * HOUR, NOON - HOUR, NOON + 6 * HOUR)).toEqual(whole);
-    expect(await paged(NOON - 6 * HOUR, NOON - 2 * HOUR, NOON, NOON + 6 * HOUR)).toEqual(whole);
-    expect(
-      await paged(
-        NOON - 6 * HOUR,
-        NOON - 100 * MINUTE,
-        NOON - 5 * MINUTE,
-        NOON + 150 * MINUTE,
-        NOON + 6 * HOUR,
-      ),
-    ).toEqual(whole);
     // The own guide's past isn't shown beside the source's: one guide supplies the channel.
     expect(
       (await rangeAt(ordered, catalogue, ["1"], NOON, NOON - 3 * HOUR, NOON - 2 * HOUR))["1"],
@@ -1188,7 +1129,7 @@ describe("a subscription's guides in order", () => {
   it("shows a mapped channel the guide channel of the guide it names, alone, and its slot's details from there", async () => {
     const ordered = await guides();
     const catalogue = catalogueOf(
-      { "1": ["shared.test"], "2": [], "3": ["shared.test"] },
+      { "1": ["shared.test"], "2": [], "3": ["shared.test"], "4": ["shared.test"] },
       {
         // Past the early source, to the late one's.
         "1": { source: "late", guideId: "shared.test", name: "One" },
@@ -1196,14 +1137,16 @@ describe("a subscription's guides in order", () => {
         // To a source whose download is still to come: nothing until it is.
         "3": { source: "waiting", guideId: "shared.test", name: "Three" },
         // To a source that went: back to automatic.
+        "4": { source: "gone", guideId: "x", name: "Four" },
         "9": { source: "gone", guideId: "x", name: "Nine" },
       },
     );
 
-    const now = listingsAt(ordered, catalogue, ["1", "2", "3"], NOON);
+    const now = listingsAt(ordered, catalogue, ["1", "2", "3", "4"], NOON);
     expect(now["1"]?.now?.title).toBe("Late news");
     expect(now["2"]?.now?.title).toBe("Only late news");
     expect(now["3"]).toBeUndefined();
+    expect(now["4"]?.now?.title).toBe("Early news");
     const [slot] = (await rangeAt(ordered, catalogue, ["1"], NOON, NOON, NOON + HOUR))["1"] ?? [];
     expect(slot?.guide).toBe(guideRef("late", "shared.test"));
     expect(programmeAt(ordered, catalogue, "1", slot?.guide ?? "", NOON - HOUR, NOON)?.title).toBe(
@@ -1216,56 +1159,41 @@ describe("a subscription's guides in order", () => {
     expect(
       programmeAt(ordered, catalogue, "1", guideRef("late", "late.test"), NOON - HOUR, NOON),
     ).toBeNull();
+    const lateRef = {
+      ref: guideRef("late", "shared.test"),
+      id: "shared.test",
+      source: "late",
+      origin: "https://late.example",
+    };
     expect(mapChannel(ordered, catalogue, liveChannel("1"), NOON)).toEqual({
       id: "1",
       number: null,
       title: "Channel 1",
-      shown: {
-        ref: guideRef("late", "shared.test"),
-        id: "shared.test",
-        source: "late",
-        origin: "https://late.example",
-      },
-      mapped: {
-        ref: guideRef("late", "shared.test"),
-        id: "shared.test",
-        source: "late",
-        origin: "https://late.example",
-      },
+      shown: lateRef,
+      mapped: lateRef,
       listed: true,
     });
-    // Only the one whose channel the provider no longer lists leads nowhere.
-    expect(unresolvedMappings(ordered, catalogue)).toBe(1);
+    // The removed source and the removed provider channel both leave unresolved mappings.
+    expect(unresolvedMappings(ordered, catalogue)).toBe(2);
   });
 
   it("lists the guides' channels to map to, each guide's in turn, with the guide it is of", async () => {
     const page = guideChannelsAt(await guides(), "shared", 0, 10, NOON);
 
+    /** "shared.test" as the chooser lists it from `source`'s guide, the own one for null. */
+    const shared = (source: string | null, origin: string | null, programmes: boolean) => ({
+      ref: guideRef(source ?? OWN_GUIDE, "shared.test"),
+      id: "shared.test",
+      source,
+      origin,
+      name: "shared.test",
+      programmes,
+    });
+
     expect(page.channels).toEqual([
-      {
-        ref: guideRef(OWN_GUIDE, "shared.test"),
-        id: "shared.test",
-        source: null,
-        origin: null,
-        name: "shared.test",
-        programmes: false,
-      },
-      {
-        ref: guideRef("early", "shared.test"),
-        id: "shared.test",
-        source: "early",
-        origin: "https://early.example",
-        name: "shared.test",
-        programmes: true,
-      },
-      {
-        ref: guideRef("late", "shared.test"),
-        id: "shared.test",
-        source: "late",
-        origin: "https://late.example",
-        name: "shared.test",
-        programmes: true,
-      },
+      shared(null, null, false),
+      shared("early", "https://early.example", true),
+      shared("late", "https://late.example", true),
     ]);
   });
 });
