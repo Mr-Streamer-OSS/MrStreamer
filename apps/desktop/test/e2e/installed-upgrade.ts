@@ -1542,6 +1542,8 @@ export async function runCommand(args: string[]) {
       `${pkg.file} no longer matches its resolved published metadata.`,
     );
   }
+  const block = outboundBlock(runner);
+  block.preflight();
   const profile = join(root, "profile");
   const evidence = join(root, "evidence");
   const lock = join(root, "profile.lock");
@@ -1623,7 +1625,6 @@ export async function runCommand(args: string[]) {
     }
     throw error;
   });
-  const block = outboundBlock(runner);
   let blocking = false;
   let failed: unknown;
   let seeded: Awaited<ReturnType<typeof seedStable>> | undefined;

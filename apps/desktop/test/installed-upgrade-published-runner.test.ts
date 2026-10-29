@@ -19,13 +19,21 @@ vi.mock("node:child_process", async (original) => {
   return { ...actual, spawn: vi.fn(actual.spawn) };
 });
 
-vi.mock("./e2e/installed-upgrade-windows.ts", async (original) => ({
-  ...(await original<typeof import("./e2e/installed-upgrade-windows.ts")>()),
-  disposableRunner: vi.fn(),
-  install: vi.fn(),
-  uninstall: vi.fn(),
-  processes: vi.fn(),
-}));
+vi.mock("./e2e/installed-upgrade-windows.ts", async (original) => {
+  const windows = await original<typeof import("./e2e/installed-upgrade-windows.ts")>();
+  return {
+    ...windows,
+    disposableRunner: vi.fn(),
+    install: vi.fn(),
+    uninstall: vi.fn(),
+    processes: vi.fn(),
+    // This suite owns synthetic installers only; native audit capability is verified separately.
+    outboundBlock: (runner: Parameters<typeof windows.outboundBlock>[0]) => ({
+      ...windows.outboundBlock(runner),
+      preflight: vi.fn(),
+    }),
+  };
+});
 
 describe("the installed upgrade run before and around native installation", () => {
   let temp: string;
