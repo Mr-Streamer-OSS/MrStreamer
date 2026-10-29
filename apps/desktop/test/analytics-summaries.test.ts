@@ -329,10 +329,7 @@ describe("durable usage and logical-play summaries", () => {
       [paused, 60, "2026-10-25T00:02:00.000Z"],
       [threshold, 360, "2026-10-25T00:08:00.000Z"],
     ] as const) {
-      let release: (() => void) | undefined;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
+      const gate = Promise.withResolvers<void>();
       let current = snapshot;
       const events: CaptureEvent[] = [];
       const owner = new Analytics({
@@ -342,7 +339,7 @@ describe("durable usage and logical-play summaries", () => {
         store: {
           load: async () => structuredClone(current),
           save: async (next) => {
-            await gate;
+            await gate.promise;
             current = structuredClone(next);
           },
         },
@@ -356,7 +353,7 @@ describe("durable usage and logical-play summaries", () => {
       });
       owners.push(owner);
       expect(await owner.settings()).toEqual({ enabled: true, transport: "local" });
-      release?.();
+      gate.resolve();
       await vi.advanceTimersByTimeAsync(0);
       expect(events.filter((event) => event.event === "stream_summary")).toMatchObject([
         {

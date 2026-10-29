@@ -1225,10 +1225,11 @@ describe("observed playback runs", () => {
     owner.admitPlayback("vod", current, frame);
     failedLoad("credentials");
     physical.failure("credentials");
-    physical.stop();
     owner.endPlayback(token);
-    owner.receiverLoadFailureObserver(current.control, frame)("network");
     const fresh = owner.remotePlayback("vod", current.control);
+    physical.state("playing");
+    physical.stop();
+    owner.receiverLoadFailureObserver(current.control, frame)("network");
     fresh.failure("credentials");
     owner.endControlledPlayback(current.control, frame);
     await expectStreams(owner, events, ["error vod network", "error vod network"]);
@@ -1612,9 +1613,6 @@ describe("observed playback runs", () => {
     const again = { control: randomUUID(), order: 2, ongoing: false };
     const token = owner.admitPlayback("vod", again, "frame")!;
     const next = owner.remotePlayback("vod", again.control);
-    remote.state("playing");
-    remote.failure("credentials");
-    remote.end();
     next.state("playing");
     await vi.advanceTimersByTimeAsync(1000);
     next.failure("network");
