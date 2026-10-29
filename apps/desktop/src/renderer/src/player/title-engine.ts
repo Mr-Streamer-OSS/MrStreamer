@@ -31,7 +31,7 @@ import {
   subtitlesDue,
 } from "./subtitles.ts";
 
-/** Stop reading once this much is buffered ahead, and read again below the second value. */
+/** Stop at the first limit; a wait entered full drains below the second before reading again. */
 const AHEAD_S = { stop: 60, resume: 40 } as const;
 /** No picture within this long counts as a failed start. */
 const START_TIMEOUT_MS = 30_000;
