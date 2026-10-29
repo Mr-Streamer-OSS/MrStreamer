@@ -783,14 +783,14 @@ describe("update feed", () => {
         }),
       );
 
-    // Stable 0.0.3, then nightly .110, which Wout tests. main moves on, so the stable run
-    // publishes nightly .120 first, then 0.0.4 from .110's commit.
+    // Stable 0.0.3, then nightly .110, which Wout tests. A later nightly .120 is published, then
+    // the stable run publishes 0.0.4 from .110's commit.
     const stable003 = published("v0.0.3", 30, false);
     const tested = published("v0.0.4-nightly.20261002.110", 8);
     const first = published("v0.0.4-nightly.20261002.120", 1);
     const stable004 = published("v0.0.4", 0, false);
 
-    it("find each channel's release before and after a stable run that publishes a nightly first", () => {
+    it("find each channel's release as a newer nightly and then the promoted stable are published", () => {
       const before = feedOf([stable003, tested]);
       const afterFirst = mergeFeeds(before, feedOf([stable003, tested, first]));
       const afterStable = mergeFeeds(afterFirst, feedOf([stable003, tested, first, stable004]));

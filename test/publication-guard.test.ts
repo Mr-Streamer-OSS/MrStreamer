@@ -5,7 +5,11 @@ import { dirname, join } from "node:path";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
-// Evaluate the actual publication conditions, including skipped validation/upgrade jobs.
+// Nothing a pull request or a dry run starts may publish: no GitHub release, update feed, Store
+// submission, version commit or website. release-plan.ts makes every pull request event a dry run
+// (test/release.test.ts holds it to that); this holds release.yml and website.yml to the rest by
+// evaluating their actual `if:` conditions, including skipped validation and upgrade jobs. A
+// context path it doesn't model fails the test rather than reading as some value.
 interface Job {
   readonly "continue-on-error"?: boolean | string;
   readonly if?: string;
@@ -210,13 +214,12 @@ function jobScope(
 }
 
 /**
- * publish.yml's `inputs` for a call that passes `given`: each workflow_call input the call names
- * or its default, and null for an input only a run by hand has. An input publish.yml doesn't
- * declare fails.
+ * A called workflow's `inputs` for a call that passes `given`: each workflow_call input the call
+ * names or its default, and null for an input only a run by hand has. An undeclared input fails.
  */
-function callInputs(publish: Workflow, given: Record<string, Value>) {
-  const called = publish.on.workflow_call?.inputs ?? {};
-  const byHand = publish.on.workflow_dispatch?.inputs ?? {};
+function callInputs(workflow: Workflow, given: Record<string, Value>) {
+  const called = workflow.on.workflow_call?.inputs ?? {};
+  const byHand = workflow.on.workflow_dispatch?.inputs ?? {};
   return (name: string): Value => {
     const input = called[name];
     if (input) {
@@ -231,18 +234,18 @@ function callInputs(publish: Workflow, given: Record<string, Value>) {
 }
 
 /**
- * The jobs of publish.yml that run for one call, in an order that respects their needs: a job that
- * runs succeeds unless `outcomes` says otherwise, and reports its outputs as "true" on success;
- * one that doesn't run is skipped.
+ * The jobs of a called workflow that run for one call, in an order that respects their needs: a
+ * job that runs succeeds unless `outcomes` says otherwise, and reports its outputs as "true" on
+ * success; one that doesn't run is skipped.
  */
 function simulate(
-  publish: Workflow,
+  workflow: Workflow,
   given: Record<string, Value>,
   event: string,
   cancelled: boolean,
   outcomes: Readonly<Record<string, Result>> = {},
 ) {
-  const inputs = callInputs(publish, given);
+  const inputs = callInputs(workflow, given);
   const context = (path: string): Value => {
     if (path === "github.event_name") return event;
     if (path === "github.ref") return "refs/heads/main";
@@ -254,21 +257,21 @@ function simulate(
   };
   const results = new Map<string, Result>();
   const outputs = (job: string, output: string): Value => {
-    if (!(output in (publish.jobs[job]!.outputs ?? {})))
+    if (!(output in (workflow.jobs[job]!.outputs ?? {})))
       return unmodelled(`needs.${job}.outputs.${output}`);
     return results.get(job) === "success" ? "true" : "";
   };
-  const pending = Object.keys(publish.jobs);
+  const pending = Object.keys(workflow.jobs);
   while (pending.length > 0) {
     const index = pending.findIndex((name) =>
-      needsOf(publish.jobs[name]!).every((need) => results.has(need)),
+      needsOf(workflow.jobs[name]!).every((need) => results.has(need)),
     );
     if (index === -1) throw new Error(`A cycle among ${pending.join(", ")}`);
     const [name] = pending.splice(index, 1);
-    const scope = jobScope(publish, name!, results, outputs, context, cancelled);
+    const scope = jobScope(workflow, name!, results, outputs, context, cancelled);
     results.set(
       name!,
-      runs(publish.jobs[name!]!.if, scope) ? (outcomes[name!] ?? "success") : "skipped",
+      runs(workflow.jobs[name!]!.if, scope) ? (outcomes[name!] ?? "success") : "skipped",
     );
   }
   return [...results].flatMap(([name, result]) => (result === "success" ? [name] : []));
@@ -276,6 +279,12 @@ function simulate(
 
 const release = read("release.yml");
 const PUBLIC = ["publish", "discord", "feed", "store-gate", "store", "finalize", "website-refresh"];
+
+/**
+ * The publication jobs of one Release run. Every job's own condition decides whether it runs, in
+ * workflow order; a job that runs succeeds unless `outcomes` says otherwise, and an outcome for a
+ * non-publication job stands in for whatever its condition would decide.
+ */
 function publication(
   workflow: Workflow,
   options: {
@@ -288,6 +297,7 @@ function publication(
     reused?: boolean;
   } = {},
 ) {
+  const event = options.event ?? "schedule";
   const results = new Map<string, Result>();
   const plan = {
     skip: "false",
@@ -304,27 +314,22 @@ function publication(
     if (job === "validation") return options.reused ? "true" : "false";
     return "true";
   };
-  for (const name of Object.keys(workflow.jobs)) {
-    if (!PUBLIC.includes(name)) {
-      results.set(name, options.outcomes?.[name] ?? "success");
-      continue;
-    }
-    const scope = jobScope(
-      workflow,
-      name,
-      results,
-      outputs,
-      (path) => {
-        if (path === "github.event_name") return options.event ?? "schedule";
-        if (path === "github.ref") return "refs/heads/main";
-        if (path === "inputs.operation") return options.operation ?? "release";
-        return unmodelled(path);
-      },
-      options.cancelled ?? false,
-    );
+  const context = (path: string): Value => {
+    if (path === "github.event_name") return event;
+    if (path === "github.ref") return "refs/heads/main";
+    if (path === "github.repository" || path === "github.event.pull_request.head.repo.full_name")
+      return "Mr-Streamer-OSS/MrStreamer";
+    if (path === "github.event.label.name") return "release dry run";
+    if (path === "inputs.operation")
+      return options.operation ?? (event === "workflow_dispatch" ? "release" : "");
+    return unmodelled(path);
+  };
+  for (const [name, job] of Object.entries(workflow.jobs)) {
+    const forced = PUBLIC.includes(name) ? undefined : options.outcomes?.[name];
+    const scope = jobScope(workflow, name, results, outputs, context, options.cancelled ?? false);
     results.set(
       name,
-      runs(workflow.jobs[name]!.if, scope) ? (options.outcomes?.[name] ?? "success") : "skipped",
+      forced ?? (runs(job.if, scope) ? (options.outcomes?.[name] ?? "success") : "skipped"),
     );
   }
   return PUBLIC.filter((name) => results.get(name) === "success");
@@ -359,20 +364,9 @@ describe("publication boundaries", () => {
     );
     expect(publication(release, { cancelled: true })).toEqual([]);
   });
-  it("accepts skipped fallback only with authenticated reuse, and skips nightly-only optional work", () => {
-    const outcomes = {
-      check: "skipped",
-      test: "skipped",
-      upgrade: "skipped",
-      msix: "skipped",
-      "release-ui": "skipped",
-    } as const;
-    expect(publication(release, { outcomes })).toEqual([]);
-    expect(publication(release, { outcomes, reused: true })).toEqual([
-      "publish",
-      "discord",
-      "feed",
-    ]);
+  it("accepts skipped fallback only with authenticated reuse", () => {
+    expect(publication(release, { reused: true })).toEqual(["publish", "discord", "feed"]);
+    expect(publication(release, { outcomes: { check: "skipped", test: "skipped" } })).toEqual([]);
   });
   it("keeps announcements and stable website handoff independent of feed and Store failures", () => {
     for (const feed of RESULTS)
@@ -389,33 +383,11 @@ describe("publication boundaries", () => {
       with: { deploy: true },
     });
   });
-  it("runs maintenance on existing releases even with a skipped plan and packaging", () => {
-    const outcomes = Object.fromEntries(
-      Object.keys(release.jobs)
-        .filter((name) => !PUBLIC.includes(name))
-        .map((name) => [name, "skipped" as const]),
-    );
-    for (const operation of ["feed", "store"]) {
-      const copy = structuredClone(release);
-      // A skipped plan has no outputs.
-      copy.jobs["plan"] = { ...copy.jobs["plan"]!, outputs: {} };
-      // Use the same evaluator with empty plan outputs via a separate narrow scope.
-      const job = release.jobs[operation === "feed" ? "feed" : "store-gate"]!;
-      expect(
-        runs(job.if, {
-          path: (path) =>
-            path === "inputs.operation"
-              ? operation
-              : path === "github.ref"
-                ? "refs/heads/main"
-                : "",
-          needsSucceeded: false,
-          ancestorFailed: false,
-          cancelled: false,
-        }),
-      ).toBe(true);
-    }
-    expect(outcomes.plan).toBe("skipped");
+  it("runs maintenance on existing releases without publishing a release", () => {
+    const event = "workflow_dispatch";
+    expect(publication(release, { event, operation: "feed" })).toEqual(["feed"]);
+    expect(publication(release, { event, operation: "store" })).toEqual(["store-gate", "store"]);
+    expect(publication(release, { event, operation: "upgrade" })).toEqual([]);
   });
   it("detects removal of the dry-run or PR boundary", () => {
     for (const condition of [

@@ -54,8 +54,8 @@ permissions:
 # stable release is never dropped. Sharing the queue keeps a nightly from being planned while a
 # stable release builds: it would preview the same version as the stable release, from newer
 # code, and sort before it. A scheduled check decides whether a nightly is due once its turn
-# comes. The nightly a stable run publishes first is a job of that run, not a run of its own, so
-# it never waits in the queue behind the run that needs it.
+# comes. Maintenance operations get a group of their own, and their jobs serialize on their own
+# feed, Store and upgrade-check groups.
 concurrency:
   group: >-
     release-${{ github.event_name == 'pull_request' && format('dry-run-{0}', github.event.pull_request.number)
@@ -837,6 +837,8 @@ jobs:
     needs: [plan, bundle]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      KEEP_DAYS: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
     outputs:
       files: ${{ steps.prepare.outputs.files }}
     defaults:
@@ -1035,7 +1037,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       CHANNEL: ${{ needs.plan.outputs.channel }}
-      VERSION: ${{ needs.plan.outputs.version || inputs.version }}
+      VERSION: ${{ needs.plan.outputs.version }}
       TAG: ${{ needs.plan.outputs.tag }}
       SHA: ${{ needs.plan.outputs.sha }}
       PREVIOUS_TAG: ${{ needs.plan.outputs.previous-tag }}
@@ -1052,7 +1054,7 @@ jobs:
       # The installers of every platform, and the sources that go with them.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: release-*-${{ needs.plan.outputs.version || inputs.version }}
+          pattern: release-*-${{ needs.plan.outputs.version }}
           path: release
           merge-multiple: true
       - name: Check the release is complete and still new
@@ -1086,8 +1088,7 @@ jobs:
           fi
 
   # The release's post in #releases or #nightly, sent once the GitHub release is out, whatever the
-  # feed, Store and website do. It is optional: a failure here never fails the run, so it cannot
-  # stop the nightly a stable run publishes first and with it the stable release.
+  # feed, Store and website do. It is optional: a failure here never fails the run.
   discord:
     name: Discord announcement
     needs: [plan, publish]
@@ -1108,7 +1109,7 @@ jobs:
       - name: Announce the published release
         env:
           CHANNEL: ${{ needs.plan.outputs.channel }}
-          VERSION: ${{ needs.plan.outputs.version || inputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
           TAG: ${{ needs.plan.outputs.tag }}
           DISCORD_STABLE_WEBHOOK_URL: ${{ secrets.DISCORD_STABLE_WEBHOOK_URL }}
           DISCORD_NIGHTLY_WEBHOOK_URL: ${{ secrets.DISCORD_NIGHTLY_WEBHOOK_URL }}
@@ -1116,8 +1117,7 @@ jobs:
 
   # The update feed, updates.json at the root of the GitHub Pages site, which names the newest
   # release on each channel. It never moves a channel down unless allow-regress says so. The
-  # release is out by now, so a failure here shows on this job without failing the run, except
-  # for the nightly a stable run publishes first: the stable release waits until the feed names it.
+  # release is out by now, so a failure here shows on this job without failing the run.
   # Pages must be enabled once, with source "GitHub Actions"; docs/maintainers/releasing.md.
   feed:
     name: Update feed
@@ -1172,8 +1172,7 @@ jobs:
           mkdir -p site
           touch site/.nojekyll
           node scripts/release-plan.ts feed "${args[@]}"
-      # Named per release and per attempt: a run that publishes a nightly and then a stable release
-      # deploys each from its own artifact, and re-running this job never meets an earlier one.
+      # Named per release and per attempt, so re-running this job never meets an earlier artifact.
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
@@ -1312,8 +1311,7 @@ jobs:
     permissions:
       contents: write
     env:
-      KEEP_DAYS: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 3 }}
-      VERSION: ${{ needs.plan.outputs.version || inputs.version }}
+      VERSION: ${{ needs.plan.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

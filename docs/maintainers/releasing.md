@@ -138,7 +138,7 @@ The **Update feed** job of `.github/workflows/release.yml` writes the feed with 
 
 The feed never goes back. Each channel is compared with its own releases. When the releases name a lower version than the deployed feed, that channel keeps the deployed release, so a late or stale publication can't take users back. Only a run by hand with **allow-regress** moves a channel down. A publication that can't read the deployed feed or look up the Pages site stops instead of publishing from the releases alone; only a 404 for either counts as nothing deployed yet.
 
-A failed publication shows on the release run's **Update feed** job but doesn't fail the run, since the release is out by then. Fix the cause, then regenerate the feed. The nightly a stable run publishes first is the exception: its failed publication fails the run before the stable release builds.
+A failed publication shows on the release run's **Update feed** job but doesn't fail the run, since the release is out by then. Fix the cause, then regenerate the feed.
 
 ### Regenerating the feed
 
