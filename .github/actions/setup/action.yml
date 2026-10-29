@@ -1,4 +1,4 @@
-# What every job of package.yml starts with, after checking out the release's commit: Node, pnpm
+# What every job of Release starts with, after checking out the release's commit: Node, pnpm
 # and the commit's dependencies, the release version in the app's package.json, and the JS
 # bundle the bundle job built for it. Jobs load it from the workflow commit's tools in .workflow,
 # so a stable release of a nightly tested earlier sets up the way the workflow does.

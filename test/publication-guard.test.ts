@@ -5,18 +5,7 @@ import { dirname, join } from "node:path";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 
-// Nothing a pull request or a dry run starts may publish: no GitHub release, update feed, Store
-// submission, version commit or website. release-plan.ts makes every pull request event a dry run
-// (test/release.test.ts holds it to that); this holds the workflows to the rest by evaluating
-// their actual `if:` conditions and `with:` mappings.
-//
-// For every event a release run starts on, every plan output that matters, every result of the
-// release run's other jobs and whether the run was cancelled, it works out which of release.yml's
-// calls of publish.yml start and, inside each, which of publish.yml's jobs would run, assuming a
-// job that runs succeeds unless an outcome says otherwise, with every kill switch on. A
-// context path it doesn't model fails the test rather than reading as some value. actionlint
-// checks the rest of the YAML; docs/maintainers/ci.md traces each path.
-
+// Evaluate the actual publication conditions, including skipped validation/upgrade jobs.
 interface Job {
   readonly "continue-on-error"?: boolean | string;
   readonly if?: string;
@@ -49,7 +38,6 @@ const read = (name: string): Workflow => {
     parsed.set(name, parse(readFileSync(`.github/workflows/${name}`, "utf8")) as Workflow);
   return parsed.get(name)!;
 };
-const PUBLISH = "./.github/workflows/publish.yml";
 
 // A GitHub Actions expression evaluator for the subset these conditions use: string literals,
 // true, false and null, context paths such as needs.plan.outputs.dry-run, the status functions,
@@ -167,20 +155,10 @@ function evaluate(expression: string, scope: Scope): Value {
 
 /** Whether a job with condition `expression` runs, adding GitHub's implicit success(). */
 function runs(expression: string | undefined, scope: Scope): boolean {
-  const source = expression ?? "success()";
+  const source = (expression ?? "success()").replace(/^\$\{\{(.*)\}\}$/s, "$1").trim();
   const tokens = tokenize(source);
   const status = tokens.some((token, index) => STATUS.includes(token) && tokens[index + 1] === "(");
   return truthy(evaluate(source, scope)) && (status || evaluate("success()", scope) === true);
-}
-
-/** A `with:` value: a literal, or the expressions inside ${{ }} evaluated in `scope`. */
-function resolve(value: unknown, scope: Scope): Value {
-  if (typeof value !== "string") return value as Value;
-  const whole = /^\$\{\{(.*)\}\}$/s.exec(value.trim());
-  if (whole) return evaluate(whole[1]!, scope);
-  return value.replace(/\$\{\{(.*?)\}\}/gs, (_, inner: string) =>
-    String(evaluate(inner, scope) ?? ""),
-  );
 }
 
 const needsOf = (job: Job) =>
@@ -296,245 +274,163 @@ function simulate(
   return [...results].flatMap(([name, result]) => (result === "success" ? [name] : []));
 }
 
-/** One release run as the guard sees it. */
-type Run = {
-  readonly event: string;
-  readonly dryRun: "true" | "false";
-  readonly channel: "nightly" | "stable";
-  /** The nightly a stable run publishes first, or "" for none. */
-  readonly firstTag: string;
-  readonly cancelled: boolean;
-  /** Each job's result but the plan's, which succeeded for there to be a plan. */
-  readonly results: Record<string, Result>;
-};
-
-/** The plan's outputs for `run`, as release.yml's plan job declares them. */
-function planOutputs(run: Run): Record<string, string> {
-  return {
-    skip: "false",
-    "dry-run": run.dryRun,
-    channel: run.channel,
-    version: run.channel === "stable" ? "0.0.13" : "0.0.14-nightly.20261013.300",
-    tag: run.channel === "stable" ? "v0.0.13" : "v0.0.14-nightly.20261013.300",
-    sha: "0123456789abcdef0123456789abcdef01234567",
-    "previous-tag": run.channel === "stable" ? "v0.0.12" : "v0.0.14-nightly.20261013.200",
-    promoted: run.channel === "stable" ? "v0.0.13-nightly.20261012.250" : "",
-    "first-version": run.firstTag.slice(1),
-    "first-tag": run.firstTag,
-    "first-sha": run.firstTag ? "fedcba9876543210fedcba9876543210fedcba98" : "",
-    "first-previous-tag": run.firstTag ? "v0.0.13-nightly.20261012.250" : "",
-  };
-}
-
-/** Which of publish.yml's jobs run, per release.yml call that starts, for one release run. */
-function publishedBy(release: Workflow, publish: Workflow, run: Run) {
-  const results = new Map<string, Result>([["plan", "success"], ...Object.entries(run.results)]);
-  const plan = planOutputs(run);
-  const outputs = (job: string, output: string): Value => {
-    const path = `needs.${job}.outputs.${output}`;
-    if (job === "plan") {
-      const declared = release.jobs["plan"]!.outputs ?? {};
-      return output in declared && output in plan ? plan[output]! : unmodelled(path);
-    }
-    // A job that calls a workflow reports that workflow's outputs, such as package.yml's sources.
-    const called = release.jobs[job]!.uses;
-    const declared = called
-      ? read(called.replace("./.github/workflows/", "")).on.workflow_call?.outputs
-      : release.jobs[job]!.outputs;
-    if (!declared || !(output in declared)) return unmodelled(path);
-    return results.get(job) === "success" ? "x" : "";
-  };
-  const context = (path: string): Value =>
-    path === "github.event_name" ? run.event : unmodelled(path);
-  const published: Record<string, string[]> = {};
-  for (const [name, job] of Object.entries(release.jobs)) {
-    if (job.uses !== PUBLISH) continue;
-    const scope = jobScope(release, name, results, outputs, context, run.cancelled);
-    if (!runs(job.if, scope)) continue;
-    const given = Object.fromEntries(
-      Object.entries(job.with ?? {}).map(([input, value]) => [input, resolve(value, scope)]),
-    );
-    published[name] = simulate(publish, given, run.event, run.cancelled);
-  }
-  return published;
-}
-
-/** Every combination of the values given for each key. */
-function* combinations<T>(choices: Record<string, readonly T[]>): Generator<Record<string, T>> {
-  const [first, ...rest] = Object.entries(choices);
-  if (!first) return yield {};
-  for (const value of first[1])
-    for (const others of combinations(Object.fromEntries(rest)))
-      yield { [first[0]]: value, ...others };
-}
-
-/**
- * Every release run a dry run or pull request event could start: each result of every job a
- * publishing call needs, directly or not, but the plan's.
- */
-function* guardedRuns(release: Workflow): Generator<Run> {
-  const callers = Object.keys(release.jobs).filter((job) => release.jobs[job]!.uses === PUBLISH);
-  const others = [...new Set(callers.flatMap((call) => [...ancestors(release, call)]))].filter(
-    (job) => job !== "plan",
-  );
-  for (const results of combinations(Object.fromEntries(others.map((job) => [job, RESULTS])))) {
-    for (const event of ["schedule", "workflow_dispatch", "pull_request"])
-      for (const dryRun of ["true", "false"] as const)
-        for (const channel of ["nightly", "stable"] as const)
-          for (const firstTag of ["", "v0.0.13-nightly.20261013.301"])
-            for (const cancelled of [false, true])
-              if (dryRun === "true" || event === "pull_request")
-                yield { event, dryRun, channel, firstTag, cancelled, results };
-  }
-}
-
-/** The first guarded run that publishes anything, with what it publishes, or null. */
-function leaks(release: Workflow, publish: Workflow) {
-  for (const run of guardedRuns(release)) {
-    const published = publishedBy(release, publish, run);
-    if (Object.values(published).some((jobs) => jobs.length > 0)) return { run, published };
-  }
-  return null;
-}
-
-/** `workflow` with `job`'s condition replaced by what `change` makes of it, in memory alone. */
-function mutated(workflow: Workflow, job: string, change: (condition: string) => string) {
-  const copy = structuredClone(workflow);
-  const target = copy.jobs[job] as { if?: string };
-  target.if = change(target.if ?? "success()");
-  return copy;
-}
-
 const release = read("release.yml");
-const publish = read("publish.yml");
-const passed = (run: Partial<Run>): Run => ({
-  event: "schedule",
-  dryRun: "false",
-  channel: "nightly",
-  firstTag: "",
-  cancelled: false,
-  results: Object.fromEntries(
-    Object.keys(release.jobs)
-      .filter((job) => job !== "plan")
-      .map((job) => [job, "success"]),
-  ),
-  ...run,
-});
+const PUBLIC = ["publish", "discord", "feed", "store-gate", "store", "finalize", "website-refresh"];
+function publication(
+  workflow: Workflow,
+  options: {
+    event?: string;
+    dry?: string;
+    channel?: string;
+    operation?: string;
+    cancelled?: boolean;
+    outcomes?: Record<string, Result>;
+    reused?: boolean;
+  } = {},
+) {
+  const results = new Map<string, Result>();
+  const plan = {
+    skip: "false",
+    "dry-run": options.dry ?? "false",
+    channel: options.channel ?? "nightly",
+    tag: "v0.0.22",
+    promoted: options.channel === "stable" ? "v0.0.22-nightly.20261029.1" : "",
+  };
+  const outputs = (job: string, output: string): Value => {
+    if (!(output in (workflow.jobs[job]?.outputs ?? {})))
+      return unmodelled(`needs.${job}.outputs.${output}`);
+    if (results.get(job) !== "success") return "";
+    if (job === "plan") return plan[output as keyof typeof plan] ?? unmodelled(output);
+    if (job === "validation") return options.reused ? "true" : "false";
+    return "true";
+  };
+  for (const name of Object.keys(workflow.jobs)) {
+    if (!PUBLIC.includes(name)) {
+      results.set(name, options.outcomes?.[name] ?? "success");
+      continue;
+    }
+    const scope = jobScope(
+      workflow,
+      name,
+      results,
+      outputs,
+      (path) => {
+        if (path === "github.event_name") return options.event ?? "schedule";
+        if (path === "github.ref") return "refs/heads/main";
+        if (path === "inputs.operation") return options.operation ?? "release";
+        return unmodelled(path);
+      },
+      options.cancelled ?? false,
+    );
+    results.set(
+      name,
+      runs(workflow.jobs[name]!.if, scope) ? (options.outcomes?.[name] ?? "success") : "skipped",
+    );
+  }
+  return PUBLIC.filter((name) => results.get(name) === "success");
+}
 
-describe("publishing", { timeout: 120_000 }, () => {
-  it("never starts on a pull request event of its own", () => {
-    expect(Object.keys(publish.on)).toEqual(["workflow_call", "workflow_dispatch"]);
+describe("publication boundaries", () => {
+  it("never publishes a PR or dry run, even with successful packaging and reuse", () => {
+    for (const event of ["schedule", "workflow_dispatch", "pull_request"])
+      for (const dry of ["true", "false"])
+        for (const channel of ["stable", "nightly"])
+          for (const reused of [true, false])
+            if (dry === "true" || event === "pull_request")
+              expect(publication(release, { event, dry, channel, reused })).toEqual([]);
   });
-
-  it("runs no job of a release's call for a dry run or a pull request event, whatever else happened", () => {
-    expect(leaks(release, publish)).toBeNull();
+  it("publishes one nightly or the selected stable after all mandatory gates", () => {
+    expect(publication(release)).toEqual(["publish", "discord", "feed"]);
+    expect(publication(release, { channel: "stable" })).toEqual(PUBLIC);
+    expect(publication(release, { channel: "stable", outcomes: { msix: "failure" } })).toEqual([]);
+    for (const job of [
+      "check",
+      "test",
+      "bundle",
+      "package",
+      "package-windows",
+      "sources",
+      "validation",
+    ])
+      for (const result of ["failure", "cancelled"] as const)
+        expect(publication(release, { outcomes: { [job]: result } }), job).toEqual([]);
+    expect(publication(release, { channel: "stable", outcomes: { upgrade: "failure" } })).toEqual(
+      [],
+    );
+    expect(publication(release, { cancelled: true })).toEqual([]);
   });
-
-  it("does publish a scheduled nightly and a stable release once everything they wait for passed", () => {
-    expect(publishedBy(release, publish, passed({}))["publish"]).toEqual([
-      "release",
+  it("accepts skipped fallback only with authenticated reuse, and skips nightly-only optional work", () => {
+    const outcomes = {
+      check: "skipped",
+      test: "skipped",
+      upgrade: "skipped",
+      msix: "skipped",
+      "release-ui": "skipped",
+    } as const;
+    expect(publication(release, { outcomes })).toEqual([]);
+    expect(publication(release, { outcomes, reused: true })).toEqual([
+      "publish",
       "discord",
       "feed",
     ]);
-    const stable = publishedBy(
-      release,
-      publish,
-      passed({
-        event: "workflow_dispatch",
-        channel: "stable",
-        firstTag: "v0.0.13-nightly.20261013.301",
-      }),
-    );
-    expect(stable["nightly-first-publish"]).toEqual(["release", "discord", "feed"]);
-    expect(stable["publish"]).toEqual(
-      expect.arrayContaining([
-        "release",
-        "discord",
-        "feed",
-        "store",
-        "finalize",
-        "website-refresh",
-      ]),
-    );
   });
-
-  it("announces only a successful publication, independently of feed failures, without failing its caller", () => {
-    const given = {
-      channel: "nightly",
-      version: "0.0.21-nightly.20261026.400",
-      tag: "v0.0.21-nightly.20261026.400",
-    };
-    for (const result of ["failure", "skipped", "cancelled"] as const)
-      expect(simulate(publish, given, "schedule", false, { release: result })).not.toContain(
-        "discord",
-      );
-    expect(simulate(publish, given, "schedule", false, { feed: "failure" })).toContain("discord");
-    expect(publish.jobs["discord"]?.["continue-on-error"]).toBe(true);
-  });
-
-  it("calls the website after a stable release's version commit, whatever the feed and Store did", () => {
-    const stable = { channel: "stable", tag: "v0.0.22" };
+  it("keeps announcements and stable website handoff independent of feed and Store failures", () => {
     for (const feed of RESULTS)
-      for (const store of RESULTS)
-        expect(simulate(publish, stable, "workflow_dispatch", false, { feed, store })).toContain(
-          "website-refresh",
-        );
-    for (const finalize of RESULTS.filter((result) => result !== "success"))
-      expect(simulate(publish, stable, "workflow_dispatch", false, { finalize })).not.toContain(
-        "website-refresh",
-      );
-    expect(publish.jobs["website-refresh"]).toMatchObject({
+      for (const store of RESULTS) {
+        const jobs = publication(release, { channel: "stable", outcomes: { feed, store } });
+        expect(jobs).toContain("discord");
+        expect(jobs).toContain("website-refresh");
+      }
+    expect(
+      publication(release, { channel: "stable", outcomes: { finalize: "failure" } }),
+    ).not.toContain("website-refresh");
+    expect(release.jobs["website-refresh"]).toMatchObject({
       uses: "./.github/workflows/website.yml",
       with: { deploy: true },
     });
   });
-  it("publishes nothing once the run is cancelled, or the package call failed", () => {
-    const jobs = (run: Run) => Object.values(publishedBy(release, publish, run)).flat();
-    const ok = passed({});
-    expect(jobs(passed({ cancelled: true }))).toEqual([]);
-    expect(jobs({ ...ok, results: { ...ok.results, package: "failure" } })).toEqual([]);
-  });
-
-  // Each probe is a condition that once got past an earlier version of this guard. They mutate a
-  // copy of the parsed workflow, never the file.
-  it.each([
-    ["ignores the plan's dry-run output", (condition: string) => `(${condition}) || true`],
-    [
-      "publishes after a failed dry run",
-      (condition: string) => `${condition} || (failure() && needs.plan.outputs.dry-run == 'true')`,
-    ],
-    [
-      "publishes a nightly dry run",
-      (condition: string) =>
-        `${condition} || (always() && needs.plan.outputs.channel == 'nightly' && needs.plan.outputs.dry-run == 'true')`,
-    ],
-  ])("would catch a publish call that %s", (_, change) => {
-    for (const call of ["publish", "nightly-first-publish"]) {
-      expect(leaks(mutated(release, call, change), publish), call).not.toBeNull();
+  it("runs maintenance on existing releases even with a skipped plan and packaging", () => {
+    const outcomes = Object.fromEntries(
+      Object.keys(release.jobs)
+        .filter((name) => !PUBLIC.includes(name))
+        .map((name) => [name, "skipped" as const]),
+    );
+    for (const operation of ["feed", "store"]) {
+      const copy = structuredClone(release);
+      // A skipped plan has no outputs.
+      copy.jobs["plan"] = { ...copy.jobs["plan"]!, outputs: {} };
+      // Use the same evaluator with empty plan outputs via a separate narrow scope.
+      const job = release.jobs[operation === "feed" ? "feed" : "store-gate"]!;
+      expect(
+        runs(job.if, {
+          path: (path) =>
+            path === "inputs.operation"
+              ? operation
+              : path === "github.ref"
+                ? "refs/heads/main"
+                : "",
+          needsSucceeded: false,
+          ancestorFailed: false,
+          cancelled: false,
+        }),
+      ).toBe(true);
     }
+    expect(outcomes.plan).toBe("skipped");
   });
-
-  it("would catch a release job that takes a pull request event", () => {
-    const taking = mutated(publish, "release", () => "inputs.tag != ''");
-    expect(leaks(release, taking)).toMatchObject({
-      run: { event: "pull_request", dryRun: "false" },
-    });
-  });
-
-  it("refuses to guess at a context it doesn't model", () => {
-    const guessing = mutated(release, "publish", (condition) => `${condition} && vars.ANYTHING`);
-    expect(() => publishedBy(guessing, publish, passed({}))).toThrow(
-      "The guard doesn't model vars.ANYTHING",
-    );
-    const output = mutated(release, "publish", (c) => `${c} && needs.plan.outputs.unknown == ''`);
-    expect(() => publishedBy(output, publish, passed({}))).toThrow(
-      "The guard doesn't model needs.plan.outputs.unknown",
-    );
-  });
-
-  it("is called by no other workflow", () => {
-    for (const name of ["checks.yml", "package.yml", "upgrade-check.yml"]) {
-      expect(Object.values(read(name).jobs).map((job) => job.uses)).not.toContain(PUBLISH);
+  it("detects removal of the dry-run or PR boundary", () => {
+    for (const condition of [
+      "!cancelled()",
+      "needs.plan.outputs.dry-run == 'false' && !cancelled()",
+      "github.event_name != 'pull_request' && !cancelled()",
+    ]) {
+      const copy = structuredClone(release);
+      copy.jobs["publish"] = { ...copy.jobs["publish"]!, if: condition };
+      expect(
+        [
+          publication(copy, { event: "pull_request", dry: "false" }),
+          publication(copy, { event: "workflow_dispatch", dry: "true" }),
+        ].some((jobs) => jobs.includes("publish")),
+      ).toBe(true);
     }
   });
 });

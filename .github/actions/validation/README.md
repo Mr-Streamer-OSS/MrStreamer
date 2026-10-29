@@ -48,3 +48,9 @@ The top-level identity repeats the Check identity for lookup; `profile: desktop-
 The test completeness gate and discovery catalogue come from the exact candidate, like its tests.
 They are bound by source SHA and validation identity and remain subject to normal source review.
 Using a newer trusted catalogue to judge an older candidate would change that candidate’s intended suite.
+
+Release fallback may set `build: "false"` only when its required final versioned production
+bundle gates publication. This omits only the duplicate Check build, leaving all static/workflow
+checks and the full Test contract intact. Default PR/main callers keep `build: "true"`.
+Fallback does not emit reusable desktop-v1 evidence: that profile still means the producer Check
+and Test both executed under the recorded identities, including the default Check build.

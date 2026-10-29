@@ -1,99 +1,42 @@
 # CI: what runs when
 
-> For maintainers. [Releasing](releasing.md) has the release policy, [testing](../contributing/testing.md#ci) what the checks check.
+> For maintainers. [Releasing](releasing.md) has the release policy; [testing](../contributing/testing.md#ci) describes acceptance.
 
-Six workflow files in `.github/workflows`: five named workflows and `package.yml`, which only `release.yml` calls. Two shared actions live in `.github/actions`:
+The operational workflow set is Checks, Release and Website.
 
-- `checks.yml`: the app's and the website's checks.
-- `release.yml`: plans a run, then builds each release through `package.yml` and publishes it through `publish.yml`.
-- `package.yml`: builds and checks one release's files on every platform. Only `release.yml` calls it.
-- `publish.yml`: the GitHub release, the update feed and the Microsoft Store.
-- `website.yml`: the website.
-- `upgrade-check.yml`: the Windows installed upgrade check.
-- `.github/actions/setup`: what every package job starts with. `.github/actions/package-receipt`: what every package job ends with.
+- `checks.yml` validates every PR and push to main. Check always reports and includes the desktop production build. Test and Website use conservative input selection; unknown inputs run both. Main validates its actual merged source. PR evidence is diagnostic only.
+- `release.yml` plans one candidate, authenticates prior Checks evidence or runs secretless fallback, builds one versioned shared JS bundle, packages native targets and sources, performs installed checks, then publishes when authorized by the selected operation. Dry runs publish nothing.
+- `website.yml` owns website builds and publication. A workflow-only merge cannot deploy the production website. A stable version commit receives an explicit Website handoff after finalization because workflow-token pushes start no new workflow.
 
-```mermaid
-flowchart LR
-  pr([Pull request]) --> checks[checks.yml<br/>Check, Test, Website]
-  main([Push to main]) --> checks
-  cron([Every 6 hours]) --> plan
-  hand([By hand: nightly, stable or dry run]) --> plan
-  label([Label: release dry run]) --> plan
-  subgraph rel [release.yml]
-    plan[Plan]
-    package[package.yml<br/>checks, bundle, platforms,<br/>MSIX, sources]
-    upgrade[upgrade-check.yml]
-  end
-  subgraph pub [publish.yml]
-    release[GitHub release]
-    feed[Update feed]
-    store[Microsoft Store]
-    finalize[Version commit on main]
-  end
-  subgraph site [website.yml]
-    web[Website build]
-    deploy[Website publish]
-    indexnow[IndexNow]
-  end
-  plan --> package
-  plan -- stable --> upgrade
-  package -- not a dry run --> release
-  upgrade --> release
-  release --> feed
-  release -- stable --> store
-  release -- stable --> finalize
-  finalize -- explicit reusable call --> web
-  main -- website inputs changed --> web
-  hand3([By hand: Website]) --> web
-  web --> deploy --> indexnow
-  hand2([By hand: feed or Store]) --> pub
-```
+## Candidate and validation
 
-A stable run that finds `main` ahead of the latest nightly runs `package.yml` and `publish.yml` twice: a nightly of `main` first, then the stable release. The stable release builds only once that nightly is published and the feed names it.
+Plan resolves the full product source SHA, version and tag once. Stable requires an explicitly tested published nightly and rebuilds that source with the Stable version even when main has newer commits. It never builds a second nightly. Promotion ancestry and version ordering remain checked by the planner and Windows upgrade resolver.
 
-## Triggers, inputs, secrets and environments
+Release's validation job searches exact-source main push Checks runs. It waits at most five minutes for an in-flight match. Reuse requires API-authenticated repository, event, branch, workflow, source, conclusion and current attempt, unexpired immutable artifact identity, trusted main ancestry, identical trusted validation tooling and matching effective input/toolchain/image identities. Missing, failed, cancelled, foreign, expired or incompatible evidence runs fallback. Signed/versioned packages never satisfy source validation.
 
-| Workflow            | Starts on                                                                                                                                               | Inputs                                                                                                                                                                                                                 | Secrets and variables                                                                                                                                                                                                                     | Environments                      |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `checks.yml`        | every pull request, every push to `main`, a call from `package.yml`                                                                                     | called: `sha`, `report-name`                                                                                                                                                                                           | none                                                                                                                                                                                                                                      | none                              |
-| `release.yml`       | schedule `17 */6 * * *`; by hand; a pull request labelled **release dry run**                                                                           | by hand: `channel` (nightly or stable), `version`, `nightly`, `dry-run`                                                                                                                                                | passes all of them on to `package.yml` and `publish.yml`                                                                                                                                                                                  | none of its own                   |
-| `package.yml`       | a call from `release.yml`                                                                                                                               | `channel`, `version`, `sha`, `dry-run`; gives back `sources` and `msix-sha256`                                                                                                                                         | `TMDB_API_KEY`; `POSTHOG_PROJECT_TOKEN` and the variable `POSTHOG_HOST`, outside dry runs; `MAC_CERTIFICATE_P12`, `MAC_CERTIFICATE_PASSWORD`, `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` and the variable `APPLE_TEAM_ID` | none                              |
-| `publish.yml`       | a call from `release.yml`, never for a dry run; by hand from `main`                                                                                     | called: `channel`, `version`, `tag`, `sha`, `previous-tag`, `sources`, `msix-sha256`, `feed-required`. By hand: `target` (feed or store), `allow-regress`, `store-action`, `version`, `draft`, `draft-metadata-sha256` | Store: `STORE_AUTOMATION_ENABLED`, and in its environment `STORE_CLIENT_SECRET`, `STORE_TENANT_ID`, `STORE_CLIENT_ID`, `STORE_CLIENT_SECRET_EXPIRES`.                                                                                     | `github-pages`, `microsoft-store` |
-| `website.yml`       | a push to `main` that changes website inputs or build-only routing/runbook paths; a call from `publish.yml` after a stable release; by hand from `main` | `deploy`                                                                                                                                                                                                               | `MARKETING_DEPLOY_ENABLED`, `POSTHOG_HOST`, `POSTHOG_PROJECT_TOKEN` (variables), and in its environment `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`                                                                              | `marketing-production`            |
-| `upgrade-check.yml` | a call from `release.yml` for a stable release; by hand from `main`                                                                                     | `candidate`: a published nightly's tag; called: also `sha`, the commit it must name                                                                                                                                    | none                                                                                                                                                                                                                                      | none                              |
+Fallback runs the shared validation action with separate Check and Test jobs and their existing 10/15-minute bounds. Only the Check production build is omitted: Release's required final versioned bundle supplies that build. PR/main Check keeps its default build. Test retains default discovery, workers, retries, timeouts, multimedia setup, JSON report and candidate completeness gate. See the [shared action contract](../../.github/actions/validation/README.md).
 
-Only the jobs that need a secret read it: the bundle job the TMDB and analytics keys, the macOS packaging step the signing secrets, the last step of the Store job the Store key, and the website publish job the Vercel token. `publish.yml` and `website.yml` are the only workflows that name an environment.
+The bundle is built once per candidate. macOS/Linux and Windows package independently after it. MSIX begins after Windows, without waiting for the other platforms. Stable installed-upgrade proof runs beside packaging and gates publication. Source archives, receipts, checksums, native integrity, signatures, app and DMG notarizations, installed checks and their historical version guards remain mandatory as documented in [releasing](releasing.md).
 
-## Which commit runs what
+## Operations
 
-A release's jobs check out the commit the plan resolved, so `main` moving during a run changes nothing. For a stable release that is the tested nightly's commit, which can be older than the workflows.
+| Operation         | Entry point                                                          | Result                                                                                                                       |
+| ----------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Automatic nightly | Daily 03:17 UTC                                                      | At least 24 hours since the latest nightly, only desktop release-input changes across the full range; unknown inputs qualify |
+| Manual nightly    | Release on main, operation release, channel nightly                  | Immediate one-candidate build                                                                                                |
+| Stable            | Release on main, operation release, channel stable, nightly selected | Rebuild selected source, upgrade proof, publish                                                                              |
+| Dry run           | Same-repository PR label `release dry run`, or manual dry-run        | Signed nonpublishing packages, UI proof, MSIX and receipts, kept 14 days                                                     |
+| Feed repair       | Release on main, operation feed                                      | Regenerate existing releases' feed without packaging; allow-regress is explicit                                              |
+| Store             | Release on main, operation store                                     | Preflight/status/submit an existing release package; no rebuild                                                              |
+| Installed upgrade | Release on main, operation upgrade, candidate tag                    | Disposable Windows installed proof, no publication                                                                           |
+| Website           | Website workflow                                                     | Independent build/delivery; stable finalization explicitly calls it                                                          |
 
-- The product comes from the release's commit: its build, its tests, its own scripts and its package receipts.
-- The tools that set up and judge a build come from the workflow commit, checked out beside it in `.workflow`: the setup and receipt actions, the Windows ffmpeg toolchain and the Store package check.
-- `publish.yml` runs the workflow commit's scripts on the files the run built. The feed job reads `main`, and the version commit goes to the branch the run started from, `main`.
+Nightly and Stable share the release queue. Dry runs queue per PR/branch. Maintenance runs do not block packaging, and feed, Store and installed-upgrade jobs retain independent noncancelling serialization. A failed publication can leave an unpublished draft; rerunning removes only that unfinished attempt. After GitHub publication, feed and Discord failures do not undo the release. Store and website have separate outcomes.
 
-## Each path
+## Trust and permissions
 
-- **Pull request:** `checks.yml` runs Check (knip, lint, format, typecheck, `pnpm actionlint`, build), Test and Website. A new push cancels the running checks. Nothing else starts: neither `publish.yml` nor `website.yml` has a pull request trigger.
-- **Push to `main`:** `checks.yml` runs Check and Test. When the push changes what the website is built from, `website.yml` builds the website and, with `MARKETING_DEPLOY_ENABLED`, publishes it. Pushes by the workflow token, such as the version commit, start nothing.
-- **Nightly:** every six hours the plan (`scripts/release-plan.ts plan`) builds a nightly when the last one is at least five hours old and `main` has commits it lacks, and skips otherwise. `package.yml` runs Checks and Test on the commit, builds the bundle, the three platforms and the sources; then `publish.yml` publishes a pre-release and updates the feed. A failed feed update shows on its job without failing the run. Nightlies build no Store package and leave the website alone. A nightly by hand skips both conditions. Five hours rather than six leaves room for the hour a nightly takes to publish, so nightlies come about every six hours while `main` changes.
-- **Dry run:** the **release dry run** label on a pull request from this repository builds its head; a run by hand with **dry-run** ticked builds the selected branch. The plan makes every pull request event a dry run. `package.yml` runs with `dry-run`, which adds the release UI proof and the Store package, compiles analytics out, and keeps the files 14 days. `publish.yml` is never called. Dry runs of one pull request or branch queue together, apart from releases.
-- **Stable release:** by hand from `main`, naming the tested nightly. If `main` is ahead of the latest nightly, a nightly of `main` is built and published first, and the stable release waits until the feed names it. Then `package.yml` rebuilds the tested nightly's commit with the stable version, including the Store package, while `upgrade-check.yml` installs the newest stable release on Windows and upgrades it to the tested nightly. `publish.yml` runs once both passed.
-- **GitHub release:** `publish.yml`'s first job checks every platform's files and every source are there (`release-plan.ts check`, against `packages/contracts/src/release-files.ts`) and the version is still new, writes the checksums and notes, removes an unfinished draft of the same tag, and publishes. It refuses a pull request event.
-- **Discord:** after each successful GitHub publication, an optional job posts Stable or Nightly to its channel, including a stable run's first nightly. `DISCORD_STABLE_WEBHOOK_URL` and `DISCORD_NIGHTLY_WEBHOOK_URL` are repository Actions secrets. Missing configuration and delivery errors warn without failing the publisher. [Setup, permissions and verification](discord.md).
-- **Update feed:** after every published release, and by hand with target **feed**. It merges the releases with the deployed feed, never moving a channel down unless **allow-regress** says so, and deploys to Pages through `github-pages`, one publication at a time.
-- **Microsoft Store:** after a published stable release, and by hand with target **store**. The gate job reads `STORE_AUTOMATION_ENABLED` and the `microsoft-store` environment's branch rule before any job names it; while submissions are off a release's run stops there with a notice. The Store job checks the release and the run's own package against its checksum, then submits. When the MSIX failed outside a dry run, the release still goes out and this job fails for want of a checksum.
-- **Version commit:** after a published stable release, `chore(release): prepare vX` on `main`, retried while `main` moves.
-- **Website:** after the version commit of a stable release, whatever the feed and the Store did, after a push that changes its inputs, and by hand from `main`. The version commit is the workflow token's push and starts nothing, so `publish.yml` calls `website.yml` for it. A push that changes only routing or runbook files, including the workflows, these docs and the marketing README, builds the website and publishes nothing; a comparison of the push that fails publishes nothing either. A run by hand publishes with **deploy** ticked, the default. Retrying it builds no desktop package and publishes no release. The build job has no owner secrets and builds `main` as it is. The publish job, in `marketing-production` with `MARKETING_DEPLOY_ENABLED`, checks out nothing, compares `main` with the build over the website deployment inputs and leaves publishing to a newer run when `main` changed the website, then deploys the prebuilt package to Vercel. One publication at a time.
-- **IndexNow:** after a publication that actually deployed, the notifier from the same build checks the public site carries that build's marker, then notifies once.
-- **Upgrade check:** inside a stable release, and by hand from `main` with a nightly's tag. Inside a release the tag must name the commit the plan resolved, so the check proves the source the release builds. It derives the prior stable release from the releases, checks both setups against their published checksums, and installs, upgrades and restarts on a disposable Windows runner. It holds no secret and publishes nothing.
+Product build/scripts/tests and receipts come from the candidate. Validation and setup tools come from the reviewed workflow SHA, in separate full validation or scoped `.workflow` checkouts. Privileged publication jobs run workflow tools, never arbitrary fork validation code. Source validation jobs have read-only access; validation lookup additionally reads Actions artifacts.
 
-## Queues and retention
+The bundle reads TMDB and public analytics inputs; dry runs compile capture off. Only macOS signing reads signing/notarization secrets. Feed retains the `github-pages` environment and Pages permissions. Store preflight checks its kill switch and branch restrictions before any job names `microsoft-store`; only its final step reads the credential. Website retains its own `marketing-production` environment. No settings, secrets, apps or runner installation is required by this graph change.
 
-- Releases share one queue (`release-main`); each pull request's or branch's dry runs have their own. None is cancelled.
-- The feed (`update-feed`), the Store (`microsoft-store`) and the website (`marketing-production`) each publish one at a time without cancelling a waiting run. The upgrade check runs one at a time (`upgrade-check`).
-- Release files are kept 3 days (dry runs 14), the Store package 90 days (dry runs 14), a failed Store package 14, release UI proof 14, test reports 7, upgrade evidence 14 and a failed upgrade's profile 7.
-
-## Checking a change to CI
-
-`pnpm actionlint` lints the workflow files, with shellcheck on each workflow `run:` script, and runs in Check on every pull request. It checks how workflows use the shared actions, but not the shell inside the actions themselves. `test/publication-guard.test.ts` evaluates the real `if:` conditions and `with:` inputs of `release.yml`'s publishing calls and of every `publish.yml` job, plus the independent `website.yml` job conditions, for every event, dry-run output, channel, result of the jobs they wait for, ancestor failure and run cancellation, and fails if anything a pull request or dry run starts would publish. A context it doesn't model fails the test instead of reading as a guessed value, and the conditions that got past earlier versions of the guard stay in it as probes. It also runs the website build's decision step on pushes that change what the website is built from, on pushes that change only routing/runbook files, and on explicit manual deploy requests. `test/release.test.ts`, `test/store-release.test.ts` and `apps/desktop/test/package-receipt.test.ts` cover the scripts the workflows run. A change to `package.yml` or the shared actions needs a dry run of its pull request. Publication routing changes require independent review and a signed non-publishing PR dry run. Actual deployment and stable refresh integration require a separately approved delivery.
+`pnpm actionlint` checks the workflow and shell contracts. `test/release.test.ts` covers public planning/publication rules; `test/publication-guard.test.ts` evaluates real publication job conditions, skipped fallback handling, failures, PR/dry-run boundaries and the independent Website decision steps. Source checks and local proof do not establish actual publication integration. That requires separately approved maintainer acceptance.

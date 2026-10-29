@@ -302,7 +302,7 @@ node apps/desktop/test/e2e/download-memory.ts 2048 .local/download-memory.json
 
 ## Installed upgrade
 
-`apps/desktop/test/e2e/installed-upgrade.ts` checks that upgrading an installed Windows app keeps what a viewer had. It has one mode: it installs the newest published stable release, replaces it with a published candidate nightly, then restarts that same candidate. A stable release run makes the check before publishing, with the nightly it promotes as the candidate and the commit it planned to build, which the candidate's tag must name exactly. It can also be dispatched alone from `main` through `.github/workflows/upgrade-check.yml`, whose one input `candidate` is the nightly's tag, such as `v0.0.13-nightly.20261013.300`. It runs on a disposable `windows-2025` runner, with read access alone and no secret, and publishes nothing.
+`apps/desktop/test/e2e/installed-upgrade.ts` checks that upgrading an installed Windows app keeps what a viewer had. It has one mode: it installs the newest published stable release, replaces it with a published candidate nightly, then restarts that same candidate. A stable release run makes the check before publishing, with the nightly it promotes as the candidate and the commit it planned to build, which the candidate's tag must name exactly. It can also be dispatched alone from `main` through `.github/workflows/release.yml`, with `operation=upgrade` and `candidate` naming the nightly's tag, such as `v0.0.13-nightly.20261013.300`. It runs on a disposable `windows-2025` runner, with read access alone and no secret, and publishes nothing.
 
 ```sh
 node apps/desktop/test/e2e/installed-upgrade.ts resolve --candidate "$CANDIDATE" \
@@ -438,7 +438,7 @@ node scripts/ci-test-results.ts .local/test-results.json
 
 Run it from the repository's root. Without ffmpeg the media files fail it, and on Windows so do the files that skip there: the rule is CI's, on Linux.
 
-The Test job uploads the report as the artifact `test-results-<run id>-<attempt>`, kept seven days, whether or not the tests passed. Release runs name it `test-results-<version>-<attempt>`, so a stable run's nightly first and stable release keep a report each. The report's paths are the runner's, so read a downloaded one with `jq` rather than the check:
+The Test job uploads the report as the artifact `test-results-<run id>-<attempt>`, kept seven days, whether or not the tests passed. Release runs name it `test-results-<version>-<attempt>`, identifying the one candidate. The report's paths are the runner's, so read a downloaded one with `jq` rather than the check:
 
 ```sh
 gh run download <run id> -n test-results-<run id>-<attempt> -D .local/ci-report

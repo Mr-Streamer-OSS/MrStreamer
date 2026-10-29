@@ -7,6 +7,10 @@ inputs:
     description: check, test or website
     required: true
 
+  build:
+    description: Production build; release fallback uses its required final versioned bundle instead
+    default: "true"
+
   report-name:
     description: Unique report label for callers validating more than one candidate
     default: ${{ github.run_id }}
@@ -66,7 +70,7 @@ runs:
       run: pnpm actionlint
       shell: bash
     - name: Build
-      if: inputs.part == 'check'
+      if: inputs.part == 'check' && inputs.build == 'true'
       run: pnpm build
       shell: bash
     - name: Locate trusted tools

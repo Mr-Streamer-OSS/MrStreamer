@@ -1,4 +1,4 @@
-# The last steps of a package job of package.yml, once its package passed every check and is
+# The last steps of a package job of Release, once its package passed every check and is
 # uploaded: apps/desktop/scripts/package-receipt.ts, from the release's commit, writes a receipt
 # binding the uploaded files to the commit, the run and the artifact, and this keeps it as an
 # artifact of its own; docs/maintainers/releasing.md#package-receipts.

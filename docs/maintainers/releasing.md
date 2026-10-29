@@ -2,19 +2,19 @@
 
 > For maintainers. Using Mr. Streamer? See [docs/user](../user).
 
-Releases come from `.github/workflows/release.yml`, which plans them, builds each release's files with `.github/workflows/package.yml` and publishes them with `.github/workflows/publish.yml`. They live on GitHub Releases. [CI](ci.md) shows how the workflows fit together. The app finds them through the [update feed](#update-feed), a small file the workflow publishes to GitHub Pages after each release; see [architecture](../contributing/architecture.md#updates).
+Releases come from `.github/workflows/release.yml`, which plans, builds, checks and publishes one candidate. They live on GitHub Releases. [CI](ci.md) shows how the workflows fit together. The app finds them through the [update feed](#update-feed), a small file the workflow publishes to GitHub Pages after each release; see [architecture](../contributing/architecture.md#updates).
 
 ## What the workflow does
 
 - Triggers:
-  - a nightly check on a schedule every six hours, at 00:17, 06:17, 12:17 and 18:17 UTC. GitHub can start scheduled runs late.
+  - a daily nightly check at 03:17 UTC. GitHub can start scheduled runs late.
   - manual `workflow_dispatch` with `channel=nightly`, which builds `main` right away
   - manual `workflow_dispatch` with `channel=stable`, the only way to ship stable
   - a [dry run](#dry-runs): the **release dry run** label on a pull request, or a manual run with **dry-run** ticked
 - Manual runs other than dry runs must select `main`; the plan refuses any other branch.
-- The plan job (`scripts/release-plan.ts plan`) decides from what started the run whether it is a dry run, and resolves the commit, version and tag before anything builds. A pull request event is always a dry run. For a stable release it also decides whether a [nightly goes first](#stable-releases). Every later job checks out the planned commit, so merges that land during a run never reach its build.
-- `package.yml` builds and checks each release the plan names. On its commit, in parallel:
-  - the [CI](../contributing/testing.md#ci) Check and Test jobs, from `checks.yml`. Test keeps its report as the `test-results-<version>-<attempt>` artifact; see [the test report](../contributing/testing.md#the-test-report)
+- The plan job (`scripts/release-plan.ts plan`) decides from what started the run whether it is a dry run, and resolves the commit, version and tag before anything builds. A pull request event is always a dry run. Every later job checks out the planned commit, so merges that land during a run never reach its build.
+- The Release packaging jobs build and check the selected candidate. On its commit, in parallel:
+  - trusted exact-source Checks results, or shared secretless Check and Test fallback. The fallback Check omits its duplicate production build; the required final versioned bundle provides it. PR/main Check still builds. Test keeps its report as the `test-results-<version>-<attempt>` artifact; see [the test report](../contributing/testing.md#the-test-report)
   - `bundle` builds the JavaScript once, with the release version, and hands it to every platform as the `js-bundle-<version>` artifact. It is the release's `pnpm build`: CI's Check job leaves building to it
   - `package` (macOS and Linux) and `package-windows` build each platform on its own runner, from the bundle:
     - the bundled ffmpeg, cached until `apps/desktop/scripts/build-ffmpeg.sh` changes, and verified by `apps/desktop/scripts/verify-ffmpeg.ts` on every cold or warm build: required features plus all five VP8/VP9/AV1 container fixtures decoded before and after H.264 conversion. The result and binary hashes are retained as `ffmpeg-codecs-<target>-<version>-attempt-<attempt>`. Sources stamped 0.0.15 or older retain the segment-muxer check when their verifier is absent; 0.0.16 and later cannot use that fallback. Windows uses MSYS2 UCRT64. Its cache hashes the setup action in `apps/desktop/scripts/windows-ffmpeg-toolchain/action.yml` alongside the release source's build script, so unrelated workflow edits reuse it and setup or build-input edits rebuild it. The setup action comes from the workflow commit, the build script from the release's. Windows and MSIX use the same exact key, without fallback restore keys. Both cold and warm Windows runs check and print the cached README's compiler, runtime and package provenance
@@ -25,7 +25,7 @@ Releases come from `.github/workflows/release.yml`, which plans them, builds eac
     - every `latest*.yml` must name the release version
     - the [packaged-app test](../contributing/testing.md#packaged-app) runs on the installed DMG, setup, deb and AppImage
   - `sources` prepares the [source archives](licences.md#sources-on-every-release) a release attaches, each checked against its pinned SHA-256 or commit, and fails unless the bundle's notices link exactly those files
-- `publish.yml` publishes only when every check and platform succeeded and the sources are prepared, and never for a dry run:
+- The Release publication jobs publish only when every check and platform succeeded and the sources are prepared, and never for a dry run:
   - checks that each platform's installers, blockmaps and update metadata (`packages/contracts/src/release-files.ts`), and every source archive, are present
   - attaches them with `SHA256SUMS.txt` and the [notes](#release-notes)
   - checks again that the tag is unused and the version sorts after every release it competes with
@@ -39,7 +39,6 @@ Releases come from `.github/workflows/release.yml`, which plans them, builds eac
 - Nightlies are pre-releases and never marked latest. Stable releases are marked latest.
 - Runs never cancel each other. Nightlies and stable releases wait in one queue, and each pull request's or branch's dry runs in their own, so a requested stable release is never dropped.
 - Sharing the queue keeps a nightly from being planned while a stable release builds. Planned then, it would preview the same version as the stable release, from newer code, and sort before it. A stable release waits for a nightly that's running, and the other way round.
-- The nightly a stable run publishes first is part of that run, not a run of its own, so it never waits in the queue behind the run that needs it.
 
 ## Versions
 
@@ -50,26 +49,25 @@ Releases come from `.github/workflows/release.yml`, which plans them, builds eac
 
 ## Nightly builds
 
-- A check on the schedule builds when the last published nightly is at least five hours old and `main` has commits that descend from it. A nightly takes about an hour to build and publish, so five hours lets the next check, six hours after the last, find it due: nightlies come about every six hours while `main` changes. The check runs once the run's turn in the queue comes, so it sees any release published ahead of it.
+- A daily check builds only when the last published nightly is at least 24 hours old and the full Git range since it changes desktop release inputs. Marketing, docs and known editorial-only inputs do not qualify. Unknown paths or unavailable diffs conservatively qualify. No elapsed speedup is implied.
   - No nightly yet: builds.
   - Nothing new since the last nightly, or `main` older than it: skipped.
   - `main` no longer contains the last nightly, after its history was rewritten: skipped with a warning. Start a nightly by hand to continue from `main`.
 - Drafts and pre-releases without a nightly version don't count as the last nightly.
 - A nightly started by hand skips both conditions.
 - The version commit after a stable release counts as new, so a nightly follows each stable release.
-- A stable run publishes a nightly of `main` first when the latest nightly lacks commits `main` has; see [stable releases](#stable-releases).
 
 ## Stable releases
 
 1. Test a nightly: install it, update an existing install to it, and play a few channels.
 2. Run the Release workflow on `main` with channel **stable**. Enter the nightly you tested, such as `0.0.2-nightly.20260930.30` or its tag. It's required: the plan refuses a stable run without it, so a nightly published after your test can't ship untested.
 3. Leave the version empty to release the version the nightly previewed (`0.0.2-nightly.*` ships as `0.0.2`), or enter one that sorts after it and every stable release, such as `0.1.0`.
-   The nightly must sort above the newest stable release and strictly descend from its commit, the rule `packages/contracts/src/promotion.ts` holds for the plan and the upgrade check alike. A nightly from before the newest stable release never ships, whatever version you enter, and neither does one built from that release's own commit: test a fresh nightly published after it. The nightly a stable run publishes first qualifies until that stable release is out; after it, it sorts below it.
-4. When `main` has commits the latest published nightly doesn't, the run first publishes a nightly of `main`, without waiting five hours, and updates the feed. Nightly users then have every change before Stable users get any of it. That nightly previews the patch after the newest stable release, usually the same version as the one you tested, such as `0.0.2-nightly.20261002.31`, so it sorts after it and before the stable release. Its notes list the changes since the previous nightly. The stable release builds only once that nightly is published and the feed names it. When the latest nightly already has `main`'s commit, the run skips this step.
-5. The run rebuilds the tested nightly's exact commit with the stable version, never that of the nightly it just published. The nightly's files carry the nightly version, so they're never reused. Merges to `main` since the tested nightly don't reach the build. Beside the build, the [upgrade check](../contributing/testing.md#installed-upgrade) installs the newest stable release on Windows and upgrades it to the tested nightly; the release publishes only once that passed.
-6. It publishes the release as latest and updates the feed. Stable users are offered it from then on. Nightly users aren't: the feed's `nightly` keeps naming the newest nightly, the one published before the stable release when the run published one.
+   The nightly must sort above the newest stable release and strictly descend from its commit, the rule `packages/contracts/src/promotion.ts` holds for the plan and the upgrade check alike. A nightly from before the newest stable release never ships, whatever version you enter, and neither does one built from that release's own commit: test a fresh nightly published after it.
+4. The run selects only the explicitly tested nightly. Newer `main` commits do not cause a second nightly or a feed dependency.
+5. The run rebuilds that nightly's exact source with the stable version. Signed or versioned packages are never reused as source validation. The installed Windows upgrade proof runs alongside packaging and must pass before publication.
+6. It publishes the stable release as latest and updates the feed. The Nightly channel continues naming the newest published nightly.
 7. The finalize job commits `chore(release): prepare vX` to `main`, so `package.json` records the release and later nightlies preview the patch after it.
-8. The run also builds the [Microsoft Store package](#microsoft-store-package) for the stable release and, once the release is published, [sends it to the Store](#sending-it-to-the-store). The nightly before it gets none.
+8. The run also builds the [Microsoft Store package](#microsoft-store-package) for the stable release and, once the release is published, [sends it to the Store](#sending-it-to-the-store).
 
 The plan refuses a stable release when:
 
@@ -83,14 +81,13 @@ The plan refuses a stable release when:
 Each of these needs a fresh tested nightly. The upgrade check applies the same rule, so a stable run the plan accepts never fails it for eligibility after packaging.
 
 - the version is already released or would sort before the nightly
-- the nightly to publish first would sort after the stable release, which happens only when `package.json` on `main` records a version no release has
 
 ## Release notes
 
 `release-plan.ts notes` lists every pull request merged between the previous release of the same channel and the commit the run builds, each once, oldest first:
 
 - Stable: from the previous stable release to the promoted nightly's commit, covering every nightly in between. Pull requests merged to `main` after that commit are left out.
-- Nightly: from the previous nightly to its own commit, also for the nightly a stable run publishes first.
+- Nightly: from the previous nightly to its own commit.
 - A channel's first release lists everything up to its commit.
 
 Commits pushed without a pull request, such as the version commit, aren't listed.
@@ -137,7 +134,7 @@ The app looks for updates in `updates.json` at the root of the repository's GitH
 - `installers` names the release's files that end in `.dmg`, `.exe`, `.AppImage` or `.deb`. The website's download page links the stable release's, and only the ones listed ([the website's downloads](../../apps/marketing/README.md#downloads)). The app doesn't read the list, and a release that lacks an installer still enters the feed. A feed written before the list existed has none, and the website then keeps the links it was built with.
 - A release counts only when it's published, its version and pre-release flag name the same channel, and it carries `latest-mac.yml`, `latest.yml` and `latest-linux.yml`. One missing a platform is incomplete and never enters the feed.
 
-The **Update feed** job of `.github/workflows/publish.yml` writes the feed with `release-plan.ts feed` and deploys it, with an empty `.nojekyll`, after every published nightly and stable release. Dry runs publish nothing. Publications wait in a queue of their own and are never cancelled, so each reads the releases after the one before it deployed.
+The **Update feed** job of `.github/workflows/release.yml` writes the feed with `release-plan.ts feed` and deploys it, with an empty `.nojekyll`, after every published nightly and stable release. Dry runs publish nothing. Publications wait in a queue of their own and are never cancelled, so each reads the releases after the one before it deployed.
 
 The feed never goes back. Each channel is compared with its own releases. When the releases name a lower version than the deployed feed, that channel keeps the deployed release, so a late or stale publication can't take users back. Only a run by hand with **allow-regress** moves a channel down. A publication that can't read the deployed feed or look up the Pages site stops instead of publishing from the releases alone; only a 404 for either counts as nothing deployed yet.
 
@@ -145,21 +142,21 @@ A failed publication shows on the release run's **Update feed** job but doesn't 
 
 ### Regenerating the feed
 
-Run the **Publish** workflow on `main` with target **feed**. It rebuilds the feed from the releases as they are now, and the run summary names each channel's release. Tick **allow-regress** only to move a channel to a lower version, after taking a bad release's update files away ([recovery](#recovery)).
+Run the **Release** workflow on `main` with operation **feed**. It rebuilds the feed from the releases as they are now, and the run summary names each channel's release. Tick **allow-regress** only to move a channel to a lower version, after taking a bad release's update files away ([recovery](#recovery)).
 
 ### Enabling Pages
 
 Needed once. Until then, every release's **Update feed** job fails at deploying, without failing the release.
 
 1. In the repository's settings, under Pages, set the source to **GitHub Actions**.
-2. Run **Publish** on `main` with target **feed** to publish the first feed.
+2. Run **Release** on `main` with operation **feed** to publish the first feed.
 3. Open the feed's address: it must name the newest releases.
 
 A custom domain set there moves the feed to that domain's root. The workflow looks the address up through the Pages API, so it needs no change.
 
 ## Dry runs
 
-Add the label **release dry run** to a pull request from a branch of this repository, or run the Release workflow by hand on a branch with **dry-run** ticked and the channel left at nightly. The run builds, signs, notarizes and tests the pull request's head commit, or the branch's, like a nightly, prepares and checks the [source archives](licences.md#sources-on-every-release) a release would attach, and builds and tests the [Microsoft Store package](#microsoft-store-package) too. It keeps the files as workflow artifacts for 14 days and publishes nothing, so no update channel can offer the build. A pull request event is always planned as a dry run, release.yml never calls `publish.yml` for one, and `publish.yml`'s release job refuses a pull request event again; `test/publication-guard.test.ts` holds the workflows to that. A dry run never plans a nightly first. The label comes off at once; add it again to test a later commit. The plan also logs what a scheduled nightly and a stable release of the latest nightly would do on `main` at that moment, including any nightly that would go first.
+Add the label **release dry run** to a pull request from a branch of this repository, or run the Release workflow by hand on a branch with **dry-run** ticked and the channel left at nightly. The run builds, signs, notarizes and tests the pull request's head commit, or the branch's, like a nightly, prepares and checks the [source archives](licences.md#sources-on-every-release) a release would attach, and builds and tests the [Microsoft Store package](#microsoft-store-package) too. It keeps the files as workflow artifacts for 14 days and publishes nothing, so no update channel can offer the build. A pull request event is always planned as a dry run, and every publication path is gated on a non-dry plan and refuses PR events; `test/publication-guard.test.ts` holds the workflows to that. The label comes off at once; add it again to test a later commit. The plan also logs what a scheduled nightly and a stable release of the latest nightly would do on `main` at that moment.
 
 Forks get no signing secrets, so their pull requests can't run it.
 
@@ -284,7 +281,7 @@ The Store reads a four-part version with 0 to 65535 in each part. The first part
 
 ### Sending it to the Store
 
-Once a stable release is published and its package passed every check, the run's **Microsoft Store** job, in `.github/workflows/publish.yml`, sends that package to Partner Center. The [Store runbook](microsoft-store.md#how-a-release-reaches-the-store) has what it checks, what it changes in the listing and what it never does.
+Once a stable release is published and its package passed every check, the run's **Microsoft Store** job, in `.github/workflows/release.yml`, sends that package to Partner Center. The [Store runbook](microsoft-store.md#how-a-release-reaches-the-store) has what it checks, what it changes in the listing and what it never does.
 
 - Only a stable release started from `main` reaches it. A nightly, a dry run, a push or a tag never does.
 - It sends the file the run built and tested, from the `msix-<version>` artifact, and never builds another.
@@ -297,11 +294,11 @@ Once a stable release is published and its package passed every check, the run's
 - **Preparing the sources failed:** nothing was published. When an upstream server didn't answer, re-run the job. When a download no longer matches its SHA-256 or a commit is gone, upstream changed: find out why before touching the pin in `apps/desktop/licences.config.json`. When the notices and the sources differ, fix that on `main`; see [licences](licences.md#sources-on-every-release).
 - **A check or platform failed:** nothing was published. Re-run the failed jobs to retry the same commit and version, or fix it on `main` and let the next nightly pick it up. For stable, promote a nightly that has the fix.
 - **The nightly before a stable release failed:** the stable release hasn't built. Re-run the failed jobs, after fixing the cause when its feed failed; the stable release builds once the nightly is published and the feed names it. To get the nightly into the feed sooner, [regenerate the feed](#regenerating-the-feed) first.
-- **The upgrade check failed:** nothing was published. Its evidence, and on failure the profile, are the run's `installed-upgrade-*` artifacts; [testing](../contributing/testing.md#installed-upgrade) says what each stage checks. Re-run the failed jobs after a runner fault; for a real failure, promote a nightly that has the fix. **Upgrade check** by hand from `main` tries a nightly on its own.
+- **The upgrade check failed:** nothing was published. Its evidence, and on failure the profile, are the run's `installed-upgrade-*` artifacts; [testing](../contributing/testing.md#installed-upgrade) says what each stage checks. Re-run the failed jobs after a runner fault; for a real failure, promote a nightly that has the fix. **Release**, operation **upgrade**, by hand from `main` tries a nightly on its own.
 - **Publishing failed:** re-run the failed jobs. A broken attempt leaves at most a draft, which the next attempt deletes first.
 - **The version was taken meanwhile:** publishing refuses. The next nightly plans a new version; start a stable release again, with another version if needed.
 - **Finalize failed:** re-run it. It only moves `package.json` forward, so running it late or twice is harmless, and until it succeeds nightlies count from the published stable release.
-- **The feed wasn't updated:** the release is out, and the run's **Update feed** job shows why. Fix that, such as [enabling Pages](#enabling-pages), then [regenerate the feed](#regenerating-the-feed) by running **Publish** on `main` with target **feed**. When the job couldn't reach the deployed feed or the Pages API, regenerating once GitHub answers again is enough.
+- **The feed wasn't updated:** the release is out, and the run's **Update feed** job shows why. Fix that, such as [enabling Pages](#enabling-pages), then [regenerate the feed](#regenerating-the-feed) by running **Release** on `main` with operation **feed**. When the job couldn't reach the deployed feed or the Pages API, regenerating once GitHub answers again is enough.
 - **The Store job failed, or the MSIX job before it:** the release is out. The [Store runbook](microsoft-store.md#when-a-submission-fails) says what each failure needs.
 - **A bad release is out:** publish a fixed one. To stop offering it sooner, delete the release's three `latest*.yml` files, then regenerate the feed with **allow-regress**: without them the release counts neither for the feed nor for the app's fallback to GitHub's API, and the feed never goes back by itself. For a stable release, mark the stable release before it as latest too. Keep the release itself, with its installers and its [source archives](licences.md#sources-on-every-release). Whoever installed it is owed those sources under the GPL and the LGPL, and the release holds their only copy. Run **Website** on `main` with **deploy** ticked after regenerating the feed so the website also stops offering the bad release. None of this downgrades anyone who installed it.
 
@@ -309,7 +306,7 @@ Once a stable release is published and its package passed every check, the run's
 
 - The publish job creates releases with the workflow token (`contents: write`) and reads the pull requests behind each commit for the notes (`pull-requests: read`).
 - The finalize job pushes to `main` with the same token (`contents: write`). `main` has no branch protection or rulesets. If one is added, let GitHub Actions bypass it or give finalize a GitHub App token, or the push is refused.
-- Pushes by the workflow token start no workflows, so the version commit doesn't run CI. Publish calls **Website** after it instead, whatever the feed and the Store did.
+- Pushes by the workflow token start no workflows, so the version commit doesn't run CI. Release calls **Website** after it instead, whatever the feed and the Store did.
 - The plan job removes the dry-run label (`pull-requests: write`).
 - The upgrade check reads releases and commits (`contents: read`) and holds no secret.
 - The feed job reads the releases (`contents: read`) and deploys to Pages (`pages: write`, `id-token: write`) through the `github-pages` environment.
