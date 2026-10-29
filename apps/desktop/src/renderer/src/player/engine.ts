@@ -219,15 +219,24 @@ function hlsEngine(
   });
   const tracks = hlsTracks(hls, video, sound);
   if (ends === null) {
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      // Levels have already passed hls.js's codec checks. Their order also considers picture
-      // size and codec, so level zero need not have the lowest declared bitrate. Start there
-      // before ABR has throughput evidence, without capping it or choosing another provider feed.
-      hls.startLevel = hls.levels.reduce(
-        (lowest, level, index, levels) =>
-          level.bitrate < levels[lowest]!.bitrate ? index : lowest,
-        0,
-      );
+    hls.once(Hls.Events.MANIFEST_PARSED, () => {
+      const initial = hls.firstAutoLevel;
+      const tier = hls.levels[initial];
+      // Keep ABR's codec/range choice and its ability to climb back to that level. Level order
+      // also considers size and codec, so select by declared bitrate within that compatible tier.
+      // This affects startup only, never a provider feed choice or a persistent quality cap.
+      if (tier) {
+        hls.startLevel = hls.levels.reduce(
+          (lowest, level, index, levels) =>
+            level.codecSet === tier.codecSet &&
+            level.videoRange === tier.videoRange &&
+            level.frameRate <= tier.frameRate &&
+            level.bitrate < levels[lowest]!.bitrate
+              ? index
+              : lowest,
+          initial,
+        );
+      }
       hls.startLoad();
     });
   }
