@@ -4,7 +4,28 @@ import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { VerifiedFiles } from "../src/main/platform/verified-files.ts";
 import { Settings } from "../src/main/services/preferences.ts";
+import type { FakeProvider } from "./fake-provider.ts";
 import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+
+/** The app's services on `dir`, a new data folder unless given one, as a start of the app has them. */
+async function started(dir?: string) {
+  const runtime = runtimeFor(mainLayer(testConfig(dir ?? (await tempDir()))));
+  return {
+    runtime,
+    subscriptions: await promised(runtime, Subscriptions),
+    titles: await promised(runtime, OnDemand),
+    files: await promised(runtime, VerifiedFiles),
+    settings: await promised(runtime, Settings),
+  };
+}
+
+/** What each of `providers` was asked so far: its lists, title details and files. */
+const asked = (...providers: FakeProvider[]) =>
+  providers.flatMap((provider) => [
+    provider.titleListRequests(),
+    provider.detailRequests(),
+    provider.fileRequests(),
+  ]);
 
 describe("current movie and series filters", { timeout: 20000 }, () => {
   it("ranks the whole filtered search before its page cap, counts both totals, and keeps companion versions", async () => {
@@ -28,9 +49,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       })),
       series: [],
     }));
-    const runtime = runtimeFor(mainLayer(testConfig(await tempDir())));
-    const subscriptions = await promised(runtime, Subscriptions);
-    const titles = await promised(runtime, OnDemand);
+    const { subscriptions, titles } = await started();
     const first = await subscriptions.add(demoLogin(provider));
     const second = await subscriptions.add(demoLogin(other));
     await titles.refresh(first.id);
@@ -95,12 +114,8 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       movies: [{ ...seed, id: 70001, name: "Shared HD (DE)", tmdb: "4567" }],
       series: [],
     }));
-    const runtime = runtimeFor(mainLayer(testConfig(await tempDir())));
+    const { runtime, subscriptions, titles, files, settings } = await started();
     try {
-      const subscriptions = await promised(runtime, Subscriptions);
-      const titles = await promised(runtime, OnDemand);
-      const files = await promised(runtime, VerifiedFiles);
-      const settings = await promised(runtime, Settings);
       const first = await subscriptions.add(demoLogin(provider));
       const second = await subscriptions.add(demoLogin(other));
       await titles.refresh(first.id);
@@ -140,7 +155,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       };
       expect(await titles.filterOptions("movie")).toEqual(observed);
       // Hints of titles for adults only once the viewer shows them, and they filter that row.
-      const listedBefore = [provider.titleListRequests(), provider.detailRequests()];
+      const listedBefore = asked(provider);
       await settings.update({ adultTitles: true });
       expect(await titles.filterOptions("movie")).toEqual({
         ...observed,
@@ -156,7 +171,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
           filters: { quality: "sd", language: "pl" },
         }),
       ).toMatchObject({ total: 1, titles: [{ id: "70011" }] });
-      expect([provider.titleListRequests(), provider.detailRequests()]).toEqual(listedBefore);
+      expect(asked(provider)).toEqual(listedBefore);
       await settings.update({ adultTitles: false });
       expect(await titles.filterOptions("movie")).toEqual(observed);
       expect(
@@ -176,14 +191,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       movies = movies.map((movie) => (movie.id === 70001 ? { ...movie, container: "mp4" } : movie));
       await titles.refresh(first.id);
       expect(await titles.filterOptions("movie")).toEqual(choices);
-      const before = [
-        provider.titleListRequests(),
-        other.titleListRequests(),
-        provider.detailRequests(),
-        other.detailRequests(),
-        provider.fileRequests(),
-        other.fileRequests(),
-      ];
+      const before = asked(provider, other);
       expect(await titles.filterOptions("movie")).toEqual(choices);
       expect(await titles.filterOptions("series")).toEqual({
         qualities: [],
@@ -191,14 +199,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         verified: [],
         files: 0,
       });
-      expect([
-        provider.titleListRequests(),
-        other.titleListRequests(),
-        provider.detailRequests(),
-        other.detailRequests(),
-        provider.fileRequests(),
-        other.fileRequests(),
-      ]).toEqual(before);
+      expect(asked(provider, other)).toEqual(before);
     } finally {
       await runtime.dispose();
     }
@@ -212,10 +213,8 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       movies: [{ ...seed, name: "Loading HD (EN)", tmdb: "" }],
       series: [],
     }));
-    const runtime = runtimeFor(mainLayer(testConfig(await tempDir())));
+    const { runtime, subscriptions, titles } = await started();
     try {
-      const subscriptions = await promised(runtime, Subscriptions);
-      const titles = await promised(runtime, OnDemand);
       const saved = await subscriptions.add(demoLogin(provider));
       const empty = { qualities: [], languages: [], verified: [], files: 0 };
       expect(await titles.filterOptions("movie")).toEqual(empty);
@@ -245,10 +244,8 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     const seed = provider.titles.series[0]!;
     let series = [{ ...seed, name: "Hint sample 4K (NL)" }];
     provider.serveTitles((all) => ({ ...all, movies: [], series }));
-    const runtime = runtimeFor(mainLayer(testConfig(await tempDir())));
+    const { runtime, subscriptions, titles } = await started();
     try {
-      const subscriptions = await promised(runtime, Subscriptions);
-      const titles = await promised(runtime, OnDemand);
       const saved = await subscriptions.add(demoLogin(provider));
       const target = { subscriptionId: saved.id, id: String(seed.id) };
       await titles.refresh(saved.id);
@@ -260,11 +257,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       series = [{ ...seed, name: "Hint sample HD (EN)" }];
       await titles.refresh(saved.id);
       await titles.details("series", target);
-      const before = [
-        provider.titleListRequests(),
-        provider.detailRequests(),
-        provider.fileRequests(),
-      ];
+      const before = asked(provider);
       expect(await titles.filterOptions("series")).toMatchObject({
         qualities: ["hd"],
         languages: ["en"],
@@ -277,11 +270,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       ).toMatchObject({
         total: 1,
       });
-      expect([
-        provider.titleListRequests(),
-        provider.detailRequests(),
-        provider.fileRequests(),
-      ]).toEqual(before);
+      expect(asked(provider)).toEqual(before);
     } finally {
       await runtime.dispose();
     }
@@ -298,10 +287,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         { ...seed, id: 71003, name: "Harbour HD (NL)", tmdb: "4567", adult: false },
       ],
     }));
-    const runtime = runtimeFor(mainLayer(testConfig(await tempDir())));
-    const subscriptions = await promised(runtime, Subscriptions);
-    const titles = await promised(runtime, OnDemand);
-    const files = await promised(runtime, VerifiedFiles);
+    const { subscriptions, titles, files } = await started();
     const saved = await subscriptions.add(demoLogin(provider));
     await titles.refresh(saved.id);
     const [source] = await subscriptions.saved();
@@ -321,11 +307,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         subtitles: [],
       });
     }
-    const before = [
-      provider.titleListRequests(),
-      provider.detailRequests(),
-      provider.fileRequests(),
-    ];
+    const before = asked(provider);
     const collection = (filters?: Parameters<typeof titles.collection>[0]["filters"]) =>
       titles.collection({
         kind: "movie",
@@ -357,11 +339,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     expect(
       await collection({ language: "nl", verified: { kind: "audio", language: "de" } }),
     ).toMatchObject({ total: 0, titles: [] });
-    expect([
-      provider.titleListRequests(),
-      provider.detailRequests(),
-      provider.fileRequests(),
-    ]).toEqual(before);
+    expect(asked(provider)).toEqual(before);
   });
 
   it("filters one actual version, remembers read tracks across restart and rejects removed files without fetching", async () => {
@@ -373,16 +351,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       { ...seed, id: 70002, name: "Filter sample HD (EN)", tmdb: "4567", adult: false },
     ];
     provider.serveTitles((all) => ({ ...all, movies, series: [] }));
-    const start = async () => {
-      const runtime = runtimeFor(mainLayer(testConfig(dir)));
-      return {
-        runtime,
-        subscriptions: await promised(runtime, Subscriptions),
-        titles: await promised(runtime, OnDemand),
-        files: await promised(runtime, VerifiedFiles),
-      };
-    };
-    let app = await start();
+    let app = await started(dir);
     const subscription = await app.subscriptions.add(demoLogin(provider));
     expect((await app.titles.filterOptions("movie")).qualities).toEqual([]);
     expect(provider.titleListRequests()).toBe(0);
@@ -398,11 +367,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       audio: ["en"],
       subtitles: ["nl"],
     });
-    const before = [
-      provider.titleListRequests(),
-      provider.detailRequests(),
-      provider.fileRequests(),
-    ];
+    const before = asked(provider);
     expect(
       await app.titles.collection({
         kind: "movie",
@@ -437,13 +402,9 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       ]),
     });
     expect(await app.titles.filterOptions("series")).toMatchObject({ files: 0, verified: [] });
-    expect([
-      provider.titleListRequests(),
-      provider.detailRequests(),
-      provider.fileRequests(),
-    ]).toEqual(before);
+    expect(asked(provider)).toEqual(before);
     await app.runtime.dispose();
-    app = await start();
+    app = await started(dir);
     expect(
       (
         await app.titles.searchKind("movie", "sample", {
@@ -476,16 +437,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     const provider = await fakeProvider({ titles: 2 });
     let series = [provider.titles.series[0]!];
     provider.serveTitles((all) => ({ ...all, movies: [], series }));
-    const start = async () => {
-      const runtime = runtimeFor(mainLayer(testConfig(dir)));
-      return {
-        runtime,
-        subscriptions: await promised(runtime, Subscriptions),
-        titles: await promised(runtime, OnDemand),
-        files: await promised(runtime, VerifiedFiles),
-      };
-    };
-    let app = await start();
+    let app = await started(dir);
     const subscription = await app.subscriptions.add(demoLogin(provider));
     await app.titles.refresh(subscription.id);
     const [source] = await app.subscriptions.saved();
@@ -513,11 +465,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       audio: ["en", null],
       subtitles: ["nl"],
     });
-    const before = [
-      provider.titleListRequests(),
-      provider.detailRequests(),
-      provider.fileRequests(),
-    ];
+    const before = asked(provider);
     const observed = async () => {
       const [title] = await app.titles.titles("series", [
         { subscriptionId: source.id, id: first.seriesId },
@@ -557,13 +505,9 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         })
       ).total,
     ).toBe(0);
-    expect([
-      provider.titleListRequests(),
-      provider.detailRequests(),
-      provider.fileRequests(),
-    ]).toEqual(before);
+    expect(asked(provider)).toEqual(before);
     await app.runtime.dispose();
-    app = await start();
+    app = await started(dir);
     expect(await observed()).toBeUndefined();
     expect(await app.titles.filterOptions("series")).toMatchObject({ files: 0, verified: [] });
     await app.titles.details("series", { subscriptionId: source.id, id: first.seriesId });

@@ -300,10 +300,12 @@ describe("movies and series", { timeout: 20_000 }, () => {
   it("marks for adults only by the row the lists show for an id, the first, in either kind", async () => {
     const app = await onDemandApp();
     const { onDemand, provider, own } = app;
-    // Series 80001 and film 91001 each listed twice, an ordinary row and one for adults.
+    // Series 80001 and film 91001 each listed twice, an ordinary row and one for adults, and
+    // with `newcomer` a series new to the lists, for adults from the start.
     const twice = (
       series: "ordinary first" | "adult first",
       film: "ordinary first" | "adult first",
+      newcomer = false,
     ) =>
       provider.serveTitles((all) => {
         const show = all.series.find((each) => each.id === 80_001)!;
@@ -316,6 +318,9 @@ describe("movies and series", { timeout: 20_000 }, () => {
           series: [
             ...all.series.filter((each) => each !== show),
             ...(series === "ordinary first" ? shows : shows.toReversed()),
+            ...(newcomer
+              ? [{ ...all.series[0]!, id: 89_999, name: "Brand New (EN)", adult: true }]
+              : []),
           ],
           movies: [
             ...all.movies.filter((each) => each !== movie),
@@ -347,11 +352,15 @@ describe("movies and series", { timeout: 20_000 }, () => {
     // So does the film's.
     twice("adult first", "adult first");
     await refresh();
-    expect(marked).toEqual([false, true, false, true]);
+    // Nothing read before named a series new to the lists: it marks nothing.
+    twice("adult first", "adult first", true);
+    await refresh();
+    expect(marked).toEqual([false, true, false, true, false]);
     expect(shown).toEqual([
       [false, false],
       [true, false],
       [true, false],
+      [true, true],
       [true, true],
     ]);
   });
@@ -401,34 +410,6 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect(fetchedAt).toBe(1792900000000);
     // Shown or not, a title for adults is never related to another.
     expect(await near()).not.toContain("80001");
-  });
-
-  it("tells the views when refreshed lists mark for adults a title they listed before, and only then", async () => {
-    const app = await onDemandApp();
-    const { onDemand, provider } = app;
-    await onDemand.refresh();
-    const told = await collect(app.runtime, onDemand.changes);
-    // The same lists again.
-    await onDemand.refresh();
-    // A series listed for everyone, now marked for adults by the provider.
-    const marked = (series: { readonly id: number }) => series.id === 80_001;
-    provider.serveTitles((all) => ({
-      ...all,
-      series: all.series.map((series) => (marked(series) ? { ...series, adult: true } : series)),
-    }));
-    await onDemand.refresh();
-    // A series new to the lists, for adults from the start: nothing read before named it.
-    provider.serveTitles((all) => ({
-      ...all,
-      series: [
-        ...all.series.map((series) => (marked(series) ? { ...series, adult: true } : series)),
-        { ...all.series[0]!, id: 89_999, name: "Brand New (EN)", adult: true },
-      ],
-    }));
-    await onDemand.refresh();
-    await vi.waitFor(() => expect(told).toHaveLength(3));
-    expect(told.map((update) => update.markedForAdults ?? false)).toEqual([false, true, false]);
-    expect(told.every((update) => update.lists[0]?.fetchedAt !== null)).toBe(true);
   });
 
   it("forgets the last account's titles when the subscription goes", async () => {

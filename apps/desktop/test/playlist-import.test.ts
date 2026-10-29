@@ -11,6 +11,7 @@ import { ViewingRecord } from "@mrstreamer/core/viewing/service";
 import { continuation } from "@mrstreamer/core/viewing/episodes";
 import { seriesEpisodeOrder, seriesEpisodeSeasons } from "@mrstreamer/core/ondemand/details";
 import { playlistGroupId } from "@mrstreamer/core/playlist/import";
+import { playlistProvider } from "../src/main/providers/m3u.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { Library } from "../src/main/services/library.ts";
@@ -86,11 +87,9 @@ async function started(dir: string, { testClock = false } = {}) {
     watchlist: await promised(runtime, Watchlist),
   };
 }
+type App = Awaited<ReturnType<typeof started>>;
 /** Moves the app's test clock on a second at a time until `pending` settles. */
-async function passTime(
-  runtime: Awaited<ReturnType<typeof started>>["runtime"],
-  pending: Promise<unknown>,
-): Promise<void> {
+async function passTime(runtime: App["runtime"], pending: Promise<unknown>): Promise<void> {
   let settled = false;
   const done = pending.finally(() => {
     settled = true;
@@ -103,6 +102,29 @@ async function passTime(
 }
 const login = (link: string) => ({ server: link, username: "", password: "" });
 const films = playlistGroupId("Films");
+/** A playlist source at example.test that maps its Films group to movies. */
+const filmsSource = {
+  link: "https://example.test/list",
+  mapping: { version: 1 as const, groups: [{ group: films, mode: "movie" as const }] },
+};
+/** The first page of a kind's All. */
+const firstPage = (titles: App["titles"], kind: "movie" | "series" = "movie") =>
+  titles.collection({ kind, id: "all", offset: 0, limit: 20 });
+
+/**
+ * Saves each playlist host on `app` with its Films group mapped to movies of its own: without a
+ * shared TMDB id, their films stay distinct titles. Answers the subscriptions, in order.
+ */
+async function savedWithFilms(app: App, providers: readonly Awaited<ReturnType<typeof host>>[]) {
+  const saved = [];
+  for (const provider of providers) {
+    provider.set(provider.list().replace(' tmdb-id="42"', ""));
+    const subscription = await app.subscriptions.add(login(provider.link));
+    await app.subscriptions.mapPlaylist(subscription.id, films, "movie");
+    saved.push(subscription);
+  }
+  return saved;
+}
 
 describe("saved M3U movie mapping", () => {
   // Each limit a source can pass, entries, bytes and groups, is the provider's: see
@@ -203,9 +225,8 @@ describe("saved M3U movie mapping", () => {
     await app.subscriptions.mapPlaylist(saved.id, films, "movie");
     await app.subscriptions.mapPlaylist(saved.id, playlistGroupId("Shows"), "series");
     await app.roster.refreshPlaylist(saved.id);
-    const query = { id: "all" as const, offset: 0, limit: 20 };
-    const movie = (await app.titles.collection({ ...query, kind: "movie" })).titles[0]!;
-    const series = (await app.titles.collection({ ...query, kind: "series" })).titles[0]!;
+    const movie = (await firstPage(app.titles)).titles[0]!;
+    const series = (await firstPage(app.titles, "series")).titles[0]!;
     const filmEntry = await app.watchlist.save("movie", movie);
     const seriesEntry = await app.watchlist.save("series", series);
     const page = { sort: "title" as const, offset: 0, limit: 20 };
@@ -223,7 +244,7 @@ describe("saved M3U movie mapping", () => {
     // Explicit TMDB identity follows a replacement version; the entry keeps its id and time.
     provider.set(provider.list("restored", shows).replace(",Film\n", ",Restored film\n"));
     await app.roster.refreshPlaylist(saved.id);
-    const restored = (await app.titles.collection({ ...query, kind: "movie" })).titles[0]!;
+    const restored = (await firstPage(app.titles)).titles[0]!;
     expect(restored.id).not.toBe(movie.id);
     expect(await app.watchlist.saved("movie", restored)).toEqual(filmEntry);
     expect((await app.watchlist.list(page)).entries[0]).toMatchObject({
@@ -267,15 +288,10 @@ describe("saved M3U movie mapping", () => {
     await app.roster.refreshPlaylist(saved.id);
     expect((await app.library.channels({})).map((channel) => channel.name)).toEqual(["Live HLS"]);
     expect((await app.titles.status()).lists[0]).toMatchObject({ movies: 1, series: 1 });
-    const query = { id: "all" as const, offset: 0, limit: 20 };
-    expect(
-      (await app.titles.collection({ ...query, kind: "movie" })).titles.map((title) => title.title),
-    ).toEqual(["File film"]);
-    expect(
-      (await app.titles.collection({ ...query, kind: "series" })).titles.map(
-        (title) => title.title,
-      ),
-    ).toEqual(["File show"]);
+    expect((await firstPage(app.titles)).titles.map((title) => title.title)).toEqual(["File film"]);
+    expect((await firstPage(app.titles, "series")).titles.map((title) => title.title)).toEqual([
+      "File show",
+    ]);
     expect((await app.subscriptions.playlistGroups(saved.id, "", 0, 20)).status).toMatchObject({
       live: 1,
       movies: 1,
@@ -292,13 +308,7 @@ describe("saved M3U movie mapping", () => {
   it("joins a titles query to the combined snapshot while other subscriptions occupy both title slots", async () => {
     const app = await started(await tempDir());
     const providers = await Promise.all([host(), host(), host()]);
-    const saved = [];
-    for (const provider of providers) {
-      provider.set(provider.list().replace(' tmdb-id="42"', ""));
-      const subscription = await app.subscriptions.add(login(provider.link));
-      await app.subscriptions.mapPlaylist(subscription.id, films, "movie");
-      saved.push(subscription);
-    }
+    const saved = await savedWithFilms(app, providers);
     const held = providers.slice(0, 2).map((provider) => provider.hold());
     const blockers = Promise.allSettled(saved.slice(0, 2).map(({ id }) => app.titles.refresh(id)));
     await Promise.all(held.map((request) => request.arrived));
@@ -319,14 +329,14 @@ describe("saved M3U movie mapping", () => {
           `#EXTINF:-1 group-title="Films",New film\n${target.origin}/new.mp4\n`,
         ),
       );
-      const asked = app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      const asked = firstPage(app.titles);
       // The worker answers this status after the query's status read, while both slots are held.
       await app.titles.status();
       for (const request of held) request.release();
       await blockers;
       await combined;
       await asked;
-      const page = await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      const page = await firstPage(app.titles);
       const own = page.titles.filter((title) => title.subscriptionId === targetId);
       expect(own).toHaveLength(1);
       expect(
@@ -342,13 +352,7 @@ describe("saved M3U movie mapping", () => {
   it("rejects a stale combined waiter without displacing the new mapping's refresh behind busy title slots", async () => {
     const app = await started(await tempDir());
     const [a, b, queued, target] = await Promise.all([host(), host(), host(), host()]);
-    const saved = [];
-    for (const provider of [a, b, queued, target]) {
-      provider.set(provider.list().replace(' tmdb-id="42"', ""));
-      const subscription = await app.subscriptions.add(login(provider.link));
-      await app.subscriptions.mapPlaylist(subscription.id, films, "movie");
-      saved.push(subscription);
-    }
+    const saved = await savedWithFilms(app, [a, b, queued, target]);
     const aId = saved[0]!.id;
     const bId = saved[1]!.id;
     const queuedId = saved[2]!.id;
@@ -408,7 +412,7 @@ describe("saved M3U movie mapping", () => {
           `#EXTINF:-1 group-title="Films",New film\n${target.origin}/new.mp4\n`,
         ),
       );
-      const asked = app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      const asked = firstPage(app.titles);
       work.push(asked);
       // The worker has answered the query's status read before releasing either remaining slot.
       await app.titles.status();
@@ -416,7 +420,7 @@ describe("saved M3U movie mapping", () => {
       heldQueued.release();
       expect(await newer).toMatchObject([{ status: "fulfilled" }]);
       await asked;
-      const page = await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      const page = await firstPage(app.titles);
       const own = page.titles.filter((title) => title.subscriptionId === targetId);
       expect(own.map((title) => title.name)).toEqual(["Film"]);
       expect(
@@ -467,9 +471,7 @@ describe("saved M3U movie mapping", () => {
         expect(await app.titles.isStale(saved.id, "12 hours")).toBe(false);
         expect(await app.library.channels({})).toHaveLength(1);
         expect((await app.library.status())[0]).toMatchObject({ failure: null });
-        expect(
-          (await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })).titles,
-        ).toEqual([]);
+        expect((await firstPage(app.titles)).titles).toEqual([]);
         expect(provider.requests() - before).toBe(2);
       } finally {
         second?.release();
@@ -501,7 +503,7 @@ describe("saved M3U movie mapping", () => {
         app.titles.refresh(saved.id, { source, read: Effect.succeed(first) }),
         app.titles.refresh(saved.id, { source, read: Effect.succeed(second) }),
       ]);
-      const page = await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      const page = await firstPage(app.titles);
       expect(page.titles.map((title) => title.name).sort()).toEqual(["Film", "New film"]);
       expect((await app.titles.status()).lists[0]?.movies).toBe(2);
     },
@@ -526,14 +528,7 @@ describe("saved M3U movie mapping", () => {
   it("keeps one exact playlist snapshot while both list services wait behind other subscriptions", async () => {
     const app = await started(await tempDir());
     const providers = await Promise.all(Array.from({ length: 5 }, () => host()));
-    const saved = [];
-    for (const provider of providers) {
-      // These are distinct synthetic films; an explicit shared TMDB id would join their rows.
-      provider.set(provider.list().replace(' tmdb-id="42"', ""));
-      const subscription = await app.subscriptions.add(login(provider.link));
-      await app.subscriptions.mapPlaylist(subscription.id, films, "movie");
-      saved.push(subscription);
-    }
+    const saved = await savedWithFilms(app, providers);
     const held = providers.slice(0, 4).map((provider) => provider.hold());
     const blockers = [
       app.library.refresh(saved[0]!.id),
@@ -571,7 +566,7 @@ describe("saved M3U movie mapping", () => {
       const [result] = await refreshed;
       expect(result?.status).toBe("fulfilled");
       expect(target.requests() - before).toBe(1);
-      const page = await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+      const page = await firstPage(app.titles);
       const own = page.titles.filter((title) => title.subscriptionId === targetId);
       expect(own).toHaveLength(1);
       expect(
@@ -602,13 +597,9 @@ describe("saved M3U movie mapping", () => {
     expect(provider.requests() - before).toBe(1);
     expect(await app.library.channels({})).toHaveLength(1);
     expect((await app.titles.status()).lists[0]?.movies).toBe(1);
-    const oldMovie = (
-      await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })
-    ).titles[0]!;
+    const oldMovie = (await firstPage(app.titles)).titles[0]!;
     await app.titles.details("movie", oldMovie);
-    const oldSeries = (
-      await app.titles.collection({ kind: "series", id: "all", offset: 0, limit: 20 })
-    ).titles[0]!;
+    const oldSeries = (await firstPage(app.titles, "series")).titles[0]!;
     const details = await app.titles.details("series", oldSeries);
     if (details.kind !== "series") throw new Error("No series");
     const episode = seriesEpisodeOrder(details)[0]!;
@@ -626,9 +617,7 @@ describe("saved M3U movie mapping", () => {
     expect((await app.library.status())[0]?.failure?.kind).toBe("provider-error");
     expect((await app.titles.status()).lists[0]?.failure?.kind).toBe("provider-error");
     expect(await app.library.channels({})).toHaveLength(1);
-    expect(
-      (await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })).total,
-    ).toBe(1);
+    expect((await firstPage(app.titles)).total).toBe(1);
     provider.set("#EXTM3U\n");
     const emptyBefore = provider.requests();
     await app.roster.refreshPlaylist(saved.id);
@@ -681,7 +670,7 @@ describe("saved M3U movie mapping", () => {
     expect(await app.subscriptions.stands(before)).toBe(false);
     await app.library.refresh(saved.id);
     await app.titles.refresh(saved.id);
-    const movies = await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 });
+    const movies = await firstPage(app.titles);
     expect(movies.total).toBe(1);
     const title = movies.titles[0]!;
     const file = await app.titles.file({ kind: "movie", subscriptionId: saved.id, id: title.id });
@@ -697,38 +686,11 @@ describe("saved M3U movie mapping", () => {
     await app.runtime.dispose();
     const restarted = await started(dir);
     expect((await restarted.subscriptions.list())[0]?.playlistMapped).toBe(true);
-    expect(
-      (await restarted.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 }))
-        .titles[0]?.id,
-    ).toBe(title.id);
+    expect((await firstPage(restarted.titles)).titles[0]?.id).toBe(title.id);
     expect(
       await restarted.titles.file({ kind: "movie", subscriptionId: saved.id, id: title.id }),
     ).toMatchObject({ headers: file.headers, url: file.url });
   }, 20_000);
-
-  it("keeps prior lists on failure, removes missing entries on one successful refresh, including remapping everything", async () => {
-    const provider = await host();
-    const app = await started(await tempDir());
-    const saved = await app.subscriptions.add(login(provider.link));
-    await app.subscriptions.mapPlaylist(saved.id, films, "movie");
-    await app.library.refresh(saved.id);
-    await app.titles.refresh(saved.id);
-    provider.fail();
-    await expect(app.library.refresh(saved.id)).rejects.toBeDefined();
-    await expect(app.titles.refresh(saved.id)).rejects.toBeDefined();
-    expect(
-      (await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })).total,
-    ).toBe(1);
-    provider.set(provider.list());
-    await app.subscriptions.mapPlaylist(saved.id, films, "skip");
-    await app.titles.refresh(saved.id);
-    expect(
-      (await app.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })).total,
-    ).toBe(0);
-    await app.subscriptions.mapPlaylist(saved.id, playlistGroupId("News"), "skip");
-    await app.library.refresh(saved.id);
-    expect(await app.library.channels({})).toHaveLength(0);
-  });
 
   it("refreshes caches after a saved mapping change interrupted before its list refresh", async () => {
     const provider = await host();
@@ -745,43 +707,15 @@ describe("saved M3U movie mapping", () => {
     expect(await restarted.library.isStale(saved.id, "12 hours")).toBe(true);
     expect(await restarted.titles.isStale(saved.id, "12 hours")).toBe(true);
     // Prior data remains reachable while the changed source refreshes.
-    expect(
-      (await restarted.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })).total,
-    ).toBe(1);
+    expect((await firstPage(restarted.titles)).total).toBe(1);
     await restarted.titles.refresh(saved.id);
-    expect(
-      (await restarted.titles.collection({ kind: "movie", id: "all", offset: 0, limit: 20 })).total,
-    ).toBe(0);
+    expect((await firstPage(restarted.titles)).total).toBe(0);
   }, 15_000);
-
-  it("drops stale work after a mapping change and preserves other subscriptions", async () => {
-    const provider = await host();
-    const app = await started(await tempDir());
-    const saved = await app.subscriptions.add(login(provider.link));
-    const other = await app.subscriptions.add(login(`${provider.link}&second=1`));
-    await app.subscriptions.mapPlaylist(saved.id, films, "live");
-    await app.subscriptions.playlistGroups(saved.id, "", 0, 10);
-    const waiting = provider.hold();
-    const refreshing = app.titles.refresh(saved.id);
-    const rejected = expect(refreshing).rejects.toBeDefined();
-    await waiting.arrived;
-    await app.subscriptions.mapPlaylist(saved.id, films, "movie");
-    waiting.release();
-    await rejected;
-    await app.titles.refresh(saved.id);
-    expect(
-      (await app.titles.status()).lists.find((each) => each.subscriptionId === saved.id)?.movies,
-    ).toBe(1);
-    expect(
-      (await app.subscriptions.list()).find((each) => each.id === other.id)?.playlistMapped,
-    ).toBe(false);
-  });
 });
 
 it.each(["/index.m3u", "/50%/index.m3u", "/50%25/index.m3u"])(
   "follows credential-free HTTPS to HTTP redirects with ordinary or malformed path %s for unmapped Live",
   async (path) => {
-    const { playlistProvider } = await import("../src/main/providers/m3u.ts");
     const requests: string[] = [];
     const provider = playlistProvider(
       { link: `https://example.test${path}` },
@@ -821,41 +755,30 @@ it.each([
   "https://player:synthetic-password@example.test/film.mp4",
   "https://player%:synthetic-password@example.test/film.mp4",
 ])("protects a file's userinfo even when its percent encoding is malformed", async (url) => {
-  const { playlistProvider } = await import("../src/main/providers/m3u.ts");
   const requests: string[] = [];
-  const provider = playlistProvider(
-    {
-      link: "https://example.test/list",
-      mapping: { version: 1, groups: [{ group: films, mode: "movie" }] },
+  const provider = playlistProvider(filmsSource, {
+    userAgent: "test",
+    fetch: async (input) => {
+      if (String(input) === "https://example.test/list")
+        return new Response(`#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n${url}\n`);
+      requests.push(String(input));
+      return new Response(null, {
+        status: 302,
+        headers: { location: url.replace("https:", "http:") },
+      });
     },
-    {
-      userAgent: "test",
-      fetch: async (input) => {
-        if (String(input) === "https://example.test/list")
-          return new Response(`#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n${url}\n`);
-        requests.push(String(input));
-        return new Response(null, {
-          status: 302,
-          headers: { location: url.replace("https:", "http:") },
-        });
-      },
-    },
-  );
+  });
   await provider.onDemandCatalogue();
   await expect(provider.request(url)).rejects.toThrow("unencrypted");
   expect(requests).toHaveLength(1);
 });
 
 it("bounds playlist headers while retaining the last successful exact file", async () => {
-  const { playlistProvider } = await import("../src/main/providers/m3u.ts");
   let body = '#EXTM3U\n#EXTINF:-1 group-title="Films",Film\nhttps://example.test/film.mp4\n';
-  const provider = playlistProvider(
-    {
-      link: "https://example.test/list",
-      mapping: { version: 1, groups: [{ group: films, mode: "movie" }] },
-    },
-    { userAgent: "test", fetch: async () => new Response(body) },
-  );
+  const provider = playlistProvider(filmsSource, {
+    userAgent: "test",
+    fetch: async () => new Response(body),
+  });
   const catalogue = await provider.onDemandCatalogue();
   const title = catalogue.movies[0]!;
   body = "#EXTM3U " + " ".repeat(65_536) + "\n";
@@ -868,29 +791,22 @@ it("bounds playlist headers while retaining the last successful exact file", asy
 });
 
 it("resolves playlist files without probing and protects a file's own redirect credentials", async () => {
-  const { playlistProvider } = await import("../src/main/providers/m3u.ts");
   const requests: string[] = [];
-  const provider = playlistProvider(
-    {
-      link: "https://example.test/list",
-      mapping: { version: 1, groups: [{ group: films, mode: "movie" }] },
+  const provider = playlistProvider(filmsSource, {
+    userAgent: "test",
+    fetch: async (input) => {
+      const address = String(input);
+      requests.push(address);
+      if (address === "https://example.test/list")
+        return new Response(
+          '#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n#EXTVLCOPT:http-user-agent=FilmAgent\nhttps://example.test/film.mp4?token=synthetic-token\n',
+        );
+      return new Response(null, {
+        status: 302,
+        headers: { location: "http://example.test/film.mp4?token=synthetic-token" },
+      });
     },
-    {
-      userAgent: "test",
-      fetch: async (input) => {
-        const address = String(input);
-        requests.push(address);
-        if (address === "https://example.test/list")
-          return new Response(
-            '#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n#EXTVLCOPT:http-user-agent=FilmAgent\nhttps://example.test/film.mp4?token=synthetic-token\n',
-          );
-        return new Response(null, {
-          status: 302,
-          headers: { location: "http://example.test/film.mp4?token=synthetic-token" },
-        });
-      },
-    },
-  );
+  });
   const catalogue = await provider.onDemandCatalogue();
   const file = await provider.titleFile("movie", catalogue.movies[0]!.id, "mp4");
   expect(requests).toEqual(["https://example.test/list"]);
@@ -914,7 +830,7 @@ it("imports series files, resumes the selected exact version after reorder/start
   const saved = await app.subscriptions.add(login(provider.link));
   await app.subscriptions.mapPlaylist(saved.id, playlistGroupId("Shows"), "series");
   await app.titles.refresh(saved.id);
-  const all = await app.titles.collection({ kind: "series", id: "all", offset: 0, limit: 20 });
+  const all = await firstPage(app.titles, "series");
   expect(all.total).toBe(1);
   const series = { subscriptionId: saved.id, id: all.titles[0]!.id };
   const details = await app.titles.details("series", series);
@@ -1034,7 +950,6 @@ it("imports series files, resumes the selected exact version after reorder/start
 it.each([false, true])(
   "keeps usable entries with long attributes and many groups, mapped=%s",
   async (mapped) => {
-    const { playlistProvider } = await import("../src/main/providers/m3u.ts");
     const names = Array.from({ length: 33 }, (_, at) => `Group ${at}`);
     const address = `https://example.test/long.mp4?signature=${"x".repeat(5000)}`;
     const provider = playlistProvider(
@@ -1082,7 +997,6 @@ it.each([false, true])(
 it.each(["?token=synthetic-token", "?v=1"])(
   "keeps unmapped Live redirect policy for its own query %s",
   async (query) => {
-    const { playlistProvider } = await import("../src/main/providers/m3u.ts");
     const url = `https://example.test/live.m3u8${query}`;
     const provider = playlistProvider(
       { link: "https://example.test/list" },

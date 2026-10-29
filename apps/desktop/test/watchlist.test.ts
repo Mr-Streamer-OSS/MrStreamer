@@ -13,7 +13,7 @@ import { Settings } from "../src/main/services/preferences.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { Watchlist } from "../src/main/services/watchlist.ts";
-import type { FakeProvider } from "./fake-provider.ts";
+import type { FakeProvider, FakeTitles } from "./fake-provider.ts";
 import { startFakeTmdb, tmdbName, type FakeTmdb } from "./fake-tmdb.ts";
 import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
@@ -59,6 +59,29 @@ afterEach(async () => {
 /** Lets the clock move on, so what is saved next is saved later. */
 function later(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 5));
+}
+
+/** A change to a listed title by its id: `null` drops it, and anything else is spread over it. */
+type Relisted<T> = Readonly<Record<string, Partial<T> | null>>;
+
+/** Has a provider list its titles with `movies` and `series` changed, from its next lists on. */
+function relist(
+  provider: FakeProvider,
+  changes: {
+    readonly movies?: Relisted<FakeTitles["movies"][number]>;
+    readonly series?: Relisted<FakeTitles["series"][number]>;
+  },
+) {
+  const apply = <T extends { readonly id: number }>(titles: readonly T[], change?: Relisted<T>) =>
+    titles.flatMap((title) => {
+      const changed = change?.[String(title.id)];
+      return changed === null ? [] : [{ ...title, ...changed }];
+    });
+  provider.serveTitles((all) => ({
+    ...all,
+    movies: apply(all.movies, changes.movies),
+    series: apply(all.series, changes.series),
+  }));
 }
 
 /** What a page shows of each entry: its name, and whether the lists have its title. */
@@ -303,16 +326,12 @@ describe("a saved title as the provider changes its lists", { timeout: 30_000 },
     const [before] = (await saving.list()).entries;
 
     // The version it was saved in goes, and the other gets another name.
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.flatMap((movie) =>
-        String(movie.id) === TWO_SOUNDS
-          ? []
-          : String(movie.id) === TWO_SOUNDS_DUBBED
-            ? [{ ...movie, name: "Two Sounds Restored (2024) (NL AUDIO)" }]
-            : [movie],
-      ),
-    }));
+    relist(provider, {
+      movies: {
+        [TWO_SOUNDS]: null,
+        [TWO_SOUNDS_DUBBED]: { name: "Two Sounds Restored (2024) (NL AUDIO)" },
+      },
+    });
     await saving.refresh();
 
     expect((await saving.list()).entries).toMatchObject([
@@ -324,16 +343,9 @@ describe("a saved title as the provider changes its lists", { timeout: 30_000 },
     ]);
 
     // Then the provider lists it under an id it never had, with the same TMDB id.
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.flatMap((movie) =>
-        String(movie.id) === TWO_SOUNDS
-          ? [{ ...movie, id: 95_555, tmdb: "100000" }]
-          : String(movie.id) === TWO_SOUNDS_DUBBED
-            ? []
-            : [movie],
-      ),
-    }));
+    relist(provider, {
+      movies: { [TWO_SOUNDS]: { id: 95_555, tmdb: "100000" }, [TWO_SOUNDS_DUBBED]: null },
+    });
     await saving.refresh();
 
     expect((await saving.list()).entries).toMatchObject([
@@ -348,20 +360,11 @@ describe("a saved title as the provider changes its lists", { timeout: 30_000 },
     await later();
     const unnamed = await saving.save("movie", UNNAMED);
     const before = await saving.list();
-    const gone = new Set([INDEX_AT_END, UNNAMED]);
 
     // One fetch finds a title renamed, and the next finds both gone, with nothing read between.
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.map((movie) =>
-        String(movie.id) === UNNAMED ? { ...movie, name: "Harbour Lights (2021) (NL)" } : movie,
-      ),
-    }));
+    relist(provider, { movies: { [UNNAMED]: { name: "Harbour Lights (2021) (NL)" } } });
     await saving.refresh();
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.filter((movie) => !gone.has(String(movie.id))),
-    }));
+    relist(provider, { movies: { [INDEX_AT_END]: null, [UNNAMED]: null } });
     await saving.refresh();
 
     // Both stay, without a title, and say the lists were looked in.
@@ -392,14 +395,7 @@ describe("a saved title as the provider changes its lists", { timeout: 30_000 },
     await later();
 
     // The provider gives the id to another film, as its TMDB id says.
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.map((movie) =>
-        String(movie.id) === INDEX_AT_END
-          ? { ...movie, name: "Another Film (EN)", tmdb: "777" }
-          : movie,
-      ),
-    }));
+    relist(provider, { movies: { [INDEX_AT_END]: { name: "Another Film (EN)", tmdb: "777" } } });
     await saving.refresh();
 
     expect(await saving.shown()).toEqual([{ name: "TEST | Index at the end", available: false }]);
@@ -433,14 +429,9 @@ describe("a saved title as the provider changes its lists", { timeout: 30_000 },
     await later();
 
     // The provider gives the id to a film without a TMDB id: nothing says it is the one saved.
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.map((movie) =>
-        String(movie.id) === INDEX_AT_END
-          ? { ...movie, name: "An Unrelated New Film (EN)", tmdb: "0" }
-          : movie,
-      ),
-    }));
+    relist(provider, {
+      movies: { [INDEX_AT_END]: { name: "An Unrelated New Film (EN)", tmdb: "0" } },
+    });
     await saving.refresh();
 
     const kept = { ...before.entries[0], title: null };
@@ -479,24 +470,11 @@ describe("a saved title as the provider changes its lists", { timeout: 30_000 },
 
     // The provider now says both are one film, in two versions. The next fetch finds the
     // version saved first gone, with nothing read between.
-    const versions = new Set([UNNAMED, UNNAMED_TOO]);
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.map((movie) =>
-        versions.has(String(movie.id)) ? { ...movie, tmdb: "424242" } : movie,
-      ),
-    }));
+    relist(provider, {
+      movies: { [UNNAMED]: { tmdb: "424242" }, [UNNAMED_TOO]: { tmdb: "424242" } },
+    });
     await saving.refresh();
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.flatMap((movie) =>
-        String(movie.id) === UNNAMED
-          ? []
-          : String(movie.id) === UNNAMED_TOO
-            ? [{ ...movie, tmdb: "424242" }]
-            : [movie],
-      ),
-    }));
+    relist(provider, { movies: { [UNNAMED]: null, [UNNAMED_TOO]: { tmdb: "424242" } } });
     await saving.refresh();
 
     // One entry is left of the two: the one saved first, where it was, as the version left.
@@ -513,14 +491,7 @@ describe("a saved title as the provider changes its lists", { timeout: 30_000 },
     const { provider, saving } = await connected();
     // Two films without a TMDB id, under one name and year.
     const named = "Night Harbour (2021) (NL)";
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.map((movie) =>
-        String(movie.id) === UNNAMED || String(movie.id) === UNNAMED_TOO
-          ? { ...movie, name: named }
-          : movie,
-      ),
-    }));
+    relist(provider, { movies: { [UNNAMED]: { name: named }, [UNNAMED_TOO]: { name: named } } });
     const saved = await saving.save("movie", UNNAMED);
 
     expect(await saving.saved("movie", UNNAMED_TOO)).toBeNull();
@@ -528,16 +499,9 @@ describe("a saved title as the provider changes its lists", { timeout: 30_000 },
 
     // The saved one goes, and comes back under an id it never had. Neither the film that
     // reads the same nor the one under the new id stands in for it: a name is no proof.
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.map((movie) =>
-        String(movie.id) === UNNAMED
-          ? { ...movie, id: 95_002, tmdb: "0", name: named }
-          : String(movie.id) === UNNAMED_TOO
-            ? { ...movie, name: named }
-            : movie,
-      ),
-    }));
+    relist(provider, {
+      movies: { [UNNAMED]: { id: 95_002, tmdb: "0", name: named }, [UNNAMED_TOO]: { name: named } },
+    });
     await saving.refresh();
 
     expect((await saving.list()).entries).toMatchObject([
@@ -587,10 +551,7 @@ describe("a saved title as the provider changes its lists", { timeout: 30_000 },
     // The entries take the names over the next time the lists are fetched.
     await saving.refresh();
 
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.filter((movie) => String(movie.id) !== INDEX_AT_END),
-    }));
+    relist(provider, { movies: { [INDEX_AT_END]: null } });
     await saving.refresh();
 
     // The entry keeps the name it showed, and its picture is TMDB's, never the provider's.
@@ -721,20 +682,6 @@ describe("the watchlist of several subscriptions", { timeout: 30_000 }, () => {
   /** Which subscription's version each of a title's is. */
   const versionsOf = (entry: WatchlistPage["entries"][number] | undefined) =>
     (entry?.title?.versions ?? []).map(({ subscriptionId, id }) => ({ subscriptionId, id }));
-  /** Has a provider list a film no more, from its next lists on. */
-  const drop = (provider: FakeProvider, id: string) =>
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.filter((movie) => String(movie.id) !== id),
-    }));
-  /** Has a provider give a film a TMDB id, from its next lists on. */
-  const name = (provider: FakeProvider, id: string, tmdbId: string) =>
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.map((movie) =>
-        String(movie.id) === id ? { ...movie, tmdb: tmdbId } : movie,
-      ),
-    }));
 
   it("shows a film two subscriptions list as one entry, saved for both at once and found by either's version", async () => {
     const { app, saving, first, second, a, b } = await two();
@@ -852,7 +799,7 @@ describe("the watchlist of several subscriptions", { timeout: 30_000 }, () => {
       const ids = [SHARED, SHARED_THERE] as const;
       const owners = [await saving.idOf(0), await saving.idOf(1)] as const;
       // The other subscription lists nothing of the film yet.
-      drop(app.providers[newcomer], ids[newcomer]);
+      relist(app.providers[newcomer], { movies: { [ids[newcomer]]: null } });
       await saving.refresh(newcomer);
       const made = await saving.save("movie", ids[saver], saver);
       // An entry saved before, under an id as saving makes them up: one that sorts behind every
@@ -896,7 +843,7 @@ describe("the watchlist of several subscriptions", { timeout: 30_000 }, () => {
     await later();
     const namesake = await saving.save("movie", NAMESAKE_THERE, 1);
     // The second drops the film both listed: what it saved of it has no title of its own left.
-    drop(second, SHARED_THERE);
+    relist(second, { movies: { [SHARED_THERE]: null } });
     await saving.refresh(1);
     const [, , left] = (await saving.list()).entries;
     expect(left).toMatchObject({ ...entry, sources: [a, b] });
@@ -925,8 +872,8 @@ describe("the watchlist of several subscriptions", { timeout: 30_000 }, () => {
     expect((await saving.list()).total).toBe(3);
 
     // Both providers now give the film the same TMDB id.
-    name(first, NAMESAKE, "424242");
-    name(second, NAMESAKE_THERE, "424242");
+    relist(first, { movies: { [NAMESAKE]: { tmdb: "424242" } } });
+    relist(second, { movies: { [NAMESAKE_THERE]: { tmdb: "424242" } } });
     await saving.refresh(0);
     await saving.refresh(1);
 
@@ -957,7 +904,7 @@ describe("the watchlist of several subscriptions", { timeout: 30_000 }, () => {
     const entries = async () => (await saving.list()).entries;
 
     // The first drops the film. Nothing says the second did.
-    drop(first, SHARED);
+    relist(first, { movies: { [SHARED]: null } });
     await saving.refresh(0);
     expect(await entries()).toMatchObject([{ title: null, sources: [a, b], listed: false }]);
 
@@ -969,7 +916,7 @@ describe("the watchlist of several subscriptions", { timeout: 30_000 }, () => {
     expect(versionsOf(there)).toEqual([{ subscriptionId: b, id: SHARED_THERE }]);
 
     // Once it drops the film too, every list was looked in and none has it.
-    drop(second, SHARED_THERE);
+    relist(second, { movies: { [SHARED_THERE]: null } });
     await saving.refresh(1);
     expect(await entries()).toMatchObject([{ title: null, sources: [a, b], listed: true }]);
 
@@ -1150,16 +1097,7 @@ describe("titles for adults on the watchlist", { timeout: 30_000 }, () => {
     expect((await saving.shown())[0]).toEqual({ name: "After Dark", available: true });
 
     // The provider drops the one, and marks another for adults.
-    provider.serveTitles((all) => ({
-      ...all,
-      series: all.series.flatMap((series) =>
-        String(series.id) === AFTER_DARK
-          ? []
-          : String(series.id) === FILES
-            ? [{ ...series, adult: true }]
-            : [series],
-      ),
-    }));
+    relist(provider, { series: { [AFTER_DARK]: null, [FILES]: { adult: true } } });
     await saving.refresh();
     expect(await saving.shown()).toEqual([
       { name: "After Dark", available: false },
@@ -1192,14 +1130,9 @@ describe("titles for adults on the watchlist", { timeout: 30_000 }, () => {
 
     // The provider gives the id to a series that isn't for adults, as its TMDB id says, and the
     // viewer saves that one too.
-    provider.serveTitles((all) => ({
-      ...all,
-      series: all.series.map((series) =>
-        String(series.id) === AFTER_DARK
-          ? { ...series, adult: false, name: "Morning Light (EN)", tmdb: "777" }
-          : series,
-      ),
-    }));
+    relist(provider, {
+      series: { [AFTER_DARK]: { adult: false, name: "Morning Light (EN)", tmdb: "777" } },
+    });
     await saving.refresh();
     const other = await saving.save("series", AFTER_DARK);
 
@@ -1304,13 +1237,9 @@ describe("a watchlist change the database refuses", { timeout: 30_000 }, () => {
     const first = await saving.save("movie", UNNAMED);
     await later();
     await saving.save("movie", UNNAMED_TOO);
-    const versions = new Set([UNNAMED, UNNAMED_TOO]);
-    provider.serveTitles((all) => ({
-      ...all,
-      movies: all.movies.map((movie) =>
-        versions.has(String(movie.id)) ? { ...movie, tmdb: "424242" } : movie,
-      ),
-    }));
+    relist(provider, {
+      movies: { [UNNAMED]: { tmdb: "424242" }, [UNNAMED_TOO]: { tmdb: "424242" } },
+    });
     app.database((db) =>
       db.exec(`create trigger held before delete on watchlist
                begin select raise(abort, 'database is locked'); end`),

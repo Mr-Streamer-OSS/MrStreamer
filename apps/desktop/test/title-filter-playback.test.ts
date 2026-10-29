@@ -82,7 +82,13 @@ async function connected() {
   const [source] = await app.subscriptions.saved();
   if (!source) throw new Error("Expected saved subscription");
   const facts = () => app.files.read(source.key, source.fileRevision);
-  return { ...app, app, dir, provider, movie, gates, ref, open, source, facts };
+  /** What the provider was asked so far: its lists, title details and files. */
+  const asked = () => [
+    provider.titleListRequests(),
+    provider.detailRequests(),
+    provider.fileRequests(),
+  ];
+  return { ...app, app, dir, provider, movie, gates, ref, open, source, facts, asked };
 }
 
 /** Read an actual player run, so the service observes the provider's current file identity. */
@@ -130,11 +136,7 @@ describe.skipIf(!hasTools)("playback produces verified filter facts", { timeout:
         { kind: "subtitles", language: "nl" },
       ],
     });
-    const before = [
-      app.provider.titleListRequests(),
-      app.provider.detailRequests(),
-      app.provider.fileRequests(),
-    ];
+    const before = app.asked();
     expect(
       (
         await app.titles.searchKind("movie", "Long subtitles", {
@@ -142,22 +144,14 @@ describe.skipIf(!hasTools)("playback produces verified filter facts", { timeout:
         })
       ).titles.map((title) => title.id),
     ).toEqual([app.ref.id]);
-    expect([
-      app.provider.titleListRequests(),
-      app.provider.detailRequests(),
-      app.provider.fileRequests(),
-    ]).toEqual(before);
+    expect(app.asked()).toEqual(before);
     await app.runtime.dispose();
     const restored = await start(app.dir);
     expect(await restored.titles.filterOptions("movie")).toMatchObject({ files: 1 });
     expect(await restored.files.read(app.source.key, app.source.fileRevision)).toEqual([
       expect.objectContaining({ fileKey: cached.sessionId }),
     ]);
-    expect([
-      app.provider.titleListRequests(),
-      app.provider.detailRequests(),
-      app.provider.fileRequests(),
-    ]).toEqual(before);
+    expect(app.asked()).toEqual(before);
     const file = await restored.titles.file(app.ref);
     const fresh = await restored.playback.openTitle(app.ref, file.url, decoders, file);
     expect(app.provider.fileRequests()).toBeGreaterThan(requests);

@@ -116,6 +116,46 @@ function holdResponse(matches: (url: URL) => boolean) {
   };
 }
 
+/** How `pending` settles, handled at once so a rejection is never unhandled. */
+const outcome = (pending: Promise<unknown>) =>
+  pending.then(
+    () => "fulfilled",
+    () => "rejected",
+  );
+
+/** Has the provider list the test series' first episode as an MP4 from its next lists on. */
+function relistFirstEpisode(provider: Awaited<ReturnType<typeof app>>["provider"]) {
+  provider.serveTitles((titles) => ({
+    ...titles,
+    series: titles.series.map((series) =>
+      series.id === 80000
+        ? {
+            ...series,
+            seasons: series.seasons.map((season, number) =>
+              number === 0
+                ? season.map((episode, index) =>
+                    index === 0 ? { ...episode, container: "mp4" } : episode,
+                  )
+                : season,
+            ),
+          }
+        : series,
+    ),
+  }));
+}
+
+/** Rewrites the saved catalogue in `dir` as builds before its acceptance stamp left it. */
+async function dropCatalogueStamp(dir: string) {
+  const path = join(dir, "ondemand.json.gz");
+  const snapshot = JSON.parse(gunzipSync(await readFile(path)).toString()) as Record<
+    string,
+    unknown
+  >;
+  expect(snapshot["catalogueStamp"]).toEqual(expect.any(String));
+  delete snapshot["catalogueStamp"];
+  await writeFile(path, gzipSync(JSON.stringify(snapshot)));
+}
+
 function episodeIds(
   details: Awaited<ReturnType<Awaited<ReturnType<typeof app>>["service"]["details"]>>,
 ) {
@@ -179,24 +219,7 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     a.provider.failDetails(null);
     const current = await a.service.file(a.episode);
     expect(current.listingKey).toBe(file.listingKey);
-    const title = a.provider.titles.series.find((each) => each.id === 80000)!;
-    a.provider.serveTitles((titles) => ({
-      ...titles,
-      series: titles.series.map((series) =>
-        series.id === title.id
-          ? {
-              ...series,
-              seasons: series.seasons.map((season, number) =>
-                number === 0
-                  ? season.map((episode, index) =>
-                      index === 0 ? { ...episode, container: "mp4" } : episode,
-                    )
-                  : season,
-              ),
-            }
-          : series,
-      ),
-    }));
+    relistFirstEpisode(a.provider);
     await a.service.refresh(a.subscriptionId);
     expect((await a.service.file(a.episode)).listingKey).not.toBe(file.listingKey);
     expect(await a.service.subtitleQuery(a.episode, file.listingKey)).toBeNull();
@@ -243,14 +266,7 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const a = await app();
     await a.service.details("series", a.series);
     await a.runtime.dispose();
-    const path = join(a.dir, "ondemand.json.gz");
-    const snapshot = JSON.parse(gunzipSync(await readFile(path)).toString()) as Record<
-      string,
-      unknown
-    >;
-    expect(snapshot["catalogueStamp"]).toEqual(expect.any(String));
-    delete snapshot["catalogueStamp"];
-    await writeFile(path, gzipSync(JSON.stringify(snapshot)));
+    await dropCatalogueStamp(a.dir);
     a.provider.failDetails(503);
     const next = await a.start();
     expect(episodeIds(await next.service.details("series", a.series))).toContain("81000");
@@ -266,13 +282,7 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const a = await app();
     await a.service.refresh(a.subscriptionId);
     await a.runtime.dispose();
-    const path = join(a.dir, "ondemand.json.gz");
-    const snapshot = JSON.parse(gunzipSync(await readFile(path)).toString()) as Record<
-      string,
-      unknown
-    >;
-    delete snapshot["catalogueStamp"];
-    await writeFile(path, gzipSync(JSON.stringify(snapshot)));
+    await dropCatalogueStamp(a.dir);
     const upgraded = await a.start();
     const displayed = await upgraded.service.details("series", a.series);
     await upgraded.runtime.dispose();
@@ -311,19 +321,13 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const a = await app();
     await a.service.refresh(a.subscriptionId);
     const gate = hold();
-    const first = a.service.details("series", a.series).then(
-      () => "success",
-      () => "cancelled",
-    );
+    const first = outcome(a.service.details("series", a.series));
     await gate.arrived;
-    const second = a.service.file(a.episode).then(
-      () => "success",
-      () => "cancelled",
-    );
+    const second = outcome(a.service.file(a.episode));
     const [source] = await a.subscriptions.saved();
     await a.service.forget(source!);
-    expect(await first).toBe("cancelled");
-    expect(await second).toBe("cancelled");
+    expect(await first).toBe("rejected");
+    expect(await second).toBe("rejected");
     expect(gate.aborted()).toBe(true);
     await expect(a.service.details("series", a.series)).rejects.toBeDefined();
     gate.release();
@@ -344,17 +348,14 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const a = await app();
     await a.service.refresh(a.subscriptionId);
     const old = hold();
-    const first = a.service.details("series", a.series).then(
-      () => "success",
-      () => "cancelled",
-    );
+    const first = outcome(a.service.details("series", a.series));
     await old.arrived;
     await a.subscriptions.add(a.login);
     const replacement = hold();
     const second = a.service.details("series", a.series);
     await replacement.arrived;
     expect(old.aborted()).toBe(true);
-    expect(await first).toBe("cancelled");
+    expect(await first).toBe("rejected");
     old.release();
     const joined = a.service.file(a.episode);
     replacement.release();
@@ -401,29 +402,9 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const a = await app();
     await a.service.refresh(a.subscriptionId);
     const gate = hold();
-    const stale = a.service.file(a.episode).then(
-      () => "success",
-      () => "rejected",
-    );
+    const stale = outcome(a.service.file(a.episode));
     await gate.arrived;
-    const title = a.provider.titles.series.find((each) => each.id === 80000)!;
-    a.provider.serveTitles((titles) => ({
-      ...titles,
-      series: titles.series.map((series) =>
-        series.id === title.id
-          ? {
-              ...series,
-              seasons: series.seasons.map((season, number) =>
-                number === 0
-                  ? season.map((episode, index) =>
-                      index === 0 ? { ...episode, container: "mp4" } : episode,
-                    )
-                  : season,
-              ),
-            }
-          : series,
-      ),
-    }));
+    relistFirstEpisode(a.provider);
     await a.service.refresh(a.subscriptionId);
     gate.release();
     expect(await stale).toBe("rejected");
@@ -436,14 +417,11 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const a = await app();
     await a.service.refresh(a.subscriptionId);
     const gate = hold();
-    const pending = a.service.details("series", a.series).then(
-      () => "success",
-      () => "cancelled",
-    );
+    const pending = outcome(a.service.details("series", a.series));
     await gate.arrived;
     await a.runtime.dispose();
     expect(gate.aborted()).toBe(true);
-    expect(await pending).toBe("cancelled");
+    expect(await pending).toBe("rejected");
     gate.release();
   });
   it("keeps valid TMDB records through key reconfiguration and expires positive metadata at 182 days", async () => {
@@ -651,15 +629,12 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     a.remote!.holdAbout(true);
     a.remote!.failSeasons("hold");
     const network = vi.spyOn(globalThis, "fetch");
-    const pending = a.service.season(a.series, 1).then(
-      () => "success",
-      () => "cancelled",
-    );
+    const pending = outcome(a.service.season(a.series, 1));
     await expect.poll(() => a.remote!.seasonRequests().length).toBe(1);
     expect(a.remote!.aboutRequests()).toBe(1);
     const [source] = await a.subscriptions.saved();
     await a.service.forget(source!);
-    expect(await pending).toBe("cancelled");
+    expect(await pending).toBe("rejected");
     const signals = network.mock.calls
       .filter(([input]) => String(input).startsWith(a.remote!.url))
       .map(([, init]) => init?.signal);
@@ -686,19 +661,7 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const gate = hold();
     const older = a.service.details("series", a.series);
     await gate.arrived;
-    a.provider.serveTitles((titles) => ({
-      ...titles,
-      series: titles.series.map((series) =>
-        series.id === 80000
-          ? {
-              ...series,
-              seasons: series.seasons.map((season) =>
-                season.map((episode) => ({ ...episode, container: "mp4" })),
-              ),
-            }
-          : series,
-      ),
-    }));
+    relistFirstEpisode(a.provider);
     await a.service.refresh(a.subscriptionId);
     const current = await a.service.file(a.episode);
     expect(current.container).toBe("mp4");
