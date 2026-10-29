@@ -24,9 +24,9 @@ runs:
       with:
         node-version: 24
         cache: pnpm
-        # The website installs only its filtered dependencies. Its lockfile-only cache can win
-        # the first save and leave every release downloading the rest. Scope this full store to
-        # this setup policy, the candidate package manager and its dependency/build policy.
+        # The website's filtered install can save the lockfile-only key first and leave every
+        # release downloading the rest. Key this full store on the candidate's lockfile, package
+        # manager and workspace policy, and on this action from .workflow.
         cache-dependency-path: |
           pnpm-lock.yaml
           package.json
