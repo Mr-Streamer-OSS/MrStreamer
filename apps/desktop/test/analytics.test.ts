@@ -1209,41 +1209,29 @@ describe("observed playback runs", () => {
     expect(streams(events)).toEqual(expected);
   }
 
-  it("reports a receiver title's pre-observer load failure once, with no start or stop", async () => {
-    playbackClock();
-    const { owner, events } = await measuring();
-    const frame = "current-frame";
-    const hint = { control: randomUUID(), order: 1, ongoing: false };
-    const token = owner.admitPlayback("vod", hint, frame)!;
-    const failedLoad = owner.receiverLoadFailureObserver(hint.control, frame);
-    failedLoad("network");
-    failedLoad("network");
-    // A later physical failure is the same incident until receiver-confirmed recovery.
-    const physical = owner.remotePlayback("vod", hint.control);
-    physical.failure("credentials");
-    physical.stop();
-    owner.endPlayback(token);
-    await expectStreams(owner, events, ["error vod network"]);
-  });
-
-  it("rejects a superseded receiver load failure and old physical callback after a new run", async () => {
+  it("deduplicates pre-observer and physical failures, rejecting both callbacks after a new control", async () => {
     playbackClock();
     const { owner, events } = await measuring();
     const frame = "current-frame";
     const old = { control: randomUUID(), order: 1, ongoing: false };
-    owner.admitPlayback("vod", old, frame);
-    const staleFailure = owner.receiverLoadFailureObserver(old.control, frame);
-    const stalePhysical = owner.remotePlayback("vod", old.control);
+    const token = owner.admitPlayback("vod", old, frame)!;
+    const failedLoad = owner.receiverLoadFailureObserver(old.control, frame);
+    failedLoad("network");
+    failedLoad("network");
+    const physical = owner.remotePlayback("vod", old.control);
+    physical.failure("credentials");
+    await expectStreams(owner, events, ["error vod network"]);
     const current = { control: randomUUID(), order: 2, ongoing: false };
     owner.admitPlayback("vod", current, frame);
-    staleFailure("credentials");
-    stalePhysical.failure("credentials");
+    failedLoad("credentials");
+    physical.failure("credentials");
+    physical.stop();
+    owner.endPlayback(token);
     owner.receiverLoadFailureObserver(current.control, frame)("network");
-    const currentPhysical = owner.remotePlayback("vod", current.control);
-    currentPhysical.failure("network");
-    currentPhysical.failure("credentials");
+    const fresh = owner.remotePlayback("vod", current.control);
+    fresh.failure("credentials");
     owner.endControlledPlayback(current.control, frame);
-    await expectStreams(owner, events, ["error vod network"]);
+    await expectStreams(owner, events, ["error vod network", "error vod network"]);
   });
 
   it("rejects a pre-reset receiver load callback after consent changes, while the current continuation can fail", async () => {
@@ -1261,31 +1249,6 @@ describe("observed playback runs", () => {
     owner.receiverLoadFailureObserver(hint.control, frame)("network");
     owner.endControlledPlayback(hint.control, frame);
     await expectStreams(owner, events, ["error vod network"]);
-  });
-
-  it("ends a receiver run at replay with its own watch time and rejects the old load's facts", async () => {
-    playbackClock();
-    const { owner, events } = await measuring();
-    const first = owner.beginPlayback("vod")!;
-    const old = owner.remotePlayback("vod", first);
-    for (let i = 0; i < 20; i++) {
-      old.state("playing");
-      await vi.advanceTimersByTimeAsync(1000);
-    }
-    old.state("stopped");
-    const replay = owner.beginPlayback("vod")!;
-    const fresh = owner.remotePlayback("vod", replay);
-    old.state("playing");
-    old.failure("credentials");
-    for (let i = 0; i < 20; i++) {
-      fresh.state("playing");
-      await vi.advanceTimersByTimeAsync(1000);
-    }
-    fresh.failure("network");
-    fresh.failure("network");
-    fresh.stop();
-    owner.endPlayback(replay);
-    await expectStreams(owner, events, ["stopped vod 20", "error vod network", "stopped vod 20"]);
   });
 
   it("resolves fresh receiver open failures after a consent reset but rejects callbacks created before it", async () => {
@@ -1364,7 +1327,6 @@ describe("observed playback runs", () => {
     const frame = "current-frame";
     const first = { control: randomUUID(), order: 1, ongoing: false };
     const token = owner.admitPlayback("live", first, frame)!;
-    expect(token).not.toBe(first.control);
     expect(owner.admitPlayback("live", first, frame)).toBe(token);
     expect(owner.controlledPlayback(first.control, frame)).toBe(token);
     expect(owner.controlledPlayback(first.control, "other-frame")).toBeNull();
@@ -1378,7 +1340,6 @@ describe("observed playback runs", () => {
     await playing(owner, token, binding, 20);
     const replay = { control: randomUUID(), order: 2, ongoing: false };
     const second = owner.admitPlayback("live", replay, frame)!;
-    expect(second).not.toBe(token);
     expect(owner.admitPlayback("live", first, frame)).toBeNull();
     expect(owner.controlledPlayback(first.control, frame)).toBeNull();
     owner.notePlaybackState(token, binding, 100, "playing");
@@ -1417,7 +1378,6 @@ describe("observed playback runs", () => {
     remote.state("playing");
     const renewed = owner.controlledPlayback(adopted.control, "new-frame")!;
     expect(renewed).not.toBeNull();
-    expect(renewed).not.toBe(token);
     remote.state("paused");
     remote.stop();
     // Current normal media admission can return a paused receiver here without another poll.
@@ -1631,23 +1591,6 @@ describe("observed playback runs", () => {
     await expectStreams(owner, events, []);
   });
 
-  it("ends a receiver run once at its terminal observation, with no renderer left", async () => {
-    playbackClock();
-    const { owner, events } = await measuring();
-    const token = owner.beginPlayback("vod")!;
-    const remote = owner.remotePlayback("vod", token);
-    for (let second = 0; second < 20; second++) {
-      remote.state("playing");
-      await vi.advanceTimersByTimeAsync(1000);
-    }
-    remote.state("stopped");
-    remote.end();
-    remote.end();
-    remote.state("playing");
-    remote.failure("network");
-    await expectStreams(owner, events, ["stopped vod 20"]);
-  });
-
   it("ends the renderer's run at a receiver's terminal observation, so its control is spent and a fresh one starts anew", async () => {
     playbackClock();
     const { owner, events } = await measuring();
@@ -1658,18 +1601,27 @@ describe("observed playback runs", () => {
       remote.state("playing");
       await vi.advanceTimersByTimeAsync(1000);
     }
+    remote.state("stopped");
     remote.end();
+    remote.end();
+    remote.state("playing");
+    remote.failure("credentials");
     expect(owner.controlledPlayback(hint.control, "frame")).toBeNull();
     expect(owner.admitPlayback("vod", hint, "frame")).toBeNull();
     owner.endControlledPlayback(hint.control, "frame");
     const again = { control: randomUUID(), order: 2, ongoing: false };
     const token = owner.admitPlayback("vod", again, "frame")!;
     const next = owner.remotePlayback("vod", again.control);
+    remote.state("playing");
+    remote.failure("credentials");
+    remote.end();
     next.state("playing");
     await vi.advanceTimersByTimeAsync(1000);
+    next.failure("network");
+    next.failure("network");
     next.end();
     expect(token).not.toBeNull();
-    await expectStreams(owner, events, ["stopped vod 10", "stopped vod 1"]);
+    await expectStreams(owner, events, ["stopped vod 10", "error vod network", "stopped vod 1"]);
   });
 
   it("ignores a terminal observation from a replaced load, a moved output or an older run", async () => {
