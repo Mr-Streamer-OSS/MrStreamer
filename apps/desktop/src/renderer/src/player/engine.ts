@@ -2,7 +2,7 @@ import type { AnalyticsPlaybackState, PlaybackDiagnostic } from "@mrstreamer/con
 import { observeMediaPlayback } from "./analytics.ts";
 // Playback engines behind one interface, so the rest of the UI only ever talks to `Engine`. The
 // main process delivers each stream in codecs these engines decode; see src/main/playback.
-import type { ErrorData } from "hls.js";
+import type { default as Hls, ErrorData } from "hls.js";
 import type { PlaybackFailureSelector } from "@mrstreamer/contracts/ipc";
 import type mpegts from "mpegts.js";
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
@@ -26,6 +26,10 @@ const UNPLAYABLE_BUFFER_S = 4;
  * timing is broken, as with frames that lack timestamps: data arrives but cannot be played.
  */
 const BROKEN_TIMING_STALL_MS = 4000;
+
+/** The optional libraries, loaded on first use (see `createEngine`). */
+type HlsJs = typeof Hls;
+type MpegtsJs = typeof mpegts;
 
 export type EngineName = "mpegts.js" | "hls.js" | "native";
 
@@ -156,10 +160,7 @@ function loadingEngine(
     .then((create) => {
       if (destroyed) return;
       current = create();
-      for (const action of pending.splice(0)) {
-        if (destroyed) break;
-        action(current);
-      }
+      for (const action of pending.splice(0)) forward(action);
       void current.started.then(resolve, reject);
     })
     .catch(() =>
@@ -194,7 +195,7 @@ function loadingEngine(
 }
 
 function mpegtsEngine(
-  mpegts: typeof import("mpegts.js").default,
+  mpegts: MpegtsJs,
   video: HTMLVideoElement,
   url: string,
   ends: number | null,
@@ -272,12 +273,7 @@ function mpegtsEngine(
   };
 }
 
-function mpegtsError(
-  mpegts: typeof import("mpegts.js").default,
-  type: unknown,
-  detail: unknown,
-  info: unknown,
-): EngineError {
+function mpegtsError(mpegts: MpegtsJs, type: unknown, detail: unknown, info: unknown): EngineError {
   const message =
     info && typeof info === "object" && "msg" in info && typeof info.msg === "string"
       ? info.msg
@@ -291,7 +287,7 @@ function mpegtsError(
 }
 
 function hlsEngine(
-  Hls: typeof import("hls.js").default,
+  Hls: HlsJs,
   hlsTracks: typeof import("./hls-tracks.ts").hlsTracks,
   video: HTMLVideoElement,
   url: string,
@@ -447,11 +443,7 @@ function hlsEngine(
 }
 
 /** Maps an HLS failure before teardown discards its loader and fragment context. */
-function hlsError(
-  Hls: typeof import("hls.js").default,
-  data: ErrorData,
-  source: string,
-): EngineError {
+function hlsError(Hls: HlsJs, data: ErrorData, source: string): EngineError {
   // hls.js also groups malformed/empty playlist content under NETWORK_ERROR.
   const parsing = [
     Hls.ErrorDetails.MANIFEST_PARSING_ERROR,
