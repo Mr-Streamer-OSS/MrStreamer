@@ -254,8 +254,6 @@ describe("searching the list Live TV shows", () => {
       }),
     );
     await ready(() => expect(page.rows()).toEqual(["BBC One", "ITV1", "BBC News", "Euronews"]));
-
-    expect(page.rows()).toEqual(["BBC One", "ITV1", "BBC News", "Euronews"]);
     expect(page.text()).toContain("4 channels · 4 streams");
     expect(page.row("ITV1")?.textContent).toContain("ITV News at Ten");
     // What matched is marked: in a name, inside a word, and in the later programme.
@@ -275,13 +273,10 @@ describe("searching the list Live TV shows", () => {
     );
     answer.reject({ kind: "unexpected", detail: "No guide." });
     await ready(() => expect(page.rows()).toEqual(["Dave"]));
-    expect(page.rows()).toEqual(["Dave"]);
 
     await searched(page, "EEN", ["Één"]);
-    await expect.poll(page.rows).toEqual(["Één"]);
 
     await searched(page, "bbc news", ["BBC News"]);
-    expect(page.rows()).toEqual(["BBC News"]);
   });
 
   it("goes to the field with /, hands the keys to the channels found, and clears before it leaves", async () => {
@@ -291,7 +286,6 @@ describe("searching the list Live TV shows", () => {
     expect(document.activeElement).toBe(page.field());
     // In the field a digit is text, not a channel number.
     await searched(page, "4", ["Channel 4"]);
-    expect(page.rows()).toEqual(["Channel 4"]);
 
     await searched(page, "bbc", ["BBC One", "BBC News"]);
     await page.press("ArrowDown");
@@ -335,14 +329,12 @@ describe("searching the list Live TV shows", () => {
     expect(page.field().placeholder).toBe("Search Favourites");
 
     await searched(page, "bbc", ["BBC News", "BBC One"]);
-    expect(page.rows()).toEqual(["BBC News", "BBC One"]);
     expect(ipc.argsOf("guide.searchList").at(-1)).toMatchObject({
       query: "bbc",
       channels: FAVOURITES,
     });
 
     await searched(page, "dave", []);
-    expect(page.rows()).toEqual([]);
     expect(page.text()).toContain("Nothing in Favourites for dave.");
     expect(useUi.getState().searchFrom).toBe("dave");
 
@@ -354,7 +346,6 @@ describe("searching the list Live TV shows", () => {
     await ready(() => expect(page.rows()).toEqual(["Dave"]));
     expect(useUi.getState().list).toEqual({ kind: "all" });
     expect(page.field().value).toBe("dave");
-    expect(page.rows()).toEqual(["Dave"]);
     expect(ipc.argsOf("guide.searchList").at(-1)).toEqual({
       query: "dave",
       channels: CHANNELS.map(ownedId),
@@ -380,7 +371,6 @@ describe("searching the list Live TV shows", () => {
     await searched(page, "ten", ["ITV1"], {
       "2": { now: false, later: { start, title: "News at Ten" } },
     });
-    expect(page.rows()).toEqual(["ITV1"]);
 
     const day = ipc.hold("guide.schedule");
     await page.press("ArrowRight");

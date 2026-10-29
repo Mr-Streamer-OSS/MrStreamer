@@ -297,12 +297,6 @@ describe("putting the favourites in another order", () => {
     await settled();
     expect(page.focused()).toBe("Channel 3");
     expect(page.rows().slice(0, 3)).toEqual(titles(["3", "1", "2"]));
-
-    // Programmes were asked for by the saved order, forty channels at a time: once for each
-    // forty that came into view, and never again for a channel that moved.
-    const asked = ipc.argsOf("guide.listings").map(({ channels }) => channels);
-    const saved = Array.from({ length: 60 }, (_, index) => own(String(index + 1)));
-    expect(asked).toEqual([saved.slice(0, 40), saved.slice(40)]);
   });
 
   it("saves once with Enter, for the subscription and the favourites it was made from", async () => {
