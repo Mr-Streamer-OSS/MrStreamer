@@ -74,7 +74,7 @@ export function fleetRunner(input: unknown): Runner {
   if (!local || !roaming || env["USERNAME"]?.toLowerCase() !== "agent")
     throw new Error("Fleet mode requires its disposable agent account.");
   const expected = win32.join(local, "Temp", `mrstreamer-${owner.task}-${owner.nonce}`);
-  if (owner.temp !== expected) throw new Error("Fleet temp must be the isolated task root.");
+  if (!same(owner.temp, expected)) throw new Error("Fleet temp must be the isolated task root.");
   const model = powershell("(Get-CimInstance Win32_ComputerSystem).Manufacturer");
   if (!/QEMU/i.test(model)) throw new Error("Fleet mode requires a disposable QEMU guest.");
   const installRoot = join(local, "Programs", "mrstreamer");

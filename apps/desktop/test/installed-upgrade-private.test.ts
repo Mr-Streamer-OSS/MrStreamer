@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as windows from "./e2e/installed-upgrade-windows.ts";
 import { execFileSync } from "node:child_process";
+import * as childProcess from "node:child_process";
 import { runCommand, verifyCheckoutSource } from "./e2e/installed-upgrade.ts";
 import { createHash } from "node:crypto";
 import { zipSync, strToU8 } from "fflate";
@@ -15,6 +16,8 @@ import {
   resolvePackages,
 } from "./e2e/installed-upgrade-packages.ts";
 import { fleetRunner } from "./e2e/installed-upgrade-windows.ts";
+
+vi.mock("node:child_process", { spy: true });
 
 function fixture() {
   const version = "0.0.22-nightly.20261029.447";
@@ -303,33 +306,43 @@ describe("explicit unpublished Windows upgrade inputs", () => {
       await expect(verifyPrivateCandidate(github, bad, true)).rejects.toThrow(message);
     },
   );
-  it.each(["C:\\Users\\agent", "C:\\Users\\agent\\AppData\\Local\\Temp\\..\\shared"])(
-    "refuses unsafe Fleet temp %s before executing Windows commands",
-    (temp) => {
-      const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
-      Object.defineProperty(process, "platform", { value: "win32" });
-      vi.stubEnv("GITHUB_ACTIONS", undefined);
-      vi.stubEnv("GH_TOKEN", undefined);
-      vi.stubEnv("GITHUB_TOKEN", undefined);
-      vi.stubEnv("USERNAME", "agent");
-      vi.stubEnv("LOCALAPPDATA", "C:\\Users\\agent\\AppData\\Local");
-      vi.stubEnv("APPDATA", "C:\\Users\\agent\\AppData\\Roaming");
-      try {
-        expect(() =>
-          fleetRunner({
-            vmId: "abc123",
-            task: "upgrade",
-            nonce: "a".repeat(64),
-            disposable: true,
-            temp,
-          }),
-        ).toThrow("isolated task root");
-      } finally {
-        Object.defineProperty(process, "platform", platform);
-        vi.unstubAllEnvs();
-      }
-    },
-  );
+  it.each([
+    ["C:\\Users\\agent", "isolated task root"],
+    ["C:\\Users\\agent\\AppData\\Local\\Temp\\..\\shared", "isolated task root"],
+    [
+      `C:\\Users\\agent\\AppData\\Local\\Temp\\mrstreamer-upgrade-${"a".repeat(64)}`,
+      "disposable QEMU guest",
+    ],
+    [
+      `c:\\users\\agent\\appdata\\local\\temp\\mrstreamer-upgrade-${"a".repeat(64)}`,
+      "disposable QEMU guest",
+    ],
+  ])("validates Fleet temp %s before refusing a non-Fleet machine", (temp, refusal) => {
+    const command = vi.spyOn(childProcess, "execFileSync").mockReturnValue("physical machine");
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    vi.stubEnv("GITHUB_ACTIONS", undefined);
+    vi.stubEnv("GH_TOKEN", undefined);
+    vi.stubEnv("GITHUB_TOKEN", undefined);
+    vi.stubEnv("USERNAME", "agent");
+    vi.stubEnv("LOCALAPPDATA", "C:\\Users\\agent\\AppData\\Local");
+    vi.stubEnv("APPDATA", "C:\\Users\\agent\\AppData\\Roaming");
+    try {
+      expect(() =>
+        fleetRunner({
+          vmId: "abc123",
+          task: "upgrade",
+          nonce: "a".repeat(64),
+          disposable: true,
+          temp,
+        }),
+      ).toThrow(refusal);
+    } finally {
+      command.mockRestore();
+      Object.defineProperty(process, "platform", platform);
+      vi.unstubAllEnvs();
+    }
+  });
   it("refuses a non-Fleet ownership declaration", () => {
     expect(() =>
       fleetRunner({
