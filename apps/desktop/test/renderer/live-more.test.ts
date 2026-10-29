@@ -375,6 +375,7 @@ it("a pointer Quality open on a failed channel starts Down on the chosen quality
   });
   await settle();
   await act(async () => {
+    await vi.dynamicImportSettled();
     player.element.dispatchEvent(new Event("error"));
   });
   await settle();

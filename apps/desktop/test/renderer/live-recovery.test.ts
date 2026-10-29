@@ -126,6 +126,7 @@ function nextStream(format: StreamFormat = "hls"): () => Promise<void> {
         url: `http://127.0.0.1/stream/${sessionId}`,
         format,
       });
+      await vi.dynamicImportSettled();
     });
 }
 

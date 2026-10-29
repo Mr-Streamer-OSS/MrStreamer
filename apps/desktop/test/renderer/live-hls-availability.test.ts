@@ -4,10 +4,17 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { streams } from "./hls-stand-in.ts";
+const support = vi.hoisted(() => ({ hls: true }));
 vi.mock("hls.js", async (original) => {
   const real = await original<typeof import("hls.js")>();
   const { standIn } = await import("./hls-stand-in.ts");
-  return { default: standIn(real.default) };
+  return {
+    default: class extends standIn(real.default) {
+      static override isSupported() {
+        return support.hls;
+      }
+    },
+  };
 });
 const channel = (id: string): LiveChannel => ({
   subscriptionId: SUBSCRIPTION,
@@ -26,6 +33,7 @@ const wait = async () => {
   else await new Promise((resolve) => setTimeout(resolve));
 };
 async function open(id = "one") {
+  const opened = streams.count();
   ipc.always("playback.open", {
     sessionId: id,
     channel: { subscriptionId: SUBSCRIPTION, id },
@@ -34,6 +42,7 @@ async function open(id = "one") {
   });
   player.play(channel(id));
   await wait();
+  await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(opened));
   const stream = streams.latest();
   stream.variant({
     subtitles: [
@@ -46,6 +55,7 @@ async function open(id = "one") {
   return stream;
 }
 beforeEach(() => {
+  support.hls = true;
   player.reset();
   ipc.reset();
   player.element.currentTime = 0;
@@ -233,8 +243,10 @@ it("waits for picture before discovery, permits a six-second reload, and retries
     format: "hls",
     url: "http://127.0.0.1/fixture",
   });
+  const opened = streams.count();
   player.play(channel("slow"));
   await wait();
+  await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(opened));
   const stream = streams.latest();
   stream.variant({ subtitles: [{ name: "English", lang: "en" }] });
   await vi.advanceTimersByTimeAsync(6000);
@@ -361,6 +373,29 @@ it("preserves a selected language through an outage that reconnects within its a
   reopened.subtitleLines([{ start: 0, end: 200, text: "Back" }]);
   expect(player.state().subtitle?.label).toBe("English");
   expect(player.state().phase.kind).toBe("playing");
+});
+
+it("settles a retained subtitle choice when reconnect selects native HLS", async () => {
+  vi.useFakeTimers();
+  player.setAudible(true);
+  const stream = await open();
+  stream.subtitleLines([{ start: 0, end: 60, text: "Hello" }]);
+  await wait();
+  player.setSubtitle(player.state().tracks!.subtitles[0]!);
+  ipc.always("playback.failure", null);
+  ipc.always("playback.playing", null);
+  support.hls = false;
+  stream.error("video");
+  await wait();
+  await vi.advanceTimersByTimeAsync(6000);
+  await vi.dynamicImportSettled();
+  player.element.dispatchEvent(new Event("playing"));
+  player.element.currentTime = 2;
+  await vi.advanceTimersByTimeAsync(1000);
+  await wait();
+  expect(player.state().phase).toMatchObject({ kind: "playing", engine: "native" });
+  expect(player.state().subtitle?.label).toBe("English");
+  expect(player.state().subtitleLoading).toBe(false);
 });
 
 /** The selected rendition's 17s allowance expires before the picture fails at +27s. */

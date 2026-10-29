@@ -16,6 +16,7 @@ import { Flash, LiveSubtitleHint } from "../../src/renderer/src/features/watch/F
 import type { Engine } from "../../src/renderer/src/player/engine.ts";
 
 const engines = vi.hoisted(() => ({
+  started: null as Promise<void> | null,
   opened: [] as {
     packet: (pid: number, data: Uint8Array, at: number) => void;
     elapsed: number;
@@ -35,7 +36,7 @@ vi.mock("../../src/renderer/src/player/engine.ts", async (original) => {
       engines.opened.push(stream);
       return {
         name: "mpegts.js",
-        started: Promise.resolve(),
+        started: engines.started ?? Promise.resolve(),
         onFailure() {},
         onEnded() {},
         onWaiting() {},
@@ -151,6 +152,7 @@ async function mount() {
   return mounted.container;
 }
 beforeEach(() => {
+  engines.started = null;
   player.reset();
   ipc.reset();
 });
@@ -362,6 +364,25 @@ it("draws the proving packet when the wanted language comes on", async () => {
   await settle();
   expect(player.state().subtitle?.page).toBe(888);
   expect(subtitleLayer.textContent).toContain("TELETEKST 888");
+});
+it("keeps one subtitle cue when MPEG-TS startup follows a retained selection's first packet", async () => {
+  ipc.prefer({ subtitleLanguage: "nl" });
+  const first = await open();
+  first.packet(0x300, working, 1);
+  await settle();
+  expect(player.state().subtitle?.page).toBe(888);
+  const ready = Promise.withResolvers<void>();
+  engines.started = ready.promise;
+  const next = await open();
+  player.element.currentTime = 11;
+  next.packet(0x300, working, 10);
+  await settle();
+  const before = subtitleLayer.textContent;
+  expect(before).toContain("TELETEKST 888");
+  ready.resolve();
+  await settle();
+  expect(player.state().phase.kind).toBe("playing");
+  expect(subtitleLayer.textContent).toBe(before);
 });
 it("retains proof through a same-channel reconnect, without accepting another declared page", async () => {
   const stream = await open();

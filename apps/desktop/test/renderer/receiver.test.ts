@@ -1344,6 +1344,7 @@ describe("a channel that plays here", () => {
         format: "hls",
       }),
     );
+    await vi.dynamicImportSettled();
     // The picture moves; the player notices within a second.
     player.element.currentTime += 1;
     await wait(1100);

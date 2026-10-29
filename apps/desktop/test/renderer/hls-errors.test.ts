@@ -24,10 +24,13 @@ it.each(["subtitle-playlist", "subtitle-segment"] as const)(
   async (target) => {
     vi.useFakeTimers();
     const video = document.createElement("video");
+    const opened = streams.count();
     engine = createEngine("hls", video, "http://127.0.0.1/fixture", {
       audio: null,
       audioLanguage: null,
     });
+    // Wait for this stream to open before injecting errors into the deferred engine.
+    await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(opened));
     const failures: EngineError[] = [];
     engine.onFailure((error) => failures.push(error));
     engine.tracks!.onSubtitleAvailable(() => {});
@@ -47,10 +50,12 @@ it.each(["subtitle-playlist", "subtitle-segment"] as const)(
 );
 it("still rejects genuine audio failures before the first picture", async () => {
   const video = document.createElement("video");
+  const opened = streams.count();
   engine = createEngine("hls", video, "http://127.0.0.1/fixture", {
     audio: null,
     audioLanguage: null,
   });
+  await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(opened));
   streams.latest().error("audio");
   await expect(engine.started).rejects.toEqual({
     kind: "network",
