@@ -33,6 +33,7 @@ const wait = async () => {
   else await new Promise((resolve) => setTimeout(resolve));
 };
 async function open(id = "one") {
+  const opened = streams.count();
   ipc.always("playback.open", {
     sessionId: id,
     channel: { subscriptionId: SUBSCRIPTION, id },
@@ -41,7 +42,7 @@ async function open(id = "one") {
   });
   player.play(channel(id));
   await wait();
-  await vi.dynamicImportSettled();
+  await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(opened));
   const stream = streams.latest();
   stream.variant({
     subtitles: [
@@ -242,9 +243,10 @@ it("waits for picture before discovery, permits a six-second reload, and retries
     format: "hls",
     url: "http://127.0.0.1/fixture",
   });
+  const opened = streams.count();
   player.play(channel("slow"));
   await wait();
-  await vi.dynamicImportSettled();
+  await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(opened));
   const stream = streams.latest();
   stream.variant({ subtitles: [{ name: "English", lang: "en" }] });
   await vi.advanceTimersByTimeAsync(6000);

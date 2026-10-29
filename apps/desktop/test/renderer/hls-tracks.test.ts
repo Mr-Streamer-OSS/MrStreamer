@@ -48,6 +48,7 @@ const SUBTITLES: readonly Rendition[] = [
 
 /** Opens `id` as an HLS stream, and gives the stream the player opened for it. */
 async function open(id: string) {
+  const opened = streams.count();
   const answer = ipc.hold("playback.open");
   player.play(channel(id));
   await wait();
@@ -58,7 +59,7 @@ async function open(id: string) {
     format: "hls",
   });
   await wait();
-  await vi.dynamicImportSettled();
+  await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(opened));
   return streams.latest();
 }
 
@@ -77,6 +78,7 @@ async function playing(id: string) {
 
 /** Opens `id` again, as after the connection was lost, and gives the stream opened for that. */
 async function reopened(id: string) {
+  const opened = streams.count();
   const answer = ipc.hold("playback.open");
   player.retry();
   await wait();
@@ -87,7 +89,7 @@ async function reopened(id: string) {
     format: "hls",
   });
   await wait();
-  await vi.dynamicImportSettled();
+  await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(opened));
   return streams.latest();
 }
 
