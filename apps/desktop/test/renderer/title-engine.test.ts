@@ -329,6 +329,8 @@ it("holds title reads on a paused picture, resumes, and cancels while held", asy
             pull(controller) {
               if (reads >= 4) return new Promise<void>(() => {});
               reads++;
+              // Pause again after one resumed read, rather than producing an unbounded mock stream.
+              paused = true;
               controller.enqueue(new Uint8Array([1]));
             },
             cancel: cancelled,
@@ -348,11 +350,6 @@ it("holds title reads on a paused picture, resumes, and cancels while held", asy
   await vi.advanceTimersByTimeAsync(0);
   expect(reads).toBe(0);
   paused = false;
-  // Pause after one resumed append, rather than producing an unbounded mock stream.
-  vi.spyOn(Buffer.prototype, "appendBuffer").mockImplementation(function (this: Buffer) {
-    paused = true;
-    queueMicrotask(() => this.dispatchEvent(new Event("updateend")));
-  });
   video.dispatchEvent(new Event("play"));
   await vi.advanceTimersByTimeAsync(0);
   expect(reads).toBe(1);
