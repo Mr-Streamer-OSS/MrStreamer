@@ -1,8 +1,9 @@
-import { mkdtemp, writeFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as windows from "./e2e/installed-upgrade-windows.ts";
-import { runCommand } from "./e2e/installed-upgrade.ts";
+import { execFileSync } from "node:child_process";
+import { runCommand, verifyCheckoutSource } from "./e2e/installed-upgrade.ts";
 import { createHash } from "node:crypto";
 import { zipSync, strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
@@ -153,6 +154,45 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     const tampered = structuredClone(receipt);
     tampered.packages[1].sha256 = "0".repeat(64);
     expect(() => readReceipt(tampered, verified)).toThrow("identity");
+    const json = api.json;
+    api.json = async (path) =>
+      path === `/compare/${input.request.run.headCommit}...main?per_page=1`
+        ? { status: "diverged", ahead_by: 1, behind_by: 1 }
+        : json(path);
+    await expect(
+      resolvePackages(api, { tag: `v${input.request.appVersion}`, private: verified }),
+    ).rejects.toThrow(`main does not contain ${input.request.run.headCommit}`);
+  });
+  it("refuses a changed runtime fixture even with the correct verification commit pin", async () => {
+    const checkout = await mkdtemp(join(tmpdir(), "verification-source-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8", stdio: "pipe" }).trim();
+    try {
+      git("init", "--quiet");
+      const folder = join(checkout, "apps", "desktop", "test");
+      await mkdir(folder, { recursive: true });
+      const fixture = join(folder, "fake-provider.ts");
+      await writeFile(fixture, "original fixture");
+      git("add", ".");
+      git(
+        "-c",
+        "user.name=Upgrade contract",
+        "-c",
+        "user.email=upgrade@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--quiet",
+        "-m",
+        "fixture",
+      );
+      const source = git("rev-parse", "HEAD");
+      expect(verifyCheckoutSource(source, checkout)).toBe(source);
+      await writeFile(fixture, "changed fixture");
+      expect(() => verifyCheckoutSource(source, checkout)).toThrow("local tracked changes");
+    } finally {
+      await rm(checkout, { recursive: true, force: true });
+    }
   });
   // Receipt identity and archive bytes are package-receipt.test.ts's; these are the private input's own gates.
   it.each(["repository", "nested root", "verification pin"])(
@@ -160,6 +200,8 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     async (failure) => {
       const { input, github } = fixture();
       const temp = await mkdtemp(join(tmpdir(), "private-upgrade-"));
+      const root =
+        failure === "nested root" ? join(temp, "redirect", "journey") : join(temp, "journey");
       const runner = vi.spyOn(windows, "fleetRunner").mockReturnValue({
         id: "test",
         temp,
@@ -221,7 +263,7 @@ describe("explicit unpublished Windows upgrade inputs", () => {
             "--packages",
             temp,
             "--root",
-            failure === "nested root" ? join(temp, "redirect", "journey") : join(temp, "journey"),
+            root,
             "--fleet-owner",
             join(temp, "owner.json"),
             "--repository",
@@ -236,7 +278,7 @@ describe("explicit unpublished Windows upgrade inputs", () => {
             "verification pin": "actual checkout",
           }[failure],
         );
-        await expect(stat(join(temp, "journey"))).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(stat(root)).rejects.toMatchObject({ code: "ENOENT" });
       } finally {
         runner.mockRestore();
         await rm(temp, { recursive: true, force: true });

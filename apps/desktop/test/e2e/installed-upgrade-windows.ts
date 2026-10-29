@@ -79,7 +79,10 @@ export function fleetRunner(input: unknown): Runner {
   if (!/QEMU/i.test(model)) throw new Error("Fleet mode requires a disposable QEMU guest.");
   const installRoot = join(local, "Programs", "mrstreamer");
   for (const path of [installRoot, join(roaming, "mrstreamer"), join(roaming, "Mr. Streamer")])
-    if (existsSync(path)) throw new Error("Fleet app/profile roots must be absent.");
+    if (existsSync(path))
+      throw new Error(
+        "Fleet app/profile roots must be absent; start a new disposable VM after a failed run.",
+      );
   // Refuse reparse points in every existing ancestor before cleanup can traverse any path.
   powershell(
     `$ErrorActionPreference = 'Stop'

@@ -1,6 +1,6 @@
 // The two Windows installers the installed upgrade check runs, one over the other, and why each is
-// the build it claims to be. The person or release run supplies one input, the candidate nightly's
-// tag. Everything else is derived from GitHub and checked, and any doubt stops the check before
+// the build it claims to be. The caller supplies a published nightly tag or explicit private
+// package identities. Remaining provenance is derived from GitHub and checked before
 // anything is installed:
 //
 // - stable: the newest published stable release by version. Drafts, prereleases and nightlies
@@ -10,9 +10,9 @@
 //
 // Published commits come from tags; private candidate source comes from its verified receipt.
 // Both sources must be on main, and the candidate must descend from stable
-// with a higher version, and each setup must match its asset size and digest, its release's
-// SHA256SUMS.txt and its latest.yml exactly. `resolvePackages` writes nothing; `readReceipt`
-// re-checks the receipt it produced before the runner installs anything.
+// with a higher version. Published setups match release asset metadata, SHA256SUMS.txt and
+// latest.yml; private setups match their verified package receipt and artifact bytes.
+// `resolvePackages` writes nothing; `readReceipt` re-checks the receipt it produced before the runner installs anything.
 import { createHash } from "node:crypto";
 import { type } from "arktype";
 import { parse } from "yaml";
@@ -272,7 +272,9 @@ async function newestStable(github: GitHub): Promise<string> {
  * throws on the first doubt. The tag's form is checked before GitHub is asked anything. With
  * `candidate.sha`, the commit a stable release run planned to promote, the tag must name exactly
  * that commit, so the check proves the source the release builds; without it, as when dispatched
- * alone, the tag's commit is taken. `now` stamps the receipt.
+ * alone, the tag's commit is taken. With `candidate.private`, the already verified package
+ * receipt supplies the candidate source and bytes; the canonical tag is only a version label.
+ * Its workflow run head must also be contained in main. `now` stamps the receipt.
  */
 export function resolvePackages(
   github: GitHub,
@@ -312,7 +314,11 @@ export async function resolvePackages(
     `${candidateTag} names ${candidateSha}, not ${candidate.sha}, the commit the release planned.`,
   );
   const stableSha = await commitOf(stableTag);
-  for (const source of [stableSha, candidateSha]) {
+  for (const source of new Set([
+    stableSha,
+    candidateSha,
+    ...(candidate.private ? [candidate.private.receipt.run.headCommit] : []),
+  ])) {
     const onMain = Ancestry.assert(await github.json(`/compare/${source}...main?per_page=1`));
     check(
       (onMain.status === "ahead" || onMain.status === "identical") && onMain.behind_by === 0,

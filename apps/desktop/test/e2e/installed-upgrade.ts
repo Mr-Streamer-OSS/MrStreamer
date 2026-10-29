@@ -44,7 +44,7 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
-import { isDeepStrictEqual, parseArgs } from "node:util";
+import { inspect, isDeepStrictEqual, parseArgs } from "node:util";
 import type { Result } from "../../../../packages/contracts/src/errors.ts";
 import type { IpcArgs, IpcMethod, IpcOutput } from "../../../../packages/contracts/src/ipc.ts";
 import { installCatalogueWorkerProbe, type Evidence } from "./installed-catalogue-worker.ts";
@@ -1429,6 +1429,28 @@ export async function cleanUp(failure: unknown, left: Leftovers) {
   return { failed, steps, kept };
 }
 
+/** Verifies the source pin and every tracked runtime input before a Fleet installer can run. */
+export function verifyCheckoutSource(
+  expected: string,
+  checkout = fileURLToPath(new URL("../../../../", import.meta.url)),
+) {
+  check(/^[0-9a-f]{40}$/.test(expected), "Pin the verification checkout source separately.");
+  const source = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: checkout,
+    encoding: "utf8",
+  }).trim();
+  check(source === expected, "Verification source differs from the actual checkout.");
+  try {
+    execFileSync("git", ["diff", "--quiet", "HEAD"], { cwd: checkout, stdio: "pipe" });
+  } catch (error) {
+    if (!(error instanceof Error && "status" in error && error.status === 1)) throw error;
+    throw new Error(
+      "Refused: verification checkout has local tracked changes; copy a clean checkout before running.",
+    );
+  }
+  return source;
+}
+
 /**
  * Stable, the candidate over it and the candidate's restart on the disposable runner, with their
  * evidence and cleanup. Refuses before installing anything unless it runs from main in the
@@ -1447,6 +1469,10 @@ export async function runCommand(args: string[]) {
     },
   });
   const fleet = values["fleet-owner"];
+  check(
+    fleet || (!values.repository && !values["verification-source"]),
+    "Fleet repository/source options require --fleet-owner.",
+  );
   const runner = fleet
     ? fleetRunner(JSON.parse(await readFile(fleet, "utf8")))
     : disposableRunner();
@@ -1484,40 +1510,10 @@ export async function runCommand(args: string[]) {
     : undefined;
   const receipt = readReceipt(raw, privateCandidate);
   check(receipt.repository === repository, "The receipt belongs to another repository.");
+  const checkoutSource = fleet
+    ? verifyCheckoutSource(values["verification-source"] ?? "")
+    : process.env["GITHUB_SHA"];
   if (fleet) {
-    const checkout = fileURLToPath(new URL("../../../../", import.meta.url));
-    const source = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: checkout,
-      encoding: "utf8",
-    }).trim();
-    check(
-      source === values["verification-source"],
-      "Verification source differs from the actual checkout.",
-    );
-    try {
-      execFileSync(
-        "git",
-        [
-          "diff",
-          "--quiet",
-          "HEAD",
-          "--",
-          "apps/desktop/test/e2e",
-          "apps/desktop/scripts/package-receipt.ts",
-          "apps/desktop/scripts/msix-version.ts",
-          "packages/contracts",
-        ],
-        { cwd: checkout, stdio: "pipe" },
-      );
-    } catch {
-      throw new Error(
-        "Refused: verification helpers have local changes; copy a clean checkout before running.",
-      );
-    }
-    check(
-      /^[0-9a-f]{40}$/.test(values["verification-source"] ?? ""),
-      "Pin the verification checkout source separately.",
-    );
     check(
       receipt.packages[1].provenance.releaseKind === "private",
       "Fleet mode requires an explicit private candidate.",
@@ -1578,10 +1574,10 @@ export async function runCommand(args: string[]) {
     runner: runner.id,
     verification: {
       mode: fleet ? "owned-fleet" : "github-hosted",
-      checkoutSource: fleet ? values["verification-source"] : process.env["GITHUB_SHA"],
+      checkoutSource,
       workflowCommit: fleet ? null : (process.env["GITHUB_SHA"] ?? null),
-      runId: process.env["GITHUB_RUN_ID"] ?? null,
-      runAttempt: process.env["GITHUB_RUN_ATTEMPT"] ?? null,
+      runId: fleet ? null : (process.env["GITHUB_RUN_ID"] ?? null),
+      runAttempt: fleet ? null : (process.env["GITHUB_RUN_ATTEMPT"] ?? null),
       driverSha256: sha256(await readFile(fileURLToPath(import.meta.url))),
       workerHelperSha256: sha256(
         await readFile(new URL("./installed-catalogue-worker.ts", import.meta.url)),
@@ -1815,7 +1811,13 @@ export async function runCommand(args: string[]) {
     failed = left.failed;
     proof.status = failed ? "failed" : "passed";
     proof.error =
-      failed instanceof Error ? (failed.stack ?? failed.message) : failed ? String(failed) : null;
+      failed instanceof AggregateError
+        ? inspect(failed, { depth: null, colors: false })
+        : failed instanceof Error
+          ? (failed.stack ?? failed.message)
+          : failed
+            ? String(failed)
+            : null;
     Object.assign(proof, {
       subtitleFixture: { requests: subtitles.requests, zipSha256: subtitles.zipSha256 },
     });
