@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 
@@ -44,7 +46,7 @@ export function changedPaths(base: string, head: string, pullRequest: boolean): 
   }
 }
 
-if (import.meta.main) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const event = JSON.parse(readFileSync(process.env["GITHUB_EVENT_PATH"]!, "utf8"));
   const pr = process.env["GITHUB_EVENT_NAME"] === "pull_request";
   const paths = changedPaths(

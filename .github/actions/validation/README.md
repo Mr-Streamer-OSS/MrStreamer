@@ -43,4 +43,8 @@ Test and Website. Main runs selected Website validation even though publication 
 This keeps an independent secretless validation result during the Website workflow transition.
 
 Website identity is diagnostic; the desktop-v1 reuse profile requires only Check and Test identities.
-The top-level identity names the required desktop profile and repeats the Check identity for lookup.
+The top-level identity repeats the Check identity for lookup; `profile: desktop-v1` is recorded separately.
+
+The test completeness gate and discovery catalogue come from the exact candidate, like its tests.
+They are bound by source SHA and validation identity and remain subject to normal source review.
+Using a newer trusted catalogue to judge an older candidate would change that candidate’s intended suite.

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -7,6 +8,9 @@ export const profile = "desktop-v1";
 
 /** Effective validation code/config and toolchain. Source SHA is checked separately. */
 export function validationIdentity() {
+  const sourceRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    encoding: "utf8",
+  }).trim();
   const inputs = execFileSync(
     "git",
     [
@@ -24,7 +28,7 @@ export function validationIdentity() {
       "tsconfig.json",
       "tsconfig.base.json",
     ],
-    { encoding: "utf8" },
+    { cwd: sourceRoot, encoding: "utf8" },
   );
   const tools = execFileSync(
     "git",
@@ -104,7 +108,7 @@ export function acceptsEvidence(
   );
 }
 
-if (import.meta.main) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, file] = process.argv.slice(2);
   if (command === "identity") console.log(validationIdentity());
   else if (command === "record" && file) {
