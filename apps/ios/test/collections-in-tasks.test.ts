@@ -582,6 +582,7 @@ describe("the collections Movies, Series, Home and details show", () => {
     for (const kind of ["movie", "series"] as const) {
       const made = initial.views[0]?.[kind];
       if (!made) throw new Error("No initial collections");
+      expect(titles.collectionsOf(kind)).toBe(made);
       expect(shown(made, undefined)).toEqual(shown(atOnce(kind, before), undefined));
     }
     const first = titles.collectionsOf("movie");
