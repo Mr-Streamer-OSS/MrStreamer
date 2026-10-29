@@ -666,6 +666,30 @@ describe("TMDB metadata store", { timeout: 30_000 }, () => {
       vi.useRealTimers();
     }
   });
+
+  it("leaves out what TMDB said more than six months ago", async () => {
+    const path = await newFile();
+    const entry = (at: number) => ({ at, genres: [35], language: "en", popularity: 1 });
+    await writeFile(
+      path,
+      gzipSync(
+        JSON.stringify({
+          version: 1,
+          entries: { "movie:1": entry(0), "movie:2": entry(100 * DAY) },
+        }),
+      ),
+    );
+    const store = metadataStore({
+      path,
+      client: null,
+      region: "NL",
+      onChange: () => {},
+      now: () => 200 * DAY,
+    });
+    store.want(wantedTitles(2));
+    await vi.waitFor(() => expect(store.get("movie", "2")).not.toBeNull());
+    expect(store.get("movie", "1")).toBeNull();
+  });
 });
 
 describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {

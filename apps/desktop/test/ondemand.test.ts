@@ -355,6 +355,9 @@ describe("movies and series", { timeout: 20_000 }, () => {
     // Nothing read before named a series new to the lists: it marks nothing.
     twice("adult first", "adult first", true);
     await refresh();
+    expect((await onDemand.titles("series", [own("89999")]))[0]).toMatchObject({
+      adult: true,
+    });
     expect(marked).toEqual([false, true, false, true, false]);
     expect(shown).toEqual([
       [false, false],
