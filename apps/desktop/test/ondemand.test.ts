@@ -664,6 +664,56 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     expect((await file(b)).url.startsWith(second.url)).toBe(true);
   });
 
+  it("opens a cold catalogue from the first usable provider while another waits", async () => {
+    const app = await started(await tempDir());
+    const slow = await fakeProvider();
+    const healthy = await fakeProvider({ second: true });
+    const a = (await app.subscriptions.add(login(slow))).id;
+    const b = (await app.subscriptions.add(login(healthy))).id;
+    const held = slow.hold("titles");
+    let page: Awaited<ReturnType<typeof all>> | undefined;
+    let search: Awaited<ReturnType<typeof app.service.search>> | undefined;
+    let searchKind: Awaited<ReturnType<typeof app.service.searchKind>> | undefined;
+    const opening = Promise.all([
+      all(app.service, "movie").then((value) => {
+        page = value;
+      }),
+      app.service.search("story").then((value) => {
+        search = value;
+      }),
+      app.service.searchKind("movie", "story").then((value) => {
+        searchKind = value;
+      }),
+    ]);
+    try {
+      await held.arrived;
+      await vi.waitFor(() => expect(page?.total).toBeGreaterThan(0), { timeout: 10_000 });
+      expect(page?.titles.every((title) => title.subscriptionId === b)).toBe(true);
+      await vi.waitFor(
+        () => {
+          expect(search?.movies.length).toBeGreaterThan(0);
+          expect(searchKind?.total).toBeGreaterThan(0);
+        },
+        { timeout: 10_000 },
+      );
+      expect(search?.movies.every((title) => title.subscriptionId === b)).toBe(true);
+      expect(searchKind?.titles.every((title) => title.subscriptionId === b)).toBe(true);
+      held.release();
+      // The slow fetch the catalogue stopped waiting for still lands, without asking again.
+      await vi.waitFor(
+        async () =>
+          expect(
+            (await app.service.status()).lists.find((row) => row.subscriptionId === a)?.fetchedAt,
+          ).toEqual(expect.any(Number)),
+        { timeout: 10_000 },
+      );
+      expect(slow.titleListRequests()).toBe(4);
+    } finally {
+      held.release();
+      await opening;
+    }
+  });
+
   it("keeps the others' titles when one's lists can't be fetched, and after it goes", async () => {
     const app = await two();
     const { service, roster, second, a, b } = app;

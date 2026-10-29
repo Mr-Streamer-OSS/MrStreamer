@@ -632,54 +632,67 @@ function make(deps: OnDemandDeps) {
     /**
      * The subscriptions whose lists make the catalogue, once there is something of it to show. A
      * subscription without lists yet fetches its own beside what shows, and the lists say when
-     * it is in. With nothing to show at all, this waits for the first fetches and fails as they
-     * did when none came; one that failed a moment ago fails with that rather than asking again.
+     * it is in. With nothing to show at all, browsing waits for the first fetch that succeeds
+     * and fails with what went wrong when none does; one that failed a moment ago fails with that rather
+     * than asking again. Exact-title reads still wait for the initial lists to settle.
      */
-    const owners = Effect.gen(function* () {
-      if ((yield* subscriptions.saved).length === 0) return yield* noSubscription;
-      const found = yield* held;
-      const all = found.map(({ subscription }) => ownerOf(subscription));
-      const sources = new Map((yield* subscriptions.sources).map((each) => [each.id, each]));
-      const missing = found.flatMap(({ subscription, worked }) =>
-        worked.fetchedAt === null ? [subscription] : [],
-      );
-      // Refresh asks the provider again whenever the viewer does.
-      const due = missing.flatMap((subscription) => {
-        const failed = failures.get(subscription.id);
-        const source = sources.get(subscription.id);
-        return source && !(failed && Date.now() - failed.at < RETRY_AFTER_MS) ? [source] : [];
-      });
-      if (missing.length < found.length) {
-        for (const source of due) {
-          // One that failed waits for its own refresh, or the next start.
-          if (!failures.has(source.id))
-            yield* Effect.forkIn(Effect.ignore(refreshOf(source)), scope);
-        }
-        return all;
-      }
-      const failed = yield* Effect.forEach(
-        due,
-        (source) =>
-          Effect.match(refreshOf(source), { onFailure: (cause) => cause, onSuccess: () => null }),
-        { concurrency: "unbounded" },
-      );
-      if (failed.length === 0 ? missing.length === 0 : failed.includes(null)) return all;
-      const [first] = missing;
-      return yield* failed.find((each) => each !== null) ??
-        new Failed({
-          error: (first && failures.get(first.id)?.error) ?? {
-            kind: "needs-secret",
-            subscriptionId: first?.id ?? "",
-          },
+    const owners = (browsing: boolean) =>
+      Effect.gen(function* () {
+        if ((yield* subscriptions.saved).length === 0) return yield* noSubscription;
+        const found = yield* held;
+        const all = found.map(({ subscription }) => ownerOf(subscription));
+        const sources = new Map((yield* subscriptions.sources).map((each) => [each.id, each]));
+        const missing = found.flatMap(({ subscription, worked }) =>
+          worked.fetchedAt === null ? [subscription] : [],
+        );
+        // Refresh asks the provider again whenever the viewer does.
+        const due = missing.flatMap((subscription) => {
+          const failed = failures.get(subscription.id);
+          const source = sources.get(subscription.id);
+          return source && !(failed && Date.now() - failed.at < RETRY_AFTER_MS) ? [source] : [];
         });
-    });
+        if (missing.length < found.length) {
+          for (const source of due) {
+            // One that failed waits for its own refresh, or the next start.
+            if (!failures.has(source.id))
+              yield* Effect.forkIn(Effect.ignore(refreshOf(source)), scope);
+          }
+          return all;
+        }
+        if (missing.length === 0) return all;
+        if (browsing && due.length > 0) {
+          // Race only the callers joining service-owned refreshes. Losing a wait must not cancel
+          // that provider's fetch: it can still join the catalogue and publish its own status.
+          const failed = yield* Effect.raceAll(due.map((source) => refreshOf(source))).pipe(
+            Effect.match({ onFailure: (cause) => cause, onSuccess: () => null }),
+          );
+          if (failed) return yield* failed;
+          return all;
+        }
+        const failed = yield* Effect.forEach(
+          due,
+          (source) =>
+            Effect.match(refreshOf(source), { onFailure: (cause) => cause, onSuccess: () => null }),
+          { concurrency: "unbounded" },
+        );
+        if (failed.includes(null)) return all;
+        const [first] = missing;
+        return yield* failed.find((each) => each !== null) ??
+          new Failed({
+            error: (first && failures.get(first.id)?.error) ?? {
+              kind: "needs-secret",
+              subscriptionId: first?.id ?? "",
+            },
+          });
+      });
 
     /** Runs a call on the catalogue in the viewer's language, once it has something to show. */
     const loaded = <A>(
       run: (owners: readonly CatalogueOwner[], language: string) => Effect.Effect<A, Failed>,
+      browsing = false,
     ) =>
       Effect.gen(function* () {
-        const made = yield* owners;
+        const made = yield* owners(browsing);
         return yield* run(made, yield* language);
       });
 
@@ -1098,8 +1111,10 @@ function make(deps: OnDemandDeps) {
         }),
 
       rows: (kind: TitleKind, tab: RowTab, like?: OwnedId) =>
-        loaded((owners, language) =>
-          call("rows", { owners, language, kind, tab, ...(like ? { like } : {}) }),
+        loaded(
+          (owners, language) =>
+            call("rows", { owners, language, kind, tab, ...(like ? { like } : {}) }),
+          true,
         ),
       recommendations: (seeds: readonly HomeSeed[]) =>
         Effect.gen(function* () {
@@ -1141,40 +1156,44 @@ function make(deps: OnDemandDeps) {
           });
         }),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
-        loaded((owners, language) => call("tiles", { owners, language, kind, of })),
+        loaded((owners, language) => call("tiles", { owners, language, kind, of }), true),
       collection: ({ kind, id, sort, offset, limit, filters }: CollectionQuery) =>
-        loaded((owners, language) =>
-          Effect.gen(function* () {
-            // Titles for adults only once the viewer asked for them.
-            if (id === "adult" && !(yield* settings.get).adultTitles) {
-              return { name: "For adults", total: 0, titles: [] };
-            }
-            return yield* call("collection", {
-              owners,
-              language,
-              kind,
-              id,
-              offset,
-              limit,
-              ...(sort ? { sort } : {}),
-              ...(filters ? { filters, files: yield* knownFiles(kind) } : {}),
-            });
-          }),
+        loaded(
+          (owners, language) =>
+            Effect.gen(function* () {
+              // Titles for adults only once the viewer asked for them.
+              if (id === "adult" && !(yield* settings.get).adultTitles) {
+                return { name: "For adults", total: 0, titles: [] };
+              }
+              return yield* call("collection", {
+                owners,
+                language,
+                kind,
+                id,
+                offset,
+                limit,
+                ...(sort ? { sort } : {}),
+                ...(filters ? { filters, files: yield* knownFiles(kind) } : {}),
+              });
+            }),
+          true,
         ),
       search: (query: string) =>
-        loaded((owners, language) => call("search", { owners, language, query })),
+        loaded((owners, language) => call("search", { owners, language, query }), true),
       searchKind: (kind: TitleKind, query: string, filters?: TitleFilters) =>
-        loaded((owners, language) =>
-          Effect.gen(function* () {
-            return yield* call("searchKind", {
-              owners,
-              language,
-              kind,
-              query,
-              limit: SEARCH_PAGE,
-              ...(filters ? { filters, files: yield* knownFiles(kind) } : {}),
-            });
-          }),
+        loaded(
+          (owners, language) =>
+            Effect.gen(function* () {
+              return yield* call("searchKind", {
+                owners,
+                language,
+                kind,
+                query,
+                limit: SEARCH_PAGE,
+                ...(filters ? { filters, files: yield* knownFiles(kind) } : {}),
+              });
+            }),
+          true,
         ),
       filterOptions: (kind: TitleKind) =>
         Effect.gen(function* () {

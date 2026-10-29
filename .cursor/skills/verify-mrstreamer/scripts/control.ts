@@ -23,6 +23,7 @@ import {
   guideGridScrollScenario,
 } from "./guide-grid.ts";
 import { startGuideHost, type GuideHost } from "../../../../apps/desktop/test/fake-guide-host.ts";
+import { slowCatalogueScenario } from "./slow-catalogue.ts";
 import { homeScenario } from "./home.ts";
 import {
   liveCategoriesScenario,
@@ -66,6 +67,7 @@ const scenarios = [
   "home-stage-live-only",
   "subscriptions",
   "background-refresh",
+  "slow-catalogue",
   "remove-during-guide",
   "moved-guide",
   "live-tv",
@@ -207,6 +209,7 @@ async function run(scenario: Scenario, prior?: string) {
   let guideHosts: { north: GuideHost; south: GuideHost } | undefined;
   let movedHost: GuideHost | undefined;
   let labelHost: GuideHost | undefined;
+  let releaseTitles: (() => void) | undefined;
   let releaseGuide: (() => void) | undefined;
   let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
   let app: ChildProcess | undefined;
@@ -344,6 +347,10 @@ async function run(scenario: Scenario, prior?: string) {
         titlesOf: withSecondSeason,
       });
     if (scenario === "background-refresh") releaseGuide = provider.hold("guide").release;
+    if (scenario === "slow-catalogue") {
+      releaseTitles = provider.hold("titles").release;
+      other = await startFakeProvider({ channels: 60, titles: 30, second: true });
+    }
     tmdb = await startFakeTmdb();
     const ownedProfile = profile;
     const ownedTmdb = tmdb;
@@ -489,6 +496,12 @@ async function run(scenario: Scenario, prior?: string) {
       };
     };
     await launch();
+    if (scenario === "slow-catalogue") {
+      const exceptions: unknown[] = [];
+      observed["runtimeExceptions"] = exceptions;
+      live().on("Runtime.exceptionThrown", (event) => exceptions.push(event));
+      await send("Runtime.enable");
+    }
     const livePage = {
       evaluate: <T>(expression: string) => live().evaluate<T>(expression),
     };
@@ -685,6 +698,26 @@ async function run(scenario: Scenario, prior?: string) {
           tmdbDetails: tmdb!.detailRequests(),
           tmdbAbout: tmdb!.aboutRequests(),
         }),
+      );
+    } else if (scenario === "slow-catalogue") {
+      await slowCatalogueScenario(
+        {
+          profile,
+          observed,
+          evaluate: livePage.evaluate,
+          send,
+          wait,
+          exists,
+          click,
+          key,
+          capture,
+          action,
+          launch,
+          quit,
+        },
+        provider,
+        other!,
+        releaseTitles!,
       );
     } else if (scenario === "background-refresh") {
       await click("Stay on Live TV while the guide waits", button("button", "Watch"));
@@ -1266,6 +1299,7 @@ async function run(scenario: Scenario, prior?: string) {
         await writeFile(join(evidence, "failure.png"), Buffer.from(shot.result["data"], "base64"));
     }
   } finally {
+    releaseTitles?.();
     releaseGuide?.();
     const cleanupErrors: string[] = [];
     const clean = async (operation: () => Promise<unknown>) => {
