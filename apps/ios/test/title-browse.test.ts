@@ -60,6 +60,7 @@ describe.each(["movie", "series"] as const)("%s collection browsing", (kind) => 
     const dutch4k = browseCollection(made, "all", { filters: { quality: "4k", language: "nl" } });
     expect(dutch4k.titles.map((title) => title.id)).toEqual(["nl-4k"]);
     expect(dutch4k.titles[0]?.versions).toHaveLength(2);
+    expect(browseCollection(made, "all", DEFAULT_BROWSE).titles).toEqual(all.titles);
   });
 
   it("keeps unknown declarations truthful and never borrows a non-4K language version", () => {
