@@ -36,16 +36,6 @@ import {
   waitFor,
   type Page,
 } from "./app.ts";
-import {
-  APP_METRICS,
-  electronVersion,
-  environment,
-  median,
-  metric,
-  positiveCount,
-  prepareMeasurementOutput,
-  saveMeasurement,
-} from "../../scripts/measurement.ts";
 
 const { values: options, positionals } = parseArgs({
   options: {
@@ -88,6 +78,18 @@ if (!executable) {
     "Usage: node test/e2e/measure-app.ts [--runs 3] [--subscriptions 1] [--revision sha] [--json file] <app executable> [-- args]",
   );
 }
+
+// Invalid invocations must exit before loading the measurement schemas and their dependencies.
+const {
+  APP_METRICS,
+  electronVersion,
+  environment,
+  median,
+  metric,
+  positiveCount,
+  prepareMeasurementOutput,
+  saveMeasurement,
+} = await import("../../scripts/measurement.ts");
 
 const ffmpeg = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const RUNS = positiveCount(options.runs, "runs", 20);

@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, it } from "vitest";
 import { profileSummary, traceSummary, type TraceEvent } from "./e2e/app-attribution.ts";
 import { cpuDelta, wakeupSupport } from "./e2e/app-probes.ts";
@@ -31,19 +34,37 @@ it("does not label Linux context switches or Windows placeholder zero as wakeups
 });
 
 it("refuses ambiguous diagnostic CLI invocations before starting an app", () => {
-  for (const args of [
-    ["--diagnostics-only"],
-    ["--covered-idle", "--idle-probes"],
-    ["--covered-idle", "--query-retention"],
-    ["--host-condition", "possibly-quiet"],
-  ]) {
-    const result = spawnSync(process.execPath, ["apps/desktop/test/e2e/measure-app.ts", ...args], {
-      encoding: "utf8",
-    });
-    expect(result.status).toBe(1);
-    expect(result.stderr).toMatch(
-      /requires --idle-probes, --live-profile, --steady-profile or --query-retention|Run --covered-idle separately|--host-condition must/,
-    );
+  const scratch = mkdtempSync(join(tmpdir(), "mr-streamer-cli-"));
+  const output = join(scratch, "results", "app.json");
+  try {
+    for (const [args, message] of [
+      [
+        ["--diagnostics-only"],
+        "--diagnostics-only requires --idle-probes, --live-profile, --steady-profile or --query-retention",
+      ],
+      [
+        ["--covered-idle", "--idle-probes"],
+        "Run --covered-idle separately from the CPU/profile probes",
+      ],
+      [
+        ["--covered-idle", "--query-retention"],
+        "Run --covered-idle separately from the CPU/profile probes",
+      ],
+      [["--host-condition", "possibly-quiet"], "--host-condition must be diagnostic or quiet"],
+    ] as const) {
+      const result = spawnSync(
+        process.execPath,
+        ["apps/desktop/test/e2e/measure-app.ts", ...args, "--json", output, "not-an-app"],
+        { encoding: "utf8" },
+      );
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(message);
+      expect(result.stderr).not.toMatch(/spawn|ENOENT/);
+      expect(result.stdout).toBe("");
+      expect(existsSync(join(scratch, "results"))).toBe(false);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
 
