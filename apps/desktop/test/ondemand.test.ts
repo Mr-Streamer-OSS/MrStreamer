@@ -267,48 +267,35 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect((await list()).total).toBeGreaterThan(0);
   });
 
-  it("drops lists that arrive after the login was entered again, and keeps the ones it had", async () => {
-    const app = await onDemandApp();
-    const { onDemand, provider } = app;
-    await onDemand.refresh();
-    const before = await onDemand.status();
-    const told = await collect(app.runtime, onDemand.changes);
-    const held = provider.hold("titles");
-    const late = onDemand.refresh();
-    late.catch(() => {});
-    await held.arrived;
+  it.each(["lists", "refusal"] as const)(
+    "ignores late %s after the login was entered again",
+    async (answer) => {
+      const app = await onDemandApp();
+      const { onDemand, provider } = app;
+      await onDemand.refresh();
+      const before = await onDemand.status();
+      const told = await collect(app.runtime, onDemand.changes);
+      if (answer === "refusal") provider.failTitles("login");
+      const held = provider.hold("titles");
+      const late = onDemand.refresh();
+      late.catch(() => {});
+      await held.arrived;
 
-    const again = await app.reconnect();
-    held.release();
+      const again = await app.reconnect();
+      held.release();
 
-    await expect(late).rejects.toMatchObject({ error: { kind: "unexpected" } });
-    expect(app.own("").subscriptionId).toBe(again.id);
-    expect(await onDemand.status()).toEqual(before);
-    expect(told).toEqual([]);
-    // Nor are they what the next start reads.
-    await app.runtime.dispose();
-    expect(await (await app.start()).onDemand.status()).toEqual(before);
-  });
-
-  it("doesn't report a refusal that arrives after the login was entered again", async () => {
-    const app = await onDemandApp();
-    const { onDemand, provider } = app;
-    await onDemand.refresh();
-    const before = await onDemand.status();
-    const told = await collect(app.runtime, onDemand.changes);
-    provider.failTitles("login");
-    const held = provider.hold("titles");
-    const late = onDemand.refresh();
-    late.catch(() => {});
-    await held.arrived;
-
-    await app.reconnect();
-    held.release();
-
-    await expect(late).rejects.toMatchObject({ error: { kind: "invalid-login" } });
-    expect(await onDemand.status()).toEqual(before);
-    expect(told).toEqual([]);
-  });
+      await expect(late).rejects.toMatchObject({
+        error: { kind: answer === "refusal" ? "invalid-login" : "unexpected" },
+      });
+      expect(app.own("").subscriptionId).toBe(again.id);
+      expect(await onDemand.status()).toEqual(before);
+      expect(told).toEqual([]);
+      if (answer === "lists") {
+        await app.runtime.dispose();
+        expect(await (await app.start()).onDemand.status()).toEqual(before);
+      }
+    },
+  );
 
   it("marks for adults only by the row the lists show for an id, the first, in either kind", async () => {
     const app = await onDemandApp();
