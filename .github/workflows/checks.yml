@@ -114,7 +114,7 @@ jobs:
   trial-test:
     name: Trial Test ${{ matrix.shard }}
     needs: inputs
-    if: ${{ !cancelled() && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop != 'false') }}
+    if: ${{ !cancelled() && !inputs.sha && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:

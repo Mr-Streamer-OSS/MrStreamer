@@ -116,10 +116,7 @@ runs:
       if: inputs.part == 'test'
       env:
         TEST_SHARD: ${{ inputs.test-shard }}
-      run: |
-        args=()
-        if [[ -n "$TEST_SHARD" ]]; then args+=("--shard=$TEST_SHARD"); fi
-        pnpm test --reporter=default --reporter=github-actions --reporter=json --outputFile.json="$RUNNER_TEMP/test-results.json" "${args[@]}"
+      run: pnpm test --reporter=default --reporter=github-actions --reporter=json --outputFile.json="$RUNNER_TEMP/test-results.json" ${TEST_SHARD:+"--shard=$TEST_SHARD"}
       shell: bash
     # The report, to look into a failure or a slow file. Missing when the tests never ran, which
     # the next step fails on.
