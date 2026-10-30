@@ -34,7 +34,8 @@ export function useFeatureEntries(
     if (ready) {
       if (!connect || view === "downloads") {
         const page = liveOnly && !withoutTitles(view) ? "home" : view;
-        active.add(page === "live" ? "live_tv" : page);
+        // Recordings has no feature of its own to count yet.
+        if (page !== "recordings") active.add(page === "live" ? "live_tv" : page);
         if (player) active.add("player");
         if (!connect) {
           if (details && !player) active.add("details");

@@ -71,6 +71,7 @@ import {
 import { LOCALES, type InterfaceLanguage } from "./language.ts";
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
 import type { Reminder, ReminderList } from "./reminders.ts";
+import type { Recording, RecordingConnections, RecordingStart } from "./recordings.ts";
 
 import { PlaylistMode, type PlaylistGroupPage, type PlaylistOmissionPage } from "./playlist.ts";
 import type { OwnedId, SubscriptionSummary } from "./subscription.ts";
@@ -274,6 +275,25 @@ export const ipcInputs = {
   "reminders.cancel": () => type({ id: "string > 0" }),
   /** Takes a reminder's notice in the window down for this run; it stays listed. */
   "reminders.dismiss": () => type({ id: "string > 0" }),
+  "recordings.list": none,
+  /** What holds a subscription's connections now, as Record shows before it starts. */
+  "recordings.connections": () => type({ subscriptionId: "string > 0" }),
+  /**
+   * Records the channel from now until `stop`, through `variant`, else the stream chosen for it
+   * before or Auto's, as `playback.open` picks. `stopPlaying` first stops what plays of its
+   * subscription here, as the viewer chose to when that held the last connection.
+   */
+  "recordings.start": () =>
+    type({
+      channel: owned(),
+      "variant?": "string",
+      stop: "number.integer",
+      "stopPlaying?": "boolean",
+    }),
+  /** Stops a recording now; what it captured stays. */
+  "recordings.stop": () => type({ id: "string > 0" }),
+  /** Deletes a recording that has ended, with its file. */
+  "recordings.remove": () => type({ id: "string > 0" }),
   "ondemand.status": none,
   "ondemand.refresh": () => type({ subscriptionId: "string > 0" }),
   "ondemand.search": () => type({ query: "string" }),
@@ -344,7 +364,10 @@ export const ipcInputs = {
   "subtitles.cancel": () => type({ sessionId: "string > 0" }),
   "playback.openTitle": () =>
     type({ title: TitleRef(), decoders: decoders(), "measurement?": PlaybackControl() }),
-  /** A downloaded copy by its id, from this computer: no subscription or network is asked. */
+  /**
+   * A downloaded copy or an ended recording by its id, from this computer: no subscription or
+   * network is asked.
+   */
   "playback.openCopy": () =>
     type({ copy: "string > 0", decoders: decoders(), "measurement?": PlaybackControl() }),
   "playback.close": () => type({ sessionId: "string" }),
@@ -665,6 +688,20 @@ export interface IpcOutputs {
   "reminders.set": Reminder;
   "reminders.cancel": null;
   "reminders.dismiss": null;
+  /** Every recording, newest first. Fails while they can't be read. */
+  "recordings.list": readonly Recording[];
+  "recordings.connections": RecordingConnections;
+  /**
+   * Started once its first bytes are on disk, or busy, starting nothing, while every connection
+   * the account allows is held. Fails when the channel can't be recorded: its subscription or
+   * channel is gone, `stop` isn't ahead and within `RECORDING_MAX_MS`, or the provider sent
+   * nothing it could keep.
+   */
+  "recordings.start": RecordingStart;
+  /** Once its provider request has ended and its file is closed and written down. */
+  "recordings.stop": null;
+  /** Once its file is gone; what played it closes first. Fails while it still records. */
+  "recordings.remove": null;
   "ondemand.status": OnDemandStatus;
   /** Fetches one subscription's movie and series lists again. */
   "ondemand.refresh": OnDemandStatus;
@@ -717,8 +754,8 @@ export interface IpcOutputs {
   /** Opens a movie or episode, and closes any stream that was open before. */
   "playback.openTitle": TitleSession;
   /**
-   * Opens a downloaded copy from this computer, and closes what played here before. A receiver
-   * plays on: a copy plays here only.
+   * Opens a downloaded copy or ended recording from this computer, and closes what played here
+   * before. A receiver plays on: a copy plays here only.
    */
   "playback.openCopy": CopySession;
   "playback.close": null;
@@ -953,6 +990,8 @@ export interface IpcEvents {
   "ondemand.detailsChanged": OwnedId & { readonly kind: TitleKind };
   /** The queue or the copies changed, or a transfer moved on: at most a few times a second. */
   "downloads.changed": DownloadList;
+  /** A recording started, grew, ended or was removed: about once a second while one records. */
+  "recordings.changed": readonly Recording[];
   /** Favourites, watched channels, progress or marks changed, up to `sequence`. */
   "viewing.changed": { readonly sequence: number };
   /** A title was saved to the watchlist or taken out of it. */

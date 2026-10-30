@@ -1390,4 +1390,53 @@ export const fr: Translation = {
   "Download it to go on.": "Téléchargez-le pour continuer.",
   "{episode} is still downloading": "{episode} est encore en téléchargement",
   "{episode} didn't download": "{episode} n'a pas été téléchargé",
+  "Recordings could not be read.": "Impossible de lire les enregistrements.",
+  "Recordings could not be saved.": "Impossible d’enregistrer la liste des enregistrements.",
+  "Choose a stop time within 12 hours.": "Choisissez une heure de fin dans les 12 heures.",
+  "Stop the recording before deleting it.": "Arrêtez l’enregistrement avant de le supprimer.",
+  "It is still recording.": "L’enregistrement est toujours en cours.",
+  Recordings: "Enregistrements",
+  Recording: "Enregistrement",
+  Record: "Enregistrer",
+  Recorded: "Enregistrés",
+  Complete: "Complet",
+  Partial: "Partiel",
+  "From when you pressed Record.": "Depuis que vous avez appuyé sur Enregistrer.",
+  "You stopped it at {time}.": "Vous l'avez arrêté à {time}.",
+  "Mr. Streamer closed at {time}.": "Mr. Streamer s'est fermé à {time}.",
+  "The stream stopped at {time}.": "Le flux s'est arrêté à {time}.",
+  "It couldn't be written from {time}.": "Impossible de l'écrire à partir de {time}.",
+  "{captured} of {planned} min": "{captured} sur {planned} min",
+  "Nothing recorded yet. Record a channel from Live TV.":
+    "Rien d'enregistré pour l'instant. Enregistrez une chaîne depuis la TV en direct.",
+  "Recordings stay until you delete them. Partial ones still play.":
+    "Les enregistrements restent jusqu'à ce que vous les supprimiez. Les enregistrements partiels se lisent aussi.",
+  "Play {title}": "Lire {title}",
+  "More for {title}": "Plus pour {title}",
+  "When it ends": "À la fin",
+  "In 1 hour": "Dans 1 heure",
+  "In 2 hours": "Dans 2 heures",
+  "Record {title}": "Enregistrer {title}",
+  "{channel} · from now, {time}": "{channel} · dès maintenant, {time}",
+  "Every connection is in use.": "Toutes les connexions sont utilisées.",
+  "Uses 1 connection. {used} of {limit} in use now.":
+    "Utilise 1 connexion. {used} sur {limit} utilisées.",
+  "Ends 2 min after the guide time.": "S'arrête 2 min après l'heure du guide.",
+  "Stop playing and record": "Arrêter la lecture et enregistrer",
+  "Start recording": "Démarrer l'enregistrement",
+  "A recording uses this subscription's connection. Stop it in Recordings to watch.":
+    "Un enregistrement utilise la connexion de cet abonnement. Arrêtez-le dans Enregistrements pour regarder.",
+  "Stop recording {title}": "Arrêter l’enregistrement de {title}",
+  "The provider refused the stream. Another device may be using your connection.":
+    "Le fournisseur a refusé le flux. Un autre appareil utilise peut-être votre connexion.",
+  "The channel has no stream right now.": "La chaîne n’a pas de flux pour le moment.",
+  "This channel's stream can't be recorded.":
+    "Le flux de cette chaîne ne peut pas être enregistré.",
+  "The recording couldn't be written to this computer.":
+    "Impossible d’enregistrer sur cet ordinateur.",
+  "The recording couldn't be deleted.": "Impossible de supprimer l’enregistrement.",
+  "The provider stopped sending.": "Le fournisseur a cessé d'envoyer.",
+  "The provider sent nothing.": "Le fournisseur n'a rien envoyé.",
+  "The stop time passed while it started.":
+    "L'heure de fin est passée pendant le démarrage de l'enregistrement.",
 };

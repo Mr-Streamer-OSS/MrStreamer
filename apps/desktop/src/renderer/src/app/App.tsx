@@ -3,6 +3,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { hasTitles, ownedKey } from "@mrstreamer/contracts/subscription";
 import { ConnectScreen } from "../features/connect/ConnectScreen.tsx";
 import { DownloadsPage } from "../features/downloads/DownloadsPage.tsx";
+import { RecordingsPage } from "../features/recordings/RecordingsPage.tsx";
+import { syncRecordings } from "../features/recordings/recordings.ts";
 import { HomeScreen } from "../features/home/HomeScreen.tsx";
 import { GuidePage } from "../features/live/GuidePage.tsx";
 import { ReminderBanners } from "../features/reminders/ReminderBanners.tsx";
@@ -68,6 +70,7 @@ export function App() {
   useEffect(() => {
     void client.invalidateQueries({ queryKey: downloadsQuery().queryKey });
   }, [client, subscriptions.data]);
+  useEffect(() => syncRecordings(client), [client]);
 
   if (subscriptions.isPending || preferences.isPending) return null;
   if (subscriptions.isError) {
@@ -84,7 +87,7 @@ export function App() {
 }
 
 /**
- * The page (Home, Live TV, Movies, Series, Watchlist or Downloads), with details, Watch and a playing title
+ * The page (Home, Live TV, Movies, Series, Watchlist, Downloads or Recordings), with details, Watch and a playing title
  * opening over it. The page stays laid out underneath, so leaving any of them finds it scrolled
  * where it was, and takes no input meanwhile. Search and settings are available everywhere.
  * Subscriptions with live TV only, unmapped playlists, have no Movies or Series: Home stands in
@@ -153,6 +156,8 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
             <WatchlistPage active={pageActive} />
           ) : view === "downloads" ? (
             <DownloadsPage />
+          ) : view === "recordings" ? (
+            <RecordingsPage />
           ) : (
             // Its own page per kind, so one never shows the other's lists while its own load.
             <TitlesPage
@@ -222,6 +227,7 @@ const PREVIEWS: Record<View, boolean> = {
   series: false,
   watchlist: false,
   downloads: false,
+  recordings: false,
 };
 
 /**

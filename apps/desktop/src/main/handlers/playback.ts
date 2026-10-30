@@ -10,6 +10,7 @@ import type { PlaybackCoordination } from "../services/playback-coordination.ts"
 import type { Library } from "../services/library.ts";
 import type { OnDemand } from "../services/ondemand.ts";
 import type { Downloads } from "../services/downloads.ts";
+import type { Recordings } from "../services/recordings.ts";
 import type { Output } from "../services/output.ts";
 import type { Settings } from "../services/preferences.ts";
 import type { Analytics } from "../analytics/service.ts";
@@ -20,6 +21,7 @@ export function playbackHandlers({
   library,
   onDemand,
   downloads,
+  recordings,
   output,
   settings,
   analytics,
@@ -29,6 +31,7 @@ export function playbackHandlers({
   readonly library: Pick<Library["Service"], "channel">;
   readonly onDemand: Pick<OnDemand["Service"], "file">;
   readonly downloads: Pick<Downloads["Service"], "copy">;
+  readonly recordings: Pick<Recordings["Service"], "copy">;
   readonly output: Pick<Output["Service"], "remote">;
   readonly settings: Pick<Settings["Service"], "get" | "ofSubscription">;
   readonly analytics: Pick<Analytics, "admitPlayback" | "playbackFailureObserver">;
@@ -105,7 +108,12 @@ export function playbackHandlers({
         () => analytics.playbackFailureObserver(token ?? undefined),
         (turn) =>
           Effect.gen(function* () {
-            return yield* playback.openCopy(yield* downloads.copy(copy), decoders, turn);
+            const recorded = yield* recordings.copy(copy);
+            return yield* playback.openCopy(
+              recorded ?? (yield* downloads.copy(copy)),
+              decoders,
+              turn,
+            );
           }),
       );
     },

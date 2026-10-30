@@ -9,14 +9,14 @@ import { currentPreferences, readPreferences } from "../lib/preferences.ts";
 import { titlePlayer } from "../player/title-player.ts";
 
 /** The page under everything else. Watch, details and playing a title open over it. */
-export type View = "home" | "live" | "movies" | "series" | "watchlist" | "downloads";
+export type View = "home" | "live" | "movies" | "series" | "watchlist" | "downloads" | "recordings";
 
 /**
  * Whether a page stays when every subscription has live TV only, as playlists do: Home, Live TV,
- * Watchlist, and Downloads, whose copies need no subscription at all.
+ * Watchlist, Downloads, whose copies need no subscription at all, and Recordings, of live TV.
  */
 export function withoutTitles(view: View): boolean {
-  return view === "home" || view === "live" || view === "watchlist" || view === "downloads";
+  return view !== "movies" && view !== "series";
 }
 
 /** The tabs of the Settings page, and the licences About opens. */

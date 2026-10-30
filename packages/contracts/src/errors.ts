@@ -89,6 +89,11 @@ export type AppError =
       readonly kind: "reminder";
       readonly reason: "started" | "not-in-guide" | "unreadable" | "newer";
     }
+  /**
+   * A play would need the subscription's connection a recording of this app holds: nothing stops
+   * the recording for it.
+   */
+  | { readonly kind: "recording-holds" }
   /** An IPC call carried input that failed validation. Indicates a UI bug. */
   | { readonly kind: "invalid-input"; readonly detail: string }
   | { readonly kind: "unexpected"; readonly detail: string };
