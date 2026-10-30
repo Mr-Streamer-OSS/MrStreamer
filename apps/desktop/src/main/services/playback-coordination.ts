@@ -6,9 +6,10 @@
 // file close, and nothing takes it back: a play that would need it fails instead, and downloads
 // of its subscription wait. It is admitted only while fewer than the account's limit are held
 // here, counting what plays, a download's lease and other recordings, so no owner is stopped for
-// it and the app never opens more connections than the account allows. Admission and each play
-// read the account's limit as the app last heard it from the provider, so a plan rechecked
-// meanwhile counts. Other devices on the same account aren't seen.
+// it and the app never opens more connections than the account allows. Only when the viewer stops
+// playing to record does it take a download's connection back, as that play would have.
+// Admission and each play read the account's limit as the app last heard it from the provider, so
+// a plan rechecked meanwhile counts. Other devices on the same account aren't seen.
 import type { ConnectionUse } from "@mrstreamer/contracts/recordings";
 import { t } from "@mrstreamer/core/i18n";
 import * as Context from "effect/Context";
@@ -55,10 +56,13 @@ export class PlaybackCoordination extends Context.Service<
     /**
      * Admits a recording on one of the subscription's connections, or answers what holds them all,
      * admitting nothing. `limit` reads the account's latest known limit, which a play is held to too.
+     * With `fromDownload`, a download's connection is taken back first, as a play takes it: the
+     * viewer stopped playing to record, and a download may have taken that connection meanwhile.
      */
     hold(
       subscriptionId: string,
       limit: Effect.Effect<number>,
+      fromDownload: boolean,
     ): Effect.Effect<
       | { readonly kind: "held"; readonly held: Held }
       | { readonly kind: "busy"; readonly uses: readonly ConnectionUse[] }
@@ -94,6 +98,20 @@ export class PlaybackCoordination extends Context.Service<
         ...(lent.has(subscriptionId) ? (["download"] as const) : []),
         ...recordingsOf(subscriptionId).map(() => "recording" as const),
       ];
+      /** Aborts the subscription's download, answering whether its lease ended in time. */
+      const takeBack = (subscriptionId: string) =>
+        Effect.promise(async () => {
+          const lease = lent.get(subscriptionId);
+          if (!lease) return true;
+          lease.controller.abort();
+          let timer: NodeJS.Timeout | undefined;
+          const late = new Promise<boolean>(
+            (resolve) => (timer = setTimeout(() => resolve(false), RECLAIM_MS)),
+          );
+          const given = await Promise.race([lease.released.then(() => true), late]);
+          clearTimeout(timer);
+          return given;
+        });
       let turns = 0;
       const whileAsked = (turn: number | undefined) =>
         Effect.suspend(() =>
@@ -111,19 +129,7 @@ export class PlaybackCoordination extends Context.Service<
             // What plays closes before it opens again, so only recordings count against it.
             const held = recordingsOf(subscriptionId);
             if (held[0] && held.length >= (yield* held[0].limit)) return yield* recorded();
-            const given = yield* Effect.promise(async () => {
-              const lease = lent.get(subscriptionId);
-              if (!lease) return true;
-              lease.controller.abort();
-              let timer: NodeJS.Timeout | undefined;
-              const late = new Promise<boolean>(
-                (resolve) => (timer = setTimeout(() => resolve(false), RECLAIM_MS)),
-              );
-              const given = await Promise.race([lease.released.then(() => true), late]);
-              clearTimeout(timer);
-              return given;
-            });
-            if (!given) return yield* stillLent();
+            if (!(yield* takeBack(subscriptionId))) return yield* stillLent();
           }),
         lend: (subscriptionId: string) =>
           one(
@@ -152,9 +158,10 @@ export class PlaybackCoordination extends Context.Service<
         closed: (sessionId: string) => {
           if (sessions.delete(sessionId)) PubSub.publishUnsafe(changed, undefined);
         },
-        hold: (subscriptionId: string, limit: Effect.Effect<number>) =>
+        hold: (subscriptionId: string, limit: Effect.Effect<number>, fromDownload: boolean) =>
           one(
             Effect.gen(function* () {
+              if (fromDownload) yield* takeBack(subscriptionId);
               const uses = usesOf(subscriptionId);
               if (uses.length >= (yield* limit)) return { kind: "busy" as const, uses };
               const held: Held = {

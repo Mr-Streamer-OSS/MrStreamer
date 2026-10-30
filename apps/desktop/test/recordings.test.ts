@@ -559,6 +559,31 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await until(statusOf, (status) => status !== "waiting")).not.toBe("waiting");
   });
 
+  it("takes the connection Watch gave up for it back from a download that started meanwhile", async () => {
+    const { provider, channel, subscriptionId, recordings, downloads, onDemand, playback } =
+      await connected();
+    await onDemand.refresh(subscriptionId);
+    const film = provider.titles.movies.find((each) =>
+      each.name.startsWith("TEST | Two sound tracks and subtitles"),
+    )!;
+    provider.stallMovieFile(film.id, 200_000, 60_000);
+    const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
+    const queued = await downloads.add({ kind: "movie", subscriptionId, id: String(film.id) });
+    const statusOf = async () =>
+      (await downloads.list()).items.find((each) => each.id === queued.id)?.status.kind;
+    expect(await statusOf()).toBe("waiting");
+
+    // Record's Stop playing closes the player before it asks to record: the download wakes first.
+    await playback.close(watching.sessionId);
+    await until(statusOf, (status) => status === "transferring");
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {
+      stopPlaying: true,
+    });
+    expect(started.kind).toBe("started");
+    expect(await until(statusOf, (status) => status === "waiting")).toBe("waiting");
+    expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: ["recording"] });
+  });
+
   it("refuses a stop time already past or more than 12 hours ahead, asking the provider nothing", async () => {
     const { provider, channel, recordings } = await connected();
     for (const stop of [Date.now() - 1000, Date.now() + 12 * 60 * 60 * 1000 + 60_000]) {
