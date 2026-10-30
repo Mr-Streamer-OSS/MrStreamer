@@ -17,6 +17,8 @@ export default function FilmsLayout() {
       <Stack.Screen name="provider" options={{ title: "" }} />
       <Stack.Screen name="licences" options={{ title: "Licences" }} />
       <Stack.Screen name="licence" options={{ title: "" }} />
+      <Stack.Screen name="guides" options={{ title: "Guides" }} />
+      <Stack.Screen name="guide-map" options={{ title: "Map channels" }} />
     </Stack>
   );
 }

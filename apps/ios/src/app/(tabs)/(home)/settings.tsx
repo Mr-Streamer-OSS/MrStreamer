@@ -51,10 +51,10 @@ import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
 const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
 
 /**
- * Settings as one list: the providers first, each a row with Add provider under them, then
- * Downloads, a row with what they take that opens them, Media policies, Privacy with its policy
- * in the browser, and About with Licences. Guide sources come here as they come to iOS, and until
- * then nothing here offers them. TMDB's terms ask for its logo and notice, as
+ * Settings as one list: the providers first, each a row with Add provider and Guides, the XMLTV
+ * guides added apart from theirs, under them, then Downloads, a row with what they take that
+ * opens them, Media policies, Privacy with its policy in the browser, and About with Licences.
+ * TMDB's terms ask for its logo and notice, as
  * the desktop's Settings show them. It opens on whichever tab's top bar asked for it, and what it
  * opens goes on that tab too.
  */
@@ -79,6 +79,13 @@ export default function Settings() {
         <SymbolView name="plus" size={20} tintColor={colors.text} style={styles.mark} />
         <Text style={styles.name}>Add provider</Text>
       </Pressable>
+      <Opens
+        label="Guides"
+        role="button"
+        // Home's at the root, as tabHref places Settings' own screens.
+        onPress={() => router.push(tab === "(home)" ? "/guides" : `/${tab}/guides`)}
+        testID="settings-guides"
+      />
 
       <Section name="Downloads" />
       <DownloadsLink onPress={() => router.push(tabHref(tab, "downloads"))} />
