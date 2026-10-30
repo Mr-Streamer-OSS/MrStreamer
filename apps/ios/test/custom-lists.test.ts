@@ -1,0 +1,312 @@
+import { createRoot, document, type Root } from "./dom.ts";
+import * as React from "react";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { LiveCatalogue, ProviderChannel } from "@mrstreamer/core/provider";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Catalogue, Member } from "../src/account.ts";
+import { buildLibrary, type Channel } from "../src/library.ts";
+import { native } from "./native-files.ts";
+
+// Channel lists as the app keeps them (custom-lists.ts): over the real files, in the files
+// stand-in (native-files.ts), with two fake providers whose stream ids collide, and the saved
+// subscriptions and their channels as account.ts would hand them over. A launch imports the module
+// again over the same files.
+
+const scenario = vi.hoisted(() => ({
+  members: [] as Member[],
+  catalogue: { kind: "loading" } as Catalogue,
+  /** Subscriptions removed with their history kept. */
+  retired: [] as string[],
+}));
+
+vi.mock("expo-file-system", () => import("./native-files.ts"));
+vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
+vi.mock("../src/account.ts", () => ({
+  useRoster: () => ({ kind: "ready", members: scenario.members }),
+  members: () => scenario.members,
+  useCatalogue: () => scenario.catalogue,
+  currentCatalogue: () => scenario.catalogue,
+}));
+vi.mock("../src/subscriptions.ts", () => ({
+  readRegistry: () => ({ registry: { retired: scenario.retired.map((id) => ({ id })) } }),
+}));
+
+const channel = (id: string, name: string): ProviderChannel => ({
+  id,
+  name,
+  number: null,
+  logoUrl: null,
+  categoryIds: ["1"],
+  guideId: null,
+  catchupDays: null,
+});
+const listing = (...channels: ProviderChannel[]): LiveCatalogue => ({
+  categories: [{ id: "1", name: "NL | News" }],
+  channels,
+});
+const NOS = channel("10", "NL | NOS Journaal HD");
+const NOS_FHD = channel("14", "NL | NOS Journaal FHD");
+const ZIGGO = channel("11", "NL | Ziggo Sport");
+const RTL = channel("10", "NL | RTL Nieuws");
+
+const member = (id: string, label: string, needsSecret = false): Member => ({
+  entry: { id, kind: "xtream", server: "http://example.test", username: "fixture", name: null },
+  label,
+  account: null,
+  needsSecret,
+  live: { kind: "ready", value: listing(), from: "provider", fetchedAt: 0, took: 1 },
+  titles: { kind: "idle" },
+});
+
+/** Home (a) lists `home`, Cabin (b) `cabin`, as Live shows them now. */
+function shows(home: ProviderChannel[], cabin: ProviderChannel[] = [RTL]) {
+  scenario.catalogue = {
+    kind: "ready",
+    library: buildLibrary([
+      { subscriptionId: "a", label: "Home", catalogue: listing(...home) },
+      { subscriptionId: "b", label: "Cabin", catalogue: listing(...cabin) },
+    ]),
+    failing: [],
+  };
+  if (root) React.act(() => root!.render(React.createElement(Probe)));
+}
+const live = (key: string): Channel => {
+  const found = scenario.catalogue.kind === "ready" && scenario.catalogue.library.byKey.get(key);
+  if (!found) throw new Error(`Live doesn't list ${key}`);
+  return found;
+};
+
+type Lists = typeof import("../src/custom-lists.ts");
+let lists: Lists;
+/** The app as a launch starts it: the module read afresh over the same files. */
+async function launch() {
+  vi.resetModules();
+  lists = await import("../src/custom-lists.ts");
+  open();
+}
+
+/** What a screen showing the lists draws: names, then each entry by key or by name and why. */
+let drawn: string[] = [];
+function Probe() {
+  drawn = lists
+    .useChannelLists()
+    .map(
+      (list) =>
+        `${list.name}: ${list.entries
+          .map((entry) =>
+            entry.kind === "listed" ? entry.channel.key : `${entry.name} (${entry.why})`,
+          )
+          .join(", ")}${list.away ? ` +${list.away} away` : ""}`,
+    );
+  return null;
+}
+let root: Root | null = null;
+function open() {
+  if (root) React.act(() => root!.unmount());
+  root = createRoot(document.createElement("div"));
+  React.act(() => root!.render(React.createElement(Probe)));
+}
+/** What a screen showing the lists draws now. */
+function shown() {
+  React.act(() => root!.render(React.createElement(Probe)));
+  return drawn;
+}
+const file = () => join(native.root, "documents", "custom-lists.json");
+const only = () => lists.currentChannelLists()[0]!;
+
+beforeEach(async () => {
+  rmSync(file(), { force: true });
+  rmSync(`${file()}.next`, { force: true });
+  native.sync = null;
+  scenario.members = [member("a", "Home"), member("b", "Cabin")];
+  scenario.retired = [];
+  shows([NOS, NOS_FHD, ZIGGO]);
+  await launch();
+});
+afterEach(() => {
+  native.sync = null;
+  if (root) React.act(() => root!.unmount());
+  root = null;
+});
+
+describe("lists", () => {
+  it("are made, renamed, ordered and deleted, and stay so after a relaunch", async () => {
+    const news = lists.createList("  News ");
+    const sport = lists.createList("Sport", live("a:11"));
+    lists.renameList(news, "Nieuws");
+    lists.orderLists({ from: [news, sport], order: [sport, news] });
+    await launch();
+    expect(shown()).toEqual(["Sport: a:11", "Nieuws: "]);
+    lists.deleteList(sport);
+    await launch();
+    expect(shown()).toEqual(["Nieuws: "]);
+  });
+
+  it("refuse a name another list has, apart from case and accents, and an empty one", () => {
+    lists.createList("Séries");
+    expect(() => lists.createList("series")).toThrow(
+      expect.objectContaining({ error: { kind: "list-name-taken" } }),
+    );
+    expect(() => lists.createList("   ")).toThrow(
+      expect.objectContaining({ error: expect.objectContaining({ kind: "invalid-input" }) }),
+    );
+    expect(lists.currentChannelLists().map((list) => list.name)).toEqual(["Séries"]);
+  });
+
+  it("refuse an order made from lists that changed since", () => {
+    const one = lists.createList("One");
+    const two = lists.createList("Two");
+    lists.createList("Three");
+    expect(() => lists.orderLists({ from: [one, two], order: [two, one] })).toThrow(
+      expect.objectContaining({ error: { kind: "list-changed" } }),
+    );
+    expect(lists.currentChannelLists().map((list) => list.name)).toEqual(["One", "Two", "Three"]);
+  });
+
+  it("change nothing, on screen or on disk, when the folder refuses a write", async () => {
+    const news = lists.createList("News", live("a:10"));
+    native.sync = (operation) => {
+      if (operation === "write") throw new Error("The disk is full.");
+    };
+    expect(() => lists.setMember(news, live("b:10"), true)).toThrow("The disk is full.");
+    expect(() => lists.renameList(news, "Nieuws")).toThrow("The disk is full.");
+    expect(shown()).toEqual(["News: a:10"]);
+    native.sync = null;
+    await launch();
+    expect(shown()).toEqual(["News: a:10"]);
+  });
+
+  it("show none of a file a later version wrote, and write nothing over it", async () => {
+    const later = JSON.stringify({ version: 2, lists: [{ id: "x", name: "Later" }] });
+    writeFileSync(file(), later);
+    await launch();
+    expect(shown()).toEqual([]);
+    expect(() => lists.createList("News")).toThrow(
+      expect.objectContaining({
+        error: expect.objectContaining({ detail: expect.stringMatching(/newer version/) }),
+      }),
+    );
+    expect(readFileSync(file(), "utf8")).toBe(later);
+  });
+});
+
+describe("a list's channels", () => {
+  it("are each provider's own, once each, at the end in the order added", () => {
+    const news = lists.createList("News");
+    lists.setMember(news, live("b:10"), true);
+    lists.setMember(news, live("a:10"), true);
+    // Its other quality is the same channel.
+    lists.setMember(news, live("a:14"), true);
+    expect(shown()).toEqual(["News: b:10, a:10"]);
+    lists.setMember(news, live("b:10"), false);
+    expect(shown()).toEqual(["News: a:10"]);
+  });
+
+  it("follow a channel its provider lists under another of its streams, after a relaunch too", async () => {
+    const news = lists.createList("News", live("a:10"));
+    // Home drops the HD stream: the channel is the FHD one's now, as Live lists it.
+    shows([NOS_FHD, ZIGGO]);
+    expect(shown()).toEqual(["News: a:14"]);
+    await launch();
+    expect(shown()).toEqual(["News: a:14"]);
+    // A new stream 10 at Home is another channel, and the list keeps the one it holds.
+    shows([channel("10", "NL | Ziggo Sport 2"), NOS_FHD, ZIGGO]);
+    expect(shown()).toEqual(["News: a:14"]);
+    lists.setMember(news, live("a:14"), false);
+    expect(shown()).toEqual(["News: "]);
+  });
+
+  it("name one their provider no longer lists, or that waits on a password, and play none of it", () => {
+    lists.createList("News", live("a:10"));
+    lists.setMember(only().id, live("b:10"), true);
+    // Cabin's stream 10 is still Cabin's: Home's channel never turns into it.
+    shows([ZIGGO]);
+    expect(shown()).toEqual(["News: NOS Journaal (not-listed), b:10"]);
+    scenario.members = [member("a", "Home"), member("b", "Cabin", true)];
+    shows([ZIGGO]);
+    expect(shown()).toEqual(["News: NOS Journaal (not-listed), RTL Nieuws (needs-secret)"]);
+    const gone = only().entries[0]!;
+    lists.removeMember(only().id, gone.member);
+    expect(shown()).toEqual(["News: RTL Nieuws (needs-secret)"]);
+  });
+
+  it("refuse a channel its provider no longer lists, or that went with its provider", () => {
+    const news = lists.createList("News");
+    const nos = live("a:10");
+    shows([ZIGGO]);
+    expect(() => lists.setMember(news, nos, true)).toThrow(
+      expect.objectContaining({ error: { kind: "channel-not-found", channelId: "10" } }),
+    );
+    scenario.members = [member("b", "Cabin")];
+    expect(() => lists.setMember(news, nos, true)).toThrow(
+      expect.objectContaining({ error: { kind: "no-subscription" } }),
+    );
+    expect(shown()).toEqual(["News: "]);
+  });
+
+  it("of a provider removed with its history come back with it, and go with its history", async () => {
+    const news = lists.createList("News", live("a:10"));
+    lists.setMember(news, live("b:10"), true);
+    scenario.members = [member("b", "Cabin")];
+    scenario.retired = ["a"];
+    shows([NOS]);
+    expect(shown()).toEqual(["News: b:10 +1 away"]);
+    scenario.members = [member("a", "Home"), member("b", "Cabin")];
+    shows([NOS]);
+    expect(shown()).toEqual(["News: a:10, b:10"]);
+    // Removed again, with its history deleted this time.
+    scenario.members = [member("b", "Cabin")];
+    scenario.retired = [];
+    shows([NOS]);
+    expect(shown()).toEqual(["News: b:10"]);
+    expect(readFileSync(file(), "utf8")).not.toContain("NOS");
+    scenario.members = [member("a", "Home"), member("b", "Cabin")];
+    await launch();
+    expect(shown()).toEqual(["News: b:10"]);
+  });
+});
+
+describe("arranging a list", () => {
+  /** A list holding Home's NOS, Ziggo and Cabin's RTL, in that order. */
+  function three() {
+    const id = lists.createList("Mix", live("a:10"));
+    lists.setMember(id, live("a:11"), true);
+    lists.setMember(id, live("b:10"), true);
+    return id;
+  }
+  const memberOf = (key: string) =>
+    only().entries.find((entry) => entry.kind === "listed" && entry.channel.key === key)!.member;
+
+  it("saves the order, kept after a relaunch", async () => {
+    three();
+    lists.arrangeList(only(), ["b:10", "a:10", "a:11"].map(memberOf));
+    await launch();
+    expect(shown()).toEqual(["Mix: b:10, a:10, a:11"]);
+  });
+
+  it("moves only the channels that open, the rest keeping their places", () => {
+    three();
+    shows([NOS, NOS_FHD], [RTL]);
+    expect(shown()).toEqual(["Mix: a:10, Ziggo Sport (not-listed), b:10"]);
+    lists.arrangeList(only(), ["b:10", "a:10"].map(memberOf));
+    expect(shown()).toEqual(["Mix: b:10, Ziggo Sport (not-listed), a:10"]);
+  });
+
+  it("refuses an order made before the list or its channels changed, moving nothing", () => {
+    const id = three();
+    const before = only();
+    const order = ["b:10", "a:11", "a:10"].map(memberOf);
+    lists.setMember(id, live("a:11"), false);
+    lists.setMember(id, live("a:11"), true);
+    expect(() => lists.arrangeList(before, order)).toThrow(
+      expect.objectContaining({ error: { kind: "list-changed" } }),
+    );
+    const now = only();
+    shows([NOS, NOS_FHD, ZIGGO], []);
+    expect(() => lists.arrangeList(now, ["a:11", "a:10"].map(memberOf))).toThrow(
+      expect.objectContaining({ error: { kind: "list-changed" } }),
+    );
+    expect(shown()).toEqual(["Mix: a:10, RTL Nieuws (not-listed), a:11"]);
+  });
+});
