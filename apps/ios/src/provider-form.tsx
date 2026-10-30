@@ -83,7 +83,9 @@ export function ProviderForm({ mode, onDone }: { mode: FormMode; onDone?: () => 
       )}
       {saved ? (
         <Text style={styles.account} numberOfLines={2}>
-          {`${hostOf(saved.server)} · ${saved.username}`}
+          {saved.kind === "m3u"
+            ? hostOf(saved.server)
+            : `${hostOf(saved.server)} · ${saved.username}`}
         </Text>
       ) : (
         <>

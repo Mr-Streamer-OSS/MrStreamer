@@ -1,11 +1,18 @@
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
+import type {
+  PlaylistGroup,
+  PlaylistImportStatus,
+  PlaylistMode,
+  PlaylistOmission,
+} from "@mrstreamer/contracts/playlist";
 import type { AccountStatus } from "@mrstreamer/contracts/subscription";
 import type { Quality } from "@mrstreamer/contracts/library";
 import { chosenVariant, streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { adultIn } from "@mrstreamer/core/adult";
+import { mapPlaylistGroup, playlistGroupId, safeName } from "@mrstreamer/core/playlist/import";
 import type { LiveCatalogue, OnDemandCatalogue, Provider } from "@mrstreamer/core/provider";
-import { parseLogin, xtreamProvider, type XtreamAccount } from "@mrstreamer/core/xtream";
+import { parseLogin, xtreamProvider, type ParsedLogin } from "@mrstreamer/core/xtream";
 import Constants from "expo-constants";
 import { dropLists, pruneLists, readList, writeList, type Saved } from "./catalogue-cache.ts";
 import { dropTitles, pruneDetails } from "./details-cache.ts";
@@ -41,6 +48,7 @@ import {
   getMediaPreferences,
   updateChannelPick,
 } from "./media-preferences.ts";
+import { playlistLogin, playlistProvider, type PlaylistAccount } from "./playlist.ts";
 import { keychainSecrets } from "./secrets.ts";
 import {
   currentSource,
@@ -66,6 +74,7 @@ import {
   demoConflict,
   migrated,
   newSubscriptionId,
+  playlistKey,
   readRegistry,
   sameAccount,
   withoutPending,
@@ -74,6 +83,7 @@ import {
   writeRegistry,
   type Registry,
   type RegistryFile,
+  type PlaylistEntry,
   type SubscriptionEntry,
 } from "./subscriptions.ts";
 import { noteAction } from "./telemetry/index.ts";
@@ -220,8 +230,22 @@ const uncached: typeof fetch = (input, init) => {
   return fetch(input, { ...init, headers });
 };
 
-const providerFor = (account: XtreamAccount): Provider =>
-  xtreamProvider(account, { userAgent: USER_AGENT, live: "hls", fetch: uncached, inTasks });
+type ProviderAccount = ParsedLogin["account"] | ({ readonly kind: "m3u" } & PlaylistAccount);
+
+const providerFor = (account: ProviderAccount): Provider =>
+  account.kind === "xtream"
+    ? xtreamProvider(account, { userAgent: USER_AGENT, live: "hls", fetch: uncached, inTasks })
+    : playlistProvider(account, { userAgent: USER_AGENT, fetch: uncached });
+
+/** A saved subscription's account with its password or link: what signs it in. */
+const accountOf = (entry: SubscriptionEntry, secret: string): ProviderAccount =>
+  entry.kind === "xtream"
+    ? { kind: "xtream", server: entry.server, username: entry.username, password: secret }
+    : { kind: "m3u", link: secret, ...(entry.mapping ? { mapping: entry.mapping } : {}) };
+
+/** What of a password or link its addresses can carry, to keep out of failures. */
+const loginFor = (entry: SubscriptionEntry, secret: string): readonly string[] =>
+  entry.kind === "xtream" ? [entry.username, secret] : [secret, ...playlistLogin(secret).secrets];
 
 /** The registry as last written. */
 let registry: Registry = EMPTY_REGISTRY;
@@ -463,9 +487,9 @@ async function dropSaved(id: string, guideGone = guide.forget(id)): Promise<bool
  * when some are left, which the next launch would show for the new login. The login then stays as
  * it was, and its lists may be saved again.
  */
-async function clearSaved(id: string): Promise<void> {
+async function clearSaved(id: string, guideGone?: Promise<boolean>): Promise<void> {
   const before = dropped.get(id);
-  if (await dropSaved(id)) return;
+  if (await dropSaved(id, guideGone)) return;
   if (before === undefined) dropped.delete(id);
   else dropped.set(id, before);
   savableChanged();
@@ -639,18 +663,18 @@ function check(id: string, source: Source, load: Promise<boolean> = Promise.reso
  * asked of the provider, as Retry does, those last loaded showing meanwhile; loads begun for the
  * login before are dropped, and its copies are gone.
  */
-function signIn(
-  entry: SubscriptionEntry,
-  password: string,
-  checked: AccountStatus | null | "again",
-) {
+function signIn(entry: SubscriptionEntry, secret: string, checked: AccountStatus | null | "again") {
   const source: Source = {
     revision: ++revisions,
-    provider: providerFor({ server: entry.server, username: entry.username, password }),
-    login: [entry.username, password],
+    provider: providerFor(accountOf(entry, secret)),
+    login: loginFor(entry, secret),
   };
+  secrets.set(source, secret);
   signedSource(entry, source, checked);
 }
+
+/** Each signed-in Source's password or link, for a playlist's mapping to sign it in again. */
+const secrets = new WeakMap<Source, string>();
 
 /** Every demo incarnation has its own Source, with no Keychain item or login values. */
 function signInDemo(checked: null | "again") {
@@ -987,11 +1011,103 @@ async function eraseDemo(): Promise<DemoErase> {
   });
 }
 
+/**
+ * The playlist link typed to replace a saved one, made whole as a typed address is. A link that
+ * carries a login is an Xtream panel's: another kind of subscription, which is added as one.
+ */
+function playlistLink(typed: string): string {
+  const { account } = parseLogin({ server: typed, username: "", password: "" });
+  if (account.kind === "m3u") return account.link;
+  throw new AppFailure({ kind: "incomplete-login", detail: "Enter the playlist's M3U link." });
+}
+
+/** A playlist's import as Settings shows it: what it holds, its groups, and what stays out. */
+export interface PlaylistReport {
+  readonly status: PlaylistImportStatus;
+  /** In the playlist's order; "Ungrouped" for entries without a group. */
+  readonly groups: readonly PlaylistGroup[];
+  readonly omissions: readonly PlaylistOmission[];
+}
+
+/** The signed-in playlist `id`, or why it has none. */
+function signedPlaylist(id: string) {
+  const entry = registry.subscriptions.find((each) => each.id === id);
+  if (entry?.kind !== "m3u") throw new AppFailure({ kind: "no-subscription" });
+  const source = sourceOf(id);
+  const link = secrets.get(source);
+  const inspect = source.provider.playlistImport;
+  if (!link || !inspect) throw new AppFailure({ kind: "needs-secret", subscriptionId: id });
+  return { entry, source, link, inspect };
+}
+
+/**
+ * The playlist's groups and what stays out of its lists, from its last read, which the provider
+ * makes when it has none yet. Names and reasons only: no address.
+ */
+export async function playlistReport(id: string, signal?: AbortSignal): Promise<PlaylistReport> {
+  const { entry, inspect } = signedPlaylist(id);
+  const imported = await inspect(signal);
+  const modes = new Map(entry.mapping?.groups.map(({ group, mode }) => [group, mode]));
+  return {
+    status: imported.status,
+    groups: [...imported.groups].map(([group, samples]) => ({
+      group: playlistGroupId(group),
+      name: safeName(group || "Ungrouped"),
+      // Until a first pick every group is Live; after it, a new group waits for one.
+      mode: imported.status.explicit ? (modes.get(playlistGroupId(group)) ?? null) : "live",
+      entries: samples.length,
+      samples: samples.slice(0, 5),
+    })),
+    omissions: imported.omissions,
+  };
+}
+
+/**
+ * Imports one of a playlist's groups as `mode` from now on. The first pick keeps every other
+ * group the playlist has now as Live; a group added later waits for a pick of its own. Saved, the
+ * playlist signs in again and both its lists are read afresh, those shown before staying until
+ * they land; its saved copies, made under the mapping before, go first. Rejects with nothing
+ * changed when the group is gone, the playlist changed meanwhile, or the copies stay.
+ */
+export async function mapPlaylist(id: string, group: string, mode: PlaylistMode): Promise<void> {
+  const { source, inspect } = signedPlaylist(id);
+  const imported = await inspect();
+  const groups = [...imported.groups.keys()].map(playlistGroupId);
+  if (!groups.includes(group))
+    throw new AppFailure({ kind: "unexpected", detail: "This playlist group is gone. Reload it." });
+  await serially(async () => {
+    const now = signedPlaylist(id);
+    if (now.source !== source)
+      throw new AppFailure({ kind: "unexpected", detail: "The playlist changed. Try again." });
+    const mapping = mapPlaylistGroup(now.entry.mapping, groups, group, mode);
+    // The file holds no more: one with more couldn't be read back.
+    if (mapping.groups.length > 10_000)
+      throw new AppFailure({
+        kind: "unexpected",
+        detail: "This playlist has more than 10,000 groups to map.",
+      });
+    const next: PlaylistEntry = { ...now.entry, mapping };
+    // The guide stays: it names channels, which a mapping doesn't rename.
+    await clearSaved(id, Promise.resolve(true));
+    try {
+      commit({
+        ...registry,
+        subscriptions: registry.subscriptions.map((each) => (each === now.entry ? next : each)),
+      });
+      syncRoster();
+      signIn(next, now.link, "again");
+    } catch (cause) {
+      await recoverLogin(id, source).catch(() => undefined);
+      throw cause;
+    }
+  });
+}
+
 /** A name as typed: none when empty, unchanged when not given. */
 const nameOf = (name: string | undefined) =>
   name === undefined ? undefined : name.trim() === "" ? null : name.trim();
 
-const authenticate = (account: XtreamAccount, signal?: AbortSignal) =>
+const authenticate = (account: ProviderAccount, signal?: AbortSignal) =>
   providerFor(account).authenticate(
     AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(20_000)]),
   );
@@ -1009,23 +1125,26 @@ const authenticate = (account: XtreamAccount, signal?: AbortSignal) =>
  */
 export async function add(input: LoginInput, signal?: AbortSignal): Promise<string | null> {
   const { account } = parseLogin(input);
-  if (account.kind !== "xtream") {
-    throw new AppFailure({
-      kind: "invalid-input",
-      detail: "M3U playlists aren't on iPhone yet. Enter an Xtream server, username and password.",
-    });
-  }
   const status = await authenticate(account, signal);
+  const secret = account.kind === "xtream" ? account.password : account.link;
+  const identity =
+    account.kind === "xtream"
+      ? account
+      : {
+          kind: account.kind,
+          server: new URL(account.link).origin,
+          key: playlistKey(account.link),
+        };
   return serially(async () => {
     if (signal?.aborted) return null;
     const name = nameOf(input.name);
-    const known = registry.subscriptions.find((entry) => sameAccount(entry, account));
+    const known = registry.subscriptions.find((entry) => sameAccount(entry, identity));
     if (known) {
       const before = currentSource(known.id);
       await fenceDownloads(known.id);
       await clearSaved(known.id);
       try {
-        await keychainSecrets.write(known.id, account.password);
+        await keychainSecrets.write(known.id, secret);
         const entry = name === undefined || name === known.name ? known : { ...known, name };
         if (entry !== known) {
           commit({
@@ -1035,7 +1154,7 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
         }
         // The roster follows the registry, whatever an earlier change left of it.
         syncRoster();
-        signIn(entry, account.password, status);
+        signIn(entry, secret, status);
         return entry.id;
       } catch (cause) {
         // Best effort: the change still fails with its own error.
@@ -1043,23 +1162,26 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
         throw cause;
       }
     }
-    const retired = registry.retired.find((each) => sameAccount(each, account));
-    const id = retired?.id ?? newSubscriptionId(registry, Date.now());
+    const retired = registry.retired.find((each) => sameAccount(each, identity));
+    const id = retired?.id ?? newSubscriptionId(registry, Date.now(), account.kind);
     // Should the app stop before the registry lists it, the next launch removes its password.
     commit({ ...registry, pendingSecrets: withPending(registry.pendingSecrets, id) });
-    const entry: SubscriptionEntry = {
-      id,
-      kind: "xtream",
-      server: account.server,
-      username: account.username,
-      name: name ?? null,
-    };
+    const entry: SubscriptionEntry =
+      identity.kind === "xtream"
+        ? {
+            id,
+            kind: "xtream",
+            server: identity.server,
+            username: identity.username,
+            name: name ?? null,
+          }
+        : { ...identity, id, name: name ?? null };
     const first = registry.subscriptions.length === 0;
     try {
       // A retired id's lists and downloads went with its removal, unless refused then.
       await fenceDownloads(id);
       await clearSaved(id);
-      await keychainSecrets.write(id, account.password);
+      await keychainSecrets.write(id, secret);
       // Left while the password was written: it goes again, and nothing is saved.
       if (signal?.aborted) {
         await settleSecret(id).catch(() => undefined);
@@ -1077,11 +1199,12 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
     }
     // Saved: from here on it shows and signs in, whatever fails after.
     syncRoster();
-    signIn(entry, account.password, status);
+    signIn(entry, secret, status);
     noteAction("playlist_added");
     // An older build shows the subscription it knew; with none left, it shows this one. Only an
-    // older build reads it: when it can't be written, that build shows Connect instead.
-    if (first) {
+    // older build reads it: when it can't be written, that build shows Connect instead. Older
+    // builds know no playlists.
+    if (first && entry.kind === "xtream") {
       try {
         writeState((state) => ({
           ...state,
@@ -1100,8 +1223,9 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
 }
 
 /**
- * Changes a saved subscription's name, and its password when `password` is given: the provider
- * checks the new one first, and nothing changes when it refuses. Aborting `signal` while the
+ * Changes a saved subscription's name, and its password or playlist link when `password` is given:
+ * the provider checks the new one first, and nothing changes when it refuses. A playlist stays
+ * the account it was with a new link, keeping its id, history and mapping. Aborting `signal` while the
  * provider checks it, or while another change runs, leaves it as it was. The change is made from
  * the moment it starts being saved, as the Keychain may hold the new password from then: aborting
  * after that changes nothing, and the change completes. A new password waits for the lists saved
@@ -1115,10 +1239,9 @@ export async function update(
 ): Promise<void> {
   const entry = registry.subscriptions.find((each) => each.id === id);
   if (!entry) throw new AppFailure({ kind: "no-subscription" });
-  const { password } = change;
-  const status = password
-    ? await authenticate({ server: entry.server, username: entry.username, password }, signal)
-    : null;
+  const password =
+    change.password && entry.kind === "m3u" ? playlistLink(change.password) : change.password;
+  const status = password ? await authenticate(accountOf(entry, password), signal) : null;
   await serially(async () => {
     if (signal?.aborted) return;
     const now = registry.subscriptions.find((each) => each.id === id);
@@ -1131,7 +1254,9 @@ export async function update(
     try {
       if (password) await keychainSecrets.write(id, password);
       const name = nameOf(change.name);
-      const next = name === undefined || name === now.name ? now : { ...now, name };
+      const named = name === undefined || name === now.name ? now : { ...now, name };
+      const server = password && now.kind === "m3u" ? new URL(password).origin : now.server;
+      const next = server === named.server ? named : { ...named, server };
       if (next !== now) {
         commit({
           ...registry,

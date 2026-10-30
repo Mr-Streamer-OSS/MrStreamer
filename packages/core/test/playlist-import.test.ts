@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { importPlaylist, mapPlaylistGroup, playlistGroupId } from "../src/playlist/import.ts";
 import { m3uReader } from "../src/playlist/m3u.ts";
 
@@ -18,6 +19,25 @@ const mapping = mapPlaylistGroup(
 );
 
 describe("mixed playlist imports", () => {
+  it("names groups and titles as releases that hashed with Node's crypto did, on any runtime", () => {
+    const node = (text: string) => createHash("sha256").update(text).digest("hex");
+    for (const group of ["", "Films", "Séries | 漢字 😀", "x".repeat(600)])
+      expect(playlistGroupId(group)).toBe(node(group));
+    const [movie] = importPlaylist(source, mapping).catalogue.movies;
+    const exact = JSON.stringify([
+      "Film",
+      "https://example.test/one.mp4",
+      [
+        ["group-title", "Films"],
+        ["tmdb-id", "42"],
+      ],
+      null,
+      "MovieAgent",
+      "https://example.test/",
+    ]);
+    expect(movie?.id).toBe(`m3u:${node(exact)}`);
+  });
+
   it("uses inherited groups for explicit movie and series picks and keeps their version IDs on reorder", () => {
     const films =
       "#EXTGRP:Films\n#EXTINF:-1,First film\nhttps://example.test/first.mp4\n#EXTINF:-1,Second film\nhttps://example.test/second.mp4\n";

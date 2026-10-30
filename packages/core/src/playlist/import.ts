@@ -1,5 +1,4 @@
 // Explicit group classification. Names never imply a movie, and unknown groups wait for a pick.
-import { createHash } from "node:crypto";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type {
   PlaylistMapping,
@@ -9,6 +8,7 @@ import type {
 } from "@mrstreamer/contracts/playlist";
 import type { ProviderDetails, ProviderEpisode, ProviderTitle } from "../provider.ts";
 import { t } from "../i18n.ts";
+import { sha256Hex } from "../sha256.ts";
 import {
   playlistCatalogue,
   streamFormat,
@@ -150,7 +150,7 @@ function classifiedPlaylist(
     }
     if (mode !== "movie" && mode !== "series") continue;
     // tvg-id often identifies a channel, not an exact file. Hash the complete source version.
-    const id = `m3u:${digest(exact)}`;
+    const id = `m3u:${sha256Hex(exact)}`;
     const container = fileContainer(entry.url);
     const categories = mode === "movie" ? movieCategories : seriesCategories;
     for (const group of names)
@@ -187,7 +187,7 @@ function classifiedPlaylist(
       details.set(id, emptyDetails(safeName(name), poster, container));
     } else if (episode) {
       // Only exact series names in the same mapped groups join. No name matching across providers.
-      const seriesId = `m3u-series:${digest(JSON.stringify([episode.series, names.toSorted(), tmdbId]))}`;
+      const seriesId = `m3u-series:${sha256Hex(JSON.stringify([episode.series, names.toSorted(), tmdbId]))}`;
       let found = series.get(seriesId);
       if (!found) {
         found = {
@@ -263,15 +263,11 @@ export function mapPlaylistGroup(
 }
 
 export function playlistGroupId(group: string): string {
-  return digest(group);
+  return sha256Hex(group);
 }
 
 export function fileContainer(address: string): string {
   return /\.([a-z0-9]{1,8})$/i.exec(new URL(address).pathname)?.[1]?.toLowerCase() ?? "ts";
-}
-
-function digest(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
 }
 
 function emptyDetails(
