@@ -42,12 +42,15 @@ export type Kept =
   | { readonly kind: "unreadable" }
   | { readonly kind: "foreign" };
 
+/** One value, so a screen asking again while the file doesn't read finds nothing changed. */
+const UNREADABLE: Kept = { kind: "unreadable" };
+
 function readKept(): Kept {
   let read: unknown;
   try {
     read = readJsonStrictly(FILE);
   } catch {
-    return { kind: "unreadable" };
+    return UNREADABLE;
   }
   if (read === null) return { kind: "read", lists: [] };
   const parsed = Saved()(read);
@@ -56,9 +59,13 @@ function readKept(): Kept {
     : { kind: "read", lists: parsed.lists };
 }
 
-/** The file, read once, at the first look, then kept as written. */
+/**
+ * The file, read at the first look and again at each look while it doesn't read, then kept as
+ * written.
+ */
 let cached: Kept | null = null;
-export const keptNow = () => (cached ??= readKept());
+export const keptNow = () =>
+  cached === null || cached === UNREADABLE ? (cached = readKept()) : cached;
 const listeners = new Set<() => void>();
 /** For `useSyncExternalStore` with `keptNow`. */
 export const subscribe = (listener: () => void) => {
@@ -75,10 +82,6 @@ function keep(next: Kept) {
  * read, after reading it again, or holds lists this build can't read.
  */
 export function stored(): readonly StoredList[] {
-  if (keptNow().kind === "unreadable") {
-    const again = readKept();
-    if (again.kind !== "unreadable") keep(again);
-  }
   const from = keptNow();
   if (from.kind === "read") return from.lists;
   throw new AppFailure({

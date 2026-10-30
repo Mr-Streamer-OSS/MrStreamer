@@ -249,6 +249,7 @@ describe("lists", () => {
     shows([NOS, ZIGGO]);
     expect(readFileSync(file(), "utf8")).toBe(before);
     native.sync = null;
+    expect(shown()).toEqual(["News: a:10"]);
     lists.createList("Sport");
     expect(shown()).toEqual(["News: a:10", "Sport: "]);
   });
