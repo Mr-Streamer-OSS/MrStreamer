@@ -346,6 +346,32 @@ function serveSubdl() {
   return { answer, requests: () => requests };
 }
 
+/**
+ * Lets a test hold the provider's answers to a series' details: each call of the function it
+ * answers holds the next one not yet held, until its `release`. Made before the app starts.
+ */
+function seriesDetailsHold() {
+  const request = fetch;
+  const holds: Array<{ arrived: () => void; released: Promise<void> }> = [];
+  const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    const held = url.searchParams.get("action") === "get_series_info" ? holds.shift() : undefined;
+    const response = await request(input, init);
+    if (held) {
+      held.arrived();
+      await held.released;
+    }
+    return response;
+  });
+  onTestFinished(() => spy.mockRestore());
+  return () => {
+    const arrived = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    holds.push({ arrived: arrived.resolve, released: released.promise });
+    return { arrived: arrived.promise, release: () => released.resolve() };
+  };
+}
+
 describe.skipIf(!hasTools)("downloads", () => {
   it("downloads a movie and an episode, then plays the copies with no provider request", async () => {
     const { provider, dataDir, subscriptionId, downloads, playback, find } = await connected();
@@ -829,6 +855,54 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect((await downloads.list()).items).toEqual([]);
     await quit();
   }, 60_000);
+
+  it.each([
+    { overtaken: 1, replaced: false, ends: "complete", requests: 2 },
+    { overtaken: 2, replaced: false, ends: "failed", requests: 2 },
+    { overtaken: 1, replaced: true, ends: "failed", requests: 1 },
+  ] as const)(
+    "looks an episode's file up again once, and no more nor under a login replaced meanwhile, when catalogue refreshes overtake the lookup as its transfer starts (%o)",
+    async ({ overtaken, replaced, ends, requests }) => {
+      const hold = seriesDetailsHold();
+      const { provider, dataDir, subscriptionId, downloads, subscriptions, onDemand, find, quit } =
+        await connected();
+      // The episode waits behind a stalled film, with the details it was queued by.
+      const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+      provider.stallMovieFile(film.id, 200_000, 60_000);
+      const first = await downloads.add(film.ref);
+      await vi.waitFor(
+        async () => expect((await find(first.id))?.status.kind).toBe("transferring"),
+        { timeout: LONG },
+      );
+      const target = episode(provider, subscriptionId);
+      const queued = await downloads.add(target.ref);
+      // Of an older catalogue since this refresh, those details are asked for again as it starts.
+      await onDemand.refresh(subscriptionId);
+      const asked = provider.detailRequests();
+      const holds = Array.from({ length: overtaken }, hold);
+      await downloads.pause(first.id);
+      // Each refresh is accepted while the lookup's answer is still on its way.
+      for (const held of holds) {
+        await held.arrived;
+        if (replaced) await subscriptions.add(demoLogin(provider));
+        await onDemand.refresh(subscriptionId);
+        held.release();
+      }
+      await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe(ends), {
+        timeout: LONG,
+      });
+      // Renewed once only, and not at all once the login was replaced during the lookup.
+      expect(provider.detailRequests() - asked).toBe(requests);
+      if (ends === "complete")
+        expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(target.bytes));
+      else
+        expect((await find(queued.id))?.status).toMatchObject({
+          failure: { kind: "app", error: { kind: "unexpected" } },
+        });
+      await quit();
+    },
+    60_000,
+  );
 
   it("asks again when the provider is still freeing the connection of the download before", async () => {
     const { provider, dataDir, subscriptionId, downloads, find } = await connected({

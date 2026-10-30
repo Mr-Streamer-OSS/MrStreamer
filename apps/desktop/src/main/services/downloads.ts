@@ -68,7 +68,7 @@ import {
   type StoredDownload,
 } from "../platform/downloads-store.ts";
 import { SavedSubtitles, subtitlesOfCopy } from "../platform/saved-subtitles.ts";
-import { OnDemand } from "./ondemand.ts";
+import { OnDemand, Overtaken, subscriptionChanged } from "./ondemand.ts";
 import { Playback, type LocalCopy } from "./playback.ts";
 import { PlaybackCoordination, type Lent } from "./playback-coordination.ts";
 import { Subscriptions } from "./subscription.ts";
@@ -575,11 +575,15 @@ function make(deps: DownloadsDeps) {
       signal: AbortSignal,
     ): Promise<TransferOutcome> => {
       const title: TitleRef = { ...record.title, subscriptionId: record.subscriptionId };
-      // Stopped while the file is looked up, nothing is asked of the provider's file.
+      // Stopped while the file is looked up, nothing is asked of the provider's file. A lookup a
+      // catalogue refresh overtook is asked once more, of the catalogue that refresh accepted.
       const resolved = await Effect.runPromise(
-        Effect.all([subscriptions.sourceOf(record.subscriptionId), onDemand.file(title)]).pipe(
-          Effect.result,
-        ),
+        Effect.all([
+          subscriptions.sourceOf(record.subscriptionId),
+          onDemand
+            .file(title)
+            .pipe(Effect.retry({ times: 1, while: (failure) => failure instanceof Overtaken })),
+        ]).pipe(Effect.result),
         { signal },
       ).catch(() => null);
       if (!resolved || signal.aborted) return { kind: "stopped" };
@@ -587,6 +591,11 @@ function make(deps: DownloadsDeps) {
         return { kind: "failed", failure: { kind: "app", error: resolved.failure.error } };
       }
       const [source, file] = resolved.success;
+      // A file looked up, first or renewed, under a login that replaced the one read here fails as
+      // a replaced login does.
+      if (file.revision !== source.revision) {
+        return { kind: "failed", failure: { kind: "app", error: subscriptionChanged() } };
+      }
       // The file the bytes are of: its listing and login, which its saved subtitles are kept by.
       update(record.id, (latest) => ({
         ...latest,
