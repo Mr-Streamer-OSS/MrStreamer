@@ -302,7 +302,7 @@ const showSchedule = (split: boolean, channel: Channel) =>
   split
     ? detail.set((current) =>
         // The Schedule already shown stays on its day, closing its programme.
-        current?.channel === channel.key
+        current?.channel === channel.key && !current.alone
           ? { ...current, programme: null }
           : { channel: channel.key, day: null, programme: null },
       )
@@ -744,7 +744,8 @@ function GuideGrid({
   );
   const span = large ? 60 : 120;
   // The grid draws again on the owner's minute tick, which moves now and a window following it.
-  const now = Date.now();
+  // On the minute, so the rows' memo holds while the grid draws again as it scrolls.
+  const now = Math.floor(Date.now() / MINUTE) * MINUTE;
   const { day, offset, latest, from, until } = gridWindow(place, now, span);
   const read = useGuideGrid(visible, day, library);
   const step = (span / 2) * MINUTE;
@@ -820,19 +821,25 @@ function GuideGrid({
         </View>
       }
       renderItem={({ item }) => {
-        const programmes = read.rows.get(item.key);
+        const row = read.rows.get(item.key);
         const said = guideMessage(read.snapshot.get(item.subscriptionId));
         const reason = said === "Guide may be out of date" ? null : said;
+        const shown = row?.programmes.some((each) => each.stop > from && each.start < until);
         return (
           <GridRow
             channel={item}
             provider={item.ambiguous ? library.labels.get(item.subscriptionId) : undefined}
-            programmes={programmes}
-            // A day read with nothing in it says why; a window between programmes is a gap.
+            programmes={row?.programmes}
+            // A day read with nothing in it says why, and a window with nothing in it says so or,
+            // past the pages read, where the rest is. A gap in a window stays empty.
             message={
-              programmes?.length
+              !row || shown
                 ? null
-                : (reason ?? (programmes ? "No programme information" : null))
+                : row.programmes.length === 0
+                  ? (reason ?? "No programme information")
+                  : row.more && from >= (row.programmes.at(-1)?.stop ?? Infinity)
+                    ? "More in Schedule"
+                    : "Nothing in this window"
             }
             from={from}
             until={until}
@@ -894,22 +901,24 @@ function TimeAxis({
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[styles.axis, { paddingLeft: large ? 16 : NAMES }]}
+      style={styles.axis}
     >
-      {marks.map((at) => {
-        const x = across(at, from, until, strip);
-        // A half hour under now's own label, or too near the end to fit, is left out.
-        return (airing !== null && Math.abs(x - airing) < 48) || x > strip - 44 ? null : (
-          <Text key={at} style={[styles.mark, { left: x + 6 }]}>
-            {programmeTime(at)}
+      <View style={[styles.marks, { marginLeft: large ? 16 : NAMES, width: strip }]}>
+        {marks.map((at) => {
+          const x = across(at, from, until, strip);
+          // A half hour under now's own label, or too near the end to fit, is left out.
+          return (airing !== null && Math.abs(x - airing) < 48) || x > strip - 44 ? null : (
+            <Text key={at} style={[styles.mark, { left: x + 6 }]}>
+              {programmeTime(at)}
+            </Text>
+          );
+        })}
+        {airing === null ? null : (
+          <Text style={[styles.mark, styles.nowMark, { left: Math.max(0, airing - 18) }]}>
+            {programmeTime(now)}
           </Text>
-        );
-      })}
-      {airing === null ? null : (
-        <Text style={[styles.mark, styles.nowMark, { left: Math.max(0, airing - 18) }]}>
-          {programmeTime(now)}
-        </Text>
-      )}
+        )}
+      </View>
     </View>
   );
 }
@@ -980,14 +989,15 @@ const GridRow = memo(function GridRow({
         ) : null}
       </Pressable>
       <View style={[styles.strip, { width: strip }, large && styles.stackedStrip]}>
-        {inWindow.map((programme) => {
+        {inWindow.map((programme, index) => {
           const left = across(Math.max(programme.start, from), from, until, strip);
           const span = across(Math.min(programme.stop, until), from, until, strip) - left;
           const airing = programme.start <= now && programme.stop > now;
           const time = programmeRange(programme);
           return (
             <Pressable
-              key={programme.start}
+              // A start and its place, as two programmes can share a start in bad data.
+              key={`${programme.start} ${index}`}
               accessibilityRole="button"
               accessibilityLabel={[channel.title, provider, time, programme.title, airing && "now"]
                 .filter(Boolean)
@@ -1428,6 +1438,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  marks: { flex: 1 },
   mark: { position: "absolute", top: 3, color: colors.dim, fontSize: 13 },
   nowMark: { color: colors.text, fontWeight: "600" },
   guideRow: {

@@ -108,15 +108,44 @@ export function createGuide(
       }),
     );
   };
-  const invalidate = (entry: Entry) => {
-    for (const [key, value] of tokens) if (value.entry === entry) tokens.delete(key);
+  /** Each token by what it names, so reading the same programme or page again reuses it. */
+  const minted = new Map<string, string>();
+  const named = (value: Token) =>
+    JSON.stringify([
+      value.generation.id,
+      value.key,
+      value.ids,
+      value.start,
+      value.day?.from ?? null,
+    ]);
+  const drop = (key: string) => {
+    const value = tokens.get(key);
+    if (value && minted.get(named(value)) === key) minted.delete(named(value));
+    tokens.delete(key);
   };
-  // The oldest goes first: about 170 Guide grid rows of 48 programmes, read since a programme
-  // shown was last read (`programme` makes its token newest again).
+  const invalidate = (entry: Entry) => {
+    for (const [key, value] of tokens) if (value.entry === entry) drop(key);
+  };
+  // The least recently minted or read goes first, once 8192 different programmes and pages are
+  // held: 32 Guide grid rows of 256 programmes, or about 170 of 48.
   const token = (value: Token) => {
-    if (tokens.size >= 8192) tokens.delete(tokens.keys().next().value ?? "");
+    const name = named(value);
+    const known = minted.get(name);
+    const held = known === undefined ? undefined : tokens.get(known);
+    if (
+      known !== undefined &&
+      held?.entry === value.entry &&
+      held.part === value.part &&
+      held.generation === value.generation
+    ) {
+      tokens.delete(known);
+      tokens.set(known, held);
+      return known;
+    }
+    if (tokens.size >= 8192) drop(tokens.keys().next().value ?? "");
     const key = id();
     tokens.set(key, value);
+    minted.set(name, key);
     return key;
   };
   const validToken = (value: Token) =>
@@ -345,6 +374,7 @@ export function createGuide(
       for (const entry of entries.values()) cancelEntry(entry);
       entries.clear();
       tokens.clear();
+      minted.clear();
       try {
         connect();
         const restored = await port().restore(ids);

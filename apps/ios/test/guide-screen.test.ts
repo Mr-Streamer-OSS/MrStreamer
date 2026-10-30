@@ -1204,8 +1204,8 @@ describe("Live's Guide grid", () => {
       "No programme information",
     );
     const read = new Set(state.queries.flatMap((query) => query.ids));
-    expect(read.size).toBeLessThanOrEqual(16);
-    expect(read.has("trusted-20")).toBe(false);
+    expect(read.size).toBeLessThanOrEqual(24);
+    expect(read.has("trusted-30")).toBe(false);
   });
 
   it("moves its window by Earlier and Later, and its day, back to now", async () => {
@@ -1232,6 +1232,46 @@ describe("Live's Guide grid", () => {
     expect(cell("a:1", current)).not.toBeNull();
     expect(cell("a:1", next)).not.toBeNull();
     expect(container.textContent).not.toContain("Now");
+  });
+
+  it("reads an empty day again on the owner's next minute, so a refused read recovers", async () => {
+    state.answer = async () => answer([]);
+    await guide();
+    expect(cell("a:1", current)).toBeNull();
+    expect(container.querySelector('[data-testid="live-guide"]')?.textContent).toContain(
+      "No programme information",
+    );
+    state.answer = async (_mode, ids) =>
+      ids[0] === "trusted-1" ? answer([current, next]) : answer([]);
+    await tick();
+    expect(cell("a:1", current)).not.toBeNull();
+  });
+
+  it("says where a window past the pages read, or between programmes, has gone", async () => {
+    // Every page says there is more, so the grid stops after its own pages, before noon.
+    state.answer = async (_mode, _ids, _from, _until, after) => {
+      const start = Math.max(after, current.start - 6 * 3600_000) + 60_000;
+      return answer([{ ...current, start, stop: start + 60_000 }], true);
+    };
+    await guide();
+    expect(container.textContent).toContain("More in Schedule");
+    state.answer = async () => answer([current]);
+    await install();
+    await guide();
+    await click("Later");
+    await click("Later");
+    expect(container.textContent).toContain("Nothing in this window");
+  });
+
+  it("opens a channel's Schedule over a grid programme, with Back to that Schedule", async () => {
+    state.window = { width: 1032, height: 1376, fontScale: 1 };
+    await guide();
+    await click(`grid-a:1-${current.start}`);
+    expect(detail()?.textContent).toContain("Back to Guide");
+    await click("schedule-a:1");
+    expect(detail()?.querySelector('[data-testid="guide-schedule"]')).not.toBeNull();
+    await click(`programme-${current.start}`);
+    expect(detail()?.textContent).toContain("Back to Schedule");
   });
 
   it("moves an hour's window by half an hour at large text", async () => {

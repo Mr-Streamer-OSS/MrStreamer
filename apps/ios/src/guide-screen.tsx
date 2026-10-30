@@ -275,7 +275,9 @@ export function Programme({
       ) : (
         <Message
           text={
-            read.pending ? "Loading programme…" : "Programme unavailable. Go Back to the schedule."
+            read.pending
+              ? "Loading programme…"
+              : "Programme unavailable. Go Back and choose it again."
           }
         />
       )}

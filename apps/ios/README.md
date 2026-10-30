@@ -71,10 +71,12 @@ Stage and Live's channel rows use the same guide owner for actual now/next, loca
 programme progress, retaining category fallback in gaps. Live adds Guide alongside For you,
 Categories and All, with the country filter preserved: a grid of the country's channels down the
 side and two hours of a day across (one hour at accessibility text sizes), moved with Previous
-day, Next day, Earlier, Later and Now. It reads the day pages of at most 16 channels in view from
-the same guide owner, again only when its guide is replaced, with no cache of its own; the line
-at now, the programme on now, gaps and "No programme information" or "Guide unavailable" rows
-show what the owner holds. A channel's name opens its Schedule and a programme cell its
+day, Next day, Earlier, Later and Now. It reads the first two day pages of at most 24 channels
+in view from the same guide owner, with no cache of its own: a row scrolled back into view, or
+whose provider's login or guide changed, is read again, and an empty one on the owner's next
+minute. The line at now, the programme on now, gaps, "Nothing in this window", "More in
+Schedule" past the pages read and "No programme information" or "Guide unavailable" rows show
+what the owner holds. A channel's name opens its Schedule and a programme cell its
 programme; neither plays. Channel taps elsewhere still play in Watch. Home tiles still preview.
 Schedule and programme routes stay on their originating Home or Live stack, retaining Back and
 browse context. Day controls use each local date's first valid instant, including a skipped midnight,
@@ -811,10 +813,11 @@ bindings report unavailable. Removal and password replacement revoke work before
 including when viewing history is kept.
 
 `src/guide-ui.tsx` reads the owner's immutable snapshot only while the screen is focused. Live
-queries at most 40 visible channels, Home at most 12 including Stage, with the existing two native
-read workers. Channel/day/catalogue changes, source revision changes from the existing sign-in
+queries at most 40 visible channels' listings, its Guide grid at most 24 visible channels' days,
+and Home at most 12 including Stage, with the existing two native read workers. Channel/day/catalogue changes, source revision changes from the existing sign-in
 owner, removal and authoritative cache loss retire presentation and late answers. Routine owner
-notifications reload the current request while settled rows stay mounted, including across blur,
+notifications reload the current request, except the Guide grid's days already read, while
+settled rows stay mounted, including across blur,
 refocus and Programme/Back. Pending work aborts and subscriptions stop when the screen blurs.
 Schedule refreshes replace the represented page span atomically; Show more never appends with a
 prior generation's cursor. Failed/refused replacements retain known rows, mark stale generation
@@ -830,12 +833,13 @@ phone performance still need the exact-app verification below; source tests do n
 
 Focused source verification is `pnpm exec vitest run apps/ios/test/guide-screen.test.ts`.
 For native acceptance, open Home, preview a tile, open its Schedule and a programme, then Back;
-open Live > Guide, choose/clear a country, star a channel, open Schedule, change local days and
-Show more, inspect details and press Watch live. Return through native Back to the same day and
+open Live > Guide, choose/clear a country, scroll the grid, move it Earlier, Later and between
+days, open a programme cell and a channel's Schedule, Show more, inspect details and press Watch
+live. Return through native Back to the same day and
 country. Repeat with cold/missing/stale/failed guide, account recovery, a held read during
 provider replacement/removal, foreground and local calendar boundaries on short, long and
 skipped-midnight DST days. Check large
-text, VoiceOver's separate Play/Schedule actions, rotation and scrolling during ingestion on the
+text, VoiceOver reading each grid cell and Live rows' Play and star actions, rotation and scrolling during ingestion on the
 exact Expo/Hermes native candidate. These native checks remain UNRUN by this source unit.
 
 Initial native refusals are 32 MiB delivered callback bytes, 64 MiB inflated XML, 64 KiB raw

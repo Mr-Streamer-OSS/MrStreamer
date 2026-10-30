@@ -152,16 +152,43 @@ export function useGuideListings(keys: readonly string[], catalogue: Library | n
   );
 }
 
-/** How many channels of the Guide grid read their day at once: about a tall window's rows. */
-export const GRID_ROWS = 16;
-/** A channel's programmes on a day, in the grid: at most this many of the owner's day pages. */
-const GRID_PAGES = 4;
-const NO_ROWS: ReadonlyMap<string, readonly ScheduleItem[]> = new Map();
+/** How many channels of the Guide grid read their day at once: a tall iPad window's rows. */
+export const GRID_ROWS = 24;
+/**
+ * A channel's programmes on a day, in the grid: at most this many of the owner's day pages of
+ * 128, so the rows in view mint fewer detail tokens than the owner keeps (guide.ts).
+ */
+const GRID_PAGES = 2;
 
-async function readDay(keys: readonly string[], day: Day, signal: AbortSignal) {
-  const read = new Map<string, readonly ScheduleItem[]>();
-  // Two at a time, as listings are read.
-  for (let offset = 0; offset < keys.length; offset += 2)
+/** A channel's day as the grid shows it; `more` when it has programmes past the pages read. */
+export interface GridDay {
+  readonly programmes: readonly ScheduleItem[];
+  readonly more: boolean;
+}
+interface GridRead extends GridDay {
+  /** The provider's login, guide and generation it was read under (`versionOf`). */
+  readonly version: string;
+  /** The owner's notification it was read under: an empty day is read again on the next. */
+  readonly snapshot: ReturnType<typeof guide.getSnapshot>;
+}
+const NO_ROWS: ReadonlyMap<string, GridDay> = new Map();
+const subscriptionOf = (key: string) => key.slice(0, key.indexOf(":"));
+const versionOf = (id: string, snapshot: ReturnType<typeof guide.getSnapshot>) =>
+  JSON.stringify([
+    currentSource(id)?.revision ?? null,
+    authorityOf([id], snapshot),
+    snapshot.get(id)?.fetchedAt ?? null,
+  ]);
+
+/** Reads `keys`' days two at a time, as listings are read, handing over each pair as it lands. */
+async function readDay(
+  keys: readonly string[],
+  day: Day,
+  signal: AbortSignal,
+  land: (read: ReadonlyMap<string, GridDay>) => void,
+) {
+  for (let offset = 0; offset < keys.length; offset += 2) {
+    const read = new Map<string, GridDay>();
     await Promise.all(
       keys.slice(offset, offset + 2).map(async (key) => {
         const programmes: ScheduleItem[] = [];
@@ -172,67 +199,87 @@ async function readDay(keys: readonly string[], day: Day, signal: AbortSignal) {
           cursor = got.cursor ?? undefined;
           if (!cursor) break;
         }
-        read.set(key, programmes);
+        read.set(key, { programmes, more: cursor !== undefined });
       }),
     );
-  return read;
+    if (signal.aborted) return;
+    land(read);
+  }
 }
 
 /**
- * The Guide grid's programmes on a local day, by channel key, for the first GRID_ROWS of `keys`:
- * those in view. Rows already read stay as others scroll in, and only those are read. A day is
- * the same all through a guide's generation, so the rows are read again only when one is
- * replaced, all at once, keeping the last ones shown until they land. Another login or day
- * starts empty.
+ * The Guide grid's days on a local day, by channel key, for the first GRID_ROWS of `keys`: those
+ * in view. A row shows once its pair is read and stays while it is in view; only rows new to the
+ * view are read. A day is the same all through a guide's generation, so a row is read again
+ * when its provider's login or guide changes, which first takes it away, or, when it came back
+ * empty, which a refused read also does, on the owner's next minute.
  */
 export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Library) {
   const signature = JSON.stringify(keys.slice(0, GRID_ROWS));
   const requested = useMemo(() => JSON.parse(signature) as string[], [signature]);
-  // Every provider's, so scrolling into another provider's channels keeps the rows read.
+  // Every provider's, so each row's provider is followed.
   const ids = useMemo(() => [...catalogue.labels.keys()], [catalogue]);
-  const { snapshot, focused, now, identity, valid, revision } = useGuideOwner(ids);
-  const scope = useMemo(
-    () => ({ day: { from: day.from, until: day.until }, catalogue, identity }),
-    [day.from, day.until, catalogue, identity],
-  );
+  const { snapshot, focused, now, identity } = useGuideOwner(ids);
   type Settled = {
-    scope: typeof scope;
-    revision: string;
-    rows: ReadonlyMap<string, readonly ScheduleItem[]>;
+    from: number;
+    catalogue: Library;
+    rows: ReadonlyMap<string, GridRead>;
   };
   const [settled, setSettled] = useState<Settled | null>(null);
   const latest = useRef(settled);
   latest.current = settled;
   useEffect(() => {
     if (!focused) return;
-    const before = latest.current?.scope === scope ? latest.current : null;
-    const kept = before?.revision === revision ? before.rows : null;
-    const wanted = requested.filter((key) => catalogue.byKey.has(key) && !kept?.has(key));
-    if (kept && wanted.length === 0) return;
+    const before =
+      latest.current?.from === day.from && latest.current.catalogue === catalogue
+        ? latest.current.rows
+        : null;
+    const versions = new Map(
+      requested.map((key) => [key, versionOf(subscriptionOf(key), snapshot)] as const),
+    );
+    const wanted = requested.filter((key) => {
+      const row = before?.get(key);
+      return (
+        catalogue.byKey.has(key) &&
+        (!row ||
+          row.version !== versions.get(key) ||
+          (row.programmes.length === 0 && row.snapshot !== snapshot))
+      );
+    });
+    if (wanted.length === 0) return;
     const controller = new AbortController();
-    void readDay(wanted, scope.day, controller.signal).then(
-      (read) => {
-        if (controller.signal.aborted || !valid()) return;
-        const rows = new Map<string, readonly ScheduleItem[]>();
+    void readDay(wanted, { from: day.from, until: day.until }, controller.signal, (read) => {
+      const at = guide.getSnapshot();
+      setSettled((prior) => {
+        const kept =
+          prior?.from === day.from && prior.catalogue === catalogue ? prior.rows : undefined;
+        const rows = new Map<string, GridRead>();
         for (const key of requested) {
-          const row = read.get(key) ?? kept?.get(key);
+          const got = read.get(key);
+          const version = versions.get(key) ?? "";
+          // A read that a login or guide change overtook is left out.
+          const row =
+            got && versionOf(subscriptionOf(key), at) === version
+              ? { ...got, version, snapshot }
+              : kept?.get(key);
           if (row) rows.set(key, row);
         }
-        setSettled({ scope, revision, rows });
-      },
-      () => {
-        // A refused day keeps what was read, as a Schedule keeps its rows.
-      },
-    );
+        return { from: day.from, catalogue, rows };
+      });
+    }).catch(() => {
+      // A refused day keeps what was read, as a Schedule keeps its rows.
+    });
     return () => controller.abort();
-  }, [scope, revision, requested, catalogue, focused, valid]);
-  const current = settled?.scope === scope ? settled : null;
-  return {
-    rows: current?.rows ?? NO_ROWS,
-    pending: focused && (!current || current.revision !== revision),
-    snapshot,
-    now,
-  };
+  }, [day.from, day.until, catalogue, requested, snapshot, focused]);
+  const rows = useMemo(() => {
+    if (settled?.from !== day.from || settled.catalogue !== catalogue) return NO_ROWS;
+    const shown = new Map<string, GridDay>();
+    for (const [key, row] of settled.rows)
+      if (row.version === versionOf(subscriptionOf(key), snapshot)) shown.set(key, row);
+    return shown;
+    // `identity` follows each provider's login, which `versionOf` reads.
+  }, [settled, day.from, catalogue, snapshot, identity]);
+  return { rows, snapshot, now };
 }
 
 /** Reload the represented page span atomically; never append with a prior generation's cursor. */
