@@ -59,9 +59,8 @@ export default function TabsLayout() {
       if (!pathname.endsWith("/settings")) openOnTabs(at, "settings");
     } else if (id === "back") {
       // Live's detail column goes back first, while it is what shows of Live's stack.
-      const stack = tabStack(state, at.tab);
-      const atRoot = (stack?.index ?? 0) === 0;
-      if (at.above === 0 && at.tab === "live" && atRoot && closeDetail()) return;
+      const liveRoot = at.above === 0 && at.tab === "live" && !tabStack(state, "live")?.index;
+      if (liveRoot && closeDetail()) return;
       if (router.canGoBack()) router.back();
     } else {
       selectTab(navigation, state, id);

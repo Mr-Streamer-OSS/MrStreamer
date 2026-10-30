@@ -44,11 +44,7 @@ export function splitAt(width: number, fontScale: number): boolean {
  * points in a Duo's inner landscape window (951), 468 in an iPad's portrait one (1032) and 520
  * from an iPad's landscape one (1376); `gutter` is the detail column's side margin there.
  */
-export function useListWidth(): {
-  readonly split: boolean;
-  readonly width: number;
-  readonly gutter: number;
-} {
+export function useListWidth() {
   const { width, fontScale } = useWindowDimensions();
   const split = splitAt(width, fontScale);
   if (!split) return { split, width, gutter: 16 };

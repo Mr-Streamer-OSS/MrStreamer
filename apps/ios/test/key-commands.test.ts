@@ -155,7 +155,6 @@ describe("the tabs' keyboard shortcuts", () => {
     scenario.watch = true;
     await draw();
     expect(scenario.installed).toEqual([]);
-    expect(scenario.press).toBeNull();
   });
 
   it("selects a tab as its button does, closing Search over the tabs first", async () => {

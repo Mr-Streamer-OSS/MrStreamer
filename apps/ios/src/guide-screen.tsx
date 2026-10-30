@@ -30,10 +30,10 @@ import { colors, Message, TextButton, useListWidth } from "./ui.tsx";
 const parameter = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : "";
 
-/** A chosen day as a route carries it: its first instant, or nothing for Today. */
-const dayOf = (value: string | string[] | undefined) => {
-  const day = Number(parameter(value));
-  return parameter(value) && Number.isFinite(day) ? day : null;
+/** A chosen day as a route's `day` carries it: its first instant, or null for Today. */
+export const dayOf = (value: unknown) => {
+  const day = typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(day) && day > 0 ? day : null;
 };
 
 /**

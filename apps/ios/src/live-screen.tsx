@@ -30,7 +30,7 @@ import {
   programmePresentation,
   useGuideListings,
 } from "./guide-ui.tsx";
-import { ChannelSchedule, Programme } from "./guide-screen.tsx";
+import { ChannelSchedule, dayOf, Programme } from "./guide-screen.tsx";
 import { tabHref, tabStack } from "./header.tsx";
 import type { Channel, Library, Region, Shelf } from "./library.ts";
 import { Docked, libraryStatus, loadingStatus, PlaceholderRows, useDockInset } from "./loading.tsx";
@@ -166,10 +166,9 @@ function useHandover(split: boolean) {
     const channel = text(schedule?.params, "channel");
     if (schedule?.name !== "schedule" || !channel || rest.length > 0) return;
     if (programme && programme.name !== "programme") return;
-    const day = Number(text(schedule.params, "day"));
     detail.set({
       channel,
-      day: Number.isFinite(day) && day > 0 ? day : null,
+      day: dayOf(text(schedule.params, "day")),
       programme: text(programme?.params, "detail"),
     });
     navigation.dispatch({ type: "POP_TO_TOP", target });
@@ -510,7 +509,6 @@ function ChannelList({
   const playing = channelStatus(usePlayback().phase);
   const favourites = useFavouriteKeys();
   const { split } = useListWidth();
-  const inColumn = column && split;
   const selected = useStore(detail)?.channel ?? null;
   const [top, setTop] = useState(0);
   const [visible, setVisible] = useState<readonly string[]>(() =>
@@ -603,7 +601,7 @@ function ChannelList({
               </>
             }
             onSchedule={schedule ? (channel) => showSchedule(split, channel) : undefined}
-            selected={inColumn ? schedule && item.key === selected : undefined}
+            selected={column && split ? schedule && item.key === selected : undefined}
           />
         );
       }}
