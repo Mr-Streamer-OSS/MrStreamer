@@ -173,11 +173,13 @@ function useHandover(split: boolean) {
     });
     navigation.dispatch({ type: "POP_TO_TOP", target });
   }, [navigation, stack, target, split]);
-  // Under another screen, as Settings opened over the list, it waits for Back to the list.
+  // A screen over the list, as Settings or Find, was opened from the list, not the Schedule: the
+  // column closes rather than putting its Schedule over that screen or the list it returns to.
   const atRoot = stack?.routes.length === 1;
   useEffect(() => {
-    if (split || !shown || !target || !atRoot) return;
+    if (split || !shown || !target) return;
     detail.set(null);
+    if (!atRoot) return;
     const day = shown.day === null ? {} : { day: String(shown.day) };
     const push = (name: string, params: object) =>
       navigation.dispatch({ type: "PUSH", payload: { name, params }, target });

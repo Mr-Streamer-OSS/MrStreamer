@@ -13,13 +13,19 @@ public class KeyCommandsModule: Module {
     Events("command")
 
     OnCreate {
+      let owner = ObjectIdentifier(self)
       DispatchQueue.main.async {
+        KeyCommandRelay.shared.owner = owner
         KeyCommandRelay.shared.send = { [weak self] id in self?.sendEvent("command", ["id": id]) }
       }
     }
 
+    // A reload's new module may have taken the relay over first; only its own owner clears it.
     OnDestroy {
+      let owner = ObjectIdentifier(self)
       DispatchQueue.main.async {
+        guard KeyCommandRelay.shared.owner == owner else { return }
+        KeyCommandRelay.shared.owner = nil
         KeyCommandRelay.shared.send = nil
         KeyCommandRelay.shared.set([])
       }
@@ -46,6 +52,7 @@ struct Shortcut: Record {
 final class KeyCommandRelay {
   static let shared = KeyCommandRelay()
 
+  var owner: ObjectIdentifier?
   var send: ((String) -> Void)?
   private var wanted: [(id: String, input: String, command: Bool, title: String)] = []
   private var installed: [UIKeyCommand] = []

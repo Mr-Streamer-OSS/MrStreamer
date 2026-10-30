@@ -2,7 +2,7 @@ import { createRoot, window } from "./dom.ts";
 import { nativePlayer } from "./native-player.ts";
 import * as React from "react";
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue } from "../src/account.ts";
 import type { Playing } from "../src/playback.ts";
 
@@ -973,4 +973,66 @@ it("does not describe a real lone subtitle as missing when Off is forbidden", as
   await act(async () => undefined);
   expect(native.sheets[0]?.options).toEqual(["✓ Off", "Cancel"]);
   expect(native.sheets[0]?.message).toBeUndefined();
+});
+
+describe("Watch's keyboard shortcuts", () => {
+  const keys = { offered: [] as { id: string; input: string }[], press: (_id: string) => {} };
+  Object.assign(globalThis, {
+    expo: {
+      modules: {
+        KeyCommands: {
+          set: (shortcuts: { id: string; input: string }[]) => {
+            keys.offered = shortcuts;
+          },
+          addListener: (_event: "command", listener: (event: { id: string }) => void) => {
+            keys.press = (id) => listener({ id });
+            return { remove: () => (keys.press = () => {}) };
+          },
+        },
+      },
+    },
+  });
+  // A sheet an earlier case left open holds the keys until it is answered.
+  beforeAll(() => {
+    for (const sheet of native.sheets) sheet.pick(sheet.options.length - 1);
+  });
+  const inputs = () => keys.offered.map((shortcut) => shortcut.input);
+  const press = (input: string) =>
+    act(() => {
+      const shortcut = keys.offered.find((each) => each.input === input);
+      if (!shortcut) throw new Error(`No ${input} offered`);
+      keys.press(shortcut.id);
+    });
+
+  it("plays, pauses, skips ten seconds either way and closes while a stream plays", async () => {
+    await watching(movie("1"));
+    expect(inputs()).toEqual([" ", "leftArrow", "rightArrow", "escape", "."]);
+    const port = native.port!;
+    port.seekBy.mockClear();
+    press("leftArrow");
+    press("rightArrow");
+    expect(port.seekBy.mock.calls).toEqual([[-10], [10]]);
+    native.player.length = 0;
+    press(" ");
+    expect(native.player).toEqual(["pause"]);
+    press(".");
+    await act(async () => undefined);
+    expect(playbackState.get().watch).toBe(false);
+    expect(inputs()).toEqual([]);
+  });
+
+  it("leaves the keys to an open sheet, and closes with Esc alone once a stream failed", async () => {
+    const watch = await watching(movie("1"));
+    await watch.press("watch-subtitles");
+    await act(async () => undefined);
+    expect(native.sheets).toHaveLength(1);
+    expect(inputs()).toEqual([]);
+    act(() => native.sheets[0]?.pick(1));
+    expect(inputs()).toEqual([" ", "leftArrow", "rightArrow", "escape", "."]);
+    act(() => failure());
+    expect(inputs()).toEqual(["escape", "."]);
+    press("escape");
+    await act(async () => undefined);
+    expect(playbackState.get().watch).toBe(false);
+  });
 });

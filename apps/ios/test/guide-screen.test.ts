@@ -996,6 +996,22 @@ describe("Live on iPad and Duo windows", () => {
     expect(detail()?.textContent).toContain(tomorrow);
     // The list and the column changed; no screen was pushed and nothing played.
     expect(state.did).toEqual([]);
+
+    // Narrowed at the list, the Schedule goes on Live's stack on the day it showed.
+    state.stack = { key: "live-stack", index: 0, routes: [{ name: "index" }] };
+    state.window = { width: 669, height: 951, fontScale: 1 };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(state.did).toEqual([
+      {
+        type: "PUSH",
+        payload: {
+          name: "schedule",
+          params: { channel: "a:1", day: String(new Date(2026, 9, 25).getTime()) },
+        },
+        target: "live-stack",
+      },
+    ]);
   });
 
   it("moves a pushed Schedule into the column as the window widens, and back as it narrows", async () => {
@@ -1072,7 +1088,7 @@ describe("Live on iPad and Duo windows", () => {
     await settle();
     expect(pushes()).toEqual([{ type: "POP_TO_TOP", target: "live-stack" }]);
 
-    // Narrowed with Settings over the list, the Schedule waits for Back to the list.
+    // Narrowed with Settings over the list, the column closes: Back returns to the list alone.
     state.did = [];
     state.stack = {
       key: "live-stack",
@@ -1086,13 +1102,7 @@ describe("Live on iPad and Duo windows", () => {
     state.stack = { key: "live-stack", index: 0, routes: [{ name: "index" }] };
     await draw(React.createElement(LiveTab));
     await settle();
-    expect(pushes()).toEqual([
-      {
-        type: "PUSH",
-        payload: { name: "schedule", params: { channel: "a:1" } },
-        target: "live-stack",
-      },
-    ]);
+    expect(pushes()).toEqual([]);
   });
 
   it("moves VoiceOver to a column programme's channel once the channel is there", async () => {
