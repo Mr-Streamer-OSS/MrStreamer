@@ -97,6 +97,8 @@ const ROW_REM = 48 / 14;
 const HEAD_REM = 2;
 /** Rows above and below the view that are drawn, and read, before they scroll in. */
 const OVERSCAN = 6;
+/** How long after a key the cursor's details may still grow as they are read. */
+const DETAILS_SETTLE_MS = 2000;
 const HALF_HOUR_MS = HOUR_MS / 2;
 const JUMP_ROWS = 10;
 
@@ -522,15 +524,25 @@ export function GuideGrid({
     else if (to > left + room) target = Math.min(from - margin, to - room + margin);
     if (target !== left) scrollTo(origin + Math.max(target, 0) / msPx);
     if (tall || !row) return;
-    // Details read a moment later, as a description, can still make it outgrow the room: it then
-    // shows its top too, while the keys are in the grid, not once its schedule panel took them.
+    // Details read just after the key, as a description, can still make it outgrow the room: it
+    // then shows its top too, while the keys are in the grid. The viewer's own wheel or click, or
+    // a later change, is left alone.
     const observer = new ResizeObserver(() => {
       if (document.activeElement !== element || !outgrows(row)) return;
       observer.disconnect();
       virtualizer.scrollToIndex(index, { align: "start" });
     });
     observer.observe(row);
-    return () => observer.disconnect();
+    const done = new AbortController();
+    const stop = () => observer.disconnect();
+    element.addEventListener("wheel", stop, { signal: done.signal, passive: true });
+    element.addEventListener("pointerdown", stop, { signal: done.signal });
+    const settled = setTimeout(stop, DETAILS_SETTLE_MS);
+    return () => {
+      stop();
+      done.abort();
+      clearTimeout(settled);
+    };
   }, [cursor.asked]);
 
   const watchLive = useRef(onWatch);

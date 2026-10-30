@@ -921,6 +921,35 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(await allClosed(provider)).toBe(true);
   });
 
+  it("records a repeat's time once through changes made after it was stopped or deleted", async () => {
+    const { provider, channel, recordings, listing } = await scheduling();
+    const { now } = await listing();
+    const at = new Date(now.start);
+    const slot = (before: number): RecordingPlan => ({
+      kind: "slot",
+      channel: channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 30,
+      title: now.title,
+      padding: { before, after: 0 },
+    });
+    const saved = await recordings.schedule(slot(0));
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    await recordings.stop(recording!.id);
+    /** No second recording of today's time starts, waiting a moment for one that would. */
+    const recordedOnce = async (count: number) =>
+      (await until(recordings.list, (list) => list.length > count, 2000)).length === count;
+    for (const before of [5, 2]) await recordings.schedule(slot(before), saved.id);
+    await recordings.check();
+    expect(await recordedOnce(1)).toBe(true);
+    await recordings.remove(recording!.id);
+    await recordings.schedule(slot(0), saved.id);
+    await recordings.check();
+    expect(await recordedOnce(0)).toBe(true);
+    expect(await allClosed(provider)).toBe(true);
+  });
+
   it("plans a programme listed more than a week ahead", async () => {
     const { recordings, listing, programmePlan } = await scheduling();
     const { next } = await listing();
