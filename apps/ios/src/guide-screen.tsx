@@ -58,7 +58,7 @@ export function ScheduleScreen({ origin }: { origin: GuideOrigin }) {
  * A channel's Schedule by its key, from `day` (null for Today), wherever it shows: a pushed
  * screen, or Live's detail column. `onDay` hears each day chosen and `onProgramme` each programme
  * opened. With `column`, it is set out for Live's detail column and VoiceOver moves to the
- * channel's name as it shows.
+ * channel's name as it shows, and again as a programme `over` it closes.
  */
 export function ChannelSchedule({
   channel: key,
@@ -67,6 +67,7 @@ export function ChannelSchedule({
   onProgramme,
   origin,
   column = false,
+  over = false,
 }: {
   channel: string;
   day: number | null;
@@ -74,6 +75,7 @@ export function ChannelSchedule({
   onProgramme: (channel: string, detail: string) => void;
   origin: GuideOrigin;
   column?: boolean;
+  over?: boolean;
 }) {
   const catalogue = useCatalogue();
   const channel = catalogue.kind === "ready" ? catalogue.library.byKey.get(key) : undefined;
@@ -89,6 +91,7 @@ export function ChannelSchedule({
       onDay={onDay}
       onProgramme={onProgramme}
       column={column}
+      over={over}
     />
   );
 }
@@ -101,6 +104,7 @@ function Schedule({
   onDay,
   onProgramme,
   column,
+  over,
 }: {
   channel: Channel;
   library: Library;
@@ -109,6 +113,7 @@ function Schedule({
   onDay: (day: number | null) => void;
   onProgramme: (channel: string, detail: string) => void;
   column: boolean;
+  over: boolean;
 }) {
   const clock = useGuideOwner();
   // null follows Today across midnight; a chosen calendar date stays on that date.
@@ -117,7 +122,7 @@ function Schedule({
     choose(day);
     onDay(day);
   };
-  const heading = useAnnounced(column);
+  const heading = useAnnounced(column && !over);
   const content = useContent(column);
   const day = localDay(chosen ?? clock.now);
   const schedule = useGuideSchedule(channel.key, day, library);

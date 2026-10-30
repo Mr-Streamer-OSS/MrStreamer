@@ -51,6 +51,7 @@ import {
 } from "./playback.ts";
 import { colors } from "./ui.tsx";
 import { currentSource } from "./sources.ts";
+import { store, useStore } from "./store.ts";
 
 /** Watch's keyboard shortcuts while it shows: Space, ← and → while a stream plays, Esc or ⌘. always. */
 const STREAMING: readonly Shortcut<"pause" | "rewind" | "skip" | "close" | "dismiss">[] = [
@@ -61,6 +62,21 @@ const STREAMING: readonly Shortcut<"pause" | "rewind" | "skip" | "close" | "dism
   // Keyboards without Esc, as the iPad's Magic Keyboard, use ⌘. instead.
   { id: "dismiss", input: ".", command: true, title: "Close" },
 ];
+/** Whether one of Watch's sheets is open: its keys are the sheet's then, Esc and arrows included. */
+const sheet = store(false);
+
+/** A system sheet over Watch, as ActionSheetIOS shows it, holding the keyboard while it shows. */
+function showSheet(
+  options: Parameters<typeof ActionSheetIOS.showActionSheetWithOptions>[0],
+  chosen: (index: number) => void,
+) {
+  sheet.set(true);
+  ActionSheetIOS.showActionSheetWithOptions(options, (index) => {
+    sheet.set(false);
+    chosen(index);
+  });
+}
+
 const STILL = STREAMING.filter((shortcut) => shortcut.id === "close" || shortcut.id === "dismiss");
 
 /**
@@ -188,7 +204,8 @@ export function WatchLayer() {
   }, [watch]);
 
   const streaming = phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused";
-  useShortcuts(!watch ? NO_SHORTCUTS : streaming ? STREAMING : STILL, (id) => {
+  const sheetShown = useStore(sheet);
+  useShortcuts(!watch || sheetShown ? NO_SHORTCUTS : streaming ? STREAMING : STILL, (id) => {
     if (id === "close" || id === "dismiss") void closeWatch();
     else if (id === "pause") togglePause();
     else seekBy(id === "rewind" ? -10 : 10);
@@ -441,7 +458,7 @@ function LiveQuality({ item }: { item: Playing }) {
     };
     if (!stands()) return;
     const choices = channelQuality(channel);
-    ActionSheetIOS.showActionSheetWithOptions(
+    showSheet(
       {
         title: "Quality",
         options: [
@@ -573,7 +590,7 @@ function TitleButtons({ next }: { next: boolean }) {
       playingItem(playbackState.get().phase) === item;
     const choices = await trackChoices(of);
     if (!stands()) return;
-    ActionSheetIOS.showActionSheetWithOptions(
+    showSheet(
       {
         title: of === "audio" ? "Audio" : "Subtitles",
         options: [

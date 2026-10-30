@@ -645,8 +645,9 @@ larger window shows the picture as it stands.
 With a keyboard, `modules/key-commands` lists the shortcuts while ⌘ is held (`src/key-commands.ts`):
 ⌘1 to ⌘4 select the tabs, ⌘F opens Search, ⌘, Settings and ⌘[ goes back, Live's detail column
 first, and does nothing at a tab's root. In Watch, Space plays and pauses, ← and → skip ten
-seconds and Esc or ⌘. closes. Moving between
-buttons with Tab and the arrows is the system's keyboard focus, which every button has.
+seconds and Esc or ⌘. closes, except while its Quality, Audio or Subtitles sheet is open,
+whose keys are the sheet's. Elsewhere, moving between buttons with Tab and the arrows is the system's keyboard
+focus, which every button has.
 
 Focused source verification is `pnpm exec vitest run apps/ios/test/guide-screen.test.ts
 apps/ios/test/key-commands.test.ts`. It does not show native behaviour. Still to check on the

@@ -20,6 +20,8 @@ const state = vi.hoisted(() => ({
   focused: true,
   focusContext: null as React.Context<boolean> | null,
   window: { width: 390, height: 844, fontScale: 1 },
+  /** What VoiceOver was moved to. */
+  focus: [] as string[],
   /** Live's stack, as navigation's state has it under the tabs. */
   stack: undefined as
     { key: string; index: number; routes: { name: string; params?: object }[] } | undefined,
@@ -168,17 +170,28 @@ vi.mock("react-native", async () => {
     accessibilityLabel?: string;
     accessibilityRole?: string;
     accessibilityValue?: { now?: number };
+    ref?: React.Ref<HTMLDivElement>;
   };
-  const box = ({ children, testID, accessibilityRole, accessibilityValue }: Props) =>
+  const box = ({ children, testID, accessibilityRole, accessibilityValue, ref }: Props) =>
     createElement(
       "div",
-      { "data-testid": testID, role: accessibilityRole, "aria-valuenow": accessibilityValue?.now },
+      {
+        ref,
+        "data-testid": testID,
+        role: accessibilityRole,
+        "aria-valuenow": accessibilityValue?.now,
+      },
       children,
     );
   const node = (value: unknown) =>
     !value ? null : isValidElement(value) ? value : createElement(value as React.ComponentType);
   return {
     ...reactNative,
+    AccessibilityInfo: {
+      ...reactNative.AccessibilityInfo,
+      sendAccessibilityEvent: (shown: { textContent: string | null }, event: string) =>
+        state.focus.push(`${event} ${shown.textContent ?? ""}`),
+    },
     useWindowDimensions: () => state.window,
     View: box,
     ScrollView: box,
@@ -224,7 +237,7 @@ vi.mock("react-native", async () => {
 const { LiveHome, LiveTab } = await import("../src/live-screen.tsx");
 const { splitAt } = await import("../src/ui.tsx");
 const { default: Home } = await import("../src/app/(tabs)/(home)/index.tsx");
-const { ScheduleScreen, ProgrammeScreen } = await import("../src/guide-screen.tsx");
+const { ScheduleScreen, ProgrammeScreen, Programme } = await import("../src/guide-screen.tsx");
 let root: ReturnType<typeof createRoot>;
 let container: ReturnType<typeof document.createElement>;
 const at = new Date(2026, 9, 24, 12).getTime();
@@ -334,6 +347,7 @@ beforeEach(async () => {
   for (const id of ["a", "b", "c"]) dropSource(id);
   state.focused = true;
   state.window = { width: 390, height: 844, fontScale: 1 };
+  state.focus = [];
   state.stack = undefined;
   state.visible = 12;
   state.params = {};
@@ -961,6 +975,7 @@ describe("Live on iPad and Duo windows", () => {
     state.did = [];
     await click("schedule-a:1");
     expect(detail()?.textContent).toContain("Channel 1");
+    expect(state.focus).toEqual(["focus Channel 1"]);
     expect(detail()?.textContent).toContain("Today");
     await click("Next day");
     const tomorrow = new Date(at + 86400_000).toLocaleDateString(undefined, {
@@ -974,8 +989,10 @@ describe("Live on iPad and Duo windows", () => {
     expect(detail()?.textContent).toContain(tomorrow);
     await click(`programme-${current.start}`);
     expect(detail()?.textContent).toContain(current.description);
+    state.focus = [];
     await click("Back to Schedule");
     expect(detail()?.textContent).not.toContain(current.description);
+    expect(state.focus).toEqual(["focus Channel 1"]);
     expect(detail()?.textContent).toContain(tomorrow);
     // The list and the column changed; no screen was pushed and nothing played.
     expect(state.did).toEqual([]);
@@ -1076,6 +1093,25 @@ describe("Live on iPad and Duo windows", () => {
         target: "live-stack",
       },
     ]);
+  });
+
+  it("moves VoiceOver to a column programme's channel once the channel is there", async () => {
+    const ready = state.catalogue;
+    state.catalogue = { kind: "loading" };
+    const column = () =>
+      React.createElement(Programme, {
+        channel: "a:1",
+        detail: "g-detail",
+        origin: "live",
+        onBack: () => {},
+      });
+    await draw(column());
+    await settle();
+    expect(state.focus).toEqual([]);
+    state.catalogue = ready;
+    await draw(column());
+    await settle();
+    expect(state.focus).toEqual(["focus Channel 1"]);
   });
 
   it("keeps the compact layout at accessibility text sizes below 1000 points", async () => {

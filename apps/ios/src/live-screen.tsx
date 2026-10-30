@@ -220,6 +220,7 @@ function LiveDetail() {
           }
           origin="live"
           column
+          over={shown.programme !== null}
         />
       </View>
       {shown.programme ? (
