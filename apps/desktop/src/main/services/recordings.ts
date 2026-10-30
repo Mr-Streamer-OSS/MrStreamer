@@ -740,17 +740,22 @@ function make(deps: RecordingsDeps) {
     };
 
     /**
-     * What a recording or missed result of `schedule`'s `occurrence` says of it. It is owed from
-     * the occurrence's start, or from when the schedule was first saved, when that was later: the
-     * time before there was a schedule is nobody's fault. It names the occurrence by its start all
-     * the same, so it is found as that time's.
+     * When a recording of `schedule`'s `occurrence` is owed from: its start, or when the schedule
+     * was first saved, when that was later. The time before there was a schedule is nobody's fault.
+     */
+    const owedOf = (schedule: KeptSchedule, occurrence: Occurrence) =>
+      Math.max(occurrence.start, schedule.created);
+
+    /**
+     * What a recording or missed result of `schedule`'s `occurrence` says of it: when it was owed
+     * from, and the occurrence by its start all the same, so it is found as that time's.
      */
     const scheduledOf = (
       schedule: KeptSchedule,
       occurrence: Occurrence,
       late: ScheduleMiss | null,
     ): NonNullable<StoredRecording["scheduled"]> => {
-      const owed = Math.max(occurrence.start, schedule.created);
+      const owed = owedOf(schedule, occurrence);
       return {
         schedule: schedule.id,
         from: occurrence.start,
@@ -766,9 +771,8 @@ function make(deps: RecordingsDeps) {
     const startOccurrence = (schedule: KeptSchedule, occurrence: Occurrence, now: number) => {
       const key = occurrenceKey(schedule.id, occurrence);
       const before = why.get(key);
-      const owed = Math.max(occurrence.start, schedule.created);
       const late =
-        now - owed <= ON_TIME_MS
+        now - owedOf(schedule, occurrence) <= ON_TIME_MS
           ? null
           : before === undefined || before === "starting"
             ? "away"
@@ -885,6 +889,13 @@ function make(deps: RecordingsDeps) {
               records.set(record.id, record);
               missed = true;
             }
+            why.delete(key);
+            tried.delete(key);
+            if (settling) through = occurrence.stop;
+            continue;
+          }
+          // Recorded, and stopped or cut short already: the rest of its time is done with too.
+          if (made && !active.has(made.id)) {
             why.delete(key);
             tried.delete(key);
             if (settling) through = occurrence.stop;

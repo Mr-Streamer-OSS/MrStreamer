@@ -883,7 +883,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(recording?.stop).toBe(now.stop);
     expect(recording!.start).toBeGreaterThanOrEqual(now.start + 15 * MINUTE);
 
-    // After the app starts again, and changed then, it is that time's one recording.
+    // After the app starts again it is that time's one recording, and the programme is let go.
     const requests = provider.streamRequests();
     await quit();
     const again = await app(dataDir);
@@ -898,9 +898,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       }),
     ];
     expect(await again.recordings.list()).toEqual(kept);
-    await again.recordings.schedule(programmePlan(now, { before: 0, after: 2 }), saved.id);
-    await again.recordings.check();
-    expect(await again.recordings.list()).toEqual(kept);
+    expect(await again.recordings.schedules()).toEqual([]);
     expect(provider.streamRequests()).toBe(requests);
     await again.quit();
   });
@@ -1079,6 +1077,18 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     });
   });
 
+  it("lets a programme go once its recording was stopped partway through", async () => {
+    const { provider, recordings, listing, programmePlan } = await scheduling();
+    const { now } = await listing();
+    await recordings.schedule(programmePlan(now));
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    await recordings.stop(recording!.id);
+    await recordings.check();
+    expect(await recordings.schedules()).toEqual([]);
+    expect((await recordings.list()).map((each) => each.id)).toEqual([recording!.id]);
+    expect(await allClosed(provider)).toBe(true);
+  });
+
   it("records a time once when its padding changes while its start is under way", async () => {
     // The stream answers once the test lets it, so the start stays under way until then.
     const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
@@ -1105,20 +1115,6 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect((await recordings.list()).map((each) => each.id)).toEqual([recording!.id]);
     expect(await recordings.schedules()).toEqual([]);
     expect(provider.streamRequests()).toBe(1);
-  });
-
-  it("records a time once when its padding changes after its recording was stopped", async () => {
-    const { provider, recordings, listing, programmePlan } = await scheduling();
-    const { now } = await listing();
-    const saved = await recordings.schedule(programmePlan(now));
-    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
-    await recordings.stop(recording!.id);
-    await recordings.schedule(programmePlan(now, { before: 5, after: 0 }), saved.id);
-    await recordings.check();
-    // Its time is settled: the programme is done with, and nothing starts again.
-    expect(await recordings.schedules()).toEqual([]);
-    expect((await recordings.list()).map((each) => each.id)).toEqual([recording!.id]);
-    expect(await allClosed(provider)).toBe(true);
   });
 
   it("records a repeat's time once through changes made after it was stopped or deleted", async () => {
