@@ -24,13 +24,19 @@ export function guideFixture() {
     forget: async (_id: string) => true,
   };
   const native: GuideNative = {
-    async restore(ids) {
+    async restore(ids, kept) {
       calls.push(`restore:${ids.join(",")}`);
-      for (const key of activations.keys())
-        if (!ids.includes(key) || revoked.has(key)) activations.delete(key);
-      return [...activations].map(([subscriptionId, activation]) => ({
+      const restored = [];
+      for (const [key, activation] of activations) {
+        if (ids.includes(key) && !revoked.has(key)) restored.push(key);
+        // Kept on disk unread, under a lease no one holds.
+        else if (!ids.includes(key) && kept.some((prefix) => key.startsWith(prefix)))
+          activations.set(key, { ...activation, lease: `l${++next}` });
+        else activations.delete(key);
+      }
+      return restored.map((subscriptionId) => ({
         subscriptionId,
-        activation,
+        activation: activations.get(subscriptionId)!,
       }));
     },
     async attach(id, revision) {

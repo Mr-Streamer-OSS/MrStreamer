@@ -157,9 +157,9 @@ describe("external guides", () => {
     const lost = before.guides.links()[0]!;
     disk.items.delete(lost.id);
     const after = launch(disk);
-    const ids = after.guides.load();
+    const { ids, kept } = after.guides.load();
     expect(ids).toHaveLength(2);
-    await after.owner.restore(ids);
+    await after.owner.restore(ids, kept);
     await after.guides.restore();
     await flush();
     expect(after.guides.links().map((each) => each.locked)).toEqual([true, false]);
@@ -177,7 +177,7 @@ describe("external guides", () => {
 
   it("shows no guides from a file another build wrote or it can't read, writing over neither", async () => {
     const { guides } = launch({ file: { version: 2 }, items: new Map() });
-    expect(guides.load()).toEqual([]);
+    expect(guides.load().ids).toEqual([]);
     expect(guides.links()).toEqual([]);
     expect(await guides.add(LINK)).toBe("saving");
     const locked = { file: null as unknown, items: new Map<string, string>() };
@@ -204,7 +204,7 @@ describe("external guides", () => {
         locked.file = value;
       },
     );
-    expect(after.load()).toEqual([]);
+    expect(after.load().ids).toEqual([]);
     expect(await after.add("https://other.test/epg.xml")).toBe("saving");
     expect(await after.map("a:1", "news")).toBe("saving");
     await expect(after.erase("a")).rejects.toThrow();

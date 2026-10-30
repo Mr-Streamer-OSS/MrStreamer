@@ -844,7 +844,7 @@ export function restore(): Promise<void> {
     for (const id of registry.pendingSecrets) await settleSecret(id).catch(() => undefined);
     for (const id of registry.erasing) await eraseHistory(id).catch(() => undefined);
     const ids = entriesOf().map((entry) => entry.id);
-    await guide.restore([...ids, ...external]);
+    await guide.restore([...ids, ...external.ids], external.kept);
     void guides.restore();
     pruneLists(ids);
     pruneDetails(ids);

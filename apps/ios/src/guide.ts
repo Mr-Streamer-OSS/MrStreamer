@@ -485,14 +485,18 @@ export function createGuide(
         }
       };
     },
-    async restore(ids: readonly string[]) {
+    /**
+     * At launch: restores the saved guides of `ids` and erases the rest, keeping unread those
+     * whose id starts with one of `kept` (guide-native.ts `restore`).
+     */
+    async restore(ids: readonly string[], kept: readonly string[] = []) {
       const cycle = ++era;
       for (const entry of entries.values()) cancelEntry(entry);
       entries.clear();
       withdrawAll();
       try {
         connect();
-        const restored = await port().restore(ids);
+        const restored = await port().restore(ids, kept);
         if (cycle !== era) return;
         for (const value of restored) {
           if (!ids.includes(value.subscriptionId)) continue;

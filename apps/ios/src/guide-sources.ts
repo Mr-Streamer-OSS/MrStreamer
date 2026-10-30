@@ -66,6 +66,8 @@ export const GUIDE_LIMIT = 8;
 /** The longest guide id the native store reads (GuideIndex.swift). */
 export const MAPPING_MAX = 512;
 const FILE_NAME = "guides.json";
+/** Every external guide's id starts with it, and no subscription's does. */
+const PREFIX = "xmltv-";
 const EMPTY: GuidesFile = { version: 1, guides: [], mappings: {}, pendingSecrets: [] };
 /** As account.ts's providers send. */
 const USER_AGENT = `MrStreamer/${Constants.expoConfig?.version ?? "0.0.0"} (iOS)`;
@@ -126,7 +128,7 @@ export function createGuides(
   };
   const newId = () => {
     const taken = new Set([...saved.guides.map(({ id }) => id), ...saved.pendingSecrets]);
-    const base = `xmltv-${now().toString(36)}`;
+    const base = `${PREFIX}${now().toString(36)}`;
     let id = base;
     for (let next = 2; taken.has(id); next++) id = `${base}-${next}`;
     return id;
@@ -208,12 +210,13 @@ export function createGuides(
     useMappings: () => useStore(mapped),
     mappings: mapped.get,
     /**
-     * At launch, before the native guide store restores: the saved guides' ids, which it keeps.
-     * Without a file it starts empty. A file that can't be read now, or that another build wrote
-     * (custom-lists-file.ts "foreign"), shows none and is never written over: its guides' saved
-     * programmes go, as the native store keeps only the ids given, but their links stay.
+     * At launch, before the native guide store restores: the saved guides' ids, which it restores,
+     * and the id prefixes it keeps unread (guide.ts `restore`). Without a file it starts empty, and
+     * every external guide's saved programmes go. A file that can't be read now, or that another
+     * build wrote (custom-lists-file.ts "foreign"), shows none and is never written over: its
+     * guides' saved programmes and links stay for a launch that reads it.
      */
-    load(): readonly string[] {
+    load(): { readonly ids: readonly string[]; readonly kept: readonly string[] } {
       let parsed: GuidesFile | type.errors | null = null;
       try {
         const contents = read();
@@ -225,7 +228,7 @@ export function createGuides(
       saved = parsed === null || parsed instanceof type.errors ? EMPTY : parsed;
       origins.clear();
       publish();
-      return saved.guides.map(({ id }) => id);
+      return { ids: saved.guides.map(({ id }) => id), kept: writable ? [] : [PREFIX] };
     },
     /** After the native store restored: removes links left pending, and signs each guide in. */
     restore: () =>

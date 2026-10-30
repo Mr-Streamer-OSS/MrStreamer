@@ -12,9 +12,9 @@ public final class GuideModule: Module {
     OnAppEntersBackground { self.owner?.background(); self.sendEvent("background") }
     Function("begin") { (lease: String, job: String) -> Bool in self.owner?.begin(lease, job) ?? false }
     Function("revoke") { (id: String) -> Void in self.owner?.revoke(id); return () }
-    AsyncFunction("restore") { (ids: [String], promise: Promise) in
+    AsyncFunction("restore") { (ids: [String], kept: [String], promise: Promise) in
       guard let owner = self.owner else { promise.reject("unavailable", "unavailable"); return }
-      owner.restoreAsync(ids) { promise.resolve($0) }
+      owner.restoreAsync(ids, keeping: kept) { promise.resolve($0) }
     }
     AsyncFunction("attach") { (id: String, revision: Int, promise: Promise) in
       guard let owner = self.owner else { promise.reject("unavailable", "unavailable"); return }

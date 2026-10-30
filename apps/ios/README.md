@@ -834,8 +834,9 @@ every guide), and removal revokes its work before erasure. Its link, which may h
 Keychain item; `guides.json` keeps its origin, name and a fingerprint, and a guide whose link the
 Keychain lost still reads its saved guide until the link is entered again, which keeps it. Another
 link is a new guide in the old one's place. A `guides.json` that can't be read at launch, or that
-another build wrote, shows no guides and isn't written over; their links stay, but the native store,
-which keeps only the ids it is given, erases their saved programmes. A name can't hold "://". Map
+another build wrote, shows no guides and isn't written over; the native store keeps their saved
+programmes unread and their links stay, for a launch that reads it. Without `guides.json`, every
+external guide's saved programmes go. A name can't hold "://". Map
 channels maps a channel, by its key, to a guide id typed by hand, with a preview of which guide
 answers; mappings go with the subscription's history. A channel reads its mapped id in every guide
 first, then its own ids, its provider's guide before the external ones in order. The native store
