@@ -130,10 +130,19 @@ export function createGuide(
   };
   /** Counts, by channel and day read, each withdrawal of its tokens, so a screen reads again. */
   const withdrawals = new Map<string, number>();
+  /** Changes once after a run of withdrawals, which evictions make without another notification. */
+  const withdrawing = store(0);
+  let announced = false;
   const read = (key: string, on: number) => JSON.stringify([key, on]);
   const withdraw = (value: Minted) => {
     const at = read(value.key, value.on);
     withdrawals.set(at, (withdrawals.get(at) ?? 0) + 1);
+    if (announced) return;
+    announced = true;
+    queueMicrotask(() => {
+      announced = false;
+      withdrawing.set((count) => count + 1);
+    });
   };
   const invalidate = (entry: Entry) => {
     for (const [key, value] of tokens)
@@ -382,6 +391,8 @@ export function createGuide(
      * withdrawn, as by background() or eviction.
      */
     withdrawn: (key: string, on: number) => withdrawals.get(read(key, on)) ?? 0,
+    /** Notifies, once a run of them is over, that `withdrawn` changed. */
+    withdrawals: withdrawing,
     subscribe(listener: () => void) {
       const stop = state.subscribe(listener);
       listeners++;

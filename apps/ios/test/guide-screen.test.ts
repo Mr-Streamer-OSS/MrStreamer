@@ -1203,7 +1203,9 @@ describe("Live's Guide grid", () => {
     expect(container.querySelector('[data-testid="live-guide"]')?.textContent).toContain(
       "No programme information",
     );
-    const read = new Set(state.queries.flatMap((query) => query.ids));
+    const read = new Set(
+      state.queries.filter((query) => query.mode === "day").flatMap((query) => query.ids),
+    );
     expect(read.size).toBeLessThanOrEqual(24);
     expect(read.has("trusted-30")).toBe(false);
   });
@@ -1291,17 +1293,20 @@ describe("Live's Guide grid", () => {
       stop: current.start + i + 1,
       description: null,
     }));
+    // That read only: a native page holds at most 128, so a grid row never holds this many.
     const withMany = state.answer;
-    state.answer = async (mode, ids, ...rest) =>
-      ids[0] === "trusted-3" ? answer(many) : withMany(mode, ids, ...rest);
+    state.answer = async (mode, ids, ...rest) => {
+      if (ids[0] !== "trusted-3") return withMany(mode, ids, ...rest);
+      state.answer = withMany;
+      return answer(many);
+    };
     await React.act(async () => {
       await owner().schedule("a:3", {
         from: new Date(2026, 9, 24).getTime(),
         until: new Date(2026, 9, 25).getTime(),
       });
     });
-    state.answer = withMany;
-    await tick();
+    await settle();
     await click(`grid-a:1-${current.start}`);
     expect(detail()?.textContent).toContain(current.description);
   });

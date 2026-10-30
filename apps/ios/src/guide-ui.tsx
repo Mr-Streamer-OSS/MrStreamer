@@ -170,7 +170,7 @@ interface GridRead extends GridDay {
   readonly refused: boolean;
   /** The provider's login, guide and generation it was read under (`versionOf`). */
   readonly version: string;
-  /** The minute it was read in: an empty day is read again in the next. */
+  /** The minute it landed in: an empty day is read again in the next. */
   readonly minute: number;
 }
 const NO_ROWS: ReadonlyMap<string, GridDay> = new Map();
@@ -244,6 +244,14 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
   // Every provider's, so each row's provider is followed.
   const ids = useMemo(() => [...catalogue.labels.keys()], [catalogue]);
   const { snapshot, focused, now, identity } = useGuideOwner(ids);
+  // Eviction withdraws tokens with no owner notification, so the rows that lost theirs follow this.
+  const withdrawals = useSyncExternalStore(
+    useCallback(
+      (listener: () => void) => (focused ? guide.withdrawals.subscribe(listener) : nothing()),
+      [focused],
+    ),
+    guide.withdrawals.get,
+  );
   type Settled = {
     from: number;
     catalogue: Library;
@@ -317,7 +325,7 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
           // still renders, so the row is read again under what changed.
           const landed =
             got && versionOf(key, day.from, guide.getSnapshot()) === version
-              ? { ...got, version, minute }
+              ? { ...got, version, minute: Math.floor(Date.now() / 60_000) }
               : undefined;
           setSettled((prior) => {
             const kept =
@@ -339,8 +347,8 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
     for (const [key, row] of settled.rows)
       if (row.version === versionOf(key, day.from, snapshot)) shown.set(key, row);
     return shown;
-    // `identity` follows each provider's login, which `versionOf` reads.
-  }, [settled, day.from, catalogue, snapshot, identity]);
+    // `identity` and `withdrawals` follow each provider's login and tokens, as `versionOf` reads.
+  }, [settled, day.from, catalogue, snapshot, identity, withdrawals]);
   return { rows, snapshot, now };
 }
 
