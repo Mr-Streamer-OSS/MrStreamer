@@ -754,8 +754,8 @@ export interface IpcOutputs {
   /** Opens a movie or episode, and closes any stream that was open before. */
   "playback.openTitle": TitleSession;
   /**
-   * Opens a downloaded copy from this computer, and closes what played here before. A receiver
-   * plays on: a copy plays here only.
+   * Opens a downloaded copy or ended recording from this computer, and closes what played here
+   * before. A receiver plays on: a copy plays here only.
    */
   "playback.openCopy": CopySession;
   "playback.close": null;

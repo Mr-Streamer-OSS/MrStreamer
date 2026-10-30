@@ -1353,7 +1353,7 @@ export const de: Translation = {
   "Nothing recorded yet. Record a channel from Live TV.":
     "Noch nichts aufgenommen. Nimm einen Sender im Live-TV auf.",
   "Recordings stay until you delete them. Partial ones still play.":
-    "Aufnahmen bleiben, bis du sie löschst. Teilweise lassen sich trotzdem abspielen.",
+    "Aufnahmen bleiben, bis du sie löschst. Auch unvollständige Aufnahmen sind abspielbar.",
   "Play {title}": "{title} abspielen",
   "More for {title}": "Mehr zu {title}",
   "When it ends": "Wenn sie endet",

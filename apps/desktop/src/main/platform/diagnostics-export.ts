@@ -32,6 +32,7 @@ const OUTCOMES = [
   "list-changed",
   "output",
   "guide",
+  "recording-holds",
   "invalid-input",
   "unexpected",
 ] as const satisfies readonly Outcome[];

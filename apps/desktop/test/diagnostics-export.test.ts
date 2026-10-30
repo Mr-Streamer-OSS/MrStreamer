@@ -60,6 +60,7 @@ describe("a local diagnostics export", () => {
         entry({ at: "/private/viewer" }) +
         entry({ op: "call", method: "https://private-provider" }) +
         entry({ op: "call", method: "updates.status", url: "https://private-provider" }) +
+        entry({ op: "call", method: "playback.open", outcome: "recording-holds" }) +
         entry({
           op: "update-source",
           source: "github",
@@ -71,7 +72,7 @@ describe("a local diagnostics export", () => {
         }),
     );
     const report = await exporter.preview();
-    expect(report.entries).toBe(3);
+    expect(report.entries).toBe(4);
     for (const secret of [
       "provider-password",
       "secret-token",
@@ -81,6 +82,7 @@ describe("a local diagnostics export", () => {
     ])
       expect(report.text).not.toContain(secret);
     expect(report.text).toContain('"method":"updates.status"');
+    expect(report.text).toContain('"outcome":"recording-holds"');
     expect(report.text).toContain('"status":403');
     expect(report.text).toContain("Last update check:");
     expect(report.version).toBe("unknown");

@@ -1410,7 +1410,7 @@ export const fr: Translation = {
   "Nothing recorded yet. Record a channel from Live TV.":
     "Rien d'enregistré pour l'instant. Enregistrez une chaîne depuis la TV en direct.",
   "Recordings stay until you delete them. Partial ones still play.":
-    "Les enregistrements restent jusqu'à ce que vous les supprimiez. Les partiels se lisent aussi.",
+    "Les enregistrements restent jusqu'à ce que vous les supprimiez. Les enregistrements partiels se lisent aussi.",
   "Play {title}": "Lire {title}",
   "More for {title}": "Plus pour {title}",
   "When it ends": "À la fin",
