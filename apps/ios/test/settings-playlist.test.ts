@@ -14,6 +14,8 @@ const scenario = vi.hoisted(() => ({
   sheet: null as { options: readonly string[]; pick: (index: number) => void } | null,
   reloaded: [] as string[],
   pushed: [] as unknown[],
+  /** How many times a row read its playlist's report. */
+  reported: 0,
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -56,13 +58,16 @@ vi.mock("../src/account.ts", () => ({
   members: () => scenario.members,
   reloadChannels: (id: string) => scenario.reloaded.push(`channels ${id}`),
   reloadTitles: (id: string) => scenario.reloaded.push(`titles ${id}`),
-  playlistReport: async (): Promise<Partial<PlaylistReport>> => ({
-    groups: [
-      { group: "a", name: "Kids", mode: null, entries: 2, samples: [] },
-      { group: "b", name: "News", mode: "live", entries: 4, samples: [] },
-      { group: "c", name: "Radio", mode: null, entries: 1, samples: [] },
-    ],
-  }),
+  playlistReport: async (): Promise<Partial<PlaylistReport>> => {
+    scenario.reported++;
+    return {
+      groups: [
+        { group: "a", name: "Kids", mode: null, entries: 2, samples: [] },
+        { group: "b", name: "News", mode: "live", entries: 4, samples: [] },
+        { group: "c", name: "Radio", mode: null, entries: 1, samples: [] },
+      ],
+    };
+  },
 }));
 
 const { default: Settings } = await import("../src/app/(tabs)/(home)/settings.tsx");
@@ -96,10 +101,11 @@ afterEach(() => {
   scenario.sheet = null;
   scenario.reloaded.length = 0;
   scenario.pushed.length = 0;
+  scenario.reported = 0;
 });
 
-async function open() {
-  scenario.members = [livingRoom];
+async function open(member = livingRoom) {
+  scenario.members = [member];
   const container = document.createElement("div");
   const root = createRoot(container);
   await React.act(async () => root.render(React.createElement(Settings)));
@@ -114,6 +120,13 @@ async function open() {
 it("names a playlist as one, with the groups that need mapping, never its link", async () => {
   const settings = await open();
   expect(settings.line()).toBe("Living room, M3U playlist · 2 groups need mapping");
+});
+
+it("reads no unmapped playlist for its row, where every group is Live", async () => {
+  const { mapping: _, ...unmapped } = livingRoom.entry as Extract<Member["entry"], { kind: "m3u" }>;
+  const settings = await open({ ...livingRoom, entry: unmapped });
+  expect(settings.line()).toBe("Living room, M3U playlist");
+  expect(scenario.reported).toBe(0);
 });
 
 it("offers its groups and one reload that reads both its lists again", async () => {

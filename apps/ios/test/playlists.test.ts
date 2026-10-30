@@ -351,6 +351,43 @@ describe("mapping a playlist's groups", () => {
     });
   });
 
+  it("skips a group, and gives it back to Live", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    await until(() => channelNames(app).length === 6, "the channels");
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Shows"), "skip");
+    await until(() => channelNames(app).length === 3, "Live without the skipped group");
+    expect((await app.playlistReport(id)).omissions).toContainEqual({
+      name: "Tidewater S01E01",
+      groups: ["Shows"],
+      reason: "skip",
+    });
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Shows"), "live");
+    await until(() => channelNames(app).includes("Tidewater S01E01"), "the group back in Live");
+    expect(titleNames(app, "series")).toEqual([]);
+  });
+
+  it("keeps every secret of its link out of the saved movie lists", async () => {
+    const link = `${host.origin}/list.m3u?user=viewer-7&pass=${TOKEN}&token=second-0ne`;
+    host.serve([
+      `#EXTINF:-1 tvg-logo="${host.origin}/second-0ne/poster.jpg" group-title="Films",Harbour Lights`,
+      `${host.origin}/films/harbour.mp4?pass=${TOKEN}`,
+      `#EXTINF:-1 tvg-logo="${host.origin}/art/${encodeURIComponent(TOKEN)}.jpg" group-title="Films",Night Ferry`,
+      `${host.origin}/films/ferry.mp4`,
+    ]);
+    const app = await launch();
+    const id = (await app.add({ server: link, ...PLAYLIST }))!;
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Films"), "movie");
+    await until(() => titleNames(app, "movie").length === 2, "the films");
+    await until(
+      () => [...memory.files.keys()].some((path) => path.includes(`${id}.titles`)),
+      "the saved films",
+    );
+    for (const [path, text] of memory.files)
+      for (const secret of [TOKEN, "second-0ne", "viewer-7"])
+        expect(text, path).not.toContain(secret);
+  });
+
   it("refuses a group the playlist no longer lists, changing nothing", async () => {
     const app = await launch();
     const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
