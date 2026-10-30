@@ -138,8 +138,13 @@ async function launch() {
     /** What each picture shows: its file's address, the fallback's text, or "" while it loads. */
     shown,
     /** Signs a subscription in, or replaces its login, as account.ts does. */
-    signIn(id: string, revision: number, login: readonly [string, string]) {
-      sources.setSource(id, { revision, provider: {} as Source["provider"], login });
+    signIn(
+      id: string,
+      revision: number,
+      login: readonly [string, string],
+      uncertain: readonly string[] = [],
+    ) {
+      sources.setSource(id, { revision, provider: {} as Source["provider"], login, uncertain });
     },
     signOut(id: string) {
       sources.dropSource(id);
@@ -470,6 +475,22 @@ describe("pictures whose address carries a login", () => {
         expect(text).not.toContain(canary);
       }
     }
+  });
+
+  it("keep a playlist link's short uncertain value out of the index, however an address spells it", async () => {
+    app.signIn("a", 1, ["", ""], ["k7"]);
+    const carrying = [
+      at("/logo/signed.png", "?sig=k7"),
+      at("/k7/logo.png"),
+      at("/logo/encoded.png", "?s=%6B7"),
+    ];
+    app.logos([...carrying, at("/logo/public.png")]);
+    await settled(() => expect(app.shown().filter(isFile)).toHaveLength(4));
+    await vi.advanceTimersByTimeAsync(5_500);
+    const index = readFileSync(join(kept, "index.json"), "utf8");
+    expect(index).toContain("/logo/public.png");
+    expect(index).not.toMatch(/k7|%6B7/);
+    for (const { path } of stored()) expect(path).not.toContain("k7");
   });
 
   it("go as soon as their login is replaced, and aren't asked for again", async () => {

@@ -143,7 +143,7 @@ function fetchable(url: string): boolean {
 
 /** The signed-in sources whose login `url` gives away. */
 const exposersOf = (url: string): readonly Source[] =>
-  signedIn().filter(({ login }) => exposes(url, loginFrom(login)));
+  signedIn().filter((source) => exposes(url, loginFrom(source)));
 
 function failedLately(url: string): boolean {
   const at = failures.get(url);

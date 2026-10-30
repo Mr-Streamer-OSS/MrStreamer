@@ -374,7 +374,23 @@ export function playlistLogin(...links: string[]): ProviderLogin {
   return { secrets: secrets.filter(Boolean), uncertain };
 }
 
-/** An uncertain value this long is taken for a token: settings, as `output=ts`, are shorter. */
+/** Query names whose values say what a panel's playlist serves, as `type=m3u_plus&output=ts`. */
+const SETTING_NAMES: ReadonlySet<string> = new Set(["type", "output"]);
+
+/**
+ * The query values of `link` under names neither of its login (`LOGIN_NAMES`) nor of a setting
+ * (`SETTING_NAMES`): each may be a token under a name of the publisher's own, as `sig`, as well
+ * as a setting the app doesn't know. Saved copies hold none as a whole text or a whole part of an
+ * address, however short (`Source.uncertain`).
+ */
+export function playlistUncertain(link: string): readonly string[] {
+  return [...new URL(link).searchParams].flatMap(([name, value]) => {
+    const known = name.toLowerCase();
+    return value !== "" && !LOGIN_NAMES.has(known) && !SETTING_NAMES.has(known) ? [value] : [];
+  });
+}
+
+/** An uncertain value this long is taken for a token wherever it is: settings are shorter. */
 const TOKEN_LENGTH = 16;
 
 /** Query names whose values name the viewer, as the user info before the host does. */
@@ -384,9 +400,8 @@ const USER_NAMES: ReadonlySet<string> = new Set(["username", "user", "login"]);
  * What of a playlist link no saved copy may hold, as a Source's `[username, ...passwords]`: the
  * user it names, found only as a whole text as an account's username is, and as passwords the
  * rest of its login (`playlistLogin`), that user too when it is long enough to be a token, and
- * each other query value that long, a token under a name of the publisher's own, as a
- * `signature`. Shorter ones, as `output=ts` or `hd=1`, would be found in ordinary names, and stay
- * out of it.
+ * each uncertain value (`playlistUncertain`) that long. Shorter ones, as `hd=1`, would be found in
+ * ordinary names: they count only as a whole text or address part.
  */
 export function playlistSecrets(link: string): readonly string[] {
   const url = new URL(link);
@@ -397,12 +412,12 @@ export function playlistSecrets(link: string): readonly string[] {
         USER_NAMES.has(name.toLowerCase()) ? [value] : [],
       ),
     ].find(Boolean) ?? "";
-  const { secrets, uncertain = [] } = playlistLogin(link);
+  const { secrets } = playlistLogin(link);
   const at = username.length < TOKEN_LENGTH ? secrets.indexOf(username) : -1;
   return [
     username,
     ...(at === -1 ? secrets : secrets.toSpliced(at, 1)),
-    ...uncertain.filter((value) => value.length >= TOKEN_LENGTH),
+    ...playlistUncertain(link).filter((value) => value.length >= TOKEN_LENGTH),
   ];
 }
 

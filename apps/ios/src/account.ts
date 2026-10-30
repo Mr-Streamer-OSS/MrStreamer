@@ -48,7 +48,12 @@ import {
   getMediaPreferences,
   updateChannelPick,
 } from "./media-preferences.ts";
-import { playlistProvider, playlistSecrets, type PlaylistAccount } from "./playlist.ts";
+import {
+  playlistProvider,
+  playlistSecrets,
+  playlistUncertain,
+  type PlaylistAccount,
+} from "./playlist.ts";
 import { keychainSecrets } from "./secrets.ts";
 import {
   currentSource,
@@ -471,7 +476,7 @@ const savableChanged = () => {
 
 /** Saves a list `source` gave, in a later task: a write that fails leaves the list as it shows. */
 function save(id: string, source: Source, saved: Saved) {
-  setTimeout(() => void writeList(id, saved, source.login, () => savable(id, source)), 0);
+  setTimeout(() => void writeList(id, saved, source, () => savable(id, source)), 0);
 }
 
 /**
@@ -671,6 +676,7 @@ function signIn(entry: SubscriptionEntry, secret: string, checked: AccountStatus
     revision: ++revisions,
     provider: providerFor(accountOf(entry, secret)),
     login: loginFor(entry, secret),
+    uncertain: entry.kind === "xtream" ? [] : playlistUncertain(secret),
   };
   secrets.set(source, secret);
   signedSource(entry, source, checked);

@@ -331,6 +331,52 @@ describe("a playlist subscription", () => {
         expect(text, path).not.toContain(secret);
   });
 
+  it("keeps a short value under a name of its own out of saved artwork and ids, however it is spelled", async () => {
+    // `sig` is no name the app knows, so its value may be a token however short; `output` and
+    // `type` are a panel's settings.
+    const sig = "short-sig";
+    const link = `${host.origin}/list.m3u?sig=${sig}&output=ts&type=m3u_plus`;
+    const setting = `${host.origin}/ts/logo.png?output=ts&type=m3u_plus`;
+    const proxied = `${host.origin}/art?u=${encodeURIComponent(`${host.origin}/a.png?s=short%2Dsig`)}`;
+    host.serve([
+      `#EXTINF:-1 tvg-logo="${host.origin}/logo.png?sig=${sig}" group-title="News",News One`,
+      `${host.origin}/live/one.ts`,
+      `#EXTINF:-1 tvg-logo="${host.origin}/${sig}/logo.png" group-title="News",News Two`,
+      `${host.origin}/live/two.ts`,
+      `#EXTINF:-1 tvg-logo="${proxied}" group-title="News",News Three`,
+      `${host.origin}/live/three.ts`,
+      `#EXTINF:-1 tvg-logo="${setting}" group-title="News",News Four`,
+      `${host.origin}/live/four.ts`,
+      '#EXTINF:-1 group-title="Films",Harbour Lights',
+      `${host.origin}/films/harbour.mp4`,
+    ]);
+    const app = await launch();
+    const id = (await app.add({ server: link, ...PLAYLIST }))!;
+    await until(
+      () => memory.files.get(`/cache/catalogues/${id}.live.json`) !== undefined,
+      "the saved channels",
+    );
+    const live = memory.files.get(`/cache/catalogues/${id}.live.json`)!;
+    expect(live).toContain(setting);
+    expect(live).not.toContain("short");
+
+    // A channel whose id is the value leaves Live unsaved; a film's poster with it is saved as none.
+    host.serve([
+      `#EXTINF:-1 tvg-id="${sig}" group-title="News",News One`,
+      `${host.origin}/live/one.ts`,
+      `#EXTINF:-1 tvg-logo="${host.origin}/poster.jpg?sig=${sig}" group-title="Films",Harbour Lights`,
+      `${host.origin}/films/harbour.mp4`,
+    ]);
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Films"), "movie");
+    await until(
+      () => memory.files.get(`/cache/catalogues/${id}.titles.json`)?.includes("Harbour") === true,
+      "the saved film",
+    );
+    await new Promise((settled) => setTimeout(settled, 200));
+    expect(channelNames(app)).toEqual(["News One"]);
+    for (const [path, text] of memory.files) expect(text, path).not.toContain("short");
+  });
+
   it("stays the same subscription with a new link, added again, or removed and added back", async () => {
     const app = await launch();
     const id = await app.add({ server: host.link(), ...PLAYLIST });

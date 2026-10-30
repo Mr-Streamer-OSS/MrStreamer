@@ -13,6 +13,11 @@ export interface Source {
   readonly provider: Provider;
   /** `[username, ...passwords]`: a playlist's are the user and secrets its link names. */
   readonly login: readonly string[];
+  /**
+   * A playlist link's query values that may be a token or a setting (`playlistUncertain`): saved
+   * copies hold none as a whole text or a whole part of an address.
+   */
+  readonly uncertain?: readonly string[];
 }
 
 const sources = new Map<string, Source>();
