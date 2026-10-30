@@ -1918,11 +1918,10 @@ export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
   const line = doc.items.filter(waitingTurn);
   const other = line[line.indexOf(record) + by];
   if (!other) return;
-  // Put just before or after `other`: no other row passes the transfer under way.
+  // Swapped with its neighbour among those waiting: every other row keeps its own place.
+  const swap = (each: Stored) => (each === record ? other : each === other ? record : each);
   const before = doc.items;
-  const rest = before.filter((each) => each !== record);
-  const at = rest.indexOf(other) + (by < 0 ? 0 : 1);
-  const moved = [...rest.slice(0, at), record, ...rest.slice(at)];
+  const moved = before.map(swap);
   commit({ ...doc, items: moved });
   tell();
   try {
