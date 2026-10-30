@@ -76,3 +76,23 @@ it("fills the bar of a complete recording shorter than a minute", async () => {
   const row = await rowOf(undefined, { start: at("12:25"), stop: at("12:25") + 30_000 });
   expect(row).toMatchObject({ captured: "1", planned: "1" });
 });
+
+// Owed from 12:00 for ten minutes and forty seconds, and begun at 12:02:30.
+const late = { schedule: "s1", from: at("12:00"), late: "busy" } as const;
+const times = { start: at("12:02") + 30_000, stop: at("12:10") + 40_000 };
+
+it("counts a late recording's minutes in whole minutes from when it was owed", async () => {
+  // Cut off at 12:07:50: two missed, five captured, of ten.
+  const row = await rowOf(late, {
+    ...times,
+    ended: at("12:07") + 50_000,
+    status: { kind: "partial", cut: "stream" },
+  });
+  expect(row).toMatchObject({ captured: "5", planned: "10" });
+  expect(row.text).toContain("5 of 10 min");
+});
+
+it("adds a complete late recording's missed and captured minutes up to those planned", async () => {
+  const row = await rowOf(late, { ...times, ended: times.stop });
+  expect(row).toMatchObject({ captured: "8", planned: "10" });
+});
