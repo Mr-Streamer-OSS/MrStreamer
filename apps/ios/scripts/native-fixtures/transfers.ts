@@ -78,16 +78,15 @@ export function titleTransfers(known: (title: string) => boolean) {
       if (breaksAt !== null) drop = null;
       void (async () => {
         for (let sent = 0; sent < body.length && !response.destroyed; sent += PIECE) {
-          if (breaksAt !== null && sent + PIECE > breaksAt) {
-            // Once what came before has gone out, so the bytes before the break arrive.
-            return void response.write(body.subarray(sent, breaksAt), () => response.destroy());
-          }
-          const piece = body.subarray(sent, sent + PIECE);
+          const breaks = breaksAt !== null && sent + PIECE > breaksAt ? breaksAt : null;
+          const piece = body.subarray(sent, breaks ?? sent + PIECE);
           // Each piece goes out once its time at the pace has passed, so the answer ends with it.
           if (rate > 0) {
             await new Promise((resolve) => setTimeout(resolve, (piece.length / rate) * 1000));
             if (response.destroyed) return;
           }
+          // Once what came before has gone out, so the bytes before the break arrive.
+          if (breaks !== null) return void response.write(piece, () => response.destroy());
           response.write(piece);
         }
         response.end();

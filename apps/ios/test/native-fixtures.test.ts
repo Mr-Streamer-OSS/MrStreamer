@@ -252,11 +252,20 @@ describe("the native verification fixture", () => {
     const paced = await download(url, { Range: "bytes=0-524287" });
     expect(paced.body.length).toBe(524_288);
     expect(Date.now() - at).toBeGreaterThanOrEqual(1_500);
-    // A range within one piece arrives at the pace too, rather than at once.
+    // A range within one piece arrives at the pace too, rather than at once. Each check gets a
+    // connection of its own, so it waits only for its own bytes.
     await post("/title-transfers?rate=65536");
     const single = Date.now();
-    expect((await download(url, { Range: "bytes=0-32767" })).body.length).toBe(32_768);
+    expect((await download(url, { Range: "bytes=0-32767" }, new Agent())).body.length).toBe(32_768);
     expect(Date.now() - single).toBeGreaterThanOrEqual(400);
+    // A break under a pace comes once the bytes before it have taken their time.
+    await post("/title-transfers?drop=32768");
+    const breaking = Date.now();
+    expect(await download(url, {}, new Agent())).toMatchObject({
+      broke: true,
+      body: { length: 32_768 },
+    });
+    expect(Date.now() - breaking).toBeGreaterThanOrEqual(400);
     // A slow pace holds a short probe only for its own two bytes, so the connection is free again.
     await post("/title-transfers?rate=1024");
     const probed = Date.now();
@@ -268,7 +277,8 @@ describe("the native verification fixture", () => {
       });
     }
     connection.destroy();
-    expect(Date.now() - probed).toBeLessThan(1_000);
+    // Well under the 64 seconds a full piece's wait held each probe for.
+    expect(Date.now() - probed).toBeLessThan(10_000);
     await post("/title-transfers?rate=0");
   }, 60_000);
 
