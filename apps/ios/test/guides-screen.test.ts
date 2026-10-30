@@ -104,7 +104,7 @@ vi.mock("../src/guide-sources.ts", async () => {
       },
       async map(key: string, id: string | null) {
         log(`map ${key} ${id}`);
-        return null;
+        return scenario.refusal;
       },
     },
   };
@@ -225,6 +225,58 @@ it("removes a guide only once Remove is confirmed", async () => {
   expect(scenario.calls).toEqual([]);
   React.act(() => scenario.alert!.buttons.find((each) => each.text === "Remove")!.onPress!());
   expect(scenario.calls).toEqual(["remove xmltv-a"]);
+});
+
+it("refreshes a guide, and gives it a new link through the same form, refusals inline", async () => {
+  stores.links.set([{ id: "xmltv-a", origin: "https://a.example", name: "Sport", locked: false }]);
+  const screen = await render(React.createElement(GuidesScreen));
+  const pick = async (action: string) => {
+    await screen.press("guides-xmltv-a");
+    const sheet = scenario.sheet!;
+    await React.act(async () => sheet.pick(sheet.options.indexOf(action)));
+  };
+  await pick("Refresh");
+  expect(scenario.calls).toEqual(["refresh xmltv-a"]);
+
+  await pick("Replace link");
+  expect(screen.container.textContent).toContain("New link for Sport");
+  expect(screen.text("guides-name")).toBeNull();
+  await screen.press("guides-cancel");
+  expect(screen.container.textContent).toContain("Add guide");
+
+  await pick("Replace link");
+  await screen.type("guides-xmltv-link", SECRET);
+  scenario.refusal = "address";
+  await screen.press("guides-submit");
+  expect(screen.text("guides-refusal")).toBe("That isn't a web link");
+  scenario.refusal = null;
+  await screen.press("guides-submit");
+  expect(scenario.calls.slice(1)).toEqual(["replace xmltv-a", "replace xmltv-a"]);
+  expect(screen.container.textContent).toContain("Add guide");
+  expect(screen.container.innerHTML).not.toContain("s3cret");
+});
+
+it("finds channels by name or mapped guide id", async () => {
+  stores.mappings.set(new Map([["home:1", "BBC1.uk"]]));
+  const screen = await render(React.createElement(GuideMapScreen));
+  await screen.type("guide-map-search", "two");
+  expect(screen.label("guide-map-home:7")).not.toBeNull();
+  expect(screen.label("guide-map-home:1")).toBeNull();
+  await screen.type("guide-map-search", "bbc1.uk");
+  expect(screen.label("guide-map-home:1")).not.toBeNull();
+  expect(screen.label("guide-map-home:7")).toBeNull();
+});
+
+it("keeps the editor open with the refusal when a mapping isn't saved", async () => {
+  const screen = await render(React.createElement(GuideMapEditor, { channelKey: "home:7" }));
+  await screen.type("guide-map-id", "bbc2.uk");
+  scenario.refusal = "saving";
+  await screen.press("guide-map-save");
+  expect(screen.text("guide-map-refusal")).toBe("Couldn't save. Nothing changed.");
+  expect(scenario.calls).toEqual(["map home:7 bbc2.uk"]);
+  scenario.refusal = null;
+  await screen.press("guide-map-save");
+  expect(scenario.calls).toEqual(["map home:7 bbc2.uk", "map home:7 bbc2.uk", "back"]);
 });
 
 it("lists mapped channels first, those no longer listed too, then Automatic ones", async () => {

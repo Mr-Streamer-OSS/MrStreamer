@@ -348,6 +348,22 @@ describe("external guides and mappings", () => {
     expect(asked).toEqual([["trusted.tv"], ["trusted.tv"], ["trusted TV"], ["trusted TV"]]);
   });
 
+  it("reads the saved guide of an external guide whose link the Keychain lost", async () => {
+    const { owner, native, control } = setup();
+    control.activations.set("xmltv-1", {
+      lease: "external",
+      generation: { id: "db-x", fetchedAt: at, until: at + 86400_000 },
+    });
+    const has = guides(native, control);
+    has.set("xmltv-1", ["trusted.tv"]);
+    await owner.restore(["a", "xmltv-1"]);
+    owner.setPart(part());
+    owner.configure(new Map([["xmltv-1", undefined]]), new Map());
+    expect(await titleOf(owner, "a:1")).toBe("xmltv-1");
+    await owner.refresh("xmltv-1");
+    expect(control.calls.filter((call) => call.startsWith("attach:"))).toEqual([]);
+  });
+
   it("withdraws a channel's reads from external guides as its channels reload", async () => {
     const { owner, has } = await twoGuides();
     has.set("xmltv-1", ["trusted.tv"]);

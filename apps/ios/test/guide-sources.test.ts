@@ -39,6 +39,7 @@ function launch(disk: { file: unknown; items: Map<string, string> }) {
       disk.items.set(id, secret);
     },
     async remove(id) {
+      if (refused.has("remove")) throw new Error("refused");
       control.calls.push(`keychain-remove:${id}`);
       disk.items.delete(id);
     },
@@ -110,6 +111,22 @@ describe("external guides", () => {
     expect(order.slice(-3)).toEqual([`revoke:${id}`, `forget:${id}`, `keychain-remove:${id}`]);
     expect(guides.links()).toEqual([]);
     expect(disk.items.size).toBe(0);
+  });
+
+  it("removes at the next launch a link the Keychain kept", async () => {
+    const disk = fresh();
+    const { guides, refused } = launch(disk);
+    guides.load();
+    await guides.add(LINK);
+    const { id } = guides.links()[0]!;
+    refused.add("remove");
+    expect(await guides.remove(id)).toBeNull();
+    expect(disk.items.has(id)).toBe(true);
+    const next = launch(disk);
+    next.guides.load();
+    await next.guides.restore();
+    expect(disk.items.has(id)).toBe(false);
+    expect(next.guides.links()).toEqual([]);
   });
 
   it("replaces a guide's link with a new guide in its place, erasing the old one", async () => {
