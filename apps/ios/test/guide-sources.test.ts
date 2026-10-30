@@ -30,6 +30,8 @@ function launch(disk: { file: unknown; items: Map<string, string> }) {
     () => undefined,
   );
   const refused = new Set<string>();
+  /** The guides of each file written, by id. */
+  const written: (readonly string[])[] = [];
   const secrets: SecretStore = {
     read: async (id) => disk.items.get(id) ?? null,
     async write(id, secret) {
@@ -49,9 +51,10 @@ function launch(disk: { file: unknown; items: Map<string, string> }) {
     (value) => {
       if (refused.has("file")) throw new Error("The disk is full.");
       disk.file = JSON.parse(JSON.stringify(value));
+      written.push(value.guides.map(({ id }) => id));
     },
   );
-  return { guides, owner, control, prepared, refused, disk };
+  return { guides, owner, control, prepared, refused, disk, written };
 }
 const fresh = () => ({ file: null as unknown, items: new Map<string, string>() });
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -110,12 +113,15 @@ describe("external guides", () => {
   });
 
   it("replaces a guide's link with a new guide in its place, erasing the old one", async () => {
-    const { guides, control, prepared } = launch(fresh());
+    const { guides, control, prepared, written } = launch(fresh());
     guides.load();
     await guides.add("https://first.test/a.xml", "First");
     await guides.add(LINK, "Second");
     const first = guides.links()[0]!;
+    const before = written.length;
     expect(await guides.replace(first.id, "https://new.test/a.xml")).toBeNull();
+    // No file written meanwhile lists both the old guide and the new one.
+    expect(written.slice(before).every((ids) => ids.length <= 2)).toBe(true);
     await flush();
     expect(guides.links().map(({ origin, name }) => [origin, name])).toEqual([
       ["https://new.test", "First"],
