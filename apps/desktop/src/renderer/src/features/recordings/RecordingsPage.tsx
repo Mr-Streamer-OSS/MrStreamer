@@ -158,7 +158,8 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
   const failure = last?.status === "error" ? describeError(appError(last.error)) : null;
   const size = missing ? null : formatBytes(recording.bytes);
   const when = t("{start} to {end}", {
-    start: dayTime(recording.scheduled?.from ?? recording.start, now),
+    // From where its coverage bar starts: a late schedule's padded start, else when it began.
+    start: dayTime(recording.scheduled?.late ? recording.scheduled.from : recording.start, now),
     end: formatDate(recording.stop, "time"),
   });
   return (

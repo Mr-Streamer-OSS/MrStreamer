@@ -935,9 +935,13 @@ function make(deps: RecordingsDeps) {
           return yield* new Failed({
             error: { kind: "invalid-input", detail: t("Its time has passed.") },
           });
-        // Changed, it settles from now: what it recorded or missed stays as it was, and while it
-        // records, the change starts with its next time.
+        // Changed, it settles from now: what it recorded or missed stays as it was, and once it
+        // recorded its time on now, still recording or stopped, the change starts with its next.
         const recording = id === undefined ? undefined : recordingOf(id);
+        const recorded =
+          recording !== undefined ||
+          (was !== undefined &&
+            occurrences(was.plan, now, now + 1).some((each) => recordOf(was.id, each)));
         const schedule: KeptSchedule = {
           id: id ?? randomUUID(),
           plan: found.plan,
@@ -948,9 +952,9 @@ function make(deps: RecordingsDeps) {
             Math.max(now, ...[...schedules.values()].map((each) => each.created + 1)),
           through: Math.max(
             now,
-            ...(recording
+            ...(recorded
               ? [
-                  records.get(recording)?.stop ?? now,
+                  (recording === undefined ? undefined : records.get(recording)?.stop) ?? now,
                   ...occurrences(found.plan, now, now + 1).map((each) => each.stop),
                 ]
               : []),

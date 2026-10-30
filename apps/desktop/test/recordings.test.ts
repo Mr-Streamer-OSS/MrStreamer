@@ -906,6 +906,20 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(await allClosed(provider)).toBe(true);
   });
 
+  it("records a time once when its padding changes after its recording was stopped", async () => {
+    const { provider, recordings, listing, programmePlan } = await scheduling();
+    const { now } = await listing();
+    const saved = await recordings.schedule(programmePlan(now));
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    await recordings.stop(recording!.id);
+    await recordings.schedule(programmePlan(now, { before: 5, after: 0 }), saved.id);
+    await recordings.check();
+    // Its time is settled: the programme is done with, and nothing starts again.
+    expect(await recordings.schedules()).toEqual([]);
+    expect((await recordings.list()).map((each) => each.id)).toEqual([recording!.id]);
+    expect(await allClosed(provider)).toBe(true);
+  });
+
   it("cancels a schedule before its time, and leaves a recording it started going", async () => {
     const { provider, recordings, listing, programmePlan, clockTo } = await scheduling();
     const { now, next } = await listing();
