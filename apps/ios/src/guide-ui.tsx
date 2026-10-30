@@ -244,9 +244,9 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
   const requested = useMemo(() => JSON.parse(signature) as string[], [signature]);
   // Every provider's, so each row's provider is followed.
   const ids = useMemo(() => [...catalogue.labels.keys()], [catalogue]);
-  const { snapshot, focused: inStack, now, identity } = useGuideOwner(ids);
+  const { snapshot, focused: ownerFocused, now, identity } = useGuideOwner(ids);
   // Going to the background withdraws every token, so rows are read again only once back.
-  const focused = useSyncExternalStore(guide.awake.subscribe, guide.awake.get) && inStack;
+  const focused = useSyncExternalStore(guide.awake.subscribe, guide.awake.get) && ownerFocused;
   // Eviction withdraws tokens with no owner notification, so the rows that lost theirs follow this.
   const withdrawals = useSyncExternalStore(
     useCallback(
