@@ -67,8 +67,9 @@ export async function startCapture(
 ): Promise<Capture> {
   const file = await open(path, "wx");
   let written = 0;
+  // At its offset: a source that failed before leaves the file emptied, but not its position.
   const write = async (chunk: Uint8Array) => {
-    await file.write(chunk);
+    await file.write(chunk, 0, chunk.length, written);
     written += chunk.length;
     options.changed();
   };
@@ -171,7 +172,15 @@ async function run(
   stop: AbortController,
   options: { readonly until: number; readonly signal: AbortSignal },
 ): Promise<CaptureEnd> {
-  const timer = setTimeout(() => stop.abort(), Math.max(0, options.until - Date.now()));
+  // Timers can fire a moment early: the stop time counts as reached once its timer fired.
+  let reached = false;
+  const timer = setTimeout(
+    () => {
+      reached = true;
+      stop.abort();
+    },
+    Math.max(0, options.until - Date.now()),
+  );
   let end: CaptureEnd;
   try {
     for (;;) {
@@ -195,7 +204,7 @@ async function run(
     await chunks.return().catch(() => {});
   }
   if (options.signal.aborted) end = "aborted";
-  else if (Date.now() >= options.until) end = "until";
+  else if (reached) end = "until";
   await file.sync().catch(() => {});
   await file.close().catch(() => {});
   return end;

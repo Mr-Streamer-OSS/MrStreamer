@@ -143,21 +143,31 @@ function make(deps: RecordingsDeps) {
       }),
     );
 
-    const shown = Effect.promise(async () => {
-      const items = await Promise.all(
-        [...records.values()].map(async (record): Promise<Recording> => {
-          const { file: _file, ...rest } = record;
-          const live = active.get(record.id);
-          if (live) return { ...rest, bytes: live.bytes() };
+    /** Ended recordings whose file was gone when last looked for: on each read of the list. */
+    const missing = new Set<string>();
+    const look = Effect.promise(() =>
+      Promise.all(
+        [...records.values()].map(async (record) => {
+          if (active.has(record.id)) return;
           const there = await stat(fileOf(record)).then(
             () => true,
             () => false,
           );
-          return there ? rest : { ...rest, status: { kind: "missing" } };
+          if (there) missing.delete(record.id);
+          else missing.add(record.id);
         }),
-      );
-      return items.toSorted((a, b) => b.start - a.start);
-    });
+      ),
+    );
+    const shown = Effect.sync(() =>
+      [...records.values()]
+        .map((record): Recording => {
+          const { file: _file, ...rest } = record;
+          const live = active.get(record.id);
+          if (live) return { ...rest, bytes: live.bytes() };
+          return missing.has(record.id) ? { ...rest, status: { kind: "missing" } } : rest;
+        })
+        .toSorted((a, b) => b.start - a.start),
+    );
     const publish = Effect.flatMap(shown, (list) => PubSub.publish(changes, list));
     let pending: NodeJS.Timeout | null = null;
     const grew = () => {
@@ -251,21 +261,22 @@ function make(deps: RecordingsDeps) {
           status: { kind: "recording" },
         };
         const controller = new AbortController();
+        const starting = mkdir(join(root, id), { recursive: true }).then(() =>
+          startCapture(
+            streams.map(({ url, format, headers }) => ({ url, format, headers: headers ?? {} })),
+            fileOf(record),
+            {
+              request: source.provider.request,
+              userAgent: deps.userAgent,
+              until: stop,
+              signal: controller.signal,
+              changed: grew,
+            },
+          ),
+        );
+        starting.catch(() => {});
         const capture = yield* Effect.tryPromise({
-          try: async () => {
-            await mkdir(join(root, id), { recursive: true });
-            return startCapture(
-              streams.map(({ url, format, headers }) => ({ url, format, headers: headers ?? {} })),
-              fileOf(record),
-              {
-                request: source.provider.request,
-                userAgent: deps.userAgent,
-                until: stop,
-                signal: controller.signal,
-                changed: grew,
-              },
-            );
-          },
+          try: () => starting,
           catch: (cause) =>
             cause instanceof CaptureFailure
               ? new Failed({ error: { kind: "stream", failure: cause.failure } })
@@ -278,8 +289,14 @@ function make(deps: RecordingsDeps) {
                   },
                 }),
         }).pipe(
-          Effect.tapError(() =>
+          // Also when the app closes meanwhile: whatever started ends before its folder goes.
+          Effect.onError(() =>
             Effect.promise(async () => {
+              controller.abort();
+              await starting.then(
+                (started) => started.ended,
+                () => {},
+              );
               held.release();
               await rm(join(root, id), { recursive: true, force: true });
             }),
@@ -301,6 +318,8 @@ function make(deps: RecordingsDeps) {
           controller.abort();
           yield* Effect.promise(() => settled);
           records.delete(id);
+          // How it ended may have been written down meanwhile.
+          yield* Effect.ignore(save);
           yield* Effect.promise(() => rm(join(root, id), { recursive: true, force: true }));
           yield* publish;
           return yield* written.failure;
@@ -329,7 +348,7 @@ function make(deps: RecordingsDeps) {
     yield* Effect.addFinalizer(() => end([...active.keys()], "quit"));
 
     return {
-      list: Effect.andThen(usable, shown),
+      list: usable.pipe(Effect.andThen(look), Effect.andThen(shown)),
       connections: (subscriptionId: string) =>
         Effect.gen(function* () {
           const limit = yield* limitOf(subscriptionId);

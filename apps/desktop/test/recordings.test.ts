@@ -2,7 +2,7 @@
 // fixtures captured to a temporary data folder, and ffprobe and the app's own copy playback for
 // what was written.
 import { spawnSync } from "node:child_process";
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import type { Recording } from "@mrstreamer/contracts/recordings";
@@ -236,5 +236,24 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await recordings.list()).toEqual([]);
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: [] });
     expect(await readdir(join(dataDir, "recordings")).catch(() => [])).toEqual([]);
+  });
+
+  it("goes on to the channel's next stream when one has no program, from the file's start", async () => {
+    const junk = "TEST | H.264 + AAC";
+    const { dataDir, channel, provider, recordings } = await connected({
+      streams: (source, out, signal) =>
+        source.name === junk
+          ? out.end(Buffer.alloc(64 * 1024, 0x20))
+          : liveStreams(source, out, signal),
+    });
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 1000, {
+      variants: [channel(junk).id, channel(TRACKS).id],
+    });
+    expect(answer.kind).toBe("started");
+    const [done] = await until(recordings.list, ([first]) => first?.status.kind !== "recording");
+    const file = await fileOf(dataDir, done!);
+    expect(file.size).toBe(done?.bytes);
+    expect((await readFile(file.path))[0]).toBe(0x47);
+    expect(provider.streamRequests()).toBe(2);
   });
 });
