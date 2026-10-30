@@ -263,10 +263,10 @@ export async function schedulesScenario(d: Driver) {
   await d.wait(() => d.exists(GRID));
   await d.key("ArrowRight", 39);
   await d.wait(() => d.exists(DETAILS));
-  await d.click(
-    "Record, larger",
-    `[...document.querySelectorAll('[role=grid] [role=region] button')].find(e => /^(Record|Scheduled)$/.test(e.textContent.trim()))`,
-  );
+  const recordLarger = `[...document.querySelectorAll('[role=grid] [role=region] button')].find(e => /^(Record|Scheduled)$/.test(e.textContent.trim()))`;
+  // Larger text can leave the cursor's row above where the grid is scrolled to.
+  await d.evaluate(`${recordLarger}?.scrollIntoView({ block: "center" })`);
+  await d.click("Record, larger", recordLarger);
   await d.wait(() => d.exists(PANEL));
   await d.wait(async () => (await text(d, PANEL)).includes(" on "));
   await d.capture("10-guide-960-larger");
