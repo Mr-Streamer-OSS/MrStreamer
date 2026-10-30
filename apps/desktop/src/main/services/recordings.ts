@@ -217,10 +217,13 @@ function make(deps: RecordingsDeps) {
         return written._tag === "Failure" ? written.failure : null;
       });
 
-    const start = (
+    /** Starts as `start` does; `controller` stops it at any step, `settle` once it's active. */
+    const begin = (
       channel: OwnedId,
       stop: number,
-      options: { readonly variants?: readonly string[]; readonly stopPlaying?: boolean } = {},
+      options: { readonly variants?: readonly string[]; readonly stopPlaying?: boolean },
+      controller: AbortController,
+      settle: () => void,
     ) =>
       Effect.gen(function* () {
         yield* usable;
@@ -238,7 +241,8 @@ function make(deps: RecordingsDeps) {
           options.variants?.length ? options.variants : [listed.id],
           (id) =>
             Effect.tryPromise({
-              try: (signal) => source.provider.liveStream(id, signal),
+              try: (signal) =>
+                source.provider.liveStream(id, AbortSignal.any([signal, controller.signal])),
               catch: (cause) =>
                 cause instanceof Failed
                   ? cause
@@ -275,9 +279,6 @@ function make(deps: RecordingsDeps) {
           bytes: 0,
           status: { kind: "recording" },
         };
-        const controller = new AbortController();
-        const started = Promise.withResolvers<void>();
-        starting.set(controller, { subscriptionId, done: started.promise });
         const opening = mkdir(join(root, id), { recursive: true }).then(() =>
           startCapture(
             streams.map(({ url, format, headers }) => ({ url, format, headers: headers ?? {} })),
@@ -315,8 +316,6 @@ function make(deps: RecordingsDeps) {
               );
               held.release();
               await rm(join(root, id), { recursive: true, force: true });
-              starting.delete(controller);
-              started.resolve();
             }),
           ),
         );
@@ -324,8 +323,7 @@ function make(deps: RecordingsDeps) {
         const live: Active = { controller, bytes: capture.bytes, asked: null, settled };
         records.set(id, record);
         active.set(id, live);
-        starting.delete(controller);
-        started.resolve();
+        settle();
         void capture.ended
           .then((end) => {
             held.release();
@@ -351,6 +349,26 @@ function make(deps: RecordingsDeps) {
           kind: "started",
           recording: { ...recording, bytes: capture.bytes() },
         } satisfies RecordingStart;
+      });
+
+    const start = (
+      channel: OwnedId,
+      stop: number,
+      options: { readonly variants?: readonly string[]; readonly stopPlaying?: boolean } = {},
+    ) =>
+      Effect.suspend(() => {
+        // Starting from before its first wait, so a removal or the app's close stops it at any step.
+        const controller = new AbortController();
+        const { promise: done, resolve } = Promise.withResolvers<void>();
+        starting.set(controller, { subscriptionId: channel.subscriptionId, done });
+        const settle = () => {
+          starting.delete(controller);
+          resolve();
+        };
+        return Effect.ensuring(
+          begin(channel, stop, options, controller, settle),
+          Effect.sync(settle),
+        );
       });
 
     /**

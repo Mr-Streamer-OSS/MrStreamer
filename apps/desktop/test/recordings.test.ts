@@ -2,6 +2,7 @@
 // fixtures captured to a temporary data folder, and ffprobe and the app's own copy playback for
 // what was written.
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
@@ -258,6 +259,52 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect((await recordings.list()).map((each) => each.status)).toEqual(
       (await started) ? [{ kind: "stopped" }] : [],
     );
+  });
+
+  it("stops with its subscription while its playlist is read again to start", async () => {
+    // An M3U subscription reads its playlist again for a channel's stream after a restart.
+    const provider = await fakeProvider({ live: true, slotReleaseMs: 0 });
+    const tracks = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+    const playlist = `#EXTM3U\n#EXTINF:-1,${TRACKS}\n${provider.url}/live/demo/demo/${tracks.streamId}.ts\n`;
+    let held: Promise<void> | null = null;
+    const asked = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+    const host = createServer(async (_request, response) => {
+      if (held) {
+        asked.resolve();
+        await held;
+      }
+      response.writeHead(200, { "Content-Type": "audio/x-mpegurl" }).end(playlist);
+    });
+    await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
+    onTestFinished(() => {
+      answer.resolve();
+      host.closeAllConnections();
+      host.close();
+    });
+    const address = host.address();
+    if (!address || typeof address === "string") throw new Error("No address");
+    const dataDir = await tempDir();
+    const before = await app(dataDir);
+    const { id: subscriptionId } = await before.subscriptions.add({
+      server: `http://127.0.0.1:${address.port}/playlist.m3u`,
+      username: "",
+      password: "",
+    });
+    await before.library.refresh(subscriptionId);
+    const channel = (await before.library.channels({})).find((each) => each.title === TRACKS)!;
+    await before.quit();
+
+    const { recordings, roster } = await app(dataDir);
+    held = answer.promise;
+    const starting = recordings.start({ subscriptionId, id: channel.id }, Date.now() + 60_000, {});
+    starting.catch(() => {});
+    await asked.promise;
+    await roster.remove(subscriptionId, false);
+    answer.resolve();
+    await expect(starting).rejects.toBeTruthy();
+    expect(await allClosed(provider)).toBe(true);
+    expect(await recordings.list()).toEqual([]);
   });
 
   it("keeps an honest partial recording when the provider's stream breaks off", async () => {
