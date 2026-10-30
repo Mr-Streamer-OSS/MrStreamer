@@ -143,12 +143,15 @@ it.each([
   const replacement = app.guides.links()[1]!.id;
   store.control.forget = async () => true;
   const file = guidesFile();
+  // A removed subscription's guide, which no launch keeps.
+  store.control.activations.set("xtream-gone", { lease: "gone", generation: null });
 
   hide();
   const blind = await launch();
   expect(blind.guides.links()).toEqual([]);
   expect(blind.guide.status(provider).availability).toBe("available");
   expect(blind.guide.status(kept!).availability).toBe("unknown");
+  expect(store.control.activations.has("xtream-gone")).toBe(false);
 
   native.sync = null;
   writeFileSync(guidesPath, file);
@@ -163,12 +166,23 @@ it.each([
   await until(() => next.guides.links().every(({ locked }) => !locked), "the links read");
 });
 
-it("erases every external guide's saved programmes at a launch without guides.json", async () => {
+it.each([
+  ["no guides.json", () => rmSync(guidesPath)],
+  [
+    "one listing none",
+    () =>
+      writeFileSync(
+        guidesPath,
+        JSON.stringify({ version: 1, guides: [], mappings: {}, pendingSecrets: [] }),
+      ),
+  ],
+  ["one that isn't JSON", () => writeFileSync(guidesPath, "{")],
+])("erases every external guide's saved programmes at a launch with %s", async (_, change) => {
   const app = await launch();
   expect(await app.guides.add("https://kept.test/epg.xml")).toBeNull();
   const { id } = app.guides.links()[0]!;
   await until(() => app.guide.status(id).availability === "available", "the guide published");
-  rmSync(guidesPath);
+  change();
   const next = await launch();
   expect(next.guides.links()).toEqual([]);
   expect(store.control.activations.has(id)).toBe(false);
