@@ -649,7 +649,15 @@ describe("a playlist's guide", () => {
     const { ingest } = await import("../src/guide-native.ts");
     const { playlistSecrets } = await import("../src/playlist.ts");
     await expect(
-      ingest(native, "lease", "job", request, [...playlistSecrets(link), link], 0, () => true),
+      ingest(
+        native,
+        "lease",
+        "job",
+        request,
+        { login: [...playlistSecrets(link), link] },
+        0,
+        () => true,
+      ),
     ).resolves.toEqual({ kind: "failed", error: "redirect" });
     expect(asked).toContain(guide);
     expect(asked).not.toContain(moved);

@@ -314,7 +314,7 @@ export function nextProviderRedirect(input: {
   if (!["http:", "https:"].includes(next.protocol)) {
     throw new TypeError(t("The server address must start with http or https."));
   }
-  // Native guide callers know the account's secrets; fetch also knows uncertain playlist values.
+  // A list is secrets alone, as an Xtream account's username and password.
   const login: ProviderLogin =
     "secrets" in input.login ? input.login : { secrets: input.login.filter(Boolean) };
   if (exposesLogin(start, next, login)) {

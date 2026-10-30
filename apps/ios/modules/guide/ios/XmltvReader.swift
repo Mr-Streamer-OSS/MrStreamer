@@ -172,16 +172,19 @@ func guideTime(_ raw: String?) -> Double? {
   return (date.timeIntervalSince1970 - Double(offset)) * 1000
 }
 
-/** Whether `text` holds any of `passwords`, as written or decoded as percent or form encoding
-    ("+" a space) spells it, up to four more decodings, as login-safety.ts holds() reads saved
-    text for passwords; a playlist's uncertain values don't reach it. Text that still decodes
+/** Whether `text` holds any of `passwords`, or one of a playlist's `uncertain` values whole
+    (`guideWhole`), as written or decoded as percent or form encoding ("+" a space) spells it, up
+    to four more decodings, as login-safety.ts holds() reads saved text. Text that still decodes
     after the last counts as holding one. */
-func guideHolds(_ text: String, _ passwords: [String]) -> Bool {
-  guard !passwords.isEmpty else { return false }
+func guideHolds(_ text: String, _ passwords: [String], _ uncertain: [String] = []) -> Bool {
+  guard !passwords.isEmpty || !uncertain.isEmpty else { return false }
   var forms: Set<String> = [text]
   var layer = [text]
+  let found = { (form: String) in
+    passwords.contains(where: { form.contains($0) }) || uncertain.contains(where: { guideWhole(form, $0) })
+  }
   for _ in 0...4 {
-    if layer.contains(where: { form in passwords.contains(where: { form.contains($0) }) }) { return true }
+    if layer.contains(where: found) { return true }
     var next = Set<String>()
     // Only text with an escape or a "+" reads otherwise decoded.
     for form in layer where form.contains("%") || form.contains("+") {
@@ -192,6 +195,26 @@ func guideHolds(_ text: String, _ passwords: [String]) -> Bool {
     layer = Array(next)
   }
   return true
+}
+
+/** Whether `value` is in `text` without a name's character (a letter, digit, "-", ".", "_" or
+    "~") right before or after it, as core's `whole` reads UTF-16 text: a word, path segment or
+    query value of its own, as in `guest|k9x`, but not the `ts` of `index.ts`. */
+func guideWhole(_ text: String, _ value: String) -> Bool {
+  let text = Array(text.utf16), value = Array(value.utf16)
+  guard !value.isEmpty, value.count <= text.count else { return false }
+  func name(_ at: Int) -> Bool {
+    guard text.indices.contains(at), let scalar = Unicode.Scalar(text[at]) else { return false }
+    switch scalar.properties.generalCategory {
+    case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter,
+         .decimalNumber, .letterNumber, .otherNumber: return true
+    default: return "-._~".unicodeScalars.contains(scalar)
+    }
+  }
+  for at in 0...(text.count - value.count) where text[at] == value[0] && Array(text[at..<(at + value.count)]) == value {
+    if !name(at - 1) && !name(at + value.count) { return true }
+  }
+  return false
 }
 
 /** `text` with each percent escape read as a byte and the bytes as UTF-8: bytes that are no
@@ -230,6 +253,8 @@ final class XmltvReader: NSObject, XMLParserDelegate {
   /// Every login part after the username: an account's password, or each secret of a playlist link
   /// but a short user it names.
   private let passwords: [String]
+  /// A playlist link's query values that may be a token (`Source.uncertain`), refused whole.
+  private let uncertain: [String]
   private var stack = [String]()
   private var channel: String?
   private var start: Double?
@@ -242,7 +267,7 @@ final class XmltvReader: NSObject, XMLParserDelegate {
   private var opened = false
   private var closed = false
   private var failure: Error?
-  init(index: GuideIndex, job: GuideJob, disk: GuideDisk, login: [String]) { self.index = index; self.job = job; self.disk = disk; passwords = login.dropFirst().filter { !$0.isEmpty } }
+  init(index: GuideIndex, job: GuideJob, disk: GuideDisk, login: [String], uncertain: [String] = []) { self.index = index; self.job = job; self.disk = disk; passwords = login.dropFirst().filter { !$0.isEmpty }; self.uncertain = uncertain.filter { !$0.isEmpty } }
   func run(_ file: URL) throws {
     if let external = try guidePreflight(file, job) {
       // Overwrite only the bounded declaration, without a second XML spool or growth.
@@ -303,11 +328,11 @@ final class XmltvReader: NSObject, XMLParserDelegate {
       if stack == ["tv", "programme", "title"], title == nil { title = String(String.UnicodeScalarView(normalized.unicodeScalars.prefix(300))) }
       if stack == ["tv", "programme", "desc"], descriptionText == nil { descriptionText = String(String.UnicodeScalarView(normalized.unicodeScalars.prefix(2000))) }
       if elementName == "programme", let id = channel, id.unicodeScalars.count <= 128, !id.isEmpty, let start = start, let title = title, !title.isEmpty, stop == nil || stop! - start >= 60000 {
-        // login-safety.ts holds()'s password policy: any password anywhere, as written or
-        // percent/form decoded, refuses persistence. Username substrings in ordinary text are
-        // allowed. No artwork/URL fields are saved.
+        // login-safety.ts holds()'s policy: any password anywhere, or an uncertain value whole,
+        // as written or percent/form decoded, refuses persistence. Username substrings in
+        // ordinary text are allowed. No artwork/URL fields are saved.
         let fields = [id, title, descriptionText ?? ""]
-        if fields.contains(where: { guideHolds($0, passwords) }) { throw GuideFailure("xml") }
+        if fields.contains(where: { guideHolds($0, passwords, uncertain) }) { throw GuideFailure("xml") }
         try index.insert(id, start, stop, title, descriptionText)
       }
       if stack == ["tv"] { closed = true }

@@ -299,12 +299,12 @@ describe("native transport adapter", () => {
         "lease",
         "job",
         { kind: "request", url: "https://fixture.test/guide", headers: {} },
-        [],
+        { login: [] },
         when,
         () => true,
       );
       expect(prepare).toHaveBeenCalledTimes(1);
-      expect(prepare.mock.calls[0]?.[6]).toBe(new Date(2026, 8, 5).getTime());
+      expect(prepare.mock.calls[0]?.[7]).toBe(new Date(2026, 8, 5).getTime());
     } finally {
       if (previous === undefined) delete process.env.TZ;
       else process.env.TZ = previous;
@@ -331,12 +331,49 @@ describe("native transport adapter", () => {
       "l",
       "job",
       { kind: "request", url: "https://fixture.test/guide", headers: {} },
-      source.login,
+      source,
       at,
       () => true,
     );
     expect(result).toEqual({ kind: "failed", error: "redirect" });
     expect(urls).toHaveLength(2);
+  });
+  it("holds a playlist's short uncertain value to its https link in each hop and the native reader", async () => {
+    const { native } = guideFixture();
+    const prepared: { url: string; uncertain: readonly string[] }[] = [];
+    native.prepare = async (_lease, _job, url, _headers, _login, uncertain) => {
+      prepared.push({ url, uncertain });
+      return {
+        kind: "ok",
+        value:
+          prepared.length === 1
+            ? { kind: "redirect", location: "http://fixture.test/guide?sig=short-sig" }
+            : { kind: "candidate", id: "candidate" },
+      };
+    };
+    const playlist: Source = {
+      ...source,
+      login: ["", "canary"],
+      uncertain: ["short-sig"],
+      provider: {
+        ...source.provider,
+        liveGuideRequest: async () => ({
+          kind: "request",
+          url: "https://fixture.test/guide",
+          from: "https://fixture.test/playlist?sig=short-sig",
+          headers: {},
+        }),
+      },
+    };
+    const owner = createGuide(
+      () => native,
+      Date.now,
+      () => playlist,
+    );
+    await owner.attach("a");
+    await owner.refresh("a");
+    expect(prepared).toEqual([{ url: "https://fixture.test/guide", uncertain: ["short-sig"] }]);
+    expect(owner.getSnapshot().get("a")?.error).toBe("redirect");
   });
 });
 

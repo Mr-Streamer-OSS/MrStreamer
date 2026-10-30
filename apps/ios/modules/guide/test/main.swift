@@ -26,7 +26,7 @@ import SQLite3
     let lease = activation["lease"] as! String
     func prepare(_ route: String, _ job: String) -> [String: Any] {
       owner.begin(lease, job)
-      return owner.prepare(lease, job, base + route, [:], ["fixture", "canary-secret"], now, now - 86400000, now + 7 * 86400000)
+      return owner.prepare(lease, job, base + route, [:], ["fixture", "canary-secret"], [], now, now - 86400000, now + 7 * 86400000)
     }
     let candidate = try value(prepare("/plain", "plain"))["id"] as! String
     let generation = try value(owner.publish(lease, "plain", candidate))
@@ -51,7 +51,7 @@ import SQLite3
     let pageActivation = try owner.attach("pages-provider", 1)
     let pageLease = pageActivation["lease"] as! String
     owner.begin(pageLease, "pages")
-    let pageCandidate = try value(owner.prepare(pageLease, "pages", base + "/pages", [:], ["fixture", "canary-secret"], now, now - 86400000, now + 7 * 86400000))["id"] as! String
+    let pageCandidate = try value(owner.prepare(pageLease, "pages", base + "/pages", [:], ["fixture", "canary-secret"], [], now, now - 86400000, now + 7 * 86400000))["id"] as! String
     let pageGeneration = try value(owner.publish(pageLease, "pages", pageCandidate))["id"] as! String
     owner.finish("pages")
     owner.begin(pageLease, "day1")
@@ -108,7 +108,7 @@ import SQLite3
     owner.begin(lease, "cancel-download")
     let finished = DispatchSemaphore(value: 0)
     var cancelledDownload = [String: Any]()
-    owner.prepareAsync(lease, "cancel-download", base + "/slow", [:], ["fixture", "canary-secret"], now, now - 86400000, now + 7 * 86400000) {
+    owner.prepareAsync(lease, "cancel-download", base + "/slow", [:], ["fixture", "canary-secret"], [], now, now - 86400000, now + 7 * 86400000) {
       cancelledDownload = $0
       finished.signal()
     }

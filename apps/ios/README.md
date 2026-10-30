@@ -358,7 +358,7 @@ Each responsibility has one owner, a plain module with a store the screens read:
   token, are the login the failures and saved copies keep out, as written or encoded. Every other
   query value but `type` and `output` is uncertain: saved copies hold none where no name's
   character runs on from it (core's `whole`), however short, so a list or file whose text holds
-  one, as `en` from `lang=en`, isn't saved. The native guide gets the secrets only.
+  one, as `en` from `lang=en`, isn't saved. The native guide reader and its redirects get both.
 - `src/playlist-groups.tsx`: a playlist's groups from Settings: what it holds, each group's pick of
   Live TV, Movies, Series or Skip, and the entries left out with why.
 - `src/sources.ts`: each subscription's provider adapter and login, apart from every store, so no
@@ -850,8 +850,10 @@ scratch files stay under the guide root and share before-growth disk/free-space 
 spools and manifest staging. Per-connection mmap, preallocation hints and WAL shared-memory
 writes are disabled. The free-space check reserves allocation rounding and 64 KiB metadata
 headroom for growth; zero-byte revocation metadata, overwrites, renames and deletion do not require that reserve. It cannot reserve space against unrelated filesystem writers. UTF-8 XML only; one bounded external XMLTV DOCTYPE is blanked before parsing, with no DTD resolution. Internal subsets and entity declarations are refused. Programme prose follows the
-existing catalogue password-substring policy: it refuses a raw password anywhere in saved text,
-including ordinary-word collisions, while usernames within prose are allowed. No guide artwork,
+saved lists' policy (`login-safety.ts` `holds`): it refuses a password anywhere in saved text,
+including ordinary-word collisions, and a playlist link's uncertain query value standing whole,
+as written or decoded, while usernames within prose are allowed. The guide's redirects are checked
+against the same login and uncertain values. No guide artwork,
 provider URLs or request metadata is saved. `modules/guide/test/run.py` compiles the production
 core against Mac, simulator and device SDKs and runs fake-only host fixtures. It excludes the Expo
 wrapper, does not install an app, and cannot establish Release/Hermes registration or iOS runtime
