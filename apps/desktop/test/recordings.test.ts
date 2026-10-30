@@ -905,6 +905,29 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await again.quit();
   });
 
+  it("misses a programme saved partway through from when it was saved, while every connection stays held", async () => {
+    const { recordings, playback, channel, listing, programmePlan, clockTo } = await scheduling();
+    const watching = await playback.open(channel(GUIDED), ["h264", "aac"]);
+    const player = await fetch(watching.url);
+    await player.body?.getReader().read();
+    const { now } = await listing();
+    const savedFrom = Date.now();
+    const saved = await recordings.schedule(programmePlan(now));
+    const savedBy = Date.now();
+    await until(recordings.schedules, ([first]) => first?.status.kind === "waiting");
+
+    await clockTo(now.stop + 1000);
+    const [missed] = await until(recordings.list, (list) => list.length > 0);
+    expect(missed).toMatchObject({
+      start: now.start,
+      status: { kind: "missed", why: "busy" },
+      scheduled: { schedule: saved.id, from: now.start, late: "busy" },
+    });
+    expect(missed!.scheduled!.owed).toBeGreaterThanOrEqual(savedFrom);
+    expect(missed!.scheduled!.owed).toBeLessThanOrEqual(savedBy);
+    await playback.close(watching.sessionId);
+  });
+
   it("writes a missed result for a time that passed while the app was closed, and records the rest of one it wakes into", async () => {
     const { dataDir, subscriptionId, channel, recordings, quit } = await scheduling();
     // Twenty past seven, UTC, every day in this computer's time zone, for ten minutes.
@@ -1029,6 +1052,31 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(await recordings.list()).toEqual([]);
     expect(await recordings.schedules()).toEqual([]);
     expect(await allClosed(provider)).toBe(true);
+  });
+
+  it("stands at a repeat's next time once its recording on now was stopped", async () => {
+    const { channel, recordings, listing } = await scheduling();
+    const { now } = await listing();
+    const at = new Date(now.start);
+    const plan: RecordingPlan = {
+      kind: "slot",
+      channel: channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 30,
+      title: now.title,
+      padding: { before: 0, after: 0 },
+    };
+    await recordings.schedule(plan);
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    await recordings.stop(recording!.id);
+    await recordings.check();
+    // Today's time records no more: it says when it records next, not that today's is planned.
+    const [following] = occurrences(plan, now.stop, now.stop + 2 * DAY);
+    expect((await recordings.schedules())[0]).toMatchObject({
+      next: following,
+      status: { kind: "planned" },
+    });
   });
 
   it("records a time once when its padding changes after its recording was stopped", async () => {

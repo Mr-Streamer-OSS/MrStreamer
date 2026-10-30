@@ -101,7 +101,8 @@ export function coverageStart(recording: Recording): number {
  * Captured and planned whole minutes, what the coverage bar and "3 of 52 min" show, and those
  * missed at the start: a late schedule's from when it was owed to when it began, or all of a
  * missed one. One on time, or saved after its start, is planned from when it began. All three
- * count whole minutes from where coverage starts, so a complete one's add up to what was planned.
+ * count whole minutes from where coverage starts, and a complete one's add up to what was planned,
+ * at least a minute.
  */
 export function coverage(
   recording: Recording,
@@ -113,11 +114,11 @@ export function coverage(
   if (recording.status.kind === "missed") return { captured: 0, planned, missed: planned };
   // Whole minutes, as main counts a start within one as on time.
   const missed = Math.min(planned, minutesTo(recording.start));
-  const until =
+  const reached =
     recording.status.kind === "complete"
-      ? recording.stop
-      : (recording.ended ?? Math.min(now, recording.stop));
-  const captured = Math.min(planned - missed, Math.max(0, minutesTo(until) - missed));
+      ? planned
+      : minutesTo(recording.ended ?? Math.min(now, recording.stop));
+  const captured = Math.min(planned - missed, Math.max(0, reached - missed));
   return { captured, planned, missed };
 }
 

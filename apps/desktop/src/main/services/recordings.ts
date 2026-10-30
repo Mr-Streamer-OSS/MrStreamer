@@ -676,8 +676,8 @@ function make(deps: RecordingsDeps) {
     ) =>
       Effect.gen(function* () {
         const { plan } = schedule;
-        const next = nextOccurrence(plan, now);
-        const as = (status: ScheduleStatus): ScheduledRecording => ({
+        const on = nextOccurrence(plan, now);
+        const as = (status: ScheduleStatus, next = on): ScheduledRecording => ({
           id: schedule.id,
           plan,
           channelName: schedule.channelName,
@@ -687,13 +687,20 @@ function make(deps: RecordingsDeps) {
         // What records goes on whatever the guide says now.
         const recording = recordingOf(schedule.id);
         if (recording) return as({ kind: "recording", recording });
-        if (hold) return as(hold);
-        if (!next) return as({ kind: "planned" });
+        // A time on now that it recorded, stopped or cut short, or a change settled, records no
+        // more: the one after it is next.
+        const next =
+          on && (recordOf(schedule.id, on) || on.stop <= schedule.through)
+            ? nextOccurrence(plan, on.stop)
+            : on;
+        if (hold) return as(hold, next);
+        if (!next) return as({ kind: "planned" }, next);
         const { subscriptionId } = plan.channel;
         const reason = next.start <= now ? why.get(occurrenceKey(schedule.id, next)) : undefined;
         if (reason === "busy")
-          return as({ kind: "waiting", holders: yield* holdersNow(subscriptionId) });
-        if (reason === "stream" || reason === "disk") return as({ kind: "retrying", why: reason });
+          return as({ kind: "waiting", holders: yield* holdersNow(subscriptionId) }, next);
+        if (reason === "stream" || reason === "disk")
+          return as({ kind: "retrying", why: reason }, next);
         const holdings = [
           ...recordingHoldings(subscriptionId),
           ...kept.flatMap((other): Holding[] => {
@@ -715,7 +722,7 @@ function make(deps: RecordingsDeps) {
           }),
         ];
         const holders = conflictOf(next, holdings, yield* limitOf(subscriptionId));
-        return as(holders.length > 0 ? { kind: "conflict", holders } : { kind: "planned" });
+        return as(holders.length > 0 ? { kind: "conflict", holders } : { kind: "planned" }, next);
       });
 
     /** Every schedule kept, by when it records next. */
@@ -733,10 +740,28 @@ function make(deps: RecordingsDeps) {
     };
 
     /**
+     * What a recording or missed result of `schedule`'s `occurrence` says of it. It is owed from
+     * the occurrence's start, or from when the schedule was first saved, when that was later: the
+     * time before there was a schedule is nobody's fault. It names the occurrence by its start all
+     * the same, so it is found as that time's.
+     */
+    const scheduledOf = (
+      schedule: KeptSchedule,
+      occurrence: Occurrence,
+      late: ScheduleMiss | null,
+    ): NonNullable<StoredRecording["scheduled"]> => {
+      const owed = Math.max(occurrence.start, schedule.created);
+      return {
+        schedule: schedule.id,
+        from: occurrence.start,
+        ...(owed > occurrence.start && { owed }),
+        late,
+      };
+    };
+
+    /**
      * Starts a schedule's occurrence on now, in the background; a check follows its answer. It is
-     * owed from its start, or from when the schedule was first saved, when that was later: the
-     * time before there was a schedule is nobody's fault. Its recording names the occurrence by
-     * its start all the same, so it is found as that time's.
+     * late once more than ON_TIME_MS passed since it was owed.
      */
     const startOccurrence = (schedule: KeptSchedule, occurrence: Occurrence, now: number) => {
       const key = occurrenceKey(schedule.id, occurrence);
@@ -764,12 +789,7 @@ function make(deps: RecordingsDeps) {
                 )
               : undefined;
           return yield* start(plan.channel, occurrence.stop, {
-            scheduled: {
-              schedule: schedule.id,
-              from: occurrence.start,
-              ...(owed > occurrence.start && { owed }),
-              late,
-            },
+            scheduled: scheduledOf(schedule, occurrence, late),
             title: listed?.title ?? plan.title,
           });
         }).pipe(
@@ -857,7 +877,7 @@ function make(deps: RecordingsDeps) {
                 title: kept.plan.title,
                 start: occurrence.start,
                 stop: occurrence.stop,
-                scheduled: { schedule: kept.id, from: occurrence.start, late: reason ?? "away" },
+                scheduled: scheduledOf(kept, occurrence, reason ?? "away"),
                 ended: null,
                 bytes: 0,
                 status: { kind: "missed", why: reason ?? "away" },
