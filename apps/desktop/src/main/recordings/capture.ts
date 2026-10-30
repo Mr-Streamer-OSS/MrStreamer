@@ -9,6 +9,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { StreamFailure, StreamFormat } from "@mrstreamer/contracts/playback";
 import type { RecordingCut } from "@mrstreamer/contracts/recordings";
 import type { Provider } from "@mrstreamer/core/provider";
+import { t } from "@mrstreamer/core/i18n";
 import { createInspector } from "../playback/inspect.ts";
 import { HlsInputFailure, openHlsTsInput } from "../playback/hls-ts-input.ts";
 import { classify } from "../services/playback.ts";
@@ -141,6 +142,13 @@ async function openSource(
           { headers, signal: AbortSignal.any([asked, waiting.signal]) },
           source.url,
         );
+      } catch (cause) {
+        if (waiting.signal.aborted && !asked.aborted)
+          throw new CaptureFailure({
+            kind: "network",
+            detail: t("The provider did not answer in time."),
+          });
+        throw cause;
       } finally {
         // Once headers arrive, the body's own watchdog owns silence on this response.
         clearTimeout(timeout);

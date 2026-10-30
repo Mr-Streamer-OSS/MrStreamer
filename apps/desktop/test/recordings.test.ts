@@ -251,7 +251,11 @@ describe.skipIf(!hasTools)("recordings", () => {
       () => true,
       () => false,
     );
-    while (!source) await new Promise((resolve) => setImmediate(resolve));
+    const openingDeadline = Date.now() + 10_000;
+    while (!source) {
+      if (Date.now() >= openingDeadline) throw new Error("No stream opened");
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     source.write(fixture("h264-aac.mpegts"));
     // Its program table is being written: it becomes active while the subscription goes.
     const folder = join(dataDir, "recordings");
@@ -259,7 +263,11 @@ describe.skipIf(!hasTools)("recordings", () => {
       readdirSync(folder).some((name) =>
         readdirSync(join(folder, name)).some((file) => statSync(join(folder, name, file)).size > 0),
       );
-    while (!existsSync(folder) || !writing()) await new Promise((resolve) => setImmediate(resolve));
+    const writingDeadline = Date.now() + 10_000;
+    while (!existsSync(folder) || !writing()) {
+      if (Date.now() >= writingDeadline) throw new Error("No program table was written");
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     await recordings.subscriptionGone(subscriptionId);
     expect(provider.activeStreams()).toBe(0);
     expect(await started).toBe(true);
@@ -399,16 +407,20 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("ends a start whose provider never sends response headers, releasing its connection", async () => {
     const { dataDir, channel, subscriptionId, provider, recordings } = await connected({
+      // writeHead buffers the headers until a first write, which never comes here.
       streams: () => undefined,
     });
     await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject({
-      error: { kind: "stream", failure: { kind: "network" } },
+      error: {
+        kind: "stream",
+        failure: { kind: "network", detail: "The provider did not answer in time." },
+      },
     });
     expect(provider.streamRequests()).toBe(1);
     expect(await allClosed(provider)).toBe(true);
     expect((await recordings.connections(subscriptionId)).uses).toEqual([]);
     expect(await recordings.list()).toEqual([]);
-    expect(await readdir(join(dataDir, "recordings"))).toEqual([]);
+    expect(await readdir(join(dataDir, "recordings")).catch(() => [])).toEqual([]);
   }, 20_000);
 
   it("goes on to the channel's next stream when one has no program, from the file's start", async () => {
