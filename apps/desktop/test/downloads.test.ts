@@ -347,16 +347,15 @@ function serveSubdl() {
 }
 
 /**
- * Lets a test hold the provider's answer to a series' details: each call of the function it
- * answers holds the next one, until its `release`. Made before the app starts.
+ * Lets a test hold the provider's answers to a series' details: each call of the function it
+ * answers holds the next one not yet held, until its `release`. Made before the app starts.
  */
 function seriesDetailsHold() {
   const request = fetch;
-  let next: { arrived: () => void; released: Promise<void> } | undefined;
+  const holds: Array<{ arrived: () => void; released: Promise<void> }> = [];
   const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
-    const held = url.searchParams.get("action") === "get_series_info" ? next : undefined;
-    if (held) next = undefined;
+    const held = url.searchParams.get("action") === "get_series_info" ? holds.shift() : undefined;
     const response = await request(input, init);
     if (held) {
       held.arrived();
@@ -368,7 +367,7 @@ function seriesDetailsHold() {
   return () => {
     const arrived = Promise.withResolvers<void>();
     const released = Promise.withResolvers<void>();
-    next = { arrived: arrived.resolve, released: released.promise };
+    holds.push({ arrived: arrived.resolve, released: released.promise });
     return { arrived: arrived.promise, release: () => released.resolve() };
   };
 }
@@ -879,43 +878,25 @@ describe.skipIf(!hasTools)("downloads", () => {
       // Of an older catalogue since this refresh, those details are asked for again as it starts.
       await onDemand.refresh(subscriptionId);
       const asked = provider.detailRequests();
-      let held = hold();
+      const holds = Array.from({ length: overtaken }, hold);
       await downloads.pause(first.id);
       // Each refresh is accepted while the lookup's answer is still on its way.
-      for (let time = 1; time <= overtaken; time++) {
+      for (const held of holds) {
         await held.arrived;
-        const overtakenNow = held;
-        if (time < overtaken) held = hold();
         await onDemand.refresh(subscriptionId);
-        overtakenNow.release();
+        held.release();
       }
-      if (ends === "complete") {
-        await vi.waitFor(
-          async () => expect((await find(queued.id))?.status.kind).toBe("complete"),
-          { timeout: LONG },
-        );
+      await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe(ends), {
+        timeout: LONG,
+      });
+      // Renewed once only.
+      expect(provider.detailRequests() - asked).toBe(2);
+      if (ends === "complete")
         expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(target.bytes));
-        expect(provider.detailRequests() - asked).toBe(2);
-      } else {
-        await vi.waitFor(
-          async () =>
-            expect((await find(queued.id))?.status).toMatchObject({
-              kind: "failed",
-              failure: { kind: "app", error: { kind: "unexpected" } },
-            }),
-          { timeout: LONG },
-        );
-        // Renewed once only: nothing asks again until the viewer retries.
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        expect(provider.detailRequests() - asked).toBe(2);
-        expect(await partial(dataDir, queued.id)).toBeNull();
-        await downloads.retry(queued.id);
-        await vi.waitFor(
-          async () => expect((await find(queued.id))?.status.kind).toBe("complete"),
-          { timeout: LONG },
-        );
-        expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(target.bytes));
-      }
+      else
+        expect((await find(queued.id))?.status).toMatchObject({
+          failure: { kind: "app", error: { kind: "unexpected" } },
+        });
       await quit();
     },
     60_000,

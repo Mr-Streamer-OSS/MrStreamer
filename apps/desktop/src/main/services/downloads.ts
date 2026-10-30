@@ -577,16 +577,9 @@ function make(deps: DownloadsDeps) {
       const title: TitleRef = { ...record.title, subscriptionId: record.subscriptionId };
       // Stopped while the file is looked up, nothing is asked of the provider's file. A lookup a
       // catalogue refresh overtook is asked once more, of the catalogue that refresh accepted.
-      const lookup = Effect.all([
-        subscriptions.sourceOf(record.subscriptionId),
-        onDemand.file(title),
-      ]);
       const resolved = await Effect.runPromise(
-        lookup.pipe(
-          Effect.catchIf(
-            (failure) => failure instanceof Overtaken,
-            () => lookup,
-          ),
+        Effect.all([subscriptions.sourceOf(record.subscriptionId), onDemand.file(title)]).pipe(
+          Effect.retry({ times: 1, while: (failure) => failure instanceof Overtaken }),
           Effect.result,
         ),
         { signal },
