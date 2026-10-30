@@ -147,6 +147,8 @@ const titleNames = (app: App, kind: "movie" | "series") => {
   const lists = app.titleLists();
   return lists.kind === "ready" ? kindOf(lists.index, kind).titles.map((each) => each.name) : [];
 };
+const signedIn = (app: App) =>
+  app.members().every((each) => each.account?.state === "active" && each.live.kind === "ready");
 const registry = () => JSON.parse(memory.files.get("/documents/subscriptions.json") ?? "null");
 const modes = (report: Awaited<ReturnType<App["playlistReport"]>>) =>
   Object.fromEntries(report.groups.map((group) => [group.name, group.mode]));
@@ -373,6 +375,27 @@ describe("a playlist subscription", () => {
     expect(ids(again)).toEqual([id]);
     const other = await again.add({ server: host.link(), ...PLAYLIST });
     expect(other).not.toBe(id);
+  });
+
+  it("keeps the link it went by at launch when another playlist has the Keychain's, or the registry refuses it", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    const other = (await app.add({ server: host.link("/other.m3u"), ...PLAYLIST }))!;
+    const saved = registry().playlists;
+    // Stopped after the Keychain took a new link another playlist goes by.
+    memory.keychain.set(`s.${id}`, host.link("/other.m3u"));
+    let again = await launch();
+    await until(() => signedIn(again), "both signed in after a relaunch");
+    expect(registry().playlists).toEqual(saved);
+    // Stopped after the Keychain took a new link the registry can't take at launch.
+    memory.keychain.set(`s.${id}`, host.link());
+    memory.keychain.set(`s.${other}`, host.link("/third.m3u"));
+    memory.full.add("subscriptions.json");
+    again = await launch();
+    await until(() => signedIn(again), "both signed in after a relaunch");
+    memory.full.clear();
+    expect(registry().playlists).toEqual(saved);
+    expect(ids(again)).toEqual([id, other]);
   });
 
   it("keeps the channels it showed when a reload fails, and loads them on Try again", async () => {

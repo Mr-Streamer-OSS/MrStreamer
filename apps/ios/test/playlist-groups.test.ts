@@ -13,7 +13,11 @@ import type { PlaylistView } from "../src/playlist-groups.tsx";
 
 const scenario = vi.hoisted(() => ({
   reports: [] as (() => Promise<PlaylistReport>)[],
-  mapped: [] as { args: readonly unknown[]; settle: () => void }[],
+  mapped: [] as {
+    args: readonly unknown[];
+    settle: () => void;
+    refuse: (cause: unknown) => void;
+  }[],
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -31,7 +35,7 @@ vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: [livingRoom] }),
   playlistReport: () => scenario.reports.shift()!(),
   mapPlaylist: (...args: unknown[]) =>
-    new Promise<void>((settle) => scenario.mapped.push({ args, settle })),
+    new Promise<void>((settle, refuse) => scenario.mapped.push({ args, settle, refuse })),
 }));
 
 const livingRoom = vi.hoisted((): Member => ({
@@ -131,6 +135,17 @@ it("saves a pick, showing it once the playlist was read with it", async () => {
   await React.act(async () => scenario.mapped[0]!.settle());
   expect(screen.text()).not.toContain("Saving");
   expect(screen.button("playlist-mode-movie").getAttribute("aria-pressed")).toBe("true");
+});
+
+it("asks for the playlist link again when a pick finds it missing", async () => {
+  scenario.reports.push(async () => report(null));
+  const screen = await mount({ kind: "group", group: "kids" });
+  await screen.press("playlist-mode-movie");
+  await React.act(async () =>
+    scenario.mapped[0]!.refuse(new AppFailure({ kind: "needs-secret", subscriptionId: "m3u-a" })),
+  );
+  expect(screen.text()).toContain("Enter the playlist link again in Settings.");
+  expect(screen.text()).not.toContain("password");
 });
 
 it("says the playlist couldn't be read, and reads it again on Try again", async () => {
