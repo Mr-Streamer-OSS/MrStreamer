@@ -174,12 +174,18 @@ export function withoutLogin(
   const words = spellings(uncertain);
   if (words.length === 0) return shown;
   const name = /[\p{L}\p{N}\-._~]/u;
-  // One failed boundary must not consume a shorter value that does match whole.
-  return words.reduce(
-    (text, word) =>
-      text.replace(new RegExp(word, "gi"), (part: string, at: number, full: string) =>
-        name.test(full[at - 1] ?? "") || name.test(full[at + part.length] ?? "") ? part : "…",
-      ),
-    shown,
-  );
+  // Lookahead visits overlapping occurrences, including after a rejected boundary.
+  return words.reduce((text, word) => {
+    let result = "";
+    let through = 0;
+    for (const match of text.matchAll(new RegExp(`(?=(${word}))`, "gi"))) {
+      const part = match[1];
+      const at = match.index;
+      if (!part || name.test(text[at - 1] ?? "") || name.test(text[at + part.length] ?? ""))
+        continue;
+      if (at >= through) result += text.slice(through, at) + "…";
+      through = Math.max(through, at + part.length);
+    }
+    return result + text.slice(through);
+  }, shown);
 }

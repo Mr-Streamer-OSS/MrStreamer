@@ -973,8 +973,8 @@ it.each(["lookup", "format"] as const)(
     const { AppFailure } = await import("@mrstreamer/contracts/errors");
     const sources = await import("../src/sources.ts");
     const login = ["r79-fixture-user", "r79-fixture-secret"];
-    const uncertain = ["short/sig", "en", "ab/c", "ab"];
-    const detail = `Unbroken: live/${login[0]}/${login[1]}/1.ts sig=guest|${encodeURIComponent(uncertain[0]!)} overlap=ab/cd`;
+    const uncertain = ["short/sig", "en", "ab/c", "ab", "1,1"];
+    const detail = `Unbroken: live/${login[0]}/${login[1]}/1.ts sig=guest|${encodeURIComponent(uncertain[0]!)} overlap=ab/cd self=21,1,1`;
     const provider = xtreamProvider(
       { server: "http://fixture.invalid", username: login[0]!, password: login[1]! },
       { userAgent: "MrStreamer fixture" },
@@ -1006,6 +1006,7 @@ it.each(["lookup", "format"] as const)(
     );
     expect(JSON.stringify(owner.playbackState.get())).toContain("Unbroken");
     expect(JSON.stringify(owner.playbackState.get())).not.toContain("overlap=ab/");
+    expect(JSON.stringify(owner.playbackState.get())).toContain("self=21,…");
     owner.retry();
     await tick();
     expect(lookup).toHaveBeenCalledTimes(2);
@@ -1018,6 +1019,7 @@ it.each(["lookup", "format"] as const)(
     );
     expect(JSON.stringify(owner.playbackState.get())).toContain("Unbroken");
     expect(JSON.stringify(owner.playbackState.get())).not.toContain("overlap=ab/");
+    expect(JSON.stringify(owner.playbackState.get())).toContain("self=21,…");
   },
 );
 
