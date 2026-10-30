@@ -181,6 +181,22 @@ describe("lists", () => {
     expect(shown()).toEqual(["News: a:10"]);
   });
 
+  it("don't come back at a relaunch from a first write cut short, when putting it back fails too", async () => {
+    // The move fails, then so does writing the lists before back.
+    let moved = false;
+    native.sync = (operation) => {
+      if (operation === "move") {
+        moved = true;
+        throw new Error("The disk went away.");
+      }
+      if (operation === "write" && moved) throw new Error("The disk is full.");
+    };
+    expect(() => lists.createList("News", live("a:10"))).toThrow("The disk went away.");
+    native.sync = null;
+    await launch();
+    expect(shown()).toEqual([]);
+  });
+
   it("don't come back at a relaunch from a first write cut short", async () => {
     let refused = false;
     native.sync = (operation) => {
@@ -367,6 +383,22 @@ describe("arranging a list", () => {
     );
     lists.arrangeList(only(), [ziggo, ...["b:10", "a:10"].map(memberOf)]);
     expect(shown()).toEqual(["Mix: Ziggo Sport (not-listed), b:10, a:10"]);
+  });
+
+  it("takes out one of two the provider joined while it needs its password, and nothing else", () => {
+    const apart = channel("14", "NL | NPO 1");
+    shows([NOS, apart]);
+    const id = lists.createList("Mix", live("a:10"));
+    lists.setMember(id, live("a:14"), true);
+    lists.setMember(id, live("b:10"), true);
+    scenario.members = [member("a", "Home", true), member("b", "Cabin")];
+    shows([NOS, NOS_FHD]);
+    expect(shown()).toEqual([
+      "Mix: NOS Journaal (needs-secret), NOS Journaal (needs-secret), b:10",
+    ]);
+    const [first, second, rtl] = only().entries.map((entry) => entry.member);
+    lists.arrangeList(only(), [second!, rtl!], [first!]);
+    expect(shown()).toEqual(["Mix: NOS Journaal (needs-secret), b:10"]);
   });
 
   it("refuses a second save from the same edit, though only channels that don't open moved", () => {

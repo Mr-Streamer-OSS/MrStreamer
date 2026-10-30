@@ -18,7 +18,7 @@ import {
   type Roster,
 } from "./account.ts";
 import { listedNow, type Unavailable } from "./favourites.ts";
-import { readJson, writeJson } from "./files.ts";
+import { readJson, removeJson, writeJson } from "./files.ts";
 import type { Channel } from "./library.ts";
 import { readRegistry } from "./subscriptions.ts";
 
@@ -245,7 +245,15 @@ function save(lists: readonly StoredList[]) {
     try {
       if (shown.kind === "read") writeJson(FILE, { version: 1, lists: shown.lists });
     } catch {
-      // As the disk left it.
+      // With no lists before, nothing is lost with what that write left; with some, the disk
+      // keeps what it took.
+      if (shown.kind === "read" && shown.lists.length === 0) {
+        try {
+          removeJson(FILE);
+        } catch {
+          // As the disk left it.
+        }
+      }
     }
     throw cause;
   }
@@ -356,13 +364,21 @@ export function setMember(id: string, channel: Channel, member: boolean): void {
 function withTwins(list: StoredList, ids: Iterable<string>): ReadonlySet<string> {
   const named = new Set(ids);
   const catalogue = currentCatalogue();
-  const keyOf = (stored: StoredMember) => resolve(catalogue, stored)?.channel.key;
-  const keys = new Set(list.members.filter((each) => named.has(each.member)).map(keyOf));
-  keys.delete(undefined);
-  return new Set(
-    list.members.flatMap((each) =>
-      named.has(each.member) || keys.has(keyOf(each)) ? [each.member] : [],
+  const saved = members();
+  // Only a channel the list opens hides its twins; those that don't open show each on its own.
+  const keys = new Set(
+    shownOf(list, catalogue, saved).entries.flatMap((entry) =>
+      entry.kind === "listed" && named.has(entry.member) ? [entry.channel.key] : [],
     ),
+  );
+  const opens = new Set(saved.flatMap((member) => (member.needsSecret ? [] : [member.entry.id])));
+  return new Set(
+    list.members.flatMap((each) => {
+      const key = opens.has(each.subscriptionId)
+        ? resolve(catalogue, each)?.channel.key
+        : undefined;
+      return named.has(each.member) || (key !== undefined && keys.has(key)) ? [each.member] : [];
+    }),
   );
 }
 

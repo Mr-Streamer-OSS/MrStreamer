@@ -1,5 +1,5 @@
 import { normalize } from "@mrstreamer/core/text";
-import { router } from "expo-router";
+import { router, useIsFocused } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -268,9 +268,12 @@ export function ChannelListScreen({ id }: { id: string }) {
   const inset = useDockInset();
   const height = useRowHeight();
   const large = largeText(useWindowDimensions().fontScale);
-  const playing = channelStatus(usePlayback().phase);
+  const { phase, watch } = usePlayback();
+  const playing = channelStatus(phase);
+  const focused = useIsFocused();
   const [draft, setDraft] = useState<Draft | null>(null);
-  useShortcuts(draft ? CANCEL : NO_SHORTCUTS, () => setDraft(null));
+  // Only while this edit shows: Watch, or a screen pushed over it, has its own Escape.
+  useShortcuts(draft && focused && !watch ? CANCEL : NO_SHORTCUTS, () => setDraft(null));
   // The draft on show, for a Try again that comes later; none once the list closed.
   const open = useRef<Draft | null>(null);
   useEffect(() => {
@@ -611,7 +614,9 @@ function ArrangedRow({
         />
         <View
           accessible
-          accessibilityLabel={`${title}, ${position + 1} of ${count}`}
+          accessibilityLabel={[title, detail, `${position + 1} of ${count}`]
+            .filter(Boolean)
+            .join(", ")}
           accessibilityActions={[
             ...(first ? [] : [{ name: "up", label: "Move up" }]),
             ...(last ? [] : [{ name: "down", label: "Move down" }]),

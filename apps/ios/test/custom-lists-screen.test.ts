@@ -400,6 +400,8 @@ describe("a list's screen", () => {
     open(listScreen(id));
     press("list-edit");
     expect(arranged()).toEqual(["a:10", "a:11", "b:10"]);
+    // VoiceOver names each row's place, its provider's where two list one name, before its own.
+    expect(find("arranged-b:10")?.getAttribute("aria-label")).toMatch(/^RTL Nieuws, .+, 3 of 3$/);
     expect((find("arranged-a:10-up") as { disabled?: boolean }).disabled).toBe(true);
     press("arranged-b:10-up");
     press("arranged-b:10-up");
