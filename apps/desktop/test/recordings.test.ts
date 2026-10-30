@@ -236,6 +236,30 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await recordings.list()).toEqual([]);
   });
 
+  it("stops with its subscription as its stream's first program arrives", async () => {
+    let source: Writable | undefined;
+    const { channel, subscriptionId, recordings, roster } = await connected({
+      streams: (_channel, out) => {
+        source = out;
+        out.write(Buffer.alloc(0));
+      },
+    });
+    const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    const started = starting.then(
+      () => true,
+      () => false,
+    );
+    while (!source) await new Promise((resolve) => setImmediate(resolve));
+    source.write(fixture("h264-aac.mpegts"));
+    // The removal begins while capture writes the program table, so the start becomes active
+    // as the removal waits for it.
+    for (let turn = 0; turn < 2; turn++) await new Promise((resolve) => setImmediate(resolve));
+    await roster.remove(subscriptionId, false);
+    expect((await recordings.list()).map((each) => each.status)).toEqual(
+      (await started) ? [{ kind: "stopped" }] : [],
+    );
+  });
+
   it("keeps an honest partial recording when the provider's stream breaks off", async () => {
     // Half the recording, then the provider closes the stream.
     const breaking = (source: Parameters<typeof liveStreams>[0], out: Writable) => {

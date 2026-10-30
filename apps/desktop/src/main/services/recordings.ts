@@ -385,7 +385,8 @@ function make(deps: RecordingsDeps) {
             }),
           ),
         ),
-        Effect.ignore(end([...active.keys()], "quit")),
+        // Read once they settle: a start that became active meanwhile ends with the others.
+        Effect.suspend(() => Effect.ignore(end([...active.keys()], "quit"))),
       ),
     );
 
@@ -415,12 +416,14 @@ function make(deps: RecordingsDeps) {
               }),
             ),
           ),
-          Effect.ignore(
-            end(
-              [...active.keys()].filter(
-                (id) => records.get(id)?.channel.subscriptionId === subscriptionId,
+          Effect.suspend(() =>
+            Effect.ignore(
+              end(
+                [...active.keys()].filter(
+                  (id) => records.get(id)?.channel.subscriptionId === subscriptionId,
+                ),
+                "stopped",
               ),
-              "stopped",
             ),
           ),
         ),
