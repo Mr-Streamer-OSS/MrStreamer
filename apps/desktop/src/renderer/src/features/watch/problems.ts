@@ -252,6 +252,7 @@ const QUOTES_NOTHING = new Set<AppError["kind"]>([
   "keychain-refused",
   "channel-not-found",
   "catch-up",
+  "recording-holds",
 ]);
 
 /** Why a channel's session didn't open, without what an error quotes: a server's name or an engine's words. */

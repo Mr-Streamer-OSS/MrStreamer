@@ -76,6 +76,8 @@ export function describeError(error: AppError): string {
       return t("Another list has this name.");
     case "list-changed":
       return t("This list changed.");
+    case "recording-holds":
+      return t("A recording uses this subscription's connection. Stop it in Recordings to watch.");
     case "incomplete-catalogue":
       if (error.list === "movies")
         return t("The provider sent no movies, so the previous list stays.");

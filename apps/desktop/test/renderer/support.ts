@@ -2,7 +2,8 @@
 // recorded; a call the test holds answers when the test says, and a method the test gave a
 // standing answer, or failure, or a reply made from its input, answers with it each time. The preferences otherwise answer with the defaults
 // and what the test says the viewer saved, a subscription's with nothing left in it, how a
-// series' episodes stand with nothing played and nothing marked, and anything else never answers.
+// series' episodes stand with nothing played and nothing marked, recordings with none kept, and
+// anything else never answers.
 // Like the main process, it refuses a call whose input the contract doesn't allow, so a view
 // can't pass here with a call that fails there. Tests send its events themselves. Import it
 // first, before the renderer's modules: it also stands in for Media Source Extensions and full
@@ -158,6 +159,7 @@ const bridge = {
     if (method === "preferences.get") {
       return Promise.resolve({ ok: true, value: { revision: preferenceRevision, preferences } });
     }
+    if (method === "recordings.list") return Promise.resolve({ ok: true, value: [] });
     if (method === "subscription.preferences") {
       return Promise.resolve({ ok: true, value: defaultSubscriptionPreferences });
     }

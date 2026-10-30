@@ -155,7 +155,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(started.kind).toBe("started");
     expect(await playback.playing(watching.sessionId)).toBeNull();
     await expect(playback.open(channel(TRACKS), ["h264", "aac"])).rejects.toMatchObject({
-      error: { kind: "unexpected", detail: expect.stringMatching(/^A recording uses/) },
+      error: { kind: "recording-holds" },
     });
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: ["recording"] });
     expect((await recordings.list())[0]?.status).toEqual({ kind: "recording" });

@@ -187,14 +187,7 @@ const superseded = () =>
     error: { kind: "unexpected", detail: t("Something else played in the meantime.") },
   });
 
-/** Made when refused, so the advice uses the interface language of that moment. */
-const recorded = () =>
-  new Failed({
-    error: {
-      kind: "unexpected",
-      detail: t("A recording uses this subscription's connection. Stop it in Recordings to watch."),
-    },
-  });
+const recorded = () => new Failed({ error: { kind: "recording-holds" } });
 
 const stillLent = () =>
   new Failed({

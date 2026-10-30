@@ -40,7 +40,7 @@ export class CaptureFailure extends Error {
 }
 
 /** Why capture couldn't write its file: the system's own words, which say why. */
-export class DiskFailure extends Error {}
+class DiskFailure extends Error {}
 
 /** Why a capture under way ended: at its stop time, as asked, or cut short. */
 export type CaptureEnd = "until" | "aborted" | Exclude<RecordingCut, "quit">;
