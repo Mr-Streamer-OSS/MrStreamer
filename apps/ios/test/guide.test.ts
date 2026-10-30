@@ -343,11 +343,13 @@ describe("native transport adapter", () => {
     const prepared: { url: string; uncertain: readonly string[] }[] = [];
     native.prepare = async (_lease, _job, url, _headers, _login, uncertain) => {
       prepared.push({ url, uncertain });
+      // A hop without the value is followed; a later one with it is not.
+      const location = ["http://fixture.test/moved", "http://fixture.test/guide?sig=short-sig"];
       return {
         kind: "ok",
         value:
-          prepared.length === 1
-            ? { kind: "redirect", location: "http://fixture.test/guide?sig=short-sig" }
+          prepared.length <= location.length
+            ? { kind: "redirect", location: location[prepared.length - 1]! }
             : { kind: "candidate", id: "candidate" },
       };
     };
@@ -372,7 +374,10 @@ describe("native transport adapter", () => {
     );
     await owner.attach("a");
     await owner.refresh("a");
-    expect(prepared).toEqual([{ url: "https://fixture.test/guide", uncertain: ["short-sig"] }]);
+    expect(prepared).toEqual([
+      { url: "https://fixture.test/guide", uncertain: ["short-sig"] },
+      { url: "http://fixture.test/moved", uncertain: ["short-sig"] },
+    ]);
     expect(owner.getSnapshot().get("a")?.error).toBe("redirect");
   });
 });
