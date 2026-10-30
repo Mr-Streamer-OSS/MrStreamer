@@ -116,8 +116,14 @@ function make(deps: RecordingsDeps) {
     const read = yield* Effect.promise(() => readRecordings(path));
     const records = new Map<string, StoredRecording>();
     const active = new Map<string, Active>();
-    /** Captures still starting, by subscription, which the app's close and a removal stop too. */
-    const starting = new Map<AbortController, string>();
+    /**
+     * Captures still starting, by subscription, which the app's close and a removal stop too.
+     * `done` settles once one is active, or has ended and let its connection go.
+     */
+    const starting = new Map<
+      AbortController,
+      { readonly subscriptionId: string; readonly done: Promise<void> }
+    >();
     const fileOf = (record: StoredRecording) => join(root, record.id, record.file);
 
     const unreadable = () =>
@@ -270,7 +276,8 @@ function make(deps: RecordingsDeps) {
           status: { kind: "recording" },
         };
         const controller = new AbortController();
-        starting.set(controller, subscriptionId);
+        const started = Promise.withResolvers<void>();
+        starting.set(controller, { subscriptionId, done: started.promise });
         const opening = mkdir(join(root, id), { recursive: true }).then(() =>
           startCapture(
             streams.map(({ url, format, headers }) => ({ url, format, headers: headers ?? {} })),
@@ -302,22 +309,24 @@ function make(deps: RecordingsDeps) {
           // Also when the app closes meanwhile: whatever started ends before its folder goes.
           Effect.onError(() =>
             Effect.promise(async () => {
-              starting.delete(controller);
               controller.abort();
               await opening.then(
-                (started) => started.ended,
+                (opened) => opened.ended,
                 () => {},
               );
               held.release();
               await rm(join(root, id), { recursive: true, force: true });
+              starting.delete(controller);
+              started.resolve();
             }),
           ),
         );
-        starting.delete(controller);
         const { promise: settled, resolve } = Promise.withResolvers<Failed | null>();
         const live: Active = { controller, bytes: capture.bytes, asked: null, settled };
         records.set(id, record);
         active.set(id, live);
+        starting.delete(controller);
+        started.resolve();
         void capture.ended
           .then((end) => {
             held.release();
@@ -369,7 +378,7 @@ function make(deps: RecordingsDeps) {
       );
     yield* Effect.addFinalizer(() =>
       Effect.andThen(
-        Effect.sync(() => starting.forEach((_subscription, controller) => controller.abort())),
+        Effect.sync(() => starting.forEach((_start, controller) => controller.abort())),
         Effect.ignore(end([...active.keys()], "quit")),
       ),
     );
@@ -385,10 +394,15 @@ function make(deps: RecordingsDeps) {
       stop: (id: string) => end([id], "stopped"),
       subscriptionGone: (subscriptionId: string) =>
         Effect.andThen(
-          Effect.sync(() =>
-            starting.forEach((owner, controller) => {
-              if (owner === subscriptionId) controller.abort();
-            }),
+          // Those starting end, or become active and are ended with the others.
+          Effect.promise(() =>
+            Promise.all(
+              [...starting].flatMap(([controller, start]) => {
+                if (start.subscriptionId !== subscriptionId) return [];
+                controller.abort();
+                return [start.done];
+              }),
+            ),
           ),
           Effect.ignore(
             end(

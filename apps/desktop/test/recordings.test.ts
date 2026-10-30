@@ -205,6 +205,23 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect((await recordings.list())[0]?.status).toEqual({ kind: "stopped" });
   });
 
+  it("stops with its subscription while it waits for the stream's first program", async () => {
+    // A stream that sends nothing yet, its connection open.
+    const { provider, channel, subscriptionId, recordings, roster } = await connected({
+      streams: (_source, out) => out.write(Buffer.alloc(0)),
+    });
+    const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    starting.catch(() => {});
+    await until(
+      async () => provider.activeStreams(),
+      (open) => open === 1,
+    );
+    await roster.remove(subscriptionId, false);
+    expect(provider.activeStreams()).toBe(0);
+    await expect(starting).rejects.toBeTruthy();
+    expect(await recordings.list()).toEqual([]);
+  });
+
   it("keeps an honest partial recording when the provider's stream breaks off", async () => {
     // Half the recording, then the provider closes the stream.
     const breaking = (source: Parameters<typeof liveStreams>[0], out: Writable) => {

@@ -4,7 +4,7 @@
 // Stop or Delete that fails says so in place of the reason. Narrower windows put the size in the
 // row's second line and the outcome under the bar.
 import { Menu } from "@base-ui/react/menu";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQuery } from "@tanstack/react-query";
 import { Ellipsis, Play } from "lucide-react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Recording } from "@mrstreamer/contracts/recordings";
@@ -108,11 +108,16 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
   const { captured, planned } = coverage(recording, now);
   const minutes = t("{captured} of {planned} min", { captured, planned });
   const { word, reason } = outcome(recording, now);
+  // Kept by the recording, not the row: a Stop moves it from Now to Recorded, into a new row, before
+  // a failure to write that down answers.
+  const mutationKey = ["recordings", "action", recording.id];
   const action = useMutation({
+    mutationKey,
     mutationFn: (kind: "stop" | "remove") =>
       call(kind === "stop" ? "recordings.stop" : "recordings.remove", { id: recording.id }),
   });
-  const failure = action.error ? describeError(appError(action.error)) : null;
+  const last = useMutationState({ filters: { mutationKey }, select: (each) => each.state }).at(-1);
+  const failure = last?.status === "error" ? describeError(appError(last.error)) : null;
   const size = missing ? null : formatBytes(recording.bytes);
   const when = t("{start} to {end}", {
     start: dayTime(recording.start, now),
