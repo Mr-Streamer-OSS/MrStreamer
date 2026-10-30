@@ -56,8 +56,9 @@ export class PlaybackCoordination extends Context.Service<
     /**
      * Admits a recording on one of the subscription's connections, or answers what holds them all,
      * admitting nothing. `limit` reads the account's latest known limit, which a play is held to too.
-     * With `fromDownload`, a download's connection is taken back first, as a play takes it: the
-     * viewer stopped playing to record, and a download may have taken that connection meanwhile.
+     * With `fromDownload`, a download's connection is taken back when that admits it, as a play
+     * takes it: the viewer stopped playing to record, and a download may have taken that
+     * connection meanwhile. Fails as a play does when the download doesn't let it go in time.
      */
     hold(
       subscriptionId: string,
@@ -65,7 +66,8 @@ export class PlaybackCoordination extends Context.Service<
       fromDownload: boolean,
     ): Effect.Effect<
       | { readonly kind: "held"; readonly held: Held }
-      | { readonly kind: "busy"; readonly uses: readonly ConnectionUse[] }
+      | { readonly kind: "busy"; readonly uses: readonly ConnectionUse[] },
+      Failed
     >;
     /** What of this app holds the subscription's connections now. */
     uses(subscriptionId: string): Effect.Effect<readonly ConnectionUse[]>;
@@ -161,9 +163,14 @@ export class PlaybackCoordination extends Context.Service<
         hold: (subscriptionId: string, limit: Effect.Effect<number>, fromDownload: boolean) =>
           one(
             Effect.gen(function* () {
-              if (fromDownload) yield* takeBack(subscriptionId);
-              const uses = usesOf(subscriptionId);
-              if (uses.length >= (yield* limit)) return { kind: "busy" as const, uses };
+              const allowed = yield* limit;
+              let uses = usesOf(subscriptionId);
+              // Only when taking the download's connection back admits it.
+              if (fromDownload && lent.has(subscriptionId) && uses.length === allowed) {
+                if (!(yield* takeBack(subscriptionId))) return yield* stillLent();
+                uses = usesOf(subscriptionId);
+              }
+              if (uses.length >= allowed) return { kind: "busy" as const, uses };
               const held: Held = {
                 release: () => {
                   if (recordings.delete(held)) PubSub.publishUnsafe(changed, undefined);

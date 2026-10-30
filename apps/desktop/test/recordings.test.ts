@@ -575,7 +575,7 @@ describe.skipIf(!hasTools)("recordings", () => {
 
     // Record's Stop playing closes the player before it asks to record: the download wakes first.
     await playback.close(watching.sessionId);
-    await until(statusOf, (status) => status === "transferring");
+    expect(await until(statusOf, (status) => status === "transferring")).toBe("transferring");
     const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {
       stopPlaying: true,
     });

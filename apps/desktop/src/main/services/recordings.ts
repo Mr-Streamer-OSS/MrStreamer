@@ -14,8 +14,7 @@
 // Capture takes one of its subscription's connections through PlaybackCoordination, which
 // admits it only while fewer than the account's limit are held here, and keeps it until it ends:
 // nothing playing or downloading stops for it, unless the viewer stops playing to record, and
-// nothing takes it back. Capture itself is in
-// ../recordings/capture.ts.
+// nothing takes it back. Capture itself is in ../recordings/capture.ts.
 import { randomUUID } from "node:crypto";
 import { mkdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";

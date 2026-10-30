@@ -1380,6 +1380,5 @@ export const de: Translation = {
   "The recording couldn't be deleted.": "Die Aufnahme konnte nicht gelöscht werden.",
   "The provider stopped sending.": "Der Anbieter hat nichts mehr gesendet.",
   "The provider sent nothing.": "Der Anbieter hat nichts gesendet.",
-  "The stop time passed while it started.":
-    "Die Stoppzeit ist beim Starten der Aufnahme verstrichen.",
+  "The stop time passed while it started.": "Das Ende ist beim Starten der Aufnahme verstrichen.",
 };

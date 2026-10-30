@@ -1370,5 +1370,5 @@ export const nl: Translation = {
   "The recording couldn't be deleted.": "De opname kon niet worden verwijderd.",
   "The provider stopped sending.": "De provider stuurde niets meer.",
   "The provider sent nothing.": "De provider stuurde niets.",
-  "The stop time passed while it started.": "De stoptijd verstreek terwijl de opname startte.",
+  "The stop time passed while it started.": "De eindtijd verstreek terwijl de opname startte.",
 };

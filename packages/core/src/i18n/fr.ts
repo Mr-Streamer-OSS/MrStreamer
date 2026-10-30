@@ -1438,5 +1438,5 @@ export const fr: Translation = {
   "The provider stopped sending.": "Le fournisseur a cessé d'envoyer.",
   "The provider sent nothing.": "Le fournisseur n'a rien envoyé.",
   "The stop time passed while it started.":
-    "L'heure d'arrêt est passée pendant le démarrage de l'enregistrement.",
+    "L'heure de fin est passée pendant le démarrage de l'enregistrement.",
 };
