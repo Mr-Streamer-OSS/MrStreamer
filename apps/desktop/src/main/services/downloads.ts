@@ -591,7 +591,8 @@ function make(deps: DownloadsDeps) {
         return { kind: "failed", failure: { kind: "app", error: resolved.failure.error } };
       }
       const [source, file] = resolved.success;
-      // A file found under a login that replaced the one it started with, also by the renewal.
+      // A file looked up, first or renewed, under a login that replaced the one read here fails as
+      // a replaced login does.
       if (file.revision !== source.revision) {
         return { kind: "failed", failure: { kind: "app", error: subscriptionChanged() } };
       }

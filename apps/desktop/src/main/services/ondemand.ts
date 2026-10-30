@@ -1463,8 +1463,8 @@ function make(deps: OnDemandDeps) {
 export class Overtaken extends Failed {}
 
 /**
- * A lookup's login replaced or removed as it went. Made when it fails, so it says so in the
- * interface language of the moment.
+ * What a lookup fails with when its login or its catalogue changed as it went. Made when it
+ * fails, so it says so in the interface language of the moment.
  */
 export const subscriptionChanged = (): AppError => ({
   kind: "unexpected",
