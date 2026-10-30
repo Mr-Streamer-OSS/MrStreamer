@@ -3,7 +3,7 @@ import { tabScreenOptions } from "../../../header.tsx";
 
 /**
  * Live: its tabs of shelves, tiles and the channel list, with a category's channels, every
- * favourite and Find countries or categories pushed over them, and the shared top bar's Downloads
+ * favourite, one of the viewer's lists and Find countries or categories pushed over them, and the shared top bar's Downloads
  * and Settings, which close as the viewer leaves the tab.
  */
 export default function LiveLayout() {
@@ -12,6 +12,7 @@ export default function LiveLayout() {
       <Stack.Screen name="index" options={{ title: "Live", headerLargeTitle: true }} />
       <Stack.Screen name="category" options={{ title: "" }} />
       <Stack.Screen name="favourites" options={{ title: "Favourites" }} />
+      <Stack.Screen name="list" options={{ title: "" }} />
       <Stack.Screen name="discover" options={{ title: "" }} />
       <Stack.Screen name="schedule" options={{ title: "Schedule" }} />
       <Stack.Screen name="programme" options={{ title: "Programme" }} />

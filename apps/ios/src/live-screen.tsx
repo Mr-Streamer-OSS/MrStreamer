@@ -22,6 +22,7 @@ import {
 import { failureOf } from "./errors.ts";
 import { starChannel, useFavouriteKeys } from "./favourites.ts";
 import { FavouritesEntry } from "./favourites-screen.tsx";
+import { ListEntries, openListSheet } from "./custom-lists-screen.tsx";
 import { Glass, IconButton } from "./glass.tsx";
 import type { ScheduleItem } from "./guide.ts";
 import {
@@ -323,13 +324,14 @@ export function LiveHome() {
 }
 
 /**
- * Live's own rows, before its tabs: Favourites, and Find countries or categories. On the tab only:
+ * Live's own rows, before its tabs: Favourites, the viewer's lists, and Find countries or categories. On the tab only:
  * a category's screen has neither.
  */
 function Entries() {
   return (
     <>
       <FavouritesEntry />
+      <ListEntries />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Find countries or categories"
@@ -631,6 +633,7 @@ function ChannelList({
             onPress={onPress}
             favourite={favourites.has(item.key)}
             onFavourite={starChannel}
+            onLists={openListSheet}
             programmeHint={[programme.line ?? category, programme.next].filter(Boolean).join(", ")}
             programme={
               <>

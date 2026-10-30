@@ -12,6 +12,7 @@ import {
   type AccessibilityActionEvent,
 } from "react-native";
 import { playChannel, useCatalogue } from "./account.ts";
+import { Entry, openListSheet, WHY } from "./custom-lists-screen.tsx";
 import { appError, describeError } from "./errors.ts";
 import {
   currentFavourites,
@@ -21,31 +22,23 @@ import {
   type Favourite,
   type FavouriteList,
   type Hidden,
-  type Unavailable,
 } from "./favourites.ts";
 import type { Channel } from "./library.ts";
 import { useDockInset } from "./loading.tsx";
 import { channelStatus, usePlayback } from "./playback.ts";
-import { ChannelLogo, colors, Notice, TextButton, useRowHeight } from "./ui.tsx";
+import { anchorOf, ChannelLogo, colors, Notice, TextButton, useRowHeight } from "./ui.tsx";
 import { reorderFavourites } from "./viewing.ts";
 
 // Every favourite, of every provider, in the order the viewer gave them: pushed on Live from its
 // Favourites row, and on Home from its row's heading. A row plays its channel in Watch; its star
 // takes it out of the favourites and plays nothing. Edit arranges the rows with each one's Move up
 // and Move down, or VoiceOver's actions; Save sends the order, Cancel and leaving the list throw it
-// away. Favourites that don't show (favourites.ts) are counted under the rows by provider, keep
+// away. Holding a row, or its VoiceOver action Lists, opens the channel's own lists
+// (custom-lists-screen.tsx). Favourites that don't show (favourites.ts) are counted under the rows by provider, keep
 // their places, and open nothing. Save, and Try again after a write viewing.json didn't take, send
 // the order only while the favourites show the rows it was arranged from, as the record, the
 // providers and their channels stand then: one a list or a password changed meanwhile is refused
 // with nothing moved, as is one whose list was closed. A refused write keeps the draft.
-
-/** What a provider's favourites that don't show say, after its name. */
-const WHY: Record<Unavailable, string> = {
-  loading: "channels still loading",
-  failed: "channels didn't load",
-  "needs-secret": "password needed in Settings",
-  "not-listed": "no longer listed",
-};
 
 /** "2 saved from Home: password needed in Settings", or "Saved from Home: …" without a count. */
 const hiddenLine = ({ label, why, count }: Hidden) =>
@@ -69,20 +62,13 @@ interface Draft {
 /** Live's row that opens every favourite, with how many open. */
 export function FavouritesEntry() {
   const favourites = useFavourites();
-  const count = favourites?.shown.length ?? 0;
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={count > 0 ? `Favourites, ${count}` : "Favourites"}
+    <Entry
+      name="Favourites"
+      count={favourites?.shown.length ?? 0}
       onPress={() => router.push("/live/favourites")}
-      style={({ pressed }) => [styles.entry, pressed && styles.pressed]}
       testID="live-favourites"
-    >
-      <Text style={styles.entryName}>Favourites</Text>
-      {count > 0 ? <Text style={styles.entryCount}>{count}</Text> : null}
-      <View style={styles.spacer} />
-      <SymbolView name="chevron.right" size={13} tintColor={colors.text} weight="semibold" />
-    </Pressable>
+    />
   );
 }
 
@@ -257,6 +243,7 @@ const FavouriteRow = memo(function FavouriteRow({
   const act = ({ nativeEvent }: AccessibilityActionEvent) => {
     if (nativeEvent.actionName === "activate") onPress(channel);
     if (nativeEvent.actionName === "unstar") starChannel(channel, false);
+    if (nativeEvent.actionName === "lists") openListSheet(channel);
   };
   return (
     <View style={[styles.row, { height }]}>
@@ -267,9 +254,11 @@ const FavouriteRow = memo(function FavouriteRow({
         accessibilityActions={[
           { name: "activate" },
           { name: "unstar", label: "Remove from Favourites" },
+          { name: "lists", label: "Lists" },
         ]}
         onAccessibilityAction={act}
         onPress={() => onPress(channel)}
+        onLongPress={(event) => openListSheet(channel, anchorOf(event))}
         style={({ pressed }) => [styles.main, pressed && styles.pressed]}
         testID={`favourite-${channel.key}`}
       >
@@ -396,16 +385,6 @@ function Names({ channel, detail }: { channel: Channel; detail: string }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000000" },
   pressed: { opacity: 0.5 },
-  spacer: { flex: 1 },
-  entry: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    minHeight: 44,
-    paddingHorizontal: 16,
-  },
-  entryName: { color: colors.text, fontSize: 17, fontWeight: "600" },
-  entryCount: { color: colors.dim, fontSize: 17 },
   bar: {
     flexDirection: "row",
     justifyContent: "space-between",
