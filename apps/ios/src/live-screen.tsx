@@ -1,6 +1,6 @@
 import { router, useNavigation, useRootNavigationState } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ActionSheetIOS,
   FlatList,
@@ -23,12 +23,18 @@ import { failureOf } from "./errors.ts";
 import { starChannel, useFavouriteKeys } from "./favourites.ts";
 import { FavouritesEntry } from "./favourites-screen.tsx";
 import { Glass, IconButton } from "./glass.tsx";
+import type { ScheduleItem } from "./guide.ts";
 import {
+  GRID_ROWS,
   guideMessage,
+  localDay,
   openProgramme,
   openSchedule,
   ProgrammeLines,
   programmePresentation,
+  programmeRange,
+  programmeTime,
+  useGuideGrid,
   useGuideListings,
 } from "./guide-ui.tsx";
 import { ChannelSchedule, dayOf, Programme } from "./guide-screen.tsx";
@@ -61,10 +67,11 @@ import {
 // then the recent channels and a few categories as shelves of logos; Categories is every category
 // as a tile. A category's shelf or tile opens all its channels, pushed on Live's stack. Nothing
 // plays until a tile, a row or Play is pressed, and each plays in Watch; a row's star stars or
-// unstars its channel and plays nothing. A "country" is the
-// provider's group, which can be a language or a label. Rows read actual now/next for at most 40 visible channels, with category fallback. Guide adds a separate Schedule action. While channels first load, still
-// rows hold the list's place; what loads or failed by provider is the status line at the bottom,
-// with Retry and Settings, over the channels already there.
+// unstars its channel and plays nothing. A "country" is the provider's group, which can be a
+// language or a label. Rows read actual now/next for at most 40 visible channels, with category
+// fallback. Guide is the programme grid (`GuideGrid`). While channels first load, still rows hold
+// the list's place; what loads or failed by provider is the status line at the bottom, with Retry
+// and Settings, over the channels already there.
 
 type Tab = "for-you" | "categories" | "all" | "guide";
 
@@ -243,6 +250,7 @@ function LiveDetail() {
           detail={shown.programme}
           origin="live"
           onBack={closeDetail}
+          back="Back to Guide"
         />
       </View>
     );
@@ -526,15 +534,24 @@ function Browse({ library }: { library: Library }) {
       <CategoryGrid key={key} categories={categories} chosen={region !== null} header={header} />
     );
   }
+  if (tab === "guide") {
+    return (
+      <GuideGrid
+        key={key}
+        library={library}
+        channels={region?.channels ?? library.channels}
+        scope={region?.name ?? ""}
+        header={header}
+      />
+    );
+  }
   return (
     <ChannelList
       key={key}
       library={library}
       channels={region?.channels ?? library.channels}
       header={header}
-      testID={tab === "guide" ? "live-guide" : "live-list"}
-      schedule={tab === "guide"}
-      column
+      testID="live-list"
     />
   );
 }
@@ -548,16 +565,11 @@ function ChannelList({
   channels,
   header,
   testID,
-  schedule = false,
-  column = false,
 }: {
   library: Library;
   channels: readonly Channel[];
   header: ReactNode;
   testID: string;
-  schedule?: boolean;
-  /** Whether it is Live's own list, which sits in the list column from the split width. */
-  column?: boolean;
 }) {
   const { fontScale } = useWindowDimensions();
   // The rows' height as ChannelRow lays them out, so getItemLayout places them where they draw.
@@ -566,8 +578,6 @@ function ChannelList({
   const inset = useDockInset();
   const playing = channelStatus(usePlayback().phase);
   const favourites = useFavouriteKeys();
-  const { split } = useListWidth();
-  const selected = useStore(detail)?.channel ?? null;
   const [top, setTop] = useState(0);
   const [visible, setVisible] = useState<readonly string[]>(() =>
     channels.slice(0, 12).map((channel) => channel.key),
@@ -583,19 +593,12 @@ function ChannelList({
     [],
   );
   const read = useGuideListings(visible, library);
-  const messages = [
-    ...new Set(
-      visible
-        .map((key) => guideMessage(read.snapshot.get(library.byKey.get(key)?.subscriptionId ?? "")))
-        .filter(Boolean),
-    ),
-  ];
   const onPress = useCallback((channel: Channel) => watch(library, channel), [library]);
   // Rows draw again when a star or what plays changes.
   const playingNow = playing && `${playing.id} ${playing.word}`;
   const extraData = useMemo(
-    () => ({ favourites, playingNow, read: read.value, selected }),
-    [favourites, playingNow, read.value, selected],
+    () => ({ favourites, playingNow, read: read.value }),
+    [favourites, playingNow, read.value],
   );
   return (
     <FlatList
@@ -604,23 +607,7 @@ function ChannelList({
       keyExtractor={(channel) => channel.key}
       extraData={extraData}
       ListHeaderComponent={
-        <View onLayout={(event) => setTop(event.nativeEvent.layout.height)}>
-          {header}
-          {schedule ? (
-            <>
-              {messages.map((message) => (
-                <Text key={message} style={styles.note}>
-                  {message}
-                </Text>
-              ))}
-              {messages.includes("Guide unavailable") ? (
-                <View style={styles.settingsInset}>
-                  <TextButton label="Provider settings" onPress={openSettings} />
-                </View>
-              ) : null}
-            </>
-          ) : null}
-        </View>
+        <View onLayout={(event) => setTop(event.nativeEvent.layout.height)}>{header}</View>
       }
       renderItem={({ item }) => {
         const provider = item.ambiguous ? library.labels.get(item.subscriptionId) : undefined;
@@ -658,8 +645,6 @@ function ChannelList({
                 />
               </>
             }
-            onSchedule={schedule ? (channel) => showSchedule(split, channel) : undefined}
-            selected={column && split ? schedule && item.key === selected : undefined}
           />
         );
       }}
@@ -676,6 +661,391 @@ function ChannelList({
     />
   );
 }
+
+/** How wide the Guide grid's channel names are beside their programmes, below large text. */
+const NAMES = 104;
+const MINUTE = 60_000;
+
+/**
+ * Where the Guide grid is: its day (null follows Today), its window's start from that day's first
+ * instant (null follows now), and the programme opened from it last, which stays marked. Kept
+ * while the window resizes or folds, a programme shows over or beside the grid, and Live shows
+ * another tab.
+ */
+const gridPlace = store<{
+  readonly day: number | null;
+  readonly offset: number | null;
+  readonly chosen: { readonly channel: string; readonly start: number } | null;
+}>({ day: null, offset: null, chosen: null });
+
+/** Each country's Guide grid scroll offset ("" for every country), as it was left. */
+const gridScroll = new Map<string, number>();
+
+/**
+ * The Guide grid's window: `span` minutes of its day from where it was left or, following now,
+ * from a quarter span before it, on the quarter hour. Clamped to the day, which a clock change
+ * can make 23 or 25 hours long.
+ */
+function gridWindow(
+  place: { day: number | null; offset: number | null },
+  now: number,
+  span: number,
+) {
+  const day = localDay(place.day ?? now);
+  const length = span * MINUTE;
+  const latest = day.until - day.from - length;
+  const around = Math.floor((now - day.from - length / 4) / (15 * MINUTE)) * 15 * MINUTE;
+  const offset = Math.max(0, Math.min(latest, place.offset ?? (place.day === null ? around : 0)));
+  return { day, offset, latest, from: day.from + offset, until: day.from + offset + length };
+}
+
+/**
+ * Live's Guide: channels as rows of one virtualised list, each its programmes across a window of
+ * two hours (one at large text, where the name goes above them), with the day and Earlier and
+ * Later to move it rather than scrolling sideways. A channel's name opens its Schedule and a
+ * programme opens it, beside the grid from the split width. Only the rows in view are read
+ * (`useGuideGrid`).
+ */
+function GuideGrid({
+  library,
+  channels,
+  scope,
+  header,
+}: {
+  library: Library;
+  channels: readonly Channel[];
+  /** The country shown, which keeps its own scroll position. */
+  scope: string;
+  header: ReactNode;
+}) {
+  const { fontScale } = useWindowDimensions();
+  const large = largeText(fontScale);
+  const { split, width } = useListWidth();
+  const strip = large ? width - 16 : width - NAMES;
+  const lineHeight = useRowHeight();
+  const height = large ? 44 + lineHeight : lineHeight;
+  const inset = useDockInset();
+  const place = useStore(gridPlace);
+  const shown = useStore(detail);
+  const scheduled = split && shown && !shown.alone ? shown.channel : null;
+  const [top, setTop] = useState(0);
+  const [visible, setVisible] = useState<readonly string[]>(() =>
+    channels.slice(0, GRID_ROWS).map((channel) => channel.key),
+  );
+  const onVisible = useCallback(
+    ({ viewableItems }: { viewableItems: { item: Channel; isViewable: boolean }[] }) => {
+      const keys = viewableItems.filter((item) => item.isViewable).map((item) => item.item.key);
+      setVisible((before) => (before.join("\n") === keys.join("\n") ? before : keys));
+    },
+    [],
+  );
+  const span = large ? 60 : 120;
+  // The grid draws again on the owner's minute tick, which moves now and a window following it.
+  const now = Date.now();
+  const { day, offset, latest, from, until } = gridWindow(place, now, span);
+  const read = useGuideGrid(visible, day, library);
+  const today = localDay(now).from;
+  const step = (span / 2) * MINUTE;
+  const move = (next: { day: number | null; offset: number | null }) =>
+    gridPlace.set((current) => ({ ...current, ...next }));
+  const messages = [
+    ...new Set(
+      visible
+        .map((key) => guideMessage(read.snapshot.get(library.byKey.get(key)?.subscriptionId ?? "")))
+        .filter(Boolean),
+    ),
+  ];
+  const onProgramme = useCallback(
+    (channel: string, programme: ScheduleItem) => {
+      gridPlace.set((current) => ({ ...current, chosen: { channel, start: programme.start } }));
+      showProgramme(split, channel, programme.detail);
+    },
+    [split],
+  );
+  const onSchedule = useCallback((channel: Channel) => showSchedule(split, channel), [split]);
+  // Rows draw again as the window, the day read, the mark or the width change.
+  const extraData = useMemo(
+    () => ({ rows: read.rows, from, until, now, chosen: place.chosen, scheduled, strip, split }),
+    [read.rows, from, until, now, place.chosen, scheduled, strip, split],
+  );
+  const saved = gridScroll.get(scope);
+  return (
+    <FlatList
+      style={styles.screen}
+      data={channels}
+      keyExtractor={(channel) => channel.key}
+      extraData={extraData}
+      ListHeaderComponent={
+        <View onLayout={(event) => setTop(event.nativeEvent.layout.height)}>
+          {header}
+          {messages.map((message) => (
+            <Text key={message} style={styles.note}>
+              {message}
+            </Text>
+          ))}
+          {messages.includes("Guide unavailable") ? (
+            <View style={styles.settingsInset}>
+              <TextButton label="Provider settings" onPress={openSettings} />
+            </View>
+          ) : null}
+          <View style={styles.moves}>
+            <TextButton
+              label="Previous day"
+              onPress={() => move({ day: localDay(day.from, -1).from, offset })}
+            />
+            <Text accessibilityRole="header" style={styles.day}>
+              {day.from === today
+                ? "Today"
+                : new Date(day.from).toLocaleDateString(undefined, {
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                  })}
+            </Text>
+            <TextButton
+              label="Next day"
+              onPress={() => move({ day: localDay(day.from, 1).from, offset })}
+            />
+          </View>
+          <View style={styles.moves}>
+            <TextButton
+              label="Earlier"
+              disabled={offset <= 0}
+              onPress={() => move({ day: place.day, offset: offset - step })}
+            />
+            {place.day !== null || place.offset !== null ? (
+              <TextButton label="Now" onPress={() => move({ day: null, offset: null })} />
+            ) : null}
+            <TextButton
+              label="Later"
+              disabled={offset >= latest}
+              onPress={() => move({ day: place.day, offset: offset + step })}
+            />
+          </View>
+          <TimeAxis from={from} until={until} now={now} strip={strip} large={large} />
+        </View>
+      }
+      renderItem={({ item }) => {
+        const programmes = read.rows.get(item.key);
+        const said = guideMessage(read.snapshot.get(item.subscriptionId));
+        const reason = said === "Guide may be out of date" ? null : said;
+        return (
+          <GridRow
+            channel={item}
+            provider={item.ambiguous ? library.labels.get(item.subscriptionId) : undefined}
+            programmes={programmes}
+            // A day read with nothing in it says why; a window between programmes is a gap.
+            message={
+              programmes?.length
+                ? null
+                : programmes
+                  ? (reason ?? "No programme information")
+                  : reason
+            }
+            from={from}
+            until={until}
+            now={now}
+            strip={strip}
+            height={height}
+            large={large}
+            chosen={place.chosen?.channel === item.key ? place.chosen.start : null}
+            scheduled={item.key === scheduled}
+            onSchedule={onSchedule}
+            onProgramme={onProgramme}
+          />
+        );
+      }}
+      getItemLayout={(_, index) => ({ length: height, offset: top + height * index, index })}
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={{ paddingBottom: inset }}
+      {...(saved === undefined ? {} : { contentOffset: { x: 0, y: saved } })}
+      onScroll={(event) => gridScroll.set(scope, event.nativeEvent.contentOffset.y)}
+      scrollEventThrottle={100}
+      onViewableItemsChanged={onVisible}
+      viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
+      initialNumToRender={12}
+      maxToRenderPerBatch={16}
+      windowSize={9}
+      removeClippedSubviews
+      testID="live-guide"
+    />
+  );
+}
+
+/** Where `at` falls across a strip `strip` points wide showing `from` to `until`. */
+const across = (at: number, from: number, until: number, strip: number) =>
+  ((at - from) / (until - from)) * strip;
+
+/**
+ * The half hours over the grid's programmes, and now in white where it falls. Hidden from
+ * VoiceOver, which reads each programme's own times.
+ */
+function TimeAxis({
+  from,
+  until,
+  now,
+  strip,
+  large,
+}: {
+  from: number;
+  until: number;
+  now: number;
+  strip: number;
+  large: boolean;
+}) {
+  const half = 30 * MINUTE;
+  const day = localDay(from).from;
+  const airing = now >= from && now < until ? across(now, from, until, strip) : null;
+  const marks: number[] = [];
+  for (let at = day + Math.ceil((from - day) / half) * half; at < until; at += half) marks.push(at);
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.axis, { paddingLeft: large ? 16 : NAMES }]}
+    >
+      {marks.map((at) => {
+        const x = across(at, from, until, strip);
+        // A half hour under now's own label, or too near the end to fit, is left out.
+        return (airing !== null && Math.abs(x - airing) < 48) || x > strip - 44 ? null : (
+          <Text key={at} style={[styles.mark, { left: x + 6 }]}>
+            {programmeTime(at)}
+          </Text>
+        );
+      })}
+      {airing === null ? null : (
+        <Text style={[styles.mark, styles.nowMark, { left: Math.max(0, airing - 18) }]}>
+          {programmeTime(now)}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+/**
+ * One channel of the Guide grid: its name, with its provider where another's channel shares it,
+ * which opens its Schedule, and its programmes in the window, each a button VoiceOver reads with
+ * the channel, times, title and whether it is on now.
+ * Past programmes are grey, the one on now bold, and now a white line across.
+ */
+const GridRow = memo(function GridRow({
+  channel,
+  provider,
+  programmes,
+  message,
+  from,
+  until,
+  now,
+  strip,
+  height,
+  large,
+  chosen,
+  scheduled,
+  onSchedule,
+  onProgramme,
+}: {
+  channel: Channel;
+  provider: string | undefined;
+  /** The day's programmes, or undefined until they are read. */
+  programmes: readonly ScheduleItem[] | undefined;
+  message: string | null;
+  from: number;
+  until: number;
+  now: number;
+  strip: number;
+  height: number;
+  large: boolean;
+  /** The start of this row's programme opened last, if it is this row's. */
+  chosen: number | null;
+  /** Whether the channel's Schedule shows in the detail column. */
+  scheduled: boolean;
+  onSchedule: (channel: Channel) => void;
+  onProgramme: (channel: string, programme: ScheduleItem) => void;
+}) {
+  const inWindow = (programmes ?? []).filter((each) => each.stop > from && each.start < until);
+  return (
+    <View style={[styles.guideRow, { height }, large && styles.stackedRow]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={[`Schedule for ${channel.title}`, provider, scheduled && "shown"]
+          .filter(Boolean)
+          .join(", ")}
+        onPress={() => onSchedule(channel)}
+        style={({ pressed }) => [
+          large ? styles.nameLine : styles.name,
+          scheduled && styles.scheduled,
+          pressed && styles.pressed,
+        ]}
+        testID={`schedule-${channel.key}`}
+      >
+        <Text style={styles.nameText} numberOfLines={large || provider ? 1 : 2}>
+          {channel.title}
+        </Text>
+        {provider ? (
+          <Text style={styles.provider} numberOfLines={1}>
+            {provider}
+          </Text>
+        ) : null}
+      </Pressable>
+      <View style={[styles.strip, { width: strip }, large && styles.stackedStrip]}>
+        {inWindow.map((programme) => {
+          const left = across(Math.max(programme.start, from), from, until, strip);
+          const span = across(Math.min(programme.stop, until), from, until, strip) - left;
+          const airing = programme.start <= now && programme.stop > now;
+          const time = programmeRange(programme);
+          return (
+            <Pressable
+              key={programme.start}
+              accessibilityRole="button"
+              accessibilityLabel={[channel.title, provider, time, programme.title, airing && "now"]
+                .filter(Boolean)
+                .join(", ")}
+              accessibilityState={{ selected: chosen === programme.start }}
+              onPress={() => onProgramme(channel.key, programme)}
+              style={({ pressed }) => [
+                styles.cell,
+                { left, width: span },
+                chosen === programme.start && styles.chosen,
+                pressed && styles.pressed,
+              ]}
+              testID={`grid-${channel.key}-${programme.start}`}
+            >
+              {/* Too narrow for words, the cell is still a button with its whole label. */}
+              {span >= 40 ? (
+                <>
+                  <Text
+                    style={[
+                      styles.cellTitle,
+                      airing && styles.airing,
+                      programme.stop <= now && styles.past,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {programme.title}
+                  </Text>
+                  <Text style={styles.cellTime} numberOfLines={1}>
+                    {time}
+                  </Text>
+                </>
+              ) : null}
+            </Pressable>
+          );
+        })}
+        {message ? (
+          <Text style={styles.rowMessage} numberOfLines={1}>
+            {message}
+          </Text>
+        ) : null}
+        {now >= from && now < until ? (
+          <View
+            pointerEvents="none"
+            style={[styles.nowLine, { left: across(now, from, until, strip) }]}
+          />
+        ) : null}
+      </View>
+    </View>
+  );
+});
 
 /**
  * For you: the channel watched last with Play, the recent channels, then the first categories as
@@ -1052,4 +1422,48 @@ const styles = StyleSheet.create({
   gridHead: { marginHorizontal: -16, marginBottom: 4 },
   gridRow: { gap: 10 },
   logos: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
+  moves: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    alignItems: "center",
+    columnGap: 16,
+    marginHorizontal: 16,
+  },
+  day: { color: colors.text, fontSize: 17 },
+  axis: {
+    height: 24,
+    borderBottomColor: colors.line,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  mark: { position: "absolute", top: 3, color: colors.dim, fontSize: 13 },
+  nowMark: { color: colors.text, fontWeight: "600" },
+  guideRow: {
+    flexDirection: "row",
+    borderBottomColor: colors.line,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  stackedRow: { flexDirection: "column" },
+  name: { width: NAMES, paddingLeft: 16, paddingRight: 4, justifyContent: "center" },
+  nameLine: { minHeight: 44, paddingHorizontal: 16, justifyContent: "center" },
+  scheduled: { backgroundColor: colors.fill },
+  nameText: { color: colors.text, fontSize: 15 },
+  strip: { flex: 1, overflow: "hidden", justifyContent: "center" },
+  stackedStrip: { marginLeft: 16 },
+  cell: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    paddingHorizontal: 8,
+    justifyContent: "center",
+    borderLeftColor: colors.line,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+  },
+  chosen: { backgroundColor: colors.fill, borderRadius: 6 },
+  cellTitle: { color: colors.text, fontSize: 15 },
+  airing: { fontWeight: "600" },
+  past: { color: colors.dim },
+  cellTime: { color: colors.dim, fontSize: 13, marginTop: 2 },
+  rowMessage: { color: colors.dim, fontSize: 15, marginHorizontal: 8 },
+  nowLine: { position: "absolute", top: 0, bottom: 0, width: 2, backgroundColor: colors.text },
 });

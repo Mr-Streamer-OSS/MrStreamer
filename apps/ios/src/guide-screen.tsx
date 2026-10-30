@@ -220,18 +220,21 @@ export function ProgrammeScreen({ origin }: { origin: GuideOrigin }) {
 
 /**
  * One programme of a channel's Schedule, by the owner's detail token: a pushed screen, or Live's
- * detail column, which passes `onBack` for the Back a pushed screen has in its top bar.
+ * detail column, which passes `onBack` for the Back a pushed screen has in its top bar, named
+ * `back` for where it returns.
  */
 export function Programme({
   channel: key,
   detail,
   origin,
   onBack,
+  back = "Back to Schedule",
 }: {
   channel: string;
   detail: string;
   origin: GuideOrigin;
   onBack?: () => void;
+  back?: string;
 }) {
   const catalogue = useCatalogue();
   const content = useContent(onBack !== undefined);
@@ -250,7 +253,7 @@ export function Programme({
     return (
       <Message
         text="Channel unavailable"
-        {...(onBack ? { action: { label: "Back to Schedule", onPress: onBack } } : {})}
+        {...(onBack ? { action: { label: back, onPress: onBack } } : {})}
       />
     );
   }
@@ -261,7 +264,7 @@ export function Programme({
       contentContainerStyle={content}
       testID="guide-programme"
     >
-      {onBack ? <TextButton label="Back to Schedule" onPress={onBack} /> : null}
+      {onBack ? <TextButton label={back} onPress={onBack} /> : null}
       <Text ref={heading} style={styles.channel}>
         {channel.title}
       </Text>
