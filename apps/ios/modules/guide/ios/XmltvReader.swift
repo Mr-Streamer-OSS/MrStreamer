@@ -174,7 +174,8 @@ func guideTime(_ raw: String?) -> Double? {
 
 /** Whether `text` holds any of `passwords`, as written or decoded as percent or form encoding
     ("+" a space) spells it, up to four more decodings, as login-safety.ts holds() reads saved
-    text. Text that still decodes after the last counts as holding one. */
+    text for passwords; a playlist's uncertain values don't reach it. Text that still decodes
+    after the last counts as holding one. */
 func guideHolds(_ text: String, _ passwords: [String]) -> Bool {
   guard !passwords.isEmpty else { return false }
   var forms: Set<String> = [text]
@@ -302,7 +303,7 @@ final class XmltvReader: NSObject, XMLParserDelegate {
       if stack == ["tv", "programme", "title"], title == nil { title = String(String.UnicodeScalarView(normalized.unicodeScalars.prefix(300))) }
       if stack == ["tv", "programme", "desc"], descriptionText == nil { descriptionText = String(String.UnicodeScalarView(normalized.unicodeScalars.prefix(2000))) }
       if elementName == "programme", let id = channel, id.unicodeScalars.count <= 128, !id.isEmpty, let start = start, let title = title, !title.isEmpty, stop == nil || stop! - start >= 60000 {
-        // Same prose policy as login-safety.ts holds(): any password anywhere, as written or
+        // login-safety.ts holds()'s password policy: any password anywhere, as written or
         // percent/form decoded, refuses persistence. Username substrings in ordinary text are
         // allowed. No artwork/URL fields are saved.
         let fields = [id, title, descriptionText ?? ""]

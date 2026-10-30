@@ -371,8 +371,8 @@ function shed(keep: string | null, pending: boolean) {
 /**
  * The file's text for `saved`, a slice of rows at a time: its rows with the fields the app reads,
  * artwork addresses that may carry the login as none. False when any other text of a row holds
- * the password, as nothing then says what else of the login a row carries; their numbers and
- * field names aren't text.
+ * the password or an uncertain value whole, as nothing then says what else of the login a row
+ * carries; their numbers and field names aren't text.
  */
 function* textOf(id: string, saved: Saved, login: SourceLogin): Steps<string | false> {
   const known = loginFrom(login);

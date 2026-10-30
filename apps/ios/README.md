@@ -267,13 +267,13 @@ Each responsibility has one owner, a plain module with a store the screens read:
 - `src/catalogue-cache.ts`: each subscription's last channel list and movie and series lists, in
   Caches, which backups leave out. A launch shows lists saved less than 12 hours ago as loaded and
   asks the provider for none, though the login is still checked; older ones show while they load
-  again, and stay when that fails. Reload, Try again and an add always ask. `account.ts` decides
-  all of that; this module only keeps the files, one operation at a time per list. A copy holds
-  the fields the app reads, with artwork addresses that could carry the login as none, and isn't
-  written when other text holds the password. Every row is checked on reading. A list may take
-  64 MiB and 250,000 rows, every list together 256 MiB, the oldest movie and series lists going
-  first. A new password or a removal deletes a subscription's copies first, and no write of the
-  earlier login is saved after that.
+  again, and stay when that fails. Reload, Try again and an add always ask. `account.ts` decides all
+  of that; this module only keeps the files, one operation at a time per list. A copy holds the
+  fields the app reads, with artwork addresses that could carry the login as none, and isn't written
+  when other text holds the password or a playlist link's uncertain value. Every row is checked on
+  reading. A list may take 64 MiB and 250,000 rows, every list together 256 MiB, the oldest movie
+  and series lists going first. A new password or a removal deletes a subscription's copies first,
+  and no write of the earlier login is saved after that.
 - `src/startup.ts`: whether the app is still opening. A launch opens once every saved list has
   been read and the channels and the movie and series collections are worked out of those that
   show. A missing, unreadable or doubtful copy only ends that list's read, and a password the
@@ -315,18 +315,17 @@ Each responsibility has one owner, a plain module with a store the screens read:
   Erase-history removal forgets the provider's picks or retains its erasing marker for launch retry;
   keeping history keeps the picks. Quality persistence, recovery timing and PiP/AirPlay through
   reconnect still require exact native and physical acceptance.
-- `src/details-cache.ts`: title and season details opened, in Caches/details. Each provider's
-  facts of a title sit under its subscription; TMDB's about of a title and of a season are shared,
-  as its list metadata is. `titles.ts` decides when one shows; this module keeps the files, one
-  operation at a time per subscription. A record holds the fields the app reads, artwork addresses
-  that could carry the login as none, and isn't written when other text holds the password. A
-  record may take 8 MiB, every record together 64 MiB and 2,048 records, counted in the UTF-8
-  bytes written with what writes under way have reserved, and a write left halfway that the disk
-  won't delete counts too; the least recently written go first, up to 64 for one write, which
-  isn't made when they don't make room. One older than 182 days isn't
-  read. A new password or a removal deletes a subscription's records with its lists, and no write
-  of the earlier login is saved after that. Launch reads no record: the budget is counted at the
-  first write.
+- `src/details-cache.ts`: title and season details opened, in Caches/details. Each provider's facts
+  of a title sit under its subscription; TMDB's about of a title and of a season are shared, as its
+  list metadata is. `titles.ts` decides when one shows; this module keeps the files, one operation
+  at a time per subscription. A record holds the fields the app reads, artwork addresses that could
+  carry the login as none, and isn't written when other text holds the password or a playlist link's
+  uncertain value. A record may take 8 MiB, every record together 64 MiB and 2,048 records, counted
+  in the UTF-8 bytes written with what writes under way have reserved, and a write left halfway that
+  the disk won't delete counts too; the least recently written go first, up to 64 for one write,
+  which isn't made when they don't make room. One older than 182 days isn't read. A new password or
+  a removal deletes a subscription's records with its lists, and no write of the earlier login is
+  saved after that. Launch reads no record: the budget is counted at the first write.
 - `src/artwork-cache.ts`: channel logos and title pictures as files in Caches, so they show
   again after a relaunch and offline. React Native's Image only gets a file: its own loader would
   fetch through iOS's shared URL cache, which keeps answers on disk under their address. Pictures
@@ -356,7 +355,10 @@ Each responsibility has one owner, a plain module with a store the screens read:
 - `src/playlist.ts`: a playlist link as a provider. It reads the playlist as it arrives, within
   64 MB and 100,000 entries, and imports it with core's parsing and group mapping, as the desktop
   does. The link stays in it and the Keychain; its secrets, and query values long enough to be a
-  token, are the login the failures and saved copies keep out, as written or encoded.
+  token, are the login the failures and saved copies keep out, as written or encoded. Every other
+  query value but `type` and `output` is uncertain: saved copies hold none where no name's
+  character runs on from it (core's `whole`), however short, so a list or file whose text holds
+  one, as `en` from `lang=en`, isn't saved. The native guide gets the secrets only.
 - `src/playlist-groups.tsx`: a playlist's groups from Settings: what it holds, each group's pick of
   Live TV, Movies, Series or Skip, and the entries left out with why.
 - `src/sources.ts`: each subscription's provider adapter and login, apart from every store, so no
