@@ -6,8 +6,9 @@
 // file close, and nothing takes it back: a play that would need it fails instead, and downloads
 // of its subscription wait. It is admitted only while fewer than the account's limit are held
 // here, counting what plays, a download's lease and other recordings, so no owner is stopped for
-// it and the app never opens more connections than the account allows. Other devices on the same
-// account aren't seen.
+// it and the app never opens more connections than the account allows. Admission and each play
+// read the account's limit as the app last heard it from the provider, so a plan rechecked
+// meanwhile counts. Other devices on the same account aren't seen.
 import type { ConnectionUse } from "@mrstreamer/contracts/recordings";
 import { t } from "@mrstreamer/core/i18n";
 import * as Context from "effect/Context";
@@ -52,12 +53,12 @@ export class PlaybackCoordination extends Context.Service<
     opened(sessionId: string, subscriptionId: string | null): void;
     closed(sessionId: string): void;
     /**
-     * Admits a recording on one of the subscription's `limit` connections, or answers what holds
-     * them all, admitting nothing.
+     * Admits a recording on one of the subscription's connections, or answers what holds them all,
+     * admitting nothing. `limit` reads the account's latest known limit, which a play is held to too.
      */
     hold(
       subscriptionId: string,
-      limit: number,
+      limit: Effect.Effect<number>,
     ): Effect.Effect<
       | { readonly kind: "held"; readonly held: Held }
       | { readonly kind: "busy"; readonly uses: readonly ConnectionUse[] }
@@ -79,10 +80,10 @@ export class PlaybackCoordination extends Context.Service<
         string,
         { readonly controller: AbortController; readonly released: Promise<void> }
       >();
-      /** Each admitted recording's subscription and the limit it was admitted under. */
+      /** Each admitted recording's subscription and what reads its account's current limit. */
       const recordings = new Map<
         Held,
-        { readonly subscriptionId: string; readonly limit: number }
+        { readonly subscriptionId: string; readonly limit: Effect.Effect<number> }
       >();
       const recordingsOf = (subscriptionId: string) =>
         [...recordings.values()].filter((each) => each.subscriptionId === subscriptionId);
@@ -109,8 +110,7 @@ export class PlaybackCoordination extends Context.Service<
           Effect.gen(function* () {
             // What plays closes before it opens again, so only recordings count against it.
             const held = recordingsOf(subscriptionId);
-            if (held.length > 0 && held.length >= Math.min(...held.map((each) => each.limit)))
-              return yield* recorded();
+            if (held[0] && held.length >= (yield* held[0].limit)) return yield* recorded();
             const given = yield* Effect.promise(async () => {
               const lease = lent.get(subscriptionId);
               if (!lease) return true;
@@ -152,11 +152,11 @@ export class PlaybackCoordination extends Context.Service<
         closed: (sessionId: string) => {
           if (sessions.delete(sessionId)) PubSub.publishUnsafe(changed, undefined);
         },
-        hold: (subscriptionId: string, limit: number) =>
+        hold: (subscriptionId: string, limit: Effect.Effect<number>) =>
           one(
-            Effect.sync(() => {
+            Effect.gen(function* () {
               const uses = usesOf(subscriptionId);
-              if (uses.length >= limit) return { kind: "busy" as const, uses };
+              if (uses.length >= (yield* limit)) return { kind: "busy" as const, uses };
               const held: Held = {
                 release: () => {
                   if (recordings.delete(held)) PubSub.publishUnsafe(changed, undefined);

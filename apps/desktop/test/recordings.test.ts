@@ -191,6 +191,56 @@ describe.skipIf(!hasTools)("recordings", () => {
     ]);
   });
 
+  it.each([
+    { admitted: 1, now: 2, watch: "opens" },
+    { admitted: 2, now: 1, watch: "is refused" },
+  ])(
+    "holds Watch to the account's current limit: admitted under $admitted, now $now, Watch $watch",
+    async ({ admitted, now, watch }) => {
+      // The provider takes two; its login answer says what `limit` says, as a changed plan would.
+      const provider = await fakeProvider({ live: true, maxConnections: 2, slotReleaseMs: 0 });
+      let limit = admitted;
+      const host = createServer(async (request, response) => {
+        const url = new URL(request.url ?? "/", provider.url);
+        if (url.pathname !== "/player_api.php" || url.searchParams.has("action")) {
+          response.writeHead(307, { Location: url.href }).end();
+          return;
+        }
+        const answer = (await (await fetch(url)).json()) as { user_info: object };
+        const user_info = { ...answer.user_info, max_connections: String(limit) };
+        response
+          .writeHead(200, { "Content-Type": "application/json" })
+          .end(JSON.stringify({ ...answer, user_info }));
+      });
+      await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
+      onTestFinished(() => {
+        host.closeAllConnections();
+        host.close();
+      });
+      const address = host.address();
+      if (!address || typeof address === "string") throw new Error("No address");
+      const { subscriptions, library, recordings, playback } = await app(await tempDir());
+      const { id: subscriptionId } = await subscriptions.add({
+        ...demoLogin(provider),
+        server: `http://127.0.0.1:${address.port}`,
+      });
+      await library.refresh(subscriptionId);
+      const found = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+      const channel = { subscriptionId, id: String(found.streamId) };
+      expect((await recordings.start(channel, Date.now() + 60_000, {})).kind).toBe("started");
+
+      limit = now;
+      await subscriptions.recheck(subscriptionId);
+      expect(await recordings.connections(subscriptionId)).toEqual({
+        limit: now,
+        uses: ["recording"],
+      });
+      const opening = playback.open(channel, ["h264", "aac"]);
+      if (watch === "opens") await expect(opening).resolves.toBeTruthy();
+      else await expect(opening).rejects.toMatchObject({ error: { kind: "recording-holds" } });
+    },
+  );
+
   it("stops once its request ended and its file closed, keeping what it captured", async () => {
     const { provider, dataDir, channel, subscriptionId, recordings } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});

@@ -256,12 +256,11 @@ function make(deps: RecordingsDeps) {
         );
         const programme = (yield* guide.listings([ownedId(listed)]))[ownedKey(listed)]?.now;
         if (options.stopPlaying) yield* playback.closeOf(subscriptionId);
-        const limit = yield* limitOf(subscriptionId);
-        const admitted = yield* coordination.hold(subscriptionId, limit);
+        const admitted = yield* coordination.hold(subscriptionId, limitOf(subscriptionId));
         if (admitted.kind === "busy")
           return {
             kind: "busy",
-            connections: { limit, uses: admitted.uses },
+            connections: { limit: yield* limitOf(subscriptionId), uses: admitted.uses },
           } satisfies RecordingStart;
         const { held } = admitted;
 
