@@ -274,6 +274,21 @@ describe("a playlist subscription", () => {
     expect(live).not.toContain("u=tv");
   });
 
+  it("keeps a user long enough to be a token out of saved artwork, within a longer text too", async () => {
+    const user = "a8f3c0d2e7b14a6c55aa99";
+    host.serve([
+      `#EXTINF:-1 tvg-logo="${host.origin}/p/x${user}y.png" group-title="News",News One`,
+      `${host.origin}/live/one.ts`,
+    ]);
+    const app = await launch();
+    const id = (await app.add({ server: `${host.origin}/list.m3u?user=${user}`, ...PLAYLIST }))!;
+    await until(
+      () => memory.files.get(`/cache/catalogues/${id}.live.json`) !== undefined,
+      "the saved channels",
+    );
+    expect(memory.files.get(`/cache/catalogues/${id}.live.json`)).not.toContain(user);
+  });
+
   it("keeps a token under a name of its own, and a secret encoded as the link has it, out of saved lists", async () => {
     // A long value under a name the app doesn't know is taken for a token; `output=ts` is a setting.
     const signature = "f3a9c0d2e7b14a6c55";

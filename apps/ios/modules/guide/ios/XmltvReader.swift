@@ -226,7 +226,8 @@ final class XmltvReader: NSObject, XMLParserDelegate {
   private let index: GuideIndex
   private let job: GuideJob
   private let disk: GuideDisk
-  /// Every login part after the username: an account's password, or each secret of a playlist link.
+  /// Every login part after the username: an account's password, or each secret of a playlist link
+  /// but a short user it names.
   private let passwords: [String]
   private var stack = [String]()
   private var channel: String?

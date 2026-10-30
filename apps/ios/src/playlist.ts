@@ -383,9 +383,10 @@ const USER_NAMES: ReadonlySet<string> = new Set(["username", "user", "login"]);
 /**
  * What of a playlist link no saved copy may hold, as a Source's `[username, ...passwords]`: the
  * user it names, found only as a whole text as an account's username is, and as passwords the
- * rest of its login (`playlistLogin`) and each other query value long enough to be a token under
- * a name of the publisher's own, as a `signature`. Shorter ones, as `output=ts` or `hd=1`, would
- * be found in ordinary names, and stay out of it.
+ * rest of its login (`playlistLogin`), that user too when it is long enough to be a token, and
+ * each other query value that long, a token under a name of the publisher's own, as a
+ * `signature`. Shorter ones, as `output=ts` or `hd=1`, would be found in ordinary names, and stay
+ * out of it.
  */
 export function playlistSecrets(link: string): readonly string[] {
   const url = new URL(link);
@@ -397,7 +398,7 @@ export function playlistSecrets(link: string): readonly string[] {
       ),
     ].find(Boolean) ?? "";
   const { secrets, uncertain = [] } = playlistLogin(link);
-  const at = secrets.indexOf(username);
+  const at = username.length < TOKEN_LENGTH ? secrets.indexOf(username) : -1;
   return [
     username,
     ...(at === -1 ? secrets : secrets.toSpliced(at, 1)),
