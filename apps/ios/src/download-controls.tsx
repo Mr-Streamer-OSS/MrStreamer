@@ -85,6 +85,12 @@ export function transferred(download: Download): number | null {
 
 const percentOf = (done: number) => formatPercent(Math.floor(done * 100) / 100);
 
+/** What arrived, of its size once known. */
+const amount = (received: number, size: number | null) =>
+  size
+    ? t("{received} of {size}", { received: formatBytes(received), size: formatBytes(size) })
+    : formatBytes(received);
+
 /** How a download stands, as Downloads says it under the facts; empty for a copy. */
 export function statusLine(download: Download): string {
   const { status } = download;
@@ -96,16 +102,9 @@ export function statusLine(download: Download): string {
         ? t("Waiting while {subscription} plays", { subscription: download.subscription.name })
         : t("Waiting for playback");
     case "paused":
-      if (status.received === 0) return t("Paused");
-      return [
-        t("Paused"),
-        status.size
-          ? t("{received} of {size}", {
-              received: formatBytes(status.received),
-              size: formatBytes(status.size),
-            })
-          : formatBytes(status.received),
-      ].join(" · ");
+      return status.received > 0
+        ? `${t("Paused")} · ${amount(status.received, status.size)}`
+        : t("Paused");
     case "transferring": {
       const done = transferred(download);
       if (done === null || status.size === null) {
@@ -115,10 +114,7 @@ export function statusLine(download: Download): string {
         status.rate && status.rate > 0 ? (status.size - status.received) / status.rate : null;
       return [
         percentOf(done),
-        t("{received} of {size}", {
-          received: formatBytes(status.received),
-          size: formatBytes(status.size),
-        }),
+        amount(status.received, status.size),
         left !== null ? minutesLeft(Math.max(1, Math.round(left / 60))) : null,
         status.restarted ? t("started again") : null,
       ]

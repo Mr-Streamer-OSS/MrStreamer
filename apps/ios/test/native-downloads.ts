@@ -9,10 +9,10 @@ import { native } from "./native-files.ts";
 //
 // - One pump claims the slot before anything else, for the first runnable authorization in the
 //   queue's order whose source is enabled under its generation, has its anchor and request item,
-//   isn't held by the viewer or a stream lease and isn't fenced; the task occupies the slot through its earliest-begin wait, a
-//   second after its source's last request ended (or launch, or an unknown request's end), until
-//   it ended and its receipt is written. Then the next goes, whether the app's JavaScript runs or
-//   not: the background handoff.
+//   isn't held by the viewer or a stream lease and isn't fenced; the task occupies the slot
+//   through its earliest-begin wait, a second after its source's last request ended (or launch,
+//   or an unknown request's end), until it ended and its receipt is written. Then the next goes,
+//   whether the app's JavaScript runs or not: the background handoff.
 // - Every ending is a receipt under the next sequence, kept until acknowledged. A pause keeps the
 //   same authorization runnable; a removal ends it cancelled; a revoke ends its source's with a
 //   refresh; a resume the server refuses starts once more from nothing, with no receipt, after

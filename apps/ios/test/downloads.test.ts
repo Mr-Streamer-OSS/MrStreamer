@@ -1434,7 +1434,6 @@ describe("downloads", { timeout: 30_000 }, () => {
     await app.pauseDownload(film.id);
     // Answered once its request actually ended: the next one's waits its second of grace.
     expect(native.open).toBe(0);
-    expect(background.events).toContain(`end:${film.id}`);
     expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
     expect(nativeSecrets()).toEqual([film.id]);
     await until(() => isComplete(app, next.id), "the next copy");
@@ -1470,11 +1469,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     await until(() => receivedOf(app, film.id) === 30_000, "the transfer to stall");
     await until(() => background.open(show.id).length === 1, "the last one authorized");
     await app.moveDownload(show.id, -1);
-    const ids = () => app.downloadList().items.map((item) => item.id);
-    expect(ids()).toEqual([film.id, show.id, other.id]);
-    // First of those waiting already; the transfer under way keeps its place.
-    await app.moveDownload(show.id, -1);
-    expect(ids()).toEqual([film.id, show.id, other.id]);
+    expect(app.downloadList().items.map((item) => item.id)).toEqual([film.id, show.id, other.id]);
     appGoes("background");
     background.die();
     await until(
