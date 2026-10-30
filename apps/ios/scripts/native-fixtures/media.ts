@@ -52,13 +52,13 @@ interface Artifact {
  * Makes and records media under `out`, for a server whose sources are in the checkout at `root`.
  * `make` cuts what ffmpeg `args` give into HLS segments; `record` adds files written otherwise.
  */
-export function mediaMaker(root: string, out: string) {
+export function mediaMaker(root: string, out: string, declaration: string) {
   const artifacts: Artifact[] = [];
   const provenance = () => ({ source, ffmpeg, artifacts });
-  /** Adds `artifact` to what provenance.json in `out` declares. */
+  /** Adds `artifact` to what `declaration` in `out` declares. */
   const add = (artifact: Artifact) => {
     artifacts.push(artifact);
-    writeFileSync(join(out, "provenance.json"), JSON.stringify(provenance(), null, 2));
+    writeFileSync(join(out, declaration), JSON.stringify(provenance(), null, 2));
   };
   const filesOf = (dir: string) =>
     readdirSync(dir)
@@ -108,11 +108,18 @@ export function mediaMaker(root: string, out: string) {
     const key = sha256(JSON.stringify([ffmpeg, options, inputs])).slice(0, 12);
     const dir = join(out, "media", `${name}-${key}`);
     if (!existsSync(dir)) {
-      const making = `${dir}.making`;
+      // A directory of this server's own, so a second one starting beside it makes its own.
+      const making = `${dir}.making-${process.pid}`;
       rmSync(making, { recursive: true, force: true });
       mkdirSync(making, { recursive: true });
       execFileSync("ffmpeg", [...options, ...local(making), join(making, output)]);
-      renameSync(making, dir);
+      try {
+        renameSync(making, dir);
+      } catch (error) {
+        // The other one finished first: its media is the same.
+        if (!existsSync(dir)) throw error;
+        rmSync(making, { recursive: true, force: true });
+      }
     }
     const path = join(dir, output);
     const command = [...options, ...local(dir), path];

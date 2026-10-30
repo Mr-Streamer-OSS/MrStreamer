@@ -4,11 +4,12 @@
 // controls, on the control port beside the others:
 //
 //   POST /title-transfers?rate=<bytes>   files are sent at that many bytes a second; 0 at once
-//   POST /title-transfers?drop=<bytes>   the next file sent breaks off after that many bytes, as a
-//                                        connection that drops does
+//   POST /title-transfers?drop=<bytes>   the next file sent longer than that breaks off after that
+//                                        many bytes, as a connection that drops does
 //   POST /title-transfers?replace=<movie|series>/<id>
 //                                        that title's file counts as another one from now on: its
-//                                        ETag changes, its bytes stay
+//                                        ETag changes, its bytes stay. Until the server restarts,
+//                                        which forgets it, as it forgets the rate and a drop
 //   GET  /title-transfers                the rate, any drop still to come and the titles replaced
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -72,8 +73,9 @@ export function titleTransfers(known: (title: string) => boolean) {
         return status;
       }
       const body = bytes.subarray(start, end + 1);
-      const breaksAt = drop;
-      drop = null;
+      // A request ending before the drop, such as a player's first two bytes, leaves it for later.
+      const breaksAt = drop !== null && drop < body.length ? drop : null;
+      if (breaksAt !== null) drop = null;
       void (async () => {
         for (let sent = 0; sent < body.length && !response.destroyed; sent += PIECE) {
           if (breaksAt !== null && sent + PIECE > breaksAt) {

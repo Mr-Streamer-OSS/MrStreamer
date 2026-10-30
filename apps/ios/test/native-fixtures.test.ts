@@ -143,7 +143,9 @@ describe("the native verification fixture", () => {
           /MEDIA-SEQUENCE:(\d+)/.exec(await text(`${panel}/hls/7999/${rendition}.m3u8`))?.[1],
       ),
     );
-    expect(new Set(sequences).size).toBe(1);
+    // Fetched apart, they can straddle a new segment.
+    const numbers = sequences.map(Number);
+    expect(Math.max(...numbers) - Math.min(...numbers)).toBeLessThanOrEqual(1);
     const dutch = await text(`${panel}/hls/7999/subtitles-nl/6.vtt`);
     expect(dutch).toMatch(/X-TIMESTAMP-MAP=MPEGTS:\d+,LOCAL:00:00:00\.000/);
     expect(dutch).toContain("00:00:12.250 --> 00:00:13.750\nNederlands 0:12");
@@ -205,6 +207,11 @@ describe("the native verification fixture", () => {
     const etag = String(whole.headers["etag"]);
 
     expect((await post("/title-transfers?drop=100000")).status).toBe(200);
+    // A player's first look at a file, ending before the drop, leaves it for the transfer.
+    expect(await download(url, { Range: "bytes=0-1" })).toMatchObject({
+      status: 206,
+      broke: false,
+    });
     const broken = await download(url);
     expect(broken).toMatchObject({ status: 200, broke: true });
     expect(broken.body.length).toBe(100_000);
@@ -239,6 +246,7 @@ describe("the native verification fixture", () => {
     const paced = await download(url, { Range: "bytes=0-524287" });
     expect(paced.body.length).toBe(524_288);
     expect(Date.now() - at).toBeGreaterThanOrEqual(1_500);
+    await post("/title-transfers?rate=0");
   }, 60_000);
 
   it("declares the source, commands and hashes of every piece of media it serves", async () => {

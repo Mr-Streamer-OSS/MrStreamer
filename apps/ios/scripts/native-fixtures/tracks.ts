@@ -51,7 +51,18 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number
   const picture = maker.make("tracks-picture", [
     ...["-f", "lavfi", "-i", "testsrc2=s=1280x720:r=30:d=60"],
     ...["-c:v", "libx264", "-profile:v", "main", "-level", "3.1", "-bf", "0", "-g", "60"],
-    ...["-sc_threshold", "0", "-pix_fmt", "yuv420p", "-b:v", "1200k"],
+    ...[
+      "-sc_threshold",
+      "0",
+      "-pix_fmt",
+      "yuv420p",
+      "-b:v",
+      "1200k",
+      "-maxrate",
+      "1200k",
+      "-bufsize",
+      "1200k",
+    ],
   ]);
   // A little short of the picture's minute: AAC's leading frames would otherwise add a 31st segment.
   const sounds = new Map<string, Media>(

@@ -12,8 +12,8 @@
 // `second`, numbering channels, movies and series as the first does, some of the first's movies
 // under ids of its own. Its requests are logged to requests-<port>.jsonl, and it says where it runs in server-<port>.json.
 // Everything it writes goes to .local/ios-fixture, or to FIXTURE_OUT, a directory of a session's
-// own, where it also makes its media and declares, in provenance.json, where each piece came from
-// (scripts/native-fixtures/media.ts).
+// own, where it also makes its media and declares, in provenance.json (provenance-<port>.json for
+// a second provider), where each piece came from (scripts/native-fixtures/media.ts).
 //
 // Every channel is a live loop: the TEST channels loop their recording from
 // apps/desktop/test/fixtures, codecs as they are, so the ones AVPlayer can't decode fail as they
@@ -112,7 +112,7 @@ const artLogin =
     : "";
 const log = join(out, second ? `requests-${port}.jsonl` : "requests.jsonl");
 
-const maker = mediaMaker(root, out);
+const maker = mediaMaker(root, out, second ? `provenance-${port}.json` : "provenance.json");
 
 /** A minute of test picture with its clock, inset on a light or a dark field, and a tone. */
 function picture(name: string, field: string): Media {
@@ -411,7 +411,7 @@ createServer((request, response) => {
           at: Date.now(),
           kind: url.pathname === "/player_api.php" ? "api" : "other",
           status: reply.statusCode ?? 0,
-          path: `${url.pathname}${url.searchParams.get("action") ? `?action=${url.searchParams.get("action")}` : ""}`,
+          path: `${redacted(url.pathname)}${action ? `?action=${action}` : ""}`,
         });
         if (pngLogos && action === "get_live_streams") return sendHere(reply, response);
         const cacheable = cacheableArt && url.pathname.startsWith("/logos/");
