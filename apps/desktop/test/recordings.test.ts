@@ -1077,6 +1077,64 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     });
   });
 
+  it("records a time once when a change moves its start and end later while it starts", async () => {
+    const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+    const { provider, recordings, listing, programmePlan, clockTo } = await scheduling({
+      streams: (source, out, signal) => {
+        arrived();
+        void gate.then(() => liveStreams(source, out, signal));
+      },
+    });
+    onTestFinished(() => open());
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next, { before: 2, after: 0 }));
+    await clockTo(next.start - 2 * MINUTE);
+    await asked;
+    const changing = recordings.schedule(programmePlan(next, { before: 0, after: 2 }), saved.id);
+    open();
+    await changing;
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+
+    // Its recording ends at the end it began with; the changed time's last minutes don't start
+    // another, and nothing is missed.
+    vi.setSystemTime(next.stop + 1000);
+    await until(recordings.list, ([each]) => each?.status.kind === "complete");
+    await recordings.check();
+    await clockTo(next.stop + 3 * MINUTE);
+    expect((await recordings.list()).map((each) => each.id)).toEqual([recording!.id]);
+    expect(await recordings.schedules()).toEqual([]);
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("records the changed time when the start a change waited for failed", async () => {
+    // The first stream breaks off once the test lets it, before a packet; the next plays.
+    let first = true;
+    const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+    const { recordings, listing, programmePlan, clockTo } = await scheduling({
+      streams: (source, out, signal) => {
+        if (!first) return liveStreams(source, out, signal);
+        first = false;
+        arrived();
+        void gate.then(() => out.destroy());
+      },
+    });
+    onTestFinished(() => open());
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next));
+    await clockTo(next.start);
+    await asked;
+    const changing = recordings.schedule(programmePlan(next, { before: 2, after: 0 }), saved.id);
+    open();
+    await changing;
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    expect(recording?.scheduled).toMatchObject({
+      schedule: saved.id,
+      from: next.start - 2 * MINUTE,
+    });
+  });
+
   it("lets a programme go once its recording was stopped partway through", async () => {
     const { provider, recordings, listing, programmePlan } = await scheduling();
     const { now } = await listing();
@@ -1104,8 +1162,10 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const saved = await recordings.schedule(programmePlan(next));
     await clockTo(next.start);
     await asked;
-    await recordings.schedule(programmePlan(next, { before: 2, after: 0 }), saved.id);
+    // The change waits for the start's answer.
+    const changing = recordings.schedule(programmePlan(next, { before: 2, after: 0 }), saved.id);
     open();
+    await changing;
     const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
 
     // Its time ends as recorded: no missed result for the changed time, and no second start.
@@ -1220,6 +1280,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       saved.id,
     );
     expect(changed.status).toEqual({ kind: "recording", recording: first?.id });
+    // Its row says when today's recording stops, not the changed time's end.
+    expect(changed.next).toEqual({ start: now.start, stop: first?.stop });
 
     // Today's recording ends at the programme's end, inside the changed time.
     vi.setSystemTime(now.stop + 1000);

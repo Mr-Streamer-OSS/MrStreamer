@@ -571,6 +571,8 @@ function make(deps: RecordingsDeps) {
      * start and then by when it was saved, takes a connection first.
      */
     const startingOn = new Set<string>();
+    /** Each schedule's start under way, settling once it answered, for a change to wait on. */
+    const startsOf = new Map<string, Promise<void>>();
     /** When this run of the app began checking schedules. */
     const started = Date.now();
     const occurrenceKey = (id: string, occurrence: Occurrence) => `${id}@${occurrence.start}`;
@@ -684,9 +686,15 @@ function make(deps: RecordingsDeps) {
           next,
           status,
         });
-        // What records goes on whatever the guide says now.
+        // What records goes on whatever the guide says now, or a change made meanwhile, until its
+        // own stop.
         const recording = recordingOf(schedule.id);
-        if (recording) return as({ kind: "recording", recording });
+        const record = recording === undefined ? undefined : records.get(recording);
+        if (recording && record)
+          return as(
+            { kind: "recording", recording },
+            { start: record.scheduled?.from ?? record.start, stop: record.stop },
+          );
         // A time on now that it recorded, stopped or cut short, or a change settled, records no
         // more: the one after it is next.
         const next =
@@ -780,6 +788,8 @@ function make(deps: RecordingsDeps) {
       const { subscriptionId } = schedule.plan.channel;
       why.set(key, "starting");
       startingOn.add(subscriptionId);
+      const answered = Promise.withResolvers<void>();
+      startsOf.set(schedule.id, answered.promise);
       const { plan } = schedule;
       Effect.runFork(
         Effect.gen(function* () {
@@ -806,8 +816,14 @@ function make(deps: RecordingsDeps) {
           }),
           // A defect, as a capture folder this computer won't remove, is this computer's too.
           Effect.catchDefect(() => Effect.sync(() => why.set(key, "disk"))),
-          // However it ended, the subscription's next schedule may start.
-          Effect.ensuring(Effect.sync(() => startingOn.delete(subscriptionId))),
+          // However it ended, the subscription's next schedule may start, and a change goes on.
+          Effect.ensuring(
+            Effect.sync(() => {
+              startingOn.delete(subscriptionId);
+              if (startsOf.get(schedule.id) === answered.promise) startsOf.delete(schedule.id);
+              answered.resolve();
+            }),
+          ),
           Effect.andThen(wake),
         ),
       );
@@ -895,7 +911,8 @@ function make(deps: RecordingsDeps) {
             continue;
           }
           // Recorded, and stopped or cut short already: the rest of its time is done with too.
-          if (made && !active.has(made.id)) {
+          // Not while its start is still answering: one whose record couldn't be kept goes.
+          if (made && !active.has(made.id) && reason !== "starting") {
             why.delete(key);
             tried.delete(key);
             if (settling) through = occurrence.stop;
@@ -978,6 +995,11 @@ function make(deps: RecordingsDeps) {
     const draft = (plan: RecordingPlan, id: string | undefined) =>
       Effect.gen(function* () {
         yield* schedulesUsable;
+        // A start under way answers first: what it began for then records, or is still to record,
+        // as the change finds it. Its recording names the time it began for, which a changed start
+        // would no longer find.
+        const answering = id === undefined ? undefined : startsOf.get(id);
+        if (answering) yield* Effect.promise(() => answering);
         const now = Date.now();
         const was = id === undefined ? undefined : schedules.get(id);
         if (id !== undefined && !was)
@@ -994,18 +1016,23 @@ function make(deps: RecordingsDeps) {
             error: { kind: "invalid-input", detail: t("Its time has passed.") },
           });
         // Changed, it settles from now: what it recorded or missed stays as it was, and once it
-        // recorded its time on now, still starting, recording, stopped or deleted, or a change
-        // before this one settled it, the change starts with its next. A start under way records
-        // under the time it began for, which the change would no longer find.
+        // recorded its time on now, still recording, stopped or deleted, or a change before this
+        // one settled it, the change starts with its next.
         const recording = id === undefined ? undefined : recordingOf(id);
-        const recorded =
-          recording !== undefined ||
-          (was !== undefined &&
-            (was.through > now ||
-              occurrences(was.plan, now, now + 1).some(
-                (each) =>
-                  recordOf(was.id, each) || why.get(occurrenceKey(was.id, each)) === "starting",
-              )));
+        // Until when that holds its time: the recording's stop, the recorded time's, or where the
+        // change before settled it. Each changed time within it is settled too, one that starts
+        // later or ends later than the recording included.
+        const held =
+          was === undefined
+            ? []
+            : [
+                ...(recording === undefined ? [] : [records.get(recording)?.stop ?? now]),
+                ...occurrences(was.plan, now, now + 1)
+                  .filter((each) => recordOf(was.id, each))
+                  .map((each) => each.stop),
+                ...(was.through > now ? [was.through] : []),
+              ];
+        const heldTo = Math.max(now + 1, ...held);
         const schedule: KeptSchedule = {
           id: id ?? randomUUID(),
           plan: found.plan,
@@ -1016,11 +1043,9 @@ function make(deps: RecordingsDeps) {
             Math.max(now, ...[...schedules.values()].map((each) => each.created + 1)),
           through: Math.max(
             now,
-            ...(recorded
-              ? [
-                  (recording === undefined ? undefined : records.get(recording)?.stop) ?? now,
-                  ...occurrences(found.plan, now, now + 1).map((each) => each.stop),
-                ]
+            ...held,
+            ...(held.length > 0
+              ? occurrences(found.plan, now, heldTo).map((each) => each.stop)
               : []),
           ),
         };
