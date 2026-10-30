@@ -116,8 +116,8 @@ function make(deps: RecordingsDeps) {
     const read = yield* Effect.promise(() => readRecordings(path));
     const records = new Map<string, StoredRecording>();
     const active = new Map<string, Active>();
-    /** Captures still starting, which the app's close stops too. */
-    const starting = new Set<AbortController>();
+    /** Captures still starting, by subscription, which the app's close and a removal stop too. */
+    const starting = new Map<AbortController, string>();
     const fileOf = (record: StoredRecording) => join(root, record.id, record.file);
 
     const unreadable = () =>
@@ -270,7 +270,7 @@ function make(deps: RecordingsDeps) {
           status: { kind: "recording" },
         };
         const controller = new AbortController();
-        starting.add(controller);
+        starting.set(controller, subscriptionId);
         const opening = mkdir(join(root, id), { recursive: true }).then(() =>
           startCapture(
             streams.map(({ url, format, headers }) => ({ url, format, headers: headers ?? {} })),
@@ -369,7 +369,7 @@ function make(deps: RecordingsDeps) {
       );
     yield* Effect.addFinalizer(() =>
       Effect.andThen(
-        Effect.sync(() => starting.forEach((controller) => controller.abort())),
+        Effect.sync(() => starting.forEach((_subscription, controller) => controller.abort())),
         Effect.ignore(end([...active.keys()], "quit")),
       ),
     );
@@ -384,12 +384,19 @@ function make(deps: RecordingsDeps) {
       start,
       stop: (id: string) => end([id], "stopped"),
       subscriptionGone: (subscriptionId: string) =>
-        Effect.ignore(
-          end(
-            [...active.keys()].filter(
-              (id) => records.get(id)?.channel.subscriptionId === subscriptionId,
+        Effect.andThen(
+          Effect.sync(() =>
+            starting.forEach((owner, controller) => {
+              if (owner === subscriptionId) controller.abort();
+            }),
+          ),
+          Effect.ignore(
+            end(
+              [...active.keys()].filter(
+                (id) => records.get(id)?.channel.subscriptionId === subscriptionId,
+              ),
+              "stopped",
             ),
-            "stopped",
           ),
         ),
       remove: (id: string) =>
