@@ -1390,4 +1390,10 @@ export const fr: Translation = {
   "Download it to go on.": "Téléchargez-le pour continuer.",
   "{episode} is still downloading": "{episode} est encore en téléchargement",
   "{episode} didn't download": "{episode} n'a pas été téléchargé",
+  "Recordings could not be read.": "Impossible de lire les enregistrements.",
+  "Recordings could not be saved.": "Impossible d’enregistrer la liste des enregistrements.",
+  "Choose a stop time within 12 hours.": "Choisissez une heure de fin dans les 12 heures.",
+  "The recording couldn't be written: {detail}": "Impossible d’écrire l’enregistrement : {detail}",
+  "Stop the recording before deleting it.": "Arrêtez l’enregistrement avant de le supprimer.",
+  "It is still recording.": "L’enregistrement est toujours en cours.",
 };

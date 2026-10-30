@@ -46,6 +46,7 @@ import { Output, type OutputDeps } from "./services/output.ts";
 import { appNotices, Licences } from "./services/licences.ts";
 import { PlaybackCoordination } from "./services/playback-coordination.ts";
 import { Playback } from "./services/playback.ts";
+import { Recordings } from "./services/recordings.ts";
 import { Reminders, type Notifier } from "./services/reminders.ts";
 import { Settings } from "./services/preferences.ts";
 import { SubtitleAccounts } from "./services/subtitle-accounts.ts";
@@ -106,7 +107,8 @@ export type MainServices =
   | SubtitleAccounts
   | OnlineSubtitles
   | Downloads
-  | Reminders;
+  | Reminders
+  | Recordings;
 
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
@@ -319,6 +321,9 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const reminders = Reminders.layer({ dataDir, notifier: config.notifier ?? null }).pipe(
     Layer.provide(Layer.mergeAll(guide, services)),
   );
+  const recordings = Recordings.layer({ dataDir, userAgent: config.userAgent }).pipe(
+    Layer.provide(Layer.mergeAll(guide, services)),
+  );
   return Roster.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
@@ -330,6 +335,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
         onlineSubtitles,
         downloads,
         reminders,
+        recordings,
       ),
     ),
     Layer.provideMerge(services),

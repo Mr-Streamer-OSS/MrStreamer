@@ -1323,4 +1323,10 @@ export const nl: Translation = {
   "Download it to go on.": "Download deze aflevering om verder te kijken.",
   "{episode} is still downloading": "{episode} wordt nog gedownload",
   "{episode} didn't download": "{episode} is niet gedownload",
+  "Recordings could not be read.": "Opnames konden niet worden gelezen.",
+  "Recordings could not be saved.": "Opnames konden niet worden opgeslagen.",
+  "Choose a stop time within 12 hours.": "Kies een eindtijd binnen 12 uur.",
+  "The recording couldn't be written: {detail}": "De opname kon niet worden geschreven: {detail}",
+  "Stop the recording before deleting it.": "Stop de opname voordat je hem verwijdert.",
+  "It is still recording.": "De opname loopt nog.",
 };

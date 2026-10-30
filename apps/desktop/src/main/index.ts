@@ -45,6 +45,7 @@ import { outputHandlers } from "./handlers/output.ts";
 import { viewingHandlers } from "./handlers/viewing.ts";
 import { customListHandlers } from "./handlers/custom-lists.ts";
 import { downloadHandlers } from "./handlers/downloads.ts";
+import { recordingHandlers } from "./handlers/recordings.ts";
 import { reminderHandlers } from "./handlers/reminders.ts";
 import { analyticsHandlers } from "./handlers/analytics.ts";
 import { preferenceHandlers } from "./handlers/preferences.ts";
@@ -79,6 +80,7 @@ import { Output } from "./services/output.ts";
 import { Licences } from "./services/licences.ts";
 import { PlaybackCoordination } from "./services/playback-coordination.ts";
 import { Playback } from "./services/playback.ts";
+import { Recordings } from "./services/recordings.ts";
 import { Reminders } from "./services/reminders.ts";
 import { OnlineSubtitles } from "./services/online-subtitles.ts";
 import { Settings } from "./services/preferences.ts";
@@ -535,6 +537,7 @@ async function start(): Promise<void> {
     licences,
     downloads,
     reminders,
+    recordings,
   } = await runtime.runPromise(
     Effect.all({
       subscriptions: Subscriptions,
@@ -555,6 +558,7 @@ async function start(): Promise<void> {
       licences: Licences,
       downloads: Downloads,
       reminders: Reminders,
+      recordings: Recordings,
     }),
   );
 
@@ -672,6 +676,7 @@ async function start(): Promise<void> {
   });
   forward(downloads.changes, "downloads.changed", (list) => list);
   forward(reminders.changes, "reminders.changed", () => null);
+  forward(recordings.changes, "recordings.changed", (list) => list);
   forward(playback.fileReplaced, "playback.fileReplaced", (sessionId) => ({ sessionId }));
   forward(playback.readingAhead, "playback.readingAhead", (sessionId) => ({ sessionId }));
   forward(playback.tracksChanged, "playback.tracksChanged", (sessionId) => ({ sessionId }));
@@ -743,6 +748,7 @@ async function start(): Promise<void> {
         library,
         onDemand,
         downloads,
+        recordings,
         output,
         settings,
         analytics,
@@ -753,6 +759,7 @@ async function start(): Promise<void> {
       ...customListHandlers({ customLists }),
       ...downloadHandlers({ downloads }),
       ...reminderHandlers({ reminders }),
+      ...recordingHandlers({ recordings, library, settings }),
       ...analyticsHandlers({ analytics, playback }),
       ...preferenceHandlers({ preferences }),
       ...updateHandlers({

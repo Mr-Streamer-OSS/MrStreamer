@@ -1298,4 +1298,10 @@ export const en = {
   "Download it to go on.": "Download it to go on.",
   "{episode} is still downloading": "{episode} is still downloading",
   "{episode} didn't download": "{episode} didn't download",
+  "Recordings could not be read.": "Recordings could not be read.",
+  "Recordings could not be saved.": "Recordings could not be saved.",
+  "Choose a stop time within 12 hours.": "Choose a stop time within 12 hours.",
+  "The recording couldn't be written: {detail}": "The recording couldn't be written: {detail}",
+  "Stop the recording before deleting it.": "Stop the recording before deleting it.",
+  "It is still recording.": "It is still recording.",
 } as const satisfies Readonly<Record<string, string | Plural>>;

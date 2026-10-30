@@ -1,6 +1,13 @@
-// Session-lifetime coordination for playback and downloads. This owns admission to a provider,
-// not media requests or the persistent download queue. Playback reports sessions as its scopes
-// open and close; Downloads returns a lease only after its request and partial file close.
+// Session-lifetime coordination for playback, downloads and recordings. This owns admission to a
+// provider, not media requests or the persistent download queue. Playback reports sessions as its
+// scopes open and close; Downloads returns a lease only after its request and partial file close.
+//
+// A recording holds one of its subscription's connections from admission until its request and
+// file close, and nothing takes it back: a play that would need it fails instead, and downloads
+// of its subscription wait. It is admitted only while fewer than the account's limit are held
+// here, counting what plays, a download's lease and other recordings, so no owner is stopped for
+// it and the provider never sees more connections than it allows.
+import type { ConnectionUse } from "@mrstreamer/contracts/recordings";
 import { t } from "@mrstreamer/core/i18n";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -13,6 +20,11 @@ import { Failed } from "@mrstreamer/core/failure";
 /** A subscription's connection held until the download's request and partial file close. */
 export interface Lent {
   readonly signal: AbortSignal;
+  release(): void;
+}
+
+/** A recording's connection, held until `release` after its request and file closed. */
+export interface Held {
   release(): void;
 }
 
@@ -38,6 +50,20 @@ export class PlaybackCoordination extends Context.Service<
     /** Media session registration and its existing scope finalizer report these transitions. */
     opened(sessionId: string, subscriptionId: string | null): void;
     closed(sessionId: string): void;
+    /**
+     * Admits a recording on one of the subscription's `limit` connections, or answers what holds
+     * them all, admitting nothing.
+     */
+    hold(
+      subscriptionId: string,
+      limit: number,
+    ): Effect.Effect<
+      | { readonly kind: "held"; readonly held: Held }
+      | { readonly kind: "busy"; readonly uses: readonly ConnectionUse[] }
+    >;
+    /** What of this app holds the subscription's connections now. */
+    uses(subscriptionId: string): Effect.Effect<readonly ConnectionUse[]>;
+    /** Subscriptions whose downloads wait: something plays or records from them. */
     readonly busy: Effect.Effect<ReadonlySet<string>>;
     readonly busyChanged: Stream.Stream<void>;
   }
@@ -52,6 +78,20 @@ export class PlaybackCoordination extends Context.Service<
         string,
         { readonly controller: AbortController; readonly released: Promise<void> }
       >();
+      /** Each admitted recording's subscription and the limit it was admitted under. */
+      const recordings = new Map<
+        Held,
+        { readonly subscriptionId: string; readonly limit: number }
+      >();
+      const recordingsOf = (subscriptionId: string) =>
+        [...recordings.values()].filter((each) => each.subscriptionId === subscriptionId);
+      const usesOf = (subscriptionId: string): ConnectionUse[] => [
+        ...[...sessions.values()].flatMap((owner) =>
+          owner === subscriptionId ? (["watch"] as const) : [],
+        ),
+        ...(lent.has(subscriptionId) ? (["download"] as const) : []),
+        ...recordingsOf(subscriptionId).map(() => "recording" as const),
+      ];
       let turns = 0;
       const whileAsked = (turn: number | undefined) =>
         Effect.suspend(() =>
@@ -66,24 +106,31 @@ export class PlaybackCoordination extends Context.Service<
         exclusive: one,
         reclaim: (subscriptionId: string) =>
           Effect.flatMap(
-            Effect.promise(async () => {
-              const lease = lent.get(subscriptionId);
-              if (!lease) return true;
-              lease.controller.abort();
-              let timer: NodeJS.Timeout | undefined;
-              const late = new Promise<boolean>(
-                (resolve) => (timer = setTimeout(() => resolve(false), RECLAIM_MS)),
-              );
-              const given = await Promise.race([lease.released.then(() => true), late]);
-              clearTimeout(timer);
-              return given;
+            Effect.suspend(() => {
+              // What plays closes before it opens again, so only recordings count against it.
+              const held = recordingsOf(subscriptionId);
+              return held.length > 0 && held.length >= Math.min(...held.map((each) => each.limit))
+                ? Effect.fail(recorded())
+                : Effect.void;
             }),
-            (given) => (given ? Effect.void : Effect.fail(stillLent())),
-          ),
+            () =>
+              Effect.promise(async () => {
+                const lease = lent.get(subscriptionId);
+                if (!lease) return true;
+                lease.controller.abort();
+                let timer: NodeJS.Timeout | undefined;
+                const late = new Promise<boolean>(
+                  (resolve) => (timer = setTimeout(() => resolve(false), RECLAIM_MS)),
+                );
+                const given = await Promise.race([lease.released.then(() => true), late]);
+                clearTimeout(timer);
+                return given;
+              }),
+          ).pipe(Effect.flatMap((given) => (given ? Effect.void : Effect.fail(stillLent())))),
         lend: (subscriptionId: string) =>
           one(
             Effect.sync((): Lent | null => {
-              if (lent.has(subscriptionId)) return null;
+              if (lent.has(subscriptionId) || recordingsOf(subscriptionId).length > 0) return null;
               for (const owner of sessions.values()) {
                 if (owner === subscriptionId) return null;
               }
@@ -107,9 +154,28 @@ export class PlaybackCoordination extends Context.Service<
         closed: (sessionId: string) => {
           if (sessions.delete(sessionId)) PubSub.publishUnsafe(changed, undefined);
         },
+        hold: (subscriptionId: string, limit: number) =>
+          one(
+            Effect.sync(() => {
+              const uses = usesOf(subscriptionId);
+              if (uses.length >= limit) return { kind: "busy" as const, uses };
+              const held: Held = {
+                release: () => {
+                  if (recordings.delete(held)) PubSub.publishUnsafe(changed, undefined);
+                },
+              };
+              recordings.set(held, { subscriptionId, limit });
+              PubSub.publishUnsafe(changed, undefined);
+              return { kind: "held" as const, held };
+            }),
+          ),
+        uses: (subscriptionId: string) => Effect.sync(() => usesOf(subscriptionId)),
         busy: Effect.sync(
           (): ReadonlySet<string> =>
-            new Set([...sessions.values()].flatMap((owner) => owner ?? [])),
+            new Set([
+              ...[...sessions.values()].flatMap((owner) => owner ?? []),
+              ...[...recordings.values()].map((each) => each.subscriptionId),
+            ]),
         ),
         busyChanged: Stream.fromPubSub(changed),
       };
@@ -122,6 +188,10 @@ const superseded = () =>
   new Failed({
     error: { kind: "unexpected", detail: t("Something else played in the meantime.") },
   });
+
+/** As the provider refuses a play that finds every connection in use: no retry helps. */
+const recorded = () =>
+  new Failed({ error: { kind: "stream", failure: { kind: "refused", status: 0 } } });
 
 const stillLent = () =>
   new Failed({
