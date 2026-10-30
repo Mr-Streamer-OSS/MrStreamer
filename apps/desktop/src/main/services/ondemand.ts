@@ -1462,13 +1462,16 @@ function make(deps: OnDemandDeps) {
  */
 export class Overtaken extends Failed {}
 
-// Made when it fails, so it says so in the interface language of the moment.
-const changed = (): AppError => ({
+/**
+ * A lookup's login replaced or removed as it went. Made when it fails, so it says so in the
+ * interface language of the moment.
+ */
+export const subscriptionChanged = (): AppError => ({
   kind: "unexpected",
   detail: t("The subscription changed while loading titles."),
 });
-const switched = Effect.failSync(() => new Failed({ error: changed() }));
-const overtaken = Effect.failSync(() => new Overtaken({ error: changed() }));
+const switched = Effect.failSync(() => new Failed({ error: subscriptionChanged() }));
+const overtaken = Effect.failSync(() => new Overtaken({ error: subscriptionChanged() }));
 
 /** Keeps `value` as the most recently used, dropping the least recently used beyond `limit`. */
 function keep<V>(map: Map<string, V>, key: string, value: V, limit: number): void {
