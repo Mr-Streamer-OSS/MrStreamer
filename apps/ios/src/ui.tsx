@@ -26,6 +26,35 @@ export function useRowHeight(): number {
   return Math.round(Math.max(60, 24 + 38 * fontScale));
 }
 
+/** Accessibility text sizes (iOS's AX1 is 1.786), which need wider windows and taller rows. */
+export const largeText = (fontScale: number) => fontScale >= 1.5;
+
+/**
+ * Whether Live shows its list and a detail column side by side, from the window's width alone:
+ * 700 points, or 1000 at accessibility text sizes. Never the device, screen or orientation, so an
+ * iPhone, a Duo's outer display, its inner one in portrait and an iPad's half-width window keep
+ * the iPhone's layout, and a resize or fold crosses it as the width does.
+ */
+export function splitAt(width: number, fontScale: number): boolean {
+  return width >= (largeText(fontScale) ? 1000 : 700);
+}
+
+/**
+ * Live's list column, as wide as the window when compact. Beside the detail column it is 456
+ * points in a Duo's inner landscape window (951), 468 in an iPad's portrait one (1032) and 520
+ * from an iPad's landscape one (1376); `gutter` is the detail column's side margin there.
+ */
+export function useListWidth() {
+  const { width, fontScale } = useWindowDimensions();
+  const split = splitAt(width, fontScale);
+  if (!split) return { split, width, gutter: 16 };
+  const gutter = width >= 1200 ? 32 : width >= 1000 ? 24 : 20;
+  return { split, width: Math.min(520, Math.floor(314 + width * 0.15)), gutter };
+}
+
+/** What a ChannelRow's Schedule and star add under its lines at large text: 44 point targets, 4 above. */
+export const stackedActions = 48;
+
 /** "VRT 1" as "V1", "Channel 4" as "C4": the stand-in for a channel without a logo. */
 function monogram(title: string): string {
   const words = title.split(/\s+/).filter(Boolean);
@@ -88,6 +117,7 @@ export const ChannelRow = memo(function ChannelRow({
   programmeHint,
   providerLabel,
   onSchedule,
+  selected,
 }: {
   channel: Channel;
   detail: string;
@@ -95,6 +125,11 @@ export const ChannelRow = memo(function ChannelRow({
   programmeHint?: string;
   providerLabel?: string | undefined;
   onSchedule?: ((channel: Channel) => void) | undefined;
+  /**
+   * In Live's list beside the detail column, whether its Schedule shows there. Left out
+   * elsewhere; rows in the column are inset from its edges, so the chosen one's fill is too.
+   */
+  selected?: boolean | undefined;
   /** How the channel stands while it is the one playing (`channelStatus`), in place of `detail`. */
   status: string | null;
   height: number;
@@ -104,8 +139,19 @@ export const ChannelRow = memo(function ChannelRow({
 }) {
   const tags = channel.tags.join(" ");
   const star = favourite ? "Remove from Favourites" : "Add to Favourites";
+  // At large text, Schedule and the star go under the lines, so the name keeps the row's width.
+  const stacked = largeText(useWindowDimensions().fontScale) && Boolean(onSchedule ?? onFavourite);
   return (
-    <View style={[styles.row, { height }, onFavourite && styles.starred]}>
+    <View
+      style={[
+        styles.row,
+        { height },
+        onFavourite && styles.starred,
+        stacked && styles.stacked,
+        selected !== undefined && styles.inset,
+        selected && styles.selected,
+      ]}
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={[
@@ -145,33 +191,39 @@ export const ChannelRow = memo(function ChannelRow({
           {programme && status ? <Text style={styles.detail}>{status}</Text> : null}
         </View>
       </Pressable>
-      {onSchedule ? (
-        <TextButton
-          label="Schedule"
-          accessibilityLabel={[`Schedule for ${channel.title}`, providerLabel]
-            .filter(Boolean)
-            .join(", ")}
-          onPress={() => onSchedule(channel)}
-          testID={`schedule-${channel.key}`}
-        />
-      ) : null}
-      {onFavourite ? (
-        <Pressable
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          accessibilityLabel={star}
-          onPress={() => onFavourite(channel, !favourite)}
-          style={({ pressed }) => [styles.star, pressed && styles.pressed]}
-          testID={`star-${channel.key}`}
-        >
-          <SymbolView
-            name={favourite ? "star.fill" : "star"}
-            size={18}
-            tintColor={colors.text}
-            weight="semibold"
+      <View style={[styles.actions, stacked && styles.under]}>
+        {onSchedule ? (
+          <TextButton
+            label="Schedule"
+            accessibilityLabel={[
+              `Schedule for ${channel.title}`,
+              providerLabel,
+              selected && "shown",
+            ]
+              .filter(Boolean)
+              .join(", ")}
+            onPress={() => onSchedule(channel)}
+            testID={`schedule-${channel.key}`}
           />
-        </Pressable>
-      ) : null}
+        ) : null}
+        {onFavourite ? (
+          <Pressable
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            accessibilityLabel={star}
+            onPress={() => onFavourite(channel, !favourite)}
+            style={({ pressed }) => [styles.star, pressed && styles.pressed]}
+            testID={`star-${channel.key}`}
+          >
+            <SymbolView
+              name={favourite ? "star.fill" : "star"}
+              size={stacked ? 28 : 18}
+              tintColor={colors.text}
+              weight="semibold"
+            />
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 });
@@ -265,6 +317,11 @@ export function TextButton({
 const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16 },
   starred: { paddingRight: 4 },
+  stacked: { flexDirection: "column", alignItems: "stretch", gap: 4, paddingVertical: 8 },
+  inset: { marginHorizontal: 8, paddingLeft: 8, borderRadius: 10 },
+  selected: { backgroundColor: colors.fill },
+  actions: { flexDirection: "row", alignItems: "center" },
+  under: { alignSelf: "flex-end", gap: 8 },
   main: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, alignSelf: "stretch" },
   star: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   pressed: { opacity: 0.5 },

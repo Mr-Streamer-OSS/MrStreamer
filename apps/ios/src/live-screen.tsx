@@ -1,6 +1,6 @@
-import { router } from "expo-router";
+import { router, useNavigation, useRootNavigationState } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ActionSheetIOS,
   FlatList,
@@ -30,7 +30,8 @@ import {
   programmePresentation,
   useGuideListings,
 } from "./guide-ui.tsx";
-import { tabHref } from "./header.tsx";
+import { ChannelSchedule, dayOf, Programme } from "./guide-screen.tsx";
+import { tabHref, tabStack } from "./header.tsx";
 import type { Channel, Library, Region, Shelf } from "./library.ts";
 import { Docked, libraryStatus, loadingStatus, PlaceholderRows, useDockInset } from "./loading.tsx";
 import { channelStatus, usePlayback } from "./playback.ts";
@@ -44,6 +45,9 @@ import {
   Message,
   Notice,
   TextButton,
+  largeText,
+  stackedActions,
+  useListWidth,
   useRowHeight,
 } from "./ui.tsx";
 
@@ -107,7 +111,165 @@ const openSettings = () => router.push(tabHref("live", "settings"));
 const watch = (library: Library, channel: Channel) =>
   playChannel(channel, library.placeOf.get(channel.key) ?? "", { watch: true });
 
-/** The Live tab. Its Favourites and Find rows show whatever the channels' state. */
+/**
+ * What Live's detail column shows, beside the list from the split width (`splitAt` in ui.tsx): a
+ * channel's Schedule on a day (null for Today), with one of its programmes over it. Below that
+ * width the same Schedule and Programme are screens pushed on Live's stack instead.
+ */
+interface Detail {
+  readonly channel: string;
+  readonly day: number | null;
+  readonly programme: string | null;
+}
+
+const detail = store<Detail | null>(null);
+
+/** A route's parameter, when it is the text its route gave. */
+const text = (params: object | undefined, name: string) => {
+  const value: unknown = params && name in params ? Reflect.get(params, name) : undefined;
+  return typeof value === "string" && value !== "" ? value : null;
+};
+
+/**
+ * The Live tab's root screen: the list alone below the split width, the list beside the detail
+ * column from it. The list keeps its place in the tree either way, so a resize or a fold keeps
+ * its tab, country and scroll position, and the one player under Watch never sees it.
+ */
+export function LiveTab() {
+  const { split, width } = useListWidth();
+  return (
+    <View style={styles.split}>
+      <View style={split ? { width } : styles.screen}>
+        <LiveHome />
+      </View>
+      {split ? <LiveDetail /> : null}
+      <Handover split={split} />
+    </View>
+  );
+}
+
+/**
+ * `useHandover`, beside the list rather than above it: it follows every navigation, which then
+ * draws nothing of Live again.
+ */
+function Handover({ split }: { split: boolean }) {
+  useHandover(split);
+  return null;
+}
+
+/**
+ * Moves a Schedule between Live's stack and the detail column as the window crosses the split
+ * width, on the same day and programme: a Schedule pushed on the stack, with its Programme if one
+ * is open, goes into the column once it is the stack's top, and the column's goes back on the
+ * stack as the window narrows with the list showing, so Back returns to the list as before. The
+ * stack changes even while another tab shows, without selecting Live.
+ */
+function useHandover(split: boolean) {
+  const navigation = useNavigation();
+  const stack = tabStack(useRootNavigationState(), "live");
+  const target = stack?.key;
+  const shown = useStore(detail);
+  useEffect(() => {
+    if (!split || !stack || !target) return;
+    const [, schedule, programme, ...rest] = stack.routes;
+    const channel = text(schedule?.params, "channel");
+    if (schedule?.name !== "schedule" || !channel || rest.length > 0) return;
+    if (programme && programme.name !== "programme") return;
+    detail.set({
+      channel,
+      day: dayOf(text(schedule.params, "day")),
+      programme: text(programme?.params, "detail"),
+    });
+    navigation.dispatch({ type: "POP_TO_TOP", target });
+  }, [navigation, stack, target, split]);
+  // A screen over the list, as Settings or Find, was opened from the list, not the Schedule: the
+  // column closes rather than putting its Schedule over that screen or the list it returns to.
+  const atRoot = stack?.routes.length === 1;
+  useEffect(() => {
+    if (split || !shown || !target) return;
+    detail.set(null);
+    if (!atRoot) return;
+    const day = shown.day === null ? {} : { day: String(shown.day) };
+    const push = (name: string, params: object) =>
+      navigation.dispatch({ type: "PUSH", payload: { name, params }, target });
+    push("schedule", { channel: shown.channel, ...day });
+    if (shown.programme) push("programme", { channel: shown.channel, detail: shown.programme });
+  }, [navigation, target, atRoot, split, shown]);
+}
+
+/**
+ * The detail column: the Schedule chosen in the list, its programme over it, or the line saying
+ * how to choose one. The Schedule stays mounted under its programme, so Back to it keeps its day
+ * and the pages shown, as Back does on the stack.
+ */
+function LiveDetail() {
+  const shown = useStore(detail);
+  const { gutter } = useListWidth();
+  if (!shown) {
+    // On the Schedule title's line, so choosing one puts the channel's name where this was.
+    return (
+      <ScrollView
+        style={styles.detail}
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{ paddingHorizontal: gutter, paddingTop: 20 }}
+        testID="live-detail"
+      >
+        <Text style={styles.empty}>Choose a channel's Schedule</Text>
+      </ScrollView>
+    );
+  }
+  return (
+    <View style={styles.detail} testID="live-detail">
+      <View style={shown.programme ? styles.hidden : styles.screen}>
+        <ChannelSchedule
+          key={shown.channel}
+          channel={shown.channel}
+          day={shown.day}
+          onDay={(day) => detail.set((current) => current && { ...current, day })}
+          onProgramme={(_, programme) =>
+            detail.set((current) => current && { ...current, programme })
+          }
+          origin="live"
+          column
+          over={shown.programme !== null}
+        />
+      </View>
+      {shown.programme ? (
+        <Programme
+          key={shown.programme}
+          channel={shown.channel}
+          detail={shown.programme}
+          origin="live"
+          onBack={closeDetail}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * Back in the detail column: from a programme to its Schedule, from a Schedule to the empty
+ * column. False when it shows nothing, so the stack's own Back can act instead.
+ */
+export function closeDetail(): boolean {
+  const shown = detail.get();
+  if (!shown) return false;
+  detail.set(shown.programme ? { ...shown, programme: null } : null);
+  return true;
+}
+
+/** Opens `channel`'s Schedule: in the detail column from the split width, else pushed on Live. */
+const showSchedule = (split: boolean, channel: Channel) =>
+  split
+    ? detail.set((current) =>
+        // The Schedule already shown stays on its day, closing its programme.
+        current?.channel === channel.key
+          ? { ...current, programme: null }
+          : { channel: channel.key, day: null, programme: null },
+      )
+    : openSchedule("live", channel.key);
+
+/** The Live tab's list. Its Favourites and Find rows show whatever the channels' state. */
 export function LiveHome() {
   return <Channels lead={<Entries />}>{(library) => <Browse library={library} />}</Channels>;
 }
@@ -333,6 +495,7 @@ function Browse({ library }: { library: Library }) {
       header={header}
       testID={tab === "guide" ? "live-guide" : "live-list"}
       schedule={tab === "guide"}
+      column
     />
   );
 }
@@ -347,17 +510,25 @@ function ChannelList({
   header,
   testID,
   schedule = false,
+  column = false,
 }: {
   library: Library;
   channels: readonly Channel[];
   header: ReactNode;
   testID: string;
   schedule?: boolean;
+  /** Whether it is Live's own list, which sits in the list column from the split width. */
+  column?: boolean;
 }) {
-  const height = useRowHeight() + Math.round(58 * useWindowDimensions().fontScale);
+  const { fontScale } = useWindowDimensions();
+  // The rows' height as ChannelRow lays them out, so getItemLayout places them where they draw.
+  const height =
+    useRowHeight() + Math.round(58 * fontScale) + (largeText(fontScale) ? stackedActions : 0);
   const inset = useDockInset();
   const playing = channelStatus(usePlayback().phase);
   const favourites = useFavouriteKeys();
+  const { split } = useListWidth();
+  const selected = useStore(detail)?.channel ?? null;
   const [top, setTop] = useState(0);
   const [visible, setVisible] = useState<readonly string[]>(() =>
     channels.slice(0, 12).map((channel) => channel.key),
@@ -384,8 +555,8 @@ function ChannelList({
   // Rows draw again when a star or what plays changes.
   const playingNow = playing && `${playing.id} ${playing.word}`;
   const extraData = useMemo(
-    () => ({ favourites, playingNow, read: read.value }),
-    [favourites, playingNow, read.value],
+    () => ({ favourites, playingNow, read: read.value, selected }),
+    [favourites, playingNow, read.value, selected],
   );
   return (
     <FlatList
@@ -448,7 +619,8 @@ function ChannelList({
                 />
               </>
             }
-            onSchedule={schedule ? (channel) => openSchedule("live", channel.key) : undefined}
+            onSchedule={schedule ? (channel) => showSchedule(split, channel) : undefined}
+            selected={column && split ? schedule && item.key === selected : undefined}
           />
         );
       }}
@@ -654,7 +826,7 @@ function CategoryGrid({
   header: ReactNode;
 }) {
   const inset = useDockInset();
-  const { width } = useWindowDimensions();
+  const { width } = useListWidth();
   const tile = Math.floor((width - 42) / 2);
   const cell = Math.floor((tile - 4) / 2);
   return (
@@ -775,6 +947,14 @@ function Country({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000000" },
+  split: { flex: 1, flexDirection: "row", backgroundColor: "#000000" },
+  detail: {
+    flex: 1,
+    borderLeftColor: colors.line,
+    borderLeftWidth: 1,
+  },
+  hidden: { display: "none" },
+  empty: { color: colors.text, fontSize: 17 },
   pressed: { opacity: 0.6 },
   provider: { color: colors.text, fontSize: 13, marginTop: 2 },
   settingsInset: { marginHorizontal: 16 },

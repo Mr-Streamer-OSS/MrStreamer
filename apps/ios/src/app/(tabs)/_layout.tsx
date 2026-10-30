@@ -1,9 +1,36 @@
 import { NativeTabs } from "expo-router/native-tabs";
-import { useSegments } from "expo-router";
+import {
+  router,
+  useNavigation,
+  usePathname,
+  useRootNavigationState,
+  useSegments,
+} from "expo-router";
 import { NowPlaying } from "../../accessory.tsx";
-import { useCloseOnTabChange } from "../../header.tsx";
+import {
+  openOnTabs,
+  openSearch,
+  selectTab,
+  tabsAt,
+  tabStack,
+  useCloseOnTabChange,
+  type Tab,
+} from "../../header.tsx";
+import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "../../key-commands.ts";
+import { closeDetail } from "../../live-screen.tsx";
 import { usePlayback } from "../../playback.ts";
 import { useVirtualisedScreen } from "../../tab-bar.ts";
+
+/** The tabs' keyboard shortcuts, while Watch is closed: ⌘1 to ⌘4, ⌘F, ⌘, and ⌘[. */
+const SHORTCUTS: readonly Shortcut<Tab | "search" | "settings" | "back">[] = [
+  { id: "(home)", input: "1", command: true, title: "Home" },
+  { id: "live", input: "2", command: true, title: "Live" },
+  { id: "films", input: "3", command: true, title: "Movies" },
+  { id: "series", input: "4", command: true, title: "Series" },
+  { id: "search", input: "f", command: true, title: "Search" },
+  { id: "settings", input: ",", command: true, title: "Settings" },
+  { id: "back", input: "[", command: true, title: "Back" },
+];
 
 // The system tab bar, Liquid Glass from iOS 26: Home, Live, Movies and Series, with Search in
 // every screen's top bar instead of a tab of its own. While Watch is closed with something in
@@ -11,7 +38,8 @@ import { useVirtualisedScreen } from "../../tab-bar.ts";
 // sits above the bar. The bar shrinks as Home, the shelves of Movies and Series and their details
 // scroll: iOS can't follow a virtualised list, as Live's and the poster grids are, so there it
 // stays put. Selecting another tab closes the Downloads, Settings and provider form the last one
-// had open (`useCloseOnTabChange`).
+// had open (`useCloseOnTabChange`). With a keyboard, ⌘1 to ⌘4 select the tabs, ⌘F opens Search,
+// ⌘, Settings and ⌘[ goes back, Live's detail column first (key-commands.ts).
 export default function TabsLayout() {
   useCloseOnTabChange();
   const { phase, watch, pip, external, aside } = usePlayback();
@@ -19,6 +47,26 @@ export default function TabsLayout() {
   const virtualised = useVirtualisedScreen();
   const accessory = phase.kind !== "idle" && !watch && (pip || external || aside);
   const shrinks = ["(home)", "films", "series"].includes(segments[1] ?? "") && !virtualised;
+  const navigation = useNavigation();
+  const state = useRootNavigationState();
+  const pathname = usePathname();
+  useShortcuts(watch ? NO_SHORTCUTS : SHORTCUTS, (id) => {
+    const at = tabsAt(state);
+    if (!at) return;
+    if (id === "search") {
+      if (pathname !== "/search") openSearch();
+    } else if (id === "settings") {
+      if (!pathname.endsWith("/settings")) openOnTabs(at, "settings");
+    } else if (id === "back") {
+      // Live's detail column goes back first, while it is what shows of Live's stack. At a tab's
+      // root there is no Back, as on the iPhone: the tabs' own history isn't followed.
+      const pushed = at.above > 0 || Boolean(tabStack(state, at.tab)?.index);
+      if (!pushed && at.tab === "live" && closeDetail()) return;
+      if (pushed) router.back();
+    } else {
+      selectTab(navigation, state, id);
+    }
+  });
   return (
     <NativeTabs
       tintColor="#FFFFFF"

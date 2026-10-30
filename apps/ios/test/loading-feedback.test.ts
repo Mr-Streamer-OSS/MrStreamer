@@ -140,9 +140,12 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-router", () => ({
   router: { push: (href: string) => scenario.did.push(`push ${href}`) },
   useIsFocused: () => scenario.focused,
+  useNavigation: () => ({ dispatch: () => {} }),
+  useRootNavigationState: () => undefined,
 }));
 vi.mock("../src/header.tsx", () => ({
   tabHref: (tab: string, screen: string) => `${tab === "films" ? "/films" : "/live"}/${screen}`,
+  tabStack: () => undefined,
 }));
 vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
