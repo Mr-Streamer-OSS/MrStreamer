@@ -47,13 +47,13 @@ export function useRecordings() {
 const anyRecording = (list: readonly Recording[]) => list.length > 0;
 
 /**
- * Whether any recording is kept or scheduled, for the window bar's entry: true until the
- * recordings are read, and once the schedules are read with one.
+ * Whether any recording is kept or scheduled, for the window bar's entry: true until both lists
+ * are read, so one that failed can be read again from Recordings.
  */
 export function useAnyRecording(): boolean {
   const recorded = useQuery({ ...recordingsQuery(), select: anyRecording }).data;
   const scheduled = useSchedules().data;
-  return recorded !== false || (scheduled?.length ?? 0) > 0;
+  return recorded !== false || scheduled === undefined || scheduled.length > 0;
 }
 
 /** The recording capturing `channel` now, if one does. */
@@ -90,13 +90,14 @@ const MINUTE_MS = 60_000;
 
 /**
  * Captured and planned whole minutes, what the coverage bar and "3 of 52 min" show, and those
- * missed at the start: a schedule's from its padded start to when it began, or all of a missed one.
+ * missed at the start: a late schedule's from its padded start to when it began, or all of a
+ * missed one. One on time, or saved after its start, is planned from when it began.
  */
 export function coverage(
   recording: Recording,
   now: number,
 ): { captured: number; planned: number; missed: number } {
-  const from = recording.scheduled?.from ?? recording.start;
+  const from = recording.scheduled?.late ? recording.scheduled.from : recording.start;
   const planned = Math.max(1, Math.round((recording.stop - from) / MINUTE_MS));
   if (recording.status.kind === "missed") return { captured: 0, planned, missed: planned };
   // Whole minutes, as main counts a start within one as on time.
@@ -138,7 +139,8 @@ export function outcome(recording: Recording, now: number): { word: string; reas
   const { word, reason } = ending(recording, now);
   const { scheduled } = recording;
   if (!scheduled?.late || recording.status.kind === "missed") return { word, reason };
-  const minutes = Math.max(1, Math.round((recording.start - scheduled.from) / MINUTE_MS));
+  // Whole minutes, as the coverage bar hatches them.
+  const minutes = Math.max(1, Math.floor((recording.start - scheduled.from) / MINUTE_MS));
   const started = `${t("Started {minutes} min late.", { minutes })} ${missText(scheduled.late)}`;
   return { word, reason: recording.status.kind === "complete" ? started : `${started} ${reason}` };
 }

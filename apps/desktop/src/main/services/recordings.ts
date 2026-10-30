@@ -984,9 +984,14 @@ function make(deps: RecordingsDeps) {
               const before = schedules.size;
               for (const [id, each] of schedules)
                 if (each.plan.channel.subscriptionId === subscriptionId) schedules.delete(id);
-              return schedules.size === before
-                ? Effect.void
-                : Effect.andThen(Effect.ignore(saveSchedules), wake);
+              if (schedules.size === before) return Effect.void;
+              // A failed write is tried again by the next check, as its own are.
+              return Effect.andThen(
+                Effect.map(Effect.result(saveSchedules), (written) => {
+                  unsaved.schedules = written._tag === "Failure";
+                }),
+                wake,
+              );
             }),
           ),
           Effect.andThen(

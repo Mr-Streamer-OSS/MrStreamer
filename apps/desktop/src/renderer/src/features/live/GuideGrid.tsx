@@ -917,6 +917,8 @@ const GridRow = memo(function GridRow({
       </div>
       {cursor && details !== null && (
         <Details
+          // Its controls are for the programme they opened under: another one closes them.
+          key={cursor.start}
           channel={channel}
           cell={cursor}
           minute={minute}
@@ -964,12 +966,11 @@ function Details({
   // A schedule the guide holds, another show listed then or none, won't record: Record re-saves it.
   const records =
     schedule !== undefined && schedule.status.kind !== "changed" && schedule.status.kind !== "gone";
-  // The programme the controls are open for: another one under the cursor closes them.
-  const [scheduling, setScheduling] = useState<number | null>(null);
-  const open = slot !== null && scheduling === slot.start;
+  const [scheduling, setScheduling] = useState(false);
+  const open = slot !== null && scheduling;
   const record = useRef<HTMLButtonElement>(null);
   const close = () => {
-    setScheduling(null);
+    setScheduling(false);
     record.current?.focus({ preventScroll: true });
   };
   return (
@@ -1016,7 +1017,7 @@ function Details({
             variant="secondary"
             size="sm"
             aria-expanded={open}
-            onClick={() => setScheduling(open ? null : slot.start)}
+            onClick={() => setScheduling(!open)}
             className="aria-expanded:bg-white/16 aria-expanded:ring-1 aria-expanded:ring-white/30 aria-expanded:ring-inset"
           >
             <span
@@ -1033,9 +1034,12 @@ function Details({
       {slot && open && (
         <SchedulePanel
           key={`${ownedKey(channel)}:${slot.start}`}
-          // A repeat edited from one of its programmes keeps its own time and length.
+          // A repeat edited from one of its programmes keeps its own time and length. A programme
+          // schedule the guide holds is saved again as the programme listed now, under its id.
           basis={
-            schedule ? basisOfSchedule(schedule, slot) : basisOfProgramme(ownedId(channel), slot)
+            schedule && (records || schedule.plan.kind === "slot")
+              ? basisOfSchedule(schedule, slot)
+              : basisOfProgramme(ownedId(channel), slot)
           }
           channelName={channel.title}
           schedule={schedule}

@@ -60,9 +60,13 @@ export function occurrences(plan: RecordingPlan, from: number, to: number): Occu
   return found;
 }
 
-/** The plan's first occurrence that hasn't ended at `now`: on now, or to come. */
+/**
+ * The plan's first occurrence that hasn't ended at `now`: on now, or to come. A programme's is
+ * whenever the guide lists it; a slot comes round within a week.
+ */
 export function nextOccurrence(plan: RecordingPlan, now: number): Occurrence | null {
-  return occurrences(plan, now, now + 8 * DAY_MS)[0] ?? null;
+  const to = plan.kind === "programme" ? Infinity : now + 8 * DAY_MS;
+  return occurrences(plan, now, to)[0] ?? null;
 }
 
 /** Something that holds a connection over a time, as a conflict counts it. */

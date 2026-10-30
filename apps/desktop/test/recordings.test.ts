@@ -10,7 +10,7 @@ import type { Writable } from "node:stream";
 import type { Recording, RecordingPlan } from "@mrstreamer/contracts/recordings";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { occurrences } from "../src/main/recordings/schedules.ts";
+import { nextOccurrence, occurrences } from "../src/main/recordings/schedules.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Downloads } from "../src/main/services/downloads.ts";
 import { Library } from "../src/main/services/library.ts";
@@ -1215,6 +1215,22 @@ describe("recording slot times", () => {
           Date.parse("2026-10-31T01:00:00Z"),
         ),
       ).toHaveLength(1);
+    });
+  });
+
+  it("finds a programme's time however far ahead the guide lists it", () => {
+    const start = Date.parse("2026-11-20T20:00:00Z");
+    const programme: RecordingPlan = {
+      kind: "programme",
+      channel: { subscriptionId: "s", id: "1" },
+      start,
+      stop: start + 60 * MINUTE,
+      title: "Final",
+      padding: { before: 2, after: 5 },
+    };
+    expect(nextOccurrence(programme, Date.parse("2026-11-01T12:00:00Z"))).toEqual({
+      start: start - 2 * MINUTE,
+      stop: start + 65 * MINUTE,
     });
   });
 });

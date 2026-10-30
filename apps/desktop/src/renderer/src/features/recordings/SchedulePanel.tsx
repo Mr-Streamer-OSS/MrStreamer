@@ -207,7 +207,14 @@ export function SchedulePanel({
         <Button
           variant="primary"
           size="sm"
-          disabled={save.isPending || cancel.isPending || !preview.data || preview.isError}
+          // The last plan's answer stands in while a changed one is read: not a label to save by.
+          disabled={
+            save.isPending ||
+            cancel.isPending ||
+            !preview.data ||
+            preview.isPlaceholderData ||
+            preview.isError
+          }
           onClick={() => save.mutate()}
         >
           {held ? t("Schedule anyway") : schedule ? t("Save") : t("Schedule")}

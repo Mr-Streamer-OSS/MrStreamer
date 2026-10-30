@@ -19,7 +19,7 @@ import { openView } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { Input } from "../../components/ui/input.tsx";
 import { menuSurface } from "../../components/ui/menu.ts";
-import { useNow } from "../../lib/clock.ts";
+import { refreshNow, useNow } from "../../lib/clock.ts";
 import { appError, describeError } from "../../lib/errors.ts";
 import { clockTime } from "../../lib/format.ts";
 import { call } from "../../lib/ipc.ts";
@@ -199,7 +199,11 @@ function RecordPanel({
     mutationFn: async (stopPlaying: boolean) => {
       // Times are taken as it starts: the popover may have stood open a while.
       const stop = stopOf(choice, programme, Date.now(), at);
-      if (stop === null) return null;
+      // Its time went since the last tick: the popover reads the clock again and says so.
+      if (stop === null) {
+        refreshNow();
+        return null;
+      }
       if (stopPlaying) player.stop();
       onStarting(true);
       return call("recordings.start", { channel: ownedId(channel), stop, stopPlaying });
@@ -263,8 +267,12 @@ function RecordPanel({
                 chosen || (!offered.includes(choice) && each.choice === offered[0]) ? 0 : -1
               }
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                if (each.choice !== "at") return setChoice(each.choice);
+              onClick={(event) => {
+                // The time field may hold the focus, and goes with At a time: the keys stay here.
+                if (each.choice !== "at") {
+                  event.currentTarget.focus();
+                  return setChoice(each.choice);
+                }
                 // Picked, as by a click, it opens on its time to type.
                 flushSync(() => setChoice("at"));
                 time.current?.focus();

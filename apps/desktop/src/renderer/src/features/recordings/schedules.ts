@@ -45,16 +45,27 @@ function minuteOfDay(at: number): number {
   return date.getHours() * 60 + date.getMinutes();
 }
 
-/** The schedule in `list` that records `channel`'s programme at `start`, if one does. */
+/**
+ * The schedule in `list` that records `channel`'s programme at `start`, if one does. A slot's
+ * time is placed on `start`'s day as main places it, across daylight saving too.
+ */
 export function scheduleAt(
   list: readonly ScheduledRecording[] | undefined,
   channel: OwnedId,
   start: number,
 ): ScheduledRecording | undefined {
+  const day = new Date(start);
   return list?.find(({ plan }) => {
     if (!sameOwned(plan.channel, channel)) return false;
     if (plan.kind === "programme") return plan.start === start;
-    return plan.days.includes(new Date(start).getDay()) && plan.at === minuteOfDay(start);
+    const at = new Date(
+      day.getFullYear(),
+      day.getMonth(),
+      day.getDate(),
+      Math.floor(plan.at / 60),
+      plan.at % 60,
+    );
+    return plan.days.includes(day.getDay()) && at.getTime() === start;
   });
 }
 
