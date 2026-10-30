@@ -646,9 +646,10 @@ in a multitasking window, and a larger window shows the picture as it stands.
 With a keyboard, `modules/key-commands` lists the shortcuts while ⌘ is held
 (`src/key-commands.ts`): ⌘1 to ⌘4 select the tabs, ⌘F opens Search, ⌘, Settings and ⌘[ goes
 back, Live's detail column first, and does nothing at a tab's root. In Watch, Space plays and
-pauses, ← and → skip ten seconds and Esc or ⌘. closes, except while its Quality, Audio or
-Subtitles sheet is open, whose keys are the sheet's. Elsewhere, moving between buttons with Tab
-and the arrows is the system's keyboard focus, which every button has.
+pauses and ← and → skip ten seconds while the stream loads, plays or is paused. Esc or ⌘. closes
+whenever Watch shows. While its Quality, Audio or Subtitles sheet is open, the keys are the
+sheet's. Elsewhere, moving between buttons with Tab and the arrows is the system's keyboard
+focus, which every button has.
 
 Focused source verification is `pnpm exec vitest run apps/ios/test/guide-screen.test.ts
 apps/ios/test/key-commands.test.ts apps/ios/test/watch-picture-in-picture.test.ts`. It does not
@@ -730,8 +731,11 @@ builds alike. Its version is its own, not the desktop's: `version` in `app.json`
 the public candidate as well as the private beta. Read the current App Store Connect build and
 version inventory before allocating an unused `ios.buildNumber`; record the dated readback and
 allocation on the candidate's project card.
-`supportsTablet: false` requests iPhone device family 1; this removes the native iPad target,
-not Apple's iPhone compatibility mode on iPad. Inspect actual archive/export device families.
+The submitted 0.1.0 candidate used `supportsTablet: false`, requesting iPhone device family 1
+without a native iPad target; Apple's iPhone compatibility mode on iPad is separate. The
+next-release source sets `supportsTablet: true`, requesting iPhone and iPad families 1 and 2.
+Inspect `UIDeviceFamily` in the actual archive/export before delivery; configuration alone does
+not prove the tablet target is present in that build.
 
 Xtream panels are mostly plain `http://` servers at whatever address the viewer types, so
 `app.json` lets the app load from any host without HTTPS. Expo's template allows local networking
