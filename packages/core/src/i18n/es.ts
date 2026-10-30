@@ -1446,4 +1446,8 @@ export const es: Translation = {
   "The provider sent nothing.": "El proveedor no envió nada.",
   "The stop time passed while it started.":
     "La hora de fin pasó mientras se iniciaba la grabación.",
+  "Schedules could not be read.": "No se pudieron leer las programaciones.",
+  "Schedules could not be saved.": "No se pudieron guardar las programaciones.",
+  "This schedule is no longer there.": "Esta programación ya no existe.",
+  "Its time has passed.": "Su hora ya pasó.",
 };

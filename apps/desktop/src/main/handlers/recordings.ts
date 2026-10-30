@@ -13,7 +13,15 @@ export function recordingHandlers({
 }: {
   readonly recordings: Pick<
     Recordings["Service"],
-    "list" | "connections" | "start" | "stop" | "remove"
+    | "list"
+    | "connections"
+    | "start"
+    | "stop"
+    | "remove"
+    | "schedules"
+    | "plan"
+    | "schedule"
+    | "cancel"
   >;
   readonly library: Pick<Library["Service"], "channel">;
   readonly settings: Pick<Settings["Service"], "get" | "ofSubscription">;
@@ -32,5 +40,9 @@ export function recordingHandlers({
       }),
     "recordings.stop": ({ id }) => Effect.as(recordings.stop(id), null),
     "recordings.remove": ({ id }) => Effect.as(recordings.remove(id), null),
+    "recordings.schedules": () => recordings.schedules,
+    "recordings.plan": ({ plan, id }) => recordings.plan(plan, id),
+    "recordings.schedule": ({ plan, id }) => recordings.schedule(plan, id),
+    "recordings.cancel": ({ id }) => Effect.as(recordings.cancel(id), null),
   };
 }

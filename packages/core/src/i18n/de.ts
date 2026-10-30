@@ -1381,4 +1381,8 @@ export const de: Translation = {
   "The provider stopped sending.": "Der Anbieter hat nichts mehr gesendet.",
   "The provider sent nothing.": "Der Anbieter hat nichts gesendet.",
   "The stop time passed while it started.": "Das Ende ist beim Starten der Aufnahme verstrichen.",
+  "Schedules could not be read.": "Zeitpläne konnten nicht gelesen werden.",
+  "Schedules could not be saved.": "Zeitpläne konnten nicht gespeichert werden.",
+  "This schedule is no longer there.": "Diesen Zeitplan gibt es nicht mehr.",
+  "Its time has passed.": "Die Zeit ist schon vorbei.",
 };

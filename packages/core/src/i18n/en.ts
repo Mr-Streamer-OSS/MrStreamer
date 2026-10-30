@@ -1345,4 +1345,8 @@ export const en = {
   "The provider stopped sending.": "The provider stopped sending.",
   "The provider sent nothing.": "The provider sent nothing.",
   "The stop time passed while it started.": "The stop time passed while it started.",
+  "Schedules could not be read.": "Schedules could not be read.",
+  "Schedules could not be saved.": "Schedules could not be saved.",
+  "This schedule is no longer there.": "This schedule is no longer there.",
+  "Its time has passed.": "Its time has passed.",
 } as const satisfies Readonly<Record<string, string | Plural>>;

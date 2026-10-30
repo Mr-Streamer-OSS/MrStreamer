@@ -1439,4 +1439,8 @@ export const fr: Translation = {
   "The provider sent nothing.": "Le fournisseur n'a rien envoyé.",
   "The stop time passed while it started.":
     "L'heure de fin est passée pendant le démarrage de l'enregistrement.",
+  "Schedules could not be read.": "Impossible de lire les programmations.",
+  "Schedules could not be saved.": "Impossible d’enregistrer les programmations.",
+  "This schedule is no longer there.": "Cette programmation n’existe plus.",
+  "Its time has passed.": "Son heure est passée.",
 };

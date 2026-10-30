@@ -23,7 +23,17 @@ export type RecordingStatus =
   /** It ended early for `cut`; what was captured stays and plays. */
   | { readonly kind: "partial"; readonly cut: RecordingCut }
   /** Its file is no longer in the app's folder. */
-  | { readonly kind: "missing" };
+  | { readonly kind: "missing" }
+  /** A schedule's time passed with nothing captured, for `why`; it has no file. */
+  | { readonly kind: "missed"; readonly why: ScheduleMiss };
+
+/**
+ * Why a schedule recorded late, or not at all:
+ *   - `away`: Mr. Streamer wasn't running, or the computer was asleep.
+ *   - `busy`: every connection the account allows was held.
+ *   - `stream`: the channel's stream couldn't be opened or recorded.
+ */
+export type ScheduleMiss = "away" | "busy" | "stream";
 
 export interface Recording {
   /** Names it for `recordings.stop`, `recordings.remove` and `playback.openCopy`. */
@@ -32,11 +42,20 @@ export interface Recording {
   readonly channelName: string;
   /** The programme on air as it started, as the guide listed it, else the channel's name. */
   readonly title: string;
-  /** When capture was asked to start. */
+  /** When capture was asked to start; a missed one's padded start. */
   readonly start: number;
   /** When it was set to stop. */
   readonly stop: number;
-  /** When it actually ended; null while it records. */
+  /**
+   * For one a schedule started: the schedule, when its padded start was, and why it started
+   * after that, null when it started on time. What it missed is from `from` to `start`.
+   */
+  readonly scheduled?: {
+    readonly schedule: string;
+    readonly from: number;
+    readonly late: ScheduleMiss | null;
+  };
+  /** When it actually ended; null while it records, and for one that was missed. */
   readonly ended: number | null;
   /** Bytes in its file. */
   readonly bytes: number;
@@ -63,3 +82,86 @@ export type RecordingStart =
 
 /** The longest a recording may be set to run, from when it starts. */
 export const RECORDING_MAX_MS = 12 * 60 * 60 * 1000;
+
+/** Minutes a schedule records before its programme or slot starts, and after it ends. */
+export interface RecordingPadding {
+  readonly before: number;
+  readonly after: number;
+}
+
+/** Padding a new schedule starts with, as guides run early and late. */
+export const DEFAULT_PADDING: RecordingPadding = { before: 2, after: 5 };
+
+/** The most padding each side takes, in minutes. */
+export const PADDING_MAX = 60;
+
+/** What a schedule records. Its title only names it: nothing is matched by title. */
+export type RecordingPlan =
+  /**
+   * One programme: the one the guide lists on `channel` at `start`. Its end follows the guide.
+   * Another programme listed at that start, or none, holds it until the viewer changes it.
+   */
+  | {
+      readonly kind: "programme";
+      readonly channel: OwnedId;
+      readonly start: number;
+      readonly stop: number;
+      readonly title: string;
+      readonly padding: RecordingPadding;
+    }
+  /**
+   * A channel at a time of day, each of `days` (0 Sunday to 6 Saturday), whatever is on, in this
+   * computer's time zone as it is each day. `at` is minutes after midnight, `minutes` how long.
+   * A start the clocks skip, as they go forward, falls an hour later; one they repeat, as they go
+   * back, is the first.
+   */
+  | {
+      readonly kind: "slot";
+      readonly channel: OwnedId;
+      readonly days: readonly number[];
+      readonly at: number;
+      readonly minutes: number;
+      readonly title: string;
+      readonly padding: RecordingPadding;
+    };
+
+/** What holds one of a subscription's connections at some time. */
+export type ConnectionHolder =
+  /** A recording that records then, until `until`. */
+  | { readonly kind: "recording"; readonly title: string; readonly until: number }
+  /** Another schedule that records then, until `until`. */
+  | { readonly kind: "schedule"; readonly title: string; readonly until: number }
+  /** Watching here, or a download, now. */
+  | { readonly kind: "watch" | "download" };
+
+/**
+ * Where a schedule's next time stands:
+ *   - `planned`: a connection is free then, as far as this app knows.
+ *   - `conflict`: what `holders` lists holds every connection then; it records once one is free.
+ *   - `waiting`: its time has come and every connection is held; it records once one is free,
+ *     the rest of its time.
+ *   - `recording`: it records now, as `recording`.
+ *   - `changed`: the guide lists `title` at its programme's start instead; it won't record that.
+ *   - `gone`: the guide lists no programme at its start, or the lists no longer list its channel.
+ */
+export type ScheduleStatus =
+  | { readonly kind: "planned" }
+  | { readonly kind: "conflict"; readonly holders: readonly ConnectionHolder[] }
+  | { readonly kind: "waiting"; readonly holders: readonly ConnectionHolder[] }
+  | { readonly kind: "recording"; readonly recording: string }
+  | { readonly kind: "changed"; readonly title: string }
+  | { readonly kind: "gone" };
+
+/** A schedule as the window sees it. */
+export interface ScheduledRecording {
+  /** Names it for `recordings.schedule` to change and `recordings.cancel`; empty in a preview. */
+  readonly id: string;
+  readonly plan: RecordingPlan;
+  readonly channelName: string;
+  /**
+   * When it records next, its padding included: now, or the first time to come. Null when it has
+   * none, as a programme that ended.
+   */
+  readonly next: { readonly start: number; readonly stop: number } | null;
+  readonly status: ScheduleStatus;
+}

@@ -1371,4 +1371,8 @@ export const nl: Translation = {
   "The provider stopped sending.": "De provider stuurde niets meer.",
   "The provider sent nothing.": "De provider stuurde niets.",
   "The stop time passed while it started.": "De eindtijd verstreek terwijl de opname startte.",
+  "Schedules could not be read.": "Planningen konden niet worden gelezen.",
+  "Schedules could not be saved.": "Planningen konden niet worden bewaard.",
+  "This schedule is no longer there.": "Deze planning bestaat niet meer.",
+  "Its time has passed.": "Het tijdstip is al voorbij.",
 };
