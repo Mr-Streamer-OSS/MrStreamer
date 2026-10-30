@@ -1,8 +1,9 @@
 import type { ListedChannel } from "@mrstreamer/core/catalogue/variants";
 import { SymbolView } from "expo-symbols";
 import type { Channel } from "./library.ts";
-import { memo, type ReactNode } from "react";
+import { memo, useRef, type ComponentRef, type ReactNode } from "react";
 import {
+  findNodeHandle,
   Image,
   Pressable,
   StyleSheet,
@@ -56,7 +57,7 @@ export function useListWidth() {
 export const stackedActions = 48;
 
 /** "VRT 1" as "V1", "Channel 4" as "C4": the stand-in for a channel without a logo. */
-function monogram(title: string): string {
+export function monogram(title: string): string {
   const words = title.split(/\s+/).filter(Boolean);
   const letters = words.length > 1 ? words.map((word) => word[0]).join("") : title;
   return letters.slice(0, 3).toUpperCase();
@@ -101,9 +102,14 @@ export function ChannelLogo({
   );
 }
 
+/** The held row's mounted view, for a sheet to point at on iPad. */
+export const anchorOf = (view: ComponentRef<typeof Pressable> | null) =>
+  findNodeHandle(view) ?? undefined;
+
 /**
  * A channel as a row that plays it when pressed. With `onFavourite`, a star at its end stars or
- * unstars it without playing, which VoiceOver offers as the row's action.
+ * unstars it without playing, which VoiceOver offers as the row's action. With `onLists`, holding
+ * the row, or VoiceOver's Lists action, opens its lists (custom-lists-screen.tsx).
  */
 export const ChannelRow = memo(function ChannelRow({
   channel,
@@ -113,6 +119,7 @@ export const ChannelRow = memo(function ChannelRow({
   onPress,
   favourite = false,
   onFavourite,
+  onLists,
   programme,
   programmeHint,
   providerLabel,
@@ -128,9 +135,16 @@ export const ChannelRow = memo(function ChannelRow({
   onPress: (channel: Channel) => void;
   favourite?: boolean;
   onFavourite?: ((channel: Channel, favourite: boolean) => void) | undefined;
+  /** Opens the channel's lists, pointing at the row when held. */
+  onLists?: ((channel: Channel, anchor?: number) => void) | undefined;
 }) {
+  const row = useRef<ComponentRef<typeof Pressable>>(null);
   const tags = channel.tags.join(" ");
   const star = favourite ? "Remove from Favourites" : "Add to Favourites";
+  const actions = [
+    ...(onFavourite ? [{ name: "favourite", label: star }] : []),
+    ...(onLists ? [{ name: "lists", label: "Lists" }] : []),
+  ];
   // At large text, the star goes under the lines, so the name keeps the row's width.
   const stacked = largeText(useWindowDimensions().fontScale) && Boolean(onFavourite);
   return (
@@ -138,6 +152,7 @@ export const ChannelRow = memo(function ChannelRow({
       style={[styles.row, { height }, onFavourite && styles.starred, stacked && styles.stacked]}
     >
       <Pressable
+        ref={row}
         accessibilityRole="button"
         accessibilityLabel={[
           channel.title,
@@ -149,16 +164,18 @@ export const ChannelRow = memo(function ChannelRow({
           .filter(Boolean)
           .join(", ")}
         accessibilityHint={programmeHint ? undefined : detail}
-        {...(onFavourite
+        {...(actions.length > 0
           ? {
-              accessibilityActions: [{ name: "activate" }, { name: "favourite", label: star }],
+              accessibilityActions: [{ name: "activate" }, ...actions],
               onAccessibilityAction: ({ nativeEvent }: AccessibilityActionEvent) => {
                 if (nativeEvent.actionName === "activate") onPress(channel);
-                if (nativeEvent.actionName === "favourite") onFavourite(channel, !favourite);
+                if (nativeEvent.actionName === "favourite") onFavourite?.(channel, !favourite);
+                if (nativeEvent.actionName === "lists") onLists?.(channel);
               },
             }
           : {})}
         onPress={() => onPress(channel)}
+        {...(onLists ? { onLongPress: () => onLists(channel, anchorOf(row.current)) } : {})}
         style={({ pressed }) => [styles.main, pressed && styles.pressed]}
         testID={`channel-${channel.key}`}
       >

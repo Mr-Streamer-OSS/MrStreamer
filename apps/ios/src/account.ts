@@ -8,6 +8,7 @@ import type { LiveCatalogue, OnDemandCatalogue, Provider } from "@mrstreamer/cor
 import { parseLogin, xtreamProvider, type XtreamAccount } from "@mrstreamer/core/xtream";
 import Constants from "expo-constants";
 import { dropLists, pruneLists, readList, writeList, type Saved } from "./catalogue-cache.ts";
+import { eraseListMembers } from "./custom-lists-file.ts";
 import { dropTitles, pruneDetails } from "./details-cache.ts";
 import { DEMO_ID, demoEntry, demoProvider, type DemoEntry } from "./demo.ts";
 import { transfers } from "./download-task.ts";
@@ -972,6 +973,7 @@ async function eraseDemo(): Promise<DemoErase> {
       try {
         writeState((state) => forgotten(state, DEMO_ID, true));
         eraseWatchlist(DEMO_ID);
+        eraseListMembers(DEMO_ID);
         if (viewingHolds(DEMO_ID)) await eraseViewing(DEMO_ID);
       } catch {
         pending.push("history");
@@ -1216,14 +1218,16 @@ function forgotten(state: SavedState, id: string, erase: boolean): SavedState {
 }
 
 /**
- * Deletes the history of a subscription removed with it: its recent channels, watchlist,
- * viewing record and quality picks, each whatever another fails, then clears `erasing`.
+ * Deletes the history of a subscription removed with it: its recent channels, watchlist, channels
+ * of custom lists, viewing record and quality picks, each whatever another fails, then clears
+ * `erasing`.
  * Rejects when one isn't deleted, leaving it there for the next launch to try again.
  */
 async function eraseHistory(id: string): Promise<void> {
   const erased = await Promise.allSettled([
     Promise.resolve().then(() => writeState((state) => forgotten(state, id, true))),
     Promise.resolve().then(() => eraseWatchlist(id)),
+    Promise.resolve().then(() => eraseListMembers(id)),
     eraseViewing(id),
     Promise.resolve().then(() => {
       if (!forgetChannelPicks(id)) throw new Error("Channel picks kept.");

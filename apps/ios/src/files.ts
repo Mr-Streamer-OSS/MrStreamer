@@ -10,12 +10,31 @@ const pendingOf = (name: string) => new File(Paths.document, `${name}.next`);
 
 /** The file's contents, or null when there is none or it doesn't read as JSON. */
 export function readJson(name: string): unknown {
+  return read(name, false);
+}
+
+/**
+ * As `readJson`, but throws when a file there can't be read now, rather than answering none: for
+ * a caller that mustn't write over what it couldn't read. Text that isn't JSON still reads as none.
+ */
+export function readJsonStrictly(name: string): unknown {
+  return read(name, true);
+}
+
+function read(name: string, strict: boolean): unknown {
   for (const file of [fileOf(name), pendingOf(name)]) {
     if (!file.exists) continue;
+    let text: string;
     try {
-      return JSON.parse(file.textSync()) as unknown;
+      text = file.textSync();
+    } catch (cause) {
+      if (strict) throw cause;
+      continue;
+    }
+    try {
+      return JSON.parse(text) as unknown;
     } catch {
-      // Unreadable: try the other, then start again.
+      // Not JSON: try the other, then start again.
     }
   }
   return null;

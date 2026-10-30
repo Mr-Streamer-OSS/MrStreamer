@@ -22,6 +22,7 @@ import {
 import { failureOf } from "./errors.ts";
 import { starChannel, useFavouriteKeys } from "./favourites.ts";
 import { FavouritesEntry } from "./favourites-screen.tsx";
+import { ListEntries, openListSheet } from "./custom-lists-screen.tsx";
 import { Glass, IconButton } from "./glass.tsx";
 import type { ScheduleItem } from "./guide.ts";
 import {
@@ -60,9 +61,10 @@ import {
 } from "./ui.tsx";
 
 // Live, in Movies' and Series' shape: a large title, its Favourites row, which opens every
-// favourite (favourites-screen.tsx), and Find countries or categories, which finds them by name
-// in every provider's channels (live-discover.tsx), then For you, Categories, All and Guide as text
-// tabs, with the country first in their row, reading All countries until one is chosen. All lists
+// favourite (favourites-screen.tsx), a row for each of the viewer's lists
+// (custom-lists-screen.tsx), and Find countries or categories, which finds them by name in every
+// provider's channels (live-discover.tsx), then For you, Categories, All and Guide as text tabs,
+// with the country first in their row, reading All countries until one is chosen. All lists
 // every channel of every provider and country once, in a virtualised list of rows of one fixed
 // height, and is where Live opens at launch. For you leads with the channel watched last and Play,
 // then the recent channels and a few categories as shelves of logos; Categories is every category
@@ -317,19 +319,20 @@ const showProgramme = (split: boolean, channel: string, programme: string) =>
     ? detail.set({ channel, day: null, programme, alone: true })
     : openProgramme("live", channel, programme);
 
-/** The Live tab's list. Its Favourites and Find rows show whatever the channels' state. */
+/** The Live tab's list. Favourites, custom lists and Find show whatever the channels' state. */
 export function LiveHome() {
   return <Channels lead={<Entries />}>{(library) => <Browse library={library} />}</Channels>;
 }
 
 /**
- * Live's own rows, before its tabs: Favourites, and Find countries or categories. On the tab only:
- * a category's screen has neither.
+ * Live's own rows, before its tabs: Favourites, the viewer's lists, and Find countries or
+ * categories. A category's screen has none of these rows.
  */
 function Entries() {
   return (
     <>
       <FavouritesEntry />
+      <ListEntries />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Find countries or categories"
@@ -631,6 +634,7 @@ function ChannelList({
             onPress={onPress}
             favourite={favourites.has(item.key)}
             onFavourite={starChannel}
+            onLists={openListSheet}
             programmeHint={[programme.line ?? category, programme.next].filter(Boolean).join(", ")}
             programme={
               <>

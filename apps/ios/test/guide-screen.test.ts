@@ -92,6 +92,9 @@ vi.mock("expo-router", async () => {
   };
 });
 vi.mock("../src/account.ts", () => ({
+  currentRoster: () => ({ kind: "ready", members: [] }),
+  onRoster: () => () => {},
+  onCatalogue: () => () => {},
   useCatalogue: () => state.catalogue,
   useRoster: () => ({ kind: "ready", members: [] }),
   playChannel: (channel: Channel, _place: string, options: { watch: boolean }) =>
