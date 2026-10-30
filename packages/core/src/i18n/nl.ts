@@ -1411,7 +1411,7 @@ export const nl: Translation = {
   Schedule: "Plannen",
   Scheduled: "Gepland",
   "Cancel schedule": "Planning annuleren",
-  "It has no time to come.": "Er komt geen tijd meer.",
+  "It has no time to come.": "Er staat geen opname meer gepland.",
   "{when} to {end} on {channel}.": "{when} tot {end} op {channel}.",
   "A connection is free then.": "Er is dan een verbinding vrij.",
   "Recording now.": "Wordt nu opgenomen.",
@@ -1438,7 +1438,8 @@ export const nl: Translation = {
   "It couldn't be written to this computer.": "Het kon niet op deze computer worden opgeslagen.",
   "Trying again": "Opnieuw proberen",
   "The guide listed another programme then, or the channel was gone.":
-    "De gids vermeldde toen een ander programma, of het kanaal was weg.",
-  "The channel list or guide wasn't read yet.": "De kanaallijst of gids was nog niet gelezen.",
-  "Its programme or channel is no longer listed.": "Het programma of kanaal staat er niet meer in.",
+    "De gids vermeldde toen een ander programma, of de zender was weg.",
+  "The channel list or guide wasn't read yet.": "De zenderlijst of gids was nog niet gelezen.",
+  "Its programme or channel is no longer listed.":
+    "Het programma of de zender staat er niet meer in.",
 };

@@ -30,7 +30,6 @@ import { useRecordingOf } from "./recordings.ts";
 /** How long after the guide's end "When it ends" records. */
 const LATE_MS = 2 * 60_000;
 const HOUR_MS = 60 * 60_000;
-const HALF_MS = HOUR_MS / 2;
 
 type StopChoice = "end" | "1h" | "2h" | "at";
 
@@ -178,7 +177,13 @@ function RecordPanel({
     stopOf("end", programme, now, "") !== null ? "end" : "1h",
   );
   // The half hour after an hour from now, until one is typed.
-  const [at, setAt] = useState(() => inputTime(Math.ceil((now + HOUR_MS) / HALF_MS) * HALF_MS));
+  const [at, setAt] = useState(() => {
+    const when = new Date(now + HOUR_MS);
+    const past =
+      when.getMinutes() % 30 !== 0 || when.getSeconds() > 0 || when.getMilliseconds() > 0;
+    when.setMinutes(Math.floor(when.getMinutes() / 30) * 30 + (past ? 30 : 0), 0, 0);
+    return inputTime(when.getTime());
+  });
   const time = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<RecordingConnections | null>(null);
   // At a time is offered with any time typed; Start waits for one it can record to.

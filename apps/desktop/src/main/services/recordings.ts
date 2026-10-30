@@ -749,13 +749,9 @@ function make(deps: RecordingsDeps) {
           Effect.match({
             onSuccess: (answer) =>
               answer.kind === "started" ? why.delete(key) : why.set(key, "busy"),
-            // The provider's, or a channel gone as it started, which the next check finds; else
-            // this computer's.
-            onFailure: ({ error }) =>
-              why.set(
-                key,
-                error.kind === "stream" || error.kind === "channel-not-found" ? "stream" : "disk",
-              ),
+            // Storage failures are unexpected; lost credentials and other provider failures
+            // must not be reported as a problem with this computer's disk.
+            onFailure: ({ error }) => why.set(key, error.kind === "unexpected" ? "disk" : "stream"),
           }),
           Effect.andThen(Effect.sync(() => startingOn.delete(subscriptionId))),
           Effect.andThen(wake),

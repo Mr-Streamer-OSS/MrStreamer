@@ -1425,7 +1425,8 @@ export const de: Translation = {
   "{when} to {end} on {channel}.": "{when} bis {end} auf {channel}.",
   "A connection is free then.": "Dann ist eine Verbindung frei.",
   "Recording now.": "Wird gerade aufgenommen.",
-  "The guide lists {title} at that time now.": "Der Guide listet zu der Zeit jetzt {title}.",
+  "The guide lists {title} at that time now.":
+    "Der Programmführer zeigt zu der Zeit jetzt {title}.",
   "Every connection is in use now.": "Alle Verbindungen sind gerade belegt.",
   "Every connection is in use then.": "Dann sind alle Verbindungen belegt.",
   "Every connection is in use then, by {holders}.":

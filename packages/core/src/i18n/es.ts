@@ -1486,7 +1486,7 @@ export const es: Translation = {
   Schedule: "Programar",
   Scheduled: "Programado",
   "Cancel schedule": "Cancelar la programación",
-  "It has no time to come.": "No tiene ninguna hora por venir.",
+  "It has no time to come.": "No hay más horarios previstos.",
   "{when} to {end} on {channel}.": "{when} a {end} en {channel}.",
   "A connection is free then.": "Entonces hay una conexión libre.",
   "Recording now.": "Grabando ahora.",

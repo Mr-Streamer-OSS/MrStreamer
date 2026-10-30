@@ -53,8 +53,9 @@ export interface Recording {
   /** When it was set to stop. */
   readonly stop: number;
   /**
-   * For one a schedule started: the schedule, when its padded start was, and why it started
-   * after that, null when it started on time. What it missed is from `from` to `start`.
+   * For a scheduled recording or missed result: the schedule, its padded start, and why it
+   * started late or was missed. `late` is null when capture started on time. A missed result
+   * has `from === start`; otherwise the unrecorded span is from `from` to `start`.
    */
   readonly scheduled?: {
     readonly schedule: string;

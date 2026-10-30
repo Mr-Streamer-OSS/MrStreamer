@@ -21,17 +21,26 @@ import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { startFakeHls } from "./fake-hls.ts";
 import { fakeGuide, fixture, liveStreams, type FakeProviderOptions } from "./fake-provider.ts";
-import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import {
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testConfig,
+  testSecrets,
+} from "./support.ts";
 
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
 const TRACKS = "TEST | Subtitles and two sound tracks";
 
 /** The app's services on `dataDir`, as one start of the app has them. */
-async function app(dataDir: string) {
+async function app(dataDir: string, secrets = testSecrets) {
   const runtime = runtimeFor(
     mainLayer({
       ...testConfig(dataDir),
+      secrets,
       ffmpeg: "ffmpeg",
       ffprobe: "ffprobe",
       // A picture for every artwork address, so a download needs no network.
@@ -1034,6 +1043,39 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await clockTo(at.getTime() + 11 * MINUTE);
     expect(provider.streamRequests()).toBe(0);
     expect((await recordings.list())[0]?.status).toEqual({ kind: "missed", why: "held" });
+  });
+
+  it("reports a lost login as a provider problem, not a disk failure", async () => {
+    const first = await scheduling();
+    const at = new Date(TEN_PAST + 2 * MINUTE);
+    await first.recordings.schedule({
+      kind: "slot",
+      channel: first.channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 5,
+      title: "Evening",
+      padding: { before: 0, after: 0 },
+    });
+    await first.quit();
+    vi.setSystemTime(at.getTime() + MINUTE);
+    const locked = await app(first.dataDir, {
+      seal: testSecrets.seal,
+      open: () => {
+        throw new Error("The keychain opens nothing.");
+      },
+    });
+    await locked.library.channels({});
+    await locked.recordings.check();
+    const [retrying] = await until(
+      locked.recordings.schedules,
+      ([each]) => each?.status.kind === "retrying",
+    );
+    expect(retrying?.status).toEqual({ kind: "retrying", why: "stream" });
+    vi.setSystemTime(at.getTime() + 6 * MINUTE);
+    await locked.recordings.check();
+    expect((await locked.recordings.list())[0]?.status).toEqual({ kind: "missed", why: "stream" });
+    expect(first.provider.streamRequests()).toBe(0);
   });
 
   it("tries a start that failed again, and says why it was missed", async () => {

@@ -54,16 +54,22 @@ export async function schedulesScenario(d: Driver) {
   await d.wait(() => d.exists(record));
 
   // 1 · Record now's At a time.
+  d.action("Check the default stop time in Asia/Kathmandu");
+  await d.send("Emulation.setTimezoneOverride", { timezoneId: "Asia/Kathmandu" });
   await d.click("Open Record", record);
   await d.wait(() => d.exists(POPUP));
   await d.click("At a time…", `${POPUP}.querySelector("[data-choice=at]")`);
   await d.wait(() =>
     d.evaluate<boolean>("document.activeElement?.matches('input[type=time]') ?? false"),
   );
+  const defaultStop = await d.evaluate<string>(`${POPUP}.querySelector('input[type=time]').value`);
+  expect(/:(00|30)$/.test(defaultStop), "The default stop isn't a local half hour", defaultStop);
+  d.observed["defaultStopKathmandu"] = defaultStop;
   d.observed["atATime"] = await text(d, POPUP);
   await d.capture("1-record-at-a-time");
   await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists(POPUP)));
+  await d.send("Emulation.setTimezoneOverride", { timezoneId: "" });
 
   // 2 · The grid's next programme, its schedule panel, Once and a repeat.
   await d.key("g", 71);
@@ -153,7 +159,10 @@ export async function schedulesScenario(d: Driver) {
   // The channel the first schedule records, for the rows written in.
   const channel = await d.evaluate<{ subscriptionId: string; id: string }>(`(async () => {
     const read = await window.mrStreamer.invoke('recordings.schedules');
-    return read.value[0].plan.channel;
+    if (!read.ok) throw new Error(JSON.stringify(read.error));
+    const first = read.value[0];
+    if (!first) throw new Error('No saved schedule');
+    return first.plan.channel;
   })()`);
   await d.quit();
   const root = join(d.profile, "recordings");
@@ -203,6 +212,19 @@ export async function schedulesScenario(d: Driver) {
     d.evaluate<boolean>(
       "document.querySelectorAll('section[aria-label=Recorded] li').length === 2",
     ),
+  );
+  await d.wait(() =>
+    d.evaluate<boolean>(`(() => {
+      const rows = [...document.querySelectorAll('section[aria-label=Recorded] li')];
+      const missed = rows.find(row => row.textContent.includes('Tide Tables'));
+      const late = rows.find(row => row.textContent.includes('The Long Table'));
+      return !!missed && missed.textContent.includes('Missed') &&
+        missed.textContent.includes("Mr. Streamer wasn't open, or the computer slept. No file.") &&
+        !!missed.querySelector('button[aria-label="Remove Tide Tables"]') &&
+        !missed.querySelector('button[aria-label="Play Tide Tables"]') &&
+        !!late && late.textContent.includes('Started 6 min late. Every connection was in use.') &&
+        late.querySelector('[role=meter]')?.getAttribute('aria-valuenow') === '54';
+    })()`),
   );
   d.observed["page"] = await text(d, "document.querySelector('#root')");
   await d.capture("5-recordings-1280");
@@ -261,8 +283,6 @@ export async function schedulesScenario(d: Driver) {
   await d.key("Escape", 27);
   await d.click("Live TV, larger", named("header button", "Live TV"));
   await d.wait(() => d.exists(GRID));
-  // Home takes the cursor, and the grid with it, back to the first channel: the 960 step left
-  // the grid scrolled, which larger text can leave above the cursor's row.
   await d.key("Home", 36);
   await d.key("ArrowRight", 39);
   await d.wait(() => d.exists(DETAILS));
@@ -279,7 +299,7 @@ export async function schedulesScenario(d: Driver) {
   await d.quit();
   await d.launch("de_DE");
   await size(d, 1280, 800);
-  await d.click("Aufnahmen", "document.querySelectorAll('header button')[4]");
+  await d.click("Aufnahmen", named("header button", "Aufnahmen"));
   await d.wait(() => d.evaluate<boolean>("document.querySelectorAll('section li').length >= 3"));
   await d.capture("lang-de-recordings");
   await d.click("Bearbeiten", "document.querySelector('section button[aria-label$=bearbeiten]')");
