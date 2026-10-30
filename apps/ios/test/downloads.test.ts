@@ -141,8 +141,11 @@ vi.mock("expo-video", () => ({
     });
     const detach = player.detachObservedAsync.getMockImplementation()!;
     player.detachObservedAsync.mockImplementation(async (id) => {
-      stream?.abort();
+      // Aborted only once the provider answered: a request already sent, a redirect's second hop
+      // included, still reaches the panel after an abort and holds its connection while the
+      // panels look idle.
       await request;
+      stream?.abort();
       return detach(id);
     });
     memory.player = player;
