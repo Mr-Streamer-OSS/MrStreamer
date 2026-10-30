@@ -328,10 +328,11 @@ export function removeMember(id: string, member: string): void {
 
 /**
  * Saves an edit of the list `from` shows: takes out the channels `removed` names, by member id, and
- * puts those `order` names in that order, in the places they had among its channels; the rest keep
- * theirs. Refuses with `list-changed`, changing nothing, once its revision or the channels it opens
- * are others than `from`'s, `removed` names one it didn't show, or `order` isn't the rest of those
- * it opened.
+ * puts those `order` names in that order, in the places they had among its channels, so one that
+ * doesn't open now moves as it showed too; those kept for removed subscriptions keep theirs.
+ * Refuses with `list-changed`, changing nothing, once its revision or the channels it opens are
+ * others than `from`'s, `removed` names one it didn't show, or `order` isn't the rest of those it
+ * showed.
  */
 export function arrangeList(
   from: ChannelList,
@@ -347,9 +348,7 @@ export function arrangeList(
     );
   const now = shownOf(list, currentCatalogue(), members());
   const out = new Set(removed);
-  const kept = now.entries.flatMap((entry) =>
-    entry.kind === "listed" && !out.has(entry.member) ? [entry.member] : [],
-  );
+  const kept = now.entries.flatMap((entry) => (out.has(entry.member) ? [] : [entry.member]));
   const sorted = (ids: Iterable<string>) => [...ids].sort().join("\n");
   if (
     list.revision !== from.revision ||

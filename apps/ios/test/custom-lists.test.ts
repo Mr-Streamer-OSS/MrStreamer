@@ -282,12 +282,16 @@ describe("arranging a list", () => {
     expect(shown()).toEqual(["Mix: b:10, a:10"]);
   });
 
-  it("moves only the channels that open, the rest keeping their places", () => {
+  it("moves a channel that doesn't open as it showed", () => {
     three();
     shows([NOS, NOS_FHD], [RTL]);
     expect(shown()).toEqual(["Mix: a:10, Ziggo Sport (not-listed), b:10"]);
-    lists.arrangeList(only(), ["b:10", "a:10"].map(memberOf));
-    expect(shown()).toEqual(["Mix: b:10, Ziggo Sport (not-listed), a:10"]);
+    const ziggo = only().entries[1]!.member;
+    expect(() => lists.arrangeList(only(), ["b:10", "a:10"].map(memberOf))).toThrow(
+      expect.objectContaining({ error: { kind: "list-changed" } }),
+    );
+    lists.arrangeList(only(), [ziggo, ...["b:10", "a:10"].map(memberOf)]);
+    expect(shown()).toEqual(["Mix: Ziggo Sport (not-listed), b:10, a:10"]);
   });
 
   it("refuses an order made before the list or its channels changed, moving nothing", () => {
