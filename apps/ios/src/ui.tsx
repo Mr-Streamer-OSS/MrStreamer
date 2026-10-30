@@ -52,7 +52,7 @@ export function useListWidth() {
   return { split, width: Math.min(520, Math.floor(314 + width * 0.15)), gutter };
 }
 
-/** What a ChannelRow's Schedule and star add under its lines at large text: 44 point targets, 4 above. */
+/** What a ChannelRow's star adds under its lines at large text: a 44 point target, 4 above. */
 export const stackedActions = 48;
 
 /** "VRT 1" as "V1", "Channel 4" as "C4": the stand-in for a channel without a logo. */
@@ -116,20 +116,12 @@ export const ChannelRow = memo(function ChannelRow({
   programme,
   programmeHint,
   providerLabel,
-  onSchedule,
-  selected,
 }: {
   channel: Channel;
   detail: string;
   programme?: ReactNode;
   programmeHint?: string;
   providerLabel?: string | undefined;
-  onSchedule?: ((channel: Channel) => void) | undefined;
-  /**
-   * In Live's list beside the detail column, whether its Schedule shows there. Left out
-   * elsewhere; rows in the column are inset from its edges, so the chosen one's fill is too.
-   */
-  selected?: boolean | undefined;
   /** How the channel stands while it is the one playing (`channelStatus`), in place of `detail`. */
   status: string | null;
   height: number;
@@ -139,18 +131,11 @@ export const ChannelRow = memo(function ChannelRow({
 }) {
   const tags = channel.tags.join(" ");
   const star = favourite ? "Remove from Favourites" : "Add to Favourites";
-  // At large text, Schedule and the star go under the lines, so the name keeps the row's width.
-  const stacked = largeText(useWindowDimensions().fontScale) && Boolean(onSchedule ?? onFavourite);
+  // At large text, the star goes under the lines, so the name keeps the row's width.
+  const stacked = largeText(useWindowDimensions().fontScale) && Boolean(onFavourite);
   return (
     <View
-      style={[
-        styles.row,
-        { height },
-        onFavourite && styles.starred,
-        stacked && styles.stacked,
-        selected !== undefined && styles.inset,
-        selected && styles.selected,
-      ]}
+      style={[styles.row, { height }, onFavourite && styles.starred, stacked && styles.stacked]}
     >
       <Pressable
         accessibilityRole="button"
@@ -192,20 +177,6 @@ export const ChannelRow = memo(function ChannelRow({
         </View>
       </Pressable>
       <View style={[styles.actions, stacked && styles.under]}>
-        {onSchedule ? (
-          <TextButton
-            label="Schedule"
-            accessibilityLabel={[
-              `Schedule for ${channel.title}`,
-              providerLabel,
-              selected && "shown",
-            ]
-              .filter(Boolean)
-              .join(", ")}
-            onPress={() => onSchedule(channel)}
-            testID={`schedule-${channel.key}`}
-          />
-        ) : null}
         {onFavourite ? (
           <Pressable
             accessibilityElementsHidden
@@ -318,8 +289,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16 },
   starred: { paddingRight: 4 },
   stacked: { flexDirection: "column", alignItems: "stretch", gap: 4, paddingVertical: 8 },
-  inset: { marginHorizontal: 8, paddingLeft: 8, borderRadius: 10 },
-  selected: { backgroundColor: colors.fill },
   actions: { flexDirection: "row", alignItems: "center" },
   under: { alignSelf: "flex-end", gap: 8 },
   main: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, alignSelf: "stretch" },

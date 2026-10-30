@@ -635,7 +635,7 @@ list beside a detail column, where a channel's Schedule and a programme over it 
 being pushed; the column reads "Choose a channel's Schedule" until one is. A programme chosen in
 the Guide grid opens there alone, with Back to Guide. Home, Movies and Series
 keep their layouts at every width, and the system places the tab bar and the now playing
-accessory. At accessibility text sizes, on every width, a Live row's Schedule and star sit under
+accessory. At accessibility text sizes, on every width, a Live row's star sits under
 its programme lines.
 
 A resize, rotation or fold keeps the list mounted, so its tab, country and scroll position stay.
