@@ -1174,6 +1174,40 @@ describe("Live on iPad and Duo windows", () => {
 });
 
 describe("Live's Guide grid", () => {
+  it("keeps a visible row when a different row's render is suspended", async () => {
+    const { useGuideGrid, localDay } = await import("../src/guide-ui.tsx");
+    if (state.catalogue.kind !== "ready") throw new Error("Catalogue missing");
+    const catalogue = state.catalogue.library;
+    const waiting = new Promise<void>(() => {});
+    let suspended = false;
+    function Grid({ keys, suspend }: { keys: string[]; suspend: boolean }) {
+      const { rows } = useGuideGrid(keys, localDay(at), catalogue);
+      if (suspend) {
+        suspended = true;
+        throw waiting;
+      }
+      return React.createElement(
+        "div",
+        null,
+        [...rows.values()].flatMap((row) => row.programmes.map((programme) => programme.title)),
+      );
+    }
+    const screen = (keys: string[], suspend = false) =>
+      React.createElement(
+        React.Suspense,
+        { fallback: "Loading" },
+        React.createElement(Grid, { keys, suspend }),
+      );
+    const gate = holdQueries(async () => answer([current]));
+    await draw(screen(["a:1"]));
+    await React.act(async () => {
+      React.startTransition(() => root.render(screen(["a:3"], true)));
+    });
+    expect(suspended).toBe(true);
+    await gate.release();
+    expect(container.textContent).toContain(current.title);
+  });
+
   const cell = (key: string, programme: Programme) =>
     container.querySelector(`[data-testid="grid-${key}-${programme.start}"]`);
   const detail = () => container.querySelector('[data-testid="live-detail"]');

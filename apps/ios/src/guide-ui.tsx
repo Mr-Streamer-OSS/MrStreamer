@@ -1,6 +1,14 @@
 import type { Listing, Programme } from "@mrstreamer/contracts/guide";
 import { router, useIsFocused } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { StyleSheet, Text, View, type StyleProp, type TextStyle } from "react-native";
 import { guide, type Day, type DayPage, type GuideStatus, type ScheduleItem } from "./guide.ts";
 import { usePlayback } from "./playback.ts";
@@ -262,9 +270,11 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
   };
   const [settled, setSettled] = useState<Settled | null>(null);
   const latest = useRef(settled);
-  latest.current = settled;
   const inView = useRef(requested);
-  inView.current = requested;
+  useLayoutEffect(() => {
+    latest.current = settled;
+    inView.current = requested;
+  }, [settled, requested]);
   // Each row's read in progress, under what it was started, so only a change to that aborts it.
   type Reading = { from: number; catalogue: Library; version: string; controller: AbortController };
   const reading = useRef(new Map<string, Reading>());
