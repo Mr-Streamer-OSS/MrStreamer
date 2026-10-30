@@ -211,10 +211,11 @@ export function createGuides(
     mappings: mapped.get,
     /**
      * At launch, before the native guide store restores: the saved guides' ids, which it restores,
-     * and the id prefixes it keeps unread (guide.ts `restore`). Without a file it starts empty, and
-     * every external guide's saved programmes go. A file that can't be read now, or that another
-     * build wrote (custom-lists-file.ts "foreign"), shows none and is never written over: its
-     * guides' saved programmes and links stay for a launch that reads it.
+     * and the id prefixes it keeps unread (guide.ts `restore`). Without a file, or with text that
+     * isn't JSON (files.ts), it starts empty, and every external guide's saved programmes go. A
+     * file that can't be read now, or that another build wrote (custom-lists-file.ts "foreign"),
+     * shows none and is never written over: its guides' saved programmes and links stay for a
+     * launch that reads it.
      */
     load(): { readonly ids: readonly string[]; readonly kept: readonly string[] } {
       let parsed: GuidesFile | type.errors | null = null;

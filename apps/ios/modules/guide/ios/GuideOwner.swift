@@ -73,7 +73,10 @@ final class GuideOwner {
       try? FileManager.default.removeItem(at: path)
     }
   }
-  /** Activates `active` and erases the rest, but ids starting with one of `kept`, which stay unread. */
+  /**
+   * Activates `active` and erases the rest, but ids starting with one of `kept`: they stay on disk,
+   * and unread only while JS attaches none of them (guide-sources.ts names none it can't read).
+   */
   func restore(_ active: [String], keeping kept: [String] = []) -> [[String: Any]] {
     lock.lock(); defer { lock.unlock() }
     for job in jobs.values { job.cancel() }; sources.removeAll(); candidates.removeAll()
