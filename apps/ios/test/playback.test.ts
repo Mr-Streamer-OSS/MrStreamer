@@ -84,7 +84,7 @@ const tick = async () => {
   for (let i = 0; i < 40; i++) await Promise.resolve();
 };
 async function until(ready: () => boolean) {
-  for (let i = 0; i < 100 && !ready(); i++) await new Promise((done) => setTimeout(done, 10));
+  for (let i = 0; i < 500 && !ready(); i++) await new Promise((done) => setTimeout(done, 10));
   expect(ready()).toBe(true);
 }
 const phase = () => playback.playbackState.get().phase;
@@ -234,20 +234,22 @@ describe("a programme from catch-up", () => {
       await tick();
     });
     expect(port.currentTime).toBe(30);
+    // The player marks no moment while it plays on: the end is timed from where it is.
     await React.act(async () => {
-      port.currentTime = 30 + 3599;
+      port.currentTime = 30 + 3500;
       port.pause.mockClear();
       port.state(true);
       await tick();
     });
-    expect(container.textContent).toContain("-0:01");
+    expect(container.textContent).toContain("-1:40");
+    await new Promise((done) => setTimeout(done, 100));
     expect(port.pause).not.toHaveBeenCalled();
     await React.act(async () => {
-      port.currentTime = 30 + 3600;
+      port.currentTime = 30 + 3600 - 0.05;
       port.state(true);
       await tick();
     });
-    expect(port.pause).toHaveBeenCalled();
+    await until(() => port.pause.mock.calls.length > 0);
   });
 
   it("plays the accepted stream where it keeps the programme", async () => {

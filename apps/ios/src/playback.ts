@@ -634,6 +634,7 @@ export function player(): VideoPlayer {
 /** Releases readers independently of the ordered progress-save result. */
 function release(): Promise<Saved> {
   const saved = report();
+  endAtLength(false);
   if (current) {
     clearWatchdog(current.epoch);
     playingTime(current.epoch, false);
@@ -1166,10 +1167,7 @@ function observe(event: PlaybackObservation) {
       if (viewerPaused) pauseOnStart = false;
       clock.set(Math.max(0, event.mediaTimeSeconds - current.offset));
       if (!stands(resource) || resource.sequence !== event.sequence) return;
-      if (playing && current.item.past && clock.get() >= length.get()) {
-        player().pause();
-        return;
-      }
+      endAtLength(playing);
       const { phase } = state.get();
       if (phase.kind === "idle" || phase.kind === "failed") return;
       if (playing && pauseOnStart) {
@@ -1607,12 +1605,38 @@ export function togglePause() {
 
 export function seekBy(seconds: number) {
   player().seekBy(seconds);
+  endAtLength(state.get().phase.kind === "playing");
 }
 
 /** Moves a title to `seconds` from its start. */
 export function seekTo(seconds: number) {
   player().currentTime = Math.max(0, seconds) + (current?.offset ?? 0);
   clock.set(Math.max(0, seconds));
+  endAtLength(state.get().phase.kind === "playing");
+}
+
+/** Pauses a programme from catch-up at its end, which no event of the player's marks. */
+let ending: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Times the pause at a programme's end from where it is, while it plays: told each time it starts
+ * or stops playing and after each seek. A timer that fires early, after a seek back, times again.
+ */
+function endAtLength(playing: boolean) {
+  if (ending) clearTimeout(ending);
+  ending = null;
+  const owned = current;
+  if (!playing || !owned?.item.past) return;
+  const left = () => length.get() - (player().currentTime - owned.offset);
+  ending = setTimeout(
+    () => {
+      ending = null;
+      if (current !== owned) return;
+      if (left() > 0.5) endAtLength(true);
+      else player().pause();
+    },
+    Math.max(0, left()) * 1000,
+  );
 }
 
 export function setMuted(muted: boolean) {
