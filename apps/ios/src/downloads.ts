@@ -1317,10 +1317,10 @@ async function firstForeground(): Promise<void> {
     }
     await finishRemovals();
     if (!bound) await bindLogins();
-    // Before anything new is admitted: a pause or a move a relaunch interrupted counts first,
-    // and the barrier stays up until both are kept.
+    // Before anything new is admitted: a pause a relaunch interrupted is kept first, and the
+    // barrier stays up until it is. A move is put in order too; one refused waits for a refill.
     if (!(await restoreHolds())) throw new Error("A pause isn't kept yet.");
-    await arrange();
+    await arrange().catch(() => undefined);
     await transfers.finishForegroundReconcile(token);
     barrier = "done";
   } catch {
@@ -1869,10 +1869,17 @@ const unfinished = (record: Stored | undefined): record is Stored =>
 export type Paused = "closed" | "closing" | "unchanged";
 
 /**
+ * Whether a native command's refusal leaves what it changed unknown: one that didn't answer in
+ * time may still be written. The viewer's ask then stands on the record, which a late write
+ * agrees with, and the next refill brings the native side to it either way.
+ */
+const unanswered = (cause: unknown) => refusalOf(cause) === "busy";
+
+/**
  * Pauses a queued or transferring download where it is: written on its record, then held on the
  * native side, so neither the queue nor a relaunch starts it again until it is resumed. Resolves
  * once its request ended or the wait for it did. Rejects, leaving it as it was, when the native
- * side can't keep the pause.
+ * side refuses the pause.
  */
 export async function pauseDownload(id: string): Promise<Paused> {
   const record = find(id);
@@ -1883,8 +1890,9 @@ export async function pauseDownload(id: string): Promise<Paused> {
   try {
     if (bound) await transfers.holdAuthorization(bound.authorization, true);
   } catch (cause) {
+    if (unanswered(cause)) refill();
     // Ended meanwhile: its receipt says what that means, and it stays paused if it stays queued.
-    if (refusalOf(cause) !== "obsolete") {
+    else if (refusalOf(cause) !== "obsolete") {
       update(id, withoutPause);
       tell();
       throw new AppFailure({ kind: "unexpected", detail: "The pause couldn't be kept." });
@@ -1900,8 +1908,8 @@ export async function pauseDownload(id: string): Promise<Paused> {
 
 /**
  * Lets a paused download go on in its place in the queue, from its bytes when the provider still
- * serves the same file to the same login. Rejects, leaving it paused, when the native side can't
- * let it go.
+ * serves the same file to the same login. Rejects, leaving it paused, when the native side
+ * refuses to let it go.
  */
 export async function resumeDownload(id: string): Promise<void> {
   const record = find(id);
@@ -1912,7 +1920,7 @@ export async function resumeDownload(id: string): Promise<void> {
   try {
     if (bound) await transfers.holdAuthorization(bound.authorization, false);
   } catch (cause) {
-    if (refusalOf(cause) !== "obsolete") {
+    if (!unanswered(cause) && refusalOf(cause) !== "obsolete") {
       update(id, (latest) => ({ ...latest, paused: true }));
       tell();
       throw new AppFailure({ kind: "unexpected", detail: "The download couldn't be resumed." });
@@ -1931,7 +1939,7 @@ const waitingTurn = (record: Stored) =>
 
 /**
  * Moves a download waiting its turn one place earlier (-1) or later (1) among those waiting, the
- * native queue with it. Rejects, putting it back, when the native side can't take the order.
+ * native queue with it. Rejects, putting it back, when the native side refuses the order.
  */
 export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
   const record = find(id);
@@ -1943,17 +1951,25 @@ export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
   const swap = (each: Stored) => (each === record ? other : each === other ? record : each);
   commit({ ...doc, items: doc.items.map(swap) });
   tell();
+  const moved = orderOf(doc.items);
   try {
     await arrange();
-  } catch {
-    // Put back while both still stand as they were; otherwise the next refill orders them.
-    if (find(id) === record && find(other.id) === other) {
+  } catch (cause) {
+    if (unanswered(cause)) {
+      refill();
+      return;
+    }
+    // Put back while both still stand as they were and nothing moved since; otherwise the next
+    // refill orders the native queue as the list stands.
+    if (find(id) === record && find(other.id) === other && orderOf(doc.items) === moved) {
       commit({ ...doc, items: doc.items.map(swap) });
       tell();
     }
     throw new AppFailure({ kind: "unexpected", detail: "The new order couldn't be kept." });
   }
 }
+
+const orderOf = (items: readonly Stored[]) => items.map((each) => each.id).join("\n");
 
 /** A complete copy that isn't being removed: the only kind that plays. */
 const playable = (record: Stored | undefined): record is Stored =>

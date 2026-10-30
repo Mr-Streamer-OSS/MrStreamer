@@ -422,6 +422,23 @@ function appGoes(state: "background" | "active") {
   for (const listener of memory.appListeners) listener(state);
 }
 
+const busy = () => Object.assign(new Error("busy"), { code: "ERR_DOWNLOADS_BUSY" });
+
+/** Answers `busy` at once, as a command past its deadline does, and is written natively later. */
+const late =
+  <A extends unknown[]>(command: (...args: A) => Promise<unknown>) =>
+  async (...args: A): Promise<never> => {
+    setTimeout(() => void command(...args).catch(() => undefined), 300);
+    throw busy();
+  };
+
+/** The model's bridge, as the app finds it: kept across launches, so a spy on it is too. */
+const bridge = (globalThis as unknown as { expo: { modules: { BackgroundDownloads: Bridge } } })
+  .expo.modules.BackgroundDownloads;
+interface Bridge {
+  arrangeAuthorizations(authorizations: string[]): Promise<void>;
+}
+
 describe("downloads", { timeout: 30_000 }, () => {
   it("excludes recognised catalogues and saved actions after refresh and restore, keeping personal copies", async () => {
     await install();
@@ -1469,6 +1486,53 @@ describe("downloads", { timeout: 30_000 }, () => {
     await until(() => native.open === 0, "the transfer to pause");
   });
 
+  it("keeps a pause and a Resume the native side answered late, and goes on as the viewer asked", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    const { transfers } = await import("../src/download-task.ts");
+    const command = transfers.holdAuthorization.bind(transfers);
+    const hold = vi.spyOn(transfers, "holdAuthorization");
+    onTestFinished(() => hold.mockRestore());
+    hold.mockImplementationOnce(late(command));
+    await expect(app.pauseDownload(film.id)).resolves.not.toBe("unchanged");
+    await sleep(1_500);
+    expect(native.open).toBe(0);
+    expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+    expect([...background.grants.values()].find((grant) => grant.id === film.id)?.held).toBe(true);
+
+    one.stallMovieFile(movie().id, 0, 0);
+    hold.mockImplementationOnce(late(command));
+    await expect(app.resumeDownload(film.id)).resolves.toBeUndefined();
+    expect(statusOf(app, film.id)?.kind).not.toBe("paused");
+    await until(() => isComplete(app, film.id), "the resumed copy");
+  });
+
+  it("goes on after a relaunch whose queue order the native side refused", async () => {
+    let app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    await app.pauseDownload(film.id);
+    // Refused once, under the next launch's first-foreground barrier.
+    let refused = false;
+    const command = bridge.arrangeAuthorizations.bind(bridge);
+    const arrange = vi.spyOn(bridge, "arrangeAuthorizations").mockImplementation(async (ids) => {
+      if (refused || background.barrier.kind !== "installed") return command(ids);
+      refused = true;
+      throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
+    });
+    onTestFinished(() => arrange.mockRestore());
+    one.stallMovieFile(movie().id, 0, 0);
+    app = await launch();
+    await until(() => refused, "the first foreground's order to be refused");
+    await app.resumeDownload(film.id);
+    await until(() => isComplete(app, film.id), "the resumed copy");
+  });
+
   it("pauses at the next launch a transfer whose pause was written down but never reached the native side", async () => {
     let app = await installedApp();
     const { a } = await withProviders(app);
@@ -1488,37 +1552,47 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(background.events.filter((each) => each === `start:${film.id}`)).toHaveLength(1);
   });
 
-  it("moves a waiting download ahead of another, and the native queue goes in that order with no JavaScript", async () => {
-    const app = await installedApp();
-    const { a } = await withProviders(app);
-    const { series, first } = episode();
-    one.stallMovieFile(movie().id, 30_000, 3_000);
-    const film = await app.addDownload(movieRef(a));
-    const other = await app.addDownload(movieRef(a, otherMovie().id));
-    const show = await app.addDownload({
-      kind: "episode",
-      subscriptionId: a,
-      id: String(first.id),
-      seriesId: String(series.id),
-      season: 1,
-      episode: first.number ?? 1,
-    });
-    await until(() => receivedOf(app, film.id) === 30_000, "the transfer to stall");
-    await until(() => background.open(show.id).length === 1, "the last one authorized");
-    await app.moveDownload(show.id, -1);
-    expect(app.downloadList().items.map((item) => item.id)).toEqual([film.id, show.id, other.id]);
-    appGoes("background");
-    background.die();
-    await until(
-      () => background.events.includes(`receipt:${other.id}:complete`),
-      "all three to complete natively",
-    );
-    expect(background.events.filter((each) => each.startsWith("start:"))).toEqual([
-      `start:${film.id}`,
-      `start:${show.id}`,
-      `start:${other.id}`,
-    ]);
-  });
+  it.each(["at once", "late"])(
+    "moves a waiting download ahead of another, and the native queue goes in that order with no JavaScript: answered %s",
+    async (answered) => {
+      const app = await installedApp();
+      const { a } = await withProviders(app);
+      const { series, first } = episode();
+      one.stallMovieFile(movie().id, 30_000, 3_000);
+      const film = await app.addDownload(movieRef(a));
+      const other = await app.addDownload(movieRef(a, otherMovie().id));
+      const show = await app.addDownload({
+        kind: "episode",
+        subscriptionId: a,
+        id: String(first.id),
+        seriesId: String(series.id),
+        season: 1,
+        episode: first.number ?? 1,
+      });
+      await until(() => receivedOf(app, film.id) === 30_000, "the transfer to stall");
+      await until(() => background.open(show.id).length === 1, "the last one authorized");
+      if (answered === "late") {
+        const command = bridge.arrangeAuthorizations.bind(bridge);
+        const arrange = vi.spyOn(bridge, "arrangeAuthorizations");
+        onTestFinished(() => arrange.mockRestore());
+        arrange.mockImplementationOnce(late(command));
+      }
+      await app.moveDownload(show.id, -1);
+      expect(app.downloadList().items.map((item) => item.id)).toEqual([film.id, show.id, other.id]);
+      await sleep(500);
+      appGoes("background");
+      background.die();
+      await until(
+        () => background.events.includes(`receipt:${other.id}:complete`),
+        "all three to complete natively",
+      );
+      expect(background.events.filter((each) => each.startsWith("start:"))).toEqual([
+        `start:${film.id}`,
+        `start:${show.id}`,
+        `start:${other.id}`,
+      ]);
+    },
+  );
 
   it("moves a waiting download past a paused one, the transfer under way keeping its row", async () => {
     const app = await installedApp();
