@@ -3,6 +3,7 @@ import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { normalize } from "@mrstreamer/core/text";
 import { useMemo, useSyncExternalStore } from "react";
+import { AppState } from "react-native";
 import {
   currentCatalogue,
   currentRoster,
@@ -17,6 +18,7 @@ import {
 } from "./account.ts";
 import {
   keptNow,
+  readAgain,
   save,
   stored,
   subscribe,
@@ -413,7 +415,14 @@ function align(catalogue: Catalogue, roster: Roster) {
 }
 
 // Loaded with Live, which the tabs load at launch, so a removed subscription's channels go
-// whether or not Live shows.
-const aligned = () => align(currentCatalogue(), currentRoster());
+// whether or not Live shows. A file that didn't read, as before the phone's first unlock, is read
+// again then and as the app comes to the front.
+const aligned = () => {
+  readAgain();
+  align(currentCatalogue(), currentRoster());
+};
 onRoster(aligned);
 onCatalogue(aligned);
+AppState.addEventListener("change", (state) => {
+  if (state === "active") readAgain();
+});

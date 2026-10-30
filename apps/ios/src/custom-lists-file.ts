@@ -42,7 +42,6 @@ export type Kept =
   | { readonly kind: "unreadable" }
   | { readonly kind: "foreign" };
 
-/** One value, so a screen asking again while the file doesn't read finds nothing changed. */
 const UNREADABLE: Kept = { kind: "unreadable" };
 
 function readKept(): Kept {
@@ -59,13 +58,9 @@ function readKept(): Kept {
     : { kind: "read", lists: parsed.lists };
 }
 
-/**
- * The file, read at the first look and again at each look while it doesn't read, then kept as
- * written.
- */
+/** The file, read once, at the first look, then kept as written. */
 let cached: Kept | null = null;
-export const keptNow = () =>
-  cached === null || cached === UNREADABLE ? (cached = readKept()) : cached;
+export const keptNow = () => (cached ??= readKept());
 const listeners = new Set<() => void>();
 /** For `useSyncExternalStore` with `keptNow`. */
 export const subscribe = (listener: () => void) => {
@@ -77,11 +72,19 @@ function keep(next: Kept) {
   for (const listener of listeners) listener();
 }
 
+/** Reads the file again while it doesn't read, and shows its lists once it does. */
+export function readAgain() {
+  if (keptNow() !== UNREADABLE) return;
+  const again = readKept();
+  if (again !== UNREADABLE) keep(again);
+}
+
 /**
  * The lists as the file holds them, for a change. Throws, changing nothing, while the file doesn't
  * read, after reading it again, or holds lists this build can't read.
  */
 export function stored(): readonly StoredList[] {
+  readAgain();
   const from = keptNow();
   if (from.kind === "read") return from.lists;
   throw new AppFailure({

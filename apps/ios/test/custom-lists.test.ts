@@ -25,10 +25,21 @@ const scenario = vi.hoisted(() => ({
   /** What account.ts tells as its channels change, and as its roster does. */
   changed: new Set<() => void>(),
   rosterChanged: new Set<() => void>(),
+  /** What iOS tells as the app comes to the front or goes. */
+  appState: new Set<(state: string) => void>(),
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
-vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
+vi.mock("react-native", async () => ({
+  ...(await import("./react-native.ts")).reactNative,
+  AppState: {
+    currentState: "active",
+    addEventListener: (_event: string, listener: (state: string) => void) => {
+      scenario.appState.add(listener);
+      return { remove: () => void scenario.appState.delete(listener) };
+    },
+  },
+}));
 vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
   onRoster: (listener: () => void) => void scenario.rosterChanged.add(listener),
@@ -101,6 +112,7 @@ async function launch() {
   vi.resetModules();
   scenario.changed.clear();
   scenario.rosterChanged.clear();
+  scenario.appState.clear();
   lists = await import("../src/custom-lists.ts");
   open();
 }
@@ -138,6 +150,7 @@ beforeEach(async () => {
   // The last test's module hears no more.
   scenario.changed.clear();
   scenario.rosterChanged.clear();
+  scenario.appState.clear();
   rmSync(file(), { force: true });
   rmSync(`${file()}.next`, { force: true });
   native.sync = null;
@@ -249,7 +262,11 @@ describe("lists", () => {
     shows([NOS, ZIGGO]);
     expect(readFileSync(file(), "utf8")).toBe(before);
     native.sync = null;
-    expect(shown()).toEqual(["News: a:10"]);
+    // The open screen shows them as the app comes to the front.
+    React.act(() => {
+      for (const listener of scenario.appState) listener("active");
+    });
+    expect(drawn).toEqual(["News: a:10"]);
     lists.createList("Sport");
     expect(shown()).toEqual(["News: a:10", "Sport: "]);
   });
