@@ -313,10 +313,28 @@ export function setMember(id: string, channel: Channel, member: boolean): void {
   });
 }
 
+/**
+ * The members `ids` names, with every other member of `list` that is the same channel now, as two
+ * the provider joined since, which show as one: taking out the one shown takes out both.
+ */
+function withTwins(list: StoredList, ids: Iterable<string>): ReadonlySet<string> {
+  const named = new Set(ids);
+  const catalogue = currentCatalogue();
+  const keyOf = (stored: StoredMember) => resolve(catalogue, stored)?.channel.key;
+  const keys = new Set(list.members.filter((each) => named.has(each.member)).map(keyOf));
+  keys.delete(undefined);
+  return new Set(
+    list.members.flatMap((each) =>
+      named.has(each.member) || keys.has(keyOf(each)) ? [each.member] : [],
+    ),
+  );
+}
+
 /** Takes a channel out of list `id` by its member id, as for one that doesn't open now. */
 export function removeMember(id: string, member: string): void {
   changeList(id, (list) => {
-    const members = list.members.filter((each) => each.member !== member);
+    const out = withTwins(list, [member]);
+    const members = list.members.filter((each) => !out.has(each.member));
     return members.length === list.members.length ? list : withMembers(list, members);
   });
 }
@@ -351,13 +369,14 @@ export function arrangeList(
     ) {
       throw new AppFailure({ kind: "list-changed" });
     }
+    const gone = withTwins(list, removed);
     const moved = new Set(order);
     const byMember = new Map(list.members.map((each) => [each.member, each]));
     const next = order.values();
     return withMembers(
       list,
       list.members.flatMap((each) =>
-        out.has(each.member)
+        gone.has(each.member)
           ? []
           : [moved.has(each.member) ? byMember.get(next.next().value!)! : each],
       ),
@@ -375,9 +394,16 @@ function align(catalogue: Catalogue, roster: Roster) {
   const from = keptNow();
   if (from.kind !== "read" || roster.kind !== "ready") return;
   const saved = new Set(roster.members.map((member) => member.entry.id));
-  let retired: ReadonlySet<string> | null = null;
-  const kept = (id: string) =>
-    (retired ??= new Set(readRegistry()?.registry.retired.map((each) => each.id) ?? [])).has(id);
+  // Read only once a list holds a subscription that isn't saved. While the registry doesn't read,
+  // whose history went is unknown, and every list keeps what it holds.
+  let retired: ReadonlySet<string> | null | undefined;
+  const kept = (id: string) => {
+    if (retired === undefined) {
+      const file = readRegistry();
+      retired = file ? new Set(file.registry.retired.map((each) => each.id)) : null;
+    }
+    return retired === null || retired.has(id);
+  };
   let changed = false;
   const lists = from.lists.map((list) => ({
     ...list,

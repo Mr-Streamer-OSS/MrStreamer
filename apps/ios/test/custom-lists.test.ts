@@ -16,8 +16,8 @@ import { native } from "./native-files.ts";
 const scenario = vi.hoisted(() => ({
   members: [] as Member[],
   catalogue: { kind: "loading" } as Catalogue,
-  /** Subscriptions removed with their history kept. */
-  retired: [] as string[],
+  /** Subscriptions removed with their history kept; null while the registry doesn't read. */
+  retired: [] as string[] | null,
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -29,7 +29,8 @@ vi.mock("../src/account.ts", () => ({
   currentCatalogue: () => scenario.catalogue,
 }));
 vi.mock("../src/subscriptions.ts", () => ({
-  readRegistry: () => ({ registry: { retired: scenario.retired.map((id) => ({ id })) } }),
+  readRegistry: () =>
+    scenario.retired && { registry: { retired: scenario.retired.map((id) => ({ id })) } },
 }));
 
 const channel = (id: string, name: string): ProviderChannel => ({
@@ -253,6 +254,32 @@ describe("a list's channels", () => {
     scenario.members = [member("a", "Home"), member("b", "Cabin")];
     await launch();
     expect(shown()).toEqual(["News: b:10"]);
+  });
+
+  it("of a provider removed while the registry doesn't read stay", () => {
+    lists.createList("News", live("a:10"));
+    scenario.members = [member("b", "Cabin")];
+    scenario.retired = null;
+    shows([NOS]);
+    expect(shown()).toEqual(["News:  +1 away"]);
+    expect(readFileSync(file(), "utf8")).toContain("NOS");
+  });
+
+  it("the provider joined since go together when the one shown is taken out", () => {
+    const apart = channel("14", "NL | NPO 1");
+    shows([NOS, apart]);
+    const news = lists.createList("News", live("a:10"));
+    lists.setMember(news, live("a:14"), true);
+    lists.createList("Mix", live("a:10"));
+    lists.setMember(only().id, live("a:14"), true);
+    // Stream 14 is NOS's other quality now: one channel, shown once in each list.
+    shows([NOS, NOS_FHD]);
+    expect(shown()).toEqual(["News: a:10", "Mix: a:10"]);
+    lists.removeMember(news, only().entries[0]!.member);
+    const mix = lists.currentChannelLists()[1]!;
+    lists.arrangeList(mix, [], [mix.entries[0]!.member]);
+    shows([NOS, apart]);
+    expect(shown()).toEqual(["News: ", "Mix: "]);
   });
 });
 

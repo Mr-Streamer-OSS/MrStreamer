@@ -104,8 +104,8 @@ interface Naming {
   readonly message?: string;
   readonly action: string;
   readonly typed: string;
-  /** The list a failure names, given the name typed. */
-  readonly named: (name: string) => string;
+  /** What a failure's alert says, given the name typed. */
+  readonly failed: (name: string) => string;
   readonly write: (name: string) => void;
 }
 
@@ -129,7 +129,7 @@ function askName(naming: Naming) {
           } catch (cause) {
             const error = appError(cause);
             if (error.kind !== "list-name-taken") {
-              return Alert.alert(`${naming.named(name)} wasn't changed`, whyNot(error));
+              return Alert.alert(naming.failed(name), whyNot(error));
             }
             const folded = normalize(name);
             const other = currentChannelLists().find((list) => normalize(list.name) === folded);
@@ -176,7 +176,7 @@ export function openListSheet(channel: Channel, anchor?: number) {
         message: `${channel.title} goes in it.`,
         action: "Create",
         typed: "",
-        named: (name) => name,
+        failed: (name) => `Couldn't make ${name}`,
         write: (name) => void createList(name, channel),
       });
     },
@@ -339,7 +339,7 @@ export function ChannelListScreen({ id }: { id: string }) {
       title: "Rename list",
       action: "Rename",
       typed: nameNow(),
-      named: nameNow,
+      failed: () => `${nameNow()} wasn't changed`,
       write: (name) => renameList(id, name),
     });
   const confirmDelete = () => {
