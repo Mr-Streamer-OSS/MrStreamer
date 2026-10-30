@@ -857,13 +857,14 @@ describe.skipIf(!hasTools)("downloads", () => {
   }, 60_000);
 
   it.each([
-    { overtaken: 1, ends: "complete" },
-    { overtaken: 2, ends: "failed" },
+    { overtaken: 1, replaced: false, ends: "complete", requests: 2 },
+    { overtaken: 2, replaced: false, ends: "failed", requests: 2 },
+    { overtaken: 1, replaced: true, ends: "failed", requests: 1 },
   ] as const)(
-    "looks an episode's file up again once, and no more, when catalogue refreshes overtake the lookup as its transfer starts ($overtaken)",
-    async ({ overtaken, ends }) => {
+    "looks an episode's file up again once, and no more nor under a login replaced meanwhile, when catalogue refreshes overtake the lookup as its transfer starts (%o)",
+    async ({ overtaken, replaced, ends, requests }) => {
       const hold = seriesDetailsHold();
-      const { provider, dataDir, subscriptionId, downloads, onDemand, find, quit } =
+      const { provider, dataDir, subscriptionId, downloads, subscriptions, onDemand, find, quit } =
         await connected();
       // The episode waits behind a stalled film, with the details it was queued by.
       const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
@@ -883,14 +884,15 @@ describe.skipIf(!hasTools)("downloads", () => {
       // Each refresh is accepted while the lookup's answer is still on its way.
       for (const held of holds) {
         await held.arrived;
+        if (replaced) await subscriptions.add(demoLogin(provider));
         await onDemand.refresh(subscriptionId);
         held.release();
       }
       await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe(ends), {
         timeout: LONG,
       });
-      // Renewed once only.
-      expect(provider.detailRequests() - asked).toBe(2);
+      // Renewed once only, and never for a replaced login.
+      expect(provider.detailRequests() - asked).toBe(requests);
       if (ends === "complete")
         expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(target.bytes));
       else

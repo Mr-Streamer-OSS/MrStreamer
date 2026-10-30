@@ -866,10 +866,12 @@ function make(deps: OnDemandDeps) {
                   : source.provider.seriesDetails(id, signal),
               catch: failedWith,
             }).pipe(diagnosed("details"));
-            if (!(yield* stands(source))) return yield* switched;
             // A refresh during this request cannot bless an answer asked of the previous catalogue.
-            if ((yield* stampOf(source)) !== stamp || !(yield* listedTitle(source, kind, id)))
-              return yield* overtaken;
+            // A source replaced meanwhile switched, whatever the catalogue did.
+            const moved =
+              (yield* stampOf(source)) !== stamp || !(yield* listedTitle(source, kind, id));
+            if (!(yield* stands(source))) return yield* switched;
+            if (moved) return yield* overtaken;
             const downloaded: Downloaded = {
               raw,
               at: yield* Clock.currentTimeMillis,
@@ -1393,12 +1395,11 @@ function make(deps: OnDemandDeps) {
               source.provider.titleFile("episode", title.id, episode.container, signal),
             catch: failedWith,
           });
-          if (!(yield* stands(source))) return yield* switched;
-          if (
+          const moved =
             (yield* stampOf(source)) !== series.evidence.catalogueStamp ||
-            !(yield* listedTitle(source, "series", title.seriesId))
-          )
-            return yield* overtaken;
+            !(yield* listedTitle(source, "series", title.seriesId));
+          if (!(yield* stands(source))) return yield* switched;
+          if (moved) return yield* overtaken;
           return {
             ...file,
             revision: source.revision,
