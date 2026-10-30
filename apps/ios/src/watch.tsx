@@ -53,10 +53,10 @@ import { colors } from "./ui.tsx";
 import { currentSource } from "./sources.ts";
 
 /** Watch's keyboard shortcuts while it shows: Space, ← and → while a stream plays, Esc always. */
-const STREAMING: readonly Shortcut<"pause" | "back" | "forward" | "close">[] = [
+const STREAMING: readonly Shortcut<"pause" | "rewind" | "skip" | "close">[] = [
   { id: "pause", input: " ", command: false, title: "Play or Pause" },
-  { id: "back", input: "leftArrow", command: false, title: "Back 10 seconds" },
-  { id: "forward", input: "rightArrow", command: false, title: "Forward 10 seconds" },
+  { id: "rewind", input: "leftArrow", command: false, title: "Back 10 seconds" },
+  { id: "skip", input: "rightArrow", command: false, title: "Forward 10 seconds" },
   { id: "close", input: "escape", command: false, title: "Close" },
 ];
 const STILL = STREAMING.filter((shortcut) => shortcut.id === "close");
@@ -189,7 +189,7 @@ export function WatchLayer() {
   useShortcuts(!watch ? NO_SHORTCUTS : streaming ? STREAMING : STILL, (id) => {
     if (id === "close") void closeWatch();
     else if (id === "pause") togglePause();
-    else seekBy(id === "back" ? -10 : 10);
+    else seekBy(id === "rewind" ? -10 : 10);
   });
 
   if (!watch && !pip) return null;

@@ -229,10 +229,10 @@ export function Programme({
   onBack?: () => void;
 }) {
   const catalogue = useCatalogue();
-  const heading = useAnnounced(onBack !== undefined);
   const content = useContent(onBack !== undefined);
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const channel = library?.byKey.get(key);
+  const heading = useAnnounced(onBack !== undefined && channel !== undefined);
   const load = useCallback(
     (signal: AbortSignal) =>
       channel && library ? guide.programme(detail, { signal }) : Promise.resolve(null),
@@ -241,7 +241,14 @@ export function Programme({
   const read = useGuideRead(load, channel ? [channel.subscriptionId] : []);
   const listing = useMemo(() => ({ now: read.value ?? null, next: null }), [read.value]);
   const progress = programmePresentation(listing, read.now).progress;
-  if (!channel || !library) return <Message text="Channel unavailable" />;
+  if (!channel || !library) {
+    return (
+      <Message
+        text="Channel unavailable"
+        {...(onBack ? { action: { label: "Back to Schedule", onPress: onBack } } : {})}
+      />
+    );
+  }
   return (
     <ScrollView
       style={styles.screen}

@@ -173,15 +173,17 @@ function useHandover(split: boolean) {
     });
     navigation.dispatch({ type: "POP_TO_TOP", target });
   }, [navigation, stack, target, split]);
+  // Under another screen, as Settings opened over the list, it waits for Back to the list.
+  const atRoot = stack?.routes.length === 1;
   useEffect(() => {
-    if (split || !shown || !target) return;
+    if (split || !shown || !target || !atRoot) return;
     detail.set(null);
     const day = shown.day === null ? {} : { day: String(shown.day) };
     const push = (name: string, params: object) =>
       navigation.dispatch({ type: "PUSH", payload: { name, params }, target });
     push("schedule", { channel: shown.channel, ...day });
     if (shown.programme) push("programme", { channel: shown.channel, detail: shown.programme });
-  }, [navigation, target, split, shown]);
+  }, [navigation, target, atRoot, split, shown]);
 }
 
 /**
@@ -247,7 +249,12 @@ export function closeDetail(): boolean {
 /** Opens `channel`'s Schedule: in the detail column from the split width, else pushed on Live. */
 const showSchedule = (split: boolean, channel: Channel) =>
   split
-    ? detail.set({ channel: channel.key, day: null, programme: null })
+    ? detail.set((current) =>
+        // The Schedule already shown stays on its day, closing its programme.
+        current?.channel === channel.key
+          ? { ...current, programme: null }
+          : { channel: channel.key, day: null, programme: null },
+      )
     : openSchedule("live", channel.key);
 
 /** The Live tab's list. Its Favourites and Find rows show whatever the channels' state. */

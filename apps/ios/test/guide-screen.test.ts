@@ -969,6 +969,9 @@ describe("Live on iPad and Duo windows", () => {
       day: "numeric",
     });
     expect(detail()?.textContent).toContain(tomorrow);
+    // Its Schedule pressed again keeps the day shown.
+    await click("schedule-a:1");
+    expect(detail()?.textContent).toContain(tomorrow);
     await click(`programme-${current.start}`);
     expect(detail()?.textContent).toContain(current.description);
     await click("Back to Schedule");
@@ -1030,7 +1033,7 @@ describe("Live on iPad and Duo windows", () => {
     });
   });
 
-  it("leaves a Schedule under another pushed screen until it is the stack's top again", async () => {
+  it("moves a Schedule only while it, or the list, is the top of Live's stack", async () => {
     state.stack = {
       key: "live-stack",
       index: 2,
@@ -1048,6 +1051,28 @@ describe("Live on iPad and Duo windows", () => {
     await draw(React.createElement(LiveTab));
     await settle();
     expect(pushes()).toEqual([{ type: "POP_TO_TOP", target: "live-stack" }]);
+
+    // Narrowed with Settings over the list, the Schedule waits for Back to the list.
+    state.did = [];
+    state.stack = {
+      key: "live-stack",
+      index: 1,
+      routes: [{ name: "index" }, { name: "settings" }],
+    };
+    state.window = { width: 684, height: 1032, fontScale: 1 };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(pushes()).toEqual([]);
+    state.stack = { key: "live-stack", index: 0, routes: [{ name: "index" }] };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(pushes()).toEqual([
+      {
+        type: "PUSH",
+        payload: { name: "schedule", params: { channel: "a:1" } },
+        target: "live-stack",
+      },
+    ]);
   });
 
   it("keeps the compact layout at accessibility text sizes below 1000 points", async () => {
