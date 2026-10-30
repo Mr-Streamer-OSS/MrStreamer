@@ -9,7 +9,8 @@
 // the commit and whether the fixture sources differ from it, the ffmpeg that made the media, and
 // per piece its command, its inputs (a lavfi graph, or a repository file and its SHA-256) and the
 // SHA-256 of every file served from it. Repository clips the server sends as they are, the TEST
-// titles' files, are declared too.
+// titles' files, are declared too. A made piece's files are named from `out`, a served clip's from
+// the repository's root, as its input is.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -21,7 +22,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 
 /** A looped recording, cut into segments of the durations its playlist gives. */
 export interface Media {
@@ -33,6 +34,17 @@ export interface Media {
 const WINDOW = 5;
 
 const sha256 = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
+
+/** Whether process `pid` is running. */
+function alive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // Another user's process that may not be signalled is running too.
+    return error instanceof Error && "code" in error && error.code === "EPERM";
+  }
+}
 
 /** One piece of media and how it was made. */
 interface Artifact {
@@ -105,12 +117,19 @@ export function mediaMaker(root: string, out: string, declaration: string) {
           : [{ file: relative(root, arg), sha256: sha256(readFileSync(arg)) }],
     );
     const options = ["-v", "error", "-y", ...args];
-    const key = sha256(JSON.stringify([ffmpeg, options, inputs])).slice(0, 12);
-    const dir = join(out, "media", `${name}-${key}`);
+    const key = sha256(JSON.stringify([ffmpeg, options, local("."), output, inputs]));
+    const dir = join(out, "media", `${name}-${key.slice(0, 12)}`);
     if (!existsSync(dir)) {
-      // A directory of this server's own, so a second one starting beside it makes its own.
+      // A directory of this server's own, so a second one starting beside it makes its own. What
+      // a server stopped while making it left is removed.
+      mkdirSync(join(out, "media"), { recursive: true });
+      for (const left of readdirSync(join(out, "media"))) {
+        const pid = Number(/\.making-(\d+)$/.exec(left)?.[1]);
+        if (left.startsWith(`${basename(dir)}.making-`) && (pid === process.pid || !alive(pid))) {
+          rmSync(join(out, "media", left), { recursive: true, force: true });
+        }
+      }
       const making = `${dir}.making-${process.pid}`;
-      rmSync(making, { recursive: true, force: true });
       mkdirSync(making, { recursive: true });
       execFileSync("ffmpeg", [...options, ...local(making), join(making, output)]);
       try {

@@ -61,9 +61,6 @@ describe("the native verification fixture", () => {
   let out: string;
   let panel: string;
   let control: string;
-  // The server runs in a process group of its own, so stopping it stops any ffmpeg it is running
-  // too. Windows has no such groups; there it is stopped alone.
-  const grouped = process.platform !== "win32";
   const provider = () =>
     xtreamProvider({ server: panel, ...login }, { userAgent: "fixture", live: "hls" });
   const post = (route: string) => fetch(`${control}${route}`, { method: "POST" });
@@ -84,7 +81,6 @@ describe("the native verification fixture", () => {
       {
         env: { ...env, FIXTURE_OUT: out, FIXTURE_TITLES: "30" },
         stdio: ["ignore", "pipe", "inherit"],
-        detached: grouped,
       },
     );
     await new Promise<void>((resolve, reject) => {
@@ -97,8 +93,7 @@ describe("the native verification fixture", () => {
   afterAll(async () => {
     if (server?.pid && server.exitCode === null && server.signalCode === null) {
       const exited = new Promise((resolve) => server.once("exit", resolve));
-      if (grouped) process.kill(-server.pid, "SIGTERM");
-      else server.kill();
+      server.kill();
       await exited;
     }
     if (out) rmSync(out, { recursive: true, force: true });
