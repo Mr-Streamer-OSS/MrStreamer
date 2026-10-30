@@ -76,9 +76,6 @@ type Reading =
   | { readonly kind: "ready"; readonly report: PlaylistReport }
   | { readonly kind: "failed"; readonly error: AppError };
 
-/** The read each list of `member` last landed from, which a new report follows. */
-const readOf = (member: Member) => (member.live.kind === "ready" ? member.live.fetchedAt : null);
-
 /**
  * How many of a playlist's groups wait for a pick, for its Settings row: null for anything but
  * a playlist whose channels its provider gave this launch, so Settings never reads it afresh.
@@ -115,7 +112,8 @@ export function PlaylistScreen({ id, view }: { id: string; view: PlaylistView })
   const roster = useRoster();
   const member =
     roster.kind === "ready" ? roster.members.find((each) => each.entry.id === id) : undefined;
-  const read = member ? readOf(member) : null;
+  // A new report follows each read the channels land from.
+  const read = member?.live.kind === "ready" ? member.live.fetchedAt : null;
   const [reading, setReading] = useState<Reading>({ kind: "loading" });
   const [asked, setAsked] = useState(0);
   const [saving, setSaving] = useState<{ group: string; mode: PlaylistMode } | null>(null);
@@ -178,17 +176,22 @@ export function PlaylistScreen({ id, view }: { id: string; view: PlaylistView })
   };
   const detail = { report: reading.report, saving, refused, pick };
 
-  if (view.kind === "left-out") return <LeftOut omissions={reading.report.omissions} />;
-  if (view.kind === "group") {
-    const group = reading.report.groups.find((each) => each.group === view.group);
-    if (!group) return <Message text="This group is no longer in the playlist." />;
-    return (
-      <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
+  if (view.kind === "groups") return <Groups id={id} {...detail} />;
+  // False for Left out; undefined when the group is gone.
+  const group =
+    view.kind === "group" && reading.report.groups.find((each) => each.group === view.group);
+  if (group === undefined) return <Message text="This group is no longer in the playlist." />;
+  return (
+    <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
+      {group ? (
         <GroupDetail group={group} {...detail} />
-      </ScrollView>
-    );
-  }
-  return <Groups id={id} {...detail} />;
+      ) : (
+        <View style={styles.body}>
+          <LeftOutEntries omissions={reading.report.omissions} />
+        </View>
+      )}
+    </ScrollView>
+  );
 }
 
 /** Why the report couldn't be read, under the screen's own headline. */
@@ -323,6 +326,8 @@ function Count({ value, label }: { value: number; label: string }) {
   );
 }
 
+/** An entry's group as the report names it. */
+const groupName = (group: string) => group || "Ungrouped";
 const entries = (count: number) => `${formatNumber(count)} ${count === 1 ? "entry" : "entries"}`;
 const modeLabel = (mode: PlaylistMode | null) =>
   MODES.find((each) => each.mode === mode)?.label ?? "Needs mapping";
@@ -438,23 +443,13 @@ function GroupDetail({ group, saving, refused, pick }: Detail & { group: Playlis
 /** Why a sample stays out, naming the other groups it is in when they disagree. */
 function sampleReason({ reason, groups }: PlaylistSample, here: string): string | null {
   if (!reason) return null;
-  const others = groups.map((name) => name || "Ungrouped").filter((name) => name !== here);
+  const others = groups.map(groupName).filter((name) => name !== here);
   return reason === "conflicting-groups" && others.length > 0
     ? `${OMISSIONS[reason]} · also in ${others.join(", ")}`
     : OMISSIONS[reason];
 }
 
-/** Every entry left out of the lists, a page at a time, as a screen of its own. */
-function LeftOut({ omissions }: { omissions: readonly PlaylistOmission[] }) {
-  return (
-    <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
-      <View style={styles.body}>
-        <LeftOutEntries omissions={omissions} />
-      </View>
-    </ScrollView>
-  );
-}
-
+/** Every entry left out of the lists, a page at a time. */
 function LeftOutEntries({ omissions }: { omissions: readonly PlaylistOmission[] }) {
   const [shown, setShown] = useState(PAGE);
   return (
@@ -470,10 +465,9 @@ function LeftOutEntries({ omissions }: { omissions: readonly PlaylistOmission[] 
           <Entry
             key={index}
             name={omission.name}
-            why={[
-              OMISSIONS[omission.reason],
-              omission.groups.map((name) => name || "Ungrouped").join(", "),
-            ].join(" · ")}
+            why={[OMISSIONS[omission.reason], omission.groups.map(groupName).join(", ")].join(
+              " · ",
+            )}
           />
         ))}
       </View>

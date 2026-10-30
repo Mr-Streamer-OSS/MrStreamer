@@ -154,7 +154,8 @@ export function playlistProvider(
         // Line by line, up to the first that says: a piece can hold the whole playlist.
         for (const [line] of decoder.decode(value, { stream: true }).matchAll(LINES)) {
           characters += line.length;
-          if (characters > HEADER_CHARACTERS) throw notAPlaylist(origin);
+          // A first line this long heads no playlist.
+          if (characters > HEADER_CHARACTERS) return { playlist: false, guideUrl: null };
           reader.push(line);
           if (reader.playlist !== null) break;
         }

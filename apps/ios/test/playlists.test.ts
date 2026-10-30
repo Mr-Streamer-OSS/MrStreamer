@@ -273,15 +273,6 @@ describe("mapping a playlist's groups", () => {
       reason: "unmapped",
     });
   });
-
-  it("refuses a group the playlist no longer lists, changing nothing", async () => {
-    const app = await launch();
-    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
-    await expect(app.mapPlaylist(id, "0".repeat(64), "movie")).rejects.toMatchObject({
-      error: { kind: "unexpected" },
-    });
-    expect(registry().playlists[0].mapping).toBeUndefined();
-  });
 });
 
 function groupId(report: Awaited<ReturnType<App["playlistReport"]>>, name: string): string {

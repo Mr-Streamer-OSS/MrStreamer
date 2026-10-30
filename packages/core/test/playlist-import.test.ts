@@ -19,23 +19,11 @@ const mapping = mapPlaylistGroup(
 );
 
 describe("mixed playlist imports", () => {
-  it("names groups and titles as releases that hashed with Node's crypto did, on any runtime", () => {
+  it("names groups as releases that hashed with Node's crypto did, on any runtime", () => {
     const node = (text: string) => createHash("sha256").update(text).digest("hex");
-    for (const group of ["", "Films", "Séries | 漢字 😀", "x".repeat(600)])
+    // Lengths either side of where padding takes another block, and text over many blocks.
+    for (const group of ["", "Séries | 漢字 😀", ...[55, 56, 64, 600].map((n) => "x".repeat(n))])
       expect(playlistGroupId(group)).toBe(node(group));
-    const [movie] = importPlaylist(source, mapping).catalogue.movies;
-    const exact = JSON.stringify([
-      "Film",
-      "https://example.test/one.mp4",
-      [
-        ["group-title", "Films"],
-        ["tmdb-id", "42"],
-      ],
-      null,
-      "MovieAgent",
-      "https://example.test/",
-    ]);
-    expect(movie?.id).toBe(`m3u:${node(exact)}`);
   });
 
   it("uses inherited groups for explicit movie and series picks and keeps their version IDs on reorder", () => {

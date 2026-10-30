@@ -1,4 +1,3 @@
-import type { AppError } from "@mrstreamer/contracts/errors";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { add, update, type Member } from "./account.ts";
@@ -97,9 +96,7 @@ export function ProviderForm({
         if (signal.aborted) return;
         setBusy(false);
         if (edits.current !== submitted) return;
-        const error = appError(cause);
-        const host = saved?.server ?? (kind === "m3u" ? link : server);
-        setFailure((kind === "m3u" && playlistFailure(error)) || failureOf(error, host));
+        setFailure(failureOf(appError(cause), saved?.server ?? (kind === "m3u" ? link : server)));
       },
     );
   };
@@ -192,15 +189,6 @@ export function ProviderForm({
       {footnote?.(kind)}
     </>
   );
-}
-
-/** A link that answered with something other than a playlist, in the form's words. */
-function playlistFailure(error: AppError): Failure | null {
-  if (error.kind !== "unreachable" || !error.detail.includes("not with a playlist")) return null;
-  return {
-    headline: "This link isn't a playlist",
-    advice: "Check the link your provider sent, then try again.",
-  };
 }
 
 function Field({

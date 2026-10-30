@@ -2,7 +2,6 @@ import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import type { HTMLInputElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { Member } from "../src/account.ts";
 
 // Settings' provider form: Add saves the name with the login, Edit changes the name and only a
@@ -15,15 +14,14 @@ interface Asked {
   readonly args: readonly unknown[];
   readonly signal: AbortSignal;
   readonly succeed: () => void;
-  readonly fail: (cause: unknown) => void;
 }
 const asked: Asked[] = [];
 const held =
   (call: Asked["call"]) =>
   (...args: unknown[]) =>
-    new Promise<void>((succeed, fail) => {
+    new Promise<void>((succeed) => {
       const signal = args.at(-1) as AbortSignal;
-      asked.push({ call, args: args.slice(0, -1), signal, succeed, fail });
+      asked.push({ call, args: args.slice(0, -1), signal, succeed });
     });
 
 vi.mock("../src/account.ts", () => ({ add: held("add"), update: held("update") }));
@@ -165,24 +163,6 @@ describe("a playlist link", () => {
         ],
       ],
     ]);
-  });
-
-  it("says when the link answered with something other than a playlist", async () => {
-    const form = mount({ kind: "add" });
-    form.press("kind-m3u");
-    form.type("playlist-link", "https://tv.example.com/page");
-    form.press();
-    await form.answer(() =>
-      asked[0]!.fail(
-        new AppFailure({
-          kind: "unreachable",
-          server: "https://tv.example.com",
-          detail: "The address answered, but not with a playlist.",
-        }),
-      ),
-    );
-    expect(form.text()).toContain("This link isn't a playlist");
-    expect(form.text()).toContain("Try again");
   });
 
   it("is never shown back when editing, and a new one replaces it", () => {

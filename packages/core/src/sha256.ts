@@ -14,6 +14,8 @@ const K = Uint32Array.from([
 
 const encoder = new TextEncoder();
 
+type Words = [number, number, number, number, number, number, number, number];
+
 /** The SHA-256 of `text` as UTF-8, in lowercase hex. */
 export function sha256Hex(text: string): string {
   const bytes = encoder.encode(text);
@@ -26,9 +28,9 @@ export function sha256Hex(text: string): string {
   const bits = bytes.length * 8;
   view.setUint32(length - 8, Math.floor(bits / 0x1_0000_0000));
   view.setUint32(length - 4, bits >>> 0);
-  const hash = Uint32Array.from([
+  let hash: Words = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-  ]);
+  ];
   const w = new Uint32Array(64);
   for (let block = 0; block < length; block += 64) {
     for (let i = 0; i < 16; i++) w[i] = view.getUint32(block + i * 4);
@@ -37,26 +39,34 @@ export function sha256Hex(text: string): string {
       const b = w[i - 2]!;
       const s0 = rotate(a, 7) ^ rotate(a, 18) ^ (a >>> 3);
       const s1 = rotate(b, 17) ^ rotate(b, 19) ^ (b >>> 10);
-      w[i] = (w[i - 16]! + s0 + w[i - 7]! + s1) >>> 0;
+      w[i] = w[i - 16]! + s0 + w[i - 7]! + s1;
     }
-    let [a, b, c, d, e, f, g, h] = Array.from(hash);
+    let [a, b, c, d, e, f, g, h] = hash;
     for (let i = 0; i < 64; i++) {
-      const t1 = h! + (rotate(e!, 6) ^ rotate(e!, 11) ^ rotate(e!, 25)) + ((e! & f!) ^ (~e! & g!));
-      const t2 =
-        (rotate(a!, 2) ^ rotate(a!, 13) ^ rotate(a!, 22)) + ((a! & b!) ^ (a! & c!) ^ (b! & c!));
+      const t1 =
+        h + (rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25)) + ((e & f) ^ (~e & g)) + K[i]! + w[i]!;
+      const t2 = (rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
       h = g;
       g = f;
       f = e;
-      e = (d! + t1 + K[i]! + w[i]!) >>> 0;
+      e = (d + t1) >>> 0;
       d = c;
       c = b;
       b = a;
-      a = (t1 + K[i]! + w[i]! + t2) >>> 0;
+      a = (t1 + t2) >>> 0;
     }
-    // Uint32Array keeps each sum to 32 bits.
-    [a, b, c, d, e, f, g, h].forEach((word, at) => (hash[at] = hash[at]! + word!));
+    hash = [
+      (hash[0] + a) >>> 0,
+      (hash[1] + b) >>> 0,
+      (hash[2] + c) >>> 0,
+      (hash[3] + d) >>> 0,
+      (hash[4] + e) >>> 0,
+      (hash[5] + f) >>> 0,
+      (hash[6] + g) >>> 0,
+      (hash[7] + h) >>> 0,
+    ];
   }
-  return Array.from(hash, (word) => word.toString(16).padStart(8, "0")).join("");
+  return hash.map((word) => word.toString(16).padStart(8, "0")).join("");
 }
 
 const rotate = (word: number, by: number) => (word >>> by) | (word << (32 - by));
