@@ -1440,6 +1440,6 @@ export const es: Translation = {
   "The channel has no stream right now.": "El canal no tiene emisión ahora mismo.",
   "This channel's stream can't be recorded.": "No se puede grabar la emisión de este canal.",
   "The recording couldn't be written to this computer.":
-    "No se pudo guardar la grabación en este ordenador.",
+    "No se pudo guardar la grabación en este equipo.",
   "The recording couldn't be deleted.": "No se pudo eliminar la grabación.",
 };
