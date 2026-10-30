@@ -403,8 +403,7 @@ function make(deps: RecordingsDeps) {
             }),
           ),
         ),
-        // Read once they settle: a start that became active meanwhile ends with the others.
-        Effect.suspend(() => Effect.ignore(end([...active.keys()], "quit"))),
+        Effect.ignore(end([...active.keys()], "quit")),
       ),
     );
 

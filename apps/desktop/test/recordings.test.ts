@@ -2,6 +2,7 @@
 // fixtures captured to a temporary data folder, and ffprobe and the app's own copy playback for
 // what was written.
 import { spawnSync } from "node:child_process";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -237,9 +238,9 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await recordings.list()).toEqual([]);
   });
 
-  it("stops with its subscription as its stream's first program arrives", async () => {
+  it("stops with its subscription when it becomes active as the subscription goes", async () => {
     let source: Writable | undefined;
-    const { channel, subscriptionId, recordings, roster } = await connected({
+    const { provider, dataDir, channel, subscriptionId, recordings } = await connected({
       streams: (_channel, out) => {
         source = out;
         out.write(Buffer.alloc(0));
@@ -252,13 +253,17 @@ describe.skipIf(!hasTools)("recordings", () => {
     );
     while (!source) await new Promise((resolve) => setImmediate(resolve));
     source.write(fixture("h264-aac.mpegts"));
-    // The removal begins while capture writes the program table, so the start becomes active
-    // as the removal waits for it.
-    for (let turn = 0; turn < 2; turn++) await new Promise((resolve) => setImmediate(resolve));
-    await roster.remove(subscriptionId, false);
-    expect((await recordings.list()).map((each) => each.status)).toEqual(
-      (await started) ? [{ kind: "stopped" }] : [],
-    );
+    // Its program table is being written: it becomes active while the subscription goes.
+    const folder = join(dataDir, "recordings");
+    const writing = () =>
+      readdirSync(folder).some((name) =>
+        readdirSync(join(folder, name)).some((file) => statSync(join(folder, name, file)).size > 0),
+      );
+    while (!existsSync(folder) || !writing()) await new Promise((resolve) => setImmediate(resolve));
+    await recordings.subscriptionGone(subscriptionId);
+    expect(provider.activeStreams()).toBe(0);
+    expect(await started).toBe(true);
+    expect((await recordings.list()).map((each) => each.status)).toEqual([{ kind: "stopped" }]);
   });
 
   it("stops with its subscription while its playlist is read again to start", async () => {
