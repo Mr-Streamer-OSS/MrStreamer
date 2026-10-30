@@ -21,7 +21,7 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF" } }));
 
-const { openOnTabs, tabsAt } = await import("../src/header.tsx");
+const { openOnTabs, tabStack, tabsAt } = await import("../src/header.tsx");
 
 const TABS = ["(home)", "live", "films", "series"].map((name) => ({ name }));
 /** The root stack: the tabs on `tab`, with `over` above them. */
@@ -73,5 +73,18 @@ describe("the top bar's destinations", () => {
 
   it("find no tabs with no provider saved, where the root shows Connect and offline Downloads", () => {
     expect(tabsAt({ index: 1, routes: [{ name: "connect" }, { name: "offline" }] })).toBeNull();
+  });
+});
+
+describe("a tab's own stack", () => {
+  it("is found while another tab is selected, and under Search, for Live's iPad and Duo hand-back", () => {
+    const live = { key: "live-stack", index: 1, routes: [{ name: "index" }, { name: "schedule" }] };
+    const tabs = TABS.map((tab) => (tab.name === "live" ? { ...tab, state: live } : tab));
+    const state = {
+      index: 1,
+      routes: [{ name: "(tabs)", state: { index: 2, routes: tabs } }, { name: "search" }],
+    };
+    expect(tabStack(state, "live")).toBe(live);
+    expect(tabStack(state, "films")).toBeUndefined();
   });
 });

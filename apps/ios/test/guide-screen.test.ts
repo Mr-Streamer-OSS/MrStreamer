@@ -1124,6 +1124,18 @@ describe("Live on iPad and Duo windows", () => {
     expect(state.focus).toEqual(["focus Channel 1"]);
   });
 
+  it("keeps a pushed Schedule's chosen day in its route, for the column to take over", async () => {
+    state.params = { channel: "a:1" };
+    await draw(React.createElement(ScheduleScreen, { origin: "live" }));
+    await settle();
+    await click("Next day");
+    await click("Today");
+    expect(state.did).toEqual([
+      { setParams: { day: String(new Date(2026, 9, 25).getTime()) } },
+      { setParams: { day: undefined } },
+    ]);
+  });
+
   it("keeps the compact layout at accessibility text sizes below 1000 points", async () => {
     state.window = { width: 951, height: 669, fontScale: 2.143 };
     await draw(React.createElement(LiveTab));
