@@ -74,8 +74,15 @@ export interface Playing {
   readonly title: string;
   /** Where the catalogue lists a channel, "Netherlands · News"; a title's line, "S1 E2 · Name". */
   readonly place: string;
-  /** A live channel plays on; a title has a length. */
+  /** A live channel plays on; a title, or a programme from catch-up, has a length. */
   readonly live: boolean;
+  /**
+   * A channel's programme from its catch-up archive, when it aired: it plays from its start as
+   * the channel's own streams do, trying another when one fails, but with a length and never
+   * live. Its length is at least the programme's, as a recording still being made grows to it,
+   * and it stops there where the archive sends on past it.
+   */
+  readonly past?: { readonly start: number; readonly stop: number };
   /** An episode with one after it, which Watch offers. */
   readonly next: boolean;
   /** A title with other versions to try when this one fails. */
@@ -129,6 +136,15 @@ const THROUGH_SESSION: ReadonlySet<string> = new Set(["mkv"]);
 
 /** How the latest save of a title's progress ended: kept, or refused with what it was refused for. */
 export type Saved = { readonly saved: true } | { readonly saved: false; readonly error: AppError };
+
+/**
+ * A title's length in seconds as the player knows it; a programme from catch-up's at least the
+ * programme's, which a recording still being made grows to.
+ */
+function lengthOf(item: Playing, known: number | null): number {
+  const seconds = known ?? 0;
+  return item.past ? Math.max(seconds, (item.past.stop - item.past.start) / 1000) : seconds;
+}
 
 /** Opens what plays; aborted when the viewer moves on first. */
 type Open = (signal: AbortSignal) => Promise<Source>;
@@ -1117,7 +1133,7 @@ function observe(event: PlaybackObservation) {
     case "media-services-reset":
       return fail({ kind: "reset" });
     case "ready": {
-      if (!current.item.live) length.set(event.durationSeconds ?? 0);
+      if (!current.item.live) length.set(lengthOf(current.item, event.durationSeconds));
       if (current.seek !== null) {
         const from = current.seek;
         current.seek = null;
@@ -1147,6 +1163,10 @@ function observe(event: PlaybackObservation) {
       if (viewerPaused) pauseOnStart = false;
       clock.set(event.mediaTimeSeconds);
       if (!stands(resource) || resource.sequence !== event.sequence) return;
+      if (playing && current.item.past && event.mediaTimeSeconds >= length.get()) {
+        player().pause();
+        return;
+      }
       const { phase } = state.get();
       if (phase.kind === "idle" || phase.kind === "failed") return;
       if (playing && pauseOnStart) {
@@ -1355,6 +1375,8 @@ async function admit(owned: NonNullable<typeof current>) {
   if (!sourceStands(owned) || !attended() || held !== null) return terminal(owned);
   const resource = makeResource(owned.choice, owned.epoch, true);
   owned.resource = resource;
+  // A recording reconnects where it got to; a channel plays live again.
+  if (!owned.item.live && owned.stoppedAt !== null) owned.seek = owned.stoppedAt;
   owned.loaded = false;
   owned.epoch.playingSince = null;
   owned.epoch.playedMs = 0;
@@ -1495,7 +1517,7 @@ function groupState(hold: TrackHold | undefined): GroupState {
 
 /** The candidate actually playing, never a backoff or a failed override. */
 export function liveStream() {
-  if (!current || current.choice.plan.kind !== "live") return null;
+  if (!current?.item.live || current.choice.plan.kind !== "live") return null;
   const { kind } = state.get().phase;
   return {
     channel: current.item.id,

@@ -269,7 +269,7 @@ const fixture = () => {
   if (!state.fixture) throw new Error("Fixture missing");
   return state.fixture;
 };
-function part(id = "a", count = 3) {
+function part(id = "a", count = 3, catchupDays: number | null = null) {
   return finish(
     partSteps({
       subscriptionId: id,
@@ -283,14 +283,14 @@ function part(id = "a", count = 3) {
           logoUrl: null,
           adult: false,
           number: null,
-          catchupDays: null,
+          catchupDays,
         })),
       },
     }),
   );
 }
-async function install(id = "a", count = 3, age = 0) {
-  const p = part(id, count);
+async function install(id = "a", count = 3, age = 0, catchupDays: number | null = null) {
+  const p = part(id, count, catchupDays);
   fixture().control.activations.set(id, {
     lease: `lease-${id}`,
     generation: { id: `db-${id}`, fetchedAt: Date.now() - age, until: Date.now() + 7 * 86400_000 },
@@ -972,6 +972,54 @@ describe("selected A public guide UI with the real guide owner", () => {
     expect(container.textContent).toContain(current.title);
     expect(container.textContent).toContain("Couldn't update schedule");
     expect(container.textContent).not.toContain("private pagination error");
+  });
+});
+
+describe("a programme's catch-up", () => {
+  /** The Programme screen's buttons, in order, for `programme` on a channel keeping `days`. */
+  async function actions(programme: Programme, days: number | null) {
+    await install("a", 3, 0, days);
+    state.params = { channel: "a:1" };
+    state.answer = async () => answer([programme]);
+    await draw(React.createElement(ScheduleScreen, { origin: "live" }));
+    await settle();
+    await click(`programme-${programme.start}`);
+    state.params = (state.did.at(-1) as { params: typeof state.params }).params;
+    await draw(React.createElement(ProgrammeScreen, { origin: "live" }));
+    await settle();
+    return [...container.querySelectorAll("button")].map((button) => button.textContent);
+  }
+  const ended: Programme = { ...current, start: at - 3 * 3600_000, stop: at - 2 * 3600_000 };
+
+  it("plays an ended programme the channel keeps from its start, before Watch live", async () => {
+    expect(await actions(ended, 3)).toEqual(["Play from start", "Watch live"]);
+    await click("Play from start");
+    expect(state.did.at(-1)).toEqual({
+      play: "a:1",
+      watch: true,
+      programme: expect.objectContaining({ start: ended.start, stop: ended.stop }),
+    });
+  });
+
+  it("starts one still on over after Watch live", async () => {
+    expect(await actions(current, 3)).toEqual(["Watch live", "Play from start"]);
+    await click("Play from start");
+    expect(state.did.at(-1)).toMatchObject({ programme: { start: current.start } });
+  });
+
+  it.each([
+    { days: 3, programme: next, says: null },
+    { days: null, programme: current, says: null },
+    { days: null, programme: ended, says: "This channel has no catch-up." },
+    {
+      days: 1,
+      programme: { ...ended, start: at - 2 * 86400_000, stop: at - 2 * 86400_000 + 3600_000 },
+      says: "Catch-up on this channel goes back 1 day.",
+    },
+  ])("watches live only, saying why: $says", async ({ days, programme, says }) => {
+    expect(await actions(programme, days)).toEqual(["Watch live"]);
+    if (says) expect(container.textContent).toContain(says);
+    else expect(container.textContent).not.toContain("catch-up");
   });
 });
 

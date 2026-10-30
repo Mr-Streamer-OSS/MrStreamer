@@ -8,7 +8,10 @@ import type {
 } from "@mrstreamer/contracts/playlist";
 import type { AccountStatus } from "@mrstreamer/contracts/subscription";
 import type { Quality } from "@mrstreamer/contracts/library";
+import type { Programme } from "@mrstreamer/contracts/guide";
+import type { ArchiveWindow } from "@mrstreamer/contracts/playback";
 import { chosenVariant, streamsToPlay } from "@mrstreamer/core/catalogue/variants";
+import { archiveVariants } from "@mrstreamer/core/catchup";
 import { adultIn } from "@mrstreamer/core/adult";
 import { mapPlaylistGroup, playlistGroupId, safeName } from "@mrstreamer/core/playlist/import";
 import type { LiveCatalogue, OnDemandCatalogue, Provider } from "@mrstreamer/core/provider";
@@ -1446,8 +1449,13 @@ async function eraseHistory(id: string): Promise<void> {
 /** The last channel chosen to watch while a channel played: another one changes the channel. */
 let chosen: string | null = null;
 
-/** Core chooses up to three streams for Automatic, or only the explicit or accepted pick. */
-function livePlan(channel: Channel, asked?: string): Plan | null {
+/**
+ * Core chooses up to three streams for Automatic, or only the explicit or accepted pick. With
+ * `past`, the streams are the channel's whose catch-up keeps that window, each asked for its
+ * recording; one that no longer keeps it when it opens, or a channel with none, fails with
+ * `catch-up`, saying why, and never plays the channel live instead.
+ */
+function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan | null {
   const permitted = () => {
     if (channel.adult) return false;
     const member = members().find((each) => each.entry.id === channel.subscriptionId);
@@ -1461,45 +1469,92 @@ function livePlan(channel: Channel, asked?: string): Plan | null {
   if (!permitted()) return null;
   const picks = channelPicks(channel.subscriptionId);
   const { liveQuality } = getMediaPreferences();
-  const [first, ...rest] = streamsToPlay(
-    channel,
-    { liveQuality, channelVariants: picks },
-    asked,
-  ).map((variant) => ({
-    variantId: variant.id,
-    open: async (signal: AbortSignal) => {
-      if (!permitted()) throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
-      const stream = await sourceOf(channel.subscriptionId).provider.liveStream(variant.id, signal);
-      if (!permitted()) throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
-      return {
-        admit: () => {
-          if (!permitted())
-            throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
-        },
-        url: stream.url,
-        container: stream.format === "hls" ? "m3u8" : "ts",
-        ...(stream.headers ? { headers: stream.headers } : {}),
+  let kept: Channel = channel;
+  if (past) {
+    try {
+      kept = { ...channel, variants: archiveVariants(channel, past, Date.now()) };
+    } catch (cause) {
+      const refused = async () => {
+        throw cause;
       };
-    },
-  }));
+      return {
+        kind: "live",
+        candidates: [{ variantId: channel.id, open: refused }],
+        explicit: true,
+      };
+    }
+  }
+  const [first, ...rest] = streamsToPlay(kept, { liveQuality, channelVariants: picks }, asked).map(
+    (variant) => ({
+      variantId: variant.id,
+      open: async (signal: AbortSignal) => {
+        if (!permitted())
+          throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
+        const { provider } = sourceOf(channel.subscriptionId);
+        // Still kept as it opens, or a failure that says why not.
+        if (past) archiveVariants({ ...channel, variants: [variant] }, past, Date.now());
+        const stream = past
+          ? await provider.archiveStream(variant.id, past, signal)
+          : await provider.liveStream(variant.id, signal);
+        if (!permitted())
+          throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
+        return {
+          admit: () => {
+            if (!permitted())
+              throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
+          },
+          url: stream.url,
+          container: stream.format === "hls" ? "m3u8" : "ts",
+          ...(stream.headers ? { headers: stream.headers } : {}),
+        };
+      },
+    }),
+  );
   return first
     ? {
         kind: "live",
         candidates: [first, ...rest],
-        explicit: asked !== undefined || chosenVariant(channel, picks) !== null,
+        explicit: asked !== undefined || chosenVariant(kept, picks) !== null,
       }
     : null;
 }
 
-/** Plays one channel from its own provider, using the accepted global quality and channel pick. */
+/**
+ * Plays one channel from its own provider, using the accepted global quality and channel pick:
+ * live, or with `programme`, that programme from its start out of the channel's catch-up, a
+ * recording with a length that is never live.
+ */
 export function playChannel(
   channel: Channel,
   place: string,
-  options: { watch: boolean; variantId?: string },
+  options: {
+    watch: boolean;
+    variantId?: string;
+    programme?: Pick<Programme, "start" | "stop" | "title">;
+  },
 ) {
-  const plan = livePlan(channel, options.variantId);
+  const { programme, ...rest } = options;
+  const past = programme && { start: programme.start, end: programme.stop };
+  const plan = livePlan(channel, options.variantId, past);
   if (!plan) return;
   const { subscriptionId } = channel;
+  if (programme) {
+    void play(
+      {
+        id: channel.key,
+        subscriptionId,
+        title: programme.title,
+        place: channel.title,
+        live: false,
+        past: { start: programme.start, stop: programme.stop },
+        next: false,
+        versions: false,
+      },
+      plan,
+      { ...rest, login: loginOf(subscriptionId) },
+    );
+    return;
+  }
   if (options.watch) {
     const { phase } = playbackState.get();
     const watching = phase.kind !== "idle" && phase.item.live;

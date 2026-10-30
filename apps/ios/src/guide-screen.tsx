@@ -1,3 +1,5 @@
+import type { Programme as Aired } from "@mrstreamer/contracts/guide";
+import { archiveHolds } from "@mrstreamer/core/catchup";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -24,6 +26,7 @@ import {
   useGuideSchedule,
   type GuideOrigin,
 } from "./guide-ui.tsx";
+import { describeError } from "./errors.ts";
 import { tabHref } from "./header.tsx";
 import type { Channel, Library } from "./library.ts";
 import { colors, Message, TextButton, useListWidth } from "./ui.tsx";
@@ -242,6 +245,8 @@ export function Programme({
   const read = useGuideRead(load, channel ? [channel.subscriptionId] : []);
   const listing = useMemo(() => ({ now: read.value ?? null, next: null }), [read.value]);
   const progress = programmePresentation(listing, read.now).progress;
+  const catchUp: CatchUp =
+    read.value && channel ? catchUpOf(channel, read.value, read.now) : { kind: "later" };
   if (!channel || !library) {
     return (
       <Message
@@ -285,6 +290,9 @@ export function Programme({
         message={guideMessage(read.snapshot.get(channel.subscriptionId))}
         origin={origin}
       />
+      {read.value && catchUp.kind === "past" ? (
+        <FromStart channel={channel} programme={read.value} />
+      ) : null}
       <TextButton
         label="Watch live"
         onPress={() =>
@@ -292,8 +300,53 @@ export function Programme({
         }
         testID="guide-watch-live"
       />
+      {read.value && catchUp.kind === "on" ? (
+        <FromStart channel={channel} programme={read.value} />
+      ) : null}
+      {read.value && read.value.stop <= read.now && catchUp.kind === "none" ? (
+        <Text style={styles.copy}>{describeError({ kind: "catch-up", reason: "none" })}</Text>
+      ) : null}
+      {catchUp.kind === "expired" ? (
+        <Text style={styles.copy}>
+          {describeError({ kind: "catch-up", reason: "outside", days: catchUp.days })}
+        </Text>
+      ) : null}
     </ScrollView>
   );
+}
+
+/** Plays a programme from its start, out of its channel's catch-up, in Watch. */
+function FromStart({ channel, programme }: { channel: Channel; programme: Aired }) {
+  return (
+    <TextButton
+      label="Play from start"
+      onPress={() => playChannel(channel, channel.title, { watch: true, programme })}
+      testID="guide-play-from-start"
+    />
+  );
+}
+
+/**
+ * What a programme of `channel` offers from its catch-up at `now`. One that has started, within
+ * the days a stream of the channel keeps, plays from its start: `past` once it ended, `on` while
+ * it is still on, to start over. Otherwise it doesn't, and says why: it hasn't started, the
+ * channel keeps no catch-up (`none`), or it aired before the `days` it keeps (`expired`).
+ */
+export type CatchUp =
+  | { readonly kind: "past" | "on" | "later" | "none" }
+  | { readonly kind: "expired"; readonly days: number };
+
+export function catchUpOf(
+  channel: Pick<Channel, "variants" | "catchupDays">,
+  programme: Pick<Aired, "start" | "stop">,
+  now: number,
+): CatchUp {
+  if (programme.start >= now || programme.stop <= programme.start) return { kind: "later" };
+  if (channel.variants.some((variant) => archiveHolds(variant.catchupDays, programme.start, now)))
+    return { kind: programme.stop <= now ? "past" : "on" };
+  return channel.catchupDays === null
+    ? { kind: "none" }
+    : { kind: "expired", days: channel.catchupDays };
 }
 
 /**

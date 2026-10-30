@@ -121,7 +121,7 @@ export interface XtreamOptions extends ProviderOptions {
   /**
    * What live channels are asked for as: MPEG-TS (`.ts`), which the desktop app plays and
    * converts, unless given; or HLS (`.m3u8`), which panels also serve, for players that take only
-   * HLS, such as AVPlayer on iOS. Catch-up recordings are MPEG-TS either way.
+   * HLS, such as AVPlayer on iOS. Catch-up recordings are asked for the same way.
    */
   readonly live?: StreamFormat;
   /**
@@ -388,9 +388,10 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
 
     /**
      * The panel's timeshift address: `/timeshift/user/pass/<minutes>/<YYYY-MM-DD:HH-MM>/<id>.ts`,
-     * the start on the panel's own clock (`server_info.timezone`), else in UTC. Panels start on a
-     * whole minute, so the recording starts on the minute before the window's start, which it
-     * says, and runs on to the window's end.
+     * or `.m3u8` where live channels are asked for as HLS, the start on the panel's own clock
+     * (`server_info.timezone`), else in UTC. Panels start on a whole minute, so the recording
+     * starts on the minute before the window's start, which it says, and runs on to the window's
+     * end.
      */
     async archiveStream(channelId, window, signal) {
       const user = encodeURIComponent(account.username);
@@ -399,9 +400,11 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
       const minutes = Math.ceil((window.end - start) / 60_000);
       const at = wallClock(start, await serverTimeZone(signal));
       const time = `${at.year}-${at.month}-${at.day}:${at.hour}-${at.minute}`;
+      const format = options.live ?? "mpegts";
+      const extension = format === "hls" ? "m3u8" : "ts";
       return {
-        url: `${account.server}/timeshift/${user}/${pass}/${minutes}/${time}/${encodeURIComponent(channelId)}.ts`,
-        format: "mpegts",
+        url: `${account.server}/timeshift/${user}/${pass}/${minutes}/${time}/${encodeURIComponent(channelId)}.${extension}`,
+        format,
         start,
       };
     },
