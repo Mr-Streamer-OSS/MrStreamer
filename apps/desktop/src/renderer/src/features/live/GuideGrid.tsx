@@ -61,7 +61,12 @@ import { archiveHolds } from "@mrstreamer/core/catchup";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
 import { SchedulePanel } from "../recordings/SchedulePanel.tsx";
-import { basisOfProgramme, scheduleAt, useSchedules } from "../recordings/schedules.ts";
+import {
+  basisOfProgramme,
+  basisOfSchedule,
+  scheduleAt,
+  useSchedules,
+} from "../recordings/schedules.ts";
 import { ReminderButton } from "../reminders/ReminderButton.tsx";
 import {
   blocksIn,
@@ -847,7 +852,10 @@ const GridRow = memo(function GridRow({
             const chosen = selected(block);
             const box = place(block);
             const reminded = reminderAt(reminders, channel, slot.start) !== undefined;
-            const scheduled = !ended && scheduleAt(schedules, channel, slot.start) !== undefined;
+            // Not where the guide lists another show at a programme's start now: it won't record.
+            const status = scheduleAt(schedules, channel, slot.start)?.status.kind;
+            const scheduled =
+              !ended && status !== undefined && status !== "changed" && status !== "gone";
             return (
               <div
                 key={slot.start}
@@ -1022,7 +1030,10 @@ function Details({
       {slot && open && (
         <SchedulePanel
           key={`${ownedKey(channel)}:${slot.start}`}
-          basis={basisOfProgramme(ownedId(channel), slot)}
+          // A repeat edited from one of its programmes keeps its own time and length.
+          basis={
+            schedule ? basisOfSchedule(schedule, slot) : basisOfProgramme(ownedId(channel), slot)
+          }
           channelName={channel.title}
           schedule={schedule}
           autoFocus

@@ -72,8 +72,7 @@ import { LOCALES, type InterfaceLanguage } from "./language.ts";
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
 import type { Reminder, ReminderList } from "./reminders.ts";
 import {
-  PADDING_MAX,
-  RECORDING_MAX_MS,
+  RecordingPlanSchema,
   type Recording,
   type RecordingConnections,
   type RecordingStart,
@@ -100,35 +99,6 @@ const titleKind = () => type.enumerated(...TITLE_KINDS);
 const decoders = () => type.enumerated(...CODECS).array();
 /** An `OwnedId`: what a provider lists, with the subscription that lists it. */
 const owned = () => type({ subscriptionId: "string > 0", id: "string" });
-/** A `RecordingPlan`: a programme, or a slot whose padded time stays within `RECORDING_MAX_MS`. */
-const recordingPlan = () => {
-  const padding = type({
-    before: `0 <= number.integer <= ${PADDING_MAX}`,
-    after: `0 <= number.integer <= ${PADDING_MAX}`,
-  });
-  const common = { channel: owned(), title: "string", padding } as const;
-  return type({
-    kind: "'programme'",
-    ...common,
-    start: "number.integer",
-    stop: "number.integer",
-  })
-    .or({
-      kind: "'slot'",
-      ...common,
-      days: type("0 <= number.integer <= 6").array().atLeastLength(1).atMostLength(7),
-      at: "0 <= number.integer < 1440",
-      minutes: "number.integer >= 1",
-    })
-    .narrow((plan) => {
-      const minutes = plan.kind === "slot" ? plan.minutes : (plan.stop - plan.start) / 60_000;
-      return (
-        minutes > 0 &&
-        (minutes + plan.padding.before + plan.padding.after) * 60_000 <= RECORDING_MAX_MS &&
-        (plan.kind === "programme" || new Set(plan.days).size === plan.days.length)
-      );
-    });
-};
 /** A list's or a list channel's id, as the window or the main process made it up. */
 const listId = () => type("string").atLeastLength(1).atMostLength(64);
 /** Movies, and series whose every episode counts, by the ids of their versions: a `TitleFilter`. */
@@ -335,9 +305,9 @@ export const ipcInputs = {
    * How a schedule would stand, saving nothing: as the one `id` names would, changed to `plan`,
    * or as a new one.
    */
-  "recordings.plan": () => type({ plan: recordingPlan(), "id?": "string > 0" }),
+  "recordings.plan": () => type({ plan: RecordingPlanSchema(), "id?": "string > 0" }),
   /** Saves a new schedule, or changes the one `id` names. */
-  "recordings.schedule": () => type({ plan: recordingPlan(), "id?": "string > 0" }),
+  "recordings.schedule": () => type({ plan: RecordingPlanSchema(), "id?": "string > 0" }),
   /** Takes a schedule out. A recording it started goes on until it stops. */
   "recordings.cancel": () => type({ id: "string > 0" }),
   "ondemand.status": none,

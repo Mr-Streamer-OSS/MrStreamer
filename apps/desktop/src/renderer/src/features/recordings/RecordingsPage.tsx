@@ -211,7 +211,7 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
       <span className="hidden w-16 flex-none text-right text-xs text-muted-foreground tabular-nums lg:block">
         {size}
       </span>
-      <div className="flex w-[5.75rem] flex-none justify-end gap-1.5 lg:w-[9.15rem]">
+      <div className="flex w-[7.5rem] flex-none justify-end gap-1.5 lg:w-[9.15rem]">
         {active ? (
           <Button
             size="sm"
@@ -382,7 +382,7 @@ function ScheduleRow({
         {line}
       </span>
       <span className="hidden w-16 flex-none lg:block" />
-      <div className="flex w-[5.75rem] flex-none justify-end gap-1.5 lg:w-[9.15rem]">
+      <div className="flex w-[7.5rem] flex-none justify-end gap-1.5 lg:w-[9.15rem]">
         <Popover.Root open={editing} onOpenChange={setEditing}>
           <Popover.Trigger
             render={
@@ -475,6 +475,14 @@ function standing(
         reason: t("Every connection is in use, by {holders}.", {
           holders: holdersText(status.holders),
         }),
+      };
+    case "retrying":
+      return {
+        word: t("Trying again"),
+        reason:
+          status.why === "stream"
+            ? t("The stream couldn't be opened.")
+            : t("It couldn't be written to this computer."),
       };
     case "recording":
       return {

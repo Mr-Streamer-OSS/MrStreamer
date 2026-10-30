@@ -120,6 +120,12 @@ function missText(why: ScheduleMiss): string {
       return t("Every connection was in use.");
     case "stream":
       return t("The stream couldn't be opened.");
+    case "disk":
+      return t("It couldn't be written to this computer.");
+    case "held":
+      return t("The guide listed another programme then, or the channel was gone.");
+    case "unread":
+      return t("The channel list or guide wasn't read yet.");
   }
 }
 

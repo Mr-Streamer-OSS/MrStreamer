@@ -4,8 +4,9 @@
 //
 //   { "version": 1, "recordings": [ { "id": …, "file": "….ts", "status": { "kind": … }, … } ] }
 //
-// schedules.json beside it keeps the schedules, in a file of their own so a build from before
-// them reads and writes recordings.json without losing one:
+// schedules.json beside it keeps the schedules, in a file of their own, which a build from before
+// them leaves alone. Such a build can't read a recordings.json that holds a missed result, and
+// so records nothing, as with any file it can't make sense of:
 //
 //   { "version": 1, "schedules": [ { "id": …, "plan": { "kind": "slot", … }, "through": …, … } ] }
 //
@@ -14,7 +15,11 @@
 import { readFile } from "node:fs/promises";
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
-import type { Recording, RecordingPlan } from "@mrstreamer/contracts/recordings";
+import {
+  RecordingPlanSchema,
+  type Recording,
+  type RecordingPlan,
+} from "@mrstreamer/contracts/recordings";
 import { writeJsonFile } from "../platform/json-file.ts";
 
 /** The version this build writes, and the newest it reads. */
@@ -40,13 +45,16 @@ const Entry = lazy(() =>
     "scheduled?": {
       schedule: "string > 0",
       from: "number",
-      late: "'away' | 'busy' | 'stream' | null",
+      late: "'away' | 'busy' | 'stream' | 'disk' | 'held' | 'unread' | null",
     },
     ended: "number | null",
     bytes: "number >= 0",
     status: type({ kind: "'recording' | 'complete' | 'stopped'" })
       .or({ kind: "'partial'", cut: "'quit' | 'stream' | 'disk'" })
-      .or({ kind: "'missed'", why: "'away' | 'busy' | 'stream'" }),
+      .or({
+        kind: "'missed'",
+        why: "'away' | 'busy' | 'stream' | 'disk' | 'held' | 'unread'",
+      }),
   }),
 );
 
@@ -67,27 +75,10 @@ export interface KeptSchedule {
   readonly through: number;
 }
 
-const Padding = lazy(() => type({ before: "number.integer >= 0", after: "number.integer >= 0" }));
-
 const Schedule = lazy(() =>
   type({
     id: "string > 0",
-    plan: type({
-      kind: "'programme'",
-      channel: Channel(),
-      title: "string",
-      padding: Padding(),
-      start: "number",
-      stop: "number",
-    }).or({
-      kind: "'slot'",
-      channel: Channel(),
-      title: "string",
-      padding: Padding(),
-      days: "number.integer[]",
-      at: "number.integer",
-      minutes: "number.integer",
-    }),
+    plan: RecordingPlanSchema(),
     channelName: "string",
     created: "number",
     through: "number",

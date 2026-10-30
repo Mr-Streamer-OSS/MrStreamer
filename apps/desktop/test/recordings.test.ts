@@ -839,12 +839,18 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await clockTo(next.start + 6 * MINUTE);
     await clockTo(next.stop + MINUTE);
     expect(provider.streamRequests()).toBe(0);
-    expect(await recordings.list()).toEqual([]);
+    // Each says it was missed, and why.
+    expect(
+      (await recordings.list()).map(({ title, status, bytes }) => ({ title, status, bytes })),
+    ).toEqual([
+      { title: next.title, status: { kind: "missed", why: "held" }, bytes: 0 },
+      { title: "Another show", status: { kind: "missed", why: "held" }, bytes: 0 },
+    ]);
     expect(await recordings.schedules()).toEqual([]);
   });
 
-  it("shows who holds the connection when two schedules overlap, the first saved recording first", async () => {
-    const { recordings, channel, listing, programmePlan } = await scheduling();
+  it("shows who holds the connection when two schedules overlap, and records the first saved first", async () => {
+    const { recordings, channel, listing, programmePlan, clockTo } = await scheduling();
     const { next } = await listing();
     const first = await recordings.schedule(programmePlan(next));
     const at = new Date(next.start);
@@ -863,6 +869,32 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     });
     // Previewed only: nothing was saved.
     expect(await recordings.schedules()).toEqual([first]);
+
+    // Saved anyway, it waits at their time while the first saved records.
+    const second = await recordings.schedule(overlapping);
+    await clockTo(next.start);
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    expect(recording?.scheduled?.schedule).toBe(first.id);
+    const waiting = await until(recordings.schedules, (list) =>
+      list.some((each) => each.id === second.id && each.status.kind === "waiting"),
+    );
+    expect(waiting.find((each) => each.id === second.id)?.status).toEqual({
+      kind: "waiting",
+      holders: [{ kind: "recording", title: next.title, until: next.stop }],
+    });
+  });
+
+  it("never records a time again once its recording was stopped and deleted", async () => {
+    const { provider, recordings, listing, programmePlan } = await scheduling();
+    const { now } = await listing();
+    await recordings.schedule(programmePlan(now));
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    await recordings.stop(recording!.id);
+    await recordings.remove(recording!.id);
+    await recordings.check();
+    expect(await recordings.list()).toEqual([]);
+    expect(await recordings.schedules()).toEqual([]);
+    expect(await allClosed(provider)).toBe(true);
   });
 
   it("cancels a schedule before its time, and leaves a recording it started going", async () => {
@@ -881,18 +913,58 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await recordings.cancel(later.id);
     expect(await recordings.schedules()).toEqual([]);
 
+    // On air as it is saved: it records the rest, not late, as it had no earlier time to record.
     const current = await recordings.schedule(programmePlan(now));
     const [recording] = await until(
       recordings.list,
       ([first]) => first?.status.kind === "recording",
     );
+    expect(recording?.scheduled).toEqual({ schedule: current.id, from: now.start, late: null });
     await recordings.cancel(current.id);
-    await clockTo(next.start + MINUTE);
+    // At the padded start the change gave it: nothing records, and the first goes on.
+    await clockTo(next.start - 2 * MINUTE + 1000);
     expect(await recordings.schedules()).toEqual([]);
     const list = await recordings.list();
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ id: recording?.id, status: { kind: "recording" } });
     expect(provider.activeStreams()).toBe(1);
+  });
+
+  it("takes a change made while it records from its next time, which it records", async () => {
+    const { recordings, channel, listing, programmePlan, clockTo } = await scheduling();
+    const { now } = await listing();
+    const saved = await recordings.schedule(programmePlan(now));
+    await until(recordings.list, ([first]) => first?.status.kind === "recording");
+    // Changed to tomorrow's weekday at the same time: today's recording goes on, tomorrow's comes.
+    const at = new Date(now.start);
+    const tomorrow = new Date(
+      at.getFullYear(),
+      at.getMonth(),
+      at.getDate() + 1,
+      at.getHours(),
+      at.getMinutes(),
+    );
+    const changed = await recordings.schedule(
+      {
+        kind: "slot",
+        channel: channel(GUIDED),
+        days: [tomorrow.getDay()],
+        at: at.getHours() * 60 + at.getMinutes(),
+        minutes: 30,
+        title: now.title,
+        padding: { before: 0, after: 0 },
+      },
+      saved.id,
+    );
+    expect(changed.next?.start).toBe(tomorrow.getTime());
+    await clockTo(tomorrow.getTime());
+    const list = await until(recordings.list, (each) =>
+      each.some((recording) => recording.scheduled?.from === tomorrow.getTime()),
+    );
+    expect(list.find((each) => each.scheduled?.from === tomorrow.getTime())).toMatchObject({
+      status: { kind: "recording" },
+      scheduled: { schedule: saved.id, late: null },
+    });
   });
 
   it("goes with its subscription", async () => {

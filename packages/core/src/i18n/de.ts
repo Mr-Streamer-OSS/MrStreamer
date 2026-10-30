@@ -1446,4 +1446,11 @@ export const de: Translation = {
   "Remove {title}": "{title} entfernen",
   "{start} to {end}, with padding": "{start} bis {end}, mit Puffer",
   "Edit {title}": "{title} bearbeiten",
+  "It couldn't be written to this computer.":
+    "Es konnte nicht auf diesem Computer gespeichert werden.",
+  "Trying again": "Neuer Versuch",
+  "The guide listed another programme then, or the channel was gone.":
+    "Der Programmführer zeigte da eine andere Sendung, oder der Sender war weg.",
+  "The channel list or guide wasn't read yet.":
+    "Die Senderliste oder der Programmführer war noch nicht gelesen.",
 };

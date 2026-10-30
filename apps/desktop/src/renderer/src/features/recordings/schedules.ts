@@ -64,12 +64,16 @@ export type Repeat = "once" | "day" | "every";
 /**
  * What a schedule is made from: a guide programme, or a schedule already made. `programme` is
  * what Once records, null for a repeat edited where no programme is at hand; `day` and `at` are
- * the local weekday and minute a repeat records at, for `minutes`.
+ * the local weekday and minute a repeat records at, for `minutes`, named `title`.
  */
 export interface ScheduleBasis {
   readonly channel: OwnedId;
   readonly title: string;
-  readonly programme: { readonly start: number; readonly stop: number } | null;
+  readonly programme: {
+    readonly start: number;
+    readonly stop: number;
+    readonly title: string;
+  } | null;
   readonly day: number;
   readonly at: number;
   readonly minutes: number;
@@ -82,20 +86,33 @@ export function basisOfProgramme(
   return {
     channel,
     title: programme.title,
-    programme: { start: programme.start, stop: programme.stop },
+    programme: { start: programme.start, stop: programme.stop, title: programme.title },
     day: new Date(programme.start).getDay(),
     at: minuteOfDay(programme.start),
     minutes: Math.max(1, Math.round((programme.stop - programme.start) / MINUTE_MS)),
   };
 }
 
-export function basisOfSchedule({ plan }: ScheduledRecording): ScheduleBasis {
+/**
+ * What `schedule` was made from, to change it. A repeat keeps its time, length and name; edited
+ * from one of its programmes, `programme` is what Once would record instead.
+ */
+export function basisOfSchedule(
+  { plan }: ScheduledRecording,
+  programme?: { readonly start: number; readonly stop: number; readonly title: string },
+): ScheduleBasis {
   if (plan.kind === "programme") return basisOfProgramme(plan.channel, plan);
   return {
     channel: plan.channel,
     title: plan.title,
-    programme: null,
-    day: plan.days.length === 1 ? (plan.days[0] ?? 0) : new Date().getDay(),
+    programme: programme
+      ? { start: programme.start, stop: programme.stop, title: programme.title }
+      : null,
+    day: programme
+      ? new Date(programme.start).getDay()
+      : plan.days.length === 1
+        ? (plan.days[0] ?? 0)
+        : new Date().getDay(),
     at: plan.at,
     minutes: plan.minutes,
   };
@@ -110,7 +127,7 @@ export function repeatOf(plan: RecordingPlan): Repeat {
 export function planOf(basis: ScheduleBasis, repeat: Repeat, padding: RecordingPadding): PlanInput {
   const { channel, title } = basis;
   if (repeat === "once" && basis.programme)
-    return { kind: "programme", channel, ...basis.programme, title, padding };
+    return { kind: "programme", channel, ...basis.programme, padding };
   return {
     kind: "slot",
     channel,

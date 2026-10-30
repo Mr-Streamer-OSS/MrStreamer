@@ -1,6 +1,8 @@
 // Recordings as the window sees them: local copies Mr. Streamer captured from a live channel
 // while it ran. The main process keeps each one's record and file; paths, addresses and logins
 // stay there. Times are epoch milliseconds, as the guide's.
+import { type } from "arktype";
+import { lazy } from "./lazy.ts";
 import type { OwnedId } from "./subscription.ts";
 
 /** Why a recording ended before its stop time. */
@@ -32,8 +34,12 @@ export type RecordingStatus =
  *   - `away`: Mr. Streamer wasn't running, or the computer was asleep.
  *   - `busy`: every connection the account allows was held.
  *   - `stream`: the channel's stream couldn't be opened or recorded.
+ *   - `disk`: this computer couldn't keep it: its file or record couldn't be written.
+ *   - `held`: the guide listed another programme or none at its start, or the lists no longer
+ *     listed its channel as it was.
+ *   - `unread`: its channel list or guide wasn't read yet.
  */
-export type ScheduleMiss = "away" | "busy" | "stream";
+export type ScheduleMiss = "away" | "busy" | "stream" | "disk" | "held" | "unread";
 
 export interface Recording {
   /** Names it for `recordings.stop`, `recordings.remove` and `playback.openCopy`. */
@@ -125,6 +131,44 @@ export type RecordingPlan =
       readonly padding: RecordingPadding;
     };
 
+/**
+ * A `RecordingPlan` the window may send and schedules.json may hold: padding within
+ * `PADDING_MAX`, a slot on distinct weekdays at a minute of the day, and a padded time within
+ * `RECORDING_MAX_MS`.
+ */
+export const RecordingPlanSchema = lazy(() => {
+  const padding = type({
+    before: `0 <= number.integer <= ${PADDING_MAX}`,
+    after: `0 <= number.integer <= ${PADDING_MAX}`,
+  });
+  const common = {
+    channel: { subscriptionId: "string > 0", id: "string" },
+    title: "string",
+    padding,
+  } as const;
+  return type({
+    kind: "'programme'",
+    ...common,
+    start: "number.integer",
+    stop: "number.integer",
+  })
+    .or({
+      kind: "'slot'",
+      ...common,
+      days: type("0 <= number.integer <= 6").array().atLeastLength(1).atMostLength(7),
+      at: "0 <= number.integer < 1440",
+      minutes: "number.integer >= 1",
+    })
+    .narrow((plan) => {
+      const minutes = plan.kind === "slot" ? plan.minutes : (plan.stop - plan.start) / 60_000;
+      return (
+        minutes > 0 &&
+        (minutes + plan.padding.before + plan.padding.after) * 60_000 <= RECORDING_MAX_MS &&
+        (plan.kind === "programme" || new Set(plan.days).size === plan.days.length)
+      );
+    });
+});
+
 /** What holds one of a subscription's connections at some time. */
 export type ConnectionHolder =
   /** A recording that records then, until `until`. */
@@ -140,6 +184,8 @@ export type ConnectionHolder =
  *   - `conflict`: what `holders` lists holds every connection then; it records once one is free.
  *   - `waiting`: its time has come and every connection is held; it records once one is free,
  *     the rest of its time.
+ *   - `retrying`: its time has come and its last start failed for `why`; it asks again every few
+ *     seconds, the rest of its time.
  *   - `recording`: it records now, as `recording`.
  *   - `changed`: the guide lists `title` at its programme's start instead; it won't record that.
  *   - `gone`: the guide lists no programme at its start, or the lists no longer list its channel.
@@ -148,13 +194,17 @@ export type ScheduleStatus =
   | { readonly kind: "planned" }
   | { readonly kind: "conflict"; readonly holders: readonly ConnectionHolder[] }
   | { readonly kind: "waiting"; readonly holders: readonly ConnectionHolder[] }
+  | { readonly kind: "retrying"; readonly why: "stream" | "disk" }
   | { readonly kind: "recording"; readonly recording: string }
   | { readonly kind: "changed"; readonly title: string }
   | { readonly kind: "gone" };
 
 /** A schedule as the window sees it. */
 export interface ScheduledRecording {
-  /** Names it for `recordings.schedule` to change and `recordings.cancel`; empty in a preview. */
+  /**
+   * Names it for `recordings.schedule` to change and `recordings.cancel`; empty in a preview of a
+   * new one.
+   */
   readonly id: string;
   readonly plan: RecordingPlan;
   readonly channelName: string;

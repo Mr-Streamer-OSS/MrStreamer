@@ -285,7 +285,7 @@ function Stepper({
         aria-valuenow={value}
         aria-valuetext={text}
         onKeyDown={step}
-        className="w-[5.5rem] flex-none rounded-md text-center whitespace-nowrap tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="min-w-[5.5rem] flex-none rounded-md text-center whitespace-nowrap tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {text}
       </span>

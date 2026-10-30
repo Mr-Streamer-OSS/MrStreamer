@@ -1410,4 +1410,9 @@ export const en = {
   "Remove {title}": "Remove {title}",
   "{start} to {end}, with padding": "{start} to {end}, with padding",
   "Edit {title}": "Edit {title}",
+  "It couldn't be written to this computer.": "It couldn't be written to this computer.",
+  "Trying again": "Trying again",
+  "The guide listed another programme then, or the channel was gone.":
+    "The guide listed another programme then, or the channel was gone.",
+  "The channel list or guide wasn't read yet.": "The channel list or guide wasn't read yet.",
 } as const satisfies Readonly<Record<string, string | Plural>>;

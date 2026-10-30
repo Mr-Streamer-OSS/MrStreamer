@@ -1506,4 +1506,10 @@ export const fr: Translation = {
   "Remove {title}": "Supprimer {title}",
   "{start} to {end}, with padding": "De {start} à {end}, avec marge",
   "Edit {title}": "Modifier {title}",
+  "It couldn't be written to this computer.": "Impossible de l’écrire sur cet ordinateur.",
+  "Trying again": "Nouvelle tentative",
+  "The guide listed another programme then, or the channel was gone.":
+    "Le guide indiquait un autre programme à ce moment, ou la chaîne avait disparu.",
+  "The channel list or guide wasn't read yet.":
+    "La liste des chaînes ou le guide n’était pas encore lu.",
 };

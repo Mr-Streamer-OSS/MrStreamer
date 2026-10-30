@@ -1436,4 +1436,9 @@ export const nl: Translation = {
   "Remove {title}": "{title} verwijderen",
   "{start} to {end}, with padding": "{start} tot {end}, met marge",
   "Edit {title}": "{title} bewerken",
+  "It couldn't be written to this computer.": "Het kon niet op deze computer worden opgeslagen.",
+  "Trying again": "Opnieuw proberen",
+  "The guide listed another programme then, or the channel was gone.":
+    "De gids vermeldde toen een ander programma, of het kanaal was weg.",
+  "The channel list or guide wasn't read yet.": "De kanaallijst of gids was nog niet gelezen.",
 };
