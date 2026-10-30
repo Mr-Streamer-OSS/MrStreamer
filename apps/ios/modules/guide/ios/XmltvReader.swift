@@ -176,7 +176,7 @@ func guideTime(_ raw: String?) -> Double? {
     (`guideWhole`), as written or decoded as percent or form encoding ("+" a space) spells it, up
     to four more decodings, as login-safety.ts holds() reads saved text. Text that still decodes
     after the last counts as holding one. */
-func guideHolds(_ text: String, _ passwords: [String], _ uncertain: [String] = []) -> Bool {
+func guideHolds(_ text: String, _ passwords: [String], _ uncertain: [String]) -> Bool {
   guard !passwords.isEmpty || !uncertain.isEmpty else { return false }
   var forms: Set<String> = [text]
   var layer = [text]
@@ -267,7 +267,7 @@ final class XmltvReader: NSObject, XMLParserDelegate {
   private var opened = false
   private var closed = false
   private var failure: Error?
-  init(index: GuideIndex, job: GuideJob, disk: GuideDisk, login: [String], uncertain: [String] = []) { self.index = index; self.job = job; self.disk = disk; passwords = login.dropFirst().filter { !$0.isEmpty }; self.uncertain = uncertain.filter { !$0.isEmpty } }
+  init(index: GuideIndex, job: GuideJob, disk: GuideDisk, login: [String], uncertain: [String]) { self.index = index; self.job = job; self.disk = disk; passwords = login.dropFirst().filter { !$0.isEmpty }; self.uncertain = uncertain.filter { !$0.isEmpty } }
   func run(_ file: URL) throws {
     if let external = try guidePreflight(file, job) {
       // Overwrite only the bounded declaration, without a second XML spool or growth.

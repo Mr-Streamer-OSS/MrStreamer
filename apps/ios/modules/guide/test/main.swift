@@ -26,7 +26,7 @@ import SQLite3
     let lease = activation["lease"] as! String
     func prepare(_ route: String, _ job: String) -> [String: Any] {
       owner.begin(lease, job)
-      return owner.prepare(lease, job, base + route, [:], ["fixture", "canary-secret"], [], now, now - 86400000, now + 7 * 86400000)
+      return owner.prepare(lease, job, base + route, [:], ["fixture", "canary-secret"], ["short-sig"], now, now - 86400000, now + 7 * 86400000)
     }
     let candidate = try value(prepare("/plain", "plain"))["id"] as! String
     let generation = try value(owner.publish(lease, "plain", candidate))
@@ -75,7 +75,7 @@ import SQLite3
       try require(value["kind"] as? String == "candidate", "decode")
       owner.finish(job)
     }
-    for (route, code) in [("/bad-crc", "gzip"), ("/truncated-gzip", "gzip"), ("/malformed", "xml"), ("/dtd", "xml"), ("/attributes", "element"), ("/empty", "empty"), ("/ended", "ended"), ("/secret", "xml"), ("/depth", "depth"), ("/html", "xml")] {
+    for (route, code) in [("/bad-crc", "gzip"), ("/truncated-gzip", "gzip"), ("/malformed", "xml"), ("/dtd", "xml"), ("/attributes", "element"), ("/empty", "empty"), ("/ended", "ended"), ("/secret", "xml"), ("/uncertain", "xml"), ("/uncertain-encoded", "xml"), ("/depth", "depth"), ("/html", "xml")] {
       let job = "reject-" + UUID().uuidString
       let result = prepare(route, job)
       try require(result["error"] as? String == code, "rejection-" + code)
@@ -85,6 +85,10 @@ import SQLite3
     let safe = try value(prepare("/false-positive", "prose"))
     try require(safe["kind"] as? String == "candidate", "username-prose")
     owner.finish("prose")
+    // A playlist's uncertain value counts only whole: within a longer word it is prose.
+    let word = try value(prepare("/uncertain-word", "uncertain-word"))
+    try require(word["kind"] as? String == "candidate", "uncertain-word")
+    owner.finish("uncertain-word")
     let redirect = try value(prepare("/redirect", "redirect"))
     try require(redirect["kind"] as? String == "redirect", "no-auto-redirect")
     owner.finish("redirect")
