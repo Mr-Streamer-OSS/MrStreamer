@@ -69,10 +69,19 @@ heading always there, opening the list on Home's stack: `favourites`), Continue 
 and Movies for you, which falls back to the provider's own list without TMDB. Home's On now and
 Stage and Live's channel rows use the same guide owner for actual now/next, local times and static
 programme progress, retaining category fallback in gaps. Live adds Guide alongside For you,
-Categories and All, with the country filter preserved. Channel taps still play in Watch; the
-separate Schedule action opens a pushed day without playing. Home tiles still preview. Schedule
-and programme routes stay on their originating Home or Live stack, retaining Back and browse
-context. Day controls use each local date's first valid instant, including a skipped midnight,
+Categories and All, with the country filter preserved: a grid of the country's channels down the
+side and two hours of a day across (one hour at accessibility text sizes), moved with Previous
+day, Next day, Earlier, Later and Now. It reads the first two day pages of at most 24 channels
+in view from the same guide owner, with no cache of its own: a row scrolled back into view, or
+whose provider's login or guide changed, is read again. A row whose detail tokens were evicted
+is read again straight away. An empty row, or one with a refused later page, is read again on
+the owner's next minute. The line at now, the programme on now, gaps, "Nothing in this window", "More in
+Schedule" past the pages read and "No programme information" or "Guide unavailable" rows show
+what the owner holds. A channel's name opens its Schedule and a programme cell its
+programme; neither plays. Channel taps elsewhere still play in Watch. Home tiles still preview.
+Schedule and programme routes stay on their originating Home or Live stack, retaining Back and
+browse context. Day controls use each local date's first valid instant, including a skipped
+midnight,
 page at most 128 programme rows with Show more, and inspect one opaque programme detail. Only
 Watch live starts playback; there is no catch-up. Search finds
 movies, series and channels: 20 movies and 20 series at first, each kind with its own Show more
@@ -627,16 +636,19 @@ an iPhone Duo's outer and inner displays. One rule picks the layout: the window'
 (`splitAt` in `src/ui.tsx`), never the device, screen or orientation. Under 700 points, or under
 1000 at accessibility text sizes, every tab keeps the iPhone's layout. From there, Live shows its
 list beside a detail column, where a channel's Schedule and a programme over it open in place of
-being pushed; the column reads "Choose a channel's Schedule" until one is. Home, Movies and Series
+being pushed; the column reads "Choose a channel's Schedule" until one is. A programme chosen in
+the Guide grid opens there alone, with Back to Guide. Home, Movies and Series
 keep their layouts at every width, and the system places the tab bar and the now playing
-accessory. At accessibility text sizes, on every width, a Live row's Schedule and star sit under
+accessory. At accessibility text sizes, on every width, a Live row's star sits under
 its programme lines.
 
 A resize, rotation or fold keeps the list mounted, so its tab, country and scroll position stay.
 A Schedule pushed on Live's stack moves into the column, on the same day and with its programme,
 once it is the stack's top. As the window narrows with the list showing, the column's Schedule
 goes back onto the stack, so Back returns to the list; with another screen over the list, such
-as Settings or Find, the column closes instead. The Schedule's own scroll position and pages
+as Settings or Find, the column closes instead. A programme pushed from the Guide grid crosses
+the same way, alone, so Back still returns to the grid. The grid's day, window, scroll position
+and last programme chosen are kept through all of it. The Schedule's own scroll position and pages
 loaded with Show more start again on the other side. Watch stays the one view of the one player
 and never remounts with the window, so nothing reconnects and audio, subtitle and quality
 choices and downloads are kept. Watch asks for landscape for a movie or an episode only in a
@@ -655,10 +667,12 @@ Focused source verification is `pnpm exec vitest run apps/ios/test/guide-screen.
 apps/ios/test/key-commands.test.ts apps/ios/test/watch-picture-in-picture.test.ts`. It does not
 show native behaviour. Still to check on the exact native candidate, on iPad portrait, landscape
 and half-width windows and on Duo outer and inner displays folded and unfolded: the column at
-700 points, a Schedule and programme crossing it both ways with Back, scroll and day kept, Watch
+700 points, a Schedule and programme crossing it both ways with Back, scroll and day kept, the
+Guide grid's scroll, window, cells and programme crossing it with Back to Guide, Watch
 and Picture in Picture surviving a fold with no second stream, the key commands reaching the app
-and listed while ⌘ is held, also with no text field focused, keyboard focus, VoiceOver moving to
-the column's channel, large text, and safe areas and bar placement.
+and listed while ⌘ is held, also with no text field focused, keyboard focus and VoiceOver reaching
+every Guide grid cell, VoiceOver moving to the column's channel, large text, and safe areas and bar
+placement.
 
 ## On the simulator
 
@@ -802,15 +816,18 @@ bindings report unavailable. Removal and password replacement revoke work before
 including when viewing history is kept.
 
 `src/guide-ui.tsx` reads the owner's immutable snapshot only while the screen is focused. Live
-queries at most 40 visible channels, Home at most 12 including Stage, with the existing two native
-read workers. Channel/day/catalogue changes, source revision changes from the existing sign-in
+queries at most 40 visible channels' listings, its Guide grid at most 24 visible channels' days,
+and Home at most 12 including Stage, with the existing two native read workers.
+Channel/day/catalogue changes, source revision changes from the existing sign-in
 owner, removal and authoritative cache loss retire presentation and late answers. Routine owner
-notifications reload the current request while settled rows stay mounted, including across blur,
+notifications reload the current request, except the Guide grid's days already read, while
+settled rows stay mounted, including across blur,
 refocus and Programme/Back. Pending work aborts and subscriptions stop when the screen blurs.
 Schedule refreshes replace the represented page span atomically; Show more never appends with a
 prior generation's cursor. Failed/refused replacements retain known rows, mark stale generation
 presentation, and keep outdated cursors disabled until a valid replacement. Ambiguous channels
-retain their provider's visible/spoken label beside populated programmes and on Schedule actions.
+retain their provider's visible/spoken label beside populated programmes and on the Guide grid's
+channel names.
 There is no UI polling clock, guide cache, provider request or XML parser. The owner's
 foreground minute notifications update progress and Today after midnight. Stale last-good data
 stays marked; cold, missing, discarded and failed reads finish with honest empty/unavailable
@@ -821,12 +838,14 @@ phone performance still need the exact-app verification below; source tests do n
 
 Focused source verification is `pnpm exec vitest run apps/ios/test/guide-screen.test.ts`.
 For native acceptance, open Home, preview a tile, open its Schedule and a programme, then Back;
-open Live > Guide, choose/clear a country, star a channel, open Schedule, change local days and
-Show more, inspect details and press Watch live. Return through native Back to the same day and
+open Live > Guide, choose/clear a country, scroll the grid, move it Earlier, Later and between
+days, open a programme cell and a channel's Schedule, Show more, inspect details and press Watch
+live. Return through native Back to the same day and
 country. Repeat with cold/missing/stale/failed guide, account recovery, a held read during
 provider replacement/removal, foreground and local calendar boundaries on short, long and
 skipped-midnight DST days. Check large
-text, VoiceOver's separate Play/Schedule actions, rotation and scrolling during ingestion on the
+text, VoiceOver reading each grid cell and Live rows' Play and star actions, rotation and scrolling
+during ingestion on the
 exact Expo/Hermes native candidate. These native checks remain UNRUN by this source unit.
 
 Initial native refusals are 32 MiB delivered callback bytes, 64 MiB inflated XML, 64 KiB raw

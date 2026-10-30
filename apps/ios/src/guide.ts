@@ -53,6 +53,10 @@ interface Token {
   readonly start: number;
   readonly day?: Day;
 }
+/** A token schedule() handed out, with the start of the day read that minted it. */
+interface Minted extends Token {
+  readonly on: number;
+}
 const FRESH = 6 * 3600_000;
 const MAX_AGE = 7 * 86400_000;
 const EMPTY: GuideStatus = {
@@ -72,7 +76,7 @@ export function createGuide(
   const entries = new Map<string, Entry>();
   const parts = new Map<string, Part>();
   const state = store<ReadonlyMap<string, GuideStatus>>(new Map());
-  const tokens = new Map<string, Token>();
+  const tokens = new Map<string, Minted>();
   const versions = new Map<string, number>();
   let sequence = 0;
   let era = 0;
@@ -108,13 +112,72 @@ export function createGuide(
       }),
     );
   };
-  const invalidate = (entry: Entry) => {
-    for (const [key, value] of tokens) if (value.entry === entry) tokens.delete(key);
+  /** Each token by what it names, so reading the same programme or page again reuses it. */
+  const minted = new Map<string, string>();
+  const named = (value: Minted) =>
+    JSON.stringify([
+      value.generation.id,
+      value.key,
+      value.ids,
+      value.start,
+      value.day?.from ?? null,
+      value.on,
+    ]);
+  const drop = (key: string) => {
+    const value = tokens.get(key);
+    if (value && minted.get(named(value)) === key) minted.delete(named(value));
+    tokens.delete(key);
   };
-  const token = (value: Token) => {
-    if (tokens.size >= 1024) tokens.delete(tokens.keys().next().value ?? "");
+  /** Counts, by channel and day read, each withdrawal of its tokens, so a screen reads again. */
+  const withdrawals = new Map<string, number>();
+  /** Changes once after a run of withdrawals, which evictions make without another notification. */
+  const withdrawing = store(0);
+  /** Whether the app is in the foreground, as foreground() and background() last said. */
+  const awake = store(true);
+  let announced = false;
+  const read = (key: string, on: number) => JSON.stringify([key, on]);
+  const withdraw = (value: Minted) => {
+    const at = read(value.key, value.on);
+    withdrawals.set(at, (withdrawals.get(at) ?? 0) + 1);
+    if (announced) return;
+    announced = true;
+    queueMicrotask(() => {
+      announced = false;
+      withdrawing.set((count) => count + 1);
+    });
+  };
+  const invalidate = (entry: Entry) => {
+    for (const [key, value] of tokens)
+      if (value.entry === entry) {
+        withdraw(value);
+        drop(key);
+      }
+  };
+  // The least recently minted or read goes first, withdrawn, once 8192 different programmes and
+  // pages are held: 32 Guide grid rows of 256 programmes, or about 170 of 48. The grid's 24 rows of
+  // two native pages of 128 (GuideIndex.swift) mint fewer, so its rows never evict each other.
+  const token = (value: Minted) => {
+    const name = named(value);
+    const known = minted.get(name);
+    const held = known === undefined ? undefined : tokens.get(known);
+    if (
+      known !== undefined &&
+      held?.entry === value.entry &&
+      held.part === value.part &&
+      held.generation === value.generation
+    ) {
+      tokens.delete(known);
+      tokens.set(known, held);
+      return known;
+    }
+    const oldest = tokens.entries().next().value;
+    if (tokens.size >= 8192 && oldest) {
+      withdraw(oldest[1]);
+      drop(oldest[0]);
+    }
     const key = id();
     tokens.set(key, value);
+    minted.set(name, key);
     return key;
   };
   const validToken = (value: Token) =>
@@ -326,6 +389,15 @@ export function createGuide(
     status,
     /** Immutable owner snapshot for React; notifications also carry the foreground minute tick. */
     getSnapshot: state.get,
+    /**
+     * Changes as the detail tokens schedule() handed out for a channel's own key (`Channel.key`)
+     * on the day from `on` are withdrawn, as by background() or eviction.
+     */
+    withdrawn: (key: string, on: number) => withdrawals.get(read(key, on)) ?? 0,
+    /** Notifies, once a run of them is over, that `withdrawn` changed. */
+    withdrawals: { get: withdrawing.get, subscribe: withdrawing.subscribe },
+    /** Whether the app is in the foreground; the Guide grid reads only then. */
+    awake: { get: awake.get, subscribe: awake.subscribe },
     subscribe(listener: () => void) {
       const stop = state.subscribe(listener);
       listeners++;
@@ -342,7 +414,9 @@ export function createGuide(
       const cycle = ++era;
       for (const entry of entries.values()) cancelEntry(entry);
       entries.clear();
+      for (const value of tokens.values()) withdraw(value);
       tokens.clear();
+      minted.clear();
       try {
         connect();
         const restored = await port().restore(ids);
@@ -450,11 +524,13 @@ export function createGuide(
     foreground() {
       foregroundCycle++;
       foreground = true;
+      awake.set(true);
       if (listeners && !clock) clock = setInterval(tick, 60_000);
       tick();
     },
     background() {
       foreground = false;
+      awake.set(false);
       clearInterval(clock);
       clock = undefined;
       for (const entry of entries.values()) cancelEntry(entry);
@@ -526,12 +602,15 @@ export function createGuide(
         start,
         stop,
         title,
-        detail: token({ ...captured, ids, start }),
+        detail: token({ ...captured, ids, start, on: day.from }),
       }));
       const last = programmes.at(-1);
       return {
         programmes,
-        cursor: answer.more && last ? token({ ...captured, ids, start: last.start, day }) : null,
+        cursor:
+          answer.more && last
+            ? token({ ...captured, ids, start: last.start, day, on: day.from })
+            : null,
       };
     },
     async programme(
@@ -540,6 +619,9 @@ export function createGuide(
     ): Promise<Programme | null> {
       const captured = tokens.get(detail);
       if (!captured || !validToken(captured)) return null;
+      // Newest again, so a programme read as it shows outlasts the day pages minted after it.
+      tokens.delete(detail);
+      tokens.set(detail, captured);
       const answer = await query(captured, "detail", { from: 0, until: 0 }, options?.signal);
       return !options?.signal?.aborted && validToken(captured) ? (answer?.rows[0] ?? null) : null;
     },

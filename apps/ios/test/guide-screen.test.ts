@@ -26,6 +26,8 @@ const state = vi.hoisted(() => ({
   stack: undefined as
     { key: string; index: number; routes: { name: string; params?: object }[] } | undefined,
   visible: 12,
+  /** The first row a list shows, as scrolled. */
+  first: 0,
   did: [] as unknown[],
   queries: [] as {
     ids: readonly string[];
@@ -217,9 +219,11 @@ vi.mock("react-native", async () => {
     }) => {
       useEffect(() => {
         onViewableItemsChanged?.({
-          viewableItems: data.slice(0, state.visible).map((item) => ({ item, isViewable: true })),
+          viewableItems: data
+            .slice(state.first, state.first + state.visible)
+            .map((item) => ({ item, isViewable: true })),
         });
-      }, [data, onViewableItemsChanged]);
+      }, [data, onViewableItemsChanged, state.first]);
       return createElement(
         "div",
         { "data-testid": testID },
@@ -238,6 +242,7 @@ const { LiveHome, LiveTab } = await import("../src/live-screen.tsx");
 const { splitAt } = await import("../src/ui.tsx");
 const { default: Home } = await import("../src/app/(tabs)/(home)/index.tsx");
 const { ScheduleScreen, ProgrammeScreen, Programme } = await import("../src/guide-screen.tsx");
+const { programmeRange } = await import("../src/guide-ui.tsx");
 let root: ReturnType<typeof createRoot>;
 let container: ReturnType<typeof document.createElement>;
 const at = new Date(2026, 9, 24, 12).getTime();
@@ -301,8 +306,11 @@ async function settle() {
     for (let i = 0; i < 30; i++) await Promise.resolve();
   });
 }
-async function click(label: string) {
-  const button = [...container.querySelectorAll("button")].find(
+async function click(
+  label: string,
+  within: Pick<typeof container, "querySelectorAll"> = container,
+) {
+  const button = [...within.querySelectorAll("button")].find(
     (button) => button.textContent === label || button.getAttribute("data-testid") === label,
   );
   if (!button) throw new Error(`Missing button ${label}: ${container.textContent}`);
@@ -350,6 +358,7 @@ beforeEach(async () => {
   state.focus = [];
   state.stack = undefined;
   state.visible = 12;
+  state.first = 0;
   state.params = {};
   state.did = [];
   state.queries = [];
@@ -392,16 +401,17 @@ describe("selected A public guide UI with the real guide owner", () => {
   it("shows actual Live programmes and category fallback, with Guide separate from Play", async () => {
     await draw(React.createElement(LiveHome));
     await settle();
-    expect(container.textContent).toContain(current.title);
-    await click("Guide");
+    await click("All");
     expect(container.textContent).toContain(current.title);
     expect(container.querySelector('[data-testid="channel-a:2"]')?.textContent).toContain("News");
     state.did = [];
-    await click("schedule-a:1");
-    expect(state.did).toEqual([{ pathname: "/live/schedule", params: { channel: "a:1" } }]);
-    state.did = [];
     await click("channel-a:1");
     expect(state.did).toEqual([{ play: "a:1", watch: true }]);
+    await click("Guide");
+    expect(container.textContent).toContain(current.title);
+    state.did = [];
+    await click("schedule-a:1");
+    expect(state.did).toEqual([{ pathname: "/live/schedule", params: { channel: "a:1" } }]);
   });
 
   it("pages the schedule, inspects one programme and plays only through Watch live", async () => {
@@ -488,6 +498,8 @@ describe("selected A public guide UI with the real guide owner", () => {
     state.visible = 60;
     await draw(React.createElement(LiveHome));
     await settle();
+    state.queries = [];
+    await click("All");
     expect(state.queries.length).toBeLessThanOrEqual(52);
     expect(new Set(state.queries.flatMap((query) => query.ids))).toHaveLength(39);
     expect(state.queries.some((query) => query.ids.includes("trusted-41"))).toBe(false);
@@ -661,9 +673,10 @@ describe("selected A public guide UI with the real guide owner", () => {
     ["Live", LiveHome],
   ] as const)(
     "keeps settled %s programmes mounted through a held minute read and failure",
-    async (_name, Screen) => {
+    async (name, Screen) => {
       await draw(React.createElement(Screen));
       await settle();
+      if (name === "Live") await click("All");
       const gate = holdQueries(async () =>
         answer([{ ...current, title: "Updated broadcast" }, next]),
       );
@@ -836,7 +849,7 @@ describe("selected A public guide UI with the real guide owner", () => {
       };
       await draw(React.createElement(LiveHome));
       await settle();
-      await click("Guide");
+      await click("All");
       state.did = [];
       for (const [id, label] of [
         ["a", "line.alpha-tv.example"],
@@ -848,12 +861,24 @@ describe("selected A public guide UI with the real guide owner", () => {
         expect(row.getAttribute("aria-label")).toContain(label);
         expect(row.getAttribute("aria-label")!.split(label)).toHaveLength(2);
         if (populated) expect(row.getAttribute("aria-label")).toContain(current.title);
+        await click(`channel-${id}:1`);
+        expect(state.did).toContainEqual({ play: `${id}:1`, watch: true });
+      }
+      await click("Guide");
+      for (const [id, label] of [
+        ["a", "line.alpha-tv.example"],
+        ["b", "line.beta-tv.example"],
+      ] as const) {
         expect(
           container.querySelector(`[data-testid="schedule-${id}:1"]`)?.getAttribute("aria-label"),
         ).toContain(label);
-        await click(`channel-${id}:1`);
+        if (populated)
+          expect(
+            container
+              .querySelector(`[data-testid="grid-${id}:1-${current.start}"]`)
+              ?.getAttribute("aria-label"),
+          ).toContain(label);
         await click(`schedule-${id}:1`);
-        expect(state.did).toContainEqual({ play: `${id}:1`, watch: true });
         expect(state.did).toContainEqual({
           pathname: "/live/schedule",
           params: { channel: `${id}:1` },
@@ -977,7 +1002,7 @@ describe("Live on iPad and Duo windows", () => {
     expect(detail()?.textContent).toContain("Channel 1");
     expect(state.focus).toEqual(["focus Channel 1"]);
     expect(detail()?.textContent).toContain("Today");
-    await click("Next day");
+    await click("Next day", detail()!);
     const tomorrow = new Date(at + 86400_000).toLocaleDateString(undefined, {
       weekday: "short",
       month: "short",
@@ -1145,5 +1170,390 @@ describe("Live on iPad and Duo windows", () => {
     await click("schedule-a:1");
     expect(detail()).toBeNull();
     expect(state.did).toEqual([{ pathname: "/live/schedule", params: { channel: "a:1" } }]);
+  });
+});
+
+describe("Live's Guide grid", () => {
+  it("keeps a visible row when a different row's render is suspended", async () => {
+    const { useGuideGrid, localDay } = await import("../src/guide-ui.tsx");
+    if (state.catalogue.kind !== "ready") throw new Error("Catalogue missing");
+    const catalogue = state.catalogue.library;
+    const waiting = new Promise<void>(() => {});
+    let suspended = false;
+    function Grid({ keys, suspend }: { keys: string[]; suspend: boolean }) {
+      const { rows } = useGuideGrid(keys, localDay(at), catalogue);
+      if (suspend) {
+        suspended = true;
+        throw waiting;
+      }
+      return React.createElement(
+        "div",
+        null,
+        [...rows.values()].flatMap((row) => row.programmes.map((programme) => programme.title)),
+      );
+    }
+    const screen = (keys: string[], suspend = false) =>
+      React.createElement(
+        React.Suspense,
+        { fallback: "Loading" },
+        React.createElement(Grid, { keys, suspend }),
+      );
+    const gate = holdQueries(async () => answer([current]));
+    await draw(screen(["a:1"]));
+    await React.act(async () => {
+      React.startTransition(() => root.render(screen(["a:3"], true)));
+    });
+    expect(suspended).toBe(true);
+    await gate.release();
+    expect(container.textContent).toContain(current.title);
+  });
+
+  const cell = (key: string, programme: Programme) =>
+    container.querySelector(`[data-testid="grid-${key}-${programme.start}"]`);
+  const detail = () => container.querySelector('[data-testid="live-detail"]');
+  /** Live on its Guide, around now. */
+  async function guide(screen: React.ComponentType = LiveTab) {
+    await draw(React.createElement(screen));
+    await settle();
+    await click("Guide");
+    if (container.textContent?.includes("Now")) await click("Now");
+  }
+  afterEach(async () => {
+    const { closeDetail } = await import("../src/live-screen.tsx");
+    while (closeDetail());
+  });
+
+  it("reads the rows in view and reads each programme to VoiceOver with its channel, time and now", async () => {
+    await install("a", 40);
+    state.visible = 40;
+    await guide();
+    expect(cell("a:1", current)?.getAttribute("data-role")).toBe("button");
+    expect(cell("a:1", current)?.getAttribute("aria-label")).toBe(
+      `Channel 1, ${programmeRange(current)}, ${current.title}, now`,
+    );
+    expect(cell("a:1", next)?.getAttribute("aria-label")).toBe(
+      `Channel 1, ${programmeRange(next)}, ${next.title}`,
+    );
+    expect(container.querySelector('[data-testid="live-guide"]')?.textContent).toContain(
+      "No programme information",
+    );
+    const read = new Set(
+      state.queries.filter((query) => query.mode === "day").flatMap((query) => query.ids),
+    );
+    expect(read.size).toBeLessThanOrEqual(24);
+    expect(read.has("trusted-30")).toBe(false);
+  });
+
+  it("moves its window by Earlier and Later, and its day, back to now", async () => {
+    await guide();
+    await click("Later");
+    expect(cell("a:1", current)).toBeNull();
+    expect(cell("a:1", next)).not.toBeNull();
+    await click("Earlier");
+    await click("Earlier");
+    expect(cell("a:1", current)).not.toBeNull();
+    expect(cell("a:1", next)).toBeNull();
+    state.queries = [];
+    await click("Next day");
+    expect(state.queries.at(-1)?.from).toBe(new Date(2026, 9, 25).getTime());
+    expect(container.textContent).toContain(
+      new Date(2026, 9, 25).toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      }),
+    );
+    await click("Now");
+    expect(container.textContent).toContain("Today");
+    expect(cell("a:1", current)).not.toBeNull();
+    expect(cell("a:1", next)).not.toBeNull();
+    expect(container.textContent).not.toContain("Now");
+  });
+
+  it("reads an empty day again on the owner's next minute, so a refused read recovers", async () => {
+    state.answer = async () => answer([]);
+    await guide();
+    expect(cell("a:1", current)).toBeNull();
+    expect(container.querySelector('[data-testid="live-guide"]')?.textContent).toContain(
+      "No programme information",
+    );
+    state.answer = async (_mode, ids) =>
+      ids[0] === "trusted-1" ? answer([current, next]) : answer([]);
+    await tick();
+    expect(cell("a:1", current)).not.toBeNull();
+  });
+
+  it("says where a window past the pages read, or between programmes, has gone", async () => {
+    // Every page says there is more, so the grid stops after its own pages, before noon.
+    state.answer = async (_mode, _ids, _from, _until, after) => {
+      const start = Math.max(after, current.start - 6 * 3600_000) + 60_000;
+      return answer([{ ...current, start, stop: start + 60_000 }], true);
+    };
+    await guide();
+    expect(container.textContent).toContain("More in Schedule");
+    state.answer = async () => answer([current]);
+    await install();
+    await guide();
+    await click("Later");
+    await click("Later");
+    expect(container.textContent).toContain("Nothing in this window");
+  });
+
+  it("reads its rows again after the app returns from the background, so their cells still open", async () => {
+    state.window = { width: 1032, height: 1376, fontScale: 1 };
+    state.answer = async (mode, ids) =>
+      mode === "detail" || ids[0] === "trusted-1" ? answer([current, next]) : answer([]);
+    await guide();
+    state.queries = [];
+    await React.act(async () => owner().background());
+    await settle();
+    expect(state.queries).toEqual([]);
+    await React.act(async () => owner().foreground());
+    await settle();
+    await click(`grid-a:1-${current.start}`);
+    expect(detail()?.textContent).toContain(current.title);
+    expect(detail()?.textContent).not.toContain("Programme unavailable");
+  });
+
+  it("reads a row again once another read evicts its tokens, so its cells still open", async () => {
+    state.window = { width: 1032, height: 1376, fontScale: 1 };
+    const base = state.answer!;
+    state.answer = async (mode, ids, ...rest) =>
+      mode === "detail" ? answer([current]) : base(mode, ids, ...rest);
+    await guide();
+    // Another screen reads a day of more programmes than the owner keeps tokens for.
+    const many = Array.from({ length: 8200 }, (_, i) => ({
+      title: `Filler ${i}`,
+      start: current.start + i,
+      stop: current.start + i + 1,
+      description: null,
+    }));
+    // That read only: a native page holds at most 128, so a grid row never holds this many.
+    const withMany = state.answer;
+    state.answer = async (mode, ids, ...rest) => {
+      if (ids[0] !== "trusted-3") return withMany(mode, ids, ...rest);
+      state.answer = withMany;
+      return answer(many);
+    };
+    await React.act(async () => {
+      await owner().schedule("a:3", {
+        from: new Date(2026, 9, 24).getTime(),
+        until: new Date(2026, 9, 25).getTime(),
+      });
+    });
+    await settle();
+    await click(`grid-a:1-${current.start}`);
+    expect(detail()?.textContent).toContain(current.description);
+  });
+
+  it("reads each row of a new day once, while its tokens evict the last day's", async () => {
+    await install("a", 20);
+    state.visible = 20;
+    // 400 programmes a row through the day, so a day's rows hold most of the owner's tokens.
+    state.answer = async (_mode, _ids, from) =>
+      answer(
+        Array.from({ length: 400 }, (_, i) => ({
+          title: `Programme ${i}`,
+          start: from + i * 216_000,
+          stop: from + (i + 1) * 216_000,
+          description: null,
+        })),
+      );
+    await guide();
+    state.queries = [];
+    await click("Next day");
+    const reads = state.queries
+      .filter((query) => query.mode === "day")
+      .map((query) => query.ids.join());
+    expect(reads).toHaveLength(20);
+    expect(new Set(reads).size).toBe(20);
+    for (let i = 1; i <= 20; i++)
+      expect(container.querySelector(`[data-testid^="grid-a:${i}-"]`)).not.toBeNull();
+  });
+
+  it("starts no more reads in the background, even of a day being read", async () => {
+    await guide();
+    const gate = holdQueries(state.answer!);
+    await click("Next day");
+    await React.act(async () => owner().background());
+    state.queries = [];
+    await gate.release();
+    expect(state.queries).toEqual([]);
+    await React.act(async () => owner().foreground());
+    await settle();
+    expect(state.queries.filter((query) => query.mode === "day")).not.toEqual([]);
+  });
+
+  it("reads a new day's rows at once while the last day's reads still hang", async () => {
+    await guide();
+    const gate = holdQueries(state.answer!);
+    await click("Next day");
+    state.queries = [];
+    await click("Next day");
+    expect(state.queries.map((query) => query.from)).toContain(new Date(2026, 9, 26).getTime());
+    await gate.release();
+  });
+
+  it("keeps one provider's rows reading while another provider changes", async () => {
+    const a = part("a"),
+      b = part("b");
+    fixture().control.activations.set("b", {
+      lease: "lease-b",
+      generation: { id: "db-b", fetchedAt: Date.now(), until: Date.now() + 86400_000 },
+    });
+    await owner().restore(["a", "b"]);
+    owner().setPart(a);
+    owner().setPart(b);
+    state.catalogue = {
+      kind: "ready",
+      failing: [],
+      library: combine([
+        { label: "a", part: a },
+        { label: "b", part: b },
+      ]),
+    };
+    const base = state.answer!;
+    const held: (() => void)[] = [];
+    let readsOfB = 0;
+    state.answer = (mode, ids, from, until, after, lease) => {
+      if (lease !== "lease-b") return base(mode, ids, from, until, after, lease);
+      if (mode === "day" && ids[0] === "trusted-1" && from === new Date(2026, 9, 24).getTime())
+        readsOfB++;
+      return new Promise((resolve) =>
+        held.push(() => void base(mode, ids, from, until, after, lease).then(resolve)),
+      );
+    };
+    await guide();
+    expect(readsOfB).toBe(1);
+    // Provider a signs in again while b's rows are still being read.
+    await React.act(async () => {
+      setSource("a", {
+        revision: 1,
+        provider: xtreamProvider(
+          { server: "https://fixture.test", username: "fixture", password: "canary" },
+          { userAgent: "fixture" },
+        ),
+        login: [],
+      });
+    });
+    await settle();
+    while (held.length) {
+      await React.act(async () => held.splice(0).forEach((release) => release()));
+      await settle();
+    }
+    expect(cell("b:1", current)).not.toBeNull();
+    expect(readsOfB).toBe(1);
+  });
+
+  it("says a refused later page is in the Schedule, and reads it again in the next minute", async () => {
+    let refuse = true;
+    state.answer = async (_mode, _ids, _from, _until, after) =>
+      after < 0
+        ? answer(
+            [
+              {
+                ...current,
+                start: current.start - 6 * 3600_000,
+                stop: current.start - 5 * 3600_000,
+              },
+            ],
+            true,
+          )
+        : refuse
+          ? { kind: "failed", error: "busy" }
+          : answer([current]);
+    await guide();
+    expect(container.textContent).toContain("More in Schedule");
+    refuse = false;
+    await tick();
+    expect(cell("a:1", current)).not.toBeNull();
+  });
+
+  it("opens a channel's Schedule over a grid programme, with Back to that Schedule", async () => {
+    state.window = { width: 1032, height: 1376, fontScale: 1 };
+    await guide();
+    await click(`grid-a:1-${current.start}`);
+    expect(detail()?.textContent).toContain("Back to Guide");
+    await click("schedule-a:1");
+    expect(detail()?.querySelector('[data-testid="guide-schedule"]')).not.toBeNull();
+    await click(`programme-${current.start}`);
+    expect(detail()?.textContent).toContain("Back to Schedule");
+  });
+
+  it("keeps a window moved by Earlier or Later on its day past midnight", async () => {
+    await guide();
+    await click("Later");
+    await React.act(async () => {
+      vi.setSystemTime(new Date(2026, 9, 25, 0, 1).getTime());
+    });
+    await tick();
+    expect(container.textContent).not.toContain("Today");
+    expect(cell("a:1", next)).not.toBeNull();
+  });
+
+  it("moves an hour's window by half an hour at large text", async () => {
+    state.window = { width: 390, height: 844, fontScale: 1.786 };
+    await guide();
+    await click("Later");
+    expect(cell("a:1", current)).not.toBeNull();
+    await click("Later");
+    expect(cell("a:1", current)).toBeNull();
+  });
+
+  it("opens a programme on Live's stack and keeps the day, window and the programme marked when it returns", async () => {
+    await guide();
+    state.did = [];
+    await click(`grid-a:1-${current.start}`);
+    expect(state.did).toEqual([
+      {
+        pathname: "/live/programme",
+        params: { channel: "a:1", detail: expect.stringMatching(/^g/) },
+      },
+    ]);
+    await click("Later");
+    // Another screen and back, as Back, a tab or a resize can remount it.
+    await draw(React.createElement(Home));
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(cell("a:1", current)).toBeNull();
+    await click("Earlier");
+    expect(cell("a:1", current)?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("keeps a programme open beside it while many rows scroll by and a minute passes", async () => {
+    state.window = { width: 1032, height: 1376, fontScale: 1 };
+    await install("a", 80);
+    // A realistic day, 48 programmes a row, so the rows read mint thousands of detail tokens.
+    const day = [
+      current,
+      ...Array.from({ length: 47 }, (_, i) => ({
+        title: `Later programme ${i}`,
+        start: current.stop + i * 60_000,
+        stop: current.stop + (i + 1) * 60_000,
+        description: null,
+      })),
+    ];
+    state.answer = async (mode) => (mode === "detail" ? answer([current]) : answer(day));
+    state.visible = 16;
+    await guide();
+    state.did = [];
+    await click(`grid-a:1-${current.start}`);
+    expect(detail()?.textContent).toContain(current.description);
+    for (const first of [16, 32, 48, 64]) {
+      state.first = first;
+      await draw(React.createElement(LiveTab));
+      await settle();
+    }
+    expect(state.queries.some((query) => query.ids.includes("trusted-75"))).toBe(true);
+    await tick();
+    expect(detail()?.textContent).toContain(current.description);
+    // Scrolled back, its row is read again with the programme still marked.
+    state.first = 0;
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(cell("a:1", current)?.getAttribute("aria-pressed")).toBe("true");
+    expect(state.did).toEqual([]);
+    await click("Back to Guide");
+    expect(detail()?.textContent).toBe("Choose a channel's Schedule");
   });
 });
