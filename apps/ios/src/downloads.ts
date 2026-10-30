@@ -1925,16 +1925,14 @@ export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
   if (!other) return;
   // Swapped with its neighbour among those waiting: every other row keeps its own place.
   const swap = (each: Stored) => (each === record ? other : each === other ? record : each);
-  const before = doc.items;
-  const moved = before.map(swap);
-  commit({ ...doc, items: moved });
+  commit({ ...doc, items: doc.items.map(swap) });
   tell();
   try {
     await arrange();
   } catch {
-    // Put back unless the list changed meanwhile, which the next refill orders.
-    if (doc.items === moved) {
-      commit({ ...doc, items: before });
+    // Put back while both still stand as they were; otherwise the next refill orders them.
+    if (find(id) === record && find(other.id) === other) {
+      commit({ ...doc, items: doc.items.map(swap) });
       tell();
     }
     throw new AppFailure({ kind: "unexpected", detail: "The new order couldn't be kept." });
