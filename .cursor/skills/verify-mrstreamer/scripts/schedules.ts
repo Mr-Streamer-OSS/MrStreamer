@@ -286,6 +286,19 @@ export async function schedulesScenario(d: Driver) {
   await d.key("Home", 36);
   await d.key("ArrowRight", 39);
   await d.wait(() => d.exists(DETAILS));
+  // Its row and details are taller than the room under the times: the cursor's programme shows
+  // below them (the grid's first child holds the sticky times), not only its details' foot.
+  await d.wait(() =>
+    d.evaluate<boolean>(`(() => {
+      const grid = ${GRID};
+      const times = grid.firstElementChild.firstElementChild.getBoundingClientRect();
+      const id = grid.getAttribute('aria-activedescendant');
+      const cell = id && document.getElementById(id)?.getBoundingClientRect();
+      return !!cell && cell.top >= times.bottom - 0.5 &&
+        cell.bottom <= grid.getBoundingClientRect().bottom + 0.5;
+    })()`),
+  );
+  await d.capture("10-guide-960-larger-cursor");
   await d.click(
     "Record, larger",
     `[...document.querySelectorAll('[role=grid] [role=region] button')].find(e => /^(Record|Scheduled)$/.test(e.textContent.trim()))`,

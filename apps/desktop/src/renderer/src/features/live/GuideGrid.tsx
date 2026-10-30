@@ -495,12 +495,18 @@ export function GuideGrid({
     if (initial > 0) virtualizer.scrollToIndex(initial, { align: "center" });
   }, [channels.length > 0]);
 
-  // A key that moved the cursor brings it into view, the row and then the programme.
+  // A key that moved the cursor brings it into view, the row and then the programme. A row whose
+  // details leave it taller than the room under the times, as larger text in a short window
+  // does, shows its top: the cursor's programme, rather than the foot of its details. It is
+  // measured as drawn now, as the last programme's details may still be counted.
   useEffect(() => {
     if (cursor.asked === 0) return;
-    virtualizer.scrollToIndex(index, { align: "auto" });
     const element = scroller.current;
     if (!element) return;
+    const row = element.querySelector<HTMLElement>(`[data-index="${index}"]`);
+    if (row) virtualizer.measureElement(row);
+    const tall = (row?.offsetHeight ?? 0) > element.clientHeight - headPx;
+    virtualizer.scrollToIndex(index, { align: tall ? "start" : "auto" });
     const { programmes } = latest.current.rowGuide(index);
     const cell = cellAt(programmes, latest.current.at, latest.current.bounds);
     const { origin, msPx, columnPx } = geometry.current;
