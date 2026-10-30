@@ -610,8 +610,9 @@ The shared rules use some JavaScript that Hermes on iOS doesn't have or gets wro
 `Intl.Locale`, `PluralRules`, `ListFormat`, `DisplayNames` and `NumberFormat` (FormatJS, with the
 interface languages' data) and `Array.prototype.toSorted` and `toReversed` (core-js). Still
 missing and not polyfilled: `Buffer`, so `core/guide/xmltv` can't load, and `crypto.randomUUID`
-and `crypto.subtle`, which `core/guide/address`, `service`, `ondemand/files` and
-`playlist/import` take from `node:crypto`.
+and `crypto.subtle`, which `core/guide/address`, `service` and `ondemand/files` take from
+`node:crypto`. `playlist/import` hashes with `core/sha256` instead, so M3U playlists map on the
+phone with the desktop's ids.
 
 Hermes's array methods ignore `Symbol.species`, so an Array subclass's `map` returns a plain
 Array. ArkType's intersection results are such a subclass. From arktype 2.2.9, its
