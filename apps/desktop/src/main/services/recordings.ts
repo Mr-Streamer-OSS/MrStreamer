@@ -124,6 +124,8 @@ function make(deps: RecordingsDeps) {
       AbortController,
       { readonly subscriptionId: string; readonly done: Promise<void> }
     >();
+    /** Set as the app closes: a start asked for meanwhile would outlive its close. */
+    let closing = false;
     const fileOf = (record: StoredRecording) => join(root, record.id, record.file);
 
     const unreadable = () =>
@@ -358,6 +360,12 @@ function make(deps: RecordingsDeps) {
       options: { readonly variants?: readonly string[]; readonly stopPlaying?: boolean } = {},
     ) =>
       Effect.suspend(() => {
+        if (closing)
+          return Effect.fail(
+            new Failed({
+              error: { kind: "stream", failure: { kind: "network", detail: t("Stopped.") } },
+            }),
+          );
         // Starting from before its first wait, so a removal or the app's close stops it at any step.
         const controller = new AbortController();
         const { promise: done, resolve } = Promise.withResolvers<void>();
@@ -396,14 +404,15 @@ function make(deps: RecordingsDeps) {
       );
     yield* Effect.addFinalizer(() =>
       Effect.andThen(
-        Effect.promise(() =>
-          Promise.all(
+        Effect.promise(() => {
+          closing = true;
+          return Promise.all(
             [...starting].map(([controller, start]) => {
               controller.abort();
               return start.done;
             }),
-          ),
-        ),
+          );
+        }),
         // Read once they settled: one may have become active meanwhile.
         Effect.suspend(() => Effect.ignore(end([...active.keys()], "quit"))),
       ),
