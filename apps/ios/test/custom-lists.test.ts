@@ -232,6 +232,26 @@ describe("lists", () => {
     );
     expect(readFileSync(file(), "utf8")).toBe(later);
   });
+
+  it("show none of a file that doesn't read, write nothing over it, and show it once it reads", async () => {
+    lists.createList("News", live("a:10"));
+    const before = readFileSync(file(), "utf8");
+    native.sync = (operation) => {
+      if (operation === "text") throw new Error("The disk went away.");
+    };
+    await launch();
+    expect(shown()).toEqual([]);
+    expect(() => lists.createList("Sport")).toThrow(
+      expect.objectContaining({
+        error: expect.objectContaining({ detail: expect.stringMatching(/couldn't be read/) }),
+      }),
+    );
+    shows([NOS, ZIGGO]);
+    expect(readFileSync(file(), "utf8")).toBe(before);
+    native.sync = null;
+    lists.createList("Sport");
+    expect(shown()).toEqual(["News: a:10", "Sport: "]);
+  });
 });
 
 describe("a list's channels", () => {

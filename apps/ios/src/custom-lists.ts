@@ -1,9 +1,7 @@
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
-import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { normalize } from "@mrstreamer/core/text";
-import { type } from "arktype";
 import { useMemo, useSyncExternalStore } from "react";
 import {
   currentCatalogue,
@@ -17,17 +15,23 @@ import {
   type Member,
   type Roster,
 } from "./account.ts";
+import {
+  keptNow,
+  save,
+  stored,
+  subscribe,
+  type Kept,
+  type StoredList,
+  type StoredMember,
+} from "./custom-lists-file.ts";
 import { listedNow, type Unavailable } from "./favourites.ts";
-import { readJson, removeJson, writeJson } from "./files.ts";
 import { DEMO_ID } from "./demo.ts";
 import type { Channel } from "./library.ts";
 import { readRegistry } from "./subscriptions.ts";
 
 // The viewer's channel lists, apart from Favourites: named, in an order of the viewer's, each
 // holding exact channels of any saved subscription in an order of its own, as the desktop keeps
-// them (apps/desktop/src/main/services/custom-lists.ts). One JSON file in Documents, written whole
-// before any screen shows a change: a write the folder refuses throws and changes nothing, the
-// lists the screens show written back so a write cut short isn't read at the next launch.
+// them (apps/desktop/src/main/services/custom-lists.ts), in one file (custom-lists-file.ts).
 //
 // A channel of a list is kept under its subscription by every stream id it was seen with, and is
 // whichever channel Live lists now under the first of them its subscription still lists, so it is
@@ -37,64 +41,11 @@ import { readRegistry } from "./subscriptions.ts";
 // whose subscription is saved but doesn't list it now, still loads, or needs its password is named
 // as it was last listed, plays nothing and can be taken out. One of a subscription removed with its
 // history kept is counted and back once it is added again; one removed with its history erased is
-// deleted from every list, at the next change of the providers or their channels, or the next
-// launch when that write is refused.
+// deleted from every list as part of that erasure (account.ts), which stays pending until it is.
 //
 // Lists keep the order they were made in. An edit of a list's channels is made from the list as it
 // showed: it lands only while the list's revision and the channels it opened still hold, so nothing
 // moves or goes under channels that changed meanwhile.
-
-const FILE = "custom-lists.json";
-
-const Saved = lazy(() =>
-  type({
-    version: "1",
-    lists: type({
-      id: "string",
-      name: "string",
-      revision: "number",
-      members: type({
-        member: "string",
-        subscriptionId: "string",
-        /** Every stream id it was seen with, the one it was found by when last listed first. */
-        streams: "string[] > 0",
-        /** What it was called when last listed. */
-        name: "string",
-      }).array(),
-    }).array(),
-  }),
-);
-type StoredList = Infer<typeof Saved>["lists"][number];
-type StoredMember = StoredList["members"][number];
-
-/**
- * The lists as the file holds them. `foreign` is a file this build can't read, as a later build's:
- * no list shows and nothing is written over it.
- */
-type Kept =
-  { readonly kind: "read"; readonly lists: readonly StoredList[] } | { readonly kind: "foreign" };
-
-function readKept(): Kept {
-  const read = readJson(FILE);
-  if (read === null) return { kind: "read", lists: [] };
-  const parsed = Saved()(read);
-  return parsed instanceof type.errors
-    ? { kind: "foreign" }
-    : { kind: "read", lists: parsed.lists };
-}
-
-/** The file, read once, at the first look, then kept as written. */
-let cached: Kept | null = null;
-const keptNow = () => (cached ??= readKept());
-const listeners = new Set<() => void>();
-const subscribe = (listener: () => void) => {
-  listeners.add(listener);
-  return () => void listeners.delete(listener);
-};
-function keep(next: Kept) {
-  cached = next;
-  for (const listener of listeners) listener();
-}
 
 /** A channel of a list as it shows now. */
 export type ListEntry =
@@ -222,44 +173,6 @@ export function listsHolding(channel: Channel): ReadonlySet<string> {
 /** Every list as it shows now, for handlers outside React. */
 export const currentChannelLists = (): readonly ChannelList[] =>
   listsOf(keptNow(), currentCatalogue(), members());
-
-/** The lists as the file holds them, or a failure when it holds lists this build can't read. */
-function stored(): readonly StoredList[] {
-  const from = keptNow();
-  if (from.kind === "foreign") {
-    throw new AppFailure({
-      kind: "unexpected",
-      detail: "These lists were saved by a newer version of the app. Nothing was changed.",
-    });
-  }
-  return from.lists;
-}
-
-/** Writes `lists` whole; only once the file took them do the screens show them. */
-function save(lists: readonly StoredList[]) {
-  try {
-    writeJson(FILE, { version: 1, lists });
-  } catch (cause) {
-    // A write cut short can leave the new lists under the temporary name, which a launch reads
-    // when the file itself is gone.
-    const shown = keptNow();
-    try {
-      if (shown.kind === "read") writeJson(FILE, { version: 1, lists: shown.lists });
-    } catch {
-      // With no lists before, nothing is lost with what that write left; with some, the disk
-      // keeps what it took.
-      if (shown.kind === "read" && shown.lists.length === 0) {
-        try {
-          removeJson(FILE);
-        } catch {
-          // As the disk left it.
-        }
-      }
-    }
-    throw cause;
-  }
-  keep({ kind: "read", lists });
-}
 
 /**
  * Saves list `id` as `change` makes it from the list and all the lists; `no-list` when there is
