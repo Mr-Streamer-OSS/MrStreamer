@@ -1354,11 +1354,13 @@ jobs:
 
   # The website, once the version commit is on main, whatever the feed and the Store did. The
   # version commit is the workflow token's push, which starts no workflow, so this call is the
-  # website's only cue. website.yml reads its Vercel token from its own environment.
+  # website's only cue.
   website-refresh:
     name: Website
     needs: [plan, finalize]
     uses: ./.github/workflows/website.yml
+    # Pass secrets through the reusable workflow call so website.yml receives VERCEL_TOKEN.
+    secrets: inherit
     if: ${{ !cancelled() && needs.finalize.result == 'success' }}
     with:
       deploy: true

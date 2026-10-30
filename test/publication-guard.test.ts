@@ -418,6 +418,7 @@ describe("publication boundaries", () => {
     ).not.toContain("website-refresh");
     expect(release.jobs["website-refresh"]).toMatchObject({
       uses: "./.github/workflows/website.yml",
+      secrets: "inherit",
       with: { deploy: true },
     });
   });
