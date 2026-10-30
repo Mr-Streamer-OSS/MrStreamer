@@ -25,7 +25,7 @@ import {
 } from "./guide-ui.tsx";
 import { tabHref } from "./header.tsx";
 import type { Channel, Library } from "./library.ts";
-import { colors, Message, TextButton } from "./ui.tsx";
+import { colors, Message, TextButton, useListWidth } from "./ui.tsx";
 
 const parameter = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : "";
@@ -57,7 +57,8 @@ export function ScheduleScreen({ origin }: { origin: GuideOrigin }) {
 /**
  * A channel's Schedule by its key, from `day` (null for Today), wherever it shows: a pushed
  * screen, or Live's detail column. `onDay` hears each day chosen and `onProgramme` each programme
- * opened. With `announce`, VoiceOver moves to the channel's name as it shows.
+ * opened. With `column`, it is set out for Live's detail column and VoiceOver moves to the
+ * channel's name as it shows.
  */
 export function ChannelSchedule({
   channel: key,
@@ -65,14 +66,14 @@ export function ChannelSchedule({
   onDay,
   onProgramme,
   origin,
-  announce = false,
+  column = false,
 }: {
   channel: string;
   day: number | null;
   onDay: (day: number | null) => void;
   onProgramme: (channel: string, detail: string) => void;
   origin: GuideOrigin;
-  announce?: boolean;
+  column?: boolean;
 }) {
   const catalogue = useCatalogue();
   const channel = catalogue.kind === "ready" ? catalogue.library.byKey.get(key) : undefined;
@@ -87,7 +88,7 @@ export function ChannelSchedule({
       initialDay={day}
       onDay={onDay}
       onProgramme={onProgramme}
-      announce={announce}
+      column={column}
     />
   );
 }
@@ -99,7 +100,7 @@ function Schedule({
   initialDay,
   onDay,
   onProgramme,
-  announce,
+  column,
 }: {
   channel: Channel;
   library: Library;
@@ -107,7 +108,7 @@ function Schedule({
   initialDay: number | null;
   onDay: (day: number | null) => void;
   onProgramme: (channel: string, detail: string) => void;
-  announce: boolean;
+  column: boolean;
 }) {
   const clock = useGuideOwner();
   // null follows Today across midnight; a chosen calendar date stays on that date.
@@ -116,7 +117,8 @@ function Schedule({
     choose(day);
     onDay(day);
   };
-  const heading = useAnnounced(announce);
+  const heading = useAnnounced(column);
+  const content = useContent(column);
   const day = localDay(chosen ?? clock.now);
   const schedule = useGuideSchedule(channel.key, day, library);
   const today = localDay(clock.now).from;
@@ -137,7 +139,7 @@ function Schedule({
       data={schedule.page?.programmes ?? []}
       keyExtractor={(item) => `${item.start}`}
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={styles.content}
+      contentContainerStyle={content}
       initialNumToRender={16}
       maxToRenderPerBatch={16}
       windowSize={7}
@@ -228,6 +230,7 @@ export function Programme({
 }) {
   const catalogue = useCatalogue();
   const heading = useAnnounced(onBack !== undefined);
+  const content = useContent(onBack !== undefined);
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const channel = library?.byKey.get(key);
   const load = useCallback(
@@ -243,7 +246,7 @@ export function Programme({
     <ScrollView
       style={styles.screen}
       contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={styles.content}
+      contentContainerStyle={content}
       testID="guide-programme"
     >
       {onBack ? <TextButton label="Back to Schedule" onPress={onBack} /> : null}
@@ -281,6 +284,17 @@ export function Programme({
       />
     </ScrollView>
   );
+}
+
+/**
+ * A pushed screen's margins, or those of Live's detail column (`column`): its gutter for the
+ * window, and lines that stop at 600 points so a wide column still reads as one.
+ */
+function useContent(column: boolean) {
+  const { gutter } = useListWidth();
+  return column
+    ? [styles.content, { paddingHorizontal: gutter, paddingTop: 8, maxWidth: 600 + 2 * gutter }]
+    : styles.content;
 }
 
 /** A heading VoiceOver moves to once it shows, when `announce`: a detail column opened beside Live. */

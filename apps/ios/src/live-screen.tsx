@@ -45,6 +45,8 @@ import {
   Message,
   Notice,
   TextButton,
+  largeText,
+  stackedActions,
   useListWidth,
   useRowHeight,
 } from "./ui.tsx";
@@ -190,11 +192,18 @@ function useHandover(split: boolean) {
  */
 function LiveDetail() {
   const shown = useStore(detail);
+  const { gutter } = useListWidth();
   if (!shown) {
+    // On the Schedule title's line, so choosing one puts the channel's name where this was.
     return (
-      <View style={styles.detail} testID="live-detail">
+      <ScrollView
+        style={styles.detail}
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={{ paddingHorizontal: gutter, paddingTop: 20 }}
+        testID="live-detail"
+      >
         <Text style={styles.empty}>Choose a channel's Schedule</Text>
-      </View>
+      </ScrollView>
     );
   }
   return (
@@ -209,7 +218,7 @@ function LiveDetail() {
             detail.set((current) => current && { ...current, programme })
           }
           origin="live"
-          announce
+          column
         />
       </View>
       {shown.programme ? (
@@ -468,6 +477,7 @@ function Browse({ library }: { library: Library }) {
       header={header}
       testID={tab === "guide" ? "live-guide" : "live-list"}
       schedule={tab === "guide"}
+      column
     />
   );
 }
@@ -482,18 +492,25 @@ function ChannelList({
   header,
   testID,
   schedule = false,
+  column = false,
 }: {
   library: Library;
   channels: readonly Channel[];
   header: ReactNode;
   testID: string;
   schedule?: boolean;
+  /** Whether it is Live's own list, which sits in the list column from the split width. */
+  column?: boolean;
 }) {
-  const height = useRowHeight() + Math.round(58 * useWindowDimensions().fontScale);
+  const { fontScale } = useWindowDimensions();
+  // The rows' height as ChannelRow lays them out, so getItemLayout places them where they draw.
+  const height =
+    useRowHeight() + Math.round(58 * fontScale) + (largeText(fontScale) ? stackedActions : 0);
   const inset = useDockInset();
   const playing = channelStatus(usePlayback().phase);
   const favourites = useFavouriteKeys();
   const { split } = useListWidth();
+  const inColumn = column && split;
   const selected = useStore(detail)?.channel ?? null;
   const [top, setTop] = useState(0);
   const [visible, setVisible] = useState<readonly string[]>(() =>
@@ -586,7 +603,7 @@ function ChannelList({
               </>
             }
             onSchedule={schedule ? (channel) => showSchedule(split, channel) : undefined}
-            selected={schedule && split && item.key === selected}
+            selected={inColumn ? schedule && item.key === selected : undefined}
           />
         );
       }}
@@ -917,10 +934,10 @@ const styles = StyleSheet.create({
   detail: {
     flex: 1,
     borderLeftColor: colors.line,
-    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: 1,
   },
   hidden: { display: "none" },
-  empty: { color: colors.text, fontSize: 17, margin: 32 },
+  empty: { color: colors.text, fontSize: 17 },
   pressed: { opacity: 0.6 },
   provider: { color: colors.text, fontSize: 13, marginTop: 2 },
   settingsInset: { marginHorizontal: 16 },
