@@ -13,8 +13,8 @@
 // Every rendition loops in step with the picture: segment n of each is its loop's n % 30, the
 // playlists list the same five, and each pass starts again with a discontinuity.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { FakeChannel } from "../../../desktop/test/fake-provider.ts";
 import { livePlaylist, type Media, type mediaMaker } from "./media.ts";
 
@@ -47,7 +47,7 @@ export function tracksChannel(channel: FakeChannel): FakeChannel {
 }
 
 /** Makes the channel's media with `maker`, and answers for its playlists and segments. */
-export function liveTracks(maker: ReturnType<typeof mediaMaker>, out: string, started: number) {
+export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number) {
   const picture = maker.make("tracks-picture", [
     ...["-f", "lavfi", "-i", "testsrc2=s=1280x720:r=30:d=60"],
     ...["-c:v", "libx264", "-profile:v", "main", "-level", "3.1", "-bf", "0", "-g", "60"],
@@ -75,7 +75,8 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, out: string, st
   ).match(/\d+/) ?? ["0"];
   const subtitles = new Map<string, Media>(
     SUBTITLES.map((subtitle) => {
-      const dir = join(out, "media", `tracks-${subtitle.id}-${basename(picture.dir).slice(-12)}`);
+      const hash = basename(picture.dir).slice(-12);
+      const dir = join(dirname(picture.dir), `tracks-${subtitle.id}-${hash}`);
       mkdirSync(dir, { recursive: true });
       let at = 0;
       const segments = picture.segments.map((segment, index) => {
@@ -107,41 +108,38 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, out: string, st
       );
     }
   }
-  const at = (id: number, rendition: string) => `/hls/${id}/${rendition}`;
+  const at = (rendition: string) => `/hls/${TRACKS_STREAM_ID}/${rendition}`;
 
   return {
     /** The channel's multivariant playlist, at its live address. */
-    playlist: (id: number) =>
+    playlist: () =>
       [
         "#EXTM3U",
         "#EXT-X-VERSION:3",
         ...SOUND.map(
           (sound, index) =>
-            `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="sound",NAME="${sound.name}",LANGUAGE="${sound.language}",DEFAULT=${index === 0 ? "YES" : "NO"},AUTOSELECT=YES,URI="${at(id, sound.id)}.m3u8"`,
+            `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="sound",NAME="${sound.name}",LANGUAGE="${sound.language}",DEFAULT=${index === 0 ? "YES" : "NO"},AUTOSELECT=YES,URI="${at(sound.id)}.m3u8"`,
         ),
         ...SUBTITLES.map(
           (subtitle) =>
-            `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="${subtitle.name}",LANGUAGE="${subtitle.language}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="${at(id, subtitle.id)}.m3u8"`,
+            `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="${subtitle.name}",LANGUAGE="${subtitle.language}",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="${at(subtitle.id)}.m3u8"`,
         ),
         '#EXT-X-STREAM-INF:BANDWIDTH=1500000,RESOLUTION=1280x720,CODECS="avc1.4d401f,mp4a.40.2",AUDIO="sound",SUBTITLES="subtitles"',
-        `${at(id, "picture")}.m3u8`,
+        `${at("picture")}.m3u8`,
         "",
       ].join("\n"),
     /**
      * What `/hls/<id>/<rendition>.m3u8` or `/hls/<id>/<rendition>/<n>.<ts|vtt>` answers, or
      * undefined for another path.
      */
-    serve(
-      id: number,
-      path: string,
-    ): { readonly type: string; readonly body: string | { readonly file: string } } | undefined {
+    serve(path: string): { readonly type: string; readonly body: string | Buffer } | undefined {
       const match = /^([a-z-]+)(?:\.m3u8|\/(\d+)\.(?:ts|vtt))$/.exec(path);
       const media = match?.[1] ? renditions.get(match[1]) : undefined;
       if (!match || !media) return undefined;
       const [, rendition = "", n] = match;
       const subtitle = subtitles.has(rendition);
       if (n === undefined) {
-        const uri = (each: number) => `${at(id, rendition)}/${each}.${subtitle ? "vtt" : "ts"}`;
+        const uri = (each: number) => `${at(rendition)}/${each}.${subtitle ? "vtt" : "ts"}`;
         return {
           type: "application/vnd.apple.mpegurl",
           body: livePlaylist(media, started, uri, { timing: picture }),
@@ -151,7 +149,7 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, out: string, st
       return segment
         ? {
             type: subtitle ? "text/vtt" : "video/mp2t",
-            body: { file: join(media.dir, segment.file) },
+            body: readFileSync(join(media.dir, segment.file)),
           }
         : undefined;
     },

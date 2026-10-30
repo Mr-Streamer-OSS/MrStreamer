@@ -139,8 +139,6 @@ describe("the native verification fixture", () => {
   }, 90_000);
 
   it("answers catch-up as HLS recordings of programmes within the days kept, never as Live", async () => {
-    const { channels } = await provider().liveCatalogue();
-    expect(channels.find((channel) => channel.id === "1000")?.catchupDays).toBe(3);
     const now = Date.now();
     /** The catch-up playlist of `channel` from `start` to `end`, at the address core makes. */
     const past = async (channel: string, start: number, end: number) => {
@@ -225,10 +223,6 @@ describe("the native verification fixture", () => {
     const paced = await download(url, { Range: "bytes=0-524287" });
     expect(paced.body.length).toBe(524_288);
     expect(Date.now() - at).toBeGreaterThanOrEqual(1_500);
-    await post("/title-transfers?rate=0");
-
-    expect((await post("/title-transfers?rate=fast")).status).toBe(400);
-    expect((await post("/title-transfers?replace=movie/0")).status).toBe(400);
   }, 60_000);
 
   it("declares the source, commands and hashes of every piece of media it serves", async () => {

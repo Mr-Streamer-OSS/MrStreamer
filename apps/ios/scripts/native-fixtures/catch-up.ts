@@ -21,7 +21,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const panelClock = new Intl.DateTimeFormat("en-US", {
   timeZone: PANEL_TIME_ZONE,
-  ...{ year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric" },
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "numeric",
   hourCycle: "h23",
 });
 /** How far `time` on the panel's clock is ahead of UTC, in ms. */
@@ -46,19 +50,19 @@ function panelTime(text: string): number | null {
 
 /**
  * What a catch-up playlist answers for `minutes` from `start`, as the address writes it, of a
- * channel whose panel keeps `days` of it, recorded as `media` loops: its playlist, or 404.
+ * channel whose panel keeps `days` of it, recorded as `media` loops: its playlist, or null for 404.
  */
 export function catchUpPlaylist(
   { id, days, media }: { id: string; days: number | undefined; media: Media },
   minutes: number,
   start: string,
   now = Date.now(),
-): { status: 200; body: string } | { status: 404 } {
+): string | null {
   const from = panelTime(start);
-  if (!days || from === null || minutes < 1) return { status: 404 };
-  if (from >= now || from < now - days * DAY_MS) return { status: 404 };
+  if (!days || from === null || minutes < 1) return null;
+  if (from >= now || from < now - days * DAY_MS) return null;
   const end = from + minutes * 60_000;
   const seconds = (Math.min(end, now) - from) / 1000;
   const uri = (n: number) => `/hls/${id}/past/${n}.ts`;
-  return { status: 200, body: recordingPlaylist(media, from, seconds, uri, end <= now) };
+  return recordingPlaylist(media, from, seconds, uri, end <= now);
 }

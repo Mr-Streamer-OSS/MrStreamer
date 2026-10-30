@@ -237,7 +237,7 @@ const mediaOf = (channel: FakeChannel): Media | null =>
         : dark;
 
 const started = Date.now();
-const tracks = liveTracks(maker, out, started);
+const tracks = liveTracks(maker, started);
 /** Playlists of a channel left to answer with 503, by its id. */
 const failing = new Map<string, number>();
 
@@ -310,19 +310,15 @@ createServer((request, response) => {
   if (live) {
     const [, user, pass, id = ""] = live;
     const channel = listed(id);
-    const withTracks = channel?.streamId === TRACKS_STREAM_ID;
     const found = channel ? mediaOf(channel) : null;
-    const status = playlistStatus(id, user, pass, withTracks || !!found);
+    const playlist =
+      channel?.streamId === TRACKS_STREAM_ID
+        ? tracks.playlist()
+        : found && livePlaylist(found, started, (n) => `/hls/${id}/${n}.ts`);
+    const status = playlistStatus(id, user, pass, !!playlist);
     record({ at: Date.now(), kind: "playlist", channel: id, status, path: redacted(path) });
-    if (status !== 200) return answer(response, status, "text/plain", "");
-    if (withTracks) return answer(response, 200, playlistType, tracks.playlist(TRACKS_STREAM_ID));
-    if (!found) return answer(response, 404, "text/plain", "");
-    return answer(
-      response,
-      200,
-      playlistType,
-      livePlaylist(found, started, (n) => `/hls/${id}/${n}.ts`),
-    );
+    if (status !== 200 || !playlist) return answer(response, status, "text/plain", "");
+    return answer(response, 200, playlistType, playlist);
   }
   const shifted = /^\/timeshift\/([^/]+)\/([^/]+)\/(\d+)\/([\d:-]+)\/(\d+)\.m3u8$/.exec(
     url.pathname,
@@ -332,11 +328,10 @@ createServer((request, response) => {
     const channel = listed(id);
     const days = channel?.archiveDays;
     const recorded = catchUpPlaylist({ id, days, media: past }, Number(minutes), start);
-    const status = playlistStatus(id, user, pass, recorded.status === 200);
+    const status = playlistStatus(id, user, pass, recorded !== null);
     record({ at: Date.now(), kind: "archive", channel: id, status, path: redacted(path) });
-    if (status !== 200 || recorded.status !== 200)
-      return answer(response, status, "text/plain", "");
-    return answer(response, 200, playlistType, recorded.body);
+    if (status !== 200 || recorded === null) return answer(response, status, "text/plain", "");
+    return answer(response, 200, playlistType, recorded);
   }
   const hls = /^\/hls\/(\d+)\/(.+)$/.exec(url.pathname);
   if (hls) {
@@ -351,13 +346,11 @@ createServer((request, response) => {
       if (!found || !file) return answer(response, 404, "text/plain", "");
       return answer(response, 200, "video/mp2t", readFileSync(join(found.dir, file)));
     }
-    const served =
-      channel?.streamId === TRACKS_STREAM_ID ? tracks.serve(TRACKS_STREAM_ID, rest) : undefined;
+    const served = channel?.streamId === TRACKS_STREAM_ID ? tracks.serve(rest) : undefined;
     const kind = rest.endsWith(".m3u8") ? "playlist" : "segment";
     record({ at: Date.now(), kind, channel: id, status: served ? 200 : 404, path });
     if (!served) return answer(response, 404, "text/plain", "");
-    const { type, body } = served;
-    return answer(response, 200, type, typeof body === "string" ? body : readFileSync(body.file));
+    return answer(response, 200, served.type, served.body);
   }
   const title = /^\/(movie|series)\/([^/]+)\/([^/]+)\/(\d+)\.(\w+)$/.exec(url.pathname);
   if (title) {

@@ -44,22 +44,11 @@ interface Artifact {
  */
 export function mediaMaker(root: string, out: string) {
   const artifacts: Artifact[] = [];
+  const provenance = () => ({ source, ffmpeg, artifacts });
   /** Adds `artifact` to what provenance.json in `out` declares. */
   const add = (artifact: Artifact) => {
     artifacts.push(artifact);
-    writeFileSync(
-      join(out, "provenance.json"),
-      JSON.stringify({ source, ffmpeg, artifacts }, null, 2),
-    );
-  };
-  const hashes = new Map<string, string>();
-  const hashOf = (file: string) => {
-    let found = hashes.get(file);
-    if (!found) {
-      found = sha256(readFileSync(file));
-      hashes.set(file, found);
-    }
-    return found;
+    writeFileSync(join(out, "provenance.json"), JSON.stringify(provenance(), null, 2));
   };
   const filesOf = (dir: string) =>
     readdirSync(dir)
@@ -111,7 +100,7 @@ export function mediaMaker(root: string, out: string) {
         ? []
         : args[index - 2] === "lavfi"
           ? [{ lavfi: arg }]
-          : [{ file: relative(root, arg), sha256: hashOf(arg) }],
+          : [{ file: relative(root, arg), sha256: sha256(readFileSync(arg)) }],
     );
     const named = command.map((arg) => (arg.startsWith(root) ? relative(root, arg) : arg));
     add({ name, command: ["ffmpeg", ...named], inputs, files: filesOf(dir) });
@@ -138,7 +127,7 @@ export function mediaMaker(root: string, out: string) {
       add({ name, command: writer, inputs: [], files: filesOf(dir) });
     },
     /** What the server declares about its media. */
-    provenance: () => ({ source, ffmpeg, artifacts }),
+    provenance,
   };
 }
 
@@ -152,14 +141,12 @@ function segmentsOf(playlist: string): Media["segments"] {
   });
 }
 
-const loopSeconds = ({ segments }: Media) => segments.reduce((sum, each) => sum + each.seconds, 0);
-
 /**
  * The newest segment of `media`'s loop at `now`, the loop having started at `started`: segment n
  * is the loop's n % length.
  */
 function newestSegment({ segments }: Media, started: number, now: number) {
-  const loop = loopSeconds({ dir: "", segments });
+  const loop = segments.reduce((sum, each) => sum + each.seconds, 0);
   const elapsed = Math.max(0, now - started) / 1000;
   const passes = Math.floor(elapsed / loop);
   let within = elapsed - passes * loop;
