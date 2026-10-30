@@ -1312,9 +1312,10 @@ async function firstForeground(): Promise<void> {
     }
     await finishRemovals();
     if (!bound) await bindLogins();
-    // Before anything new is admitted: a pause or a move a relaunch interrupted counts first.
-    await restoreHolds();
-    await arrange().catch(() => undefined);
+    // Before anything new is admitted: a pause or a move a relaunch interrupted counts first,
+    // and the barrier stays up until both are kept.
+    if (!(await restoreHolds())) throw new Error("A pause isn't kept yet.");
+    await arrange();
     await transfers.finishForegroundReconcile(token);
     barrier = "done";
   } catch {
@@ -1385,9 +1386,11 @@ async function fill() {
 
 /**
  * Holds or lets go each authorization as its record's pause says, where a relaunch or a refusal
- * between the two writes left the native side behind; `known` follows what was kept.
+ * between the two writes left the native side behind; `known` follows what was kept. Answers
+ * whether every one was kept, an authorization that ended meanwhile counting as kept.
  */
-async function restoreHolds() {
+async function restoreHolds(): Promise<boolean> {
+  let kept = true;
   for (const { id } of doc.items) {
     // As it stands now: a pause or Resume may have come while an earlier one was answered.
     const record = find(id);
@@ -1399,10 +1402,12 @@ async function restoreHolds() {
     try {
       await transfers.holdAuthorization(bound.authorization, paused);
       known.set(bound.authorization, { ...view, held: paused });
-    } catch {
+    } catch (cause) {
       // Tried again at the next refill.
+      if (refusalOf(cause) !== "obsolete") kept = false;
     }
   }
+  return kept;
 }
 
 /** Puts the native queue in the records' order: what the list shows next is what goes next. */

@@ -908,11 +908,12 @@ const module = {
       throw refused("ERR_DOWNLOADS_OBSOLETE");
     }
     const { open, receipts } = load();
-    // Held ones wait outside the window, within the queue's capacity.
+    // Held ones wait outside the window, within the queue's capacity, leaving the pump the one
+    // place it needs to admit anything.
     const waiting = [...background.grants.values()].filter(
       (grant) => grant.state !== "terminal" && !grant.held,
     ).length;
-    if (waiting >= 32 || open + receipts + 1 > 128) throw refused("ERR_DOWNLOADS_CAPACITY");
+    if (waiting >= 32 || open + receipts + 1 >= 128) throw refused("ERR_DOWNLOADS_CAPACITY");
     if (!write()) throw refused("ERR_DOWNLOADS_UNAVAILABLE");
     const authorization = fresh("z");
     background.grants.set(authorization, {

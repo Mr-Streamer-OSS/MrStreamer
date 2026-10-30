@@ -1507,7 +1507,8 @@ describe("downloads", { timeout: 30_000 }, () => {
     const { a } = await withProviders(app);
     const { series, first } = episode();
     one.stallMovieFile(movie().id, 20_000, 60_000);
-    one.stallMovieFile(otherMovie().id, 20_000, 60_000);
+    // Small enough for the file an earlier test put behind this film.
+    one.stallMovieFile(otherMovie().id, 5_000, 60_000);
     const paused = await app.addDownload(movieRef(a));
     const running = await app.addDownload(movieRef(a, otherMovie().id));
     const show = await app.addDownload({
@@ -1520,7 +1521,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     });
     await until(() => receivedOf(app, paused.id) === 20_000, "the first transfer to stall");
     await app.pauseDownload(paused.id);
-    await until(() => receivedOf(app, running.id) === 20_000, "the next transfer to stall");
+    await until(() => receivedOf(app, running.id) === 5_000, "the next transfer to stall");
     await app.moveDownload(show.id, -1);
     expect(app.downloadList().items.map((item) => item.id)).toEqual([
       show.id,
