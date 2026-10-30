@@ -137,23 +137,32 @@ const text = (params: object | undefined, name: string) => {
  */
 export function LiveTab() {
   const { split, width } = useListWidth();
-  useHandover(split);
   return (
     <View style={styles.split}>
       <View style={split ? { width } : styles.screen}>
         <LiveHome />
       </View>
       {split ? <LiveDetail /> : null}
+      <Handover split={split} />
     </View>
   );
+}
+
+/**
+ * `useHandover`, beside the list rather than above it: it follows every navigation, which then
+ * draws nothing of Live again.
+ */
+function Handover({ split }: { split: boolean }) {
+  useHandover(split);
+  return null;
 }
 
 /**
  * Moves a Schedule between Live's stack and the detail column as the window crosses the split
  * width, on the same day and programme: a Schedule pushed on the stack, with its Programme if one
  * is open, goes into the column once it is the stack's top, and the column's goes back on the
- * stack, so Back returns to the list as before. The stack changes even while another tab shows,
- * without selecting Live.
+ * stack as the window narrows with the list showing, so Back returns to the list as before. The
+ * stack changes even while another tab shows, without selecting Live.
  */
 function useHandover(split: boolean) {
   const navigation = useNavigation();
