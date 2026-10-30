@@ -139,14 +139,23 @@ export function repeatOf(plan: RecordingPlan): Repeat {
 /** The plan that records `basis` as `repeat` asks, with `padding`. */
 export function planOf(basis: ScheduleBasis, repeat: Repeat, padding: RecordingPadding): PlanInput {
   const { channel, title } = basis;
-  if (repeat === "once" && basis.programme)
-    return { kind: "programme", channel, ...basis.programme, padding };
+  // A programme longer than a recording may run records what it may, as main follows it.
+  if (repeat === "once" && basis.programme) {
+    const { start, stop } = basis.programme;
+    const longest = start + (MAX_MINUTES - padding.before - padding.after) * MINUTE_MS;
+    return {
+      kind: "programme",
+      channel,
+      ...basis.programme,
+      stop: Math.min(stop, longest),
+      padding,
+    };
+  }
   return {
     kind: "slot",
     channel,
     days: repeat === "every" ? [...EVERY_DAY] : [...basis.days],
     at: basis.at,
-    // A programme longer than a recording may be records what it may.
     minutes: Math.min(basis.minutes, MAX_MINUTES),
     title,
     padding,

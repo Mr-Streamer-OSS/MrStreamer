@@ -120,3 +120,12 @@ it("repeats a programme longer than a recording may run for as long as one may",
   });
   expect(plan).toMatchObject({ kind: "slot", minutes: 12 * 60, padding: { before: 0, after: 0 } });
 });
+
+it("records a programme longer than a recording may run once for as long as one may", async () => {
+  const programme = { start: NOON, stop: NOON + 13 * HOUR, title: "All Day" };
+  const plan = await saved(basisOfProgramme(channel, programme), undefined, async () => {
+    await press("Start", "Home");
+    await press("End", "Home");
+  });
+  expect(plan).toMatchObject({ kind: "programme", start: NOON, stop: NOON + 12 * HOUR });
+});
