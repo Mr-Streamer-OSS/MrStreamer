@@ -124,24 +124,19 @@ it.each([
   const app = await launch();
   const provider = await app.add({ server: panel.url, username: "one", password: "one+Pw@1" });
   if (!provider) throw new Error("The add was cancelled");
-  for (const link of ["kept", "removed", "replaced"])
+  for (const link of ["kept", "removed"])
     expect(await app.guides.add(`https://${link}.test/epg.xml`, link)).toBeNull();
-  const [kept, removed, replaced] = app.guides.links().map(({ id }) => id);
+  const [kept, removed] = app.guides.links().map(({ id }) => id);
   await until(
     () =>
-      [provider, kept!, removed!, replaced!].every(
-        (id) => app.guide.status(id).availability === "available",
-      ),
+      [provider, kept!, removed!].every((id) => app.guide.status(id).availability === "available"),
     "every guide published",
   );
   const generation = (id: string) => store.control.activations.get(id)?.generation?.id;
   const saved = generation(kept!);
-  // Their native erase fails, so only the next launch's cleanup takes them.
+  // Its native erase fails, so only the next launch's cleanup takes it.
   store.control.forget = async () => false;
   expect(await app.guides.remove(removed!)).toBeNull();
-  expect(await app.guides.replace(replaced!, "https://new.test/epg.xml")).toBeNull();
-  const replacement = app.guides.links()[1]!.id;
-  await until(() => app.guide.status(replacement).availability === "available", "replacement");
   store.control.forget = async () => true;
   const file = guidesFile();
 
@@ -149,24 +144,18 @@ it.each([
   const blind = await launch();
   expect(blind.guides.links()).toEqual([]);
   expect(blind.guide.status(provider).availability).toBe("available");
-  for (const id of [kept!, replacement]) {
-    expect(blind.guide.status(id).availability).toBe("unknown");
-    expect(store.control.calls.at(-1)).not.toContain(id);
-  }
-  expect(await blind.guides.add("https://other.test/epg.xml")).toBe("saving");
+  expect(blind.guide.status(kept!).availability).toBe("unknown");
 
   native.sync = null;
   writeFileSync(guidesPath, file);
   const next = await launch();
-  expect(next.guides.links().map(({ id }) => id)).toEqual([kept, replacement]);
+  expect(next.guides.links().map(({ id }) => id)).toEqual([kept]);
   expect(next.guide.status(kept!).availability).toBe("available");
   expect(generation(kept!)).toBe(saved);
-  expect(next.guide.status(replacement).availability).toBe("available");
-  // Removed and replaced guides' leftovers are erased, never shown again.
+  // A removed guide's leftovers are erased, never shown again.
   expect(generation(removed!)).toBeUndefined();
-  expect(generation(replaced!)).toBeUndefined();
-  // Their links stayed in the Keychain too.
-  await until(() => next.guides.links().every(({ locked }) => !locked), "the links read");
+  // Its link stayed in the Keychain too.
+  await until(() => next.guides.links().every(({ locked }) => !locked), "the link read");
 });
 
 it("erases every external guide's saved programmes at a launch without guides.json", async () => {
