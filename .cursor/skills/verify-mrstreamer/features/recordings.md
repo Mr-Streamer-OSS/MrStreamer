@@ -18,7 +18,9 @@ What is captured, and its limits: the MPEG-TS packets as the provider sends them
 
 Service contracts are in `apps/desktop/test/recordings.test.ts`: every track of the subtitles fixture recorded to its stop time and played through `openCopy`, busy without a provider request while Watch holds the one connection, **Stop playing and record** while the provider frees the stopped stream's slot late, beside Watch with two connections, stop and broken-stream partials, quit then restart, the next stream after one with no program, a name within the file system's bytes, and HLS segments with a refused separate-audio rendition.
 
-Stop also retries saving an ended recording's current status. A failed terminal save never makes a later Stop silently succeed: it reports the save error while storage remains unavailable, then persists the retained outcome when storage works again. The public-service check blocks manifest replacement after start, lets the source end, and verifies failure, released connections and a successful retry against the file.
+At the service boundary, Stop also retries saving an ended recording's current status. A failed terminal save never makes a later Stop silently succeed: it reports the save error while storage remains unavailable, then persists the retained outcome when storage works again. The public-service check blocks manifest replacement after start, lets the source end, and verifies failure, released connections and a successful retry against the file.
+
+The window offers Stop only while a row reads Recording, so this protects a click racing the automatic end. An automatic end with no Stop can leave its save failure unreported. On relaunch, an unsaved terminal outcome reads as Partial, cut short by the quit, with the file's actual size. The service retry does not add a retry control to an ended row.
 
 ## Gotchas
 
