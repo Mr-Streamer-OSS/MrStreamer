@@ -66,6 +66,10 @@ function stopOf(
         return null;
       const stop = new Date(now);
       stop.setHours(hours, minutes, 0, 0);
+      // In the hour the clocks repeat, the time typed comes again an hour after the first.
+      const again = new Date(stop.getTime() + HOUR_MS);
+      if (stop.getTime() <= now && again.getHours() === hours && again.getMinutes() === minutes)
+        stop.setTime(again.getTime());
       if (stop.getTime() <= now) stop.setDate(stop.getDate() + 1);
       return stop.getTime() <= now + RECORDING_MAX_MS ? stop.getTime() : null;
     }
