@@ -379,6 +379,36 @@ describe("a playlist subscription", () => {
     for (const [path, text] of memory.files) expect(text, path).not.toContain("short");
   });
 
+  it("saves neither the films nor the details of a film whose name holds a short value of its link", async () => {
+    host.serve([
+      '#EXTINF:-1 group-title="Films",Harbour Lights',
+      `${host.origin}/films/harbour.mp4`,
+      '#EXTINF:-1 group-title="Films",Night short-sig',
+      `${host.origin}/films/night.mp4`,
+    ]);
+    const app = await launch();
+    const id = (await app.add({ server: `${host.origin}/list.m3u?sig=short-sig`, ...PLAYLIST }))!;
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Films"), "movie");
+    await until(() => titleNames(app, "movie").length === 2, "the films");
+    const lists = app.titleLists();
+    if (lists.kind !== "ready") throw new Error("No films");
+    // Details are written in the order opened, one at a time: Harbour Lights' come last.
+    for (const name of ["Night short-sig", "Harbour Lights"])
+      await app.detailsOf(kindOf(lists.index, "movie").titles.find((each) => each.name === name)!);
+    // The memory disk keeps a details record as the bytes written.
+    const text = (value: unknown) =>
+      value instanceof Uint8Array ? new TextDecoder().decode(value) : String(value);
+    const details = () =>
+      [...memory.files]
+        .filter(([path]) => path.startsWith("/cache/details/"))
+        .map(([, value]) => text(value));
+    await until(() => details().some((each) => each.includes("Harbour")), "the saved details");
+    await new Promise((settled) => setTimeout(settled, 200));
+    expect(details()).toHaveLength(1);
+    expect(memory.files.has(`/cache/catalogues/${id}.titles.json`)).toBe(false);
+    for (const [path, value] of memory.files) expect(text(value), path).not.toContain("short");
+  });
+
   it("stays the same subscription with a new link, added again, or removed and added back", async () => {
     const app = await launch();
     const id = await app.add({ server: host.link(), ...PLAYLIST });
