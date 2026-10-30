@@ -99,6 +99,9 @@ describe("the shared Downloads action", () => {
     expect(label()).toBe("Downloads");
     publish([item({ kind: "queued" })]);
     expect(label()).toBe("Downloads, 1 queued");
+    publish([item({ kind: "paused", received: 0, size: null })]);
+    expect(container.textContent).toBe("Paused");
+    expect(label()).toBe("Downloads, 1 paused");
     publish([transferring(499, 1000)]);
     expect(container.textContent).toBe("49%");
     expect(label()).toBe("Downloads, Paper Harbor, 49% downloaded");

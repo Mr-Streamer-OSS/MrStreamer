@@ -4,7 +4,11 @@ import { SymbolView } from "expo-symbols";
 import { Pressable, StyleSheet, Text } from "react-native";
 import { useDownloads } from "./downloads.ts";
 
-/** The queue's most immediate state, derived from the existing owner without another timer. */
+/**
+ * The queue's most immediate state, derived from the existing owner without another timer: the
+ * transfer, else one waiting for playback, else how many are queued, else how many the viewer
+ * paused, else how many failed where Retry can still reach their provider.
+ */
 function downloadStatus({ items }: DownloadList): { short: string; text: string } | null {
   const transferring = items.find((item) => item.status.kind === "transferring");
   if (transferring?.status.kind === "transferring") {
@@ -27,6 +31,8 @@ function downloadStatus({ items }: DownloadList): { short: string; text: string 
     };
   const queued = items.filter((item) => item.status.kind === "queued").length;
   if (queued) return { short: String(queued), text: `${queued} queued` };
+  const paused = items.filter((item) => item.status.kind === "paused").length;
+  if (paused) return { short: "Paused", text: `${paused} paused` };
   const failed = items.filter((item) => item.status.kind === "failed" && item.subscription).length;
   return failed ? { short: "!", text: `${failed} failed, open Downloads to retry` } : null;
 }

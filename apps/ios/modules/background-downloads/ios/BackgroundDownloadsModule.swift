@@ -52,6 +52,14 @@ public class BackgroundDownloadsModule: Module {
       TransferOwner.shared.cancelAuthorization(authorization, reason: reason) { answer(promise, $0) }
     }
 
+    AsyncFunction("holdAuthorization") { (authorization: String, held: Bool, promise: Promise) in
+      TransferOwner.shared.holdAuthorization(authorization, held: held) { answer(promise, $0) }
+    }
+
+    AsyncFunction("arrangeAuthorizations") { (authorizations: [String], promise: Promise) in
+      TransferOwner.shared.arrange(authorizations) { answer(promise, $0) }
+    }
+
     AsyncFunction("drainDownload") { (id: String, promise: Promise) in
       TransferOwner.shared.drain(download: id) { answer(promise, $0) }
     }
