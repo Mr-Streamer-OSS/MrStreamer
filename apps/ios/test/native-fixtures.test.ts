@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { xtreamProvider } from "@mrstreamer/core/xtream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { catchUpPlaylist } from "../scripts/native-fixtures/catch-up.ts";
 
 // The simulator fixture (scripts/fixture-server.ts) as native verification journeys reach it: its
 // panel through core's Xtream adapter, its media through ffprobe, and its control port, run as a
@@ -70,12 +71,18 @@ describe("the native verification fixture", () => {
     const [port, controlPort] = [await freePort(), await freePort()];
     panel = `http://127.0.0.1:${port}`;
     control = `http://127.0.0.1:${controlPort}`;
+    // The default fixture, whatever FIXTURE_ settings the shell running the tests has.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => !name.startsWith("FIXTURE_")),
+    );
+    // In a process group of its own, so stopping it stops any ffmpeg it is running too.
     server = spawn(
       process.execPath,
       [join(root, "apps/ios/scripts/fixture-server.ts"), String(port), String(controlPort)],
       {
-        env: { ...process.env, FIXTURE_OUT: out, FIXTURE_TITLES: "30" },
+        env: { ...env, FIXTURE_OUT: out, FIXTURE_TITLES: "30" },
         stdio: ["ignore", "pipe", "inherit"],
+        detached: true,
       },
     );
     await new Promise<void>((resolve, reject) => {
@@ -85,8 +92,12 @@ describe("the native verification fixture", () => {
       });
     });
   }, 300_000);
-  afterAll(() => {
-    server?.kill();
+  afterAll(async () => {
+    if (server?.pid && server.exitCode === null && server.signalCode === null) {
+      const exited = new Promise((resolve) => server.once("exit", resolve));
+      process.kill(-server.pid, "SIGTERM");
+      await exited;
+    }
     if (out) rmSync(out, { recursive: true, force: true });
   });
 
@@ -152,7 +163,7 @@ describe("the native verification fixture", () => {
     const ended = await past("1000", aired, aired + 30 * MINUTE);
     expect(ended.status).toBe(200);
     const whole = await ended.text();
-    expect(whole).toContain("#EXT-X-PLAYLIST-TYPE:VOD");
+    expect(whole).toContain("#EXT-X-PLAYLIST-TYPE:EVENT");
     expect(whole).toContain(`#EXT-X-PROGRAM-DATE-TIME:${new Date(aired).toISOString()}`);
     expect(whole.trimEnd().endsWith("#EXT-X-ENDLIST")).toBe(true);
     expect(seconds(whole)).toBeGreaterThanOrEqual(30 * 60);
@@ -212,6 +223,11 @@ describe("the native verification fixture", () => {
       expect.objectContaining({ kind: "title", range: "bytes=100000-" }),
     );
 
+    // A range that ends before it starts is ignored, as HTTP has it.
+    const reversed = await download(url, { Range: "bytes=20-10" });
+    expect(reversed).toMatchObject({ status: 200, broke: false });
+    expect(reversed.body.length).toBe(whole.body.length);
+
     await post(`/title-transfers?replace=movie/${movie.id}`);
     const changed = await download(url, { Range: "bytes=100000-", "If-Range": etag });
     expect(changed.status).toBe(200);
@@ -249,15 +265,37 @@ describe("the native verification fixture", () => {
     const hashes = new Set(
       declared.artifacts.flatMap(({ files }) => files.map((file) => file.sha256)),
     );
+    // A TEST movie's clip, which the server sends as the repository has it.
+    const { movies } = await provider().onDemandCatalogue();
+    const clip = movies.find((each) => each.name === "TEST | Index at the end (NL)");
+    if (!clip?.container) throw new Error("no TEST movie");
+    const { url } = await provider().titleFile("movie", clip.id, clip.container);
     for (const path of [
       "/hls/7999/subtitles-nl/0.vtt",
       "/hls/7999/sound-nl/0.ts",
       "/hls/1000/past/0.ts",
       "/hls/2014/0.ts",
+      url.slice(panel.length),
     ]) {
       expect([...hashes]).toContain(
         sha256(Buffer.from(await (await fetch(`${panel}${path}`)).arrayBuffer())),
       );
     }
+  });
+});
+
+describe("catch-up around the panel's clock changes", () => {
+  const media = { dir: "", segments: [{ file: "000.ts", seconds: 2 }] };
+  /** Where the recording of half an hour from `start` begins, asked for at `now`, if anywhere. */
+  const begins = (start: string, now: string) =>
+    /PROGRAM-DATE-TIME:(\S+)/.exec(
+      catchUpPlaylist({ id: "1000", days: 3, media }, 30, start, Date.parse(now)) ?? "",
+    )?.[1] ?? null;
+
+  it("takes a time the clock shows twice as the first, and refuses one it skips", () => {
+    // Amsterdam goes back from 03:00 to 02:00 on 25 October 2026, and forward on 29 March.
+    expect(begins("2026-10-25:02-30", "2026-10-25T01:00:00Z")).toBe("2026-10-25T00:30:00.000Z");
+    expect(begins("2026-03-29:02-30", "2026-03-29T05:00:00Z")).toBeNull();
+    expect(begins("2026-03-29:03-30", "2026-03-29T05:00:00Z")).toBe("2026-03-29T01:30:00.000Z");
   });
 });

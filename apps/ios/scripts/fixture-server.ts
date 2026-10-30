@@ -74,7 +74,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
   measurementTitles,
   pngLogo,
@@ -220,6 +220,9 @@ for (const series of provider.titles.series) {
   for (const episode of series.seasons.flat()) {
     titleFiles.set(`series/${episode.id}`, fileOf(series.name, episode.fixture));
   }
+}
+for (const file of new Set(titleFiles.values())) {
+  if (file && file !== feature) maker.served(basename(file), file);
 }
 const transfers = titleTransfers((title) => titleFiles.has(title));
 /** Title file requests left to answer with a failure, and its status. */

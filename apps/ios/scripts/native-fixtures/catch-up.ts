@@ -8,8 +8,8 @@
 // "TEST | HEVC + AAC" (1006) two. A window they hold, one that has started within those days,
 // answers a recording from that start (see `recordingPlaylist`), looping the fixture server's
 // ten-minute catch-up picture, whose counter shows the seconds since the start: the whole
-// window once it has ended, and while it is still on, an event playlist of what has aired so far,
-// which grows until it ends, as a programme started over. Its segments, `/hls/<id>/past/<n>.ts`,
+// window once it has ended, and while it is still on, what has aired so far, which grows until it
+// ends, as a programme started over. Its segments, `/hls/<id>/past/<n>.ts`,
 // are logged as "archive", apart from live ones. A channel without catch-up and a window outside
 // the days kept answer 404, a wrong login 401. scripts/fixture-server.ts's `/fail-live` fails a
 // channel's catch-up playlists as it does its live ones.
@@ -37,15 +37,20 @@ function panelOffset(time: number) {
   return Date.UTC(year, month - 1, day, hour, minute) - (time - (time % 60_000));
 }
 
-/** The moment "2026-10-13:14-00" on the panel's clock names, or null when it names none. */
+/**
+ * The moment "2026-10-13:14-00" on the panel's clock names, or null when it names none, as a time
+ * the clock skips when it goes forward. A time it shows twice, going back, is the first of them.
+ */
 function panelTime(text: string): number | null {
   const match = /^(\d{4})-(\d{2})-(\d{2}):(\d{2})-(\d{2})$/.exec(text);
   if (!match) return null;
   const [, year, month, day, hour, minute] = match.map(Number);
   const asUtc = Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1, hour ?? 0, minute ?? 0);
-  // The offset at the moment, which a first guess finds unless the clock changed between them.
-  const guess = asUtc - panelOffset(asUtc);
-  return asUtc - panelOffset(guess);
+  // The clock's offsets either side of the time, which differ only around a change.
+  const named = [-3, 3]
+    .map((hours) => asUtc - panelOffset(asUtc + hours * 60 * 60_000))
+    .filter((time) => time + panelOffset(time) === asUtc);
+  return named.length > 0 ? Math.min(...named) : null;
 }
 
 /**

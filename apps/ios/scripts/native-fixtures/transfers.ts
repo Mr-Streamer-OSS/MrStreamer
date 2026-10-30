@@ -47,10 +47,12 @@ export function titleTransfers(known: (title: string) => boolean) {
       }
       const etag = `"${hash}-${replaced.get(title) ?? 0}"`;
       const ifRange = request.headers["if-range"];
-      const range =
+      const asked =
         ifRange === undefined || ifRange === etag
           ? /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "")
           : null;
+      // A range that ends before it starts is no range, and the file comes whole.
+      const range = asked && (!asked[2] || Number(asked[2]) >= Number(asked[1])) ? asked : null;
       const start = range ? Number(range[1]) : 0;
       const end = range?.[2] ? Math.min(Number(range[2]), bytes.length - 1) : bytes.length - 1;
       if (start >= bytes.length) {

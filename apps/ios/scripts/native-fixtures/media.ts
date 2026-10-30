@@ -1,16 +1,26 @@
 // The media scripts/fixture-server.ts serves, and where each piece came from. Everything is made
 // here with ffmpeg from its own test sources (lavfi), or cut from the synthetic clips in
 // apps/desktop/test/fixtures, which apps/desktop/scripts writes; no provider or broadcast media.
-// Each piece is made once into `<out>/media/<name>-<hash of its command>`, so a changed command
-// makes it again instead of serving what an older one made.
+// Each piece is made once into `<out>/media/<name>-<hash>`, a hash of its command, its input files
+// and the ffmpeg making it, so a change to any of them makes it again instead of serving what was
+// made before. It is made in a directory of its own and moved there only once complete.
 //
 // The provenance the server declares (its control port's /provenance and provenance.json) names
 // the commit and whether the fixture sources differ from it, the ffmpeg that made the media, and
 // per piece its command, its inputs (a lavfi graph, or a repository file and its SHA-256) and the
-// SHA-256 of every file served from it.
+// SHA-256 of every file served from it. Repository clips the server sends as they are, the TEST
+// titles' files, are declared too.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join, relative } from "node:path";
 
 /** A looped recording, cut into segments of the durations its playlist gives. */
@@ -87,14 +97,6 @@ export function mediaMaker(root: string, out: string) {
     output: string,
     local: (dir: string) => readonly string[] = () => [],
   ) {
-    const options = ["-v", "error", "-y", ...args];
-    const dir = join(out, "media", `${name}-${sha256(options.join("\0")).slice(0, 12)}`);
-    const path = join(dir, output);
-    const command = [...options, ...local(dir), path];
-    if (!existsSync(path)) {
-      mkdirSync(dir, { recursive: true });
-      execFileSync("ffmpeg", command);
-    }
     const inputs = args.flatMap((arg, index): Artifact["inputs"] =>
       args[index - 1] !== "-i"
         ? []
@@ -102,6 +104,18 @@ export function mediaMaker(root: string, out: string) {
           ? [{ lavfi: arg }]
           : [{ file: relative(root, arg), sha256: sha256(readFileSync(arg)) }],
     );
+    const options = ["-v", "error", "-y", ...args];
+    const key = sha256(JSON.stringify([ffmpeg, options, inputs])).slice(0, 12);
+    const dir = join(out, "media", `${name}-${key}`);
+    if (!existsSync(dir)) {
+      const making = `${dir}.making`;
+      rmSync(making, { recursive: true, force: true });
+      mkdirSync(making, { recursive: true });
+      execFileSync("ffmpeg", [...options, ...local(making), join(making, output)]);
+      renameSync(making, dir);
+    }
+    const path = join(dir, output);
+    const command = [...options, ...local(dir), path];
     const named = command.map((arg) => (arg.startsWith(root) ? relative(root, arg) : arg));
     add({ name, command: ["ffmpeg", ...named], inputs, files: filesOf(dir) });
     return { dir, output: path };
@@ -122,6 +136,17 @@ export function mediaMaker(root: string, out: string) {
     },
     /** The file ffmpeg makes from `args`, named `file` in a directory of `name`'s, made once. */
     file: (name: string, args: readonly string[], file: string) => made(name, args, file).output,
+    /** Records `file`, a repository clip served as it is, as `name`. */
+    served(name: string, file: string) {
+      const bytes = readFileSync(file);
+      const hash = sha256(bytes);
+      add({
+        name,
+        command: "served as it is",
+        inputs: [{ file: relative(root, file), sha256: hash }],
+        files: [{ file: relative(root, file), bytes: bytes.length, sha256: hash }],
+      });
+    },
     /** Records the files in `dir`, written by `writer` rather than ffmpeg. */
     record(name: string, dir: string, writer: string) {
       add({ name, command: writer, inputs: [], files: filesOf(dir) });
@@ -206,9 +231,11 @@ export function livePlaylist(
 }
 
 /**
- * A recording of `media`'s loop from `start`, epoch ms, for `seconds`: every segment, when it
- * `ended` before now, or, while it is still going, those it has had time for, as an event playlist
- * that grows until it ends. Its segments are on the clock from `start` (#EXT-X-PROGRAM-DATE-TIME).
+ * A recording of `media`'s loop from `start`, epoch ms, for `seconds`, as an event playlist: every
+ * segment, ending the playlist, when it `ended` before now, or, while it is still going, those it
+ * has had time for, growing until it ends. A player that started it while it was going reads the
+ * same playlist type throughout, as HLS requires. Its segments are on the clock from `start`
+ * (#EXT-X-PROGRAM-DATE-TIME).
  */
 export function recordingPlaylist(
   media: Media,
@@ -227,7 +254,7 @@ export function recordingPlaylist(
   return [
     "#EXTM3U",
     "#EXT-X-VERSION:3",
-    `#EXT-X-PLAYLIST-TYPE:${ended ? "VOD" : "EVENT"}`,
+    "#EXT-X-PLAYLIST-TYPE:EVENT",
     ...(last >= 0
       ? loopSegments(media, 0, last, uri, start)
       : ["#EXT-X-TARGETDURATION:2", "#EXT-X-MEDIA-SEQUENCE:0"]),
