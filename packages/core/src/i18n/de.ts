@@ -1371,4 +1371,12 @@ export const de: Translation = {
   "Start recording": "Aufnahme starten",
   "The recording couldn't be deleted: {detail}":
     "Die Aufnahme konnte nicht gelöscht werden: {detail}",
+  "A recording uses this subscription's connection. Stop it in Recordings to watch.":
+    "Eine Aufnahme nutzt die Verbindung dieses Abos. Beende sie unter Aufnahmen, um zu schauen.",
+  "Stop recording {title}": "Aufnahme von {title} beenden",
+  "The provider refused the stream. Another device may be using your connection.":
+    "Der Anbieter hat den Stream abgelehnt. Vielleicht nutzt ein anderes Gerät deine Verbindung.",
+  "The channel has no stream right now.": "Der Sender hat gerade keinen Stream.",
+  "This channel's stream can't be recorded.":
+    "Der Stream dieses Senders kann nicht aufgenommen werden.",
 };

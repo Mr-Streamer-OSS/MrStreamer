@@ -6,7 +6,8 @@
 import { Popover } from "@base-ui/react/popover";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import type { AppError } from "@mrstreamer/contracts/errors";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { RECORDING_MAX_MS, type RecordingConnections } from "@mrstreamer/contracts/recordings";
@@ -62,9 +63,15 @@ export function RecordButton({
   const recording = useRecordingOf(channel);
   const [open, setOpen] = useState(false);
   const popup = useRef<HTMLDivElement>(null);
+  // Started from the popover: the keys go to Recording, which takes Record's place.
+  const started = useRef(false);
+  const recordingButton = useCallback((button: HTMLButtonElement | null) => {
+    if (button && started.current) button.focus();
+    started.current = false;
+  }, []);
   if (recording) {
     return (
-      <Button variant="secondary" onClick={() => openView("recordings")}>
+      <Button ref={recordingButton} variant="secondary" onClick={() => openView("recordings")}>
         {dot}
         {t("Recording")}
       </Button>
@@ -105,7 +112,14 @@ export function RecordButton({
               "flex w-[22.25rem] max-w-[calc(100vw-2rem)] flex-col transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
             )}
           >
-            <RecordPanel channel={channel} programme={programme} onDone={() => setOpen(false)} />
+            <RecordPanel
+              channel={channel}
+              programme={programme}
+              onDone={(recorded) => {
+                started.current = recorded;
+                setOpen(false);
+              }}
+            />
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
@@ -121,7 +135,8 @@ function RecordPanel({
 }: {
   channel: LiveChannel;
   programme: Programme | null;
-  onDone: () => void;
+  /** Closes it, `recorded` once a recording started. */
+  onDone: (recorded: boolean) => void;
 }) {
   const now = useNow();
   const [choice, setChoice] = useState<StopChoice>(
@@ -136,15 +151,16 @@ function RecordPanel({
     queryFn: () => call("recordings.connections", { subscriptionId: channel.subscriptionId }),
   });
   const start = useMutation({
-    mutationFn: (stopPlaying: boolean) => {
+    mutationFn: async (stopPlaying: boolean) => {
       // Times are taken as it starts: the popover may have stood open a while.
-      const at = Date.now();
-      const stop = stopOf(choice, programme, at) ?? at + HOUR_MS;
+      const stop = stopOf(choice, programme, Date.now());
+      if (stop === null) return null;
       if (stopPlaying) player.stop();
       return call("recordings.start", { channel: ownedId(channel), stop, stopPlaying });
     },
     onSuccess: (answer) => {
-      if (answer.kind === "started") return onDone();
+      if (answer === null) return;
+      if (answer.kind === "started") return onDone(true);
       setBusy(answer.connections);
       void connections.refetch();
     },
@@ -233,19 +249,20 @@ function RecordPanel({
         )}
         {start.isError && (
           <p role="alert" className="text-destructive">
-            {describeError(appError(start.error))}
+            {startFailure(appError(start.error))}
           </p>
         )}
       </div>
       <div className="flex justify-end gap-2 pl-2">
-        <Button variant="ghost" size="sm" onClick={onDone}>
+        <Button variant="ghost" size="sm" onClick={() => onDone(false)}>
           {t("Cancel")}
         </Button>
         <Button
           variant="primary"
           size="sm"
           className="gap-1.5"
-          disabled={start.isPending}
+          // A programme that ended while it stood open takes "When it ends" with it.
+          disabled={start.isPending || !offered.includes(choice)}
           onClick={() => start.mutate(onlyWatch)}
         >
           {dot}
@@ -254,4 +271,24 @@ function RecordPanel({
       </div>
     </>
   );
+}
+
+/** Why recording didn't start, in words for a channel rather than playback's for a title. */
+function startFailure(error: AppError): string {
+  if (error.kind !== "stream") return describeError(error);
+  const { failure } = error;
+  switch (failure.kind) {
+    case "refused":
+      return t("The provider refused the stream. Another device may be using your connection.");
+    case "unavailable":
+      return t("The channel has no stream right now.");
+    case "provider-error":
+      return t("The provider answered with an error (HTTP {status}).", {
+        status: String(failure.status),
+      });
+    case "network":
+      return t("The connection to the provider failed.");
+    case "unsupported":
+      return t("This channel's stream can't be recorded.");
+  }
 }

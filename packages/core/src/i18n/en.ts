@@ -1334,4 +1334,11 @@ export const en = {
   "Stop playing and record": "Stop playing and record",
   "Start recording": "Start recording",
   "The recording couldn't be deleted: {detail}": "The recording couldn't be deleted: {detail}",
+  "A recording uses this subscription's connection. Stop it in Recordings to watch.":
+    "A recording uses this subscription's connection. Stop it in Recordings to watch.",
+  "Stop recording {title}": "Stop recording {title}",
+  "The provider refused the stream. Another device may be using your connection.":
+    "The provider refused the stream. Another device may be using your connection.",
+  "The channel has no stream right now.": "The channel has no stream right now.",
+  "This channel's stream can't be recorded.": "This channel's stream can't be recorded.",
 } as const satisfies Readonly<Record<string, string | Plural>>;

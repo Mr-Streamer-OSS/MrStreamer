@@ -22,6 +22,7 @@ import { OnDemand } from "./ondemand.ts";
 import { Output } from "./output.ts";
 import { Playback } from "./playback.ts";
 import { Settings } from "./preferences.ts";
+import { Recordings } from "./recordings.ts";
 import { Reminders } from "./reminders.ts";
 import { Subscriptions, type Source } from "./subscription.ts";
 
@@ -87,6 +88,7 @@ function make() {
     const output = yield* Output;
     const guide = yield* Guide;
     const viewing = yield* ViewingRecord;
+    const recordings = yield* Recordings;
     const downloads = yield* Downloads;
     const reminders = yield* Reminders;
     const scope = yield* Effect.scope;
@@ -185,8 +187,10 @@ function make() {
           if (!subscription) return;
           yield* output.subscriptionGone(subscriptionId);
           yield* playback.closeOf(subscriptionId);
-          // Its unfinished downloads end with it, their requests over before its login goes.
+          // Its unfinished downloads and its recordings end with it, their requests over before
+          // its login goes.
           yield* downloads.subscriptionGone(subscriptionId);
+          yield* recordings.subscriptionGone(subscriptionId);
           const forgetSettings = yield* settings.prepareForget(subscription);
           // Erased as it goes, and not before: while the removal waits its turn the subscription
           // is saved still, and what is starred or saved for it then has to go with the rest.
@@ -204,8 +208,9 @@ function make() {
           });
           // An open asked for as it went has had its turn by now, and found it saved still.
           yield* playback.closeOf(subscriptionId);
-          // As has a download queued as it went.
+          // As has a download queued, or a recording started, as it went.
           yield* downloads.subscriptionGone(subscriptionId);
+          yield* recordings.subscriptionGone(subscriptionId);
         }),
 
       refreshDue: Effect.flatMap(subscriptions.sources, (sources) =>

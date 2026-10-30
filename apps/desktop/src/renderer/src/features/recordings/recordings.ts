@@ -1,5 +1,5 @@
 // Recordings as the window reads them. The main process keeps each one's record and file and says
-// when any changes (`recordings.changed`), a few times a second while one records, so the list is
+// when any changes (`recordings.changed`), about once a second while one records, so the list is
 // read once and then follows those events. An ended recording plays like a downloaded copy.
 import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { Recording } from "@mrstreamer/contracts/recordings";

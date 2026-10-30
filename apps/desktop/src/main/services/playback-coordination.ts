@@ -6,7 +6,8 @@
 // file close, and nothing takes it back: a play that would need it fails instead, and downloads
 // of its subscription wait. It is admitted only while fewer than the account's limit are held
 // here, counting what plays, a download's lease and other recordings, so no owner is stopped for
-// it and the provider never sees more connections than it allows.
+// it and the app never opens more connections than the account allows. Other devices on the same
+// account aren't seen.
 import type { ConnectionUse } from "@mrstreamer/contracts/recordings";
 import { t } from "@mrstreamer/core/i18n";
 import * as Context from "effect/Context";
@@ -186,9 +187,14 @@ const superseded = () =>
     error: { kind: "unexpected", detail: t("Something else played in the meantime.") },
   });
 
-/** As the provider refuses a play that finds every connection in use: no retry helps. */
+/** Made when refused, so the advice uses the interface language of that moment. */
 const recorded = () =>
-  new Failed({ error: { kind: "stream", failure: { kind: "refused", status: 0 } } });
+  new Failed({
+    error: {
+      kind: "unexpected",
+      detail: t("A recording uses this subscription's connection. Stop it in Recordings to watch."),
+    },
+  });
 
 const stillLent = () =>
   new Failed({

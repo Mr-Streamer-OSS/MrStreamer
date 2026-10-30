@@ -1359,4 +1359,11 @@ export const nl: Translation = {
   "Stop playing and record": "Stop afspelen en neem op",
   "Start recording": "Opname starten",
   "The recording couldn't be deleted: {detail}": "De opname kon niet worden verwijderd: {detail}",
+  "A recording uses this subscription's connection. Stop it in Recordings to watch.":
+    "Een opname gebruikt de verbinding van dit abonnement. Stop hem bij Opnames om te kijken.",
+  "Stop recording {title}": "Opname van {title} stoppen",
+  "The provider refused the stream. Another device may be using your connection.":
+    "De aanbieder weigerde de stream. Misschien gebruikt een ander apparaat je verbinding.",
+  "The channel has no stream right now.": "Het kanaal heeft nu geen stream.",
+  "This channel's stream can't be recorded.": "De stream van dit kanaal kan niet worden opgenomen.",
 };

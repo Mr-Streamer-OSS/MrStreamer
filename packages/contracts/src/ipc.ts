@@ -990,7 +990,7 @@ export interface IpcEvents {
   "ondemand.detailsChanged": OwnedId & { readonly kind: TitleKind };
   /** The queue or the copies changed, or a transfer moved on: at most a few times a second. */
   "downloads.changed": DownloadList;
-  /** A recording started, grew, ended or was removed: at most a few times a second. */
+  /** A recording started, grew, ended or was removed: about once a second while one records. */
   "recordings.changed": readonly Recording[];
   /** Favourites, watched channels, progress or marks changed, up to `sequence`. */
   "viewing.changed": { readonly sequence: number };

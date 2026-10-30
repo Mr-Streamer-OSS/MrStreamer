@@ -76,6 +76,11 @@ export class Recordings extends Context.Service<
     stop(id: string): Effect.Effect<void, Failed>;
     /** Deletes an ended recording and its file, closing what plays it first. */
     remove(id: string): Effect.Effect<void, Failed>;
+    /**
+     * A subscription is going: its recordings stop as the viewer stops one, their requests over
+     * before this answers. What they captured stays.
+     */
+    subscriptionGone(subscriptionId: string): Effect.Effect<void>;
     /** An ended recording's file for playback to open; null when no recording has that id. */
     copy(id: string): Effect.Effect<LocalCopy | null, Failed>;
     /** The list after each change, and as recordings grow, about once a second. */
@@ -111,6 +116,8 @@ function make(deps: RecordingsDeps) {
     const read = yield* Effect.promise(() => readRecordings(path));
     const records = new Map<string, StoredRecording>();
     const active = new Map<string, Active>();
+    /** Captures still starting, which the app's close stops too. */
+    const starting = new Set<AbortController>();
     const fileOf = (record: StoredRecording) => join(root, record.id, record.file);
 
     const unreadable = () =>
@@ -263,7 +270,8 @@ function make(deps: RecordingsDeps) {
           status: { kind: "recording" },
         };
         const controller = new AbortController();
-        const starting = mkdir(join(root, id), { recursive: true }).then(() =>
+        starting.add(controller);
+        const opening = mkdir(join(root, id), { recursive: true }).then(() =>
           startCapture(
             streams.map(({ url, format, headers }) => ({ url, format, headers: headers ?? {} })),
             fileOf(record),
@@ -276,9 +284,9 @@ function make(deps: RecordingsDeps) {
             },
           ),
         );
-        starting.catch(() => {});
+        opening.catch(() => {});
         const capture = yield* Effect.tryPromise({
-          try: () => starting,
+          try: () => opening,
           catch: (cause) =>
             cause instanceof CaptureFailure
               ? new Failed({ error: { kind: "stream", failure: cause.failure } })
@@ -294,8 +302,9 @@ function make(deps: RecordingsDeps) {
           // Also when the app closes meanwhile: whatever started ends before its folder goes.
           Effect.onError(() =>
             Effect.promise(async () => {
+              starting.delete(controller);
               controller.abort();
-              await starting.then(
+              await opening.then(
                 (started) => started.ended,
                 () => {},
               );
@@ -304,14 +313,17 @@ function make(deps: RecordingsDeps) {
             }),
           ),
         );
+        starting.delete(controller);
         const { promise: settled, resolve } = Promise.withResolvers<Failed | null>();
         const live: Active = { controller, bytes: capture.bytes, asked: null, settled };
         records.set(id, record);
         active.set(id, live);
-        void capture.ended.then(async (end) => {
-          held.release();
-          resolve(await Effect.runPromise(ended(id, end, live)));
-        });
+        void capture.ended
+          .then((end) => {
+            held.release();
+            return Effect.runPromise(ended(id, end, live));
+          })
+          .then(resolve, () => resolve(null));
         const written = yield* Effect.result(save);
         if (written._tag === "Failure") {
           // Without its record nothing would say it exists: it stops, and its file goes.
@@ -355,7 +367,12 @@ function make(deps: RecordingsDeps) {
           return failure ? Effect.fail(failure) : Effect.void;
         },
       );
-    yield* Effect.addFinalizer(() => Effect.ignore(end([...active.keys()], "quit")));
+    yield* Effect.addFinalizer(() =>
+      Effect.andThen(
+        Effect.sync(() => starting.forEach((controller) => controller.abort())),
+        Effect.ignore(end([...active.keys()], "quit")),
+      ),
+    );
 
     return {
       list: usable.pipe(Effect.andThen(look), Effect.andThen(shown)),
@@ -366,6 +383,15 @@ function make(deps: RecordingsDeps) {
         }),
       start,
       stop: (id: string) => end([id], "stopped"),
+      subscriptionGone: (subscriptionId: string) =>
+        Effect.ignore(
+          end(
+            [...active.keys()].filter(
+              (id) => records.get(id)?.channel.subscriptionId === subscriptionId,
+            ),
+            "stopped",
+          ),
+        ),
       remove: (id: string) =>
         Effect.gen(function* () {
           yield* usable;

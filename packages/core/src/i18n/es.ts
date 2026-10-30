@@ -1434,4 +1434,11 @@ export const es: Translation = {
   "Stop playing and record": "Detener la reproducción y grabar",
   "Start recording": "Empezar a grabar",
   "The recording couldn't be deleted: {detail}": "No se pudo eliminar la grabación: {detail}",
+  "A recording uses this subscription's connection. Stop it in Recordings to watch.":
+    "Una grabación usa la conexión de esta suscripción. Detenla en Grabaciones para ver.",
+  "Stop recording {title}": "Detener la grabación de {title}",
+  "The provider refused the stream. Another device may be using your connection.":
+    "El proveedor rechazó la emisión. Puede que otro dispositivo esté usando tu conexión.",
+  "The channel has no stream right now.": "El canal no tiene emisión ahora mismo.",
+  "This channel's stream can't be recorded.": "No se puede grabar la emisión de este canal.",
 };

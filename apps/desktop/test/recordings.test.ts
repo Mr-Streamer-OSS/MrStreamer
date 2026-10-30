@@ -11,6 +11,7 @@ import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Recordings } from "../src/main/services/recordings.ts";
+import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { startFakeHls } from "./fake-hls.ts";
 import { fixture, liveStreams, type FakeProviderOptions } from "./fake-provider.ts";
@@ -30,6 +31,7 @@ async function app(dataDir: string) {
     playback: await promised(runtime, Playback),
     subscriptions: await promised(runtime, Subscriptions),
     library: await promised(runtime, Library),
+    roster: await promised(runtime, Roster),
     quit: () => runtime.dispose(),
   };
 }
@@ -153,7 +155,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(started.kind).toBe("started");
     expect(await playback.playing(watching.sessionId)).toBeNull();
     await expect(playback.open(channel(TRACKS), ["h264", "aac"])).rejects.toMatchObject({
-      error: { kind: "stream", failure: { kind: "refused" } },
+      error: { kind: "unexpected", detail: expect.stringMatching(/^A recording uses/) },
     });
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: ["recording"] });
     expect((await recordings.list())[0]?.status).toEqual({ kind: "recording" });
@@ -182,13 +184,25 @@ describe.skipIf(!hasTools)("recordings", () => {
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 100_000);
 
     await recordings.stop(answer.recording.id);
+    // Answered once the provider's request ended: its slot is free as it hears that.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(provider.activeStreams()).toBe(0);
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: [] });
     const [stopped] = await recordings.list();
     expect(stopped?.status).toEqual({ kind: "stopped" });
     const file = await fileOf(dataDir, stopped!);
     expect(stopped?.bytes).toBe(file.size);
     expect(decodes(file.path)).toBe(true);
-    expect(await allClosed(provider)).toBe(true);
+  });
+
+  it("stops with its subscription, before its login goes", async () => {
+    const { provider, channel, subscriptionId, recordings, roster } = await connected();
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
+    await roster.remove(subscriptionId, false);
+    expect(provider.activeStreams()).toBe(0);
+    expect((await recordings.list())[0]?.status).toEqual({ kind: "stopped" });
   });
 
   it("keeps an honest partial recording when the provider's stream breaks off", async () => {

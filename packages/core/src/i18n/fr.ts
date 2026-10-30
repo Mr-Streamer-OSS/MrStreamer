@@ -1427,4 +1427,12 @@ export const fr: Translation = {
   "Start recording": "Démarrer l'enregistrement",
   "The recording couldn't be deleted: {detail}":
     "Impossible de supprimer l’enregistrement : {detail}",
+  "A recording uses this subscription's connection. Stop it in Recordings to watch.":
+    "Un enregistrement utilise la connexion de cet abonnement. Arrêtez-le dans Enregistrements pour regarder.",
+  "Stop recording {title}": "Arrêter l’enregistrement de {title}",
+  "The provider refused the stream. Another device may be using your connection.":
+    "Le fournisseur a refusé le flux. Un autre appareil utilise peut-être votre connexion.",
+  "The channel has no stream right now.": "La chaîne n’a pas de flux pour le moment.",
+  "This channel's stream can't be recorded.":
+    "Le flux de cette chaîne ne peut pas être enregistré.",
 };

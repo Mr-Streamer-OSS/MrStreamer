@@ -106,6 +106,8 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
 
   await d.click("Stop the recording", named("li button", "Stop"));
   await d.wait(async () => (await listed(d))[0]?.status.kind === "stopped");
+  // Its request ended: the provider frees the slot once it hears so.
+  await d.wait(async () => fixture.streams().active === 0);
   d.observed["stopped"] = { list: await listed(d), streams: fixture.streams() };
 
   // A second recording takes Now while the first waits under Recorded.
@@ -160,6 +162,7 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
   await d.wait(async () => !(await listed(d)).some((each) => each.id === stoppedId));
   await d.click("Stop the second recording", named("li button", "Stop"));
   await d.wait(async () => (await listed(d)).every((each) => each.status.kind !== "recording"));
+  await d.wait(async () => fixture.streams().active === 0);
   d.observed["end"] = { list: await listed(d), streams: fixture.streams() };
   await d.capture("recordings-end");
 }

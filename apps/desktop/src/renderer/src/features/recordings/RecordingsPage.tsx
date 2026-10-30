@@ -164,7 +164,12 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
       </span>
       <div className="flex w-[4.5rem] flex-none justify-end gap-1.5 lg:w-[9.15rem]">
         {active ? (
-          <Button size="sm" disabled={action.isPending} onClick={() => action.mutate("stop")}>
+          <Button
+            size="sm"
+            aria-label={t("Stop recording {title}", { title: recording.title })}
+            disabled={action.isPending}
+            onClick={() => action.mutate("stop")}
+          >
             {t("Stop")}
           </Button>
         ) : (
@@ -225,6 +230,7 @@ function Coverage({
   return (
     <span
       role="meter"
+      aria-label={t("{captured} of {planned} min", { captured, planned })}
       aria-valuemin={0}
       aria-valuemax={planned}
       aria-valuenow={captured}
