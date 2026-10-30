@@ -148,6 +148,7 @@ vi.mock("../src/header.tsx", () => ({
   tabStack: () => undefined,
 }));
 vi.mock("../src/account.ts", () => ({
+  onCatalogue: () => () => {},
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
   onRoster: (listener: () => void) => {
     scenario.rosterChanged = listener;

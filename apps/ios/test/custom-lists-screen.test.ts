@@ -131,6 +131,7 @@ vi.mock("../src/header.tsx", () => ({
   tabHref: (_tab: string, screen: string) => `/live/${screen}`,
 }));
 vi.mock("../src/account.ts", () => ({
+  onCatalogue: () => () => {},
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
   onRoster: () => () => {},
   useRoster: () => ({ kind: "ready", members: scenario.members }),

@@ -18,11 +18,16 @@ const scenario = vi.hoisted(() => ({
   catalogue: { kind: "loading" } as Catalogue,
   /** Subscriptions removed with their history kept; null while the registry doesn't read. */
   retired: [] as string[] | null,
+  /** What account.ts tells as its roster or channels change. */
+  changed: new Set<() => void>(),
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
 vi.mock("../src/account.ts", () => ({
+  currentRoster: () => ({ kind: "ready", members: scenario.members }),
+  onRoster: (listener: () => void) => void scenario.changed.add(listener),
+  onCatalogue: (listener: () => void) => void scenario.changed.add(listener),
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   members: () => scenario.members,
   useCatalogue: () => scenario.catalogue,
@@ -70,7 +75,7 @@ function shows(home: ProviderChannel[], cabin: ProviderChannel[] = [RTL]) {
     ]),
     failing: [],
   };
-  if (root) React.act(() => root!.render(React.createElement(Probe)));
+  for (const listener of scenario.changed) listener();
 }
 const live = (key: string): Channel => {
   const found = scenario.catalogue.kind === "ready" && scenario.catalogue.library.byKey.get(key);
@@ -83,6 +88,7 @@ let lists: Lists;
 /** The app as a launch starts it: the module read afresh over the same files. */
 async function launch() {
   vi.resetModules();
+  scenario.changed.clear();
   lists = await import("../src/custom-lists.ts");
   open();
 }
@@ -165,6 +171,20 @@ describe("lists", () => {
     native.sync = null;
     await launch();
     expect(shown()).toEqual(["News: a:10"]);
+  });
+
+  it("don't come back at a relaunch from a first write cut short", async () => {
+    let refused = false;
+    native.sync = (operation) => {
+      if (operation === "move" && !refused) {
+        refused = true;
+        throw new Error("The disk went away.");
+      }
+    };
+    expect(() => lists.createList("News", live("a:10"))).toThrow("The disk went away.");
+    native.sync = null;
+    await launch();
+    expect(shown()).toEqual([]);
   });
 
   it("show none of a file a later version wrote, and write nothing over it", async () => {
@@ -254,6 +274,15 @@ describe("a list's channels", () => {
     scenario.members = [member("a", "Home"), member("b", "Cabin")];
     await launch();
     expect(shown()).toEqual(["News: b:10"]);
+  });
+
+  it("of a provider removed with its history go while no screen shows the lists", () => {
+    lists.createList("News", live("a:10"));
+    React.act(() => root!.unmount());
+    root = null;
+    scenario.members = [member("b", "Cabin")];
+    shows([NOS]);
+    expect(readFileSync(file(), "utf8")).not.toContain("NOS");
   });
 
   it("of a provider removed while the registry doesn't read stay", () => {

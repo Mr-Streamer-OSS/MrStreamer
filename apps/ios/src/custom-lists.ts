@@ -4,10 +4,13 @@ import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { normalize } from "@mrstreamer/core/text";
 import { type } from "arktype";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import {
   currentCatalogue,
+  currentRoster,
   members,
+  onCatalogue,
+  onRoster,
   useCatalogue,
   useRoster,
   type Catalogue,
@@ -22,7 +25,8 @@ import { readRegistry } from "./subscriptions.ts";
 // The viewer's channel lists, apart from Favourites: named, in an order of the viewer's, each
 // holding exact channels of any saved subscription in an order of its own, as the desktop keeps
 // them (apps/desktop/src/main/services/custom-lists.ts). One JSON file in Documents, written whole
-// before any screen shows a change: a write the folder refuses throws and changes nothing.
+// before any screen shows a change: a write the folder refuses throws and changes nothing, the
+// lists the screens show written back so a write cut short isn't read at the next launch.
 //
 // A channel of a list is kept under its subscription by every stream id it was seen with, and is
 // whichever channel Live lists now under the first of them its subscription still lists, so it is
@@ -32,8 +36,8 @@ import { readRegistry } from "./subscriptions.ts";
 // whose subscription is saved but doesn't list it now, still loads, or needs its password is named
 // as it was last listed, plays nothing and can be taken out. One of a subscription removed with its
 // history kept is counted and back once it is added again; one removed with its history erased is
-// deleted from every list. Both happen while a screen shows the lists (`useChannelLists`), as Live's
-// own rows always do.
+// deleted from every list, at the next change of the providers or their channels, or the next
+// launch when that write is refused.
 //
 // Lists keep the order they were made in. An edit of a list's channels is made from the list as it
 // showed: it lands only while the list's revision and the channels it opened still hold, so nothing
@@ -187,7 +191,6 @@ export function useChannelLists(): readonly ChannelList[] {
   const from = useSyncExternalStore(subscribe, keptNow);
   const catalogue = useCatalogue();
   const roster = useRoster();
-  useEffect(() => align(catalogue, roster), [from, catalogue, roster]);
   return useMemo(
     () => listsOf(from, catalogue, roster.kind === "ready" ? roster.members : []),
     [from, catalogue, roster],
@@ -212,7 +215,19 @@ function stored(): readonly StoredList[] {
 
 /** Writes `lists` whole; only once the file took them do the screens show them. */
 function save(lists: readonly StoredList[]) {
-  writeJson(FILE, { version: 1, lists });
+  try {
+    writeJson(FILE, { version: 1, lists });
+  } catch (cause) {
+    // A write cut short can leave the new lists under the temporary name, which a launch reads
+    // when the file itself is gone.
+    const shown = keptNow();
+    try {
+      if (shown.kind === "read") writeJson(FILE, { version: 1, lists: shown.lists });
+    } catch {
+      // As the disk left it.
+    }
+    throw cause;
+  }
   keep({ kind: "read", lists });
 }
 
@@ -430,3 +445,9 @@ function align(catalogue: Catalogue, roster: Roster) {
     // Kept as they were until the next change of the channels or the providers.
   }
 }
+
+// Loaded with Live, which the tabs load at launch, so a removed subscription's channels go
+// whether or not Live shows.
+const aligned = () => align(currentCatalogue(), currentRoster());
+onRoster(aligned);
+onCatalogue(aligned);
