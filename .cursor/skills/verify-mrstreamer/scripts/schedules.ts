@@ -261,12 +261,15 @@ export async function schedulesScenario(d: Driver) {
   await d.key("Escape", 27);
   await d.click("Live TV, larger", named("header button", "Live TV"));
   await d.wait(() => d.exists(GRID));
+  // Home takes the cursor, and the grid with it, back to the first channel: the 960 step left
+  // the grid scrolled, which larger text can leave above the cursor's row.
+  await d.key("Home", 36);
   await d.key("ArrowRight", 39);
   await d.wait(() => d.exists(DETAILS));
-  const recordLarger = `[...document.querySelectorAll('[role=grid] [role=region] button')].find(e => /^(Record|Scheduled)$/.test(e.textContent.trim()))`;
-  // Larger text can leave the cursor's row above where the grid is scrolled to.
-  await d.evaluate(`${recordLarger}?.scrollIntoView({ block: "center" })`);
-  await d.click("Record, larger", recordLarger);
+  await d.click(
+    "Record, larger",
+    `[...document.querySelectorAll('[role=grid] [role=region] button')].find(e => /^(Record|Scheduled)$/.test(e.textContent.trim()))`,
+  );
   await d.wait(() => d.exists(PANEL));
   await d.wait(async () => (await text(d, PANEL)).includes(" on "));
   await d.capture("10-guide-960-larger");
