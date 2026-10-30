@@ -2,6 +2,7 @@
 // lists use it to keep artwork addresses that may carry the login out of their files, and to leave
 // out what holds the password anywhere else. Pure: nothing here reads or writes a file.
 
+import { whole } from "@mrstreamer/core/provider";
 import type { Source } from "./sources.ts";
 
 /** The longest artwork address kept. */
@@ -13,7 +14,8 @@ const LAYERS = 4;
 /**
  * A subscription's login as the checks here look for it: an Xtream account's username and
  * password, or the user and secrets a playlist link names, and the link's `uncertain` values,
- * each found only as a whole text or a whole part of an address, however short.
+ * each found however short where no name's character runs on from it (core's `whole`), as in a
+ * path segment, a query value, `guest|k9x` or a text of its own.
  */
 export type Login = {
   readonly username: string;
@@ -54,11 +56,12 @@ export function safeUrl(url: string | null, login: Login): string | null {
 }
 
 /**
- * Whether `text`, an address or a part of one, gives the login away: it is the username or an
- * uncertain value, or holds a password, as written or decoded as percent or form encoding ("+" a
- * space) spells it, and so on for `layers` more decodings; an address within it, such as an image proxy's, counts
- * with its own login, path parts, fragment, and query names and values. Text that won't decode,
- * or still decodes or holds an address after the last layer, counts as giving it away.
+ * Whether `text`, an address or a part of one, gives the login away: it is the username, holds
+ * an uncertain value whole, or holds a password, as written or decoded as percent or form
+ * encoding ("+" a space) spells it, and so on for `layers` more decodings; an address within it,
+ * such as an image proxy's, counts with its own login, path parts, fragment, and query names and
+ * values. Text that won't decode, or still decodes or holds an address after the last layer,
+ * counts as giving it away.
  */
 export function exposes(
   text: string,
@@ -69,7 +72,7 @@ export function exposes(
   const { username, passwords, uncertain } = login;
   if (
     (username !== "" && text === username) ||
-    uncertain.includes(text) ||
+    uncertain.some((each) => whole(text, each)) ||
     passwords.some((each) => text.includes(each))
   ) {
     return true;
@@ -86,10 +89,10 @@ export function exposes(
 }
 
 /**
- * Whether a text within `value`, a copied row, holds any of the login's passwords or is one of its
- * uncertain values, as written or decoded as percent or form encoding ("+" a space) spells it, and
- * so on for `LAYERS` more decodings. Text that still decodes after the last counts as holding one.
- * Artwork kept has none.
+ * Whether a text within `value`, a copied row, holds any of the login's passwords, or one of its
+ * uncertain values whole, as written or decoded as percent or form encoding ("+" a space) spells
+ * it, and so on for `LAYERS` more decodings. Text that still decodes after the last counts as
+ * holding one. Artwork kept has none.
  */
 export function holds(value: unknown, login: Login): boolean {
   if (typeof value === "string")
@@ -105,7 +108,7 @@ function textHolds(text: string, { passwords, uncertain }: Login): boolean {
   const forms = new Set([text]);
   for (let layer = [text], times = 0; ; times++) {
     const found = (form: string) =>
-      uncertain.includes(form) || passwords.some((each) => form.includes(each));
+      uncertain.some((each) => whole(form, each)) || passwords.some((each) => form.includes(each));
     if (layer.some(found)) return true;
     const next = new Set<string>();
     // Only text with an escape or a "+" reads otherwise decoded.

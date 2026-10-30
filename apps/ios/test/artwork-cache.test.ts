@@ -483,9 +483,10 @@ describe("pictures whose address carries a login", () => {
       at("/logo/signed.png", "?sig=k7"),
       at("/k7/logo.png"),
       at("/logo/encoded.png", "?s=%6B7"),
+      at("/logo/joined.png", "?s=guest%7Ck7"),
     ];
     app.logos([...carrying, at("/logo/public.png")]);
-    await settled(() => expect(app.shown().filter(isFile)).toHaveLength(4));
+    await settled(() => expect(app.shown().filter(isFile)).toHaveLength(5));
     await vi.advanceTimersByTimeAsync(5_500);
     const index = readFileSync(join(kept, "index.json"), "utf8");
     expect(index).toContain("/logo/public.png");

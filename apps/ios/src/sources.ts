@@ -15,7 +15,7 @@ export interface Source {
   readonly login: readonly string[];
   /**
    * A playlist link's query values that may be a token or a setting (`playlistUncertain`): saved
-   * copies hold none as a whole text or a whole part of an address.
+   * copies hold none whole (core's `whole`), as a text, address part or part of either.
    */
   readonly uncertain?: readonly string[];
 }

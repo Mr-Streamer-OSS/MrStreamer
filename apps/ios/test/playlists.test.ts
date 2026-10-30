@@ -347,6 +347,8 @@ describe("a playlist subscription", () => {
       `${host.origin}/live/three.ts`,
       `#EXTINF:-1 tvg-logo="${setting}" group-title="News",News Four`,
       `${host.origin}/live/four.ts`,
+      `#EXTINF:-1 tvg-logo="${host.origin}/logo.png?k=guest%7C${sig}" group-title="News",News Five`,
+      `${host.origin}/live/five.ts`,
       '#EXTINF:-1 group-title="Films",Harbour Lights',
       `${host.origin}/films/harbour.mp4`,
     ]);
@@ -360,11 +362,11 @@ describe("a playlist subscription", () => {
     expect(live).toContain(setting);
     expect(live).not.toContain("short");
 
-    // A channel whose id is the value leaves Live unsaved; a film's poster with it is saved as none.
+    // A channel whose id holds the value, joined to another as an address part, leaves Live unsaved.
     host.serve([
-      `#EXTINF:-1 tvg-id="${sig}" group-title="News",News One`,
+      `#EXTINF:-1 tvg-id="cdn%2F${sig}%2Fone" group-title="News",News One`,
       `${host.origin}/live/one.ts`,
-      `#EXTINF:-1 tvg-logo="${host.origin}/poster.jpg?sig=${sig}" group-title="Films",Harbour Lights`,
+      '#EXTINF:-1 group-title="Films",Harbour Lights',
       `${host.origin}/films/harbour.mp4`,
     ]);
     await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Films"), "movie");

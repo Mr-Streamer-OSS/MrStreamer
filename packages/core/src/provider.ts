@@ -433,7 +433,7 @@ const NAME = /[\p{L}\p{N}\-._~]/u;
  * segment, a query value or a part of one between separators, as in `auth=guest:k9x`, but not
  * the `ts` of `index.ts`.
  */
-function whole(text: string, value: string): boolean {
+export function whole(text: string, value: string): boolean {
   for (let at = text.indexOf(value); at !== -1; at = text.indexOf(value, at + 1)) {
     if (!NAME.test(text[at - 1] ?? "") && !NAME.test(text[at + value.length] ?? "")) return true;
   }

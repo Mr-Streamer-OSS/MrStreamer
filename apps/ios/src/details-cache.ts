@@ -514,8 +514,8 @@ export function writeSeason(
 
 /**
  * Whether a file's facts may be kept: within the bounds, of a time the clock can stand behind,
- * and with no text that gives `login` away (its username or an uncertain value, or anything
- * holding its password).
+ * and with no text that gives `login` away (its username, or anything holding its password or an
+ * uncertain value whole).
  */
 function keepable(file: SavedFile, now: number, login: SourceLogin): boolean {
   const known = loginFrom(login);

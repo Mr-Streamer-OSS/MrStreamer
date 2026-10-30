@@ -380,8 +380,7 @@ const SETTING_NAMES: ReadonlySet<string> = new Set(["type", "output"]);
 /**
  * The query values of `link` under names neither of its login (`LOGIN_NAMES`) nor of a setting
  * (`SETTING_NAMES`): each may be a token under a name of the publisher's own, as `sig`, as well
- * as a setting the app doesn't know. Saved copies hold none as a whole text or a whole part of an
- * address, however short (`Source.uncertain`).
+ * as a setting the app doesn't know. Saved copies hold none whole, however short (`Source.uncertain`).
  */
 export function playlistUncertain(link: string): readonly string[] {
   return [...new URL(link).searchParams].flatMap(([name, value]) => {
@@ -400,8 +399,8 @@ const USER_NAMES: ReadonlySet<string> = new Set(["username", "user", "login"]);
  * What of a playlist link no saved copy may hold, as a Source's `[username, ...passwords]`: the
  * user it names, found only as a whole text as an account's username is, and as passwords the
  * rest of its login (`playlistLogin`), that user too when it is long enough to be a token, and
- * each uncertain value (`playlistUncertain`) that long. Shorter ones, as `hd=1`, would be found in
- * ordinary names: they count only as a whole text or address part.
+ * each uncertain value (`playlistUncertain`) that long. Shorter ones, as `hd=1`, would be found
+ * within ordinary words: they count only whole.
  */
 export function playlistSecrets(link: string): readonly string[] {
   const url = new URL(link);
