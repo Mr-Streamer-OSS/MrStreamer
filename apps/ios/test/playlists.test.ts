@@ -191,7 +191,10 @@ describe("a playlist subscription", () => {
     const app = await launch();
     host.fail(403);
     await expect(app.add({ server: host.link(), ...PLAYLIST })).rejects.toMatchObject({
-      error: { kind: "incomplete-login", detail: expect.stringContaining("no longer works") },
+      error: {
+        kind: "incomplete-login",
+        detail: expect.stringContaining("refused this playlist link"),
+      },
     });
     expect(registry().playlists).toBeUndefined();
   });

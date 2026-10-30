@@ -80,7 +80,7 @@ export function playlistProvider(
         throw new AppFailure({
           kind: "incomplete-login",
           detail:
-            "This playlist link no longer works. Get a new one from your provider and enter it in Edit.",
+            "Your provider refused this playlist link. Check it, or get a new one from your provider.",
         });
       throw new AppFailure({ kind: "provider-error", status: response.status });
     }
@@ -131,7 +131,7 @@ export function playlistProvider(
         if (!reader.playlist) throw notAPlaylist(origin);
         const snapshot = account.mapping
           ? importPlaylist(entries, account.mapping)
-          : importPlaylist(entries.map(withoutAddresses));
+          : importPlaylist(entries.map(unmappedEntry));
         last = {
           snapshot,
           entries: account.mapping ? null : entries,
@@ -290,7 +290,7 @@ export function playlistProvider(
  * The desktop app keeps an unmapped playlist's names as they were for favourites saved before;
  * the phone has none.
  */
-const withoutAddresses = (entry: PlaylistEntry): PlaylistEntry => ({
+const unmappedEntry = (entry: PlaylistEntry): PlaylistEntry => ({
   ...entry,
   name: safeName(entry.name),
   group: entry.group === null ? null : safeName(entry.group),
@@ -299,7 +299,8 @@ const withoutAddresses = (entry: PlaylistEntry): PlaylistEntry => ({
     ...Object.fromEntries(
       (["tvg-id", "tvg-name", "group-title"] as const).flatMap((name) => {
         const value = entry.attributes[name];
-        return value === undefined ? [] : [[name, safeName(value)]];
+        // Each of several groups on its own, as a mapping's import reads them.
+        return value === undefined ? [] : [[name, value.split(";").map(safeName).join(";")]];
       }),
     ),
   },
