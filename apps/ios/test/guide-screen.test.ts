@@ -1313,6 +1313,17 @@ describe("Live's Guide grid", () => {
     expect(detail()?.textContent).toContain("Back to Schedule");
   });
 
+  it("keeps a window moved by Earlier or Later on its day past midnight", async () => {
+    await guide();
+    await click("Later");
+    await React.act(async () => {
+      vi.setSystemTime(new Date(2026, 9, 25, 0, 1).getTime());
+    });
+    await tick();
+    expect(container.textContent).not.toContain("Today");
+    expect(cell("a:1", next)).not.toBeNull();
+  });
+
   it("moves an hour's window by half an hour at large text", async () => {
     state.window = { width: 390, height: 844, fontScale: 1.786 };
     await guide();

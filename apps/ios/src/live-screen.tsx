@@ -806,7 +806,7 @@ function GuideGrid({
             <TextButton
               label="Earlier"
               disabled={offset <= 0}
-              onPress={() => moveGrid({ offset: offset - step })}
+              onPress={() => moveGrid({ day: day.from, offset: offset - step })}
             />
             {place.day !== null || place.offset !== null ? (
               <TextButton label="Now" onPress={() => moveGrid({ day: null, offset: null })} />
@@ -814,7 +814,7 @@ function GuideGrid({
             <TextButton
               label="Later"
               disabled={offset >= latest}
-              onPress={() => moveGrid({ offset: offset + step })}
+              onPress={() => moveGrid({ day: day.from, offset: offset + step })}
             />
           </View>
           <TimeAxis from={from} until={until} now={now} strip={strip} large={large} />
