@@ -42,7 +42,7 @@ const CHOICES = [
 
 /**
  * When `choice` stops a recording started at `now`, or null where it can't: no programme on, or
- * `at`, a time input's "21:30", empty or more than RECORDING_MAX_MS ahead.
+ * `at`, a time input's "21:30", empty, more than RECORDING_MAX_MS ahead or skipped by the clocks.
  */
 function stopOf(
   choice: StopChoice,
@@ -61,27 +61,40 @@ function stopOf(
     case "2h":
       return now + 2 * HOUR_MS;
     case "at": {
-      const [hours, minutes] = at.split(":").map(Number);
-      if (hours === undefined || minutes === undefined || Number.isNaN(hours + minutes))
-        return null;
-      const stop = new Date(now);
-      stop.setHours(hours, minutes, 0, 0);
-      // Where the clocks go back, by an hour or half of one, a time they repeat comes again by
-      // as much after the first.
-      const back =
-        new Date(stop.getTime() + HOUR_MS).getTimezoneOffset() - stop.getTimezoneOffset();
-      const again = new Date(stop.getTime() + back * 60_000);
-      if (
-        stop.getTime() <= now &&
-        back > 0 &&
-        again.getHours() === hours &&
-        again.getMinutes() === minutes
-      )
-        stop.setTime(again.getTime());
-      if (stop.getTime() <= now) stop.setDate(stop.getDate() + 1);
-      return stop.getTime() <= now + RECORDING_MAX_MS ? stop.getTime() : null;
+      const stop = atTime(now, at);
+      return typeof stop === "number" ? stop : null;
     }
   }
+}
+
+/**
+ * The time `at`, a time input's "21:30", next comes after `now`: today's, or tomorrow's once that
+ * passed. "skipped" where the clocks go forward past it then, null for none or one more than
+ * RECORDING_MAX_MS ahead.
+ */
+function atTime(now: number, at: string): number | "skipped" | null {
+  const [hours, minutes] = at.split(":").map(Number);
+  if (hours === undefined || minutes === undefined || Number.isNaN(hours + minutes)) return null;
+  const stop = new Date(now);
+  stop.setHours(hours, minutes, 0, 0);
+  // Where the clocks go back, by an hour or half of one, a time they repeat comes again by as
+  // much after the first.
+  const back = new Date(stop.getTime() + HOUR_MS).getTimezoneOffset() - stop.getTimezoneOffset();
+  const again = new Date(stop.getTime() + back * 60_000);
+  if (
+    stop.getTime() <= now &&
+    back > 0 &&
+    again.getHours() === hours &&
+    again.getMinutes() === minutes
+  )
+    stop.setTime(again.getTime());
+  if (stop.getTime() <= now) {
+    stop.setDate(stop.getDate() + 1);
+    stop.setHours(hours, minutes, 0, 0);
+  }
+  // A time the clocks go forward past isn't there: setHours moves it on by the change.
+  if (stop.getHours() !== hours || stop.getMinutes() !== minutes) return "skipped";
+  return stop.getTime() <= now + RECORDING_MAX_MS ? stop.getTime() : null;
 }
 
 /** "22:30" in this computer's time, as a time input takes it. */
@@ -339,7 +352,11 @@ function RecordPanel({
           <p className="text-muted-foreground">{t("Ends 2 min after the guide time.")}</p>
         )}
         {choice === "at" && stop === null && (
-          <p className="text-muted-foreground">{t("Pick a time within 12 hours.")}</p>
+          <p className="text-muted-foreground">
+            {atTime(now, at) === "skipped"
+              ? t("The clocks skip that time.")
+              : t("Pick a time within 12 hours.")}
+          </p>
         )}
         {start.isError && (
           <p role="alert" className="text-destructive">

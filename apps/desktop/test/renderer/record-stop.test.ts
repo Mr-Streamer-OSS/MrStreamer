@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
-// Record's At a time in the hour the clocks repeat: a typed time still to come in that hour is
-// the stop, not the one an hour ago or the next day's.
+// Record's At a time where the clocks change: a typed time still to come in the hour they repeat
+// is the stop, not the one an hour ago or the next day's, and one in the hour they skip is none.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { queryView } from "./mount.ts";
-import { afterAll, expect, it, vi } from "vitest";
+import { afterAll, expect, it, onTestFinished, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { RecordButton } from "../../src/renderer/src/features/recordings/RecordButton.tsx";
 
@@ -41,8 +41,8 @@ const channel: LiveChannel = {
 const button = (text: string) =>
   [...document.querySelectorAll("button")].find((each) => each.textContent?.trim() === text);
 
-/** The stop Start asks for after `typed` is entered in At a time. */
-async function stopFor(typed: string): Promise<number | undefined> {
+/** Record's popover, `typed` entered in At a time. */
+async function typedAt(typed: string) {
   ipc.reset();
   ipc.always("recordings.start", { kind: "busy", connections: { limit: 1, uses: ["watch"] } });
   const view = queryView(new QueryClient());
@@ -55,6 +55,12 @@ async function stopFor(typed: string): Promise<number | undefined> {
     setValue.call(input, typed);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
+  return view;
+}
+
+/** The stop Start asks for after `typed` is entered in At a time. */
+async function stopFor(typed: string): Promise<number | undefined> {
+  const view = await typedAt(typed);
   await act(async () => button("Start recording")?.click());
   await vi.waitFor(() => expect(ipc.argsOf("recordings.start")).toHaveLength(1));
   view.unmount();
@@ -63,6 +69,16 @@ async function stopFor(typed: string): Promise<number | undefined> {
 
 it("stops at a time still to come in the hour the clocks repeat", async () => {
   expect(await stopFor("02:30")).toBe(Date.parse("2026-10-25T01:30:00Z"));
+});
+
+it("records to no time the clocks skip, saying so", async () => {
+  // 01:15 in Amsterdam on 29 March 2026: at 02:00 the clocks go forward to 03:00.
+  vi.setSystemTime(Date.parse("2026-03-29T00:15:00Z"));
+  const view = await typedAt("02:30");
+  onTestFinished(() => view.unmount());
+  expect(document.body.textContent).toContain("The clocks skip that time.");
+  await act(async () => button("Start recording")?.click());
+  expect(ipc.argsOf("recordings.start")).toEqual([]);
 });
 
 it("stops at a time still to come in the half hour Lord Howe Island repeats", async () => {

@@ -1443,6 +1443,7 @@ export const de: Translation = {
   "At a time…": "Zu einer Uhrzeit…",
   "Stop at": "Beenden um",
   "Pick a time within 12 hours.": "Wähle eine Uhrzeit innerhalb von 12 Stunden.",
+  "The clocks skip that time.": "Die Uhr überspringt diese Uhrzeit.",
   "Remove {title}": "{title} entfernen",
   "{start} to {end}, with padding": "{start} bis {end}, mit Puffer",
   "Edit {title}": "{title} bearbeiten",

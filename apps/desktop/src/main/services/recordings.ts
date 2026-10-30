@@ -234,6 +234,9 @@ function make(deps: RecordingsDeps) {
       }),
     );
 
+    /** What a check, or a recording's end, couldn't write, for the next check to write again. */
+    const unsaved = { recordings: false, schedules: false };
+
     /** Ended recordings whose file was gone when last looked for: on each read of the list. */
     const missing = new Set<string>();
     const look = Effect.promise(() =>
@@ -289,8 +292,10 @@ function make(deps: RecordingsDeps) {
               : { kind: "partial", cut: end };
         records.set(id, { ...record, status, bytes: live.bytes(), ended: Date.now() });
         active.delete(id);
-        // Any later write takes it down too; until then a restart reads it as cut by the quit.
+        // Any later write takes it down too, the next check's at the latest; until then a restart
+        // reads it as cut by the quit, and its schedule's time stays unsettled.
         const written = yield* Effect.result(save);
+        if (written._tag === "Failure") unsaved.recordings = true;
         yield* publish;
         // Its connection is free for a schedule that waits.
         yield* wake;
@@ -325,25 +330,39 @@ function make(deps: RecordingsDeps) {
           ...(yield* settings.get),
           ...(yield* settings.ofSubscription(subscriptionId)),
         };
-        const streams = yield* Effect.forEach(
-          options.variants?.length
-            ? options.variants
-            : streamsToPlay(listed, preferences, undefined).map(({ id }) => id),
-          (id) =>
-            Effect.tryPromise({
-              try: (signal) =>
-                source.provider.liveStream(id, AbortSignal.any([signal, controller.signal])),
-              catch: (cause) =>
-                cause instanceof Failed
-                  ? cause
-                  : new Failed({
-                      error: {
-                        kind: "stream",
-                        failure: { kind: "network", detail: String(cause) },
-                      },
-                    }),
-            }),
-        );
+        const ask = (id: string) =>
+          Effect.tryPromise({
+            try: (signal) =>
+              source.provider.liveStream(id, AbortSignal.any([signal, controller.signal])),
+            catch: (cause) =>
+              cause instanceof Failed
+                ? cause
+                : new Failed({
+                    error: {
+                      kind: "stream",
+                      failure: { kind: "network", detail: String(cause) },
+                    },
+                  }),
+          });
+        // Streams asked for are each needed. Auto's are tried in its order, so one the provider
+        // can't name, as a playlist that dropped it, leaves the others; the first failure says
+        // why when none is left.
+        const streams = options.variants?.length
+          ? yield* Effect.forEach(options.variants, ask)
+          : yield* Effect.flatMap(
+              Effect.forEach(streamsToPlay(listed, preferences, undefined), ({ id }) =>
+                Effect.result(ask(id)),
+              ),
+              (tried) => {
+                const found = tried.flatMap((each) =>
+                  each._tag === "Success" ? [each.success] : [],
+                );
+                const failed = tried.find((each) => each._tag === "Failure");
+                return found.length === 0 && failed
+                  ? Effect.fail(failed.failure)
+                  : Effect.succeed(found);
+              },
+            );
         const programme = options.title
           ? { title: options.title }
           : (yield* guide.listings([ownedId(listed)]))[ownedKey(listed)]?.now;
@@ -521,14 +540,17 @@ function make(deps: RecordingsDeps) {
     const schedules = new Map(
       (readKept.kind === "read" ? readKept.items : []).map((each) => [each.id, each]),
     );
-    const schedulesUsable =
+    // Both files: with recordings.json unread no check runs, and a schedule saved never records.
+    const schedulesUsable = Effect.andThen(
+      usable,
       readKept.kind === "read"
         ? Effect.void
         : Effect.fail(
             new Failed({
               error: { kind: "unexpected", detail: t("Schedules could not be read.") },
             }),
-          );
+          ),
+    );
     /** One check, or change of the schedules, at a time. */
     const scheduling = (yield* Semaphore.make(1)).withPermits(1);
     const scheduleChanges = yield* PubSub.sliding<readonly ScheduledRecording[]>(4);
@@ -551,8 +573,6 @@ function make(deps: RecordingsDeps) {
     const startingOn = new Set<string>();
     /** When this run of the app began checking schedules. */
     const started = Date.now();
-    /** What a check couldn't write, to write again at the next. */
-    const unsaved = { recordings: false, schedules: false };
     const occurrenceKey = (id: string, occurrence: Occurrence) => `${id}@${occurrence.start}`;
     /** The recording a schedule made of `occurrence`, if one did. */
     const recordOf = (id: string, occurrence: Occurrence) =>
@@ -714,14 +734,16 @@ function make(deps: RecordingsDeps) {
 
     /**
      * Starts a schedule's occurrence on now, in the background; a check follows its answer. It is
-     * late from its start, or from when the schedule was first saved, when that was later: the
-     * time before there was a schedule is nobody's fault.
+     * owed from its start, or from when the schedule was first saved, when that was later: the
+     * time before there was a schedule is nobody's fault. Its recording names the occurrence by
+     * its start all the same, so it is found as that time's.
      */
     const startOccurrence = (schedule: KeptSchedule, occurrence: Occurrence, now: number) => {
       const key = occurrenceKey(schedule.id, occurrence);
       const before = why.get(key);
+      const owed = Math.max(occurrence.start, schedule.created);
       const late =
-        now - Math.max(occurrence.start, schedule.created) <= ON_TIME_MS
+        now - owed <= ON_TIME_MS
           ? null
           : before === undefined || before === "starting"
             ? "away"
@@ -742,7 +764,12 @@ function make(deps: RecordingsDeps) {
                 )
               : undefined;
           return yield* start(plan.channel, occurrence.stop, {
-            scheduled: { schedule: schedule.id, from: occurrence.start, late },
+            scheduled: {
+              schedule: schedule.id,
+              from: occurrence.start,
+              ...(owed > occurrence.start && { owed }),
+              late,
+            },
             title: listed?.title ?? plan.title,
           });
         }).pipe(

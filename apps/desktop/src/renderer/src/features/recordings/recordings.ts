@@ -89,27 +89,35 @@ export function playRecording(recording: Recording): void {
 const MINUTE_MS = 60_000;
 
 /**
+ * Where a recording's coverage starts: for a late schedule, when capture was owed, its padded
+ * start or when it was saved, if later; else when capture began.
+ */
+export function coverageStart(recording: Recording): number {
+  const { scheduled } = recording;
+  return scheduled?.late ? (scheduled.owed ?? scheduled.from) : recording.start;
+}
+
+/**
  * Captured and planned whole minutes, what the coverage bar and "3 of 52 min" show, and those
- * missed at the start: a late schedule's from its padded start to when it began, or all of a
- * missed one. One on time, or saved after its start, is planned from when it began.
+ * missed at the start: a late schedule's from when it was owed to when it began, or all of a
+ * missed one. One on time, or saved after its start, is planned from when it began. All three
+ * count whole minutes from where coverage starts, so a complete one's add up to what was planned.
  */
 export function coverage(
   recording: Recording,
   now: number,
 ): { captured: number; planned: number; missed: number } {
-  const from = recording.scheduled?.late ? recording.scheduled.from : recording.start;
-  const planned = Math.max(1, Math.round((recording.stop - from) / MINUTE_MS));
+  const from = coverageStart(recording);
+  const minutesTo = (at: number) => Math.max(0, Math.floor((at - from) / MINUTE_MS));
+  const planned = Math.max(1, minutesTo(recording.stop));
   if (recording.status.kind === "missed") return { captured: 0, planned, missed: planned };
   // Whole minutes, as main counts a start within one as on time.
-  const missed = Math.min(planned, Math.max(0, Math.floor((recording.start - from) / MINUTE_MS)));
+  const missed = Math.min(planned, minutesTo(recording.start));
   const until =
     recording.status.kind === "complete"
       ? recording.stop
       : (recording.ended ?? Math.min(now, recording.stop));
-  const captured = Math.min(
-    planned - missed,
-    Math.max(0, Math.floor((until - recording.start) / MINUTE_MS)),
-  );
+  const captured = Math.min(planned - missed, Math.max(0, minutesTo(until) - missed));
   return { captured, planned, missed };
 }
 
@@ -140,7 +148,7 @@ export function outcome(recording: Recording, now: number): { word: string; reas
   const { scheduled } = recording;
   if (!scheduled?.late || recording.status.kind === "missed") return { word, reason };
   // Whole minutes, as the coverage bar hatches them.
-  const minutes = Math.max(1, Math.floor((recording.start - scheduled.from) / MINUTE_MS));
+  const minutes = Math.max(1, Math.floor((recording.start - coverageStart(recording)) / MINUTE_MS));
   const started = `${t("Started {minutes} min late.", { minutes })} ${missText(scheduled.late)}`;
   return { word, reason: recording.status.kind === "complete" ? started : `${started} ${reason}` };
 }

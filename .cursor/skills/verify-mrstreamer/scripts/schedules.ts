@@ -205,9 +205,15 @@ export async function schedulesScenario(d: Driver) {
       channel,
       channelName: "TEST | H.264 + AAC",
       title: "The Long Table",
-      start: now - 50 * hour + 6 * 60_000,
+      // Saved twenty minutes into its programme, and begun six minutes after that.
+      start: now - 50 * hour + 26 * 60_000,
       stop: now - 49 * hour,
-      scheduled: { schedule: "gone", from: now - 50 * hour, late: "busy" },
+      scheduled: {
+        schedule: "gone",
+        from: now - 50 * hour,
+        owed: now - 50 * hour + 20 * 60_000,
+        late: "busy",
+      },
       ended: now - 49 * hour,
       bytes: 188 * 1000,
       status: { kind: "complete" },
@@ -232,7 +238,8 @@ export async function schedulesScenario(d: Driver) {
         !!missed.querySelector('button[aria-label="Remove Tide Tables"]') &&
         !missed.querySelector('button[aria-label="Play Tide Tables"]') &&
         !!late && late.textContent.includes('Started 6 min late. Every connection was in use.') &&
-        late.querySelector('[role=meter]')?.getAttribute('aria-valuenow') === '54';
+        late.querySelector('[role=meter]')?.getAttribute('aria-valuenow') === '34' &&
+        late.querySelector('[role=meter]')?.getAttribute('aria-valuemax') === '40';
     })()`),
   );
   d.observed["page"] = await text(d, "document.querySelector('#root')");

@@ -1406,6 +1406,7 @@ export const en = {
   "At a time…": "At a time…",
   "Stop at": "Stop at",
   "Pick a time within 12 hours.": "Pick a time within 12 hours.",
+  "The clocks skip that time.": "The clocks skip that time.",
   "Remove {title}": "Remove {title}",
   "{start} to {end}, with padding": "{start} to {end}, with padding",
   "Edit {title}": "Edit {title}",

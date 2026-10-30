@@ -3,11 +3,12 @@
 // then follows those events, as recordings do. A guide programme finds its schedule by channel and
 // start: one made of it, or a repeat that records its channel at its weekday and time.
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import type {
-  ConnectionHolder,
-  RecordingPadding,
-  RecordingPlan,
-  ScheduledRecording,
+import {
+  RECORDING_MAX_MS,
+  type ConnectionHolder,
+  type RecordingPadding,
+  type RecordingPlan,
+  type ScheduledRecording,
 } from "@mrstreamer/contracts/recordings";
 import type { IpcInput } from "@mrstreamer/contracts/ipc";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
@@ -36,7 +37,8 @@ export function useSchedules() {
 }
 
 const MINUTE_MS = 60_000;
-const DAY_MINUTES = 24 * 60;
+/** The most a recording's minutes and padding may add up to. */
+const MAX_MINUTES = RECORDING_MAX_MS / MINUTE_MS;
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6] as const;
 
 /** Minutes after local midnight of `at`. */
@@ -74,8 +76,8 @@ export type Repeat = "once" | "day" | "every";
 
 /**
  * What a schedule is made from: a guide programme, or a schedule already made. `programme` is
- * what Once records, null for a repeat edited where no programme is at hand; `day` and `at` are
- * the local weekday and minute a repeat records at, for `minutes`, named `title`.
+ * what Once records, null for a repeat edited where no programme is at hand; `days` and `at` are
+ * the local weekdays and minute a repeat on some days records at, for `minutes`, named `title`.
  */
 export interface ScheduleBasis {
   readonly channel: OwnedId;
@@ -85,7 +87,7 @@ export interface ScheduleBasis {
     readonly stop: number;
     readonly title: string;
   } | null;
-  readonly day: number;
+  readonly days: readonly number[];
   readonly at: number;
   readonly minutes: number;
 }
@@ -98,15 +100,16 @@ export function basisOfProgramme(
     channel,
     title: programme.title,
     programme: { start: programme.start, stop: programme.stop, title: programme.title },
-    day: new Date(programme.start).getDay(),
+    days: [new Date(programme.start).getDay()],
     at: minuteOfDay(programme.start),
     minutes: Math.max(1, Math.round((programme.stop - programme.start) / MINUTE_MS)),
   };
 }
 
 /**
- * What `schedule` was made from, to change it. A repeat keeps its time, length and name; edited
- * from one of its programmes, `programme` is what Once would record instead.
+ * What `schedule` was made from, to change it. A repeat keeps its days, time, length and name;
+ * edited from one of its programmes, `programme` is what Once would record instead. One every day
+ * offers the programme's weekday, else today's.
  */
 export function basisOfSchedule(
   { plan }: ScheduledRecording,
@@ -119,11 +122,10 @@ export function basisOfSchedule(
     programme: programme
       ? { start: programme.start, stop: programme.stop, title: programme.title }
       : null,
-    day: programme
-      ? new Date(programme.start).getDay()
-      : plan.days.length === 1
-        ? (plan.days[0] ?? 0)
-        : new Date().getDay(),
+    days:
+      plan.days.length < EVERY_DAY.length
+        ? plan.days
+        : [(programme ? new Date(programme.start) : new Date()).getDay()],
     at: plan.at,
     minutes: plan.minutes,
   };
@@ -142,12 +144,19 @@ export function planOf(basis: ScheduleBasis, repeat: Repeat, padding: RecordingP
   return {
     kind: "slot",
     channel,
-    days: repeat === "every" ? [...EVERY_DAY] : [basis.day],
+    days: repeat === "every" ? [...EVERY_DAY] : [...basis.days],
     at: basis.at,
-    minutes: Math.min(basis.minutes, DAY_MINUTES),
+    // A programme longer than a recording may be records what it may.
+    minutes: Math.min(basis.minutes, MAX_MINUTES),
     title,
     padding,
   };
+}
+
+/** Minutes of padding `plan` has room for, both sides together, within RECORDING_MAX_MS. */
+export function paddingRoom(plan: PlanInput): number {
+  const minutes = plan.kind === "slot" ? plan.minutes : (plan.stop - plan.start) / MINUTE_MS;
+  return Math.max(0, Math.floor(MAX_MINUTES - minutes));
 }
 
 const WEEKDAYS = [
@@ -169,9 +178,9 @@ const EVERY_WEEKDAY = [
   "Every Saturday",
 ] as const satisfies readonly PlainKey[];
 
-/** "Fridays", for the repeat to choose. */
-export function weekdays(day: number): string {
-  return t(WEEKDAYS[day] ?? "Sundays");
+/** "Fridays", or "Mondays and Fridays", for the repeat to choose. */
+export function weekdays(days: readonly number[]): string {
+  return formatList(days.map((day) => t(WEEKDAYS[day] ?? "Sundays")));
 }
 
 /** "Once", "Every Friday" or "Every day", as a schedule's row says how often it records. */
@@ -179,7 +188,7 @@ export function repeatText(plan: RecordingPlan): string {
   if (plan.kind === "programme") return t("Once");
   if (plan.days.length === EVERY_DAY.length) return t("Every day");
   if (plan.days.length === 1) return t(EVERY_WEEKDAY[plan.days[0] ?? 0] ?? "Every Sunday");
-  return formatList(plan.days.map((day) => weekdays(day)));
+  return weekdays(plan.days);
 }
 
 /** What holds a connection, in a few words, and until when: "until 22:17", else nothing. */

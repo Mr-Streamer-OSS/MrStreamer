@@ -1507,6 +1507,7 @@ export const es: Translation = {
   "At a time…": "A una hora…",
   "Stop at": "Parar a las",
   "Pick a time within 12 hours.": "Elige una hora dentro de las próximas 12 horas.",
+  "The clocks skip that time.": "El reloj se salta esa hora.",
   "Remove {title}": "Quitar {title}",
   "{start} to {end}, with padding": "{start} a {end}, con margen",
   "Edit {title}": "Editar {title}",

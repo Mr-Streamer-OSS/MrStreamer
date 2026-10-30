@@ -1432,6 +1432,7 @@ export const nl: Translation = {
   "At a time…": "Op een tijdstip…",
   "Stop at": "Stoppen om",
   "Pick a time within 12 hours.": "Kies een tijdstip binnen 12 uur.",
+  "The clocks skip that time.": "De klok slaat dat tijdstip over.",
   "Remove {title}": "{title} verwijderen",
   "{start} to {end}, with padding": "{start} tot {end}, met marge",
   "Edit {title}": "{title} bewerken",

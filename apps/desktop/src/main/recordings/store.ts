@@ -45,6 +45,7 @@ const Entry = lazy(() =>
     "scheduled?": {
       schedule: "string > 0",
       from: "number",
+      "owed?": "number",
       late: "'away' | 'busy' | 'stream' | 'disk' | 'held' | 'unread' | null",
     },
     ended: "number | null",

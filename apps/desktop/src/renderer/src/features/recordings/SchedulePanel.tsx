@@ -1,9 +1,9 @@
-// What a schedule records, as it is made or changed: how often (Once, the programme's weekday, or
-// every day), how many minutes early it starts and late it ends, and how its next time stands as
-// main previews it (`recordings.plan`), saving nothing until Schedule. While every connection is
-// held then, it names what holds them and offers Schedule anyway. One already saved can be
-// cancelled from here too. The guide grid's programme details show it inline, Recordings' Edit in
-// a popover.
+// What a schedule records, as it is made or changed: how often (Once, the programme's weekday or
+// a repeat's days, or every day), how many minutes early it starts and late it ends, within the
+// room a recording has, and how its next time stands as main previews it (`recordings.plan`),
+// saving nothing until Schedule. While every connection is held then, it names what holds them and
+// offers Schedule anyway. One already saved can be cancelled from here too. The guide grid's
+// programme details show it inline, Recordings' Edit in a popover.
 //   Its keys are its own: arrows move the repeat and step the padding, and nothing behind it
 // moves. Escape closes it where `onEscape` is given; a popover closes itself.
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -25,6 +25,7 @@ import { call } from "../../lib/ipc.ts";
 import { cn } from "../../lib/utils.ts";
 import {
   holderText,
+  paddingRoom,
   planOf,
   planQuery,
   repeatOf,
@@ -63,7 +64,11 @@ export function SchedulePanel({
   const [padding, setPadding] = useState<RecordingPadding>(
     schedule?.plan.padding ?? DEFAULT_PADDING,
   );
-  const plan = planOf(basis, repeat, padding);
+  // Each side's padding takes what the other leaves of the room a recording has, the end's first.
+  const room = paddingRoom(planOf(basis, repeat, { before: 0, after: 0 }));
+  const after = Math.min(padding.after, room);
+  const fitted = { before: Math.min(padding.before, room - after), after };
+  const plan = planOf(basis, repeat, fitted);
   const preview = useQuery({ ...planQuery(plan, schedule?.id), placeholderData: keepPreviousData });
   const save = useMutation({
     mutationFn: () =>
@@ -89,7 +94,7 @@ export function SchedulePanel({
 
   const repeats: readonly { repeat: Repeat; label: string }[] = [
     ...(basis.programme ? [{ repeat: "once" as const, label: t("Once") }] : []),
-    { repeat: "day", label: weekdays(basis.day) },
+    { repeat: "day", label: weekdays(basis.days) },
     { repeat: "every", label: t("Every day") },
   ];
   const panel = useRef<HTMLDivElement>(null);
@@ -174,15 +179,17 @@ export function SchedulePanel({
         <div className="flex flex-wrap items-center gap-x-7 gap-y-2">
           <Stepper
             label={t("Start")}
-            value={padding.before}
-            text={t("{minutes} min early", { minutes: padding.before })}
-            onChange={(before) => setPadding({ ...padding, before })}
+            value={fitted.before}
+            max={Math.min(PADDING_MAX, room - fitted.after)}
+            text={t("{minutes} min early", { minutes: fitted.before })}
+            onChange={(before) => setPadding({ ...fitted, before })}
           />
           <Stepper
             label={t("End")}
-            value={padding.after}
-            text={t("{minutes} min late", { minutes: padding.after })}
-            onChange={(after) => setPadding({ ...padding, after })}
+            value={fitted.after}
+            max={Math.min(PADDING_MAX, room - fitted.before)}
+            text={t("{minutes} min late", { minutes: fitted.after })}
+            onChange={(after) => setPadding({ ...fitted, after })}
           />
         </div>
       </div>
@@ -239,21 +246,23 @@ export function SchedulePanel({
 }
 
 /**
- * Minutes of padding, 0 to PADDING_MAX: a spin button the arrows step, by ten with Page Up and
- * Down, between − and + for the pointer.
+ * Minutes of padding, 0 to `max`: a spin button the arrows step, by ten with Page Up and Down,
+ * between − and + for the pointer.
  */
 function Stepper({
   label,
   value,
+  max,
   text,
   onChange,
 }: {
   label: string;
   value: number;
+  max: number;
   text: string;
   onChange: (value: number) => void;
 }) {
-  const set = (next: number) => onChange(Math.min(Math.max(next, 0), PADDING_MAX));
+  const set = (next: number) => onChange(Math.min(Math.max(next, 0), max));
   const step = (event: KeyboardEvent) => {
     const by = {
       ArrowUp: 1,
@@ -264,7 +273,7 @@ function Stepper({
       PageDown: -10,
     }[event.key];
     if (event.key === "Home") set(0);
-    else if (event.key === "End") set(PADDING_MAX);
+    else if (event.key === "End") set(max);
     else if (by !== undefined) set(value + by);
   };
   const round =
@@ -288,7 +297,7 @@ function Stepper({
         tabIndex={0}
         aria-label={label}
         aria-valuemin={0}
-        aria-valuemax={PADDING_MAX}
+        aria-valuemax={max}
         aria-valuenow={value}
         aria-valuetext={text}
         onKeyDown={step}
@@ -300,7 +309,7 @@ function Stepper({
         type="button"
         tabIndex={-1}
         aria-hidden
-        disabled={value >= PADDING_MAX}
+        disabled={value >= max}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => set(value + 1)}
         className={round}
@@ -328,7 +337,7 @@ function Standing({
     plan.kind === "programme"
       ? dayTime(next.start, now)
       : t("{day} {time}", {
-          day: repeatOf(plan) === "every" ? t("Every day") : weekdays(plan.days[0] ?? 0),
+          day: repeatOf(plan) === "every" ? t("Every day") : weekdays(plan.days),
           time: formatDate(next.start, "time"),
         });
   const span = t("{when} to {end} on {channel}.", {
