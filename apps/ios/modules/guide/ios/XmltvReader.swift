@@ -176,7 +176,8 @@ final class XmltvReader: NSObject, XMLParserDelegate {
   private let index: GuideIndex
   private let job: GuideJob
   private let disk: GuideDisk
-  private let password: String
+  /// Every login part after the username: an account's password, or each secret of a playlist link.
+  private let passwords: [String]
   private var stack = [String]()
   private var channel: String?
   private var start: Double?
@@ -189,7 +190,7 @@ final class XmltvReader: NSObject, XMLParserDelegate {
   private var opened = false
   private var closed = false
   private var failure: Error?
-  init(index: GuideIndex, job: GuideJob, disk: GuideDisk, login: [String]) { self.index = index; self.job = job; self.disk = disk; password = login.count > 1 ? login[1] : "" }
+  init(index: GuideIndex, job: GuideJob, disk: GuideDisk, login: [String]) { self.index = index; self.job = job; self.disk = disk; passwords = login.dropFirst().filter { !$0.isEmpty } }
   func run(_ file: URL) throws {
     if let external = try guidePreflight(file, job) {
       // Overwrite only the bounded declaration, without a second XML spool or growth.
@@ -250,10 +251,10 @@ final class XmltvReader: NSObject, XMLParserDelegate {
       if stack == ["tv", "programme", "title"], title == nil { title = String(String.UnicodeScalarView(normalized.unicodeScalars.prefix(300))) }
       if stack == ["tv", "programme", "desc"], descriptionText == nil { descriptionText = String(String.UnicodeScalarView(normalized.unicodeScalars.prefix(2000))) }
       if elementName == "programme", let id = channel, id.unicodeScalars.count <= 128, !id.isEmpty, let start = start, let title = title, !title.isEmpty, stop == nil || stop! - start >= 60000 {
-        // Same prose policy as catalogue-cache holds(): raw password anywhere refuses persistence.
+        // Same prose policy as catalogue-cache holds(): any raw password anywhere refuses persistence.
         // Username substrings in ordinary text are allowed. No artwork/URL fields are saved.
         let fields = [id, title, descriptionText ?? ""]
-        if !password.isEmpty && fields.contains(where: { $0.contains(password) }) { throw GuideFailure("xml") }
+        if fields.contains(where: { field in passwords.contains(where: { field.contains($0) }) }) { throw GuideFailure("xml") }
         try index.insert(id, start, stop, title, descriptionText)
       }
       if stack == ["tv"] { closed = true }

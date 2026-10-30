@@ -1269,12 +1269,19 @@ export async function update(
     if (!now) throw new AppFailure({ kind: "no-subscription" });
     if (taken()) throw alreadySaved();
     const before = currentSource(id);
+    // A playlist's link and its fingerprint change together: should the registry refuse the new
+    // fingerprint, the link it had goes back to the Keychain.
+    const previous = now.kind === "m3u" && before ? secrets.get(before) : undefined;
+    let written = false;
     if (password) {
       await fenceDownloads(id);
       await clearSaved(id);
     }
     try {
-      if (password) await keychainSecrets.write(id, password);
+      if (password) {
+        await keychainSecrets.write(id, password);
+        written = true;
+      }
       const name = nameOf(change.name);
       const named = name === undefined || name === now.name ? now : { ...now, name };
       const next =
@@ -1290,6 +1297,7 @@ export async function update(
       }
       if (password && status) signIn(next, password, status);
     } catch (cause) {
+      if (written && previous) await keychainSecrets.write(id, previous).catch(() => undefined);
       if (password) await recoverLogin(id, before).catch(() => undefined);
       throw cause;
     }

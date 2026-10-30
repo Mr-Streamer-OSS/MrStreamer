@@ -111,6 +111,7 @@ afterAll(async () => {
 beforeEach(() => {
   memory.files.clear();
   memory.keychain.clear();
+  memory.full.clear();
   host.fail(null);
   host.serve(MIXED(host.origin));
 });
@@ -273,6 +274,12 @@ describe("a playlist subscription", () => {
     await expect(
       app.update(id!, { password: `${host.origin}/get.php?username=a&password=b` }),
     ).rejects.toMatchObject({ error: { kind: "incomplete-login" } });
+
+    // A new link the registry can't take leaves the link it had, under the fingerprint it had.
+    memory.full.add("subscriptions.json");
+    await expect(app.update(id!, { password: host.link("/third.m3u") })).rejects.toThrow();
+    memory.full.clear();
+    expect(memory.keychain.get(`s.${id}`)).toBe(moved);
 
     await app.remove(id!, { keepHistory: true });
     expect(ids(app)).toEqual([]);
