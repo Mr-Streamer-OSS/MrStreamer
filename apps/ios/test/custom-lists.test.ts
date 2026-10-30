@@ -22,15 +22,16 @@ const scenario = vi.hoisted(() => ({
   demo: "absent" as string,
   /** Subscriptions the registry saves, which the roster may not show yet. */
   registered: [] as string[],
-  /** What account.ts tells as its roster or channels change. */
+  /** What account.ts tells as its channels change, and as its roster does. */
   changed: new Set<() => void>(),
+  rosterChanged: new Set<() => void>(),
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
 vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
-  onRoster: (listener: () => void) => void scenario.changed.add(listener),
+  onRoster: (listener: () => void) => void scenario.rosterChanged.add(listener),
   onCatalogue: (listener: () => void) => void scenario.changed.add(listener),
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   members: () => scenario.members,
@@ -99,6 +100,7 @@ let lists: Lists;
 async function launch() {
   vi.resetModules();
   scenario.changed.clear();
+  scenario.rosterChanged.clear();
   lists = await import("../src/custom-lists.ts");
   open();
 }
@@ -135,6 +137,7 @@ const only = () => lists.currentChannelLists()[0]!;
 beforeEach(async () => {
   // The last test's module hears no more.
   scenario.changed.clear();
+  scenario.rosterChanged.clear();
   rmSync(file(), { force: true });
   rmSync(`${file()}.next`, { force: true });
   native.sync = null;
@@ -245,8 +248,10 @@ describe("a list's channels", () => {
 
   it("follow a channel its provider lists under another of its streams, after a relaunch too", async () => {
     const news = lists.createList("News", live("a:10"));
-    // Home drops the HD stream: the channel is the FHD one's now, as Live lists it.
+    // Home drops the HD stream: the channel is the FHD one's now, as Live lists it, and the list
+    // follows at that change of the channels alone.
     shows([NOS_FHD, ZIGGO]);
+    expect(readFileSync(file(), "utf8")).toContain('"streams":["14"');
     expect(shown()).toEqual(["News: a:14"]);
     await launch();
     expect(shown()).toEqual(["News: a:14"]);
@@ -310,8 +315,9 @@ describe("a list's channels", () => {
     lists.createList("News", live("a:10"));
     React.act(() => root!.unmount());
     root = null;
+    // The roster changes alone, as a removal tells it before the channels.
     scenario.members = [member("b", "Cabin")];
-    shows([NOS]);
+    for (const listener of scenario.rosterChanged) listener();
     expect(readFileSync(file(), "utf8")).not.toContain("NOS");
   });
 

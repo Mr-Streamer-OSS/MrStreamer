@@ -37,6 +37,9 @@ const scenario = vi.hoisted(() => ({
   alerts: [] as Shown[],
   prompts: [] as Shown[],
   sheets: [] as Sheet[],
+  /** What the route's search params give, and the titles it set. */
+  params: {} as Record<string, string>,
+  titles: [] as string[],
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -126,6 +129,11 @@ vi.mock("expo-router", () => ({
     back: () => void scenario.did.push("back"),
   },
   useIsFocused: () => true,
+  useLocalSearchParams: () => scenario.params,
+  useNavigation: () => navigation,
+}));
+const navigation = vi.hoisted(() => ({
+  setOptions: ({ title }: { title: string }) => void scenario.titles.push(title),
 }));
 vi.mock("../src/header.tsx", () => ({
   tabHref: (_tab: string, screen: string) => `/live/${screen}`,
@@ -167,6 +175,8 @@ const lists = await import("../src/custom-lists.ts");
 const { LiveHome } = await import("../src/live-screen.tsx");
 const { FavouritesScreen } = await import("../src/favourites-screen.tsx");
 const { ChannelListScreen } = await import("../src/custom-lists-screen.tsx");
+const { CategoryScreen } = await import("../src/live-screen.tsx");
+const { default: ListRoute } = await import("../src/app/(tabs)/live/list.tsx");
 
 const channel = (id: string, name: string): ProviderChannel => ({
   id,
@@ -286,6 +296,8 @@ beforeEach(async () => {
     alerts: [],
     prompts: [],
     sheets: [],
+    params: {},
+    titles: [],
   });
   shows([NOS, ZIGGO], [RTL, ZAPPELIN]);
   for (const list of lists.currentChannelLists()) lists.deleteList(list.id);
@@ -366,6 +378,23 @@ describe("a row's lists", () => {
       { title: "Kids wasn't changed", message: "There isn't enough space on this iPhone." },
     ]);
     expect(saved()).toEqual(["Sport: a:11", "Kids: "]);
+    expect(scenario.did).toEqual([]);
+  });
+
+  it("open from a list's row and a category's row, playing nothing", () => {
+    const id = lists.createList("Sport", live("a:10"));
+    lists.createList("News", live("b:10"));
+    open(listScreen(id));
+    hold("list-row-a:10");
+    choose("News");
+    const library = scenario.catalogue.kind === "ready" ? scenario.catalogue.library : null;
+    const region = library!.regions[0]!;
+    open(() =>
+      React.createElement(CategoryScreen, { region: region.name, name: region.shelves[0]!.title }),
+    );
+    hold("channel-a:11");
+    choose("Sport");
+    expect(saved()).toEqual(["Sport: a:10, a:11", "News: b:10, a:10"]);
     expect(scenario.did).toEqual([]);
   });
 
@@ -450,6 +479,36 @@ describe("a list's screen", () => {
     confirm("Try again");
     expect(saved()).toEqual(["Sport: b:10, a:10"]);
     expect(rows()).toEqual(["b:10", "a:10"]);
+  });
+
+  it("saves nothing from a Try again that comes after its edit ended", () => {
+    const id = lists.createList("Sport", live("a:10"));
+    lists.setMember(id, live("b:10"), true);
+    open(listScreen(id));
+    press("list-edit");
+    press("arranged-b:10-up");
+    failWrites();
+    press("list-save");
+    const refused = scenario.alerts.at(-1)!;
+    native.sync = null;
+    press("list-cancel");
+    // Another edit, with an order of its own, is under way.
+    press("list-edit");
+    press("arranged-a:10-remove");
+    React.act(() => refused.buttons?.find((each) => each.text === "Try again")?.onPress?.());
+    expect(scenario.alerts.at(-1)?.title).toBe("Sport wasn't saved");
+    expect(saved()).toEqual(["Sport: a:10, b:10"]);
+    expect(arranged()).toEqual(["b:10"]);
+  });
+
+  it("opens by the route's id, titled with the list's name as it is renamed", () => {
+    const id = lists.createList("Sport", live("a:10"));
+    scenario.params = { id };
+    open(ListRoute);
+    expect(rows()).toEqual(["a:10"]);
+    lists.renameList(id, "Football");
+    redraw();
+    expect(scenario.titles).toEqual(["Sport", "Football"]);
   });
 
   it("moves and removes nothing when the list changed while it was edited", () => {
