@@ -252,6 +252,11 @@ describe("the native verification fixture", () => {
     const paced = await download(url, { Range: "bytes=0-524287" });
     expect(paced.body.length).toBe(524_288);
     expect(Date.now() - at).toBeGreaterThanOrEqual(1_500);
+    // A range within one piece arrives at the pace too, rather than at once.
+    await post("/title-transfers?rate=65536");
+    const single = Date.now();
+    expect((await download(url, { Range: "bytes=0-32767" })).body.length).toBe(32_768);
+    expect(Date.now() - single).toBeGreaterThanOrEqual(400);
     // A slow pace holds a short probe only for its own two bytes, so the connection is free again.
     await post("/title-transfers?rate=1024");
     const probed = Date.now();

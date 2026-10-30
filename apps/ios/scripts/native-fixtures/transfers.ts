@@ -83,10 +83,12 @@ export function titleTransfers(known: (title: string) => boolean) {
             return void response.write(body.subarray(sent, breaksAt), () => response.destroy());
           }
           const piece = body.subarray(sent, sent + PIECE);
-          response.write(piece);
+          // Each piece goes out once its time at the pace has passed, so the answer ends with it.
           if (rate > 0) {
             await new Promise((resolve) => setTimeout(resolve, (piece.length / rate) * 1000));
+            if (response.destroyed) return;
           }
+          response.write(piece);
         }
         response.end();
       })();
