@@ -1424,6 +1424,90 @@ describe("downloads", { timeout: 30_000 }, () => {
     app.stop();
   });
 
+  it("pauses a transfer where it is, lets the next go meanwhile, and goes on from its bytes once resumed after a relaunch", async () => {
+    let app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    const next = await app.addDownload(movieRef(a, otherMovie().id));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    await app.pauseDownload(film.id);
+    // Answered once its request actually ended: the next one's waits its second of grace.
+    expect(native.open).toBe(0);
+    expect(background.events).toContain(`end:${film.id}`);
+    expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+    expect(nativeSecrets()).toEqual([film.id]);
+    await until(() => isComplete(app, next.id), "the next copy");
+    expect(one.mostFilesAtOnce()).toBe(1);
+
+    app = await launch();
+    await sleep(1_500);
+    expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+    expect(background.events.filter((each) => each === `start:${film.id}`)).toHaveLength(1);
+    one.stallMovieFile(movie().id, 0, 0);
+    native.requests.length = 0;
+    await app.resumeDownload(film.id);
+    await until(() => isComplete(app, film.id), "the resumed copy");
+    expect(native.requests.map((each) => each.range)).toEqual(["bytes=20000-"]);
+    expect(mediaFile(film.id)?.size).toBe(fixture(movie().fixture!).length);
+  });
+
+  it("moves a waiting download ahead of another, and the native queue goes in that order with no JavaScript", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    const { series, first } = episode();
+    one.stallMovieFile(movie().id, 30_000, 3_000);
+    const film = await app.addDownload(movieRef(a));
+    const other = await app.addDownload(movieRef(a, otherMovie().id));
+    const show = await app.addDownload({
+      kind: "episode",
+      subscriptionId: a,
+      id: String(first.id),
+      seriesId: String(series.id),
+      season: 1,
+      episode: first.number ?? 1,
+    });
+    await until(() => receivedOf(app, film.id) === 30_000, "the transfer to stall");
+    await until(() => background.open(show.id).length === 1, "the last one authorized");
+    await app.moveDownload(show.id, -1);
+    const ids = () => app.downloadList().items.map((item) => item.id);
+    expect(ids()).toEqual([film.id, show.id, other.id]);
+    // First of those waiting already; the transfer under way keeps its place.
+    await app.moveDownload(show.id, -1);
+    expect(ids()).toEqual([film.id, show.id, other.id]);
+    appGoes("background");
+    background.die();
+    await until(
+      () => background.events.includes(`receipt:${other.id}:complete`),
+      "all three to complete natively",
+    );
+    expect(background.events.filter((each) => each.startsWith("start:"))).toEqual([
+      `start:${film.id}`,
+      `start:${show.id}`,
+      `start:${other.id}`,
+    ]);
+  });
+
+  it("starts a paused download over under its changed login rather than resume the old login's bytes", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    await app.pauseDownload(film.id);
+    expect(nativeSecrets()).toEqual([film.id]);
+    await app.update(a, { password: ONE.password });
+    // Its login's generation went with its resume data; it stays paused, asked for nothing.
+    expect(nativeSecrets()).toEqual([]);
+    await sleep(1_500);
+    expect(statusOf(app, film.id)?.kind).toBe("paused");
+    one.stallMovieFile(movie().id, 0, 0);
+    native.requests.length = 0;
+    await app.resumeDownload(film.id);
+    await until(() => isComplete(app, film.id), "the copy under the new login");
+    expect(native.requests.map((each) => each.range)).toEqual([null]);
+  });
+
   it("cancels a transfer found after a relaunch: its request ends before its files go", async () => {
     await install();
     let app = await launch();
@@ -1477,7 +1561,8 @@ describe("downloads", { timeout: 30_000 }, () => {
     // Small enough for the file an earlier test put behind this film.
     one.stallMovieFile(otherMovie().id, 5_000, 60_000);
     const unfinished = await app.addDownload(movieRef(a, otherMovie().id));
-    await until(() => one.activeStreams() === 1, "the second transfer");
+    // Its own bytes, not the copy's connection the panel is still freeing.
+    await until(() => receivedOf(app, unfinished.id) === 5_000, "the second transfer");
     // Watched a while from the copy, its subscription still saved: the viewing record has it too.
     app.playDownload(kept.id);
     await until(() => memory.played.length === 1, "the copy to open");

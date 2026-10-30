@@ -81,6 +81,8 @@ const AuthorizationView = lazy(() =>
     expected: Size(),
     restarted: "boolean",
     resumed: "boolean",
+    /** The viewer paused it: not admitted until let go. */
+    held: "boolean",
   }),
 );
 export type AuthorizationView = Infer<typeof AuthorizationView>;
@@ -207,6 +209,8 @@ interface Native {
     headers: Record<string, string>;
   }): Promise<void>;
   cancelAuthorization(authorization: string, reason: "remove" | "abandon"): Promise<unknown>;
+  holdAuthorization(authorization: string, held: boolean): Promise<void>;
+  arrangeAuthorizations(authorizations: string[]): Promise<void>;
   drainDownload(id: string): Promise<void>;
   acquirePlayback(request: { sourceId: string; lease: string }): Promise<unknown>;
   releasePlayback(lease: string): Promise<void>;
@@ -345,6 +349,19 @@ export const transfers = {
     const answer = await bounded(native().cancelAuthorization(authorization, reason));
     return reason === "abandon" ? { durable: "ledger", receipts: [], legacy: [] } : fenceOf(answer);
   },
+  /**
+   * Holds an authorization for the viewer, or lets it go: a held one is never admitted until let
+   * go, and its transfer pauses, keeping its resume data. Answers once the hold is durable, never
+   * once its task closed: `drainDownload` answers that.
+   */
+  holdAuthorization: async (authorization: string, held: boolean): Promise<void> =>
+    bounded(native().holdAuthorization(authorization, held)),
+  /**
+   * Puts these authorizations in the order given, among the places they hold in the queue; any
+   * other keeps its place, and the transfer under way goes on.
+   */
+  arrangeAuthorizations: async (authorizations: readonly string[]): Promise<void> =>
+    bounded(native().arrangeAuthorizations([...authorizations])),
   /** Resolves once no task or publication of download `id` is left; refuses after ten seconds. */
   drainDownload: async (id: string): Promise<void> => bounded(native().drainDownload(id), 12_000),
   /**

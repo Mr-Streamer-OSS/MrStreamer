@@ -80,6 +80,13 @@ import { recordProgress } from "./viewing.ts";
 // Retry asks again, elsewhere it waits for the app to be open; a revoked login's are asked again
 // under the new one.
 //
+// The viewer's pause is written on its record first, then held on the native side, which never
+// admits a held authorization and pauses its transfer, keeping the resume data; Pause answers
+// once that request actually ended. Resume lets it go in its place, and the native side goes on
+// from its bytes only under the same login and request. The queue goes in the records' order,
+// which Move changes; each refill tells the native side both, so a relaunch between the two
+// writes loses neither.
+//
 // The first time the app is open in a process, everything the native side kept is taken in
 // before it may start anything new: receipts, build 14's receipts and unfinished removals, and
 // the subscriptions' bindings once launch's passwords were read. A queue whose native authority
@@ -152,6 +159,8 @@ const Stored = lazy(() =>
     artwork: { poster: "boolean", wide: "boolean" },
     /** A transfer under way is `queued` on disk: the native side has it, or it waits for one. */
     state: "'queued' | 'failed' | 'complete'",
+    /** The viewer paused it: it keeps its place and its bytes, and goes on once resumed. */
+    "paused?": "boolean",
     /** Recognised by the public catalogue policy, retained when offline or no longer listed. */
     "excluded?": "boolean",
     "failure?": Failure(),
@@ -358,6 +367,11 @@ function withoutFailure(record: Stored): Stored {
   return rest;
 }
 
+function withoutPause(record: Stored): Stored {
+  const { paused: _paused, ...rest } = record;
+  return rest;
+}
+
 function withoutRemoval(record: Stored): Stored {
   const { removal: _removal, ...rest } = record;
   return rest;
@@ -472,17 +486,23 @@ function viewOf(
                 error: { kind: "unexpected", detail: "This download stopped." },
               },
             }
-          : moving
+          : record.paused
             ? {
-                kind: "transferring",
-                received: moving.received,
-                size: moving.size,
-                rate: moving.rate,
-                restarted: moving.restarted,
+                kind: "paused",
+                received: moving?.received ?? record.received,
+                size: moving?.size ?? record.size,
               }
-            : busy.has(record.subscriptionId)
-              ? { kind: "waiting" }
-              : { kind: "queued" },
+            : moving
+              ? {
+                  kind: "transferring",
+                  received: moving.received,
+                  size: moving.size,
+                  rate: moving.rate,
+                  restarted: moving.restarted,
+                }
+              : busy.has(record.subscriptionId)
+                ? { kind: "waiting" }
+                : { kind: "queued" },
     progress: record.progress && {
       position: record.progress.position,
       duration: record.progress.duration,
@@ -682,7 +702,8 @@ async function apply(record: Stored, outcome: OutcomeV2, inFront: boolean, bound
       if (!completeCopy(record, outcome)) return tell();
       break;
     case "paused":
-      // The same authorization goes on once its subscription's stream let go.
+      // The same authorization goes on once its subscription's stream let go, or the viewer's
+      // pause was let go.
       update(id, () => ({ ...withoutFailure(record), ...(bound ? { transfer: bound } : {}) }));
       break;
     case "cancelled":
@@ -1349,11 +1370,31 @@ async function fill() {
       update(record.id, (latest) => ({ ...unbound(latest), state: "queued" }));
     }
   }
+  for (const record of doc.items) {
+    // A pause or Resume whose native half a relaunch or a refusal left undone.
+    const bound = boundOf(record);
+    const view = bound && known.get(bound.authorization);
+    const paused = record.state === "queued" && record.paused === true;
+    if (bound && view && view.state !== "terminal" && view.held !== paused) {
+      await transfers.holdAuthorization(bound.authorization, paused).catch(() => undefined);
+    }
+  }
   let open = snapshot.authorizations.filter((view) => view.state !== "terminal").length;
   for (const record of doc.items) {
     if (open >= WINDOW || !foreground) break;
     if (await authorize(record)) open++;
   }
+  await arrange();
+}
+
+/** Puts the native queue in the records' order: what the list shows next is what goes next. */
+function arrange(): Promise<void> {
+  return transfers.arrangeAuthorizations(
+    doc.items.flatMap((record) => {
+      const bound = record.state === "queued" ? boundOf(record) : null;
+      return bound ? [bound.authorization] : [];
+    }),
+  );
 }
 
 /**
@@ -1364,6 +1405,7 @@ async function fill() {
 async function authorize(record: Stored): Promise<boolean> {
   if (
     record.state !== "queued" ||
+    record.paused ||
     excludedDownload(record) ||
     !standing(record) ||
     record.transfer !== undefined ||
@@ -1379,6 +1421,7 @@ async function authorize(record: Stored): Promise<boolean> {
     const latest = find(record.id);
     return (
       latest?.state === "queued" &&
+      !latest.paused &&
       latest.transfer === undefined &&
       standing(latest) &&
       currentSource(record.subscriptionId) === source &&
@@ -1587,7 +1630,7 @@ async function again(record: Stored, stands: Stands = always): Promise<Retried> 
   const latest = find(record.id);
   if (latest?.state !== "failed" || !standing(latest)) return "unchanged";
   if (!stands()) return "stopped";
-  update(record.id, () => ({ ...unbound(latest), container, state: "queued" }));
+  update(record.id, () => ({ ...withoutPause(unbound(latest)), container, state: "queued" }));
   tell();
   refill();
   return "queued";
@@ -1784,6 +1827,87 @@ export async function replaceMissingDownload(
 export async function retryDownload(id: string, stands: Stands = always): Promise<Retried> {
   const record = find(id);
   return record?.state === "failed" && standing(record) ? again(record, stands) : "unchanged";
+}
+
+/** Still to transfer and nothing is removing it: what Pause, Resume and Move act on. */
+const unfinished = (record: Stored | undefined): record is Stored =>
+  record?.state === "queued" && standing(record) && !excludedDownload(record);
+
+/**
+ * Pauses a queued or transferring download where it is: written on its record, then held on the
+ * native side, so neither the queue nor a relaunch starts it again until it is resumed. Resolves
+ * once its request actually ended, or the native side stopped waiting for it, which still admits
+ * nothing else meanwhile. Rejects, leaving it as it was, when the native side can't keep the
+ * pause.
+ */
+export async function pauseDownload(id: string): Promise<void> {
+  const record = find(id);
+  if (!unfinished(record) || record.paused) return;
+  update(id, (latest) => ({ ...latest, paused: true }));
+  tell();
+  const bound = boundOf(record);
+  if (!bound) return;
+  try {
+    await transfers.holdAuthorization(bound.authorization, true);
+  } catch (cause) {
+    // Ended meanwhile: its receipt says what that means, and it stays paused if it stays queued.
+    if (refusalOf(cause) === "obsolete") return;
+    update(id, withoutPause);
+    tell();
+    throw new AppFailure({ kind: "unexpected", detail: "The pause couldn't be kept." });
+  }
+  await transfers.drainDownload(id).catch(() => undefined);
+  tell();
+}
+
+/**
+ * Lets a paused download go on in its place in the queue, from its bytes when the provider still
+ * serves the same file to the same login. Rejects, leaving it paused, when the native side can't
+ * let it go.
+ */
+export async function resumeDownload(id: string): Promise<void> {
+  const record = find(id);
+  if (!unfinished(record) || !record.paused) return;
+  update(id, withoutPause);
+  tell();
+  const bound = boundOf(record);
+  try {
+    if (bound) await transfers.holdAuthorization(bound.authorization, false);
+  } catch (cause) {
+    if (refusalOf(cause) !== "obsolete") {
+      update(id, (latest) => ({ ...latest, paused: true }));
+      tell();
+      throw new AppFailure({ kind: "unexpected", detail: "The download couldn't be resumed." });
+    }
+  }
+  refill();
+}
+
+/** Waiting its turn, paused or not: what Move passes. The transfer under way keeps its place. */
+const waitingTurn = (record: Stored) => unfinished(record) && transferring(record) === null;
+
+/**
+ * Moves a download waiting its turn one place earlier (-1) or later (1) among those waiting, the
+ * native queue with it. Rejects, putting it back, when the native side can't take the order.
+ */
+export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
+  const record = find(id);
+  if (!record || !waitingTurn(record)) return;
+  const line = doc.items.filter(waitingTurn);
+  const other = line[line.indexOf(record) + by];
+  if (!other) return;
+  const swap = (each: Stored) => (each === record ? other : each === other ? record : each);
+  commit({ ...doc, items: doc.items.map(swap) });
+  tell();
+  try {
+    await arrange();
+  } catch {
+    if (find(id) === record && find(other.id) === other) {
+      commit({ ...doc, items: doc.items.map(swap) });
+      tell();
+    }
+    throw new AppFailure({ kind: "unexpected", detail: "The new order couldn't be kept." });
+  }
 }
 
 /** A complete copy that isn't being removed: the only kind that plays. */

@@ -1026,6 +1026,102 @@ final class TransferOwner: NSObject, URLSessionDownloadDelegate {
     }
   }
 
+  /**
+   Holds an authorization for the viewer, or lets it go: a held one is never admitted, whatever
+   wakes the queue, until it is let go. Once the hold is durable, an admission of it gives way and
+   its transfer pauses as a stream's lease pauses it, keeping its resume data for the same
+   authorization, and is cancelled should the pause not end it in five seconds. Answers once the
+   hold is durable, never once the task closed: `drain` answers that. The same hold again answers
+   as before; a terminal or unknown authorization is obsolete.
+   */
+  func holdAuthorization(
+    _ authorization: String, held: Bool, done: @escaping (Result<Void, Refusal>) -> Void
+  ) {
+    queue.async {
+      let reply: Once<Void> = self.once(done, deadline: Self.commandSeconds)
+      guard Names.isAuthorization(authorization) else { return reply(.failure(.invalid)) }
+      self.load()
+      guard case .ready = self.storage, self.ledger != nil else {
+        return reply(.failure(self.refusal))
+      }
+      guard !self.resetting, !self.resetFailed else { return reply(.failure(.busy)) }
+      self.commit({ ledger in
+        guard var grant = ledger.authorizations[authorization], grant.state != .terminal,
+          (grant.held == true) != held
+        else { return false }
+        grant.held = held ? true : nil
+        ledger.authorizations[authorization] = grant
+        return true
+      }) { result in
+        switch result {
+        case .failed, .expired: return reply(.failure(.unavailable))
+        case .refused:
+          // Unknown or terminal, or held as asked already.
+          let standing = self.ledger?.authorizations[authorization].map { $0.state != .terminal }
+          guard standing == true else { return reply(.failure(.obsolete)) }
+        case .saved: break
+        }
+        reply(.success(()))
+        if held { self.stopHeld(authorization) } else { self.trigger() }
+      }
+    }
+  }
+
+  /** Ends the slot's admission or transfer of a held authorization, keeping its resume data. */
+  private func stopHeld(_ authorization: String) {
+    switch slot {
+    case .idle: return
+    case .admitting(let admission):
+      if admission.authorization == authorization { abort(admission) }
+    case .bound(let binding):
+      guard binding.authorization == authorization else { return }
+      pause(binding)
+      queue.asyncAfter(deadline: .now() + Self.closeSeconds) {
+        guard self.owns(binding), !binding.networkClosed else { return }
+        // The pause didn't end it: cancelled now, still a pause for its authorization.
+        binding.pauseAnswered = true
+        binding.task?.cancel()
+      }
+    }
+  }
+
+  /**
+   Puts the listed authorizations in the order given among the places they hold: the order
+   values they have are dealt out again in that sequence, so every other authorization keeps its
+   place. Unknown and terminal ones are passed over; the transfer under way goes on.
+   */
+  func arrange(_ authorizations: [String], done: @escaping (Result<Void, Refusal>) -> Void) {
+    queue.async {
+      guard authorizations.count <= Self.capacity,
+        authorizations.allSatisfy(Names.isAuthorization),
+        Set(authorizations).count == authorizations.count
+      else { return done(.failure(.invalid)) }
+      self.load()
+      guard case .ready = self.storage, self.ledger != nil else {
+        return done(.failure(self.refusal))
+      }
+      guard !self.resetting, !self.resetFailed else { return done(.failure(.busy)) }
+      self.commit({ ledger in
+        let listed = authorizations.filter {
+          ledger.authorizations[$0].map { $0.state != .terminal } ?? false
+        }
+        let places = listed.compactMap { ledger.authorizations[$0]?.order }.sorted()
+        var changed = false
+        for (id, order) in zip(listed, places) where ledger.authorizations[id]?.order != order {
+          ledger.authorizations[id]?.order = order
+          changed = true
+        }
+        return changed
+      }) { result in
+        switch result {
+        // Refused: already in that order.
+        case .saved, .refused: done(.success(()))
+        case .failed, .expired: done(.failure(.unavailable))
+        }
+      }
+    }
+  }
+
   private func cancelTask(of authorization: String) {
     if case .bound(let binding) = slot, binding.authorization == authorization {
       binding.task?.cancel()
@@ -1498,6 +1594,7 @@ final class TransferOwner: NSObject, URLSessionDownloadDelegate {
             "expected": mine?.expected.map { $0 as Any } ?? NSNull(),
             "restarted": grant.restarted || mine?.restarted == true,
             "resumed": mine?.resumed ?? false,
+            "held": grant.held == true,
           ]
         }
         if !recovered {
@@ -1929,6 +2026,7 @@ final class TransferOwner: NSObject, URLSessionDownloadDelegate {
         .filter({ entry in
           let grant = entry.value
           return (grant.state == .queued || grant.state == .paused) && grant.attempt == nil
+            && grant.held != true
             && ledger.sources[grant.sourceId]
               == SourceAuthority(generation: grant.sourceGeneration, state: .enabled)
             && !removed.contains(entry.key) && !gated(grant.sourceId) && !held(grant.sourceId)
@@ -2091,7 +2189,7 @@ final class TransferOwner: NSObject, URLSessionDownloadDelegate {
     let resumed = resumeData != nil
     commit({ ledger in
       guard var armed = ledger.authorizations[id], armed.state == .queued || armed.state == .paused,
-        armed.attempt == nil, !self.removed.contains(id)
+        armed.attempt == nil, armed.held != true, !self.removed.contains(id)
       else { return false }
       armed.state = .active
       armed.attempt = NativeAttempt(

@@ -133,7 +133,9 @@ struct NativeAttempt: Codable {
 /**
  One exact file request a download's record authorized. `reserved` until armed with its request;
  `queued` or `paused` while runnable; `active` while its one attempt may have a request open;
- `terminal` once its last receipt is written, kept until that receipt is acknowledged.
+ `terminal` once its last receipt is written, kept until that receipt is acknowledged. `order` is
+ its place in the queue, which `arrange` deals out again; `held` keeps a runnable one from being
+ admitted until the viewer resumes it. Ledgers written before either was added read as unheld.
  */
 struct Grant: Codable {
   enum State: String, Codable { case reserved, queued, active, paused, terminal }
@@ -142,13 +144,15 @@ struct Grant: Codable {
   let ext: String
   let sourceId: String
   let sourceGeneration: String
-  let order: Int64
+  var order: Int64
   var state: State
   var restarted: Bool
   /// One fresh start, without resume data, after the server refused to go on from it.
   var freshRestartRemaining: Int
   var lastSequence: Int64
   var attempt: NativeAttempt?
+  /// The viewer paused it: never admitted, whatever wakes the queue, until released.
+  var held: Bool? = nil
 }
 
 /** How an authorization's request ended, kept until JavaScript says it wrote it down. */

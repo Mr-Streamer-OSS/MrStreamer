@@ -7,9 +7,9 @@ import { native } from "./native-files.ts";
 // URLSession, for tests run on Linux. Importing it installs it where Expo installs native
 // modules, as the app finds them. It keeps the contract over real requests and real files:
 //
-// - One pump claims the slot before anything else, for the oldest runnable authorization whose
-//   source is enabled under its generation, has its anchor and request item, isn't held by a
-//   stream lease and isn't fenced; the task occupies the slot through its earliest-begin wait, a
+// - One pump claims the slot before anything else, for the first runnable authorization in the
+//   queue's order whose source is enabled under its generation, has its anchor and request item,
+//   isn't held by the viewer or a stream lease and isn't fenced; the task occupies the slot through its earliest-begin wait, a
 //   second after its source's last request ended (or launch, or an unknown request's end), until
 //   it ended and its receipt is written. Then the next goes, whether the app's JavaScript runs or
 //   not: the background handoff.
@@ -19,6 +19,9 @@ import { native } from "./native-files.ts";
 //   its resume data is deleted. At most 32 unfinished authorizations and 128 with receipts.
 // - A removal or revoke is fenced by its ledger write, or when the ledger refuses (`faults`), by
 //   deleting its request items; neither waits for its task to end.
+// - The viewer's hold pauses its authorization's task, keeping its resume data, and keeps it from
+//   being admitted until let go, durably. Arranging deals the listed authorizations' places out
+//   again in the order given.
 // - A stream's lease pauses its source's task, cancels it after five seconds, and is refused
 //   after five more; then the provider's second of grace passes. Memory only.
 // - The first foreground reconcile of a process installs the barrier; until it is finished, no
@@ -34,12 +37,13 @@ interface Grant {
   readonly ext: string;
   readonly sourceId: string;
   readonly sourceGeneration: string;
-  readonly order: number;
+  order: number;
   state: AuthorizationView["state"];
   restarted: boolean;
   fresh: 0 | 1;
   lastSequence: number;
   attempt: string | null;
+  held: boolean;
 }
 
 interface Request {
@@ -393,6 +397,7 @@ function pump() {
     .filter(
       ([id, grant]) =>
         (grant.state === "queued" || grant.state === "paused") &&
+        !grant.held &&
         b.sources.get(grant.sourceId)?.state === "enabled" &&
         b.sources.get(grant.sourceId)?.generation === grant.sourceGeneration &&
         !b.removed.has(id) &&
@@ -820,6 +825,7 @@ function snapshot() {
           expected: b.task?.authorization === authorization ? b.task.expected : null,
           restarted: grant.restarted,
           resumed: b.task?.authorization === authorization ? b.task.resumed : false,
+          held: grant.held,
         })),
     receipts: b.unavailable ? [] : [...b.receipts],
     legacy: { receipts: b.unavailable ? [] : [...b.legacyReceipts] },
@@ -916,6 +922,7 @@ const module = {
       fresh: 1,
       lastSequence: background.sequence,
       attempt: null,
+      held: false,
     });
     return { authorization };
   },
@@ -979,6 +986,36 @@ const module = {
     }
     if (task) stopTask(task, "cancel");
     return { durable: "secrets", receipts: [], legacy: [] };
+  },
+
+  async holdAuthorization(authorization: string, held: boolean) {
+    gate();
+    const grant = background.grants.get(authorization);
+    if (!grant || grant.state === "terminal") throw refused("ERR_DOWNLOADS_OBSOLETE");
+    if (grant.held !== held) {
+      if (!write()) throw refused("ERR_DOWNLOADS_UNAVAILABLE");
+      grant.held = held;
+    }
+    if (!held) return pump();
+    // Durable first; then its admission gives way and its transfer pauses.
+    if (background.admitting === authorization) {
+      background.admitting = null;
+      pump();
+    }
+    const task = background.task;
+    if (task?.authorization === authorization) stopTask(task, "pause");
+  },
+
+  async arrangeAuthorizations(authorizations: string[]) {
+    gate();
+    const listed = authorizations.flatMap((id) => {
+      const grant = background.grants.get(id);
+      return grant && grant.state !== "terminal" ? [grant] : [];
+    });
+    const places = listed.map((grant) => grant.order).toSorted((a, z) => a - z);
+    if (listed.every((grant, at) => grant.order === places[at])) return;
+    if (!write()) throw refused("ERR_DOWNLOADS_UNAVAILABLE");
+    listed.forEach((grant, at) => (grant.order = places[at]!));
   },
 
   async drainDownload(id: string) {
