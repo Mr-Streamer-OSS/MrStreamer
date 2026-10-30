@@ -24,17 +24,20 @@ import {
   transferred,
   type DownloadAction,
   showActions,
+  waitingTurn,
 } from "./download-controls.tsx";
 import { playDownload, useDownloads } from "./downloads.ts";
 import { Glass } from "./glass.tsx";
 import { Artwork } from "./titles-ui.tsx";
 import { colors, Notice } from "./ui.tsx";
 
-// Downloads as one list: the queue in the order added, then the copies on this iPhone, newest
+// Downloads as one list: the queue in its order, then the copies on this iPhone, newest
 // first, as the desktop's page. Empty sections are left out; how much the copies take and what is
-// free closes the list. Each row has one trailing glass button for what fits its state, the
-// rest in its long-press sheet, a swipe to the left and VoiceOver's actions. A copy plays offline
-// when its row is tapped; queue rows don't answer a tap, so a stray touch cancels nothing.
+// free closes the list. Each row has one trailing glass button for what fits its state, Pause or
+// Resume in the queue, the rest in its long-press sheet, a swipe to the left and VoiceOver's
+// actions; there, one waiting its turn also moves a place up or down among the others. A copy
+// plays offline when its row is tapped; queue rows don't answer a tap, so a stray touch changes
+// nothing.
 // Home pushes it with providers saved, and Connect without any, as copies play with none.
 
 /** A finished copy, or one whose file went, rather than something in the queue. */
@@ -59,6 +62,8 @@ export function DownloadsScreen() {
       ).filter((section) => section.data.length > 0),
     [list.items],
   );
+  // Those waiting their turn, in order: Move leaves out the first's up and the last's down.
+  const line = useMemo(() => list.items.filter(waitingTurn), [list.items]);
   const storage = [
     list.bytes > 0 ? `${formatBytes(list.bytes)} on this iPhone` : null,
     list.free !== null ? t("{size} free", { size: formatBytes(list.free) }) : null,
@@ -84,7 +89,9 @@ export function DownloadsScreen() {
           </Text>
         ) : null
       }
-      renderItem={({ item }) => <Row item={item} />}
+      renderItem={({ item }) => (
+        <Row item={item} first={line[0] === item} last={line.at(-1) === item} />
+      )}
       ItemSeparatorComponent={Separator}
       ListEmptyComponent={
         <Notice
@@ -109,10 +116,10 @@ function Separator() {
 
 /** The trailing button's symbol and label for the first action of each state. */
 const PRIMARY: Record<Download["status"]["kind"], { symbol: SFSymbol; label: string }> = {
-  queued: { symbol: "xmark", label: "Cancel download" },
-  waiting: { symbol: "xmark", label: "Cancel download" },
-  paused: { symbol: "xmark", label: "Cancel download" },
-  transferring: { symbol: "xmark", label: "Cancel download" },
+  queued: { symbol: "pause.fill", label: "Pause" },
+  waiting: { symbol: "pause.fill", label: "Pause" },
+  paused: { symbol: "arrow.down", label: "Resume" },
+  transferring: { symbol: "pause.fill", label: "Pause" },
   failed: { symbol: "arrow.clockwise", label: "Retry" },
   complete: { symbol: "play.fill", label: "Play offline" },
   missing: { symbol: "trash", label: "Delete download" },
@@ -129,11 +136,20 @@ const SWIPED: Record<Download["status"]["kind"], string> = {
   missing: "Delete",
 };
 
-const Row = memo(function Row({ item }: { item: Download }) {
+const Row = memo(function Row({
+  item,
+  first,
+  last,
+}: {
+  item: Download;
+  /** Whether it is the first, or last, of the downloads waiting their turn. */
+  first: boolean;
+  last: boolean;
+}) {
   const { fontScale } = useWindowDimensions();
   const { status } = item;
   const copy = onPhone(item);
-  const actions = actionsOf(item);
+  const actions = actionsOf(item, { first, last });
   const destructive = actions.find((action) => action.destructive);
   const sized = [
     copy && item.duration ? runtime(item.duration) : null,

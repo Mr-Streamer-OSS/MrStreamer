@@ -114,6 +114,16 @@ vi.mock("../src/downloads.ts", () => ({
   retryDownload: async (id: string) => {
     scenario.asked.push(`retry ${id}`);
   },
+  pauseDownload: async (id: string) => {
+    scenario.asked.push(`pause ${id}`);
+    if (id === "t") throw new Error("held");
+  },
+  resumeDownload: async (id: string) => {
+    scenario.asked.push(`resume ${id}`);
+  },
+  moveDownload: async (id: string, by: -1 | 1) => {
+    scenario.asked.push(`move ${id} ${by}`);
+  },
 }));
 
 const { DownloadsScreen } = await import("../src/downloads-screen.tsx");
@@ -166,6 +176,9 @@ const complete = movie("c", "North of Quiet", {
 });
 const kept = movie("k", "Small Hours", { status: { kind: "complete" }, subscription: null });
 const missing = movie("m", "Red Meridian", { status: { kind: "missing" } });
+const paused = movie("p", "Iron Bay", {
+  status: { kind: "paused", received: 300_000_000, size: 1_200_000_000 },
+});
 
 let unmount = () => {};
 let redraw = () => {};
@@ -257,17 +270,49 @@ describe("Downloads", () => {
 
   it("cancels a waiting download at once and asks before ending a transfer", async () => {
     show([waiting, transferring]);
-    button("w", "Cancel download").onPress!();
-    await settled();
+    row("w").onLongPress!();
+    await pick("Cancel download");
     expect(scenario.asked).toEqual(["remove w"]);
 
-    button("t", "Cancel download").onPress!();
+    row("t").onLongPress!();
+    await pick("Cancel download");
     expect(scenario.sheet?.title).toBe("Cancel downloading Paper Harbor · S1 E3?");
     await pick("Keep downloading");
     expect(scenario.asked).toEqual(["remove w"]);
-    button("t", "Cancel download").onPress!();
+    row("t").onLongPress!();
+    await pick("Cancel download");
     await pick("Cancel download");
     expect(scenario.asked).toEqual(["remove w", "remove t"]);
+  });
+
+  it("pauses and resumes at once, and moves one waiting its turn within the line", async () => {
+    show([transferring, queued, paused, failed]);
+    button("q", "Pause").onPress!();
+    button("p", "Resume").onPress!();
+    await settled();
+    expect(scenario.asked).toEqual(["pause q", "resume p"]);
+    expect(row("p").accessibilityLabel).toContain("Paused, 300 MB of 1.2 GB");
+
+    row("q").onLongPress!();
+    expect(scenario.sheet?.options).toEqual([
+      "Pause",
+      "Move Glass Orchard down",
+      "Cancel download",
+      "Cancel",
+    ]);
+    await pick("Move Glass Orchard down");
+    row("p").onAccessibilityAction!({ nativeEvent: { actionName: "Move Iron Bay up" } });
+    await settled();
+    expect(scenario.asked.slice(2)).toEqual(["move q 1", "move p -1"]);
+    expect(row("p").accessibilityActions?.map((action) => action.name)).toEqual([
+      "Resume",
+      "Move Iron Bay up",
+      "Cancel download",
+    ]);
+
+    button("t", "Pause").onPress!();
+    await settled();
+    expect(scenario.asked.at(-1)).toBe("alert Couldn't pause Paper Harbor · S1 E3");
   });
 
   it("retries a failed download, with Remove and its reason on long-press", async () => {
@@ -301,6 +346,7 @@ describe("Downloads", () => {
       "Paper Harbor, season 1 episode 3, The Tide Table, 1.4 GB, 42%, 590 MB of 1.4 GB, 6 min left",
     );
     expect(row("t").accessibilityActions?.map((action) => action.name)).toEqual([
+      "Pause",
       "Cancel download",
     ]);
     expect(row("c").accessibilityActions?.map((action) => action.name)).toEqual([

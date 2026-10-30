@@ -16,8 +16,11 @@ import {
 import {
   addDownload,
   downloadList,
+  moveDownload,
+  pauseDownload,
   playDownload,
   removeDownload,
+  resumeDownload,
   retryDownload,
   useDownloadOf,
 } from "./downloads.ts";
@@ -25,9 +28,11 @@ import { appError, describeError } from "./errors.ts";
 
 // What a download says and what can be done with it, wherever one shows: Downloads' rows, the
 // details' capsule and episode rows. Each state offers its own actions, as the desktop's do:
-// queued, waiting and transferring Cancel; failed Retry and Remove, with why it stopped; a copy
-// Play offline and Delete; a copy whose file went Delete. Ending a running transfer or deleting a
-// copy asks first, as both lose what took a while to download; the rest happens at once.
+// queued, waiting and transferring Pause and Cancel; paused Resume and Cancel; on Downloads, one
+// waiting its turn also moves up or down a place among the others; failed Retry and Remove, with
+// why it stopped; a copy Play offline and Delete; a copy whose file went Delete. Ending a running
+// transfer or deleting a copy asks first, as both lose what took a while to download; the rest
+// happens at once.
 // A sheet or a confirmation can stay open while the download moves on, so each action looks the
 // download up again when it runs, and again on confirming: it does what still applies, or nothing.
 
@@ -90,9 +95,17 @@ export function statusLine(download: Download): string {
       return download.subscription
         ? t("Waiting while {subscription} plays", { subscription: download.subscription.name })
         : t("Waiting for playback");
-    // The desktop's pause; this app's own queue has none yet.
     case "paused":
-      return t("Paused");
+      if (status.received === 0) return t("Paused");
+      return [
+        t("Paused"),
+        status.size
+          ? t("{received} of {size}", {
+              received: formatBytes(status.received),
+              size: formatBytes(status.size),
+            })
+          : formatBytes(status.received),
+      ].join(" · ");
     case "transferring": {
       const done = transferred(download);
       if (done === null || status.size === null) {
@@ -218,18 +231,66 @@ function deleteCopy(id: string) {
   });
 }
 
+/** Waiting its turn in the queue, paused or not: what Move passes. */
+export const waitingTurn = ({ status }: Download): boolean =>
+  status.kind === "queued" || status.kind === "waiting" || status.kind === "paused";
+
+/** Where a download waiting its turn stands among the others, as Downloads lists them. */
+export interface Turn {
+  readonly first: boolean;
+  readonly last: boolean;
+}
+
+/** Pause, or Resume once paused: at once, as neither loses what was downloaded. */
+function hold(download: Download): DownloadAction {
+  const name = nameOf(download);
+  return download.status.kind === "paused"
+    ? {
+        label: t("Resume download"),
+        destructive: false,
+        run: () => attempt(`Couldn't resume ${name}`, resumeDownload(download.id)),
+      }
+    : {
+        label: t("Pause download"),
+        destructive: false,
+        run: () => attempt(`Couldn't pause ${name}`, pauseDownload(download.id)),
+      };
+}
+
+/** Moves a download waiting its turn a place earlier (-1) or later (1). */
+function move(download: Download, by: -1 | 1): DownloadAction {
+  const name = nameOf(download);
+  return {
+    label: by < 0 ? t("Move {name} up", { name }) : t("Move {name} down", { name }),
+    destructive: false,
+    run: () => attempt(`Couldn't move ${name}`, moveDownload(download.id, by)),
+  };
+}
+
 /**
  * Everything that can be done with `download` as it stands, the first being what fits most. Each
- * run acts on the download as it is by then.
+ * run acts on the download as it is by then. With its `turn` among those waiting, one waiting its
+ * turn also moves, except past either end.
  */
-export function actionsOf(download: Download): readonly DownloadAction[] {
+export function actionsOf(download: Download, turn?: Turn): readonly DownloadAction[] {
   const { status } = download;
+  const cancelling = {
+    label: "Cancel download",
+    destructive: true,
+    run: () => cancel(download.id),
+  };
   switch (status.kind) {
     case "queued":
     case "waiting":
     case "paused":
+      return [
+        hold(download),
+        ...(turn && !turn.first ? [move(download, -1)] : []),
+        ...(turn && !turn.last ? [move(download, 1)] : []),
+        cancelling,
+      ];
     case "transferring":
-      return [{ label: "Cancel download", destructive: true, run: () => cancel(download.id) }];
+      return [hold(download), cancelling];
     case "failed":
       return [
         {
