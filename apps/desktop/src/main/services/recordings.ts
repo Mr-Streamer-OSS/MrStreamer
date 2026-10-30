@@ -144,7 +144,10 @@ export class Recordings extends Context.Service<
     schedule(plan: RecordingPlan, id?: string): Effect.Effect<ScheduledRecording, Failed>;
     /** Takes a schedule out; a recording it started goes on. */
     cancel(id: string): Effect.Effect<void, Failed>;
-    /** Checks the schedules now, as when the computer wakes or the clock may have moved. */
+    /**
+     * Checks the schedules now, as when the computer wakes or the clock may have moved, answering
+     * once the check is done. Starts it asks for go on in the background.
+     */
     readonly check: Effect.Effect<void>;
     /** The schedules after each change. */
     readonly scheduleChanges: Stream.Stream<readonly ScheduledRecording[]>;
@@ -763,14 +766,15 @@ function make(deps: RecordingsDeps) {
       return Math.min(now + (retry ? RETRY_MS : CHECK_MS), ...starts);
     });
 
+    const checkOnce = scheduling(checkNow).pipe(
+      Effect.catchDefect((defect) =>
+        Effect.as(Effect.logWarning("[recordings] checking schedules failed", defect), null),
+      ),
+    );
     yield* Effect.forkScoped(
       Effect.gen(function* () {
         for (;;) {
-          const next = yield* scheduling(checkNow).pipe(
-            Effect.catchDefect((defect) =>
-              Effect.as(Effect.logWarning("[recordings] checking schedules failed", defect), null),
-            ),
-          );
+          const next = yield* checkOnce;
           yield* next === null
             ? Queue.take(wakes)
             : Effect.raceFirst(Effect.sleep(Math.max(0, next - Date.now())), Queue.take(wakes));
@@ -814,7 +818,10 @@ function make(deps: RecordingsDeps) {
           id: id ?? randomUUID(),
           plan: found.plan,
           channelName: found.listed.title,
-          created: was?.created ?? now,
+          // Strictly after every other: of two that start together, the one saved first records.
+          created:
+            was?.created ??
+            Math.max(now, ...[...schedules.values()].map((each) => each.created + 1)),
           through: (recording && nextOccurrence(found.plan, now)?.stop) || now,
         };
         const kept = [...schedules.values()].filter((each) => each.id !== schedule.id);
@@ -970,7 +977,8 @@ function make(deps: RecordingsDeps) {
           ),
           wake,
         ),
-      check: wake,
+      // Checked now, and the loop then waits for the next time from there.
+      check: Effect.andThen(checkOnce, wake),
       scheduleChanges: Stream.fromPubSub(scheduleChanges),
     };
   });

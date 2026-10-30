@@ -7,8 +7,10 @@ import { createServer } from "node:http";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
-import type { Recording } from "@mrstreamer/contracts/recordings";
-import { describe, expect, it, onTestFinished } from "vitest";
+import type { Recording, RecordingPlan } from "@mrstreamer/contracts/recordings";
+import { Guide } from "@mrstreamer/core/guide/service";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { occurrences } from "../src/main/recordings/schedules.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Downloads } from "../src/main/services/downloads.ts";
 import { Library } from "../src/main/services/library.ts";
@@ -46,6 +48,7 @@ async function app(dataDir: string) {
     subscriptions: await promised(runtime, Subscriptions),
     library: await promised(runtime, Library),
     roster: await promised(runtime, Roster),
+    guide: await promised(runtime, Guide),
     quit: () => runtime.dispose(),
   };
 }
@@ -658,5 +661,332 @@ describe.skipIf(!hasTools)("recordings", () => {
       expect(await readFile(path, "utf8")).toBe(unreadable);
     }
     expect(provider.streamRequests()).toBe(0);
+  });
+});
+
+const GUIDED = "TEST | H.264 + AAC";
+const MINUTE = 60_000;
+/** Ten past seven in the evening, UTC: the fake guide's half-hour programmes start at :00 and :30. */
+const TEN_PAST = Date.UTC(2026, 9, 30, 19, 10);
+const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
+
+describe.skipIf(!hasTools)("recording schedules", () => {
+  /** A connected app whose clock the test sets, at `TEN_PAST`, with the guide read. */
+  async function scheduling(options: FakeProviderOptions = {}) {
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(TEN_PAST);
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const started = await connected(options);
+    await started.guide.refresh(started.subscriptionId);
+    const listing = async () => {
+      const own = started.channel(GUIDED);
+      const listed = (await started.guide.listings([own]))[`${own.subscriptionId}:${own.id}`];
+      if (!listed?.now || !listed.next) throw new Error("No guide");
+      return { now: listed.now, next: listed.next };
+    };
+    const programmePlan = (
+      programme: { start: number; stop: number; title: string },
+      padding = { before: 0, after: 0 },
+    ): RecordingPlan => ({
+      kind: "programme",
+      channel: started.channel(GUIDED),
+      start: programme.start,
+      stop: programme.stop,
+      title: programme.title,
+      padding,
+    });
+    /** The clock moves to `time`, and the app checks, as when the computer wakes. */
+    const clockTo = async (time: number) => {
+      vi.setSystemTime(time);
+      await started.recordings.check();
+    };
+    return { ...started, listing, programmePlan, clockTo };
+  }
+
+  it("records a programme from its padded start to its end, and lets it go once recorded", async () => {
+    const { provider, recordings, listing, programmePlan, clockTo } = await scheduling();
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next, { before: 1, after: 0 }));
+    expect(saved).toMatchObject({
+      status: { kind: "planned" },
+      next: { start: next.start - MINUTE, stop: next.stop },
+    });
+    expect(await recordings.schedules()).toEqual([saved]);
+    expect(provider.streamRequests()).toBe(0);
+
+    await clockTo(next.start - MINUTE);
+    const [recording] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    expect(recording).toMatchObject({
+      title: next.title,
+      stop: next.stop,
+      scheduled: { schedule: saved.id, from: next.start - MINUTE, late: null },
+    });
+    expect((await recordings.schedules())[0]?.status).toEqual({
+      kind: "recording",
+      recording: recording?.id,
+    });
+
+    // The capture sees its stop time pass, as the clock reads it.
+    vi.setSystemTime(next.stop + 1000);
+    const [done] = await until(recordings.list, ([first]) => first?.status.kind !== "recording");
+    expect(done?.status).toEqual({ kind: "complete" });
+    expect(await allClosed(provider)).toBe(true);
+    await recordings.check();
+    expect(await until(recordings.schedules, (list) => list.length === 0)).toEqual([]);
+    expect(await recordings.list()).toHaveLength(1);
+  });
+
+  it("waits while every connection is held, then records the rest, saying it started late", async () => {
+    const { provider, recordings, playback, channel, listing, programmePlan, clockTo } =
+      await scheduling();
+    const watching = await playback.open(channel(GUIDED), ["h264", "aac"]);
+    const player = await fetch(watching.url);
+    await player.body?.getReader().read();
+    const { now } = await listing();
+    const before = provider.streamRequests();
+
+    const saved = await recordings.schedule(programmePlan(now));
+    const [waiting] = await until(
+      recordings.schedules,
+      ([first]) => first?.status.kind === "waiting",
+    );
+    expect(waiting?.status).toEqual({ kind: "waiting", holders: [{ kind: "watch" }] });
+    expect(await recordings.list()).toEqual([]);
+    expect(provider.streamRequests()).toBe(before);
+
+    // Nothing stops for it: it records once Watch lets its connection go.
+    await playback.close(watching.sessionId);
+    await clockTo(now.start + 15 * MINUTE);
+    const [recording] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    expect(recording?.scheduled).toEqual({ schedule: saved.id, from: now.start, late: "busy" });
+    expect(recording?.stop).toBe(now.stop);
+    expect(recording!.start).toBeGreaterThanOrEqual(now.start + 15 * MINUTE);
+  });
+
+  it("writes a missed result for a time that passed while the app was closed, and records the rest of one it wakes into", async () => {
+    const { dataDir, subscriptionId, channel, recordings, quit } = await scheduling();
+    // Twenty past seven, UTC, every day in this computer's time zone, for ten minutes.
+    const at = new Date(TEN_PAST + 10 * MINUTE);
+    const plan: RecordingPlan = {
+      kind: "slot",
+      channel: channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 10,
+      title: "Evening",
+      padding: { before: 0, after: 0 },
+    };
+    const saved = await recordings.schedule(plan);
+    expect(saved.next).toEqual({ start: at.getTime(), stop: at.getTime() + 10 * MINUTE });
+    await quit();
+
+    vi.setSystemTime(TEN_PAST + 25 * MINUTE);
+    const again = await app(dataDir);
+    await again.library.refresh(subscriptionId);
+    const [missed] = await until(again.recordings.list, (list) => list.length > 0);
+    expect(missed).toMatchObject({
+      title: "Evening",
+      start: at.getTime(),
+      stop: at.getTime() + 10 * MINUTE,
+      bytes: 0,
+      status: { kind: "missed", why: "away" },
+    });
+    const tomorrow = new Date(
+      at.getFullYear(),
+      at.getMonth(),
+      at.getDate() + 1,
+      at.getHours(),
+      at.getMinutes(),
+    );
+    expect((await again.recordings.schedules())[0]).toMatchObject({
+      next: { start: tomorrow.getTime() },
+      status: { kind: "planned" },
+    });
+    // Removed, a missed result stays removed.
+    await again.recordings.remove(missed!.id);
+    await again.recordings.check();
+    expect(await again.recordings.list()).toEqual([]);
+
+    // The computer wakes three minutes into tomorrow's time: it records the rest.
+    vi.setSystemTime(tomorrow.getTime() + 3 * MINUTE);
+    await again.recordings.check();
+    const [late] = await until(
+      again.recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    expect(late?.scheduled).toEqual({ schedule: saved.id, from: tomorrow.getTime(), late: "away" });
+    expect(late?.stop).toBe(tomorrow.getTime() + 10 * MINUTE);
+  });
+
+  it("holds a programme the guide no longer lists at its start, recording no other show", async () => {
+    const { provider, recordings, listing, programmePlan, clockTo } = await scheduling();
+    const { next } = await listing();
+    const renamed = await recordings.schedule(programmePlan({ ...next, title: "Another show" }));
+    expect(renamed.status).toEqual({ kind: "changed", title: next.title });
+    const moved = await recordings.schedule(
+      programmePlan({ ...next, start: next.start + 5 * MINUTE }),
+    );
+    expect(moved.status).toEqual({ kind: "gone" });
+
+    await clockTo(next.start + 6 * MINUTE);
+    await clockTo(next.stop + MINUTE);
+    expect(provider.streamRequests()).toBe(0);
+    expect(await recordings.list()).toEqual([]);
+    expect(await recordings.schedules()).toEqual([]);
+  });
+
+  it("shows who holds the connection when two schedules overlap, the first saved recording first", async () => {
+    const { recordings, channel, listing, programmePlan } = await scheduling();
+    const { next } = await listing();
+    const first = await recordings.schedule(programmePlan(next));
+    const at = new Date(next.start);
+    const overlapping: RecordingPlan = {
+      kind: "slot",
+      channel: channel(TRACKS),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 30,
+      title: "Tracks",
+      padding: { before: 0, after: 0 },
+    };
+    expect((await recordings.plan(overlapping)).status).toEqual({
+      kind: "conflict",
+      holders: [{ kind: "schedule", title: next.title, until: next.stop }],
+    });
+    // Previewed only: nothing was saved.
+    expect(await recordings.schedules()).toEqual([first]);
+  });
+
+  it("cancels a schedule before its time, and leaves a recording it started going", async () => {
+    const { provider, recordings, listing, programmePlan, clockTo } = await scheduling();
+    const { now, next } = await listing();
+    const later = await recordings.schedule(programmePlan(next));
+    // Changed by its id: the same schedule, with padding.
+    const changed = await recordings.schedule(
+      programmePlan(next, { before: 2, after: 3 }),
+      later.id,
+    );
+    expect(changed).toMatchObject({
+      id: later.id,
+      next: { start: next.start - 2 * MINUTE, stop: next.stop + 3 * MINUTE },
+    });
+    await recordings.cancel(later.id);
+    expect(await recordings.schedules()).toEqual([]);
+
+    const current = await recordings.schedule(programmePlan(now));
+    const [recording] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    await recordings.cancel(current.id);
+    await clockTo(next.start + MINUTE);
+    expect(await recordings.schedules()).toEqual([]);
+    const list = await recordings.list();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: recording?.id, status: { kind: "recording" } });
+    expect(provider.activeStreams()).toBe(1);
+  });
+
+  it("goes with its subscription", async () => {
+    const { subscriptionId, recordings, roster, listing, programmePlan } = await scheduling();
+    await recordings.schedule(programmePlan((await listing()).next));
+    await roster.remove(subscriptionId, false);
+    expect(await recordings.schedules()).toEqual([]);
+  });
+
+  it("leaves a schedules file it can't read as it is, and schedules nothing meanwhile", async () => {
+    const { dataDir, listing, programmePlan } = await scheduling();
+    const { next } = await listing();
+    const path = join(dataDir, "recordings", "schedules.json");
+    const unreadable = JSON.stringify({ version: 2, schedules: [] });
+    await mkdir(join(dataDir, "recordings"), { recursive: true });
+    await writeFile(path, unreadable);
+    const { recordings } = await app(dataDir);
+    await expect(recordings.schedules()).rejects.toMatchObject({ error: { kind: "unexpected" } });
+    await expect(recordings.schedule(programmePlan(next))).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    expect(await readFile(path, "utf8")).toBe(unreadable);
+  });
+});
+
+describe("recording slot times", () => {
+  /** Runs `body` with this computer's time zone as `zone`. */
+  function inZone(zone: string, body: () => void) {
+    const was = process.env.TZ;
+    process.env.TZ = zone;
+    try {
+      body();
+    } finally {
+      if (was === undefined) delete process.env.TZ;
+      else process.env.TZ = was;
+    }
+  }
+  const slot = (at: number, minutes: number): RecordingPlan => ({
+    kind: "slot",
+    channel: { subscriptionId: "s", id: "1" },
+    days: EVERY_DAY,
+    at,
+    minutes,
+    title: "Night",
+    padding: { before: 2, after: 5 },
+  });
+
+  it("keeps a slot at its local time across daylight saving, an hour later where the clocks skip it", () => {
+    inZone("Europe/Amsterdam", () => {
+      // 02:30 for an hour: the clocks go forward at 02:00 on 29 March 2026 and back at 03:00 on
+      // 25 October.
+      const night = slot(150, 60);
+      const day = (from: string) =>
+        occurrences(night, Date.parse(from), Date.parse(from) + 20 * 60 * MINUTE)[0];
+      // CET, before the change: 02:28 local is 01:28 UTC.
+      expect(day("2026-03-28T00:00:00Z")).toEqual({
+        start: Date.parse("2026-03-28T01:28:00Z"),
+        stop: Date.parse("2026-03-28T02:35:00Z"),
+      });
+      // 02:30 doesn't happen: it starts at 03:30 CEST, 01:30 UTC.
+      expect(day("2026-03-29T00:00:00Z")).toEqual({
+        start: Date.parse("2026-03-29T01:28:00Z"),
+        stop: Date.parse("2026-03-29T02:35:00Z"),
+      });
+      // 02:30 happens twice: the first, in CEST.
+      expect(day("2026-10-24T23:00:00Z")).toEqual({
+        start: Date.parse("2026-10-25T00:28:00Z"),
+        stop: Date.parse("2026-10-25T01:35:00Z"),
+      });
+    });
+  });
+
+  it("carries a slot's padding and length past midnight, and only on its days", () => {
+    inZone("UTC", () => {
+      const fridays = { ...slot(23 * 60 + 30, 60), days: [5] };
+      // Friday 30 October 2026, 23:28 to Saturday 00:35.
+      expect(
+        occurrences(
+          fridays,
+          Date.parse("2026-10-29T00:00:00Z"),
+          Date.parse("2026-11-07T00:00:00Z"),
+        ),
+      ).toEqual([
+        { start: Date.parse("2026-10-30T23:28:00Z"), stop: Date.parse("2026-10-31T00:35:00Z") },
+        { start: Date.parse("2026-11-06T23:28:00Z"), stop: Date.parse("2026-11-07T00:35:00Z") },
+      ]);
+      // One under way at midnight is found from after it.
+      expect(
+        occurrences(
+          fridays,
+          Date.parse("2026-10-31T00:10:00Z"),
+          Date.parse("2026-10-31T01:00:00Z"),
+        ),
+      ).toHaveLength(1);
+    });
   });
 });
