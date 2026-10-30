@@ -249,6 +249,8 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
         autoCapitalize="none"
         returnKeyType="go"
         onSubmitEditing={submit}
+        // Replace link and Enter link open the form below the guides: its field takes focus.
+        autoFocus={replacing !== null}
         testID="guides-xmltv-link"
       />
       {replacing ? null : (
@@ -258,7 +260,8 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
           onChangeText={edit(setName)}
           placeholder="Optional"
           textContentType="none"
-          returnKeyType="next"
+          returnKeyType="go"
+          onSubmitEditing={submit}
           testID="guides-name"
         />
       )}
@@ -457,11 +460,20 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
       });
     return () => controller.abort();
   }, [channelKey, wanted, snapshot]);
-  const change = (guideId: string | null) =>
+  // Done and Save can both land before the first change answers: it alone goes back.
+  const pending = useRef(false);
+  const change = (guideId: string | null) => {
+    if (pending.current) return;
+    pending.current = true;
     void guides
       .map(channelKey, guideId)
       .catch((): GuideRefusal => "saving")
-      .then((refused) => (refused ? setRefusal(refused) : router.back()));
+      .then((refused) => {
+        pending.current = false;
+        if (refused) setRefusal(refused);
+        else router.back();
+      });
+  };
   const source = (owner: string) => {
     const link = links.find((each) => each.id === owner);
     return link ? labelOf(link) : (library?.labels.get(owner) ?? "its provider's guide");

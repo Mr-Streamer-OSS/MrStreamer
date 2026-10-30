@@ -3,7 +3,7 @@ import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import type { GuideRequest } from "@mrstreamer/core/provider";
 import { sha256Hex } from "@mrstreamer/core/sha256";
 import Constants from "expo-constants";
-import { readJson, writeJson } from "./files.ts";
+import { readJsonStrictly, writeJson } from "./files.ts";
 import { guide, type GuideOrigin } from "./guide.ts";
 import { playlistSecrets, playlistUncertain } from "./playlist.ts";
 import { keychainSecrets, type SecretStore } from "./secrets.ts";
@@ -74,11 +74,13 @@ const USER_AGENT = `MrStreamer/${Constants.expoConfig?.version ?? "0.0.0"} (iOS)
 export function createGuides(
   secrets: SecretStore = keychainSecrets,
   owner: Pick<typeof guide, "configure" | "attach" | "forget" | "refresh"> = guide,
-  read: () => unknown = () => readJson(FILE_NAME),
+  read: () => unknown = () => readJsonStrictly(FILE_NAME),
   write: (value: GuidesFile) => void = (value) => writeJson(FILE_NAME, value),
   now: () => number = Date.now,
 ) {
   let saved = EMPTY;
+  /** False after a launch couldn't read the file there: nothing writes over it until the next. */
+  let writable = true;
   const origins = new Map<string, GuideOrigin>();
   const shown = store<readonly GuideLink[]>([]);
   const mapped = store<ReadonlyMap<string, string>>(new Map());
@@ -91,6 +93,7 @@ export function createGuides(
     return run;
   };
   const commit = (next: GuidesFile) => {
+    if (!writable) throw new Error("The guides file couldn't be read.");
     write(next);
     saved = next;
   };
@@ -157,7 +160,6 @@ export function createGuides(
     const url = URL.parse(link.trim());
     if (!url || (url.protocol !== "https:" && url.protocol !== "http:")) return "address";
     const key = sha256Hex(url.href);
-    // A guide whose link the Keychain lost takes the same link back.
     if (saved.guides.some((each) => each.key === key && each.id !== replacing)) return "duplicate";
     const at = replacing ? saved.guides.findIndex((each) => each.id === replacing) : -1;
     const id = newId();
@@ -210,8 +212,14 @@ export function createGuides(
      * A file that doesn't read as one starts again empty.
      */
     load(): readonly string[] {
-      const parsed = File()(read());
-      saved = parsed instanceof type.errors ? EMPTY : parsed;
+      let parsed: GuidesFile | type.errors | null = null;
+      try {
+        parsed = File()(read());
+        writable = true;
+      } catch {
+        writable = false;
+      }
+      saved = parsed === null || parsed instanceof type.errors ? EMPTY : parsed;
       origins.clear();
       publish();
       return saved.guides.map(({ id }) => id);
@@ -245,7 +253,21 @@ export function createGuides(
     replace: (id: string, link: string) =>
       serially(async (): Promise<GuideRefusal | null> => {
         const old = saved.guides.find((each) => each.id === id);
-        return old ? added(link, old.name, id) : null;
+        if (!old) return null;
+        const url = URL.parse(link.trim());
+        // A guide whose link the Keychain lost takes it back under its id, keeping its guide.
+        if (url && sha256Hex(url.href) === old.key && !origins.has(id)) {
+          try {
+            await secrets.write(id, url.href);
+          } catch {
+            return "saving";
+          }
+          origins.set(id, originFor(url.href));
+          publish();
+          void owner.attach(id);
+          return null;
+        }
+        return added(link, old.name, id);
       }),
     remove: (id: string) => serially(() => removed(id)),
     refresh: (id: string) => owner.refresh(id),

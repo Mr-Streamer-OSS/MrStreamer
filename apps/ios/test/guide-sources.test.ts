@@ -14,9 +14,15 @@ const LINK = "https://guide.test/epg.xml.gz?token=private-guide-token";
 function launch(disk: { file: unknown; items: Map<string, string> }) {
   const { native, control } = guideFixture();
   const prepared: string[] = [];
+  control.prepare = async () => ({ kind: "failed", error: "network" });
   native.prepare = async (_lease, _job, url) => {
     prepared.push(url);
-    return { kind: "failed", error: "network" };
+    return control.prepare();
+  };
+  const cancel = native.cancel;
+  native.cancel = async (job) => {
+    control.calls.push(`cancel:${job}`);
+    return cancel(job);
   };
   const owner = createGuide(
     () => native,
@@ -135,20 +141,74 @@ describe("external guides", () => {
     await flush();
     expect(after.guides.links().map((each) => each.locked)).toEqual([true, false]);
     expect(after.prepared).toEqual(["https://other.test/epg.xml"]);
-    // Its own link again unlocks it, in its place.
+    // Its own link again unlocks it, under its id, so its saved guide stays.
     expect(await after.guides.replace(lost.id, LINK)).toBeNull();
     await flush();
-    expect(after.guides.links().map((each) => [each.origin, each.locked])).toEqual([
-      ["https://guide.test", false],
-      ["https://other.test", false],
+    expect(after.guides.links().map((each) => [each.id, each.locked])).toEqual([
+      [lost.id, false],
+      [before.guides.links()[1]!.id, false],
     ]);
+    expect(after.control.calls).not.toContain(`forget:${lost.id}`);
     expect(after.prepared.at(-1)).toBe(LINK);
   });
 
-  it("starts empty from a guides file it can't read", () => {
+  it("starts empty from a guides file it can't read, writing over none it couldn't open", async () => {
     const { guides } = launch({ file: { version: 2 }, items: new Map() });
     expect(guides.load()).toEqual([]);
     expect(guides.links()).toEqual([]);
+    expect(await guides.add(LINK)).toBeNull();
+    const locked = { file: null as unknown, items: new Map<string, string>() };
+    const before = launch(locked);
+    before.guides.load();
+    await before.guides.add(LINK);
+    const saved = locked.file;
+    const after = createGuides(
+      {
+        read: async () => null,
+        write: async () => {},
+        remove: async () => {},
+        clear: async () => {},
+      },
+      createGuide(
+        () => guideFixture().native,
+        Date.now,
+        () => undefined,
+      ),
+      () => {
+        throw new Error("Protected until the first unlock.");
+      },
+      (value) => {
+        locked.file = value;
+      },
+    );
+    expect(after.load()).toEqual([]);
+    expect(await after.add("https://other.test/epg.xml")).toBe("saving");
+    expect(await after.map("a:1", "news")).toBe("saving");
+    expect(locked.file).toBe(saved);
+  });
+
+  it("cancels a removed guide's download under way before erasing it", async () => {
+    const { guides, owner, control } = launch(fresh());
+    guides.load();
+    let started!: () => void;
+    const downloading = new Promise<void>((resolve) => (started = resolve));
+    control.prepare = () => {
+      started();
+      return new Promise(() => {});
+    };
+    await guides.add(LINK);
+    await downloading;
+    const { id } = guides.links()[0]!;
+    expect(owner.status(id).activity).toBe("loading");
+    await guides.remove(id);
+    const revoked = control.calls.indexOf(`revoke:${id}`);
+    const cancelled = control.calls.findIndex(
+      (call, at) => at > revoked && call.startsWith("cancel:"),
+    );
+    expect(revoked).toBeGreaterThan(-1);
+    expect(cancelled).toBeGreaterThan(revoked);
+    expect(control.calls.indexOf(`forget:${id}`)).toBeGreaterThan(cancelled);
+    expect(owner.status(id).availability).toBe("unknown");
   });
 });
 

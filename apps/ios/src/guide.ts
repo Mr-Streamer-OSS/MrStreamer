@@ -365,7 +365,11 @@ export function createGuide(
         ? [{ owner, entry, generation: entry.generation }]
         : [];
     });
-    const passes = trying ? [[trying]] : mapped ? [[mapped], own] : [own];
+    const passes = trying
+      ? [[trying]]
+      : mapped
+        ? [[mapped], own.filter((id) => id !== mapped)]
+        : [own];
     return passes
       .filter((ids) => ids.length > 0)
       .flatMap((ids) =>
@@ -556,6 +560,12 @@ export function createGuide(
     },
     setPart(part: Part) {
       parts.set(part.subscriptionId, part);
+      // Its channels' reads from external guides too.
+      for (const [key, value] of tokens)
+        if (value.part.subscriptionId === part.subscriptionId) {
+          withdraw(value);
+          drop(key);
+        }
       const entry = entries.get(part.subscriptionId);
       if (entry) {
         invalidate(entry);
