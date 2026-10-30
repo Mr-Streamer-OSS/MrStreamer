@@ -831,7 +831,9 @@ final class TransferOwner: NSObject, URLSessionDownloadDelegate {
       self.commit({ ledger in
         guard ledger.sources[source] == enabled, !self.gated(source) else { return false }
         let load = ledger.load
-        guard load.authorizations < Self.window,
+        // Held ones wait outside the window, within the queue's capacity.
+        let waiting = ledger.authorizations.values.filter { $0.state != .terminal && $0.held != true }
+        guard waiting.count < Self.window,
           load.authorizations + load.receipts + 1 <= Self.capacity
         else {
           full = true
@@ -1897,7 +1899,10 @@ final class TransferOwner: NSObject, URLSessionDownloadDelegate {
         binding.revalidating = false
         guard self.owns(binding), !binding.networkClosed else { return }
         switch self.judge(id, found) {
-        case .valid: binding.validated = true
+        case .valid:
+          binding.validated = true
+          // Held durably before the process ended, before its pause reached the task.
+          if self.ledger?.authorizations[id]?.held == true { self.stopHeld(id) }
         // Not decided: it stays gated, and is read again on a later legitimate trigger. A revoke
         // or removal that does become durable cancels it itself.
         case .unavailable, .pending: break

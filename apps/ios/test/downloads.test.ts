@@ -1451,6 +1451,25 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(mediaFile(film.id)?.size).toBe(fixture(movie().fixture!).length);
   });
 
+  it("pauses at the next launch a transfer whose pause was written down but never reached the native side", async () => {
+    let app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    // The process ends between the record's write and the native hold.
+    const written = doc();
+    written.items[0].paused = true;
+    background.die();
+    new DiskFile(native.root, "documents", "downloads.json").writeSync(JSON.stringify(written));
+    app = await launch();
+    await until(() => native.open === 0, "the transfer to pause");
+    await sleep(1_500);
+    expect(native.open).toBe(0);
+    expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+    expect(background.events.filter((each) => each === `start:${film.id}`)).toHaveLength(1);
+  });
+
   it("moves a waiting download ahead of another, and the native queue goes in that order with no JavaScript", async () => {
     const app = await installedApp();
     const { a } = await withProviders(app);

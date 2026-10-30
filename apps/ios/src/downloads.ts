@@ -111,7 +111,7 @@ const ROOT = "downloads";
 const PROGRESS_MS = 250;
 /** How often a transfer's progress is written down. */
 const SAVE_MS = 5000;
-/** Unfinished authorizations the native queue may hold at once. */
+/** Unfinished authorizations the native queue may hold at once, paused ones aside. */
 const WINDOW = 32;
 /** How long removing a copy waits for its task and readers to close before its folder waits. */
 const CLOSE_MS = 10_000;
@@ -1312,6 +1312,9 @@ async function firstForeground(): Promise<void> {
     }
     await finishRemovals();
     if (!bound) await bindLogins();
+    // Before anything new is admitted: a pause or a move a relaunch interrupted counts first.
+    await restoreHolds();
+    await arrange().catch(() => undefined);
     await transfers.finishForegroundReconcile(token);
     barrier = "done";
   } catch {
@@ -1370,21 +1373,33 @@ async function fill() {
       update(record.id, (latest) => ({ ...unbound(latest), state: "queued" }));
     }
   }
-  for (const record of doc.items) {
-    // A pause or Resume whose native half a relaunch or a refusal left undone.
-    const bound = boundOf(record);
-    const view = bound && known.get(bound.authorization);
-    const paused = record.state === "queued" && record.paused === true;
-    if (bound && view && view.state !== "terminal" && view.held !== paused) {
-      await transfers.holdAuthorization(bound.authorization, paused).catch(() => undefined);
-    }
-  }
-  let open = snapshot.authorizations.filter((view) => view.state !== "terminal").length;
+  await restoreHolds();
+  // A paused one keeps its authorization outside the window, so pauses never starve the rest.
+  let open = [...known.values()].filter((view) => view.state !== "terminal" && !view.held).length;
   for (const record of doc.items) {
     if (open >= WINDOW || !foreground) break;
     if (await authorize(record)) open++;
   }
   await arrange();
+}
+
+/**
+ * Holds or lets go each authorization as its record's pause says, where a relaunch or a refusal
+ * between the two writes left the native side behind; `known` follows what was kept.
+ */
+async function restoreHolds() {
+  for (const record of doc.items) {
+    const bound = boundOf(record);
+    const view = bound && known.get(bound.authorization);
+    const paused = record.state === "queued" && record.paused === true;
+    if (!bound || !view || view.state === "terminal" || view.held === paused) continue;
+    try {
+      await transfers.holdAuthorization(bound.authorization, paused);
+      known.set(bound.authorization, { ...view, held: paused });
+    } catch {
+      // Tried again at the next refill.
+    }
+  }
 }
 
 /** Puts the native queue in the records' order: what the list shows next is what goes next. */
@@ -1883,8 +1898,12 @@ export async function resumeDownload(id: string): Promise<void> {
   refill();
 }
 
-/** Waiting its turn, paused or not: what Move passes. The transfer under way keeps its place. */
-const waitingTurn = (record: Stored) => unfinished(record) && transferring(record) === null;
+/**
+ * Waiting its turn, paused or not, as its status says: what Move passes. The transfer under way
+ * keeps its place; one paused while its request is still closing shows paused, and moves.
+ */
+const waitingTurn = (record: Stored) =>
+  unfinished(record) && (record.paused === true || transferring(record) === null);
 
 /**
  * Moves a download waiting its turn one place earlier (-1) or later (1) among those waiting, the
