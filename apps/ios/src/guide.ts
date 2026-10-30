@@ -10,9 +10,20 @@ import {
   type Query,
   type Result,
 } from "./guide-native.ts";
+import type { Provider } from "@mrstreamer/core/provider";
 import type { Part } from "./library.ts";
-import { currentSource, type Source } from "./sources.ts";
+import type { SourceLogin } from "./login-safety.ts";
+import { currentSource } from "./sources.ts";
 import { store } from "./store.ts";
+
+/**
+ * What a guide downloads with: a subscription's Source, or an external guide's link
+ * (guide-sources.ts), its `login` the parts of the link no saved programme may hold.
+ */
+export interface GuideOrigin extends SourceLogin {
+  readonly revision: number;
+  readonly provider: Pick<Provider, "liveGuideRequest">;
+}
 
 export interface GuideStatus {
   readonly availability: "unknown" | "none" | "available";
@@ -36,7 +47,7 @@ interface Entry {
   activation: Activation;
   /** Cached reads may stand while attach is pending, but its old lease cannot refresh. */
   activating?: true;
-  readonly source: Source | undefined;
+  readonly source: GuideOrigin | undefined;
   part?: Part;
   generation: Generation | null;
   failedAt: number;
@@ -45,6 +56,8 @@ interface Entry {
   readonly jobs: Set<string>;
 }
 interface Token {
+  /** The subscription or external guide whose guide `entry` is. */
+  readonly owner: string;
   readonly entry: Entry;
   readonly part: Part;
   readonly generation: Generation;
@@ -52,11 +65,17 @@ interface Token {
   readonly key: string;
   readonly start: number;
   readonly day?: Day;
+  /** The `configure` it was read under: new guides or mappings withdraw it. */
+  readonly layout: number;
 }
 /** A token schedule() handed out, with the start of the day read that minted it. */
 interface Minted extends Token {
   readonly on: number;
 }
+const listingOf = (rows: readonly Programme[], at: number): Listing => ({
+  now: rows.find((row) => row.start <= at && row.stop > at) ?? null,
+  next: rows.find((row) => row.start > at) ?? null,
+});
 const FRESH = 6 * 3600_000;
 const MAX_AGE = 7 * 86400_000;
 const EMPTY: GuideStatus = {
@@ -67,11 +86,16 @@ const EMPTY: GuideStatus = {
   error: null,
 };
 
-/** Sole JS owner. Account supplies lifecycle and Parts; screens only read this service. */
+/**
+ * Sole JS owner. Account supplies lifecycle and Parts, guide-sources.ts the external guides and
+ * mappings (`configure`); screens only read this service. A channel's programmes come from the
+ * first guide with current ones for the guide id it is mapped to, then for its own guide ids: its
+ * subscription's guide first, then each external guide in order.
+ */
 export function createGuide(
   port: () => GuideNative = nativeGuide,
   now: () => number = Date.now,
-  sourceOf = currentSource,
+  sourceOf: (key: string) => GuideOrigin | undefined = currentSource,
 ) {
   const entries = new Map<string, Entry>();
   const parts = new Map<string, Part>();
@@ -85,6 +109,12 @@ export function createGuide(
   let listeners = 0;
   let clock: ReturnType<typeof setInterval> | undefined;
   let lifecycle: readonly { remove(): void }[] = [];
+  /** Undefined for one whose link the Keychain didn't give back: its saved guide still reads. */
+  let externals: ReadonlyMap<string, GuideOrigin | undefined> = new Map();
+  /** Guide ids by `Channel.key`, which a channel's programmes are read by before its own. */
+  let mappings: ReadonlyMap<string, string> = new Map();
+  let layout = 0;
+  const originOf = (key: string) => sourceOf(key) ?? externals.get(key);
   const id = () => `g${++sequence}`;
   const cancel = async (job: string) => {
     try {
@@ -94,7 +124,7 @@ export function createGuide(
     }
   };
   const stands = (key: string, entry: Entry) =>
-    entries.get(key) === entry && sourceOf(key) === entry.source;
+    entries.get(key) === entry && originOf(key) === entry.source;
   const usable = (g: Generation | null) =>
     g !== null &&
     g.until > now() &&
@@ -181,11 +211,11 @@ export function createGuide(
     return key;
   };
   const validToken = (value: Token) =>
-    [...entries.values()].includes(value.entry) &&
-    value.entry.part === value.part &&
+    value.layout === layout &&
+    stands(value.owner, value.entry) &&
+    parts.get(value.part.subscriptionId) === value.part &&
     value.entry.generation === value.generation &&
-    usable(value.generation) &&
-    sourceOf(value.part.subscriptionId) === value.entry.source;
+    usable(value.generation);
   const cancelEntry = (entry: Entry) => {
     entry.refreshAbort?.abort();
     invalidate(entry);
@@ -204,7 +234,7 @@ export function createGuide(
     if (!foreground) return;
     let entry = entries.get(key);
     // A failed activation has no usable lease. The public Retry action must acquire one.
-    if (!entry && explicit && sourceOf(key)) {
+    if (!entry && explicit && originOf(key)) {
       await service.attach(key);
       entry = entries.get(key);
     }
@@ -304,31 +334,63 @@ export function createGuide(
     })();
     return entry.refresh;
   }
-  const capture = (key: string): Token | null => {
+  /** The channel an owned key names, by its canonical key, with its subscription's Part. */
+  const channelOf = (key: string) => {
     const colon = key.indexOf(":");
     if (colon < 1) return null;
-    const owned = { subscriptionId: key.slice(0, colon), id: key.slice(colon + 1) };
-    const entry = entries.get(owned.subscriptionId);
-    const part = entry?.part;
-    const channel = part?.byId.get(owned.id);
-    if (
-      !entry ||
-      !part ||
-      !channel ||
-      !stands(owned.subscriptionId, entry) ||
-      !usable(entry.generation) ||
-      !entry.generation
-    )
-      return null;
-    return {
-      entry,
-      part,
-      generation: entry.generation,
-      ids: part.guideIds.get(channel.id) ?? [],
-      key: channel.key,
-      start: -1,
-    };
+    const part = parts.get(key.slice(0, colon));
+    const channel = part?.byId.get(key.slice(colon + 1));
+    return part && channel ? { part, channel } : null;
   };
+  /**
+   * What to read a channel by, in order, from each guide with a usable generation: its mapped id,
+   * then its own ids, or only `trying`.
+   */
+  const candidates = (key: string, trying?: string): Token[] => {
+    const found = channelOf(key);
+    if (!found) return [];
+    const { part, channel } = found;
+    const own = part.guideIds.get(channel.id) ?? [];
+    const mapped = mappings.get(channel.key);
+    const guides = [part.subscriptionId, ...externals.keys()];
+    const passes = trying ? [[trying]] : mapped ? [[mapped], own] : [own];
+    return passes.flatMap((ids) =>
+      ids.length === 0
+        ? []
+        : guides.flatMap((owner) => {
+            const entry = entries.get(owner);
+            return entry?.generation && stands(owner, entry) && usable(entry.generation)
+              ? [
+                  {
+                    owner,
+                    entry,
+                    part,
+                    generation: entry.generation,
+                    ids,
+                    key: channel.key,
+                    start: -1,
+                    layout,
+                  },
+                ]
+              : [];
+          }),
+    );
+  };
+  /** The first candidate whose guide has the channel, with its answer. */
+  async function first(
+    key: string,
+    mode: "listing" | "day",
+    day: Day,
+    signal?: AbortSignal,
+    trying?: string,
+  ) {
+    for (const captured of candidates(key, trying)) {
+      const answer = await query(captured, mode, day, signal);
+      if (signal?.aborted) return null;
+      if (answer?.guideId) return { captured, answer };
+    }
+    return null;
+  }
   async function query(
     value: Token,
     mode: "listing" | "day" | "detail",
@@ -444,7 +506,7 @@ export function createGuide(
       }
     },
     async attach(key: string) {
-      const source = sourceOf(key);
+      const source = originOf(key);
       const cycle = era;
       if (!source) return;
       const before = entries.get(key);
@@ -468,7 +530,7 @@ export function createGuide(
       try {
         connect();
         const activation = await port().attach(key, source.revision);
-        if (sourceOf(key) !== source || versions.get(key) !== version || cycle !== era) return;
+        if (originOf(key) !== source || versions.get(key) !== version || cycle !== era) return;
         const entry: Entry = pending ?? {
           activation,
           source,
@@ -494,7 +556,7 @@ export function createGuide(
           cancelEntry(pending);
           entries.delete(key);
         }
-        if (sourceOf(key) === source && versions.get(key) === version && cycle === era)
+        if (originOf(key) === source && versions.get(key) === version && cycle === era)
           update(key, { error: "unavailable" });
       }
     },
@@ -505,6 +567,41 @@ export function createGuide(
         invalidate(entry);
         entry.part = part;
       }
+    },
+    /**
+     * The external guides, in the order channels read them after their subscription's own, and
+     * guide ids by `Channel.key`. Every read handed out before is withdrawn and screens told, so
+     * they read again. A guide given a new link needs `attach` again.
+     */
+    configure(
+      guides: ReadonlyMap<string, GuideOrigin | undefined>,
+      mapped: ReadonlyMap<string, string>,
+    ) {
+      externals = guides;
+      mappings = mapped;
+      layout++;
+      for (const value of tokens.values()) withdraw(value);
+      tokens.clear();
+      minted.clear();
+      state.set(new Map(state.get()));
+    },
+    /** The guide ids channel `key`'s provider names it by, as its own guide is read. */
+    guideIdsOf(key: string): readonly string[] {
+      const found = channelOf(key);
+      return found?.part.guideIds.get(found.channel.id) ?? [];
+    },
+    /**
+     * What channel `key` shows now and next when mapped to `guideId`, and from which guide: its
+     * subscription's or an external guide's id. Null where no guide has current programmes for it.
+     */
+    async preview(
+      key: string,
+      guideId: string,
+      options?: { readonly signal?: AbortSignal },
+    ): Promise<{ readonly guide: string; readonly listing: Listing } | null> {
+      const read = await first(key, "listing", { from: 0, until: 0 }, options?.signal, guideId);
+      if (!read || options?.signal?.aborted || !validToken(read.captured)) return null;
+      return { guide: read.captured.owner, listing: listingOf(read.answer.rows, now()) };
     },
     async forget(key: string): Promise<boolean> {
       versions.set(key, (versions.get(key) ?? 0) + 1);
@@ -540,29 +637,22 @@ export function createGuide(
       options?: { readonly signal?: AbortSignal },
     ): Promise<ReadonlyMap<string, Listing>> {
       if (keys.length > 40) throw new GuideFault("reply");
-      const answers = new Map<string, { capture: Token | null; answer: Query | null }>();
+      const answers = new Map<string, Awaited<ReturnType<typeof first>>>();
       // Retain each requested alias independently. Later batches must not hide earlier captures.
       for (let offset = 0; offset < keys.length; offset += 2)
         await Promise.all(
           keys.slice(offset, offset + 2).map(async (key) => {
-            const captured = capture(key);
-            const answer = captured
-              ? await query(captured, "listing", { from: 0, until: 0 }, options?.signal)
-              : null;
-            answers.set(key, { capture: captured, answer });
+            answers.set(key, await first(key, "listing", { from: 0, until: 0 }, options?.signal));
           }),
         );
       const result = new Map<string, Listing>();
       const at = now();
       for (const [key, value] of answers) {
         const rows =
-          !options?.signal?.aborted && value.capture && validToken(value.capture)
-            ? value.answer?.rows
+          !options?.signal?.aborted && value && validToken(value.captured)
+            ? value.answer.rows
             : undefined;
-        result.set(key, {
-          now: rows?.find((row) => row.start <= at && row.stop > at) ?? null,
-          next: rows?.find((row) => row.start > at) ?? null,
-        });
+        result.set(key, listingOf(rows ?? [], at));
       }
       return result;
     },
@@ -584,20 +674,25 @@ export function createGuide(
       const tomorrow = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
       if (start.getTime() !== day.from || tomorrow.getTime() !== day.until)
         throw new GuideFault("time");
-      const captured = cursor ? tokens.get(cursor) : capture(key);
-      if (
-        !captured ||
-        !validToken(captured) ||
-        (cursor &&
-          (captured.day?.from !== day.from ||
-            captured.day.until !== day.until ||
-            capture(key)?.key !== captured.key))
-      )
+      let read: Awaited<ReturnType<typeof first>> = null;
+      if (cursor) {
+        const captured = tokens.get(cursor);
+        if (
+          captured &&
+          validToken(captured) &&
+          captured.day?.from === day.from &&
+          captured.day.until === day.until &&
+          channelOf(key)?.channel.key === captured.key
+        ) {
+          const answer = await query(captured, "day", day, options?.signal);
+          if (answer) read = { captured, answer };
+        }
+      } else read = await first(key, "day", day, options?.signal);
+      const guideId = read?.answer.guideId;
+      if (!read || !guideId || options?.signal?.aborted || !validToken(read.captured))
         return { programmes: [], cursor: null };
-      const answer = await query(captured, "day", day, options?.signal);
-      if (!answer?.guideId || options?.signal?.aborted || !validToken(captured))
-        return { programmes: [], cursor: null };
-      const ids = [answer.guideId];
+      const { captured, answer } = read;
+      const ids = [guideId];
       const programmes = answer.rows.map(({ start, stop, title }) => ({
         start,
         stop,
