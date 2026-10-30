@@ -296,6 +296,8 @@ async function within<A>(promise: Promise<A>, ms: number, signal: AbortSignal): 
 }
 
 function failureOf(cause: unknown): StreamFailure {
-  if (cause instanceof HlsInputFailure) return cause.failure;
-  return { kind: "network", detail: cause instanceof Error ? cause.message : String(cause) };
+  // Recorder-authored details stay on CaptureFailure; transport messages are not localized.
+  if (cause instanceof HlsInputFailure)
+    return cause.failure.kind === "network" ? { ...cause.failure, detail: "" } : cause.failure;
+  return { kind: "network", detail: "" };
 }

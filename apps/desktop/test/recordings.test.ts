@@ -310,8 +310,12 @@ describe.skipIf(!hasTools)("recordings", () => {
     // Its program table is being written: it becomes active while the subscription goes.
     const folder = join(dataDir, "recordings");
     const writing = () =>
-      readdirSync(folder).some((name) =>
-        readdirSync(join(folder, name)).some((file) => statSync(join(folder, name, file)).size > 0),
+      readdirSync(folder, { withFileTypes: true }).some(
+        (entry) =>
+          entry.isDirectory() &&
+          readdirSync(join(folder, entry.name)).some(
+            (file) => statSync(join(folder, entry.name, file)).size > 0,
+          ),
       );
     const writingDeadline = Date.now() + 10_000;
     while (!existsSync(folder) || !writing()) {
@@ -453,6 +457,15 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await recordings.list()).toEqual([]);
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: [] });
     expect(await readdir(join(dataDir, "recordings")).catch(() => [])).toEqual([]);
+  });
+
+  it("keeps raw transport messages out of a recording's start failure", async () => {
+    const { channel, recordings } = await connected({
+      streams: (_source, out) => out.destroy(),
+    });
+    await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject({
+      error: { kind: "stream", failure: { kind: "network", detail: "" } },
+    });
   });
 
   it("ends a start whose provider never sends response headers, releasing its connection", async () => {

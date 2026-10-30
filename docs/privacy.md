@@ -1,6 +1,6 @@
 # Privacy policy
 
-Last updated 27 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
+Last updated 30 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
 
 Mr. Streamer is a free, open-source IPTV player for your computer and iPhone. It has no Mr. Streamer account or in-app purchases, shows no ads and doesn't sell data. When you connect your own provider, its streams and requests go directly between your device and the services you connect. We also operate a restricted sample provider for app review, described below.
 
@@ -18,6 +18,7 @@ Most of what the desktop app handles never reaches us. It stays in its data fold
 - programme reminders in `reminders.json`: the programme's title, channel, start and end times, and whether it was shown or missed
 - copies of each provider's channel, guide, movie and series lists, and what TMDB said about them
 - downloaded movies and episodes, with their details, pictures, subtitles and progress
+- live TV recordings in `recordings/`: saved `.ts` files and their channel, title, times, size and outcome in `recordings.json`
 - subtitle-service settings and saved subtitles, if you turn subtitle search on
 - the statistics setting, its installation identifier and up to 64 statistics items: queued events, the open five-minute counts and one unfinished play
 - a diagnostics log with no addresses, logins or channel names
@@ -165,6 +166,7 @@ In the desktop app:
 - **Also delete** in an older app without custom lists leaves that account's list channels on disk while you use that app. The next start of an app with custom lists deletes them before showing lists, even if you added the same account again in the older app.
 - **The cross** on a guide in Settings > Guides deletes its address, its name and what it downloaded. Every subscription reads those guides, so removing a subscription keeps them.
 - **Delete** on a download deletes the copy with its details, pictures, progress and subtitles.
+- **Delete** on a recording removes its saved video and recording entry. Removing a subscription stops its active recordings and keeps saved recordings until you delete them.
 - **The cross** on a reminder in Live TV's reminders list deletes it.
 - **Deleting the data folder** deletes everything else, including the statistics setting, so a new folder starts with statistics on. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS or the matching entry in your Linux keyring. A downloaded update stays in `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows or `~/.cache/mrstreamer-updater` on Linux until you delete that folder.
 - **Statistics already sent** are not erased by local removal or turning the setting off. If you still have the desktop `installationId` in `analytics.json`, you can supply it privately with a request through the contact below. It may help identify the records; it does not itself perform deletion.
