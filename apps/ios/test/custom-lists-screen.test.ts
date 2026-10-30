@@ -73,7 +73,7 @@ vi.mock("react-native", async () => {
       accessibilityLabel?: string;
       disabled?: boolean;
       onPress?: () => void;
-      onLongPress?: (event: { currentTarget: null }) => void;
+      onLongPress?: () => void;
       ref?: React.Ref<HTMLButtonElement>;
     }) =>
       createElement(
@@ -84,7 +84,7 @@ vi.mock("react-native", async () => {
           disabled,
           ref,
           onClick: onPress,
-          onContextMenu: () => onLongPress?.({ currentTarget: null }),
+          onContextMenu: () => onLongPress?.(),
         },
         children,
       ),

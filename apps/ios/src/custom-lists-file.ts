@@ -71,8 +71,8 @@ function keep(next: Kept) {
 }
 
 /**
- * The lists as the file holds them, for a change: a failure, changing nothing, while it doesn't
- * read, tried again first, or holds lists this build can't read.
+ * The lists as the file holds them, for a change. Throws, changing nothing, while the file doesn't
+ * read, after reading it again, or holds lists this build can't read.
  */
 export function stored(): readonly StoredList[] {
   if (keptNow().kind === "unreadable") {
