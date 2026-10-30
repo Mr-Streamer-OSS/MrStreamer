@@ -1484,7 +1484,7 @@ export const es: Translation = {
     "Graba mientras Mr. Streamer esté abierto y el ordenador no esté en reposo.",
   "Schedule anyway": "Programar de todos modos",
   Schedule: "Programar",
-  Scheduled: "Programado",
+  Scheduled: "Programada",
   "Cancel schedule": "Cancelar la programación",
   "It has no time to come.": "No hay más horarios previstos.",
   "{when} to {end} on {channel}.": "{when} a {end} en {channel}.",
