@@ -16,8 +16,9 @@ import { native } from "./native-files.ts";
 // - Every ending is a receipt under the next sequence, kept until acknowledged. A pause keeps the
 //   same authorization runnable; a removal ends it cancelled; a revoke ends its source's with a
 //   refresh; a resume the server refuses starts once more from nothing, with no receipt, after
-//   its resume data is deleted. At most 32 unfinished authorizations the viewer doesn't hold,
-//   and 127 with receipts: the pump admits only below 128, and held ones never end by themselves.
+//   its resume data is deleted. A reservation leaves at most 32 unfinished authorizations the
+//   viewer doesn't hold, and 127 with receipts: the pump admits only below 128, and held ones
+//   never end by themselves.
 // - A removal or revoke is fenced by its ledger write, or when the ledger refuses (`faults`), by
 //   deleting its request items; neither waits for its task to end.
 // - The viewer's hold pauses its authorization's task, keeping its resume data, and keeps it from
