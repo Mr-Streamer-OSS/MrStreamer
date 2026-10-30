@@ -115,6 +115,8 @@ const SAVE_MS = 5000;
 const WINDOW = 32;
 /** How long removing a copy waits for its task and readers to close before its folder waits. */
 const CLOSE_MS = 10_000;
+/** How soon a first foreground held back by a pause that wasn't kept is tried again. */
+const HELD_BACK_MS = 5_000;
 const ARTWORK_MS = 20_000;
 /** A download's id: also its folder's name. */
 const ID = /^d-[a-z0-9-]+$/;
@@ -1271,7 +1273,8 @@ async function bindLogins(): Promise<void> {
  * is taken in; a queue whose authority is damaged is started over once, its records' old
  * authorizations and the logins' bindings let go of and bound again; unfinished removals finish;
  * then the barrier ends and the queue is refilled. Refused or interrupted, it stays blocked, and
- * is tried again at the next foreground; later foregrounds only refill.
+ * is tried again at the next foreground, or soon when a pause wasn't kept, or when the viewer's
+ * Pause, Resume or Cancel may have settled it; later foregrounds only refill.
  */
 async function firstForeground(): Promise<void> {
   if (barrier === "done") {
@@ -1319,7 +1322,13 @@ async function firstForeground(): Promise<void> {
     if (!bound) await bindLogins();
     // Before anything new is admitted: a pause a relaunch interrupted is kept first, and the
     // barrier stays up until it is. A move is put in order too; one refused waits for a refill.
-    if (!(await restoreHolds())) throw new Error("A pause isn't kept yet.");
+    if (!(await restoreHolds())) {
+      // Every download waits behind it, so it is tried again soon, not at the next foreground.
+      setTimeout(() => {
+        if (foreground && barrier === "pending") void firstForeground();
+      }, HELD_BACK_MS);
+      throw new Error("A pause isn't kept yet.");
+    }
     await arrange().catch(() => undefined);
     await transfers.finishForegroundReconcile(token);
     barrier = "done";
@@ -1872,7 +1881,7 @@ const unfinished = (record: Stored | undefined): record is Stored =>
 
 /**
  * What Pause did: `closed` once no request of the download is left; `closing` when the pause is
- * kept but its request hadn't ended in time, which still admits nothing else meanwhile and ends
+ * asked but its request hadn't ended in time, which still admits nothing else meanwhile and ends
  * natively; `unchanged` when there was nothing to pause.
  */
 export type Paused = "closed" | "closing" | "unchanged";
@@ -1880,7 +1889,8 @@ export type Paused = "closed" | "closing" | "unchanged";
 /**
  * Whether a native command's refusal leaves what it changed unknown: one that didn't answer in
  * time may still be written. The viewer's ask then stands on the record, which a late write
- * agrees with, and the next refill brings the native side to it either way.
+ * agrees with. Every ask ends in a refill, which brings the native side to the record: a refill
+ * running meanwhile may have sent it an ask that a refusal then put back.
  */
 const unanswered = (cause: unknown) => refusalOf(cause) === "busy";
 
@@ -1898,16 +1908,16 @@ export async function pauseDownload(id: string): Promise<Paused> {
   const bound = boundOf(record);
   try {
     if (bound) await transfers.holdAuthorization(bound.authorization, true);
-    goOn();
   } catch (cause) {
-    if (unanswered(cause)) goOn();
     // Ended meanwhile: its receipt says what that means, and it stays paused if it stays queued.
-    else if (refusalOf(cause) !== "obsolete") {
+    if (!unanswered(cause) && refusalOf(cause) !== "obsolete") {
       update(id, withoutPause);
       tell();
+      goOn();
       throw new AppFailure({ kind: "unexpected", detail: "The pause couldn't be kept." });
     }
   }
+  goOn();
   const closed = await transfers.drainDownload(id).then(
     () => "closed" as const,
     () => "closing" as const,
@@ -1933,6 +1943,7 @@ export async function resumeDownload(id: string): Promise<void> {
     if (!unanswered(cause) && refusalOf(cause) !== "obsolete") {
       update(id, (latest) => ({ ...latest, paused: true }));
       tell();
+      goOn();
       throw new AppFailure({ kind: "unexpected", detail: "The download couldn't be resumed." });
     }
   }
@@ -1952,7 +1963,8 @@ let reorders = 0;
 
 /**
  * Moves a download waiting its turn one place earlier (-1) or later (1) among those waiting, the
- * native queue with it. Rejects, putting it back, when the native side refuses the order.
+ * native queue with it. Rejects, putting it back, when the native side refuses the order and
+ * nothing moved since.
  */
 export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
   const record = find(id);
@@ -1960,10 +1972,18 @@ export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
   const line = doc.items.filter(waitingTurn);
   const other = line[line.indexOf(record) + by];
   if (!other) return;
-  // Swapped with its neighbour among those waiting: every other row keeps its own place.
-  const swap = (each: Stored) => (each === record ? other : each === other ? record : each);
-  commit({ ...doc, items: doc.items.map(swap) });
-  tell();
+  // Swapped with its neighbour among those waiting, each as it stands then: every other row
+  // keeps its own place.
+  const swap = () => {
+    const [mine, theirs] = [find(id), find(other.id)];
+    if (!mine || !theirs) return;
+    commit({
+      ...doc,
+      items: doc.items.map((each) => (each === mine ? theirs : each === theirs ? mine : each)),
+    });
+    tell();
+  };
+  swap();
   const moved = ++reorders;
   try {
     await arrange();
@@ -1972,12 +1992,14 @@ export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
       goOn();
       return;
     }
-    // Put back while both still stand as they were and nothing moved since; otherwise the next
-    // refill orders the native queue as the list stands.
-    if (find(id) === record && find(other.id) === other && reorders === moved) {
-      commit({ ...doc, items: doc.items.map(swap) });
-      tell();
+    // Put back while both are still listed and no other Move came since. Otherwise the list
+    // keeps it, and a refill orders the native queue as the list stands.
+    if (!find(id) || !find(other.id) || reorders !== moved) {
+      goOn();
+      return;
     }
+    swap();
+    goOn();
     throw new AppFailure({ kind: "unexpected", detail: "The new order couldn't be kept." });
   }
 }

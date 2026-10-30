@@ -1558,6 +1558,91 @@ describe("downloads", { timeout: 30_000 }, () => {
     await until(() => isComplete(app, next.id), "the resumed copy");
   });
 
+  it("puts Pause, Resume and Move back when the native side refuses them", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    const { series, first } = episode();
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await app.addDownload(movieRef(a, otherMovie().id));
+    const show = await app.addDownload({
+      kind: "episode",
+      subscriptionId: a,
+      id: String(first.id),
+      seriesId: String(series.id),
+      season: 1,
+      episode: first.number ?? 1,
+    });
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    await until(() => background.open(show.id).length === 1, "the last one authorized");
+    const unavailable = () =>
+      Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
+    const held = () => [...background.grants.values()].find((grant) => grant.id === film.id)?.held;
+    const hold = vi.spyOn(bridge, "holdAuthorization");
+    const arrange = vi.spyOn(bridge, "arrangeAuthorizations");
+    onTestFinished(() => {
+      hold.mockRestore();
+      arrange.mockRestore();
+    });
+
+    const order = app.downloadList().items.map((item) => item.id);
+    arrange.mockRejectedValueOnce(unavailable());
+    await expect(app.moveDownload(show.id, -1)).rejects.toBeTruthy();
+    expect(app.downloadList().items.map((item) => item.id)).toEqual(order);
+
+    hold.mockRejectedValueOnce(unavailable());
+    await expect(app.pauseDownload(film.id)).rejects.toBeTruthy();
+    expect(statusOf(app, film.id)?.kind).toBe("transferring");
+    await until(() => held() === false, "the native side to follow the record");
+
+    await app.pauseDownload(film.id);
+    hold.mockRejectedValueOnce(unavailable());
+    await expect(app.resumeDownload(film.id)).rejects.toBeTruthy();
+    expect(statusOf(app, film.id)?.kind).toBe("paused");
+    await until(() => held() === true, "the native side to follow the record");
+    await sleep(1_500);
+    expect(background.events.filter((each) => each === `start:${film.id}`)).toHaveLength(1);
+  });
+
+  it("goes on soon after a launch whose interrupted pause the native side kept only when asked again", async () => {
+    let app = await installedApp();
+    const { a } = await withProviders(app);
+    const { series, first } = episode();
+    one.stallMovieFile(movie().id, 20_000, 2_000);
+    await app.addDownload(movieRef(a));
+    const next = await app.addDownload(movieRef(a, otherMovie().id));
+    const show = await app.addDownload({
+      kind: "episode",
+      subscriptionId: a,
+      id: String(first.id),
+      seriesId: String(series.id),
+      season: 1,
+      episode: first.number ?? 1,
+    });
+    await until(() => background.open(show.id).length === 1, "the last one authorized");
+    // The process ends between the next one's pause on its record and its native hold.
+    const written = doc();
+    written.items.find((item: { id: string }) => item.id === next.id).paused = true;
+    background.die();
+    new DiskFile(native.root, "documents", "downloads.json").writeSync(JSON.stringify(written));
+    // Refused once, under the next launch's first-foreground barrier.
+    let refused = false;
+    const command = bridge.holdAuthorization.bind(bridge);
+    const hold = vi
+      .spyOn(bridge, "holdAuthorization")
+      .mockImplementation(async (authorization, held) => {
+        if (refused || background.barrier.kind !== "installed") return command(authorization, held);
+        refused = true;
+        throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
+      });
+    onTestFinished(() => hold.mockRestore());
+    app = await launch();
+    await until(() => refused, "the hold to be refused");
+    await until(() => isComplete(app, show.id), "the one after the paused one", 20_000);
+    expect(statusOf(app, next.id)?.kind).toBe("paused");
+    expect(background.events).not.toContain(`start:${next.id}`);
+  });
+
   it("goes on after a relaunch whose queue order the native side refused", async () => {
     let app = await installedApp();
     const { a } = await withProviders(app);
@@ -1677,7 +1762,8 @@ describe("downloads", { timeout: 30_000 }, () => {
     await app.moveDownload(other.id, -1);
     await app.moveDownload(other.id, 1);
     refusal.resolve();
-    await expect(refused).rejects.toBeTruthy();
+    // Kept as the list stands, which the later Moves already ordered natively.
+    await expect(refused).resolves.toBeUndefined();
     expect(app.downloadList().items.map((item) => item.id)).toEqual([film.id, show.id, other.id]);
   });
 
