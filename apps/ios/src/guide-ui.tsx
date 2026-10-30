@@ -156,7 +156,8 @@ export function useGuideListings(keys: readonly string[], catalogue: Library | n
 export const GRID_ROWS = 24;
 /**
  * A channel's programmes on a day, in the grid: at most this many of the owner's day pages of
- * 128, so the rows in view mint fewer detail tokens than the owner keeps (guide.ts).
+ * 128, so the rows in view mint fewer detail tokens than the owner keeps (guide.ts) and a row
+ * read again never evicts another's.
  */
 const GRID_PAGES = 2;
 
@@ -243,7 +244,9 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
   const requested = useMemo(() => JSON.parse(signature) as string[], [signature]);
   // Every provider's, so each row's provider is followed.
   const ids = useMemo(() => [...catalogue.labels.keys()], [catalogue]);
-  const { snapshot, focused, now, identity } = useGuideOwner(ids);
+  const { snapshot, focused: inStack, now, identity } = useGuideOwner(ids);
+  // Going to the background withdraws every token, so rows are read again only once back.
+  const focused = useSyncExternalStore(guide.awake.subscribe, guide.awake.get) && inStack;
   // Eviction withdraws tokens with no owner notification, so the rows that lost theirs follow this.
   const withdrawals = useSyncExternalStore(
     useCallback(
@@ -320,19 +323,17 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
       void lane(signal, () => readRow(key, { from: day.from, until: day.until }, signal)).then(
         (got) => {
           if (running.get(key) === read) running.delete(key);
-          if (signal.aborted) return;
-          // A read that a login or guide change or a withdrawal overtook is left out. Settling
-          // still renders, so the row is read again under what changed.
-          const landed =
-            got && versionOf(key, day.from, guide.getSnapshot()) === version
-              ? { ...got, version, minute: Math.floor(Date.now() / 60_000) }
-              : undefined;
+          // A read that a login or guide change or a withdrawal overtook is left out: each of
+          // those notifies, so the row is read again under what changed.
+          if (!got || signal.aborted || versionOf(key, day.from, guide.getSnapshot()) !== version)
+            return;
+          const landed = { ...got, version, minute: Math.floor(Date.now() / 60_000) };
           setSettled((prior) => {
             const kept =
               prior?.from === day.from && prior.catalogue === catalogue ? prior.rows : undefined;
             const rows = new Map<string, GridRead>();
             for (const shown of inView.current) {
-              const row = (shown === key ? landed : undefined) ?? kept?.get(shown);
+              const row = shown === key ? landed : kept?.get(shown);
               if (row) rows.set(shown, row);
             }
             return { from: day.from, catalogue, rows };

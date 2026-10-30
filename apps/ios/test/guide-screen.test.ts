@@ -1270,10 +1270,11 @@ describe("Live's Guide grid", () => {
     state.answer = async (mode, ids) =>
       mode === "detail" || ids[0] === "trusted-1" ? answer([current, next]) : answer([]);
     await guide();
-    await React.act(async () => {
-      owner().background();
-      owner().foreground();
-    });
+    state.queries = [];
+    await React.act(async () => owner().background());
+    await settle();
+    expect(state.queries).toEqual([]);
+    await React.act(async () => owner().foreground());
     await settle();
     await click(`grid-a:1-${current.start}`);
     expect(detail()?.textContent).toContain(current.title);
@@ -1334,6 +1335,19 @@ describe("Live's Guide grid", () => {
     expect(new Set(reads).size).toBe(20);
     for (let i = 1; i <= 20; i++)
       expect(container.querySelector(`[data-testid^="grid-a:${i}-"]`)).not.toBeNull();
+  });
+
+  it("starts no more reads in the background, even of a day being read", async () => {
+    await guide();
+    const gate = holdQueries(state.answer!);
+    await click("Next day");
+    await React.act(async () => owner().background());
+    state.queries = [];
+    await gate.release();
+    expect(state.queries).toEqual([]);
+    await React.act(async () => owner().foreground());
+    await settle();
+    expect(state.queries.filter((query) => query.mode === "day")).not.toEqual([]);
   });
 
   it("reads a new day's rows at once while the last day's reads still hang", async () => {

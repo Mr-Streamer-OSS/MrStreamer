@@ -132,6 +132,8 @@ export function createGuide(
   const withdrawals = new Map<string, number>();
   /** Changes once after a run of withdrawals, which evictions make without another notification. */
   const withdrawing = store(0);
+  /** Whether the app is in the foreground, as foreground() and background() last said. */
+  const awake = store(true);
   let announced = false;
   const read = (key: string, on: number) => JSON.stringify([key, on]);
   const withdraw = (value: Minted) => {
@@ -152,7 +154,8 @@ export function createGuide(
       }
   };
   // The least recently minted or read goes first, withdrawn, once 8192 different programmes and
-  // pages are held: 32 Guide grid rows of 256 programmes, or about 170 of 48.
+  // pages are held: 32 Guide grid rows of 256 programmes, or about 170 of 48. The grid's 24 rows of
+  // two native pages of 128 (GuideIndex.swift) mint fewer, so its rows never evict each other.
   const token = (value: Minted) => {
     const name = named(value);
     const known = minted.get(name);
@@ -387,12 +390,14 @@ export function createGuide(
     /** Immutable owner snapshot for React; notifications also carry the foreground minute tick. */
     getSnapshot: state.get,
     /**
-     * Changes as the detail tokens a channel's schedule() of the day from `on` handed out are
-     * withdrawn, as by background() or eviction.
+     * Changes as the detail tokens schedule() handed out for a channel's own key (`Channel.key`)
+     * on the day from `on` are withdrawn, as by background() or eviction.
      */
     withdrawn: (key: string, on: number) => withdrawals.get(read(key, on)) ?? 0,
     /** Notifies, once a run of them is over, that `withdrawn` changed. */
-    withdrawals: withdrawing,
+    withdrawals: { get: withdrawing.get, subscribe: withdrawing.subscribe },
+    /** Whether the app is in the foreground; the Guide grid reads only then. */
+    awake: { get: awake.get, subscribe: awake.subscribe },
     subscribe(listener: () => void) {
       const stop = state.subscribe(listener);
       listeners++;
@@ -519,11 +524,13 @@ export function createGuide(
     foreground() {
       foregroundCycle++;
       foreground = true;
+      awake.set(true);
       if (listeners && !clock) clock = setInterval(tick, 60_000);
       tick();
     },
     background() {
       foreground = false;
+      awake.set(false);
       clearInterval(clock);
       clock = undefined;
       for (const entry of entries.values()) cancelEntry(entry);
