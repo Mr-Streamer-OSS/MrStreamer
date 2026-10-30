@@ -1982,7 +1982,7 @@ final class TransferOwner: NSObject, URLSessionDownloadDelegate {
   // MARK: The pump
 
   /**
-   Admits the oldest runnable authorization whose source is enabled under its generation, not
+   Admits the first runnable authorization in the queue's order whose source is enabled under its generation, not
    held by playback, revoked or mutating, while the slot is free, nothing unknown is still
    closing, recovery and any first-foreground barrier are done, and the queue has room. The slot
    is claimed before any read: every trigger enters here and finds it taken.

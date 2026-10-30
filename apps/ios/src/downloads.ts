@@ -81,8 +81,8 @@ import { recordProgress } from "./viewing.ts";
 // under the new one.
 //
 // The viewer's pause is written on its record first, then held on the native side, which never
-// admits a held authorization and pauses its transfer, keeping the resume data; Pause answers
-// once that request actually ended. Resume lets it go in its place, and the native side goes on
+// admits a held authorization and pauses its transfer, keeping the resume data; Pause waits for
+// that request to end, and nothing else is admitted until it did. Resume lets it go in its place, and the native side goes on
 // from its bytes only under the same login and request. The queue goes in the records' order,
 // which Move changes; each refill tells the native side both, so a relaunch between the two
 // writes loses neither.
@@ -255,7 +255,7 @@ interface Live {
 const EMPTY: DownloadList = { items: [], series: {}, bytes: 0, free: null, ended: 0 };
 const list = store<DownloadList>(EMPTY);
 
-/** Every download, queue first in the order added, then the copies, newest first. */
+/** Every download, the queue first in the order it goes, then the copies, newest first. */
 export const useDownloads = () => useStore(list);
 /** The list as it stands, for owners outside React. */
 export const downloadList = () => list.get();
@@ -1388,7 +1388,10 @@ async function fill() {
  * between the two writes left the native side behind; `known` follows what was kept.
  */
 async function restoreHolds() {
-  for (const record of doc.items) {
+  for (const { id } of doc.items) {
+    // As it stands now: a pause or Resume may have come while an earlier one was answered.
+    const record = find(id);
+    if (!record) continue;
     const bound = boundOf(record);
     const view = bound && known.get(bound.authorization);
     const paused = record.state === "queued" && record.paused === true;
@@ -1915,14 +1918,19 @@ export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
   const line = doc.items.filter(waitingTurn);
   const other = line[line.indexOf(record) + by];
   if (!other) return;
-  const swap = (each: Stored) => (each === record ? other : each === other ? record : each);
-  commit({ ...doc, items: doc.items.map(swap) });
+  // Put just before or after `other`: no other row passes the transfer under way.
+  const before = doc.items;
+  const rest = before.filter((each) => each !== record);
+  const at = rest.indexOf(other) + (by < 0 ? 0 : 1);
+  const moved = [...rest.slice(0, at), record, ...rest.slice(at)];
+  commit({ ...doc, items: moved });
   tell();
   try {
     await arrange();
   } catch {
-    if (find(id) === record && find(other.id) === other) {
-      commit({ ...doc, items: doc.items.map(swap) });
+    // Put back unless the list changed meanwhile, which the next refill orders.
+    if (doc.items === moved) {
+      commit({ ...doc, items: before });
       tell();
     }
     throw new AppFailure({ kind: "unexpected", detail: "The new order couldn't be kept." });

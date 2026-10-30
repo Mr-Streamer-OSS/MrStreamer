@@ -381,7 +381,7 @@ function recover() {
   }
 }
 
-/** The one pump: claims the slot for the oldest runnable authorization, before anything else. */
+/** The one pump: claims the slot for the first runnable authorization in order, before anything else. */
 function pump() {
   const b = background;
   if (b.down) return;
@@ -1012,6 +1012,9 @@ const module = {
 
   async arrangeAuthorizations(authorizations: string[]) {
     gate();
+    if (new Set(authorizations).size !== authorizations.length) {
+      throw refused("ERR_DOWNLOADS_INVALID");
+    }
     const listed = authorizations.flatMap((id) => {
       const grant = background.grants.get(id);
       return grant && grant.state !== "terminal" ? [grant] : [];

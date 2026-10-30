@@ -135,7 +135,7 @@ struct NativeAttempt: Codable {
  `queued` or `paused` while runnable; `active` while its one attempt may have a request open;
  `terminal` once its last receipt is written, kept until that receipt is acknowledged. `order` is
  its place in the queue, which `arrange` deals out again; `held` keeps a runnable one from being
- admitted until the viewer resumes it. Ledgers written before either was added read as unheld.
+ admitted until the viewer resumes it. Ledgers written before `held` was added read as unheld.
  */
 struct Grant: Codable {
   enum State: String, Codable { case reserved, queued, active, paused, terminal }
