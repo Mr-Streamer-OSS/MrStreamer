@@ -114,8 +114,11 @@ export async function startCapture(
   await rm(path, { force: true });
   if (last instanceof DiskFailure) throw last;
   if (deadline.aborted && !options.signal.aborted)
-    throw new CaptureFailure({ kind: "network", detail: "The stop time passed while it started." });
-  if (options.signal.aborted) throw new CaptureFailure({ kind: "network", detail: "Stopped." });
+    throw new CaptureFailure({
+      kind: "network",
+      detail: t("The stop time passed while it started."),
+    });
+  if (options.signal.aborted) throw new CaptureFailure({ kind: "network", detail: t("Stopped.") });
   throw new CaptureFailure(last instanceof CaptureFailure ? last.failure : failureOf(last));
 }
 
@@ -176,7 +179,8 @@ async function openSource(
   }
   const answer = await ask(source.url, signal);
   const reader = answer.body?.getReader();
-  if (!reader) throw new CaptureFailure({ kind: "network", detail: "The provider sent nothing." });
+  if (!reader)
+    throw new CaptureFailure({ kind: "network", detail: t("The provider sent nothing.") });
   const chunks = (async function* () {
     for (;;) {
       const next = await within(reader.read(), SILENCE_MS, signal);
@@ -275,12 +279,12 @@ async function within<A>(promise: Promise<A>, ms: number, signal: AbortSignal): 
             reject(
               new CaptureFailure({
                 kind: "network",
-                detail: "The provider stopped sending.",
+                detail: t("The provider stopped sending."),
               }),
             ),
           ms,
         );
-        abort = () => reject(new CaptureFailure({ kind: "network", detail: "Stopped." }));
+        abort = () => reject(new CaptureFailure({ kind: "network", detail: t("Stopped.") }));
         if (signal.aborted) abort();
         else signal.addEventListener("abort", abort, { once: true });
       }),

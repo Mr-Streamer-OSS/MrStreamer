@@ -1435,4 +1435,8 @@ export const fr: Translation = {
   "The recording couldn't be written to this computer.":
     "Impossible d’enregistrer sur cet ordinateur.",
   "The recording couldn't be deleted.": "Impossible de supprimer l’enregistrement.",
+  "The provider stopped sending.": "Le fournisseur a cessé d'envoyer.",
+  "The provider sent nothing.": "Le fournisseur n'a rien envoyé.",
+  "The stop time passed while it started.":
+    "L'heure d'arrêt est passée pendant le démarrage de l'enregistrement.",
 };

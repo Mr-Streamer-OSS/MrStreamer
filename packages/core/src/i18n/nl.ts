@@ -1368,4 +1368,7 @@ export const nl: Translation = {
   "The recording couldn't be written to this computer.":
     "De opname kon niet op deze computer worden bewaard.",
   "The recording couldn't be deleted.": "De opname kon niet worden verwijderd.",
+  "The provider stopped sending.": "De provider stuurde niets meer.",
+  "The provider sent nothing.": "De provider stuurde niets.",
+  "The stop time passed while it started.": "De stoptijd verstreek terwijl de opname startte.",
 };

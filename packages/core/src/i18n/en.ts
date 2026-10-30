@@ -1342,4 +1342,7 @@ export const en = {
   "The recording couldn't be written to this computer.":
     "The recording couldn't be written to this computer.",
   "The recording couldn't be deleted.": "The recording couldn't be deleted.",
+  "The provider stopped sending.": "The provider stopped sending.",
+  "The provider sent nothing.": "The provider sent nothing.",
+  "The stop time passed while it started.": "The stop time passed while it started.",
 } as const satisfies Readonly<Record<string, string | Plural>>;
