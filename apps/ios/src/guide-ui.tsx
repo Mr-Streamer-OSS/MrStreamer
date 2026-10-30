@@ -152,7 +152,7 @@ export function useGuideListings(keys: readonly string[], catalogue: Library | n
   );
 }
 
-/** How many channels of the Guide grid read their day at once: a tall iPad window's rows. */
+/** Caps the Guide grid rows read for a day; readDay processes two channels at a time. */
 export const GRID_ROWS = 24;
 /**
  * A channel's programmes on a day, in the grid: at most this many of the owner's day pages of

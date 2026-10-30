@@ -73,8 +73,8 @@ Categories and All, with the country filter preserved: a grid of the country's c
 side and two hours of a day across (one hour at accessibility text sizes), moved with Previous
 day, Next day, Earlier, Later and Now. It reads the first two day pages of at most 24 channels
 in view from the same guide owner, with no cache of its own: a row scrolled back into view, or
-whose provider's login or guide changed, is read again, and an empty one on the owner's next
-minute. The line at now, the programme on now, gaps, "Nothing in this window", "More in
+whose provider's login or guide changed, is read again. An empty row is read again on the owner's
+next minute. The line at now, the programme on now, gaps, "Nothing in this window", "More in
 Schedule" past the pages read and "No programme information" or "Guide unavailable" rows show
 what the owner holds. A channel's name opens its Schedule and a programme cell its
 programme; neither plays. Channel taps elsewhere still play in Watch. Home tiles still preview.
