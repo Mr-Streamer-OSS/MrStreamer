@@ -12,8 +12,8 @@
 // - mark.svg, favicon.svg, favicon-48.png, apple-touch-icon.png: the mark, alone and on black.
 // - social.png: 1200 × 630, the Home window on black, for links shared elsewhere.
 // - With --readme, in docs/assets: readme-poster.webp, the Home window with the Live TV and TV
-//   Guide cuts in front of it on black, and readme-mark-light.svg and readme-mark-dark.svg, the
-//   mark in GitHub's text colours. README.md shows these, so they are committed.
+//   Guide cuts in front of it on black, and readme-mark.svg, the mark in a grey that reads on
+//   light and dark pages. README.md shows these, so they are committed.
 //
 // public/generated/ is rebuilt on every run and is not committed. index.html names these files
 // and the cuts' sizes: change both together.
@@ -186,17 +186,15 @@ await sharp({
   .toFile(join(out, "social.png"));
 
 if (process.argv.includes("--readme")) {
-  // The mark in GitHub's own text colours, so README.md shows it in both of GitHub's themes.
+  // The mark in a grey that reads on GitHub's light, dark and dimmed themes and GitCafe's light
+  // and dark themes. One file, because GitHub picks a <picture> source by the system's colour
+  // scheme rather than its own theme, and GitCafe drops <picture> for its fallback image.
   const white = '<g transform="translate(0 3)" fill="#fff">';
   const source = readFileSync(mark, "utf8");
   if (!source.includes(white)) throw new Error("mark.svg no longer paints its shape white.");
   writeFileSync(
-    join(assets, "readme-mark-light.svg"),
-    source.replace(white, white.replace("#fff", "#1f2328")),
-  );
-  writeFileSync(
-    join(assets, "readme-mark-dark.svg"),
-    source.replace(white, white.replace("#fff", "#e6edf3")),
+    join(assets, "readme-mark.svg"),
+    source.replace(white, white.replace("#fff", "#808080")),
   );
 
   // The Home window with the Live TV and TV Guide cuts in front of it, lower right, on black. The
