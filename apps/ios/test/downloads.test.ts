@@ -1378,7 +1378,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     one.stallMovieFile(movie().id, 20_000, 60_000);
     one.stallMovieFile(otherMovie().id, 1, 60_000);
     const film = await app.addDownload(movieRef(a));
-    await until(() => one.activeStreams() === 1, "the transfer");
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
     // URLSession ends neither the request it is asked to pause nor, after, to cancel.
     native.held = [];
     const asked = one.fileRequests();
