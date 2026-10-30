@@ -308,10 +308,13 @@ describe("the first launch since private beta 2", () => {
 
   it("migrates once: a relaunch finds the registry and changes nothing", async () => {
     await beta2(one, firstMovie(one, LEGACY));
-    await launch();
+    const first = await launch();
+    // Registry restore finishes before the catalogue aligns the saved watchlist.
+    await until(() => titlesOf(first).length > 0, "the first movie lists");
     const after = documents();
     const keychain = new Map(memory.keychain);
     const again = await launch();
+    await until(() => titlesOf(again).length > 0, "the relaunched movie lists");
     expect(ids(again)).toEqual([LEGACY]);
     expect(documents()).toEqual(after);
     expect(new Map(memory.keychain)).toEqual(keychain);
