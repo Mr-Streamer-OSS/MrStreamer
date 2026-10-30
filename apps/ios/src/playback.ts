@@ -741,7 +741,11 @@ function terminal(owned: NonNullable<typeof current>): void {
     phase: {
       kind: "failed",
       item,
-      error: withoutLogin(message, [...options.login, ...(epoch.signedIn?.login ?? [])]),
+      error: withoutLogin(
+        message,
+        [...options.login, ...(epoch.signedIn?.login ?? [])],
+        epoch.signedIn?.uncertain,
+      ),
     },
   }));
 }

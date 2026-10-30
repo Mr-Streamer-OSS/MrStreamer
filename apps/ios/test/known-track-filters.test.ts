@@ -480,7 +480,7 @@ describe("Known audio/subtitles on the real title grids", () => {
       await click("Sort & filter");
       const observed = await found(app, "movie", "91001", ["en"]);
       const { readFiles } = await import("../src/details-cache.ts");
-      await readFiles(app.id, [LOGIN.username, LOGIN.password], () => true);
+      await readFiles(app.id, { login: [LOGIN.username, LOGIN.password] }, () => true);
       await click("Audio: English · 1");
       const source = (await import("../src/sources.ts")).currentSource(app.id);
       if (!source) throw new Error("No signed-in source");

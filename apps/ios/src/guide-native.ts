@@ -1,5 +1,6 @@
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { nextProviderRedirect, type GuideRequest } from "@mrstreamer/core/provider";
+import type { SourceLogin } from "./login-safety.ts";
 
 /** Fixed codes only. Native errors, URLs, headers and Location never enter public state. */
 export type GuideProblem =
@@ -58,6 +59,7 @@ export interface GuideNative {
     url: string,
     headers: Readonly<Record<string, string>>,
     login: readonly string[],
+    uncertain: readonly string[],
     now: number,
     from: number,
     until: number,
@@ -93,16 +95,23 @@ export function nativeGuide(): GuideNative {
   return found;
 }
 
-/** Each redirect has closed before JS validates the next hop against the ORIGINAL request. */
+/**
+ * Each redirect has closed before JS validates the next hop against the ORIGINAL request, or the
+ * address that named it (`from`), with the source's login and uncertain values: an https
+ * playlist's token goes to no http hop, however short. The native reader saves no programme
+ * holding either, as login-safety.ts `holds` reads saved lists.
+ */
 export async function ingest(
   native: GuideNative,
   lease: string,
   job: string,
   request: Extract<GuideRequest, { kind: "request" }>,
-  login: readonly string[],
+  { login, uncertain = [] }: SourceLogin,
   now: number,
   wanted: () => boolean,
 ): Promise<Result<Generation>> {
+  // An empty value would be in everything.
+  const known = { secrets: login.filter(Boolean), uncertain: uncertain.filter(Boolean) };
   const today = new Date(now);
   const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
   let url = request.url;
@@ -114,6 +123,7 @@ export async function ingest(
       url,
       request.headers,
       login,
+      known.uncertain,
       now,
       yesterday.getTime(),
       now + 7 * 86400_000,
@@ -123,11 +133,11 @@ export async function ingest(
     if (result.value.kind === "candidate") return native.publish(lease, job, result.value.id);
     try {
       url = nextProviderRedirect({
-        original: request.url,
+        original: request.from ?? request.url,
         current: url,
         location: result.value.location,
         followed,
-        login,
+        login: known,
       });
     } catch {
       return { kind: "failed", error: "redirect" };

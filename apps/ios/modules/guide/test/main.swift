@@ -26,7 +26,7 @@ import SQLite3
     let lease = activation["lease"] as! String
     func prepare(_ route: String, _ job: String) -> [String: Any] {
       owner.begin(lease, job)
-      return owner.prepare(lease, job, base + route, [:], ["fixture", "canary-secret"], now, now - 86400000, now + 7 * 86400000)
+      return owner.prepare(lease, job, base + route, [:], ["fixture", "canary-secret"], ["short-sig"], now, now - 86400000, now + 7 * 86400000)
     }
     let candidate = try value(prepare("/plain", "plain"))["id"] as! String
     let generation = try value(owner.publish(lease, "plain", candidate))
@@ -51,7 +51,7 @@ import SQLite3
     let pageActivation = try owner.attach("pages-provider", 1)
     let pageLease = pageActivation["lease"] as! String
     owner.begin(pageLease, "pages")
-    let pageCandidate = try value(owner.prepare(pageLease, "pages", base + "/pages", [:], ["fixture", "canary-secret"], now, now - 86400000, now + 7 * 86400000))["id"] as! String
+    let pageCandidate = try value(owner.prepare(pageLease, "pages", base + "/pages", [:], ["fixture", "canary-secret"], [], now, now - 86400000, now + 7 * 86400000))["id"] as! String
     let pageGeneration = try value(owner.publish(pageLease, "pages", pageCandidate))["id"] as! String
     owner.finish("pages")
     owner.begin(pageLease, "day1")
@@ -75,7 +75,7 @@ import SQLite3
       try require(value["kind"] as? String == "candidate", "decode")
       owner.finish(job)
     }
-    for (route, code) in [("/bad-crc", "gzip"), ("/truncated-gzip", "gzip"), ("/malformed", "xml"), ("/dtd", "xml"), ("/attributes", "element"), ("/empty", "empty"), ("/ended", "ended"), ("/secret", "xml"), ("/depth", "depth"), ("/html", "xml")] {
+    for (route, code) in [("/bad-crc", "gzip"), ("/truncated-gzip", "gzip"), ("/malformed", "xml"), ("/dtd", "xml"), ("/attributes", "element"), ("/empty", "empty"), ("/ended", "ended"), ("/secret", "xml"), ("/uncertain", "xml"), ("/uncertain-encoded", "xml"), ("/depth", "depth"), ("/html", "xml")] {
       let job = "reject-" + UUID().uuidString
       let result = prepare(route, job)
       try require(result["error"] as? String == code, "rejection-" + code)
@@ -85,6 +85,10 @@ import SQLite3
     let safe = try value(prepare("/false-positive", "prose"))
     try require(safe["kind"] as? String == "candidate", "username-prose")
     owner.finish("prose")
+    // A playlist's uncertain value counts only whole: within a longer word it is prose.
+    let word = try value(prepare("/uncertain-word", "uncertain-word"))
+    try require(word["kind"] as? String == "candidate", "uncertain-word")
+    owner.finish("uncertain-word")
     let redirect = try value(prepare("/redirect", "redirect"))
     try require(redirect["kind"] as? String == "redirect", "no-auto-redirect")
     owner.finish("redirect")
@@ -108,7 +112,7 @@ import SQLite3
     owner.begin(lease, "cancel-download")
     let finished = DispatchSemaphore(value: 0)
     var cancelledDownload = [String: Any]()
-    owner.prepareAsync(lease, "cancel-download", base + "/slow", [:], ["fixture", "canary-secret"], now, now - 86400000, now + 7 * 86400000) {
+    owner.prepareAsync(lease, "cancel-download", base + "/slow", [:], ["fixture", "canary-secret"], [], now, now - 86400000, now + 7 * 86400000) {
       cancelledDownload = $0
       finished.signal()
     }

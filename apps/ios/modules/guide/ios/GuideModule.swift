@@ -33,9 +33,9 @@ public final class GuideModule: Module {
       guard let owner = self.owner else { promise.resolve(); return }
       owner.cancelAsync(job) { promise.resolve() }
     }
-    AsyncFunction("prepare") { (lease: String, job: String, url: String, headers: [String: String], login: [String], now: Double, from: Double, until: Double, promise: Promise) in
+    AsyncFunction("prepare") { (lease: String, job: String, url: String, headers: [String: String], login: [String], uncertain: [String], now: Double, from: Double, until: Double, promise: Promise) in
       guard let owner = self.owner else { promise.resolve(["kind": "failed", "error": "unavailable"]); return }
-      owner.prepareAsync(lease, job, url, headers, login, now, from, until) { promise.resolve($0) }
+      owner.prepareAsync(lease, job, url, headers, login, uncertain, now, from, until) { promise.resolve($0) }
     }
     AsyncFunction("publish") { (lease: String, job: String, candidate: String, promise: Promise) in
       guard let owner = self.owner else { promise.resolve(["kind": "failed", "error": "unavailable"]); return }

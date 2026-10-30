@@ -29,7 +29,7 @@ extension GuideFixtures {
     try require(owner.begin(b, "held-ingest"), "begin-held")
     let ingested = DispatchSemaphore(value: 0)
     var ingestResult = [String: Any]()
-    owner.prepareAsync(b, "held-ingest", base + "/held", [:], [], now, now - 86400000, now + 7 * 86400000) { ingestResult = $0; ingested.signal() }
+    owner.prepareAsync(b, "held-ingest", base + "/held", [:], [], [], now, now - 86400000, now + 7 * 86400000) { ingestResult = $0; ingested.signal() }
     let until = ProcessInfo.processInfo.systemUptime + 2
     while try fetch(base, "/held-state") != "yes" {
       try require(ProcessInfo.processInfo.systemUptime < until, "held-start")
@@ -51,7 +51,7 @@ extension GuideFixtures {
     try require(owner.begin(c, "queued-ingest"), "queued-admission")
     let queued = DispatchSemaphore(value: 0)
     var queuedResult = [String: Any]()
-    owner.prepareAsync(c, "queued-ingest", base + "/plain", [:], [], now, now - 86400000, now + 7 * 86400000) { queuedResult = $0; queued.signal() }
+    owner.prepareAsync(c, "queued-ingest", base + "/plain", [:], [], [], now, now - 86400000, now + 7 * 86400000) { queuedResult = $0; queued.signal() }
     try drain(owner, "queued-ingest")
     try require(queued.wait(timeout: .now() + 2) == .success && queuedResult["kind"] as? String == "cancelled", "queued-cancel-completion")
     let forgotten: Bool = try awaitValue("unrelated-forget") { owner.forgetAsync("short-provider", completion: $0) }
@@ -66,7 +66,7 @@ extension GuideFixtures {
     // Hold a real pinned query in its connection-open policy, then forget that provider.
     let pinnedLease = try owner.attach("pinned-provider", 1)["lease"] as! String
     owner.begin(pinnedLease, "pinned-build")
-    let candidate = try value(owner.prepare(pinnedLease, "pinned-build", base + "/plain", [:], [], now, now - 86400000, now + 7 * 86400000))["id"] as! String
+    let candidate = try value(owner.prepare(pinnedLease, "pinned-build", base + "/plain", [:], [], [], now, now - 86400000, now + 7 * 86400000))["id"] as! String
     let pinnedDB = try value(owner.publish(pinnedLease, "pinned-build", candidate))["id"] as! String
     try drain(owner, "pinned-build")
     let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
@@ -92,7 +92,7 @@ extension GuideFixtures {
     let normal = try GuideOwner(root: lowRoot)
     let normalLease = try normal.attach("cached", 1)["lease"] as! String
     normal.begin(normalLease, "seed")
-    let seed = try value(normal.prepare(normalLease, "seed", base + "/plain", [:], [], now, now - 86400000, now + 7 * 86400000))["id"] as! String
+    let seed = try value(normal.prepare(normalLease, "seed", base + "/plain", [:], [], [], now, now - 86400000, now + 7 * 86400000))["id"] as! String
     _ = try value(normal.publish(normalLease, "seed", seed)); try drain(normal, "seed")
     _ = low.restore(["cached"])
     let directory = lowRoot.appendingPathComponent("cached")
@@ -119,7 +119,7 @@ extension GuideFixtures {
     for route in accepted + rejected {
       let job = "header-" + UUID().uuidString
       owner.begin(lease, job)
-      let result = owner.prepare(lease, job, base + route, [:], [], now, now - 86400000, now + 7 * 86400000)
+      let result = owner.prepare(lease, job, base + route, [:], [], [], now, now - 86400000, now + 7 * 86400000)
       if accepted.contains(route) { try require(try value(result)["kind"] as? String == "candidate", "header-accept-" + route) }
       else { try require(result["kind"] as? String == "failed", "header-refuse-" + route) }
       try drain(owner, job)

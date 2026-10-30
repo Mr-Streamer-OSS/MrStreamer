@@ -152,6 +152,8 @@ export type GuideRequest =
       readonly kind: "request";
       readonly url: string;
       readonly headers: Readonly<Record<string, string>>;
+      /** The address that named `url`, as a playlist's link names its guide: its redirects are held to it. */
+      readonly from?: string;
     };
 
 /**
@@ -312,7 +314,7 @@ export function nextProviderRedirect(input: {
   if (!["http:", "https:"].includes(next.protocol)) {
     throw new TypeError(t("The server address must start with http or https."));
   }
-  // Native guide callers know the account's secrets; fetch also knows uncertain playlist values.
+  // A list is secrets alone, as an Xtream account's username and password.
   const login: ProviderLogin =
     "secrets" in input.login ? input.login : { secrets: input.login.filter(Boolean) };
   if (exposesLogin(start, next, login)) {
@@ -431,7 +433,7 @@ const NAME = /[\p{L}\p{N}\-._~]/u;
  * segment, a query value or a part of one between separators, as in `auth=guest:k9x`, but not
  * the `ts` of `index.ts`.
  */
-function whole(text: string, value: string): boolean {
+export function whole(text: string, value: string): boolean {
   for (let at = text.indexOf(value); at !== -1; at = text.indexOf(value, at + 1)) {
     if (!NAME.test(text[at - 1] ?? "") && !NAME.test(text[at + value.length] ?? "")) return true;
   }

@@ -11,7 +11,13 @@ export interface Source {
   /** Rises with every new login of any subscription: an answer for an older one is dropped. */
   readonly revision: number;
   readonly provider: Provider;
+  /** `[username, ...passwords]`: a playlist's are the user and secrets its link names. */
   readonly login: readonly string[];
+  /**
+   * A playlist link's query values that may be a token or a setting (`playlistUncertain`): saved
+   * copies hold none whole (core's `whole`), as a text, address part or part of either.
+   */
+  readonly uncertain?: readonly string[];
 }
 
 const sources = new Map<string, Source>();
@@ -31,7 +37,7 @@ export function sourceOf(subscriptionId: string): Source {
 export const currentSource = (subscriptionId: string): Source | undefined =>
   sources.get(subscriptionId);
 
-/** What stream addresses of `subscriptionId` carry, to keep out of failures. */
+/** Recognized login parts. Playback also redacts its captured Source's uncertain values. */
 export const loginOf = (subscriptionId: string): readonly string[] =>
   sources.get(subscriptionId)?.login ?? [];
 

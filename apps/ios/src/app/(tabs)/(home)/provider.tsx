@@ -29,8 +29,16 @@ export default function Provider() {
       <ProviderForm
         mode={member ? { kind: "edit", member } : { kind: "add" }}
         onDone={() => router.back()}
+        footnote={(kind) => (
+          <Text style={styles.footnote}>
+            {kind === "xtream"
+              ? "The password stays in this iPhone's Keychain."
+              : member
+                ? "A new link replaces the saved one in this iPhone's Keychain."
+                : "The playlist link stays in this iPhone's Keychain."}
+          </Text>
+        )}
       />
-      <Text style={styles.footnote}>The password stays in this iPhone's Keychain.</Text>
     </ScrollView>
   );
 }

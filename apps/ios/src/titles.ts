@@ -762,7 +762,7 @@ function askUnder(title: Title, source: Source): Promise<ProviderDetails> {
       asking.value = value;
       if (asked.get(key) === asking) factsChanged();
       const saved = { at: Date.now(), listedAt: listed, value };
-      void writeTitle(id, title.kind, title.id, saved, source.login, () => savable(id, source));
+      void writeTitle(id, title.kind, title.id, saved, source, () => savable(id, source));
     },
     () => {
       if (asked.get(key) !== asking) return;
@@ -1158,7 +1158,7 @@ function factsOf(id: string, source: Source): Facts {
   const held: Facts = {
     source,
     files,
-    ready: readFiles(id, source.login, stands).then((saved) => {
+    ready: readFiles(id, source, stands).then((saved) => {
       if (!stands()) {
         // Nothing is in them yet: `remember` waits for this.
         if (facts.get(id) === held) facts.delete(id);
@@ -1222,7 +1222,7 @@ async function remember(id: string, source: Source, row: FileRow, tracks: Observ
     held.files.delete(oldest);
   }
   factsChanged();
-  void writeFiles(id, [...held.files.values()], source.login, () => {
+  void writeFiles(id, [...held.files.values()], source, () => {
     return savable(id, source) && facts.get(id) === held;
   });
 }

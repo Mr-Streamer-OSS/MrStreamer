@@ -1,5 +1,4 @@
 // Explicit group classification. Names never imply a movie, and unknown groups wait for a pick.
-import { createHash } from "node:crypto";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type {
   PlaylistMapping,
@@ -9,6 +8,7 @@ import type {
 } from "@mrstreamer/contracts/playlist";
 import type { ProviderDetails, ProviderEpisode, ProviderTitle } from "../provider.ts";
 import { t } from "../i18n.ts";
+import { sha256Hex } from "../sha256.ts";
 import {
   playlistCatalogue,
   streamFormat,
@@ -82,6 +82,13 @@ function classifiedPlaylist(
     if (!unique.has(exact)) unique.set(exact, entry);
   }
   const modes = new Map(mapping?.groups.map(({ group, mode }) => [group, mode]));
+  // Hashed once per group, not for each of its entries.
+  const groupIds = new Map<string, string>();
+  const groupId = (group: string) => {
+    let id = groupIds.get(group);
+    if (id === undefined) groupIds.set(group, (id = playlistGroupId(group)));
+    return id;
+  };
   const files = new Map<string, PlaylistFile>();
   const details = new Map<string, ProviderDetails>();
   const groups = new Map<string, PlaylistSample[]>();
@@ -94,7 +101,7 @@ function classifiedPlaylist(
   let episodeCount = 0;
   for (const [exact, entry] of unique) {
     const names = playlistGroups(entry);
-    const choices = names.map((group) => (mapping ? modes.get(playlistGroupId(group)) : "live"));
+    const choices = names.map((group) => (mapping ? modes.get(groupId(group)) : "live"));
     const chosen = new Set(choices);
     const mode = chosen.size === 1 ? choices[0] : undefined;
     const name = entry.name || entry.attributes["tvg-name"] || "";
@@ -150,11 +157,11 @@ function classifiedPlaylist(
     }
     if (mode !== "movie" && mode !== "series") continue;
     // tvg-id often identifies a channel, not an exact file. Hash the complete source version.
-    const id = `m3u:${digest(exact)}`;
+    const id = `m3u:${sha256Hex(exact)}`;
     const container = fileContainer(entry.url);
     const categories = mode === "movie" ? movieCategories : seriesCategories;
     for (const group of names)
-      categories.set(group, { id: playlistGroupId(group), name: safeName(group || "Ungrouped") });
+      categories.set(group, { id: groupId(group), name: safeName(group || "Ungrouped") });
     const poster = artwork(entry.attributes["tvg-logo"]);
     const explicitTmdb = entry.attributes["tmdb-id"] ?? entry.attributes["tmdb_id"];
     const tmdbId = explicitTmdb && /^[1-9]\d{0,9}$/.test(explicitTmdb) ? explicitTmdb : null;
@@ -166,7 +173,7 @@ function classifiedPlaylist(
       rating: null,
       addedAt: null,
       releaseDate: null,
-      categoryIds: names.map(playlistGroupId),
+      categoryIds: names.map(groupId),
       adult: false,
       container,
       metadata: "lazy",
@@ -187,7 +194,7 @@ function classifiedPlaylist(
       details.set(id, emptyDetails(safeName(name), poster, container));
     } else if (episode) {
       // Only exact series names in the same mapped groups join. No name matching across providers.
-      const seriesId = `m3u-series:${digest(JSON.stringify([episode.series, names.toSorted(), tmdbId]))}`;
+      const seriesId = `m3u-series:${sha256Hex(JSON.stringify([episode.series, names.toSorted(), tmdbId]))}`;
       let found = series.get(seriesId);
       if (!found) {
         found = {
@@ -263,15 +270,11 @@ export function mapPlaylistGroup(
 }
 
 export function playlistGroupId(group: string): string {
-  return digest(group);
+  return sha256Hex(group);
 }
 
 export function fileContainer(address: string): string {
   return /\.([a-z0-9]{1,8})$/i.exec(new URL(address).pathname)?.[1]?.toLowerCase() ?? "ts";
-}
-
-function digest(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
 }
 
 function emptyDetails(

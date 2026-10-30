@@ -10,7 +10,14 @@ import { pacer, type Steps } from "@mrstreamer/core/steps";
 import { type, type ArkErrors } from "arktype";
 import { Directory, File, Paths } from "expo-file-system";
 import { inTasks } from "./library.ts";
-import { holds, safeUrl, URL_LENGTH } from "./login-safety.ts";
+import {
+  holds,
+  loginFrom,
+  safeUrl,
+  URL_LENGTH,
+  type Login,
+  type SourceLogin,
+} from "./login-safety.ts";
 
 // Each subscription's last channel list and movie and series lists, as its provider gave them,
 // kept in Caches/catalogues so a launch can show them before, or instead of, asking again.
@@ -265,7 +272,7 @@ export function readList(id: string, kind: SavedKind, stands: () => boolean) {
 export function writeList(
   id: string,
   saved: Saved,
-  login: readonly string[],
+  login: SourceLogin,
   stands: () => boolean,
 ): Promise<void> {
   const { kind } = saved;
@@ -364,33 +371,33 @@ function shed(keep: string | null, pending: boolean) {
 /**
  * The file's text for `saved`, a slice of rows at a time: its rows with the fields the app reads,
  * artwork addresses that may carry the login as none. False when any other text of a row holds
- * the password, as nothing then says what else of the login a row carries; their numbers and
- * field names aren't text.
+ * the password or an uncertain value whole, as nothing then says what else of the login a row
+ * carries; their numbers and field names aren't text.
  */
-function* textOf(id: string, saved: Saved, login: readonly string[]): Steps<string | false> {
-  const [username = "", password = ""] = login;
-  const art = (url: string | null) => safeUrl(url, username, password);
+function* textOf(id: string, saved: Saved, login: SourceLogin): Steps<string | false> {
+  const known = loginFrom(login);
+  const art = (url: string | null) => safeUrl(url, known);
   let catalogue: LiveCatalogue | OnDemandCatalogue;
   if (saved.kind === "live") {
-    const categories = yield* copies(saved.catalogue.categories, categoryCopy, password);
+    const categories = yield* copies(saved.catalogue.categories, categoryCopy, known);
     if (!categories) return false;
     const channels = yield* copies(
       saved.catalogue.channels,
       (each) => channelCopy(each, art),
-      password,
+      known,
     );
     if (!channels) return false;
     catalogue = { categories, channels } satisfies LiveCatalogue;
   } else {
     const { movieCategories, movies, seriesCategories, series } = saved.catalogue;
     const titleOf = (each: ProviderTitle) => titleCopy(each, art);
-    const movieCopies = yield* copies(movieCategories, categoryCopy, password);
+    const movieCopies = yield* copies(movieCategories, categoryCopy, known);
     if (!movieCopies) return false;
-    const movieRows = yield* copies(movies, titleOf, password);
+    const movieRows = yield* copies(movies, titleOf, known);
     if (!movieRows) return false;
-    const seriesCopies = yield* copies(seriesCategories, categoryCopy, password);
+    const seriesCopies = yield* copies(seriesCategories, categoryCopy, known);
     if (!seriesCopies) return false;
-    const seriesRows = yield* copies(series, titleOf, password);
+    const seriesRows = yield* copies(series, titleOf, known);
     if (!seriesRows) return false;
     catalogue = {
       movieCategories: movieCopies,
@@ -408,18 +415,18 @@ function* textOf(id: string, saved: Saved, login: readonly string[]): Steps<stri
   });
 }
 
-/** `list` copied by `copy`, a slice at a time; false at the first copy whose text holds `password`. */
+/** `list` copied by `copy`, a slice at a time; false at the first copy whose text holds `login`. */
 function* copies<A, B extends object>(
   list: readonly A[],
   copy: (each: A) => B,
-  password: string,
+  login: Login,
 ): Steps<B[] | false> {
   const due = pacer();
   const copied: B[] = [];
   for (const each of list) {
     if (due()) yield;
     const row = copy(each);
-    if (password !== "" && holds(row, password)) return false;
+    if (holds(row, login)) return false;
     copied.push(row);
   }
   return copied;

@@ -23,7 +23,7 @@ task stay until positive closure, even after reset. Personal providers, copies a
 preferences and analytics choices remain separate. Native playback, background/offline downloads,
 the exact reviewer journey and public-review approval retain their own acceptance gates.
 
-It connects Xtream subscriptions, one or several, and shows everything from all of them
+It connects Xtream subscriptions and M3U playlist links, one or several, and shows everything from all of them
 together, as the desktop does: there is no subscription to switch to. Live opens on All, every
 provider's channels of every country once, with their providers' logos; For you leads with the
 channel watched last behind Play, then recent channels and category shelves, and Categories has
@@ -265,7 +265,7 @@ Each responsibility has one owner, a plain module with a store the screens read:
 - `src/account.ts`: the saved subscriptions and their lists. It adds them (the provider checks
   the login before anything is saved; the same account added again updates the one saved),
   edits, retries and removes them, signs each in with core's Xtream adapter (shared with the
-  desktop) and loads each one's channels, and its movie and series lists once its login is
+  desktop) or a playlist link with `src/playlist.ts`, and loads each one's channels, and its movie and series lists once its login is
   checked. Each has its own login, loads and failures: one that fails, reloads or is removed
   leaves the others as they were. Changes to the registry and the Keychain run one at a time.
   Its requests to the provider ask iOS's URL cache to keep nothing: the cache would store each
@@ -276,13 +276,13 @@ Each responsibility has one owner, a plain module with a store the screens read:
 - `src/catalogue-cache.ts`: each subscription's last channel list and movie and series lists, in
   Caches, which backups leave out. A launch shows lists saved less than 12 hours ago as loaded and
   asks the provider for none, though the login is still checked; older ones show while they load
-  again, and stay when that fails. Reload, Try again and an add always ask. `account.ts` decides
-  all of that; this module only keeps the files, one operation at a time per list. A copy holds
-  the fields the app reads, with artwork addresses that could carry the login as none, and isn't
-  written when other text holds the password. Every row is checked on reading. A list may take
-  64 MiB and 250,000 rows, every list together 256 MiB, the oldest movie and series lists going
-  first. A new password or a removal deletes a subscription's copies first, and no write of the
-  earlier login is saved after that.
+  again, and stay when that fails. Reload, Try again and an add always ask. `account.ts` decides all
+  of that; this module only keeps the files, one operation at a time per list. A copy holds the
+  fields the app reads, with artwork addresses that could carry the login as none, and isn't written
+  when other text holds the password or a playlist link's uncertain value. Every row is checked on
+  reading. A list may take 64 MiB and 250,000 rows, every list together 256 MiB, the oldest movie
+  and series lists going first. A new password or a removal deletes a subscription's copies first,
+  and no write of the earlier login is saved after that.
 - `src/startup.ts`: whether the app is still opening. A launch opens once every saved list has
   been read and the channels and the movie and series collections are worked out of those that
   show. A missing, unreadable or doubtful copy only ends that list's read, and a password the
@@ -324,18 +324,17 @@ Each responsibility has one owner, a plain module with a store the screens read:
   Erase-history removal forgets the provider's picks or retains its erasing marker for launch retry;
   keeping history keeps the picks. Quality persistence, recovery timing and PiP/AirPlay through
   reconnect still require exact native and physical acceptance.
-- `src/details-cache.ts`: title and season details opened, in Caches/details. Each provider's
-  facts of a title sit under its subscription; TMDB's about of a title and of a season are shared,
-  as its list metadata is. `titles.ts` decides when one shows; this module keeps the files, one
-  operation at a time per subscription. A record holds the fields the app reads, artwork addresses
-  that could carry the login as none, and isn't written when other text holds the password. A
-  record may take 8 MiB, every record together 64 MiB and 2,048 records, counted in the UTF-8
-  bytes written with what writes under way have reserved, and a write left halfway that the disk
-  won't delete counts too; the least recently written go first, up to 64 for one write, which
-  isn't made when they don't make room. One older than 182 days isn't
-  read. A new password or a removal deletes a subscription's records with its lists, and no write
-  of the earlier login is saved after that. Launch reads no record: the budget is counted at the
-  first write.
+- `src/details-cache.ts`: title and season details opened, in Caches/details. Each provider's facts
+  of a title sit under its subscription; TMDB's about of a title and of a season are shared, as its
+  list metadata is. `titles.ts` decides when one shows; this module keeps the files, one operation
+  at a time per subscription. A record holds the fields the app reads, artwork addresses that could
+  carry the login as none, and isn't written when other text holds the password or a playlist link's
+  uncertain value. A record may take 8 MiB, every record together 64 MiB and 2,048 records, counted
+  in the UTF-8 bytes written with what writes under way have reserved, and a write left halfway that
+  the disk won't delete counts too; the least recently written go first, up to 64 for one write,
+  which isn't made when they don't make room. One older than 182 days isn't read. A new password or
+  a removal deletes a subscription's records with its lists, and no write of the earlier login is
+  saved after that. Launch reads no record: the budget is counted at the first write.
 - `src/artwork-cache.ts`: channel logos and title pictures as files in Caches, so they show
   again after a relaunch and offline. React Native's Image only gets a file: its own loader would
   fetch through iOS's shared URL cache, which keeps answers on disk under their address. Pictures
@@ -359,7 +358,18 @@ Each responsibility has one owner, a plain module with a store the screens read:
   whose Keychain item an add or a removal was writing when the app stopped are listed, and the
   next launch removes those items; nothing else in the Keychain is touched. Ids removed with
   their history are listed until all of it is deleted: each launch deletes what is left, and no new
-  subscription takes one of those ids.
+  subscription takes one of those ids. Playlists, with their group mapping, are kept apart under
+  `playlists` and `retiredPlaylists`, each with its place among all of them, so builds before
+  playlists read the file as they wrote it.
+- `src/playlist.ts`: a playlist link as a provider. It reads the playlist as it arrives, within
+  64 MB and 100,000 entries, and imports it with core's parsing and group mapping, as the desktop
+  does. The link stays in it and the Keychain; its secrets, and query values long enough to be a
+  token, are the login the failures and saved copies keep out, as written or encoded. Every other
+  query value but `type` and `output` is uncertain: saved copies hold none where no name's
+  character runs on from it (core's `whole`), however short, so a list or file whose text holds
+  one, as `en` from `lang=en`, isn't saved. The native guide reader and its redirects get both.
+- `src/playlist-groups.tsx`: a playlist's groups from Settings: what it holds, each group's pick of
+  Live TV, Movies, Series or Skip, and the entries left out with why.
 - `src/sources.ts`: each subscription's provider adapter and login, apart from every store, so no
   screen, snapshot or failure holds a password. Requests go to the subscription that lists what
   they name (`OwnedId`), and a failure hides only that subscription's login.
@@ -529,7 +539,8 @@ providers' lists are still loading or failed. `connect` shows until a subscripti
 the phone, Connect also opens `offline`, the same Downloads outside the tabs, so copies play with
 no provider saved, after a relaunch too. Connect and `provider` share `src/provider-form.tsx`. Settings lists each provider as a row with how it
 stands; pressing one offers Retry, its reloads, Edit and Remove as a system sheet, and Remove asks
-whether to delete its history too.
+whether to delete its history too. A playlist's sheet offers Playlist groups and one Reload
+playlist instead of the two reloads.
 
 Downloads' header entry and Watch's existing button show the queue's actual percentage, received
 bytes when its size is unknown, provider wait, queue count or failure. Search offers the same
@@ -619,8 +630,9 @@ The shared rules use some JavaScript that Hermes on iOS doesn't have or gets wro
 `Intl.Locale`, `PluralRules`, `ListFormat`, `DisplayNames` and `NumberFormat` (FormatJS, with the
 interface languages' data) and `Array.prototype.toSorted` and `toReversed` (core-js). Still
 missing and not polyfilled: `Buffer`, so `core/guide/xmltv` can't load, and `crypto.randomUUID`
-and `crypto.subtle`, which `core/guide/address`, `service`, `ondemand/files` and
-`playlist/import` take from `node:crypto`.
+and `crypto.subtle`, which `core/guide/address`, `service` and `ondemand/files` take from
+`node:crypto`. `playlist/import` hashes with `core/sha256` instead, so M3U playlists map on the
+phone with the desktop's ids.
 
 Hermes's array methods ignore `Symbol.species`, so an Array subclass's `map` returns a plain
 Array. ArkType's intersection results are such a subclass. From arktype 2.2.9, its
@@ -857,8 +869,10 @@ scratch files stay under the guide root and share before-growth disk/free-space 
 spools and manifest staging. Per-connection mmap, preallocation hints and WAL shared-memory
 writes are disabled. The free-space check reserves allocation rounding and 64 KiB metadata
 headroom for growth; zero-byte revocation metadata, overwrites, renames and deletion do not require that reserve. It cannot reserve space against unrelated filesystem writers. UTF-8 XML only; one bounded external XMLTV DOCTYPE is blanked before parsing, with no DTD resolution. Internal subsets and entity declarations are refused. Programme prose follows the
-existing catalogue password-substring policy: it refuses a raw password anywhere in saved text,
-including ordinary-word collisions, while usernames within prose are allowed. No guide artwork,
+saved lists' policy (`login-safety.ts` `holds`): it refuses a password anywhere in saved text,
+including ordinary-word collisions, and a playlist link's uncertain query value standing whole,
+as written or decoded, while usernames within prose are allowed. The guide's redirects are checked
+against the same login and uncertain values. No guide artwork,
 provider URLs or request metadata is saved. `modules/guide/test/run.py` compiles the production
 core against Mac, simulator and device SDKs and runs fake-only host fixtures. It excludes the Expo
 wrapper, does not install an app, and cannot establish Release/Hermes registration or iOS runtime

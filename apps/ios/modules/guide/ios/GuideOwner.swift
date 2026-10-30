@@ -234,8 +234,8 @@ final class GuideOwner {
     }
     lock.unlock()
   }
-  func prepareAsync(_ lease: String, _ id: String, _ url: String, _ headers: [String: String], _ login: [String], _ now: Double, _ from: Double, _ until: Double, completion: @escaping ([String: Any]) -> Void) {
-    submit(lease, id, work: { self.prepare(lease, id, url, headers, login, now, from, until) }, completion: completion)
+  func prepareAsync(_ lease: String, _ id: String, _ url: String, _ headers: [String: String], _ login: [String], _ uncertain: [String], _ now: Double, _ from: Double, _ until: Double, completion: @escaping ([String: Any]) -> Void) {
+    submit(lease, id, work: { self.prepare(lease, id, url, headers, login, uncertain, now, from, until) }, completion: completion)
   }
   func publishAsync(_ lease: String, _ id: String, _ candidate: String, completion: @escaping ([String: Any]) -> Void) {
     submit(lease, id, short: true, work: { self.publish(lease, id, candidate) }, completion: completion)
@@ -247,7 +247,7 @@ final class GuideOwner {
     guard let owner = sources.first(where: { $0.value.lease == lease })?.key, let job = jobs[id], job.lease == lease else { throw GuideFailure("changed") }
     try job.check(); return (owner, job)
   }
-  func prepare(_ lease: String, _ id: String, _ url: String, _ headers: [String: String], _ login: [String], _ now: Double, _ from: Double, _ until: Double) -> [String: Any] {
+  func prepare(_ lease: String, _ id: String, _ url: String, _ headers: [String: String], _ login: [String], _ uncertain: [String], _ now: Double, _ from: Double, _ until: Double) -> [String: Any] {
     guideResult {
       lock.lock(); let captured: (String, GuideJob)
       do { captured = try context(lease, id); captured.1.active.enter() } catch { lock.unlock(); throw error }; lock.unlock()
@@ -279,7 +279,7 @@ final class GuideOwner {
         } else { xml = closed }
         let last: Double = try {
           let index = try GuideIndex(part, job: job, disk: disk, create: true)
-          try XmltvReader(index: index, job: job, disk: disk, login: login).run(xml)
+          try XmltvReader(index: index, job: job, disk: disk, login: login, uncertain: uncertain).run(xml)
           return try index.finish(now: now, from: from, until: until)
         }()
         let generation = GuideGeneration(id: key, fetchedAt: now, until: last)

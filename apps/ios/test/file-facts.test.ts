@@ -229,7 +229,7 @@ async function found(
   file.observed(tracks);
 }
 const savedIds = async (app: App, id: string) =>
-  ((await app.readFiles(id, LOGIN, () => true)) ?? []).map((file) => file.id).toSorted();
+  ((await app.readFiles(id, { login: LOGIN }, () => true)) ?? []).map((file) => file.id).toSorted();
 const versionTags = (app: App, kind: TitleKind, version: string) => {
   const index = indexOf(app);
   return index
@@ -662,7 +662,7 @@ describe("tracks found in a movie's file", () => {
       held.release();
       await change;
       // In the subscription's turn on the disk: after anything the late file asked to write.
-      expect(await app.readFiles(id, LOGIN, () => true)).toBeNull();
+      expect(await app.readFiles(id, { login: LOGIN }, () => true)).toBeNull();
       expect(savedPath()).toBeUndefined();
       if (how === "replaced") {
         await until(() => app.members()[0]?.titles.kind === "ready", "the new login's lists");
@@ -672,7 +672,7 @@ describe("tracks found in a movie's file", () => {
             tracksOf(app.filterFilesOf("movie"), ownedKey({ subscriptionId: id, id: each })),
           ).toBeUndefined();
         }
-        expect(await app.readFiles(id, LOGIN, () => true)).toBeNull();
+        expect(await app.readFiles(id, { login: LOGIN }, () => true)).toBeNull();
         expect(savedPath()).toBeUndefined();
       }
     },
@@ -748,7 +748,7 @@ describe("tracks found in a movie's file", () => {
       join(folder, path),
       JSON.stringify({ version: 1, subscriptionId: id, at: now, files }),
     );
-    const read = (await app.readFiles(id, LOGIN, () => true)) ?? [];
+    const read = (await app.readFiles(id, { login: LOGIN }, () => true)) ?? [];
     expect(read.map((file) => file.id).toSorted()).toEqual(
       Array.from({ length: 2048 }, (_, place) => String(place + 2)).toSorted(),
     );
@@ -905,7 +905,7 @@ describe("tracks found under a login whose saved lists are being deleted", () =>
     await until(() => app.members()[0]?.titles.kind === "ready", "the new login's lists");
     expect(tracksOf(app.filterFilesOf("movie"), movie)).toBeUndefined();
     expect(shows()).toBe("0 0");
-    expect(await app.readFiles(id, LOGIN, () => true)).toBeNull();
+    expect(await app.readFiles(id, { login: LOGIN }, () => true)).toBeNull();
   });
 
   it.each(["held", "still being read"] as const)(
