@@ -753,7 +753,10 @@ function make(deps: RecordingsDeps) {
             // must not be reported as a problem with this computer's disk.
             onFailure: ({ error }) => why.set(key, error.kind === "unexpected" ? "disk" : "stream"),
           }),
-          Effect.andThen(Effect.sync(() => startingOn.delete(subscriptionId))),
+          // A defect, as a capture folder this computer won't remove, is this computer's too.
+          Effect.catchDefect(() => Effect.sync(() => why.set(key, "disk"))),
+          // However it ended, the subscription's next schedule may start.
+          Effect.ensuring(Effect.sync(() => startingOn.delete(subscriptionId))),
           Effect.andThen(wake),
         ),
       );
