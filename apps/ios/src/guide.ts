@@ -53,6 +53,10 @@ interface Token {
   readonly start: number;
   readonly day?: Day;
 }
+/** A token schedule() handed out, with the start of the day read that minted it. */
+interface Minted extends Token {
+  readonly on: number;
+}
 const FRESH = 6 * 3600_000;
 const MAX_AGE = 7 * 86400_000;
 const EMPTY: GuideStatus = {
@@ -72,7 +76,7 @@ export function createGuide(
   const entries = new Map<string, Entry>();
   const parts = new Map<string, Part>();
   const state = store<ReadonlyMap<string, GuideStatus>>(new Map());
-  const tokens = new Map<string, Token>();
+  const tokens = new Map<string, Minted>();
   const versions = new Map<string, number>();
   let sequence = 0;
   let era = 0;
@@ -110,23 +114,26 @@ export function createGuide(
   };
   /** Each token by what it names, so reading the same programme or page again reuses it. */
   const minted = new Map<string, string>();
-  const named = (value: Token) =>
+  const named = (value: Minted) =>
     JSON.stringify([
       value.generation.id,
       value.key,
       value.ids,
       value.start,
       value.day?.from ?? null,
+      value.on,
     ]);
   const drop = (key: string) => {
     const value = tokens.get(key);
     if (value && minted.get(named(value)) === key) minted.delete(named(value));
     tokens.delete(key);
   };
-  /** Counts, by channel, each time its tokens are withdrawn, so a screen reads it again. */
+  /** Counts, by channel and day read, each withdrawal of its tokens, so a screen reads again. */
   const withdrawals = new Map<string, number>();
-  const withdraw = (value: Token) => {
-    withdrawals.set(value.key, (withdrawals.get(value.key) ?? 0) + 1);
+  const read = (key: string, on: number) => JSON.stringify([key, on]);
+  const withdraw = (value: Minted) => {
+    const at = read(value.key, value.on);
+    withdrawals.set(at, (withdrawals.get(at) ?? 0) + 1);
   };
   const invalidate = (entry: Entry) => {
     for (const [key, value] of tokens)
@@ -137,7 +144,7 @@ export function createGuide(
   };
   // The least recently minted or read goes first, withdrawn, once 8192 different programmes and
   // pages are held: 32 Guide grid rows of 256 programmes, or about 170 of 48.
-  const token = (value: Token) => {
+  const token = (value: Minted) => {
     const name = named(value);
     const known = minted.get(name);
     const held = known === undefined ? undefined : tokens.get(known);
@@ -370,8 +377,11 @@ export function createGuide(
     status,
     /** Immutable owner snapshot for React; notifications also carry the foreground minute tick. */
     getSnapshot: state.get,
-    /** Changes as a channel's detail tokens are withdrawn, as by background() or eviction. */
-    withdrawn: (key: string) => withdrawals.get(key) ?? 0,
+    /**
+     * Changes as the detail tokens a channel's schedule() of the day from `on` handed out are
+     * withdrawn, as by background() or eviction.
+     */
+    withdrawn: (key: string, on: number) => withdrawals.get(read(key, on)) ?? 0,
     subscribe(listener: () => void) {
       const stop = state.subscribe(listener);
       listeners++;
@@ -574,12 +584,15 @@ export function createGuide(
         start,
         stop,
         title,
-        detail: token({ ...captured, ids, start }),
+        detail: token({ ...captured, ids, start, on: day.from }),
       }));
       const last = programmes.at(-1);
       return {
         programmes,
-        cursor: answer.more && last ? token({ ...captured, ids, start: last.start, day }) : null,
+        cursor:
+          answer.more && last
+            ? token({ ...captured, ids, start: last.start, day, on: day.from })
+            : null,
       };
     },
     async programme(

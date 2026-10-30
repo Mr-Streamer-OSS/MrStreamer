@@ -174,27 +174,31 @@ interface GridRead extends GridDay {
   readonly minute: number;
 }
 const NO_ROWS: ReadonlyMap<string, GridDay> = new Map();
-// With the owner's tokens, which going to the background or eviction withdraws, so a row's cells
-// still open.
-const versionOf = (key: string, snapshot: ReturnType<typeof guide.getSnapshot>) => {
+// With the owner's tokens for the day, which going to the background or eviction withdraws, so a
+// row's cells still open.
+const versionOf = (key: string, from: number, snapshot: ReturnType<typeof guide.getSnapshot>) => {
   const id = key.slice(0, key.indexOf(":"));
   return JSON.stringify([
     currentSource(id)?.revision ?? null,
     authorityOf([id], snapshot),
     snapshot.get(id)?.fetchedAt ?? null,
-    guide.withdrawn(key),
+    guide.withdrawn(key, from),
   ]);
 };
 
-/** Runs reads `width` at a time, in the order they are asked for. */
+/** Runs reads `width` at a time, in the order asked for; an aborted one gives way at once. */
 function lanes(width: number) {
   let free = width;
   const waiting: (() => void)[] = [];
-  return async <T,>(read: () => Promise<T>) => {
+  return async <T,>(signal: AbortSignal, read: () => Promise<T>) => {
     if (free > 0) free--;
     else await new Promise<void>((go) => waiting.push(go));
     try {
-      return await read();
+      if (signal.aborted) return undefined;
+      const aborted = new Promise<undefined>((stop) =>
+        signal.addEventListener("abort", () => stop(undefined), { once: true }),
+      );
+      return await Promise.race([read(), aborted]);
     } finally {
       const next = waiting.shift();
       if (next) next();
@@ -264,14 +268,16 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
   // Only what a row is read under starts reads, not every notification, which ingestion sends
   // often and would abort each read in progress.
   const minute = Math.floor(now / 60_000);
-  const versioned = JSON.stringify(requested.map((key) => versionOf(key, snapshot)));
+  const versioned = JSON.stringify(requested.map((key) => versionOf(key, day.from, snapshot)));
   useEffect(() => {
     const running = reading.current;
     const listed = JSON.parse(versioned) as string[];
     const versions = new Map(requested.map((key, index) => [key, listed[index] ?? ""] as const));
+    // A read stops once its row leaves the view, or what it is read under changes.
     for (const [key, read] of running)
       if (
         !focused ||
+        !versions.has(key) ||
         read.from !== day.from ||
         read.catalogue !== catalogue ||
         read.version !== versions.get(key)
@@ -303,32 +309,35 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
       };
       running.set(key, read);
       const { signal } = read.controller;
-      void lane(() =>
-        signal.aborted
-          ? Promise.resolve(undefined)
-          : readRow(key, { from: day.from, until: day.until }, signal),
-      ).then((got) => {
-        if (running.get(key) === read) running.delete(key);
-        // A read that a login or guide change overtook is left out.
-        if (!got || signal.aborted || versionOf(key, guide.getSnapshot()) !== version) return;
-        setSettled((prior) => {
-          const kept =
-            prior?.from === day.from && prior.catalogue === catalogue ? prior.rows : undefined;
-          const rows = new Map<string, GridRead>();
-          for (const shown of inView.current) {
-            const row = shown === key ? { ...got, version, minute } : kept?.get(shown);
-            if (row) rows.set(shown, row);
-          }
-          return { from: day.from, catalogue, rows };
-        });
-      });
+      void lane(signal, () => readRow(key, { from: day.from, until: day.until }, signal)).then(
+        (got) => {
+          if (running.get(key) === read) running.delete(key);
+          if (signal.aborted) return;
+          // A read that a login or guide change or a withdrawal overtook is left out. Settling
+          // still renders, so the row is read again under what changed.
+          const landed =
+            got && versionOf(key, day.from, guide.getSnapshot()) === version
+              ? { ...got, version, minute }
+              : undefined;
+          setSettled((prior) => {
+            const kept =
+              prior?.from === day.from && prior.catalogue === catalogue ? prior.rows : undefined;
+            const rows = new Map<string, GridRead>();
+            for (const shown of inView.current) {
+              const row = (shown === key ? landed : undefined) ?? kept?.get(shown);
+              if (row) rows.set(shown, row);
+            }
+            return { from: day.from, catalogue, rows };
+          });
+        },
+      );
     }
   }, [day.from, day.until, catalogue, requested, versioned, minute, focused, lane]);
   const rows = useMemo(() => {
     if (settled?.from !== day.from || settled.catalogue !== catalogue) return NO_ROWS;
     const shown = new Map<string, GridDay>();
     for (const [key, row] of settled.rows)
-      if (row.version === versionOf(key, snapshot)) shown.set(key, row);
+      if (row.version === versionOf(key, day.from, snapshot)) shown.set(key, row);
     return shown;
     // `identity` follows each provider's login, which `versionOf` reads.
   }, [settled, day.from, catalogue, snapshot, identity]);

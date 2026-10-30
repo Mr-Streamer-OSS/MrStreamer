@@ -1306,6 +1306,41 @@ describe("Live's Guide grid", () => {
     expect(detail()?.textContent).toContain(current.description);
   });
 
+  it("reads each row of a new day once, while its tokens evict the last day's", async () => {
+    await install("a", 20);
+    state.visible = 20;
+    // 400 programmes a row through the day, so a day's rows hold most of the owner's tokens.
+    state.answer = async (_mode, _ids, from) =>
+      answer(
+        Array.from({ length: 400 }, (_, i) => ({
+          title: `Programme ${i}`,
+          start: from + i * 216_000,
+          stop: from + (i + 1) * 216_000,
+          description: null,
+        })),
+      );
+    await guide();
+    state.queries = [];
+    await click("Next day");
+    const reads = state.queries
+      .filter((query) => query.mode === "day")
+      .map((query) => query.ids.join());
+    expect(reads).toHaveLength(20);
+    expect(new Set(reads).size).toBe(20);
+    for (let i = 1; i <= 20; i++)
+      expect(container.querySelector(`[data-testid^="grid-a:${i}-"]`)).not.toBeNull();
+  });
+
+  it("reads a new day's rows at once while the last day's reads still hang", async () => {
+    await guide();
+    const gate = holdQueries(state.answer!);
+    await click("Next day");
+    state.queries = [];
+    await click("Next day");
+    expect(state.queries.map((query) => query.from)).toContain(new Date(2026, 9, 26).getTime());
+    await gate.release();
+  });
+
   it("keeps one provider's rows reading while another provider changes", async () => {
     const a = part("a"),
       b = part("b");
@@ -1329,7 +1364,8 @@ describe("Live's Guide grid", () => {
     let readsOfB = 0;
     state.answer = (mode, ids, from, until, after, lease) => {
       if (lease !== "lease-b") return base(mode, ids, from, until, after, lease);
-      if (mode === "day" && ids[0] === "trusted-1") readsOfB++;
+      if (mode === "day" && ids[0] === "trusted-1" && from === new Date(2026, 9, 24).getTime())
+        readsOfB++;
       return new Promise((resolve) =>
         held.push(() => void base(mode, ids, from, until, after, lease).then(resolve)),
       );
