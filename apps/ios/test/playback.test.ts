@@ -219,23 +219,46 @@ describe("a programme from catch-up", () => {
     expect(container.textContent).toContain("-1:00:00");
   });
 
-  it("stops at the programme's end where the archive sends on past it", async () => {
+  it("counts from the programme's start and stops at its end, where the recording runs wider", async () => {
     await connect([3, 3, 3]);
+    // A recording that starts on the minute, 30 seconds before the programme, and sends on.
+    archiveStream.mockImplementation(async (id, window) => ({
+      url: `archive:${id}:${window.start}`,
+      format: "hls",
+      start: window.start - 30_000,
+    }));
     await play(aired(2 * HOUR));
     await React.act(async () => {
-      port.observation({ kind: "ready", durationSeconds: null });
-      port.currentTime = 3599;
+      port.duration = 2 * 3600;
+      port.ready();
+      await tick();
+    });
+    expect(port.currentTime).toBe(30);
+    await React.act(async () => {
+      port.currentTime = 30 + 3599;
       port.pause.mockClear();
       port.state(true);
       await tick();
     });
+    expect(container.textContent).toContain("-0:01");
     expect(port.pause).not.toHaveBeenCalled();
     await React.act(async () => {
-      port.currentTime = 3600;
+      port.currentTime = 30 + 3600;
       port.state(true);
       await tick();
     });
     expect(port.pause).toHaveBeenCalled();
+  });
+
+  it("plays the accepted stream where it keeps the programme", async () => {
+    await connect([null, 3, 3]);
+    preferences.updateChannelPick(channel, "12");
+    await play(aired(2 * HOUR));
+    expect(archiveStream).toHaveBeenCalledExactlyOnceWith(
+      "12",
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it.each([

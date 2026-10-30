@@ -77,10 +77,10 @@ export interface Playing {
   /** A live channel plays on; a title, or a programme from catch-up, has a length. */
   readonly live: boolean;
   /**
-   * A channel's programme from its catch-up archive, when it aired: it plays from its start as
-   * the channel's own streams do, trying another when one fails, but with a length and never
-   * live. Its length is at least the programme's, as a recording still being made grows to it,
-   * and it stops there where the archive sends on past it.
+   * A channel's programme from its catch-up archive, when it aired: it plays as the channel's own
+   * streams do, trying another when one fails, but with a length and never live. Its times count
+   * from the programme's start and its length is the programme's, even where the recording
+   * starts on the minute before it, is still being made or sends on past it: it stops at the end.
    */
   readonly past?: { readonly start: number; readonly stop: number };
   /** An episode with one after it, which Watch offers. */
@@ -126,6 +126,8 @@ export interface Source {
   readonly container: string;
   /** Bound by titles.ts to the exact provider row; only original AVPlayer reads report facts. */
   readonly observed?: (tracks: ObservedFileTracks) => void;
+  /** Epoch milliseconds a recording from catch-up starts at: its programme's start or before. */
+  readonly start?: number;
 }
 
 /**
@@ -137,14 +139,9 @@ const THROUGH_SESSION: ReadonlySet<string> = new Set(["mkv"]);
 /** How the latest save of a title's progress ended: kept, or refused with what it was refused for. */
 export type Saved = { readonly saved: true } | { readonly saved: false; readonly error: AppError };
 
-/**
- * A title's length in seconds as the player knows it; a programme from catch-up's at least the
- * programme's, which a recording still being made grows to.
- */
-function lengthOf(item: Playing, known: number | null): number {
-  const seconds = known ?? 0;
-  return item.past ? Math.max(seconds, (item.past.stop - item.past.start) / 1000) : seconds;
-}
+/** A title's length in seconds as the player knows it; a programme from catch-up's own. */
+const lengthOf = (item: Playing, known: number | null): number =>
+  item.past ? (item.past.stop - item.past.start) / 1000 : (known ?? 0);
 
 /** Opens what plays; aborted when the viewer moves on first. */
 type Open = (signal: AbortSignal) => Promise<Source>;
@@ -322,6 +319,11 @@ let current: {
   readonly epoch: Epoch;
   /** Seconds to seek to once the title is ready; null once done. */
   seek: number | null;
+  /**
+   * Seconds of the stream before what plays starts, which positions leave out: a recording that
+   * starts before its programme. 0 otherwise.
+   */
+  offset: number;
   /** Whether the stream got as far as playing, so a position means something. */
   loaded: boolean;
   /** Where a title was when it was let go of, for Try again. */
@@ -636,7 +638,8 @@ function release(): Promise<Saved> {
     clearWatchdog(current.epoch);
     playingTime(current.epoch, false);
   }
-  if (current?.loaded && !current.item.live) current.stoppedAt = player().currentTime;
+  if (current?.loaded && !current.item.live)
+    current.stoppedAt = player().currentTime - current.offset;
   if (checkpoint) clearInterval(checkpoint);
   checkpoint = null;
   if (current) void retire(current.resource);
@@ -1135,7 +1138,7 @@ function observe(event: PlaybackObservation) {
     case "ready": {
       if (!current.item.live) length.set(lengthOf(current.item, event.durationSeconds));
       if (current.seek !== null) {
-        const from = current.seek;
+        const from = current.seek + current.offset;
         current.seek = null;
         if (from > 0) player().currentTime = from;
       }
@@ -1161,9 +1164,9 @@ function observe(event: PlaybackObservation) {
       else if (held?.acknowledged && previous === "paused" && playing) held = null;
       const viewerPaused = paused && pauseOnStart === "viewer-applied";
       if (viewerPaused) pauseOnStart = false;
-      clock.set(event.mediaTimeSeconds);
+      clock.set(Math.max(0, event.mediaTimeSeconds - current.offset));
       if (!stands(resource) || resource.sequence !== event.sequence) return;
-      if (playing && current.item.past && event.mediaTimeSeconds >= length.get()) {
+      if (playing && current.item.past && clock.get() >= length.get()) {
         player().pause();
         return;
       }
@@ -1287,7 +1290,9 @@ async function start(choice: Choice, options: PlayOptions) {
     choice,
     options,
     epoch,
-    seek: options.from ?? null,
+    // A programme from catch-up starts at its start, which its recording can start before.
+    seek: options.from ?? (choice.item.past ? 0 : null),
+    offset: 0,
     loaded: false,
     stoppedAt: null,
     resource,
@@ -1428,6 +1433,10 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
     }
     const source = await open(controller.signal);
     resource.admit = source.admit ?? null;
+    owned.offset =
+      item.past && source.start !== undefined
+        ? Math.max(0, (item.past.start - source.start) / 1000)
+        : 0;
     if (!attemptStands(owned, resource)) return;
     resource.observed =
       plan.kind === "file" && !item.live && item.subscriptionId !== null
@@ -1602,7 +1611,7 @@ export function seekBy(seconds: number) {
 
 /** Moves a title to `seconds` from its start. */
 export function seekTo(seconds: number) {
-  player().currentTime = Math.max(0, seconds);
+  player().currentTime = Math.max(0, seconds) + (current?.offset ?? 0);
   clock.set(Math.max(0, seconds));
 }
 

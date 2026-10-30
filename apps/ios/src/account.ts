@@ -1484,7 +1484,11 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
       };
     }
   }
-  const [first, ...rest] = streamsToPlay(kept, { liveQuality, channelVariants: picks }, asked).map(
+  // The accepted pick is kept under the channel's id, so it is found among all its streams, and
+  // plays where it keeps the window too.
+  const chosen = chosenVariant(channel, picks);
+  const pick = asked ?? (chosen && kept.variants.includes(chosen) ? chosen.id : undefined);
+  const [first, ...rest] = streamsToPlay(kept, { liveQuality, channelVariants: picks }, pick).map(
     (variant) => ({
       variantId: variant.id,
       open: async (signal: AbortSignal) => {
@@ -1495,7 +1499,7 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
         if (past) archiveVariants({ ...channel, variants: [variant] }, past, Date.now());
         const stream = past
           ? await provider.archiveStream(variant.id, past, signal)
-          : await provider.liveStream(variant.id, signal);
+          : { ...(await provider.liveStream(variant.id, signal)), start: undefined };
         if (!permitted())
           throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
         return {
@@ -1506,6 +1510,7 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
           url: stream.url,
           container: stream.format === "hls" ? "m3u8" : "ts",
           ...(stream.headers ? { headers: stream.headers } : {}),
+          ...(stream.start === undefined ? {} : { start: stream.start }),
         };
       },
     }),
@@ -1514,7 +1519,7 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
     ? {
         kind: "live",
         candidates: [first, ...rest],
-        explicit: asked !== undefined || chosenVariant(kept, picks) !== null,
+        explicit: pick !== undefined,
       }
     : null;
 }
