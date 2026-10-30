@@ -92,8 +92,9 @@ vi.mock("../src/guide-sources.ts", async () => {
         ]);
         return null;
       },
-      async replace(id: string) {
-        log(`replace ${id}`);
+      async replace(id: string, link: string) {
+        // The link's host, so the log holds no secret.
+        log(`replace ${id} ${URL.parse(link)?.host ?? "?"}`);
         return scenario.refusal;
       },
       async remove(id: string) {
@@ -211,7 +212,13 @@ it("says why a guide failed and that its last good guide stays; a locked one ask
   expect(screen.label("guides-xmltv-c")).toBe("News, Downloading");
 
   await screen.press("guides-xmltv-b");
-  expect(scenario.sheet!.options).toEqual(["Enter link", "Remove", "Cancel"]);
+  const sheet = scenario.sheet!;
+  expect(sheet.options).toEqual(["Enter link", "Remove", "Cancel"]);
+  await React.act(async () => sheet.pick(0));
+  expect(screen.container.textContent).toContain("New link for b.example");
+  await screen.type("guides-xmltv-link", SECRET);
+  await screen.press("guides-submit");
+  expect(scenario.calls).toEqual(["replace xmltv-b epg.example.com"]);
 });
 
 it("removes a guide only once Remove is confirmed", async () => {
@@ -251,7 +258,10 @@ it("refreshes a guide, and gives it a new link through the same form, refusals i
   expect(screen.text("guides-refusal")).toBe("That isn't a web link");
   scenario.refusal = null;
   await screen.press("guides-submit");
-  expect(scenario.calls.slice(1)).toEqual(["replace xmltv-a", "replace xmltv-a"]);
+  expect(scenario.calls.slice(1)).toEqual([
+    "replace xmltv-a epg.example.com",
+    "replace xmltv-a epg.example.com",
+  ]);
   expect(screen.container.textContent).toContain("Add guide");
   expect(screen.container.innerHTML).not.toContain("s3cret");
 });
