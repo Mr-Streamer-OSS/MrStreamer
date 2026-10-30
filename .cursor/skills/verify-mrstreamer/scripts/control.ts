@@ -42,6 +42,7 @@ import { nextEpisodeScenario } from "./next-episode.ts";
 import { posterGridScenario } from "./poster-grid.ts";
 import { B_SERIES, detailsBackScenario, withSecondSeason } from "./details-back.ts";
 import { removeDuringGuideScenario } from "./remove-during-guide.ts";
+import { recordingsScenario } from "./recordings.ts";
 import { remindersScenario } from "./reminders.ts";
 import {
   electronExecutable,
@@ -84,6 +85,7 @@ const scenarios = [
   "guide-grid-cells",
   "guide-grid-scroll",
   "reminders",
+  "recordings",
   "titles",
   "details-back",
   "next-episode",
@@ -234,6 +236,17 @@ async function run(scenario: Scenario, prior?: string) {
             // The playable test channels get guides of their own, but for the third.
             channelOf: (channel) =>
               channel.fixture && channel.streamId !== 1002
+                ? { ...channel, guideId: channel.guideId ?? `test${channel.streamId}.grid` }
+                : channel,
+          }
+        : {}),
+      ...(scenario === "recordings"
+        ? {
+            // Half-hour programmes, so Record offers When it ends.
+            guideHours: { past: 1, ahead: 3 },
+            guideLengths: [30],
+            channelOf: (channel) =>
+              channel.fixture
                 ? { ...channel, guideId: channel.guideId ?? `test${channel.streamId}.grid` }
                 : channel,
           }
@@ -1077,6 +1090,29 @@ async function run(scenario: Scenario, prior?: string) {
         });
       else if (scenario === "guide-grid-cells") await guideGridCellsScenario(driver);
       else await guideGridScrollScenario(driver);
+    } else if (scenario === "recordings") {
+      await recordingsScenario(
+        {
+          profile,
+          observed,
+          evaluate: livePage.evaluate,
+          send,
+          wait,
+          exists,
+          click,
+          key,
+          capture,
+          action,
+          launch,
+          quit,
+        },
+        {
+          streams: () => ({
+            requests: provider!.streamRequests(),
+            active: provider!.activeStreams(),
+          }),
+        },
+      );
     } else if (scenario === "reminders") {
       await remindersScenario(
         {

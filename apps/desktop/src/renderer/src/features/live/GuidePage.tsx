@@ -78,6 +78,7 @@ import { usePreviewWaits } from "../../player/output.ts";
 import { Picture } from "../../player/Picture.tsx";
 import { player, usePlayer } from "../../player/player.ts";
 import { RemindersMenu } from "../reminders/RemindersMenu.tsx";
+import { RecordButton } from "../recordings/RecordButton.tsx";
 import { numberEntry, NumberEntry } from "../watch/NumberEntry.tsx";
 import { rowPlays, searchChannelRows } from "./search-rows.ts";
 import { BrowseFilters } from "./BrowseFilters.tsx";
@@ -1144,8 +1145,8 @@ function NothingFound({
 
 /**
  * The stream that plays, muted, with what it shows and a way back to it, then `viewSwitch`, from
- * the list to the grid and back. A programme from the catch-up archive says when it aired, as
- * Watch does. While a receiver on the network is connected, the channel stands still and a line
+ * the list to the grid and back, and Record for the channel live. A programme from the catch-up
+ * archive says when it aired, as Watch does. While a receiver on the network is connected, the channel stands still and a line
  * says why.
  */
 function NowStrip({ active, viewSwitch }: { active: boolean; viewSwitch: ReactNode }) {
@@ -1202,6 +1203,7 @@ function NowStrip({ active, viewSwitch }: { active: boolean; viewSwitch: ReactNo
             </Button>
           )}
           {viewSwitch}
+          {!archive && <RecordButton channel={channel} programme={current} />}
         </div>
       </div>
     </section>

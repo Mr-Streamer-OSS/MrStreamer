@@ -22,6 +22,7 @@ import {
   type View,
 } from "../app/ui-store.ts";
 import { DownloadsNotice, useDownloadsStatus } from "../features/downloads/DownloadsNotice.tsx";
+import { useAnyRecording } from "../features/recordings/recordings.ts";
 import {
   UpdateNotice,
   updateNoticeLabel,
@@ -44,6 +45,7 @@ const VIEWS = [
   { view: "series", label: "Series" },
   { view: "watchlist", label: "Watchlist" },
   { view: "downloads", label: "Downloads" },
+  { view: "recordings", label: "Recordings" },
 ] as const satisfies readonly { readonly view: View; readonly label: PlainKey }[];
 
 const anyKept = (list: DownloadList) => list.items.length > 0;
@@ -56,8 +58,8 @@ const anyKept = (list: DownloadList) => list.items.length > 0;
  * a related title opened, it first returns through those it was opened from (`backDetails`).
  * Details get a bar of their own above their backdrop for it (`App.tsx`). `onBack` overrides
  * where it goes, as a playing title or an open collection does. Subscriptions with live TV only
- * have no Movies or Series. Watchlist and Downloads show once anything is saved or kept; hiding an
- * empty page's entry leaves that page open. Where the window is too
+ * have no Movies or Series. Watchlist, Downloads and Recordings show once anything is saved or
+ * kept; hiding an empty page's entry leaves that page open. Where the window is too
  * narrow for every page's name, Downloads goes beside Search as a button of its own, under the same name. That
  * place also says how the downloads stand while one is under way, waits or stopped, except over
  * the Downloads page itself while its name is in the bar. Where even the other names, or Back,
@@ -85,6 +87,8 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
     watchlist: useQuery(queries.watchlistAvailability()).data ?? true,
     // Every retained record counts, regardless of transfer or file state.
     downloads: useQuery({ ...downloadsQuery(), select: anyKept }).data ?? true,
+    // Every kept recording counts, recording or ended.
+    recordings: useAnyRecording(),
   };
   const shown = VIEWS.filter(
     (entry) => (!liveOnly || withoutTitles(entry.view)) && filled[entry.view] !== false,
