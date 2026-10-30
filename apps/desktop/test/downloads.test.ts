@@ -346,6 +346,33 @@ function serveSubdl() {
   return { answer, requests: () => requests };
 }
 
+/**
+ * Lets a test hold the provider's answer to a series' details: each call of the function it
+ * answers holds the next one, until its `release`. Made before the app starts.
+ */
+function seriesDetailsHold() {
+  const request = fetch;
+  let next: { arrived: () => void; released: Promise<void> } | undefined;
+  const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    const held = url.searchParams.get("action") === "get_series_info" ? next : undefined;
+    if (held) next = undefined;
+    const response = await request(input, init);
+    if (held) {
+      held.arrived();
+      await held.released;
+    }
+    return response;
+  });
+  onTestFinished(() => spy.mockRestore());
+  return () => {
+    const arrived = Promise.withResolvers<void>();
+    const released = Promise.withResolvers<void>();
+    next = { arrived: arrived.resolve, released: released.promise };
+    return { arrived: arrived.promise, release: () => released.resolve() };
+  };
+}
+
 describe.skipIf(!hasTools)("downloads", () => {
   it("downloads a movie and an episode, then plays the copies with no provider request", async () => {
     const { provider, dataDir, subscriptionId, downloads, playback, find } = await connected();
@@ -829,6 +856,70 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect((await downloads.list()).items).toEqual([]);
     await quit();
   }, 60_000);
+
+  it.each([
+    { overtaken: 1, ends: "complete" },
+    { overtaken: 2, ends: "failed" },
+  ] as const)(
+    "looks an episode's file up again once, and no more, when catalogue refreshes overtake the lookup as its transfer starts ($overtaken)",
+    async ({ overtaken, ends }) => {
+      const hold = seriesDetailsHold();
+      const { provider, dataDir, subscriptionId, downloads, onDemand, find, quit } =
+        await connected();
+      // The episode waits behind a stalled film, with the details it was queued by.
+      const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+      provider.stallMovieFile(film.id, 200_000, 60_000);
+      const first = await downloads.add(film.ref);
+      await vi.waitFor(
+        async () => expect((await find(first.id))?.status.kind).toBe("transferring"),
+        { timeout: LONG },
+      );
+      const target = episode(provider, subscriptionId);
+      const queued = await downloads.add(target.ref);
+      // Of an older catalogue since this refresh, those details are asked for again as it starts.
+      await onDemand.refresh(subscriptionId);
+      const asked = provider.detailRequests();
+      let held = hold();
+      await downloads.pause(first.id);
+      // Each refresh is accepted while the lookup's answer is still on its way.
+      for (let time = 1; time <= overtaken; time++) {
+        await held.arrived;
+        const overtakenNow = held;
+        if (time < overtaken) held = hold();
+        await onDemand.refresh(subscriptionId);
+        overtakenNow.release();
+      }
+      if (ends === "complete") {
+        await vi.waitFor(
+          async () => expect((await find(queued.id))?.status.kind).toBe("complete"),
+          { timeout: LONG },
+        );
+        expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(target.bytes));
+        expect(provider.detailRequests() - asked).toBe(2);
+      } else {
+        await vi.waitFor(
+          async () =>
+            expect((await find(queued.id))?.status).toMatchObject({
+              kind: "failed",
+              failure: { kind: "app", error: { kind: "unexpected" } },
+            }),
+          { timeout: LONG },
+        );
+        // Renewed once only: nothing asks again until the viewer retries.
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        expect(provider.detailRequests() - asked).toBe(2);
+        expect(await partial(dataDir, queued.id)).toBeNull();
+        await downloads.retry(queued.id);
+        await vi.waitFor(
+          async () => expect((await find(queued.id))?.status.kind).toBe("complete"),
+          { timeout: LONG },
+        );
+        expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(target.bytes));
+      }
+      await quit();
+    },
+    60_000,
+  );
 
   it("asks again when the provider is still freeing the connection of the download before", async () => {
     const { provider, dataDir, subscriptionId, downloads, find } = await connected({

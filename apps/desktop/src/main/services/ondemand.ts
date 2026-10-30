@@ -869,7 +869,7 @@ function make(deps: OnDemandDeps) {
             if (!(yield* stands(source))) return yield* switched;
             // A refresh during this request cannot bless an answer asked of the previous catalogue.
             if ((yield* stampOf(source)) !== stamp || !(yield* listedTitle(source, kind, id)))
-              return yield* switched;
+              return yield* overtaken;
             const downloaded: Downloaded = {
               raw,
               at: yield* Clock.currentTimeMillis,
@@ -1393,12 +1393,12 @@ function make(deps: OnDemandDeps) {
               source.provider.titleFile("episode", title.id, episode.container, signal),
             catch: failedWith,
           });
+          if (!(yield* stands(source))) return yield* switched;
           if (
-            !(yield* stands(source)) ||
             (yield* stampOf(source)) !== series.evidence.catalogueStamp ||
             !(yield* listedTitle(source, "series", title.seriesId))
           )
-            return yield* switched;
+            return yield* overtaken;
           return {
             ...file,
             revision: source.revision,
@@ -1454,13 +1454,19 @@ function make(deps: OnDemandDeps) {
   });
 }
 
+/**
+ * A lookup a catalogue refresh overtook: accepted while it was asked, so its answer is of the
+ * catalogue before. Asked again, it reads the one that refresh accepted.
+ */
+export class Overtaken extends Failed {}
+
 // Made when it fails, so it says so in the interface language of the moment.
-const switched = Effect.failSync(
-  () =>
-    new Failed({
-      error: { kind: "unexpected", detail: t("The subscription changed while loading titles.") },
-    }),
-);
+const changed = (): AppError => ({
+  kind: "unexpected",
+  detail: t("The subscription changed while loading titles."),
+});
+const switched = Effect.failSync(() => new Failed({ error: changed() }));
+const overtaken = Effect.failSync(() => new Overtaken({ error: changed() }));
 
 /** Keeps `value` as the most recently used, dropping the least recently used beyond `limit`. */
 function keep<V>(map: Map<string, V>, key: string, value: V, limit: number): void {

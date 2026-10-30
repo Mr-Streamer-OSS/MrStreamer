@@ -68,7 +68,7 @@ import {
   type StoredDownload,
 } from "../platform/downloads-store.ts";
 import { SavedSubtitles, subtitlesOfCopy } from "../platform/saved-subtitles.ts";
-import { OnDemand } from "./ondemand.ts";
+import { OnDemand, Overtaken } from "./ondemand.ts";
 import { Playback, type LocalCopy } from "./playback.ts";
 import { PlaybackCoordination, type Lent } from "./playback-coordination.ts";
 import { Subscriptions } from "./subscription.ts";
@@ -575,9 +575,18 @@ function make(deps: DownloadsDeps) {
       signal: AbortSignal,
     ): Promise<TransferOutcome> => {
       const title: TitleRef = { ...record.title, subscriptionId: record.subscriptionId };
-      // Stopped while the file is looked up, nothing is asked of the provider's file.
+      // Stopped while the file is looked up, nothing is asked of the provider's file. A lookup a
+      // catalogue refresh overtook is asked once more, of the catalogue that refresh accepted.
+      const lookup = Effect.all([
+        subscriptions.sourceOf(record.subscriptionId),
+        onDemand.file(title),
+      ]);
       const resolved = await Effect.runPromise(
-        Effect.all([subscriptions.sourceOf(record.subscriptionId), onDemand.file(title)]).pipe(
+        lookup.pipe(
+          Effect.catchIf(
+            (failure) => failure instanceof Overtaken,
+            () => lookup,
+          ),
           Effect.result,
         ),
         { signal },
