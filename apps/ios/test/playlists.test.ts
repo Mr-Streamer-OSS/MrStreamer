@@ -2,7 +2,7 @@ import { keychain } from "./keychain.ts";
 import { memoryFiles } from "./memory-files.ts";
 import { nativePlayer } from "./native-player.ts";
 // Installs the native guide stand-in a removal and a mapping forget through.
-import "./native-guide.ts";
+import { guideFixture } from "./native-guide.ts";
 import { kindOf } from "@mrstreamer/core/ondemand/catalogue";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -483,8 +483,11 @@ describe("mapping a playlist's groups", () => {
 });
 
 describe("a playlist's guide", () => {
-  /** The adapter over an https link whose playlist names `guide`, and every address it asked. */
-  async function guideOf(link: string, guide: string) {
+  /**
+   * The adapter over `link` whose playlist names `guide`, which redirects to `moved` when given,
+   * and every address it asked.
+   */
+  async function guideOf(link: string, guide: string, moved?: string) {
     const asked: string[] = [];
     const { playlistProvider } = await import("../src/playlist.ts");
     const provider = playlistProvider(
@@ -492,8 +495,11 @@ describe("a playlist's guide", () => {
       {
         userAgent: "test",
         fetch: async (input) => {
-          asked.push(String(input));
-          return new Response(`#EXTM3U x-tvg-url="${guide}"\n`);
+          const url = String(input);
+          asked.push(url);
+          return moved && url === guide
+            ? new Response(null, { status: 302, headers: { location: moved } })
+            : new Response(`#EXTM3U x-tvg-url="${guide}"\n`);
         },
       },
     );
@@ -508,6 +514,30 @@ describe("a playlist's guide", () => {
     });
     await expect(provider.liveGuide!()).rejects.toMatchObject({ error: { kind: "unreachable" } });
     expect(asked.some((each) => each.startsWith("http://guide.example"))).toBe(false);
+  });
+
+  it("is not followed over http with the login of an https link it redirects to", async () => {
+    const guide = "http://guide.example/start.xml";
+    const moved = `http://guide.example/guide.xml?token=${TOKEN}`;
+    const link = `https://tv.example/list.m3u?token=${TOKEN}`;
+    const { provider, asked } = await guideOf(link, guide, moved);
+    await expect(provider.liveGuide!()).rejects.toThrow();
+
+    // The native reader closes each redirect for the app to check before it asks the next.
+    const request = await provider.liveGuideRequest!();
+    if (request.kind !== "request") throw new Error("No guide");
+    const { native } = guideFixture();
+    native.prepare = async (_lease, _job, url) => {
+      asked.push(url);
+      return { kind: "ok", value: { kind: "redirect", location: moved } };
+    };
+    const { ingest } = await import("../src/guide-native.ts");
+    const { playlistSecrets } = await import("../src/playlist.ts");
+    await expect(
+      ingest(native, "lease", "job", request, [...playlistSecrets(link), link], 0, () => true),
+    ).resolves.toEqual({ kind: "failed", error: "redirect" });
+    expect(asked).toContain(guide);
+    expect(asked).not.toContain(moved);
   });
 
   it("is asked where it is when it holds no login, or the link is http too", async () => {

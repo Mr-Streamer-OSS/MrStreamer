@@ -152,6 +152,8 @@ export type GuideRequest =
       readonly kind: "request";
       readonly url: string;
       readonly headers: Readonly<Record<string, string>>;
+      /** The address that named `url`, as a playlist's link names its guide: its redirects are held to it. */
+      readonly from?: string;
     };
 
 /**

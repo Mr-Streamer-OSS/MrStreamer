@@ -61,15 +61,19 @@ export function playlistProvider(
   /** The read under way, shared by every call that needs one. */
   let reading: Promise<Read> | null = null;
 
-  /** The link's answer, its network and HTTP failures typed. */
-  async function open(url: string, timeoutMs: number, signal?: AbortSignal) {
+  /** `url`'s answer, its network and HTTP failures typed, its redirects held to `from`. */
+  async function open(url: string, timeoutMs: number, signal?: AbortSignal, from = url) {
     const timeout = AbortSignal.timeout(timeoutMs);
     let response: Response;
     try {
-      response = await get(url, {
-        headers: { "User-Agent": options.userAgent },
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      });
+      response = await get(
+        url,
+        {
+          headers: { "User-Agent": options.userAgent },
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        },
+        from,
+      );
     } catch (cause) {
       if (signal?.aborted) throw cause;
       throw unreachable(cause);
@@ -194,9 +198,9 @@ export function playlistProvider(
   }
 
   /**
-   * The guide the playlist names, held to the link as a redirect from it is: an https link's
-   * login goes to no http guide (`nextProviderRedirect`), as an HLS playlist's segments are held
-   * to its address.
+   * The guide the playlist names, held to the link as a redirect from it is, and its redirects
+   * too (`from`): an https link's login goes to no http address (`nextProviderRedirect`), as an
+   * HLS playlist's segments are held to its address.
    */
   async function guideRequest(signal?: AbortSignal): Promise<GuideRequest> {
     const { playlist, guideUrl } = await firstLine(signal);
@@ -218,7 +222,12 @@ export function playlistProvider(
         detail: "The playlist names an unencrypted guide address with your login in it.",
       });
     }
-    return { kind: "request", url, headers: { "User-Agent": options.userAgent } };
+    return {
+      kind: "request",
+      url,
+      headers: { "User-Agent": options.userAgent },
+      from: account.link,
+    };
   }
 
   return {
@@ -263,7 +272,10 @@ export function playlistProvider(
     async liveGuide(signal) {
       const request = await guideRequest(signal);
       if (request.kind === "none") return request;
-      return { kind: "document", ...(await open(request.url, GUIDE_TIMEOUT_MS, signal)) };
+      return {
+        kind: "document",
+        ...(await open(request.url, GUIDE_TIMEOUT_MS, signal, request.from)),
+      };
     },
 
     async onDemandCatalogue(signal) {
@@ -314,18 +326,20 @@ export function playlistProvider(
 const unmappedEntry = (entry: PlaylistEntry): PlaylistEntry => ({
   ...entry,
   name: safeName(entry.name),
-  group: entry.group === null ? null : safeName(entry.group),
+  group: entry.group === null ? null : eachGroup(entry.group),
   attributes: {
     ...entry.attributes,
     ...Object.fromEntries(
       (["tvg-id", "tvg-name", "group-title"] as const).flatMap((name) => {
         const value = entry.attributes[name];
-        // Each of several groups on its own, as a mapping's import reads them.
-        return value === undefined ? [] : [[name, value.split(";").map(safeName).join(";")]];
+        return value === undefined ? [] : [[name, eachGroup(value)]];
       }),
     ),
   },
 });
+
+/** `value` with each of several groups cleaned on its own, as a mapping's import reads them. */
+const eachGroup = (value: string) => value.split(";").map(safeName).join(";");
 
 /** Query names whose values are as much a playlist link's login as the user info before its host. */
 const LOGIN_NAMES: ReadonlySet<string> = new Set([

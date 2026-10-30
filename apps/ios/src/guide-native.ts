@@ -93,7 +93,10 @@ export function nativeGuide(): GuideNative {
   return found;
 }
 
-/** Each redirect has closed before JS validates the next hop against the ORIGINAL request. */
+/**
+ * Each redirect has closed before JS validates the next hop against the ORIGINAL request, or the
+ * address that named it (`from`).
+ */
 export async function ingest(
   native: GuideNative,
   lease: string,
@@ -123,7 +126,7 @@ export async function ingest(
     if (result.value.kind === "candidate") return native.publish(lease, job, result.value.id);
     try {
       url = nextProviderRedirect({
-        original: request.url,
+        original: request.from ?? request.url,
         current: url,
         location: result.value.location,
         followed,
