@@ -132,7 +132,19 @@ async function openSource(
   const ask = async (address: string, asked: AbortSignal) => {
     const headers = new Headers({ "User-Agent": options.userAgent, ...source.headers });
     for (let attempt = 0; ; attempt++) {
-      const answer = await options.request(address, { headers, signal: asked }, source.url);
+      const waiting = new AbortController();
+      const timeout = setTimeout(() => waiting.abort(), SILENCE_MS);
+      let answer: Response;
+      try {
+        answer = await options.request(
+          address,
+          { headers, signal: AbortSignal.any([asked, waiting.signal]) },
+          source.url,
+        );
+      } finally {
+        // Once headers arrive, the body's own watchdog owns silence on this response.
+        clearTimeout(timeout);
+      }
       if (answer.ok) return answer;
       await answer.body?.cancel().catch(() => {});
       const failure = classify(answer.status);

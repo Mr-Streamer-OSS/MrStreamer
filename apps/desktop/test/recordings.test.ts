@@ -397,6 +397,20 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await readdir(join(dataDir, "recordings")).catch(() => [])).toEqual([]);
   });
 
+  it("ends a start whose provider never sends response headers, releasing its connection", async () => {
+    const { dataDir, channel, subscriptionId, provider, recordings } = await connected({
+      streams: () => undefined,
+    });
+    await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject({
+      error: { kind: "stream", failure: { kind: "network" } },
+    });
+    expect(provider.streamRequests()).toBe(1);
+    expect(await allClosed(provider)).toBe(true);
+    expect((await recordings.connections(subscriptionId)).uses).toEqual([]);
+    expect(await recordings.list()).toEqual([]);
+    expect(await readdir(join(dataDir, "recordings"))).toEqual([]);
+  }, 20_000);
+
   it("goes on to the channel's next stream when one has no program, from the file's start", async () => {
     const junk = "TEST | H.264 + AAC";
     // A name with what file systems refuse, longer in bytes than one takes whole.

@@ -22,6 +22,8 @@ At the service boundary, Stop also retries saving an ended recording's current s
 
 The window offers Stop only while a row reads Recording, so this protects a click racing the automatic end. An automatic end with no Stop can leave its save failure unreported. On relaunch, an unsaved terminal outcome reads as Partial, cut short by the quit, with the file's actual size. The service retry does not add a retry control to an ended row.
 
+Every provider HTTP request also has a 15-second wait for response headers, including HLS playlists and segments. Once headers arrive that timer is cleared, leaving the response body's own watchdog in control. A public-service check lets the provider accept a connection without sending headers and requires the start to fail, close its request, release capacity and leave no recording or capture folder.
+
 ## Gotchas
 
 A provider can take a moment to free the slot of the preview **Stop playing and record** just closed: capture asks again after 0.5 and 1.5 s when refused, as playback does.
