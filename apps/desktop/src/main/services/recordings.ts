@@ -766,10 +766,20 @@ function make(deps: RecordingsDeps) {
     /**
      * Brings every schedule up to date at the time now: drops those of a subscription that
      * went, follows the lists and the guide, starts what is due, writes what was missed, and
-     * tells the window what changed. Answers when the next check is due. Only runs in a turn.
+     * tells the window what changed. Answers when the next check is due, or null while none is
+     * kept. Only runs in a turn.
      */
     const checkNow = Effect.gen(function* () {
       if (readKept.kind !== "read" || read.kind !== "read" || closing) return null;
+      // With none kept, nothing is asked of the lists, the guide or the clock: a schedule saved
+      // wakes the next check.
+      if (schedules.size === 0 && !unsaved.recordings && !unsaved.schedules) {
+        if (shownSchedules.length > 0) {
+          shownSchedules = [];
+          yield* PubSub.publish(scheduleChanges, shownSchedules);
+        }
+        return null;
+      }
       const now = Date.now();
       const saved = new Set((yield* subscriptions.saved).map((each) => each.id));
       let dirty = false;
