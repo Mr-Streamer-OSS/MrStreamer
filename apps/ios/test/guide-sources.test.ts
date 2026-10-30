@@ -184,6 +184,7 @@ describe("external guides", () => {
     expect(after.load()).toEqual([]);
     expect(await after.add("https://other.test/epg.xml")).toBe("saving");
     expect(await after.map("a:1", "news")).toBe("saving");
+    await expect(after.erase("a")).rejects.toThrow();
     expect(locked.file).toBe(saved);
   });
 

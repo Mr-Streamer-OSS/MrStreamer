@@ -302,7 +302,7 @@ describe("external guides and mappings", () => {
     return has;
   }
   async function twoGuides() {
-    const { owner, native, control } = setup();
+    const { owner, native, control, sources } = setup();
     control.activations.set("xmltv-1", {
       lease: "external",
       generation: { id: "db-x", fetchedAt: at, until: at + 86400_000 },
@@ -312,7 +312,7 @@ describe("external guides and mappings", () => {
     owner.setPart(part());
     owner.configure(new Map([["xmltv-1", external]]), new Map());
     await owner.attach("xmltv-1");
-    return { owner, has, control };
+    return { owner, has, control, native, sources };
   }
   const titleOf = async (owner: ReturnType<typeof createGuide>, key: string) =>
     (await owner.listings([key])).get(key)?.now?.title ?? null;
@@ -356,7 +356,7 @@ describe("external guides and mappings", () => {
   });
 
   it("withdraws what another guide answered once an external guide publishes", async () => {
-    const { owner, has, control } = await twoGuides();
+    const { owner, has, control, native } = await twoGuides();
     has.set("a", ["trusted.tv"]);
     const from = new Date(at);
     from.setHours(0, 0, 0, 0);
@@ -385,9 +385,35 @@ describe("external guides and mappings", () => {
     );
     await owner.attach("xmltv-1");
     const { programmes: again } = await owner.schedule("a:1", day);
+    // A read under way as it publishes answers nothing: what it chose may no longer come first.
+    const query = native.query;
+    const held = deferred<void>();
+    native.query = async (...args) => {
+      await held.promise;
+      return query(...args);
+    };
+    const reading = owner.schedule("a:1", day);
     await owner.refresh("xmltv-1");
+    held.resolve();
+    expect(await reading).toEqual(empty);
     expect(owner.withdrawn("a:1", day.from)).toBe(2);
     expect(await owner.programme(again[0]!.detail)).toBeNull();
+  });
+
+  it("withdraws what an external guide answered once the provider's own guide publishes", async () => {
+    const { owner, has, control, sources } = await twoGuides();
+    has.set("xmltv-1", ["trusted.tv"]);
+    const from = new Date(at);
+    from.setHours(0, 0, 0, 0);
+    const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
+    const { programmes } = await owner.schedule("a:1", day);
+    expect(programmes[0]?.title).toBe("xmltv-1");
+    sources.set("a", source);
+    await owner.attach("a");
+    control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "next" } });
+    await owner.refresh("a");
+    expect(owner.withdrawn("a:1", day.from)).toBe(1);
+    expect(await owner.programme(programmes[0]!.detail)).toBeNull();
   });
 
   it("downloads an external guide by its own link and keeps its last good guide on failure", async () => {

@@ -216,7 +216,17 @@ export function createGuide(
     parts.get(value.part.subscriptionId) === value.part &&
     value.entry.generation === value.generation &&
     usable(value.generation);
+  /** Withdraws the reads of a subscription's channels, from external guides too. */
+  const withdrawChannels = (subscriptionId: string) => {
+    for (const [key, value] of tokens)
+      if (value.part.subscriptionId === subscriptionId) {
+        withdraw(value);
+        drop(key);
+      }
+  };
+  /** Withdraws every read handed out, and refuses those under way. */
   const withdrawAll = () => {
+    layout++;
     for (const value of tokens.values()) withdraw(value);
     tokens.clear();
     minted.clear();
@@ -308,7 +318,10 @@ export function createGuide(
           entry.generation = result.value;
           // An external guide can now answer channels another guide answered before.
           if (externals.has(key)) withdrawAll();
-          else invalidate(entry);
+          else {
+            invalidate(entry);
+            withdrawChannels(key);
+          }
           entry.failedAt = -Infinity;
           update(key, { availability: "available", error: null });
         } else if (wanted() && result.kind === "failed") throw new GuideFault(result.error);
@@ -560,12 +573,7 @@ export function createGuide(
     },
     setPart(part: Part) {
       parts.set(part.subscriptionId, part);
-      // Its channels' reads from external guides too.
-      for (const [key, value] of tokens)
-        if (value.part.subscriptionId === part.subscriptionId) {
-          withdraw(value);
-          drop(key);
-        }
+      withdrawChannels(part.subscriptionId);
       const entry = entries.get(part.subscriptionId);
       if (entry) {
         invalidate(entry);
@@ -583,7 +591,6 @@ export function createGuide(
     ) {
       externals = guides;
       mappings = mapped;
-      layout++;
       withdrawAll();
       state.set(new Map(state.get()));
     },

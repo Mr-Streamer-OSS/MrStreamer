@@ -288,6 +288,8 @@ export function createGuides(
     /** Erases the mappings of subscription `id`'s channels, as its history goes. */
     erase: (subscriptionId: string) =>
       serially(async () => {
+        // Mappings not read can't be known erased: the erasure stays pending.
+        if (!writable) throw new Error("The guides file couldn't be read.");
         const prefix = `${subscriptionId}:`;
         const kept = Object.entries(saved.mappings).filter(([key]) => !key.startsWith(prefix));
         if (kept.length === Object.keys(saved.mappings).length) return;
