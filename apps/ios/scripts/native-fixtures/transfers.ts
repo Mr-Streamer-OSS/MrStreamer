@@ -82,8 +82,11 @@ export function titleTransfers(known: (title: string) => boolean) {
             // Once what came before has gone out, so the bytes before the break arrive.
             return void response.write(body.subarray(sent, breaksAt), () => response.destroy());
           }
-          response.write(body.subarray(sent, sent + PIECE));
-          if (rate > 0) await new Promise((resolve) => setTimeout(resolve, (PIECE / rate) * 1000));
+          const piece = body.subarray(sent, sent + PIECE);
+          response.write(piece);
+          if (rate > 0) {
+            await new Promise((resolve) => setTimeout(resolve, (piece.length / rate) * 1000));
+          }
         }
         response.end();
       })();

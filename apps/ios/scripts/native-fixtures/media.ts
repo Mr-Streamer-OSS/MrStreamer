@@ -74,6 +74,8 @@ export function mediaMaker(root: string, out: string, declaration: string) {
   };
   const filesOf = (dir: string) =>
     readdirSync(dir)
+      // A file still being written beside its place, by this server or another.
+      .filter((file) => !file.includes(".making-"))
       .toSorted()
       .map((file) => {
         const bytes = readFileSync(join(dir, file));
@@ -81,7 +83,7 @@ export function mediaMaker(root: string, out: string, declaration: string) {
       });
   const git = (args: readonly string[]) => {
     try {
-      return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+      return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trimEnd();
     } catch {
       return null;
     }

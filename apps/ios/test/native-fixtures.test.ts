@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { request } from "node:http";
+import { Agent, request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,14 +29,14 @@ const freePort = () =>
 const sha256 = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 
 /** Every byte of `url` that arrives, and whether the answer broke off before its end. */
-function download(url: string, headers: Record<string, string> = {}) {
+function download(url: string, headers: Record<string, string> = {}, agent?: Agent) {
   return new Promise<{
     status: number;
     headers: Record<string, unknown>;
     body: Buffer;
     broke: boolean;
   }>((resolve, reject) => {
-    request(url, { headers }, (response) => {
+    request(url, { headers, agent }, (response) => {
       const chunks: Buffer[] = [];
       let broke = false;
       response.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -124,15 +124,15 @@ describe("the native verification fixture", () => {
       probed.streams.map((each) =>
         `${each.codec_type} ${each.codec_name} ${each.tags?.language ?? ""}`.trim(),
       ),
-    ).toEqual(
-      expect.arrayContaining([
-        "video h264",
-        "audio aac en",
-        "audio aac nl",
-        "subtitle webvtt en",
-        "subtitle webvtt nl",
-      ]),
-    );
+    ).toEqual(expect.arrayContaining(["video h264", "audio aac en", "audio aac nl"]));
+    // ffprobe 6.1, which CI installs, leaves HLS subtitles out, so their listing is read as is.
+    const listed = await text(url);
+    for (const language of ["en", "nl"]) {
+      expect(listed).toMatch(
+        new RegExp(`#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",.*LANGUAGE="${language}"`),
+      );
+    }
+    expect(listed).toMatch(/#EXT-X-STREAM-INF:.*SUBTITLES="subtitles"/);
 
     // Each rendition lists the same segments, so a switch lands where the picture is.
     const sequences = await Promise.all(
@@ -244,6 +244,18 @@ describe("the native verification fixture", () => {
     const paced = await download(url, { Range: "bytes=0-524287" });
     expect(paced.body.length).toBe(524_288);
     expect(Date.now() - at).toBeGreaterThanOrEqual(1_500);
+    // A slow pace holds a short probe only for its own two bytes, so the connection is free again.
+    await post("/title-transfers?rate=1024");
+    const probed = Date.now();
+    const connection = new Agent({ keepAlive: true, maxSockets: 1 });
+    for (const _ of [1, 2]) {
+      expect(await download(url, { Range: "bytes=0-1" }, connection)).toMatchObject({
+        status: 206,
+        broke: false,
+      });
+    }
+    connection.destroy();
+    expect(Date.now() - probed).toBeLessThan(1_000);
     await post("/title-transfers?rate=0");
   }, 60_000);
 
@@ -298,10 +310,12 @@ describe("catch-up around the panel's clock changes", () => {
       catchUpPlaylist({ id: "1000", days: 3, media }, 30, start, Date.parse(now)) ?? "",
     )?.[1] ?? null;
 
-  it("takes a time the clock shows twice as the first, and refuses one it skips", () => {
+  it("takes a time the clock shows twice as the first, and refuses one it skips or no calendar has", () => {
     // Amsterdam goes back from 03:00 to 02:00 on 25 October 2026, and forward on 29 March.
     expect(begins("2026-10-25:02-30", "2026-10-25T01:00:00Z")).toBe("2026-10-25T00:30:00.000Z");
     expect(begins("2026-03-29:02-30", "2026-03-29T05:00:00Z")).toBeNull();
     expect(begins("2026-03-29:03-30", "2026-03-29T05:00:00Z")).toBe("2026-03-29T01:30:00.000Z");
+    expect(begins("2026-02-30:12-00", "2026-03-02T13:00:00Z")).toBeNull();
+    expect(begins("2026-03-01:24-00", "2026-03-02T13:00:00Z")).toBeNull();
   });
 });
