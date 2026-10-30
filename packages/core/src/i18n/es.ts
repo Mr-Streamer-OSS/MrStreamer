@@ -1491,7 +1491,6 @@ export const es: Translation = {
   "A connection is free then.": "Entonces hay una conexión libre.",
   "Recording now.": "Grabando ahora.",
   "The guide lists {title} at that time now.": "La guía muestra ahora {title} a esa hora.",
-  "The guide no longer lists it.": "La guía ya no lo muestra.",
   "Every connection is in use now.": "Todas las conexiones están en uso ahora.",
   "Every connection is in use then.": "Entonces todas las conexiones estarán en uso.",
   "Every connection is in use then, by {holders}.":
@@ -1517,4 +1516,5 @@ export const es: Translation = {
     "La guía mostraba otro programa a esa hora, o el canal ya no estaba.",
   "The channel list or guide wasn't read yet.":
     "La lista de canales o la guía aún no se había leído.",
+  "Its programme or channel is no longer listed.": "Su programa o canal ya no aparece.",
 };

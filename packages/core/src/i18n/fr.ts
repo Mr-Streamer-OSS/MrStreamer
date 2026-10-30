@@ -1485,7 +1485,6 @@ export const fr: Translation = {
   "Recording now.": "Enregistrement en cours.",
   "The guide lists {title} at that time now.":
     "Le guide indique désormais {title} à cette heure-là.",
-  "The guide no longer lists it.": "Le guide ne l'indique plus.",
   "Every connection is in use now.": "Toutes les connexions sont utilisées en ce moment.",
   "Every connection is in use then.": "Toutes les connexions seront utilisées à ce moment-là.",
   "Every connection is in use then, by {holders}.":
@@ -1512,4 +1511,5 @@ export const fr: Translation = {
     "Le guide indiquait un autre programme à ce moment, ou la chaîne avait disparu.",
   "The channel list or guide wasn't read yet.":
     "La liste des chaînes ou le guide n’était pas encore lu.",
+  "Its programme or channel is no longer listed.": "Son programme ou sa chaîne n’est plus listé.",
 };

@@ -934,8 +934,9 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { recordings, channel, listing, programmePlan, clockTo } = await scheduling();
     const { now } = await listing();
     const saved = await recordings.schedule(programmePlan(now));
-    await until(recordings.list, ([first]) => first?.status.kind === "recording");
-    // Changed to tomorrow's weekday at the same time: today's recording goes on, tomorrow's comes.
+    const [first] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    // Changed to every day at the same time, ten minutes longer: today's recording goes on to
+    // its own end, today's longer time doesn't start again, and tomorrow's comes.
     const at = new Date(now.start);
     const tomorrow = new Date(
       at.getFullYear(),
@@ -948,21 +949,30 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       {
         kind: "slot",
         channel: channel(GUIDED),
-        days: [tomorrow.getDay()],
+        days: EVERY_DAY,
         at: at.getHours() * 60 + at.getMinutes(),
-        minutes: 30,
+        minutes: 40,
         title: now.title,
         padding: { before: 0, after: 0 },
       },
       saved.id,
     );
-    expect(changed.next?.start).toBe(tomorrow.getTime());
+    expect(changed.status).toEqual({ kind: "recording", recording: first?.id });
+
+    // Today's recording ends at the programme's end, inside the changed time.
+    vi.setSystemTime(now.stop + 1000);
+    await until(recordings.list, ([each]) => each?.status.kind !== "recording");
+    await recordings.check();
+    expect(await recordings.list()).toHaveLength(1);
+
     await clockTo(tomorrow.getTime());
     const list = await until(recordings.list, (each) =>
       each.some((recording) => recording.scheduled?.from === tomorrow.getTime()),
     );
+    expect(list).toHaveLength(2);
     expect(list.find((each) => each.scheduled?.from === tomorrow.getTime())).toMatchObject({
       status: { kind: "recording" },
+      stop: tomorrow.getTime() + 40 * MINUTE,
       scheduled: { schedule: saved.id, late: null },
     });
   });

@@ -495,6 +495,6 @@ function standing(
         reason: t("The guide lists {title} at that time now.", { title: status.title }),
       };
     case "gone":
-      return { word: when, reason: t("The guide no longer lists it.") };
+      return { word: when, reason: t("Its programme or channel is no longer listed.") };
   }
 }

@@ -961,6 +961,9 @@ function Details({
   }).data;
   const on = slot !== null && slot.start <= minute && minute < slot.stop;
   const schedule = scheduleAt(useSchedules().data, channel, slot?.start ?? 0);
+  // A schedule the guide holds, another show listed then or none, won't record: Record re-saves it.
+  const records =
+    schedule !== undefined && schedule.status.kind !== "changed" && schedule.status.kind !== "gone";
   // The programme the controls are open for: another one under the cursor closes them.
   const [scheduling, setScheduling] = useState<number | null>(null);
   const open = slot !== null && scheduling === slot.start;
@@ -1020,10 +1023,10 @@ function Details({
               aria-hidden
               className={cn(
                 "size-2 flex-none rounded-full",
-                schedule ? "ring-[1.5px] ring-destructive ring-inset" : "bg-destructive",
+                records ? "ring-[1.5px] ring-destructive ring-inset" : "bg-destructive",
               )}
             />
-            {schedule ? t("Scheduled") : t("Record")}
+            {records ? t("Scheduled") : t("Record")}
           </Button>
         )}
       </div>

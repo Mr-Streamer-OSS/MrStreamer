@@ -64,7 +64,7 @@ const File = lazy(() => type({ version: "number.integer", recordings: Entry().ar
 export interface KeptSchedule {
   readonly id: string;
   readonly plan: RecordingPlan;
-  /** Its channel's name when it was saved or last found. */
+  /** Its channel's name when it was saved: listed under another, it is held as gone. */
   readonly channelName: string;
   /** When it was saved: of two that start together, the one saved first records first. */
   readonly created: number;

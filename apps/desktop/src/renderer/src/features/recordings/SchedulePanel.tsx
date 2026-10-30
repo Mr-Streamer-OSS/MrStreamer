@@ -334,10 +334,18 @@ function Standing({
       return <p>{`${span} ${t("A connection is free then.")}`}</p>;
     case "recording":
       return <p>{`${span} ${t("Recording now.")}`}</p>;
+    case "retrying":
+      return (
+        <p>{`${span} ${
+          status.why === "stream"
+            ? t("The stream couldn't be opened.")
+            : t("It couldn't be written to this computer.")
+        }`}</p>
+      );
     case "changed":
       return <p>{t("The guide lists {title} at that time now.", { title: status.title })}</p>;
     case "gone":
-      return <p>{t("The guide no longer lists it.")}</p>;
+      return <p>{t("Its programme or channel is no longer listed.")}</p>;
     case "conflict":
     case "waiting":
       return (

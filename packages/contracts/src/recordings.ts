@@ -184,8 +184,8 @@ export type ConnectionHolder =
  *   - `conflict`: what `holders` lists holds every connection then; it records once one is free.
  *   - `waiting`: its time has come and every connection is held; it records once one is free,
  *     the rest of its time.
- *   - `retrying`: its time has come and its last start failed for `why`; it asks again every few
- *     seconds, the rest of its time.
+ *   - `retrying`: its time has come and its last start failed for `why`; it asks again about once
+ *     a minute, the rest of its time.
  *   - `recording`: it records now, as `recording`.
  *   - `changed`: the guide lists `title` at its programme's start instead; it won't record that.
  *   - `gone`: the guide lists no programme at its start, or the lists no longer list its channel.

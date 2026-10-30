@@ -561,11 +561,22 @@ function make(deps: RecordingsDeps) {
     const recordingOf = (id: string) =>
       [...active.keys()].find((each) => records.get(each)?.scheduled?.schedule === id);
 
-    const saveSchedules = Effect.tryPromise({
-      try: () => writeSchedules(schedulesPath, [...schedules.values()]),
-      catch: () =>
-        new Failed({ error: { kind: "unexpected", detail: t("Schedules could not be saved.") } }),
-    });
+    /**
+     * Writes schedules.json, after what a check couldn't write of recordings.json: a time it
+     * settled is only kept settled once its missed result is kept too.
+     */
+    const saveSchedules = Effect.andThen(
+      Effect.suspend(() =>
+        unsaved.recordings
+          ? Effect.tap(save, () => Effect.sync(() => (unsaved.recordings = false)))
+          : Effect.void,
+      ),
+      Effect.tryPromise({
+        try: () => writeSchedules(schedulesPath, [...schedules.values()]),
+        catch: () =>
+          new Failed({ error: { kind: "unexpected", detail: t("Schedules could not be saved.") } }),
+      }),
+    );
     /** Keeps `schedule` as `id`, or takes `id` out for null, putting it back if the write fails. */
     const keep = (id: string, schedule: KeptSchedule | null) =>
       Effect.gen(function* () {
@@ -609,7 +620,12 @@ function make(deps: RecordingsDeps) {
         const { title, stop } = answer.programme;
         if (title !== plan.title)
           return { plan, listed, hold: { kind: "changed", title } satisfies Hold };
-        return { plan: { ...plan, stop }, listed, hold: null };
+        // Within the longest a recording runs, as schedules.json keeps it.
+        const longest =
+          plan.start + RECORDING_MAX_MS - (plan.padding.before + plan.padding.after) * 60_000;
+        // A guide whose end isn't after the start keeps the end it was saved with.
+        const followed = stop > plan.start ? Math.min(stop, longest) : plan.stop;
+        return { plan: { ...plan, stop: followed }, listed, hold: null };
       });
 
     /** What of this app holds the subscription's connections now. */
@@ -646,9 +662,10 @@ function make(deps: RecordingsDeps) {
           next,
           status,
         });
-        if (hold) return as(hold);
+        // What records goes on whatever the guide says now.
         const recording = recordingOf(schedule.id);
         if (recording) return as({ kind: "recording", recording });
+        if (hold) return as(hold);
         if (!next) return as({ kind: "planned" });
         const { subscriptionId } = plan.channel;
         const reason = next.start <= now ? why.get(occurrenceKey(schedule.id, next)) : undefined;
@@ -663,8 +680,9 @@ function make(deps: RecordingsDeps) {
             if (holds.get(other.id)) return [];
             // Each of its times within this one, but one it records now, which counts above.
             return occurrences(other.plan, next.start, next.stop).flatMap((theirs) => {
-              const made = recordOf(other.id, theirs);
-              if (made && active.has(made.id)) return [];
+              // One recording counts above as what it holds; one that recorded, or was settled,
+              // holds nothing more.
+              if (recordOf(other.id, theirs) || theirs.stop <= other.through) return [];
               const holder = {
                 kind: "schedule",
                 title: other.plan.title,
@@ -694,14 +712,14 @@ function make(deps: RecordingsDeps) {
 
     /**
      * Starts a schedule's occurrence on now, in the background; a check follows its answer. It is
-     * late from its start, or from when the schedule was saved, its `through` then, when that was
-     * later: the time before the schedule was saved is nobody's fault.
+     * late from its start, or from when the schedule was first saved, when that was later: the
+     * time before there was a schedule is nobody's fault.
      */
     const startOccurrence = (schedule: KeptSchedule, occurrence: Occurrence, now: number) => {
       const key = occurrenceKey(schedule.id, occurrence);
       const before = why.get(key);
       const late =
-        now - Math.max(occurrence.start, schedule.through) <= ON_TIME_MS
+        now - Math.max(occurrence.start, schedule.created) <= ON_TIME_MS
           ? null
           : before === undefined || before === "starting"
             ? "away"
@@ -843,8 +861,7 @@ function make(deps: RecordingsDeps) {
         yield* publish;
       }
       if (dirty || unsaved.schedules)
-        unsaved.schedules =
-          unsaved.recordings || (yield* Effect.result(saveSchedules))._tag === "Failure";
+        unsaved.schedules = (yield* Effect.result(saveSchedules))._tag === "Failure";
       if (unsaved.recordings || unsaved.schedules) {
         yield* Effect.logWarning("[recordings] schedules could not be saved; trying again");
         retry = true;
@@ -999,8 +1016,16 @@ function make(deps: RecordingsDeps) {
             yield* scheduling(
               Effect.suspend(() => {
                 const schedule = schedules.get(scheduled.schedule);
-                return schedule && schedule.through < record.stop
-                  ? keep(schedule.id, { ...schedule, through: record.stop })
+                if (!schedule) return Effect.void;
+                // That time as the plan has it now, as a guide that ran later moved its end.
+                const through = Math.max(
+                  record.stop,
+                  ...occurrences(schedule.plan, scheduled.from, scheduled.from + 1)
+                    .filter((each) => each.start === scheduled.from)
+                    .map((each) => each.stop),
+                );
+                return schedule.through < through
+                  ? keep(schedule.id, { ...schedule, through })
                   : Effect.void;
               }),
             );

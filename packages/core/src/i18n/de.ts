@@ -1426,7 +1426,6 @@ export const de: Translation = {
   "A connection is free then.": "Dann ist eine Verbindung frei.",
   "Recording now.": "Wird gerade aufgenommen.",
   "The guide lists {title} at that time now.": "Der Guide listet zu der Zeit jetzt {title}.",
-  "The guide no longer lists it.": "Der Guide listet es nicht mehr.",
   "Every connection is in use now.": "Alle Verbindungen sind gerade belegt.",
   "Every connection is in use then.": "Dann sind alle Verbindungen belegt.",
   "Every connection is in use then, by {holders}.":
@@ -1453,4 +1452,6 @@ export const de: Translation = {
     "Der Programmführer zeigte da eine andere Sendung, oder der Sender war weg.",
   "The channel list or guide wasn't read yet.":
     "Die Senderliste oder der Programmführer war noch nicht gelesen.",
+  "Its programme or channel is no longer listed.":
+    "Die Sendung oder der Sender ist nicht mehr aufgeführt.",
 };

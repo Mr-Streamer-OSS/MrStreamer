@@ -74,29 +74,19 @@ export interface Holding {
 }
 
 /**
- * What holds every connection at some time of `occurrence`, of `holdings` that start before it
- * and take the connection first; empty while one is free throughout, as far as they tell.
+ * What holds every connection as `occurrence` starts, of `holdings` that take the connection
+ * before it: those that started earlier, or together with it and first. Empty while one is free
+ * then, as far as they tell. One that starts later within it waits for it instead.
  */
 export function conflictOf(
   occurrence: Occurrence,
   holdings: readonly Holding[],
   limit: number,
 ): readonly ConnectionHolder[] {
-  const before = holdings.filter(
+  const holding = holdings.filter(
     (each) =>
       each.holder.until > occurrence.start &&
-      each.start < occurrence.stop &&
       (each.start < occurrence.start || (each.start === occurrence.start && each.first)),
   );
-  // Those holding at its start, or starting later within it: where most overlap at once is where
-  // it would wait.
-  const moments = [occurrence.start, ...before.map((each) => each.start)].filter(
-    (at) => at >= occurrence.start && at < occurrence.stop,
-  );
-  let most: Holding[] = [];
-  for (const at of moments) {
-    const holding = before.filter((each) => each.start <= at && each.holder.until > at);
-    if (holding.length > most.length) most = holding;
-  }
-  return most.length >= limit ? most.map((each) => each.holder) : [];
+  return holding.length >= limit ? holding.map((each) => each.holder) : [];
 }

@@ -1390,7 +1390,6 @@ export const en = {
   "A connection is free then.": "A connection is free then.",
   "Recording now.": "Recording now.",
   "The guide lists {title} at that time now.": "The guide lists {title} at that time now.",
-  "The guide no longer lists it.": "The guide no longer lists it.",
   "Every connection is in use now.": "Every connection is in use now.",
   "Every connection is in use then.": "Every connection is in use then.",
   "Every connection is in use then, by {holders}.":
@@ -1415,4 +1414,5 @@ export const en = {
   "The guide listed another programme then, or the channel was gone.":
     "The guide listed another programme then, or the channel was gone.",
   "The channel list or guide wasn't read yet.": "The channel list or guide wasn't read yet.",
+  "Its programme or channel is no longer listed.": "Its programme or channel is no longer listed.",
 } as const satisfies Readonly<Record<string, string | Plural>>;

@@ -32,7 +32,7 @@ Schedule contracts are in `apps/desktop/test/recordings.test.ts` under "recordin
 
 ## Gotchas
 
-A schedule whose time comes while every connection is held, or whose start failed, asks again every 10 seconds, and when a recording ends; nothing playing or downloading stops for it. Schedules due together on one subscription start one at a time, by their start and then the order they were saved in. A programme schedule waits for its guide to be read before it starts, so it never records another show.
+A schedule whose time comes while every connection is held asks again every 10 seconds, and when a recording ends; one whose start failed asks again about once a minute. Nothing playing or downloading stops for it. Schedules due together on one subscription start one at a time, by their start and then the order they were saved in. A programme schedule waits for its guide to be read before it starts, so it never records another show.
 
 Schedules are kept in `schedules.json` beside `recordings.json`, which a build from before them leaves alone. Such a build refuses a `recordings.json` holding a missed result, leaving it as it is and recording nothing, as with any file it can't read; no released build predates Record now.
 

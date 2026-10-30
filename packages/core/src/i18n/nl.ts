@@ -1416,7 +1416,6 @@ export const nl: Translation = {
   "A connection is free then.": "Er is dan een verbinding vrij.",
   "Recording now.": "Wordt nu opgenomen.",
   "The guide lists {title} at that time now.": "De gids vermeldt nu {title} op dat tijdstip.",
-  "The guide no longer lists it.": "De gids vermeldt het niet meer.",
   "Every connection is in use now.": "Alle verbindingen zijn nu in gebruik.",
   "Every connection is in use then.": "Alle verbindingen zijn dan in gebruik.",
   "Every connection is in use then, by {holders}.":
@@ -1441,4 +1440,5 @@ export const nl: Translation = {
   "The guide listed another programme then, or the channel was gone.":
     "De gids vermeldde toen een ander programma, of het kanaal was weg.",
   "The channel list or guide wasn't read yet.": "De kanaallijst of gids was nog niet gelezen.",
+  "Its programme or channel is no longer listed.": "Het programma of kanaal staat er niet meer in.",
 };
