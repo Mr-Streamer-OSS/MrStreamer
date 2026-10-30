@@ -173,7 +173,14 @@ export function PlaylistScreen({ id, view }: { id: string; view: PlaylistView })
         () => playlistReport(id, signal).then(show(signal), failed(signal)),
         (cause: unknown) => {
           if (signal.aborted) return;
-          setRefused({ group, failure: failureOf(appError(cause), member?.entry.server ?? "") });
+          const error = appError(cause);
+          setRefused({
+            group,
+            failure:
+              error.kind === "needs-secret"
+                ? readFailure(error)
+                : failureOf(error, member?.entry.server ?? ""),
+          });
         },
       )
       .finally(() => {

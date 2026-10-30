@@ -138,6 +138,7 @@ export function ProviderForm({
           value={link}
           onChange={edit(setLink)}
           placeholder={saved ? unchanged : "https://tv.example.com/playlist.m3u"}
+          secret
           keyboard="url"
           onSubmit={submit}
           prefix={prefix}
