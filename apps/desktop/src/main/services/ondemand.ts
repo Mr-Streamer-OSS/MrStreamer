@@ -1395,11 +1395,12 @@ function make(deps: OnDemandDeps) {
             catch: failedWith,
           });
           if (!(yield* stands(source))) return yield* switched;
-          if (
-            (yield* stampOf(source)) !== series.evidence.catalogueStamp ||
-            !(yield* listedTitle(source, "series", title.seriesId))
-          )
-            return yield* (yield* stands(source)) ? overtaken : switched;
+          const current =
+            (yield* stampOf(source)) === series.evidence.catalogueStamp &&
+            (yield* listedTitle(source, "series", title.seriesId));
+          // A login replaced during those reads is switched, whatever they found.
+          if (!(yield* stands(source))) return yield* switched;
+          if (!current) return yield* overtaken;
           return {
             ...file,
             revision: source.revision,
