@@ -79,7 +79,8 @@ Schedule" past the pages read and "No programme information" or "Guide unavailab
 what the owner holds. A channel's name opens its Schedule and a programme cell its
 programme; neither plays. Channel taps elsewhere still play in Watch. Home tiles still preview.
 Schedule and programme routes stay on their originating Home or Live stack, retaining Back and
-browse context. Day controls use each local date's first valid instant, including a skipped midnight,
+browse context. Day controls use each local date's first valid instant, including a skipped
+midnight,
 page at most 128 programme rows with Show more, and inspect one opaque programme detail. Only
 Watch live starts playback; there is no catch-up. Search finds
 movies, series and channels: 20 movies and 20 series at first, each kind with its own Show more
@@ -669,7 +670,8 @@ and half-width windows and on Duo outer and inner displays folded and unfolded: 
 Guide grid's scroll, window, cells and programme crossing it with Back to Guide, Watch
 and Picture in Picture surviving a fold with no second stream, the key commands reaching the app
 and listed while ⌘ is held, also with no text field focused, keyboard focus and VoiceOver reaching
-every Guide grid cell, VoiceOver moving to the column's channel, large text, and safe areas and bar placement.
+every Guide grid cell, VoiceOver moving to the column's channel, large text, and safe areas and bar
+placement.
 
 ## On the simulator
 
@@ -814,7 +816,8 @@ including when viewing history is kept.
 
 `src/guide-ui.tsx` reads the owner's immutable snapshot only while the screen is focused. Live
 queries at most 40 visible channels' listings, its Guide grid at most 24 visible channels' days,
-and Home at most 12 including Stage, with the existing two native read workers. Channel/day/catalogue changes, source revision changes from the existing sign-in
+and Home at most 12 including Stage, with the existing two native read workers.
+Channel/day/catalogue changes, source revision changes from the existing sign-in
 owner, removal and authoritative cache loss retire presentation and late answers. Routine owner
 notifications reload the current request, except the Guide grid's days already read, while
 settled rows stay mounted, including across blur,
@@ -839,7 +842,8 @@ live. Return through native Back to the same day and
 country. Repeat with cold/missing/stale/failed guide, account recovery, a held read during
 provider replacement/removal, foreground and local calendar boundaries on short, long and
 skipped-midnight DST days. Check large
-text, VoiceOver reading each grid cell and Live rows' Play and star actions, rotation and scrolling during ingestion on the
+text, VoiceOver reading each grid cell and Live rows' Play and star actions, rotation and scrolling
+during ingestion on the
 exact Expo/Hermes native candidate. These native checks remain UNRUN by this source unit.
 
 Initial native refusals are 32 MiB delivered callback bytes, 64 MiB inflated XML, 64 KiB raw

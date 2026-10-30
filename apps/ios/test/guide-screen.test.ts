@@ -1263,6 +1263,45 @@ describe("Live's Guide grid", () => {
     expect(container.textContent).toContain("Nothing in this window");
   });
 
+  it("reads its rows again after the app returns from the background, so their cells still open", async () => {
+    state.window = { width: 1032, height: 1376, fontScale: 1 };
+    state.answer = async (mode, ids) =>
+      mode === "detail" || ids[0] === "trusted-1" ? answer([current, next]) : answer([]);
+    await guide();
+    await React.act(async () => {
+      owner().background();
+      owner().foreground();
+    });
+    await settle();
+    await click(`grid-a:1-${current.start}`);
+    expect(detail()?.textContent).toContain(current.title);
+    expect(detail()?.textContent).not.toContain("Programme unavailable");
+  });
+
+  it("says a refused later page is in the Schedule, and reads it again in the next minute", async () => {
+    let refuse = true;
+    state.answer = async (_mode, _ids, _from, _until, after) =>
+      after < 0
+        ? answer(
+            [
+              {
+                ...current,
+                start: current.start - 6 * 3600_000,
+                stop: current.start - 5 * 3600_000,
+              },
+            ],
+            true,
+          )
+        : refuse
+          ? { kind: "failed", error: "busy" }
+          : answer([current]);
+    await guide();
+    expect(container.textContent).toContain("More in Schedule");
+    refuse = false;
+    await tick();
+    expect(cell("a:1", current)).not.toBeNull();
+  });
+
   it("opens a channel's Schedule over a grid programme, with Back to that Schedule", async () => {
     state.window = { width: 1032, height: 1376, fontScale: 1 };
     await guide();

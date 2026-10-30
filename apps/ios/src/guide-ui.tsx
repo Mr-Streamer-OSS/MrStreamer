@@ -166,18 +166,22 @@ export interface GridDay {
   readonly more: boolean;
 }
 interface GridRead extends GridDay {
+  /** Whether a page after the first was refused, so it is read again in the next minute. */
+  readonly refused: boolean;
   /** The provider's login, guide and generation it was read under (`versionOf`). */
   readonly version: string;
-  /** The owner's notification it was read under: an empty day is read again on the next. */
-  readonly snapshot: ReturnType<typeof guide.getSnapshot>;
+  /** The minute it was read in: an empty day is read again in the next. */
+  readonly minute: number;
 }
 const NO_ROWS: ReadonlyMap<string, GridDay> = new Map();
 const subscriptionOf = (key: string) => key.slice(0, key.indexOf(":"));
+// With the owner's tokens, which going to the background withdraws, so a row's cells still open.
 const versionOf = (id: string, snapshot: ReturnType<typeof guide.getSnapshot>) =>
   JSON.stringify([
     currentSource(id)?.revision ?? null,
     authorityOf([id], snapshot),
     snapshot.get(id)?.fetchedAt ?? null,
+    guide.withdrawn(id),
   ]);
 
 /** Reads `keys`' days two at a time, as listings are read, handing over each pair as it lands. */
@@ -185,21 +189,29 @@ async function readDay(
   keys: readonly string[],
   day: Day,
   signal: AbortSignal,
-  land: (read: ReadonlyMap<string, GridDay>) => void,
+  land: (read: ReadonlyMap<string, GridDay & { readonly refused: boolean }>) => void,
 ) {
   for (let offset = 0; offset < keys.length; offset += 2) {
-    const read = new Map<string, GridDay>();
+    const read = new Map<string, GridDay & { readonly refused: boolean }>();
     await Promise.all(
       keys.slice(offset, offset + 2).map(async (key) => {
         const programmes: ScheduleItem[] = [];
         let cursor: string | undefined;
-        for (let page = 0; page < GRID_PAGES; page++) {
-          const got = await guide.schedule(key, day, cursor, { signal });
-          programmes.push(...got.programmes);
-          cursor = got.cursor ?? undefined;
-          if (!cursor) break;
+        let refused = false;
+        try {
+          for (let page = 0; page < GRID_PAGES; page++) {
+            const got = await guide.schedule(key, day, cursor, { signal });
+            programmes.push(...got.programmes);
+            // A page after a cursor has programmes, so an empty one was refused.
+            refused = cursor !== undefined && got.programmes.length === 0;
+            cursor = got.cursor ?? undefined;
+            if (!cursor) break;
+          }
+        } catch {
+          // Left out, so it is read again in the next minute, and the other rows still land.
+          return;
         }
-        read.set(key, { programmes, more: cursor !== undefined });
+        read.set(key, { programmes, more: cursor !== undefined || refused, refused });
       }),
     );
     if (signal.aborted) return;
@@ -212,7 +224,7 @@ async function readDay(
  * in view. A row shows once its pair is read and stays while it is in view; only rows new to the
  * view are read. A day is the same all through a guide's generation, so a row is read again
  * when its provider's login or guide changes, which first takes it away, or, when it came back
- * empty, which a refused read also does, on the owner's next minute.
+ * empty or with a page refused, in the next minute.
  */
 export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Library) {
   const signature = JSON.stringify(keys.slice(0, GRID_ROWS));
@@ -228,22 +240,27 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
   const [settled, setSettled] = useState<Settled | null>(null);
   const latest = useRef(settled);
   latest.current = settled;
+  // Only what a row is read under starts reads, not every notification, which ingestion sends
+  // often and would abort each read in progress.
+  const minute = Math.floor(now / 60_000);
+  const versioned = JSON.stringify(
+    requested.map((key) => versionOf(subscriptionOf(key), snapshot)),
+  );
   useEffect(() => {
     if (!focused) return;
     const before =
       latest.current?.from === day.from && latest.current.catalogue === catalogue
         ? latest.current.rows
         : null;
-    const versions = new Map(
-      requested.map((key) => [key, versionOf(subscriptionOf(key), snapshot)] as const),
-    );
+    const listed = JSON.parse(versioned) as string[];
+    const versions = new Map(requested.map((key, index) => [key, listed[index] ?? ""] as const));
     const wanted = requested.filter((key) => {
       const row = before?.get(key);
       return (
         catalogue.byKey.has(key) &&
         (!row ||
           row.version !== versions.get(key) ||
-          (row.programmes.length === 0 && row.snapshot !== snapshot))
+          ((row.programmes.length === 0 || row.refused) && row.minute !== minute))
       );
     });
     if (wanted.length === 0) return;
@@ -260,17 +277,15 @@ export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Libra
           // A read that a login or guide change overtook is left out.
           const row =
             got && versionOf(subscriptionOf(key), at) === version
-              ? { ...got, version, snapshot }
+              ? { ...got, version, minute }
               : kept?.get(key);
           if (row) rows.set(key, row);
         }
         return { from: day.from, catalogue, rows };
       });
-    }).catch(() => {
-      // A refused day keeps what was read, as a Schedule keeps its rows.
     });
     return () => controller.abort();
-  }, [day.from, day.until, catalogue, requested, snapshot, focused]);
+  }, [day.from, day.until, catalogue, requested, versioned, minute, focused]);
   const rows = useMemo(() => {
     if (settled?.from !== day.from || settled.catalogue !== catalogue) return NO_ROWS;
     const shown = new Map<string, GridDay>();

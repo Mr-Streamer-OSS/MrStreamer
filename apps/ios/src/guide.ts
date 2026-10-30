@@ -123,8 +123,18 @@ export function createGuide(
     if (value && minted.get(named(value)) === key) minted.delete(named(value));
     tokens.delete(key);
   };
+  /** Counts, by subscription, each time its tokens are withdrawn, so a screen reads again. */
+  const withdrawals = new Map<string, number>();
+  const withdraw = (value: Token) => {
+    const id = value.part.subscriptionId;
+    withdrawals.set(id, (withdrawals.get(id) ?? 0) + 1);
+  };
   const invalidate = (entry: Entry) => {
-    for (const [key, value] of tokens) if (value.entry === entry) drop(key);
+    for (const [key, value] of tokens)
+      if (value.entry === entry) {
+        withdraw(value);
+        drop(key);
+      }
   };
   // The least recently minted or read goes first, once 8192 different programmes and pages are
   // held: 32 Guide grid rows of 256 programmes, or about 170 of 48.
@@ -357,6 +367,8 @@ export function createGuide(
     status,
     /** Immutable owner snapshot for React; notifications also carry the foreground minute tick. */
     getSnapshot: state.get,
+    /** Changes as a subscription's detail tokens are withdrawn, as by background(). */
+    withdrawn: (id: string) => withdrawals.get(id) ?? 0,
     subscribe(listener: () => void) {
       const stop = state.subscribe(listener);
       listeners++;
@@ -373,6 +385,7 @@ export function createGuide(
       const cycle = ++era;
       for (const entry of entries.values()) cancelEntry(entry);
       entries.clear();
+      for (const value of tokens.values()) withdraw(value);
       tokens.clear();
       minted.clear();
       try {
