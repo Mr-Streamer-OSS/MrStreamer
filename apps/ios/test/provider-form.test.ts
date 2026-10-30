@@ -3,6 +3,7 @@ import * as React from "react";
 import type { HTMLInputElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Member } from "../src/account.ts";
+import { AppFailure } from "@mrstreamer/contracts/errors";
 
 // Settings' provider form: Add saves the name with the login, Edit changes the name and only a
 // password that was typed, and leaving the form before the provider answers cancels what it
@@ -14,14 +15,15 @@ interface Asked {
   readonly args: readonly unknown[];
   readonly signal: AbortSignal;
   readonly succeed: () => void;
+  readonly fail: (cause: unknown) => void;
 }
 const asked: Asked[] = [];
 const held =
   (call: Asked["call"]) =>
   (...args: unknown[]) =>
-    new Promise<void>((succeed) => {
+    new Promise<void>((succeed, fail) => {
       const signal = args.at(-1) as AbortSignal;
-      asked.push({ call, args: args.slice(0, -1), signal, succeed });
+      asked.push({ call, args: args.slice(0, -1), signal, succeed, fail });
     });
 
 vi.mock("../src/account.ts", () => ({ add: held("add"), update: held("update") }));
@@ -175,5 +177,16 @@ describe("a playlist link", () => {
       "m3u-a",
       { name: "Living room", password: "https://tv.example.com/new.m3u" },
     ]);
+  });
+
+  it("names the new playlist's host when its provider refuses the replacement", async () => {
+    const form = mount({ kind: "edit", member: playlist });
+    form.type("new-playlist-link", "https://new.example.com/another.m3u");
+    form.press();
+    await form.answer(() =>
+      asked[0]!.fail(new AppFailure({ kind: "provider-error", status: 503 })),
+    );
+    expect(form.text()).toContain("new.example.com isn't answering");
+    expect(form.text()).not.toContain("tv.example.com isn't answering");
   });
 });

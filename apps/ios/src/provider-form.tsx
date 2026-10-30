@@ -96,7 +96,9 @@ export function ProviderForm({
         if (signal.aborted) return;
         setBusy(false);
         if (edits.current !== submitted) return;
-        setFailure(failureOf(appError(cause), saved?.server ?? (kind === "m3u" ? link : server)));
+        setFailure(
+          failureOf(appError(cause), kind === "m3u" && link ? link : (saved?.server ?? server)),
+        );
       },
     );
   };
