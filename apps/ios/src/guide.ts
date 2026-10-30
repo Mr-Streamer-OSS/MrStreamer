@@ -111,8 +111,10 @@ export function createGuide(
   const invalidate = (entry: Entry) => {
     for (const [key, value] of tokens) if (value.entry === entry) tokens.delete(key);
   };
+  // The oldest goes first: about 170 Guide grid rows of 48 programmes, read since a programme
+  // shown was last read (`programme` makes its token newest again).
   const token = (value: Token) => {
-    if (tokens.size >= 1024) tokens.delete(tokens.keys().next().value ?? "");
+    if (tokens.size >= 8192) tokens.delete(tokens.keys().next().value ?? "");
     const key = id();
     tokens.set(key, value);
     return key;

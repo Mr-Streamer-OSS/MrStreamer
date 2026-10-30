@@ -69,10 +69,15 @@ heading always there, opening the list on Home's stack: `favourites`), Continue 
 and Movies for you, which falls back to the provider's own list without TMDB. Home's On now and
 Stage and Live's channel rows use the same guide owner for actual now/next, local times and static
 programme progress, retaining category fallback in gaps. Live adds Guide alongside For you,
-Categories and All, with the country filter preserved. Channel taps still play in Watch; the
-separate Schedule action opens a pushed day without playing. Home tiles still preview. Schedule
-and programme routes stay on their originating Home or Live stack, retaining Back and browse
-context. Day controls use each local date's first valid instant, including a skipped midnight,
+Categories and All, with the country filter preserved: a grid of the country's channels down the
+side and two hours of a day across (one hour at accessibility text sizes), moved with Previous
+day, Next day, Earlier, Later and Now. It reads the day pages of at most 16 channels in view from
+the same guide owner, again only when its guide is replaced, with no cache of its own; the line
+at now, the programme on now, gaps and "No programme information" or "Guide unavailable" rows
+show what the owner holds. A channel's name opens its Schedule and a programme cell its
+programme; neither plays. Channel taps elsewhere still play in Watch. Home tiles still preview.
+Schedule and programme routes stay on their originating Home or Live stack, retaining Back and
+browse context. Day controls use each local date's first valid instant, including a skipped midnight,
 page at most 128 programme rows with Show more, and inspect one opaque programme detail. Only
 Watch live starts playback; there is no catch-up. Search finds
 movies, series and channels: 20 movies and 20 series at first, each kind with its own Show more
@@ -627,7 +632,8 @@ an iPhone Duo's outer and inner displays. One rule picks the layout: the window'
 (`splitAt` in `src/ui.tsx`), never the device, screen or orientation. Under 700 points, or under
 1000 at accessibility text sizes, every tab keeps the iPhone's layout. From there, Live shows its
 list beside a detail column, where a channel's Schedule and a programme over it open in place of
-being pushed; the column reads "Choose a channel's Schedule" until one is. Home, Movies and Series
+being pushed; the column reads "Choose a channel's Schedule" until one is. A programme chosen in
+the Guide grid opens there alone, with Back to Guide. Home, Movies and Series
 keep their layouts at every width, and the system places the tab bar and the now playing
 accessory. At accessibility text sizes, on every width, a Live row's Schedule and star sit under
 its programme lines.
@@ -636,7 +642,9 @@ A resize, rotation or fold keeps the list mounted, so its tab, country and scrol
 A Schedule pushed on Live's stack moves into the column, on the same day and with its programme,
 once it is the stack's top. As the window narrows with the list showing, the column's Schedule
 goes back onto the stack, so Back returns to the list; with another screen over the list, such
-as Settings or Find, the column closes instead. The Schedule's own scroll position and pages
+as Settings or Find, the column closes instead. A programme pushed from the Guide grid crosses
+the same way, alone, so Back still returns to the grid. The grid's day, window, scroll position
+and last programme chosen are kept through all of it. The Schedule's own scroll position and pages
 loaded with Show more start again on the other side. Watch stays the one view of the one player
 and never remounts with the window, so nothing reconnects and audio, subtitle and quality
 choices and downloads are kept. Watch asks for landscape for a movie or an episode only in a
@@ -655,10 +663,11 @@ Focused source verification is `pnpm exec vitest run apps/ios/test/guide-screen.
 apps/ios/test/key-commands.test.ts apps/ios/test/watch-picture-in-picture.test.ts`. It does not
 show native behaviour. Still to check on the exact native candidate, on iPad portrait, landscape
 and half-width windows and on Duo outer and inner displays folded and unfolded: the column at
-700 points, a Schedule and programme crossing it both ways with Back, scroll and day kept, Watch
+700 points, a Schedule and programme crossing it both ways with Back, scroll and day kept, the
+Guide grid's scroll, window, cells and programme crossing it with Back to Guide, Watch
 and Picture in Picture surviving a fold with no second stream, the key commands reaching the app
-and listed while ⌘ is held, also with no text field focused, keyboard focus, VoiceOver moving to
-the column's channel, large text, and safe areas and bar placement.
+and listed while ⌘ is held, also with no text field focused, keyboard focus and VoiceOver reaching
+every Guide grid cell, VoiceOver moving to the column's channel, large text, and safe areas and bar placement.
 
 ## On the simulator
 

@@ -1266,8 +1266,17 @@ describe("Live's Guide grid", () => {
   it("keeps a programme open beside it while many rows scroll by and a minute passes", async () => {
     state.window = { width: 1032, height: 1376, fontScale: 1 };
     await install("a", 80);
-    state.answer = async (mode) =>
-      mode === "detail" ? answer([current]) : answer([current, next]);
+    // A realistic day, 48 programmes a row, so the rows read mint thousands of detail tokens.
+    const day = [
+      current,
+      ...Array.from({ length: 47 }, (_, i) => ({
+        title: `Later programme ${i}`,
+        start: current.stop + i * 60_000,
+        stop: current.stop + (i + 1) * 60_000,
+        description: null,
+      })),
+    ];
+    state.answer = async (mode) => (mode === "detail" ? answer([current]) : answer(day));
     state.visible = 16;
     await guide();
     state.did = [];
