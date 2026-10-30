@@ -38,8 +38,9 @@ const CHOICES = [
 function stopOf(choice: StopChoice, programme: Programme | null, now: number): number | null {
   switch (choice) {
     case "end": {
-      const stop = programme ? programme.stop + LATE_MS : null;
-      return stop !== null && stop > now && stop <= now + RECORDING_MAX_MS ? stop : null;
+      if (!programme) return null;
+      const stop = programme.stop + LATE_MS;
+      return stop > now && stop <= now + RECORDING_MAX_MS ? stop : null;
     }
     case "1h":
       return now + HOUR_MS;
@@ -187,11 +188,11 @@ function RecordPanel({
       </div>
       <div className="my-1 h-px flex-none bg-white/12" />
       <div className="flex flex-col gap-1.5 px-2 pt-1.5 pb-3 text-[0.8125rem]">
-        {busy ? (
+        {busy && (
           <p role="alert" className="font-semibold">
             {t("Every connection is in use.")}
           </p>
-        ) : null}
+        )}
         {shown && (
           <p>
             {t("Uses 1 connection. {used} of {limit} in use now.", {

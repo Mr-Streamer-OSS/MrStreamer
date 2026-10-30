@@ -55,33 +55,8 @@ export function RecordingsPage() {
             {t("Nothing recorded yet. Record a channel from Live TV.")}
           </p>
         ) : null}
-        {now.length > 0 && (
-          <section aria-label={t("Now")}>
-            <h2 className="pt-2.5 pb-0.5 text-[0.9375rem] font-semibold">{t("Now")}</h2>
-            <ul>
-              {now.map((each) => (
-                <Row key={each.id} recording={each} channel={logoOf(each)} />
-              ))}
-            </ul>
-          </section>
-        )}
-        {recorded.length > 0 && (
-          <section aria-label={t("Recorded")}>
-            <h2
-              className={cn(
-                "pb-0.5 text-[0.9375rem] font-semibold",
-                now.length > 0 ? "pt-4 lg:pt-5" : "pt-2.5",
-              )}
-            >
-              {t("Recorded")}
-            </h2>
-            <ul>
-              {recorded.map((each) => (
-                <Row key={each.id} recording={each} channel={logoOf(each)} />
-              ))}
-            </ul>
-          </section>
-        )}
+        <Section label={t("Now")} items={now} logoOf={logoOf} first />
+        <Section label={t("Recorded")} items={recorded} logoOf={logoOf} first={now.length === 0} />
         {recordings.length > 0 && (
           <p className="pt-4 text-[0.8125rem] text-muted-foreground">
             {t("Recordings stay until you delete them. Partial ones still play.")}
@@ -89,6 +64,35 @@ export function RecordingsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+/** A titled list of recordings; nothing while it has none. */
+function Section({
+  label,
+  items,
+  logoOf,
+  first,
+}: {
+  label: string;
+  items: readonly Recording[];
+  logoOf: (recording: Recording) => LiveChannel | null;
+  first: boolean;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <section aria-label={label}>
+      <h2
+        className={cn("pb-0.5 text-[0.9375rem] font-semibold", first ? "pt-2.5" : "pt-4 lg:pt-5")}
+      >
+        {label}
+      </h2>
+      <ul>
+        {items.map((each) => (
+          <Row key={each.id} recording={each} channel={logoOf(each)} />
+        ))}
+      </ul>
+    </section>
   );
 }
 

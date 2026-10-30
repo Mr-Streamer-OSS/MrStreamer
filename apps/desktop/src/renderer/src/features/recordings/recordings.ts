@@ -3,8 +3,7 @@
 // read once and then follows those events. An ended recording plays like a downloaded copy.
 import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { Recording } from "@mrstreamer/contracts/recordings";
-import type { OwnedId } from "@mrstreamer/contracts/subscription";
-import { sameOwned } from "@mrstreamer/contracts/subscription";
+import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatDate, t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { call, listen } from "../../lib/ipc.ts";
@@ -38,9 +37,8 @@ export function useAnyRecording(): boolean {
 }
 
 /** The recording capturing `channel` now, if one does. */
-export function useRecordingOf(channel: OwnedId | null): Recording | null {
+export function useRecordingOf(channel: OwnedId): Recording | null {
   const { data } = useRecordings();
-  if (!channel) return null;
   return (
     data?.find((each) => each.status.kind === "recording" && sameOwned(each.channel, channel)) ??
     null

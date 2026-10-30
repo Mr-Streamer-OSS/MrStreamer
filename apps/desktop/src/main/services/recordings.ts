@@ -305,11 +305,11 @@ function make(deps: RecordingsDeps) {
           yield* publish;
           return yield* written.failure;
         }
-        const list = yield* shown;
-        yield* PubSub.publish(changes, list);
+        yield* publish;
+        const { file: _file, ...recording } = record;
         return {
           kind: "started",
-          recording: list.find((each) => each.id === id) ?? { ...record, bytes: capture.bytes() },
+          recording: { ...recording, bytes: capture.bytes() },
         } satisfies RecordingStart;
       });
 

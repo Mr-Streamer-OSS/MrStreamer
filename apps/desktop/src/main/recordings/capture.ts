@@ -19,7 +19,7 @@ const SILENCE_MS = 15_000;
  * Waits before asking again after a refusal: a provider can take a moment to free the slot of a
  * stream that just closed, as Watch's does when the viewer stops it to record.
  */
-const REFUSED_RETRY_MS = [500, 1500];
+const REFUSED_RETRY_MS: readonly number[] = [500, 1500];
 /** How much of a stream may pass before its program table, while capture starts. */
 const START_LIMIT = { bytes: 4 * 1024 * 1024, ms: 15_000 };
 
@@ -104,15 +104,15 @@ async function openSource(
 ): Promise<Chunks> {
   const ask = async (address: string, asked: AbortSignal) => {
     const headers = new Headers({ "User-Agent": options.userAgent, ...source.headers });
-    for (const delay of [...REFUSED_RETRY_MS, null]) {
+    for (let attempt = 0; ; attempt++) {
       const answer = await options.request(address, { headers, signal: asked }, source.url);
       if (answer.ok) return answer;
       await answer.body?.cancel().catch(() => {});
       const failure = classify(answer.status);
-      if (failure.kind !== "refused" || delay === null) throw new CaptureFailure(failure);
+      const delay = REFUSED_RETRY_MS[attempt];
+      if (failure.kind !== "refused" || delay === undefined) throw new CaptureFailure(failure);
       await sleep(delay, undefined, { signal: asked });
     }
-    throw new CaptureFailure({ kind: "refused", status: 0 });
   };
   if (source.format === "hls") {
     const input = await openHlsTsInput(source.url, ask, signal, false, null);
@@ -175,20 +175,16 @@ async function run(
   let end: CaptureEnd;
   try {
     for (;;) {
-      let next: IteratorResult<Uint8Array>;
-      try {
-        next = await chunks.next();
-      } catch {
+      const next = await chunks.next().catch(() => null);
+      if (!next || next.done) {
         end = "stream";
         break;
       }
-      if (next.done) {
-        end = "stream";
-        break;
-      }
-      try {
-        await write(next.value);
-      } catch {
+      const wrote = await write(next.value).then(
+        () => true,
+        () => false,
+      );
+      if (!wrote) {
         end = "disk";
         break;
       }

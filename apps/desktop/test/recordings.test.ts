@@ -62,6 +62,16 @@ async function until<A>(read: () => Promise<A>, done: (value: A) => boolean, ms 
   }
 }
 
+/** Whether the provider sees every stream closed, waiting a moment for its sockets to end. */
+async function allClosed(provider: { activeStreams(): number }) {
+  return (
+    (await until(
+      async () => provider.activeStreams(),
+      (open) => open === 0,
+    )) === 0
+  );
+}
+
 /** The one recording's file in its folder. */
 async function fileOf(dataDir: string, recording: Recording) {
   const folder = join(dataDir, "recordings", recording.id);
@@ -177,12 +187,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const file = await fileOf(dataDir, stopped!);
     expect(stopped?.bytes).toBe(file.size);
     expect(decodes(file.path)).toBe(true);
-    expect(
-      await until(
-        async () => provider.activeStreams(),
-        (open) => open === 0,
-      ),
-    ).toBe(0);
+    expect(await allClosed(provider)).toBe(true);
   });
 
   it("keeps an honest partial recording when the provider's stream breaks off", async () => {
@@ -207,12 +212,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 100_000);
     await quit();
-    expect(
-      await until(
-        async () => provider.activeStreams(),
-        (open) => open === 0,
-      ),
-    ).toBe(0);
+    expect(await allClosed(provider)).toBe(true);
 
     const again = await app(dataDir);
     const [kept] = await again.recordings.list();

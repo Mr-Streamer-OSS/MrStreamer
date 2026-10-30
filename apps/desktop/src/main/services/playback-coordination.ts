@@ -86,9 +86,9 @@ export class PlaybackCoordination extends Context.Service<
       const recordingsOf = (subscriptionId: string) =>
         [...recordings.values()].filter((each) => each.subscriptionId === subscriptionId);
       const usesOf = (subscriptionId: string): ConnectionUse[] => [
-        ...[...sessions.values()].flatMap((owner) =>
-          owner === subscriptionId ? (["watch"] as const) : [],
-        ),
+        ...[...sessions.values()]
+          .filter((owner) => owner === subscriptionId)
+          .map(() => "watch" as const),
         ...(lent.has(subscriptionId) ? (["download"] as const) : []),
         ...recordingsOf(subscriptionId).map(() => "recording" as const),
       ];
@@ -105,28 +105,25 @@ export class PlaybackCoordination extends Context.Service<
           one(Effect.andThen(whileAsked(turn), open)),
         exclusive: one,
         reclaim: (subscriptionId: string) =>
-          Effect.flatMap(
-            Effect.suspend(() => {
-              // What plays closes before it opens again, so only recordings count against it.
-              const held = recordingsOf(subscriptionId);
-              return held.length > 0 && held.length >= Math.min(...held.map((each) => each.limit))
-                ? Effect.fail(recorded())
-                : Effect.void;
-            }),
-            () =>
-              Effect.promise(async () => {
-                const lease = lent.get(subscriptionId);
-                if (!lease) return true;
-                lease.controller.abort();
-                let timer: NodeJS.Timeout | undefined;
-                const late = new Promise<boolean>(
-                  (resolve) => (timer = setTimeout(() => resolve(false), RECLAIM_MS)),
-                );
-                const given = await Promise.race([lease.released.then(() => true), late]);
-                clearTimeout(timer);
-                return given;
-              }),
-          ).pipe(Effect.flatMap((given) => (given ? Effect.void : Effect.fail(stillLent())))),
+          Effect.gen(function* () {
+            // What plays closes before it opens again, so only recordings count against it.
+            const held = recordingsOf(subscriptionId);
+            if (held.length > 0 && held.length >= Math.min(...held.map((each) => each.limit)))
+              return yield* recorded();
+            const given = yield* Effect.promise(async () => {
+              const lease = lent.get(subscriptionId);
+              if (!lease) return true;
+              lease.controller.abort();
+              let timer: NodeJS.Timeout | undefined;
+              const late = new Promise<boolean>(
+                (resolve) => (timer = setTimeout(() => resolve(false), RECLAIM_MS)),
+              );
+              const given = await Promise.race([lease.released.then(() => true), late]);
+              clearTimeout(timer);
+              return given;
+            });
+            if (!given) return yield* stillLent();
+          }),
         lend: (subscriptionId: string) =>
           one(
             Effect.sync((): Lent | null => {
