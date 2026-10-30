@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // A schedule's controls as they save: a repeat on some days keeps them, and a long programme's
 // padding and repeat stay within what a recording may run, so what is saved is a plan main takes.
+// And which of the guide's airings a schedule still records, as its cells and details mark them.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -11,6 +12,7 @@ import { SchedulePanel } from "../../src/renderer/src/features/recordings/Schedu
 import {
   basisOfProgramme,
   basisOfSchedule,
+  recordsAt,
   type ScheduleBasis,
 } from "../../src/renderer/src/features/recordings/schedules.ts";
 
@@ -128,4 +130,36 @@ it("records a programme longer than a recording may run once for as long as one 
     await press("End", "Home");
   });
   expect(plan).toMatchObject({ kind: "programme", start: NOON, stop: NOON + 12 * HOUR });
+});
+
+it("marks the airings a schedule still records, not one it recorded, stopped or let go", () => {
+  const DAY = 24 * HOUR;
+  const repeat = (next: ScheduledRecording["next"]): ScheduledRecording => ({
+    id: "s1",
+    plan: {
+      kind: "slot",
+      channel,
+      days: [0, 1, 2, 3, 4, 5, 6],
+      at: 12 * 60,
+      minutes: 60,
+      title: "Noon News",
+      padding: { before: 2, after: 5 },
+    },
+    channelName: "Eurosport 1",
+    next,
+    status: { kind: "planned" },
+  });
+  const padded = (start: number) => ({
+    start: start - 2 * 60_000,
+    stop: start + HOUR + 5 * 60_000,
+  });
+  // Today's on now or to come, and every one after it.
+  expect(recordsAt(repeat(padded(NOON)), NOON)).toBe(true);
+  expect(recordsAt(repeat(padded(NOON)), NOON + DAY)).toBe(true);
+  // Today's stopped: tomorrow's is next, and today's is no longer marked.
+  expect(recordsAt(repeat(padded(NOON + DAY)), NOON)).toBe(false);
+  expect(recordsAt(repeat(padded(NOON + DAY)), NOON + DAY)).toBe(true);
+  // With no time to come, as a programme stopped partway, and held by the guide, none.
+  expect(recordsAt(repeat(null), NOON)).toBe(false);
+  expect(recordsAt({ ...repeat(padded(NOON)), status: { kind: "gone" } }, NOON)).toBe(false);
 });

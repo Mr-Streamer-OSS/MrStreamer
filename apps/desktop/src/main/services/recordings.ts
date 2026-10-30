@@ -983,14 +983,18 @@ function make(deps: RecordingsDeps) {
             error: { kind: "invalid-input", detail: t("Its time has passed.") },
           });
         // Changed, it settles from now: what it recorded or missed stays as it was, and once it
-        // recorded its time on now, still recording, stopped or deleted, or a change before this
-        // one settled it, the change starts with its next.
+        // recorded its time on now, still starting, recording, stopped or deleted, or a change
+        // before this one settled it, the change starts with its next. A start under way records
+        // under the time it began for, which the change would no longer find.
         const recording = id === undefined ? undefined : recordingOf(id);
         const recorded =
           recording !== undefined ||
           (was !== undefined &&
             (was.through > now ||
-              occurrences(was.plan, now, now + 1).some((each) => recordOf(was.id, each))));
+              occurrences(was.plan, now, now + 1).some(
+                (each) =>
+                  recordOf(was.id, each) || why.get(occurrenceKey(was.id, each)) === "starting",
+              )));
         const schedule: KeptSchedule = {
           id: id ?? randomUUID(),
           plan: found.plan,

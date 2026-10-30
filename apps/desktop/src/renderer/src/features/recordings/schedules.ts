@@ -71,6 +71,18 @@ export function scheduleAt(
   });
 }
 
+/**
+ * Whether `schedule`, as `scheduleAt` finds it for the programme at `start`, still records that
+ * airing: not one the guide holds it from, another show listed then or none, nor one before its
+ * next time, as an airing it recorded, stopped or let go.
+ */
+export function recordsAt(schedule: ScheduledRecording | undefined, start: number): boolean {
+  if (!schedule || schedule.status.kind === "changed" || schedule.status.kind === "gone")
+    return false;
+  const { next, plan } = schedule;
+  return next !== null && start - plan.padding.before * MINUTE_MS >= next.start;
+}
+
 /** How often a schedule records. */
 export type Repeat = "once" | "day" | "every";
 

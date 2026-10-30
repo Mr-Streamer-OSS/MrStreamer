@@ -64,6 +64,7 @@ import { SchedulePanel } from "../recordings/SchedulePanel.tsx";
 import {
   basisOfProgramme,
   basisOfSchedule,
+  recordsAt,
   scheduleAt,
   useSchedules,
 } from "../recordings/schedules.ts";
@@ -882,10 +883,8 @@ const GridRow = memo(function GridRow({
             const chosen = selected(block);
             const box = place(block);
             const reminded = reminderAt(reminders, channel, slot.start) !== undefined;
-            // Not where the guide lists another show at a programme's start now: it won't record.
-            const status = scheduleAt(schedules, channel, slot.start)?.status.kind;
             const scheduled =
-              !ended && status !== undefined && status !== "changed" && status !== "gone";
+              !ended && recordsAt(scheduleAt(schedules, channel, slot.start), slot.start);
             return (
               <div
                 key={slot.start}
@@ -993,9 +992,9 @@ function Details({
   }).data;
   const on = slot !== null && slot.start <= minute && minute < slot.stop;
   const schedule = scheduleAt(useSchedules().data, channel, slot?.start ?? 0);
-  // A schedule the guide holds, another show listed then or none, won't record: Record re-saves it.
-  const records =
-    schedule !== undefined && schedule.status.kind !== "changed" && schedule.status.kind !== "gone";
+  // A schedule the guide holds, another show listed then or none, won't record: Record re-saves
+  // it. Nor will one that already recorded, stopped or let this airing go.
+  const records = recordsAt(schedule, slot?.start ?? 0);
   const [scheduling, setScheduling] = useState(false);
   const open = slot !== null && scheduling;
   const record = useRef<HTMLButtonElement>(null);

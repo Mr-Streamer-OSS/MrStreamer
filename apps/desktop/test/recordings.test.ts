@@ -1079,6 +1079,34 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     });
   });
 
+  it("records a time once when its padding changes while its start is under way", async () => {
+    // The stream answers once the test lets it, so the start stays under way until then.
+    const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+    const { provider, recordings, listing, programmePlan, clockTo } = await scheduling({
+      streams: (source, out, signal) => {
+        arrived();
+        void gate.then(() => liveStreams(source, out, signal));
+      },
+    });
+    onTestFinished(() => open());
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next));
+    await clockTo(next.start);
+    await asked;
+    await recordings.schedule(programmePlan(next, { before: 2, after: 0 }), saved.id);
+    open();
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+
+    // Its time ends as recorded: no missed result for the changed time, and no second start.
+    vi.setSystemTime(next.stop + 1000);
+    await until(recordings.list, ([each]) => each?.status.kind === "complete");
+    await recordings.check();
+    expect((await recordings.list()).map((each) => each.id)).toEqual([recording!.id]);
+    expect(await recordings.schedules()).toEqual([]);
+    expect(provider.streamRequests()).toBe(1);
+  });
+
   it("records a time once when its padding changes after its recording was stopped", async () => {
     const { provider, recordings, listing, programmePlan } = await scheduling();
     const { now } = await listing();
