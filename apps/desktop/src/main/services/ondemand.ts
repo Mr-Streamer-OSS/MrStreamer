@@ -1457,7 +1457,8 @@ function make(deps: OnDemandDeps) {
 
 /**
  * A lookup a catalogue refresh overtook: accepted while it was asked, so its answer is of the
- * catalogue before. Asked again, it reads the one that refresh accepted.
+ * catalogue before. Asked again, it reads the one that refresh accepted, which may no longer
+ * list the title.
  */
 export class Overtaken extends Failed {}
 

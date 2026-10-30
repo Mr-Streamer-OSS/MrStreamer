@@ -891,7 +891,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe(ends), {
         timeout: LONG,
       });
-      // Renewed once only, and never for a replaced login.
+      // Renewed once only, and not at all once the login was replaced during the lookup.
       expect(provider.detailRequests() - asked).toBe(requests);
       if (ends === "complete")
         expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(target.bytes));
