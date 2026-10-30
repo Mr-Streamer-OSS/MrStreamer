@@ -1278,6 +1278,84 @@ describe("Live's Guide grid", () => {
     expect(detail()?.textContent).not.toContain("Programme unavailable");
   });
 
+  it("reads a row again once another read evicts its tokens, so its cells still open", async () => {
+    state.window = { width: 1032, height: 1376, fontScale: 1 };
+    const base = state.answer!;
+    state.answer = async (mode, ids, ...rest) =>
+      mode === "detail" ? answer([current]) : base(mode, ids, ...rest);
+    await guide();
+    // Another screen reads a day of more programmes than the owner keeps tokens for.
+    const many = Array.from({ length: 8200 }, (_, i) => ({
+      title: `Filler ${i}`,
+      start: current.start + i,
+      stop: current.start + i + 1,
+      description: null,
+    }));
+    const withMany = state.answer;
+    state.answer = async (mode, ids, ...rest) =>
+      ids[0] === "trusted-3" ? answer(many) : withMany(mode, ids, ...rest);
+    await React.act(async () => {
+      await owner().schedule("a:3", {
+        from: new Date(2026, 9, 24).getTime(),
+        until: new Date(2026, 9, 25).getTime(),
+      });
+    });
+    state.answer = withMany;
+    await tick();
+    await click(`grid-a:1-${current.start}`);
+    expect(detail()?.textContent).toContain(current.description);
+  });
+
+  it("keeps one provider's rows reading while another provider changes", async () => {
+    const a = part("a"),
+      b = part("b");
+    fixture().control.activations.set("b", {
+      lease: "lease-b",
+      generation: { id: "db-b", fetchedAt: Date.now(), until: Date.now() + 86400_000 },
+    });
+    await owner().restore(["a", "b"]);
+    owner().setPart(a);
+    owner().setPart(b);
+    state.catalogue = {
+      kind: "ready",
+      failing: [],
+      library: combine([
+        { label: "a", part: a },
+        { label: "b", part: b },
+      ]),
+    };
+    const base = state.answer!;
+    const held: (() => void)[] = [];
+    let readsOfB = 0;
+    state.answer = (mode, ids, from, until, after, lease) => {
+      if (lease !== "lease-b") return base(mode, ids, from, until, after, lease);
+      if (mode === "day" && ids[0] === "trusted-1") readsOfB++;
+      return new Promise((resolve) =>
+        held.push(() => void base(mode, ids, from, until, after, lease).then(resolve)),
+      );
+    };
+    await guide();
+    expect(readsOfB).toBe(1);
+    // Provider a signs in again while b's rows are still being read.
+    await React.act(async () => {
+      setSource("a", {
+        revision: 1,
+        provider: xtreamProvider(
+          { server: "https://fixture.test", username: "fixture", password: "canary" },
+          { userAgent: "fixture" },
+        ),
+        login: [],
+      });
+    });
+    await settle();
+    while (held.length) {
+      await React.act(async () => held.splice(0).forEach((release) => release()));
+      await settle();
+    }
+    expect(cell("b:1", current)).not.toBeNull();
+    expect(readsOfB).toBe(1);
+  });
+
   it("says a refused later page is in the Schedule, and reads it again in the next minute", async () => {
     let refuse = true;
     state.answer = async (_mode, _ids, _from, _until, after) =>

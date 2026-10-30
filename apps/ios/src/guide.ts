@@ -123,11 +123,10 @@ export function createGuide(
     if (value && minted.get(named(value)) === key) minted.delete(named(value));
     tokens.delete(key);
   };
-  /** Counts, by subscription, each time its tokens are withdrawn, so a screen reads again. */
+  /** Counts, by channel, each time its tokens are withdrawn, so a screen reads it again. */
   const withdrawals = new Map<string, number>();
   const withdraw = (value: Token) => {
-    const id = value.part.subscriptionId;
-    withdrawals.set(id, (withdrawals.get(id) ?? 0) + 1);
+    withdrawals.set(value.key, (withdrawals.get(value.key) ?? 0) + 1);
   };
   const invalidate = (entry: Entry) => {
     for (const [key, value] of tokens)
@@ -136,8 +135,8 @@ export function createGuide(
         drop(key);
       }
   };
-  // The least recently minted or read goes first, once 8192 different programmes and pages are
-  // held: 32 Guide grid rows of 256 programmes, or about 170 of 48.
+  // The least recently minted or read goes first, withdrawn, once 8192 different programmes and
+  // pages are held: 32 Guide grid rows of 256 programmes, or about 170 of 48.
   const token = (value: Token) => {
     const name = named(value);
     const known = minted.get(name);
@@ -152,7 +151,11 @@ export function createGuide(
       tokens.set(known, held);
       return known;
     }
-    if (tokens.size >= 8192) drop(tokens.keys().next().value ?? "");
+    const oldest = tokens.entries().next().value;
+    if (tokens.size >= 8192 && oldest) {
+      withdraw(oldest[1]);
+      drop(oldest[0]);
+    }
     const key = id();
     tokens.set(key, value);
     minted.set(name, key);
@@ -367,8 +370,8 @@ export function createGuide(
     status,
     /** Immutable owner snapshot for React; notifications also carry the foreground minute tick. */
     getSnapshot: state.get,
-    /** Changes as a subscription's detail tokens are withdrawn, as by background(). */
-    withdrawn: (id: string) => withdrawals.get(id) ?? 0,
+    /** Changes as a channel's detail tokens are withdrawn, as by background() or eviction. */
+    withdrawn: (key: string) => withdrawals.get(key) ?? 0,
     subscribe(listener: () => void) {
       const stop = state.subscribe(listener);
       listeners++;
