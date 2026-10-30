@@ -91,6 +91,15 @@ export function RecordButton({
             // The popup takes the keys as it opens; Tab reaches the stop choices from there.
             initialFocus={popup}
             aria-label={t("Record")}
+            // Its keys are its own: Live TV's list behind it neither moves nor plays. A focused
+            // button keeps its Enter and Space, and Escape and Tab do what they do in a popup.
+            onKeyDown={(event) => {
+              const pressed =
+                (event.key === "Enter" || event.key === " ") &&
+                event.target instanceof Element &&
+                event.target.closest("button");
+              if (event.key !== "Escape" && event.key !== "Tab" && !pressed) event.preventDefault();
+            }}
             className={cn(
               menuSurface,
               "flex w-[22.25rem] max-w-[calc(100vw-2rem)] flex-col transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
@@ -119,6 +128,9 @@ function RecordPanel({
     stopOf("end", programme, now) !== null ? "end" : "1h",
   );
   const [busy, setBusy] = useState<RecordingConnections | null>(null);
+  const offered = CHOICES.flatMap((each) =>
+    stopOf(each.choice, programme, now) === null ? [] : [each.choice],
+  );
   const connections = useQuery({
     queryKey: ["recordings", "connections", channel.subscriptionId],
     queryFn: () => call("recordings.connections", { subscriptionId: channel.subscriptionId }),
@@ -157,7 +169,20 @@ function RecordPanel({
       <div className="px-2 pt-1.5 pb-1 text-xs font-semibold text-muted-foreground">
         {t("Stop")}
       </div>
-      <div role="radiogroup" aria-label={t("Stop")} className="flex flex-col">
+      <div
+        role="radiogroup"
+        aria-label={t("Stop")}
+        className="flex flex-col"
+        // The arrows move the choice, and the keys with it, as in any radio group.
+        onKeyDown={(event) => {
+          const by = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+          if (by === undefined) return;
+          const index = offered.indexOf(choice);
+          const next = offered[(index + by + offered.length) % offered.length] ?? choice;
+          setChoice(next);
+          event.currentTarget.querySelector<HTMLElement>(`[data-choice="${next}"]`)?.focus();
+        }}
+      >
         {CHOICES.map((each) => {
           const stop = stopOf(each.choice, programme, now);
           if (stop === null) return null;
@@ -167,7 +192,9 @@ function RecordPanel({
               key={each.choice}
               type="button"
               role="radio"
+              data-choice={each.choice}
               aria-checked={chosen}
+              tabIndex={chosen ? 0 : -1}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => setChoice(each.choice)}
               className={cn(

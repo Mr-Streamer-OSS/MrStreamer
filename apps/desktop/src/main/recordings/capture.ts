@@ -39,6 +39,9 @@ export class CaptureFailure extends Error {
   }
 }
 
+/** Why capture couldn't write its file: the system's own words, which say why. */
+export class DiskFailure extends Error {}
+
 /** Why a capture under way ended: at its stop time, as asked, or cut short. */
 export type CaptureEnd = "until" | "aborted" | Exclude<RecordingCut, "quit">;
 
@@ -51,8 +54,9 @@ export interface Capture {
 
 /**
  * Starts capturing the first of `sources` that sends a program table, from now until `until` or
- * `signal`. Answers once the table is in a new file at `path`; throws `CaptureFailure`, with no
- * file left, when no source does. `changed` hears each write.
+ * `signal`. Answers once the table is in a new file at `path`. Throws `CaptureFailure` when no
+ * source does, or `DiskFailure` when the file can't be written, with no file left either way and
+ * every source's request ended.
  */
 export async function startCapture(
   sources: readonly CaptureSource[],
@@ -65,44 +69,66 @@ export async function startCapture(
     readonly changed: () => void;
   },
 ): Promise<Capture> {
-  const file = await open(path, "wx");
+  const file = await open(path, "wx").catch((cause: unknown) => {
+    throw new DiskFailure(String(cause));
+  });
+  // The stop time also ends a start that takes that long.
+  const deadline = AbortSignal.timeout(Math.max(0, options.until - Date.now()));
   let written = 0;
-  // At its offset: a source that failed before leaves the file emptied, but not its position.
+  // Every byte, at its offset: a source that failed before leaves the file emptied, but not its
+  // position.
   const write = async (chunk: Uint8Array) => {
-    await file.write(chunk, 0, chunk.length, written);
-    written += chunk.length;
+    let offset = 0;
+    while (offset < chunk.length) {
+      const { bytesWritten } = await file
+        .write(chunk, offset, chunk.length - offset, written)
+        .catch((cause: unknown) => {
+          throw new DiskFailure(cause instanceof Error ? cause.message : String(cause));
+        });
+      if (bytesWritten === 0) throw new DiskFailure("Nothing could be written.");
+      offset += bytesWritten;
+      written += bytesWritten;
+    }
     options.changed();
   };
-  let last: StreamFailure = { kind: "unavailable", status: 404 };
+  let last: unknown = new CaptureFailure({ kind: "unavailable", status: 404 });
   for (const source of sources) {
     const stop = new AbortController();
-    const signal = AbortSignal.any([options.signal, stop.signal]);
+    const signal = AbortSignal.any([options.signal, deadline, stop.signal]);
+    let opened: Opened | null = null;
     try {
-      const chunks = await openSource(source, options, signal);
-      await startTable(chunks, write, signal);
-      return { bytes: () => written, ended: run(chunks, write, file, stop, options) };
+      opened = await openSource(source, options, signal);
+      await startTable(opened.chunks, write, signal);
+      return { bytes: () => written, ended: run(opened, write, file, stop, deadline, options) };
     } catch (cause) {
       stop.abort();
+      await opened?.close();
+      last = cause;
+      if (cause instanceof DiskFailure || options.signal.aborted || deadline.aborted) break;
       await file.truncate(0).catch(() => {});
       written = 0;
-      if (options.signal.aborted) break;
-      last = cause instanceof CaptureFailure ? cause.failure : failureOf(cause);
     }
   }
   await file.close().catch(() => {});
   await rm(path, { force: true });
+  if (last instanceof DiskFailure) throw last;
+  if (deadline.aborted && !options.signal.aborted)
+    throw new CaptureFailure({ kind: "network", detail: "The stop time passed while it started." });
   if (options.signal.aborted) throw new CaptureFailure({ kind: "network", detail: "Stopped." });
-  throw new CaptureFailure(last);
+  throw new CaptureFailure(last instanceof CaptureFailure ? last.failure : failureOf(last));
 }
 
-/** The pieces of a source's stream, in order; ending it ends the provider's request. */
-type Chunks = AsyncGenerator<Uint8Array, void, undefined>;
+/** A source's stream, in order, and what ends its request, once the signal it opened with aborts. */
+interface Opened {
+  readonly chunks: AsyncGenerator<Uint8Array, void, undefined>;
+  close(): Promise<void>;
+}
 
 async function openSource(
   source: CaptureSource,
   options: { readonly request: Provider["request"]; readonly userAgent: string },
   signal: AbortSignal,
-): Promise<Chunks> {
+): Promise<Opened> {
   const ask = async (address: string, asked: AbortSignal) => {
     const headers = new Headers({ "User-Agent": options.userAgent, ...source.headers });
     for (let attempt = 0; ; attempt++) {
@@ -117,33 +143,39 @@ async function openSource(
   };
   if (source.format === "hls") {
     const input = await openHlsTsInput(source.url, ask, signal, false, null);
-    return (async function* () {
-      try {
-        for await (const epoch of input.epochs) yield* epoch.chunks;
-      } finally {
-        await input.close();
-      }
+    const chunks = (async function* () {
+      for await (const epoch of input.epochs) yield* epoch.chunks;
     })();
+    return {
+      chunks,
+      close: async () => {
+        await chunks.return().catch(() => {});
+        await input.close();
+      },
+    };
   }
   const answer = await ask(source.url, signal);
   const reader = answer.body?.getReader();
   if (!reader) throw new CaptureFailure({ kind: "network", detail: "The provider sent nothing." });
-  return (async function* () {
-    try {
-      for (;;) {
-        const next = await within(reader.read(), SILENCE_MS, signal);
-        if (next.done) return;
-        yield next.value;
-      }
-    } finally {
-      await reader.cancel().catch(() => {});
+  const chunks = (async function* () {
+    for (;;) {
+      const next = await within(reader.read(), SILENCE_MS, signal);
+      if (next.done) return;
+      yield next.value;
     }
   })();
+  return {
+    chunks,
+    close: async () => {
+      await chunks.return().catch(() => {});
+      await reader.cancel().catch(() => {});
+    },
+  };
 }
 
 /** Writes the stream until its program table has passed, or fails as playback would. */
 async function startTable(
-  chunks: Chunks,
+  chunks: Opened["chunks"],
   write: (chunk: Uint8Array) => Promise<void>,
   signal: AbortSignal,
 ): Promise<void> {
@@ -164,50 +196,44 @@ async function startTable(
   });
 }
 
-/** Writes the rest, then ends the request and closes the file before saying why it ended. */
+/**
+ * Writes the rest, then ends the request and flushes and closes the file before saying why it
+ * ended. A file that couldn't be flushed or closed ends as cut by the disk, whatever ended it.
+ */
 async function run(
-  chunks: Chunks,
+  opened: Opened,
   write: (chunk: Uint8Array) => Promise<void>,
   file: Awaited<ReturnType<typeof open>>,
   stop: AbortController,
-  options: { readonly until: number; readonly signal: AbortSignal },
+  deadline: AbortSignal,
+  options: { readonly signal: AbortSignal },
 ): Promise<CaptureEnd> {
-  // Timers can fire a moment early: the stop time counts as reached once its timer fired.
-  let reached = false;
-  const timer = setTimeout(
-    () => {
-      reached = true;
-      stop.abort();
-    },
-    Math.max(0, options.until - Date.now()),
-  );
-  let end: CaptureEnd;
-  try {
-    for (;;) {
-      const next = await chunks.next().catch(() => null);
-      if (!next || next.done) {
-        end = "stream";
-        break;
-      }
-      const wrote = await write(next.value).then(
-        () => true,
-        () => false,
-      );
-      if (!wrote) {
-        end = "disk";
-        break;
-      }
+  let end: CaptureEnd = "stream";
+  for (;;) {
+    const next = await opened.chunks.next().catch(() => null);
+    if (!next || next.done) break;
+    const wrote = await write(next.value).then(
+      () => true,
+      () => false,
+    );
+    if (!wrote) {
+      end = "disk";
+      break;
     }
-  } finally {
-    clearTimeout(timer);
-    stop.abort();
-    await chunks.return().catch(() => {});
   }
-  if (options.signal.aborted) end = "aborted";
-  else if (reached) end = "until";
-  await file.sync().catch(() => {});
-  await file.close().catch(() => {});
-  return end;
+  stop.abort();
+  await opened.close();
+  if (end !== "disk" && options.signal.aborted) end = "aborted";
+  else if (end !== "disk" && deadline.aborted) end = "until";
+  const flushed = await file.sync().then(
+    () => true,
+    () => false,
+  );
+  const closed = await file.close().then(
+    () => true,
+    () => false,
+  );
+  return flushed && closed ? end : "disk";
 }
 
 /** `promise`, or a `network` failure once `ms` pass or `signal` aborts first. */

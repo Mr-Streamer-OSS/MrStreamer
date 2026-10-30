@@ -1333,4 +1333,5 @@ export const en = {
   "Ends 2 min after the guide time.": "Ends 2 min after the guide time.",
   "Stop playing and record": "Stop playing and record",
   "Start recording": "Start recording",
+  "The recording couldn't be deleted: {detail}": "The recording couldn't be deleted: {detail}",
 } as const satisfies Readonly<Record<string, string | Plural>>;

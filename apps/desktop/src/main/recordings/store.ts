@@ -88,5 +88,11 @@ export function recordingFileName(title: string, channelName: string, start: num
       .replace(/\s+/g, " ")
       .trim();
   const words = [...new Set([clean(title), clean(channelName)].filter(Boolean))].join(" - ");
-  return `${`${words.slice(0, 100).trim()} - ${when}`.replace(/^[. -]+/, "")}.ts`;
+  // File systems count a name's bytes, at most 255: the words keep 150 of them, in whole characters.
+  let kept = "";
+  for (const character of words) {
+    if (Buffer.byteLength(kept + character) > 150) break;
+    kept += character;
+  }
+  return `${`${kept.trim()} - ${when}`.replace(/^[. -]+/, "")}.ts`;
 }

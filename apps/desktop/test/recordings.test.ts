@@ -6,12 +6,13 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import type { Recording } from "@mrstreamer/contracts/recordings";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Library } from "../src/main/services/library.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Recordings } from "../src/main/services/recordings.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
+import { startFakeHls } from "./fake-hls.ts";
 import { fixture, liveStreams, type FakeProviderOptions } from "./fake-provider.ts";
 import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
@@ -240,20 +241,57 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("goes on to the channel's next stream when one has no program, from the file's start", async () => {
     const junk = "TEST | H.264 + AAC";
+    // A name longer in bytes than a file system takes whole.
+    const long = "長い番組名".repeat(24);
     const { dataDir, channel, provider, recordings } = await connected({
+      channelOf: (each) => (each.name === TRACKS ? { ...each, name: long } : each),
+      // It sends what isn't MPEG-TS, and keeps its connection open.
       streams: (source, out, signal) =>
         source.name === junk
-          ? out.end(Buffer.alloc(64 * 1024, 0x20))
+          ? out.write(Buffer.alloc(64 * 1024, 0x20))
           : liveStreams(source, out, signal),
     });
-    const answer = await recordings.start(channel(TRACKS), Date.now() + 1000, {
-      variants: [channel(junk).id, channel(TRACKS).id],
+    const answer = await recordings.start(channel(long), Date.now() + 1000, {
+      variants: [channel(junk).id, channel(long).id],
     });
     expect(answer.kind).toBe("started");
+    // The first stream's request ended: only the recording's holds the one connection.
+    expect(provider.activeStreams()).toBe(1);
     const [done] = await until(recordings.list, ([first]) => first?.status.kind !== "recording");
     const file = await fileOf(dataDir, done!);
+    expect(Buffer.byteLength(file.name)).toBeLessThanOrEqual(255);
     expect(file.size).toBe(done?.bytes);
     expect((await readFile(file.path))[0]).toBe(0x47);
     expect(provider.streamRequests()).toBe(2);
+  });
+
+  it("records an HLS channel's segments one after another, and refuses one it can't read", async () => {
+    const host = await startFakeHls();
+    onTestFinished(() => host.close());
+    const dataDir = await tempDir();
+    const { recordings, subscriptions, library } = await app(dataDir);
+    const { id: subscriptionId } = await subscriptions.add({
+      server: host.link,
+      username: "",
+      password: "",
+    });
+    await library.refresh(subscriptionId);
+    const channel = (name: string) => ({ subscriptionId, id: `${name}.test` });
+
+    // The fixture's playlist ends after four segments, so the recording ends with it, early.
+    const answer = await recordings.start(channel("compatible"), Date.now() + 60_000, {});
+    expect(answer.kind).toBe("started");
+    const [ended] = await until(recordings.list, ([first]) => first?.status.kind !== "recording");
+    expect(ended?.status).toEqual({ kind: "partial", cut: "stream" });
+    const file = await fileOf(dataDir, ended!);
+    expect(file.size).toBe(4 * fixture("h264-aac.mpegts").length);
+    expect(probe(file.path)).toEqual(["h264", "aac"]);
+    expect(decodes(file.path)).toBe(true);
+
+    // Its sound comes from a rendition of its own, which capture doesn't join.
+    await expect(
+      recordings.start(channel("excluded"), Date.now() + 60_000, {}),
+    ).rejects.toMatchObject({ error: { kind: "stream", failure: { kind: "unsupported" } } });
+    expect(await recordings.list()).toHaveLength(1);
   });
 });

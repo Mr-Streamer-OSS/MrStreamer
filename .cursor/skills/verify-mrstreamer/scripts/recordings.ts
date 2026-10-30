@@ -1,6 +1,7 @@
 // Record now through the built window, against the fake provider's one connection. A playable
-// channel previews in Live TV, so Record's first start finds the connection held by playing here
-// and offers Stop playing and record, which frees it and starts. Recordings then shows it under
+// channel previews in Live TV, so Record's first start finds the connection held by playing here,
+// asks the provider for nothing more and offers Stop playing and record, which frees it and starts
+// on that one connection. Recordings then shows it under
 // Now; Stop moves it to Recorded, a second recording takes Now again, and the stopped one plays
 // from this computer. Its menu deletes it. Each state is captured at 1280 × 800 and the
 // Recordings page also at 960 × 600.
@@ -64,7 +65,8 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
   await d.wait(() =>
     d.evaluate<boolean>("(document.querySelector('video')?.currentTime ?? 0) > 1"),
   );
-  d.observed["beforeRecord"] = fixture.streams();
+  const before = fixture.streams();
+  d.observed["beforeRecord"] = before;
 
   await d.click("Open Record", record);
   await d.wait(() => d.exists(POPUP));
@@ -77,20 +79,20 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
   await d.wait(() => d.exists(stopAndRecord));
   d.observed["busy"] = await d.evaluate<string>(`${POPUP}.innerText`);
   expect((await listed(d)).length === 0, "Busy started a recording");
+  const busy = fixture.streams();
+  expect(
+    busy.requests === before.requests && busy.active === 1,
+    "Busy asked the provider for another stream",
+    busy,
+  );
   await d.capture("record-busy");
+  // The preview's stream closes first; its slot may take the provider a moment to free.
   await d.click("Stop playing and record", stopAndRecord);
   const recordingButton = named("button", "Recording");
-  const refused = `${POPUP}?.querySelector('p.text-destructive')`;
-  await d.wait(async () => (await d.exists(recordingButton)) || (await d.exists(refused)), 60_000);
-  if (!(await d.exists(recordingButton))) {
-    // Known main-process race: the provider can still count the stopped preview's stream.
-    d.observed["stopPlayingFirstAnswer"] = await d.evaluate<string>(`${refused}.innerText`);
-    await d.capture("record-refused");
-    await d.click("Stop playing and record, again", stopAndRecord);
-    await d.wait(() => d.exists(recordingButton), 60_000);
-  }
+  await d.wait(() => d.exists(recordingButton), 60_000);
   const first = await listed(d);
   expect(first.length === 1 && first[0]!.status.kind === "recording", "Not recording", first);
+  await d.wait(async () => fixture.streams().active === 1);
   d.observed["recording"] = { list: first, streams: fixture.streams() };
   await d.capture("live-recording");
 
@@ -137,9 +139,12 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
     () => d.evaluate<boolean>("(document.querySelector('video')?.currentTime ?? 0) >= 1"),
     60_000,
   );
-  d.observed["playing"] =
-    await d.evaluate<object>(`(() => { const v = document.querySelector('video');
-    return { time: v.currentTime, width: v.videoWidth, audio: v.webkitAudioDecodedByteCount }; })()`);
+  const playing = await d.evaluate<{ time: number; width: number; audio: number }>(
+    `(() => { const v = document.querySelector('video');
+    return { time: v.currentTime, width: v.videoWidth, audio: v.webkitAudioDecodedByteCount }; })()`,
+  );
+  expect(playing.width > 0 && playing.audio > 0, "No picture or sound", playing);
+  d.observed["playing"] = playing;
   await d.capture("recording-playing");
   await d.click("Leave the recording", named("header button", "Back"));
   await d.wait(() =>

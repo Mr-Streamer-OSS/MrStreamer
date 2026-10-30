@@ -1425,4 +1425,6 @@ export const fr: Translation = {
   "Ends 2 min after the guide time.": "S'arrête 2 min après l'heure du guide.",
   "Stop playing and record": "Arrêter la lecture et enregistrer",
   "Start recording": "Démarrer l'enregistrement",
+  "The recording couldn't be deleted: {detail}":
+    "Impossible de supprimer l’enregistrement : {detail}",
 };

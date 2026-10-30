@@ -1358,4 +1358,5 @@ export const nl: Translation = {
   "Ends 2 min after the guide time.": "Stopt 2 min na de tijd in de gids.",
   "Stop playing and record": "Stop afspelen en neem op",
   "Start recording": "Opname starten",
+  "The recording couldn't be deleted: {detail}": "De opname kon niet worden verwijderd: {detail}",
 };

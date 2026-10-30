@@ -1369,4 +1369,6 @@ export const de: Translation = {
   "Ends 2 min after the guide time.": "Endet 2 Min. nach der Zeit im Programm.",
   "Stop playing and record": "Wiedergabe beenden und aufnehmen",
   "Start recording": "Aufnahme starten",
+  "The recording couldn't be deleted: {detail}":
+    "Die Aufnahme konnte nicht gelöscht werden: {detail}",
 };

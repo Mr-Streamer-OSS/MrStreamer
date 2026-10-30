@@ -91,8 +91,8 @@ interface Active {
   readonly bytes: () => number;
   /** Why it was asked to end before its stop time. */
   asked: "stopped" | "quit" | null;
-  /** Settles once how it ended is written down, or couldn't be. */
-  readonly settled: Promise<void>;
+  /** Settles once how it ended is written down, with why that couldn't be, if it couldn't. */
+  readonly settled: Promise<Failed | null>;
 }
 
 function make(deps: RecordingsDeps) {
@@ -187,7 +187,7 @@ function make(deps: RecordingsDeps) {
     const ended = (id: string, end: CaptureEnd, live: Active) =>
       Effect.gen(function* () {
         const record = records.get(id);
-        if (!record) return;
+        if (!record) return null;
         const status: StoredRecording["status"] =
           end === "until"
             ? { kind: "complete" }
@@ -198,8 +198,10 @@ function make(deps: RecordingsDeps) {
               : { kind: "partial", cut: end };
         records.set(id, { ...record, status, bytes: live.bytes(), ended: Date.now() });
         active.delete(id);
-        yield* Effect.ignore(save);
+        // Any later write takes it down too; until then a restart reads it as cut by the quit.
+        const written = yield* Effect.result(save);
         yield* publish;
+        return written._tag === "Failure" ? written.failure : null;
       });
 
     const start = (
@@ -302,14 +304,13 @@ function make(deps: RecordingsDeps) {
             }),
           ),
         );
-        const { promise: settled, resolve } = Promise.withResolvers<void>();
+        const { promise: settled, resolve } = Promise.withResolvers<Failed | null>();
         const live: Active = { controller, bytes: capture.bytes, asked: null, settled };
         records.set(id, record);
         active.set(id, live);
         void capture.ended.then(async (end) => {
           held.release();
-          await Effect.runPromise(ended(id, end, live));
-          resolve();
+          resolve(await Effect.runPromise(ended(id, end, live)));
         });
         const written = yield* Effect.result(save);
         if (written._tag === "Failure") {
@@ -332,20 +333,29 @@ function make(deps: RecordingsDeps) {
         } satisfies RecordingStart;
       });
 
-    /** Ends what records now, as asked, once each has written down how it ended. */
+    /**
+     * Ends what records now, as asked, once each has written down how it ended; fails when that
+     * couldn't be written down.
+     */
     const end = (ids: readonly string[], asked: "stopped" | "quit") =>
-      Effect.promise(() =>
-        Promise.all(
-          ids.flatMap((id) => {
-            const live = active.get(id);
-            if (!live) return [];
-            live.asked ??= asked;
-            live.controller.abort();
-            return [live.settled];
-          }),
+      Effect.flatMap(
+        Effect.promise(() =>
+          Promise.all(
+            ids.flatMap((id) => {
+              const live = active.get(id);
+              if (!live) return [];
+              live.asked ??= asked;
+              live.controller.abort();
+              return [live.settled];
+            }),
+          ),
         ),
+        (failures) => {
+          const failure = failures.find((each) => each !== null);
+          return failure ? Effect.fail(failure) : Effect.void;
+        },
       );
-    yield* Effect.addFinalizer(() => end([...active.keys()], "quit"));
+    yield* Effect.addFinalizer(() => Effect.ignore(end([...active.keys()], "quit")));
 
     return {
       list: usable.pipe(Effect.andThen(look), Effect.andThen(shown)),
@@ -355,7 +365,7 @@ function make(deps: RecordingsDeps) {
           return { limit, uses: yield* coordination.uses(subscriptionId) };
         }),
       start,
-      stop: (id: string) => Effect.asVoid(end([id], "stopped")),
+      stop: (id: string) => end([id], "stopped"),
       remove: (id: string) =>
         Effect.gen(function* () {
           yield* usable;
@@ -366,13 +376,29 @@ function make(deps: RecordingsDeps) {
               error: { kind: "unexpected", detail: t("Stop the recording before deleting it.") },
             });
           yield* playback.closeCopy(id);
+          // The file goes first: one that stays, as one Windows holds open, keeps its record to
+          // delete again, and a record whose file went lists it as missing until it is deleted.
+          yield* Effect.tryPromise({
+            try: () => rm(join(root, id), { recursive: true, force: true }),
+            catch: (cause) =>
+              new Failed({
+                error: {
+                  kind: "unexpected",
+                  detail: t("The recording couldn't be deleted: {detail}", {
+                    detail: cause instanceof Error ? cause.message : String(cause),
+                  }),
+                },
+              }),
+          });
           records.delete(id);
           const written = yield* Effect.result(save);
           if (written._tag === "Failure") {
             records.set(id, record);
+            missing.add(id);
+            yield* publish;
             return yield* written.failure;
           }
-          yield* Effect.promise(() => rm(join(root, id), { recursive: true, force: true }));
+          missing.delete(id);
           yield* publish;
         }),
       copy: (id: string) =>
