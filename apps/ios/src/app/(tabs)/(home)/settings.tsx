@@ -43,6 +43,7 @@ import {
   useMediaPreferences,
 } from "../../../media-preferences.ts";
 import { openLink } from "../../../open-link.ts";
+import { playlistHref, useUnmapped } from "../../../playlist-groups.tsx";
 import { setStatistics, useStatistics } from "../../../telemetry/index.ts";
 import { hasTmdb, useMetadataStatus, useTitleTimings } from "../../../titles.ts";
 import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
@@ -52,8 +53,8 @@ const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
 /**
  * Settings as one list: the providers first, each a row with Add provider under them, then
  * Downloads, a row with what they take that opens them, Media policies, Privacy with its policy
- * in the browser, and About with Licences. M3U playlists and guide sources come here as they come
- * to iOS, and until then nothing here offers them. TMDB's terms ask for its logo and notice, as
+ * in the browser, and About with Licences. Guide sources come here as they come to iOS, and until
+ * then nothing here offers them. TMDB's terms ask for its logo and notice, as
  * the desktop's Settings show them. It opens on whichever tab's top bar asked for it, and what it
  * opens goes on that tab too.
  */
@@ -253,13 +254,39 @@ function chooseMedia<K extends keyof ReturnType<typeof getMediaPreferences>>(
 }
 
 /**
- * A provider as one row: its name and how it stands, in a line. Pressing it offers what can be
- * done with it, as a system sheet: Retry when it didn't answer, the reloads, Edit and Remove.
+ * A provider as one row: its name and how it stands, in a line, with how many of a playlist's
+ * groups need mapping. Pressing it offers what can be done with it, as a system sheet: Retry when
+ * it didn't answer, a playlist's groups, the reloads, Edit and Remove. A playlist reloads as one.
  */
 function Provider({ member, tab }: { member: Member; tab: Tab }) {
   const { entry, label } = member;
-  const line = standing(member);
+  const unmapped = useUnmapped(member);
+  const line = [
+    standing(member),
+    unmapped ? `${unmapped} ${unmapped === 1 ? "group needs" : "groups need"} mapping` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const edit = () => router.push({ pathname: tabHref(tab, "provider"), params: { id: entry.id } });
+  const reloads =
+    entry.kind === "m3u"
+      ? [
+          {
+            label: "Playlist groups",
+            run: () => router.push({ pathname: playlistHref(tab), params: { id: entry.id } }),
+          },
+          {
+            label: "Reload playlist",
+            run: () => {
+              reloadChannels(entry.id);
+              reloadTitles(entry.id);
+            },
+          },
+        ]
+      : [
+          { label: "Reload channels", run: () => reloadChannels(entry.id) },
+          { label: "Reload movies and series", run: () => reloadTitles(entry.id) },
+        ];
   const open = () => {
     const actions =
       entry.kind === "demo"
@@ -271,16 +298,16 @@ function Provider({ member, tab }: { member: Member; tab: Tab }) {
           ]
         : [
             ...(member.needsSecret
-              ? [{ label: "Enter password", run: edit }]
+              ? [
+                  {
+                    label: entry.kind === "m3u" ? "Enter playlist link" : "Enter password",
+                    run: edit,
+                  },
+                ]
               : failed(member)
                 ? [{ label: "Retry", run: () => retry(entry.id) }]
                 : []),
-            ...(member.needsSecret
-              ? []
-              : [
-                  { label: "Reload channels", run: () => reloadChannels(entry.id) },
-                  { label: "Reload movies and series", run: () => reloadTitles(entry.id) },
-                ]),
+            ...(member.needsSecret ? [] : reloads),
             { label: "Edit", run: edit },
             { label: "Remove", run: () => confirmRemove(member) },
           ];
@@ -324,7 +351,9 @@ const failed = (member: Member) =>
 
 /** How a provider stands, in a line: its account, or what needs the viewer, or what loads. */
 function standing({ entry, account, needsSecret, live, titles }: Member): string {
-  if (needsSecret) return "Enter the password again";
+  if (needsSecret) {
+    return entry.kind === "m3u" ? "Enter the playlist link again" : "Enter the password again";
+  }
   if (live.kind === "failed") return failureOf(live.error, entry.server).headline;
   if (titles.kind === "failed") {
     return `Movies and series: ${failureOf(titles.error, entry.server).headline}`;
@@ -332,7 +361,12 @@ function standing({ entry, account, needsSecret, live, titles }: Member): string
   if (entry.kind === "demo") return "Sample content";
   const loading =
     live.kind === "loading" ? "Loading channels" : titles.kind === "loading" ? "Loading" : null;
-  return [accountLine(account, entry.server), loading].filter(Boolean).join(" · ");
+  // A playlist's provider says nothing of its account, only whether it answered.
+  const state =
+    entry.kind === "m3u" && !(account && "kind" in account)
+      ? "M3U playlist"
+      : accountLine(account, entry.server);
+  return [state, loading].filter(Boolean).join(" · ");
 }
 
 /** Both demo actions are ephemeral and name the data removed before the viewer confirms. */

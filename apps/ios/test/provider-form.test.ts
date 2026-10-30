@@ -2,6 +2,7 @@ import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import type { HTMLInputElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { Member } from "../src/account.ts";
 
 // Settings' provider form: Add saves the name with the login, Edit changes the name and only a
@@ -14,14 +15,15 @@ interface Asked {
   readonly args: readonly unknown[];
   readonly signal: AbortSignal;
   readonly succeed: () => void;
+  readonly fail: (cause: unknown) => void;
 }
 const asked: Asked[] = [];
 const held =
   (call: Asked["call"]) =>
   (...args: unknown[]) =>
-    new Promise<void>((succeed) => {
+    new Promise<void>((succeed, fail) => {
       const signal = args.at(-1) as AbortSignal;
-      asked.push({ call, args: args.slice(0, -1), signal, succeed });
+      asked.push({ call, args: args.slice(0, -1), signal, succeed, fail });
     });
 
 vi.mock("../src/account.ts", () => ({ add: held("add"), update: held("update") }));
@@ -73,9 +75,11 @@ function mount(mode: Parameters<typeof ProviderForm>[0]["mode"]) {
         input.dispatchEvent(new Event("input", { bubbles: true }));
       });
     },
-    press: () =>
+    press: (name = "submit") =>
       React.act(() =>
-        container.querySelector("button")!.dispatchEvent(new Event("click", { bubbles: true })),
+        container
+          .querySelector(`[data-testid="provider-${name}"]`)!
+          .dispatchEvent(new Event("click", { bubbles: true })),
       ),
     answer: (each: () => void) => React.act(async () => each()),
     text: () => container.textContent,
@@ -126,5 +130,70 @@ describe("editing a saved provider", () => {
     form.type("password", "new");
     form.press();
     expect(asked[0]?.args).toEqual(["xtream-b", { name: "Cabin", password: "new" }]);
+  });
+});
+
+describe("a playlist link", () => {
+  const playlist: Member = {
+    ...saved,
+    entry: {
+      id: "m3u-a",
+      kind: "m3u",
+      server: "https://tv.example.com",
+      key: "k",
+      name: "Living room",
+    },
+    label: "Living room",
+  };
+
+  it("adds as the server with no login, under its name", () => {
+    const form = mount({ kind: "add" });
+    form.press("kind-m3u");
+    form.type("name", "Living room");
+    form.type("playlist-link", "https://tv.example.com/alex.m3u");
+    form.press();
+    expect(asked.map(({ call, args }) => [call, args])).toEqual([
+      [
+        "add",
+        [
+          {
+            server: "https://tv.example.com/alex.m3u",
+            username: "",
+            password: "",
+            name: "Living room",
+          },
+        ],
+      ],
+    ]);
+  });
+
+  it("says when the link answered with something other than a playlist", async () => {
+    const form = mount({ kind: "add" });
+    form.press("kind-m3u");
+    form.type("playlist-link", "https://tv.example.com/page");
+    form.press();
+    await form.answer(() =>
+      asked[0]!.fail(
+        new AppFailure({
+          kind: "unreachable",
+          server: "https://tv.example.com",
+          detail: "The address answered, but not with a playlist.",
+        }),
+      ),
+    );
+    expect(form.text()).toContain("This link isn't a playlist");
+    expect(form.text()).toContain("Try again");
+  });
+
+  it("is never shown back when editing, and a new one replaces it", () => {
+    const form = mount({ kind: "edit", member: playlist });
+    expect(form.text()).toContain("M3U playlist");
+    expect(form.text()).not.toContain("tv.example.com");
+    form.type("new-playlist-link", "https://tv.example.com/new.m3u");
+    form.press();
+    expect(asked[0]?.args).toEqual([
+      "m3u-a",
+      { name: "Living room", password: "https://tv.example.com/new.m3u" },
+    ]);
   });
 });

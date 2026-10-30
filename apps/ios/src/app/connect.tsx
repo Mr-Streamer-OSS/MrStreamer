@@ -36,10 +36,20 @@ export default function Connect() {
               <Text style={styles.title} accessibilityRole="header">
                 Add your provider
               </Text>
-              <Text style={styles.lead}>Use the login from your IPTV provider.</Text>
+              <Text style={styles.lead}>
+                Use the login or playlist link from your IPTV provider.
+              </Text>
             </View>
-            <ProviderForm mode={{ kind: "connect" }} />
-            <Text style={styles.footnote}>Your login goes only to your provider.</Text>
+            <ProviderForm
+              mode={{ kind: "connect" }}
+              footnote={(kind) => (
+                <Text style={styles.footnote}>
+                  {kind === "m3u"
+                    ? "Your playlist link goes only to your provider."
+                    : "Your login goes only to your provider."}
+                </Text>
+              )}
+            />
             <View style={styles.space} />
           </>
         ) : (
