@@ -152,11 +152,11 @@ describe("external guides", () => {
     expect(after.prepared.at(-1)).toBe(LINK);
   });
 
-  it("starts empty from a guides file it can't read, writing over none it couldn't open", async () => {
+  it("shows no guides from a file another build wrote or it can't read, writing over neither", async () => {
     const { guides } = launch({ file: { version: 2 }, items: new Map() });
     expect(guides.load()).toEqual([]);
     expect(guides.links()).toEqual([]);
-    expect(await guides.add(LINK)).toBeNull();
+    expect(await guides.add(LINK)).toBe("saving");
     const locked = { file: null as unknown, items: new Map<string, string>() };
     const before = launch(locked);
     before.guides.load();

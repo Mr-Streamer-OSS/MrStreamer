@@ -209,13 +209,16 @@ export function createGuides(
     mappings: mapped.get,
     /**
      * At launch, before the native guide store restores: the saved guides' ids, which it keeps.
-     * A file that doesn't read as one starts again empty.
+     * Without a file it starts empty. A file that can't be read now, or that another build wrote
+     * (custom-lists-file.ts "foreign"), shows none and is never written over: its guides' saved
+     * programmes go, as the native store keeps only the ids given, but their links stay.
      */
     load(): readonly string[] {
       let parsed: GuidesFile | type.errors | null = null;
       try {
-        parsed = File()(read());
-        writable = true;
+        const contents = read();
+        if (contents !== null) parsed = File()(contents);
+        writable = !(parsed instanceof type.errors);
       } catch {
         writable = false;
       }

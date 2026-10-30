@@ -288,10 +288,14 @@ describe("guide public owner", () => {
 
 describe("external guides and mappings", () => {
   const external = { revision: 1, login: [], provider: {} };
+  /** The ids each native read asked for. */
+  const asked: (readonly string[])[] = [];
   /** Answers each lease's guide ids: what the native reader would find in its generation. */
   function guides(native: GuideNative, control: ReturnType<typeof guideFixture>["control"]) {
     const has = new Map<string, readonly string[]>();
+    asked.length = 0;
     native.query = async (lease, _generation, _job, ids) => {
+      asked.push(ids);
       const owner = [...control.activations].find(([, value]) => value.lease === lease)?.[0];
       const guideId = ids.find((id) => has.get(owner ?? "")?.includes(id)) ?? null;
       return {
@@ -336,6 +340,23 @@ describe("external guides and mappings", () => {
     has.set("xmltv-1", []);
     expect(await titleOf(owner, "a:1")).toBe("a");
     expect(owner.guideIdsOf("a:2")).toEqual(["trusted.tv", "trusted TV"]);
+    // A mapped id that is also its own is asked for once in each guide.
+    owner.configure(new Map([["xmltv-1", external]]), new Map([["a:1", "trusted.tv"]]));
+    has.set("a", []);
+    asked.length = 0;
+    await titleOf(owner, "a:1");
+    expect(asked).toEqual([["trusted.tv"], ["trusted.tv"], ["trusted TV"], ["trusted TV"]]);
+  });
+
+  it("withdraws a channel's reads from external guides as its channels reload", async () => {
+    const { owner, has } = await twoGuides();
+    has.set("xmltv-1", ["trusted.tv"]);
+    const from = new Date(at);
+    from.setHours(0, 0, 0, 0);
+    const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
+    expect((await owner.schedule("a:1", day)).programmes).toHaveLength(1);
+    owner.setPart(part());
+    expect(owner.withdrawn("a:1", day.from)).toBe(1);
   });
 
   it("withdraws what was read under guides or mappings that changed", async () => {
