@@ -7,8 +7,9 @@ import { readJsonStrictly, removeJson, writeJson } from "./files.ts";
 // subscription's channels from it without importing what reads the account. One JSON file in
 // Documents, written whole before any screen shows a change: a write the folder refuses throws and
 // changes nothing, the lists the screens show written back so a write cut short isn't read at the
-// next launch. A file there that doesn't read now, or that a later build wrote, shows no lists
-// and is never written over, and a subscription's erasure waits on it (`eraseListMembers`).
+// next launch. A file there that can't be read now, or that a later build wrote, shows no lists
+// and is never written over, and a subscription's erasure waits on it (`eraseListMembers`); one
+// that reads but isn't JSON holds none.
 
 const FILE = "custom-lists.json";
 
