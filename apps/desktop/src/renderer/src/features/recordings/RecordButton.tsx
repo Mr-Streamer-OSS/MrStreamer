@@ -295,7 +295,7 @@ function startFailure(error: AppError): string {
         status: String(failure.status),
       });
     case "network":
-      return t("The connection to the provider failed.");
+      return describeError(error);
     case "unsupported":
       return t("This channel's stream can't be recorded.");
   }
