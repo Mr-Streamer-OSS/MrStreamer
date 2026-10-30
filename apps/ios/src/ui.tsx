@@ -173,7 +173,6 @@ export const ChannelRow = memo(function ChannelRow({
               },
             }
           : {})}
-        accessibilityState={{ selected }}
         onPress={() => onPress(channel)}
         style={({ pressed }) => [styles.main, pressed && styles.pressed]}
         testID={`channel-${channel.key}`}
@@ -196,7 +195,11 @@ export const ChannelRow = memo(function ChannelRow({
         {onSchedule ? (
           <TextButton
             label="Schedule"
-            accessibilityLabel={[`Schedule for ${channel.title}`, providerLabel]
+            accessibilityLabel={[
+              `Schedule for ${channel.title}`,
+              providerLabel,
+              selected && "shown",
+            ]
               .filter(Boolean)
               .join(", ")}
             onPress={() => onSchedule(channel)}

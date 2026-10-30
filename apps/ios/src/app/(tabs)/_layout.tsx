@@ -58,10 +58,11 @@ export default function TabsLayout() {
     } else if (id === "settings") {
       if (!pathname.endsWith("/settings")) openOnTabs(at, "settings");
     } else if (id === "back") {
-      // Live's detail column goes back first, while it is what shows of Live's stack.
-      const liveRoot = at.above === 0 && at.tab === "live" && !tabStack(state, "live")?.index;
-      if (liveRoot && closeDetail()) return;
-      if (router.canGoBack()) router.back();
+      // Live's detail column goes back first, while it is what shows of Live's stack. At a tab's
+      // root there is no Back, as on the iPhone: the tabs' own history isn't followed.
+      const pushed = at.above > 0 || Boolean(tabStack(state, at.tab)?.index);
+      if (!pushed && at.tab === "live" && closeDetail()) return;
+      if (pushed) router.back();
     } else {
       selectTab(navigation, state, id);
     }

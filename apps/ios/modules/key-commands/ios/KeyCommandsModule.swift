@@ -19,8 +19,10 @@ public class KeyCommandsModule: Module {
     }
 
     OnDestroy {
-      KeyCommandRelay.shared.send = nil
-      DispatchQueue.main.async { KeyCommandRelay.shared.set([]) }
+      DispatchQueue.main.async {
+        KeyCommandRelay.shared.send = nil
+        KeyCommandRelay.shared.set([])
+      }
     }
 
     Function("set") { (shortcuts: [Shortcut]) in

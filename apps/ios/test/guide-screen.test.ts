@@ -1026,9 +1026,12 @@ describe("Live on iPad and Duo windows", () => {
       payload: { name: "schedule", params: { channel: "a:1", day: String(day) } },
       target: "live-stack",
     });
-    expect(programme).toMatchObject({
+    expect(programme).toEqual({
       type: "PUSH",
-      payload: { name: "programme", params: { channel: "a:1" } },
+      payload: {
+        name: "programme",
+        params: { channel: "a:1", detail: expect.stringMatching(/^g/) },
+      },
       target: "live-stack",
     });
   });

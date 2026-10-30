@@ -625,7 +625,8 @@ honours species, so only the app shows it.
 The app runs on iPad (`supportsTablet`), in any orientation and in a multitasking window, and on
 an iPhone Duo's outer and inner displays. One rule picks the layout: the window's width in points
 (`splitAt` in `src/ui.tsx`), never the device, screen or orientation. Under 700 points, or under
-1000 at accessibility text sizes, every tab keeps the iPhone's layout. From there, Live shows its
+1000 at accessibility text sizes, every tab keeps the iPhone's layout. At those text sizes, on
+every width, a Live row's Schedule and star sit under its programme lines. From there, Live shows its
 list beside a detail column, where a channel's Schedule and a programme over it open in place of
 being pushed; the column reads "Choose a channel's Schedule" until one is. Home, Movies and Series
 keep their layouts at every width, and the system places the tab bar and the now playing
@@ -633,15 +634,18 @@ accessory.
 
 A resize, rotation or fold keeps the list mounted, so its tab, country and scroll position stay.
 A Schedule pushed on Live's stack moves into the column, on the same day and with its programme,
-once it is the stack's top; the column's goes back onto the stack as the window narrows, so Back
-returns to the list. Watch stays the one view of the one player and never remounts with the
+once it is the stack's top; the column's goes back onto the stack as the window narrows, once
+Live's list is the top again, so Back returns to the list. The Schedule's own scroll position and
+pages loaded with Show more start again on the other side. Watch stays the one view of the one player and never remounts with the
 window, so nothing reconnects and audio, subtitle and quality choices and downloads are kept.
-Watch turns to landscape for a movie or an episode only in a window under 700 points on its
-short side; a larger one shows the picture as it stands.
+Watch asks for landscape for a movie or an episode only in a window under 700 points on its
+short side, as on an iPhone or a Duo; iPadOS ignores the request in a multitasking window, and a
+larger window shows the picture as it stands.
 
 With a keyboard, `modules/key-commands` lists the shortcuts while ⌘ is held (`src/key-commands.ts`):
 ⌘1 to ⌘4 select the tabs, ⌘F opens Search, ⌘, Settings and ⌘[ goes back, Live's detail column
-first. In Watch, Space plays and pauses, ← and → skip ten seconds and Esc closes. Moving between
+first, and does nothing at a tab's root. In Watch, Space plays and pauses, ← and → skip ten
+seconds and Esc or ⌘. closes. Moving between
 buttons with Tab and the arrows is the system's keyboard focus, which every button has.
 
 Focused source verification is `pnpm exec vitest run apps/ios/test/guide-screen.test.ts
@@ -649,7 +653,8 @@ apps/ios/test/key-commands.test.ts`. It does not show native behaviour. Still to
 exact native candidate, on iPad portrait, landscape and half-width windows and on Duo outer and
 inner displays folded and unfolded: the column at 700 points, a Schedule and programme crossing
 it both ways with Back, scroll and day kept, Watch and Picture in Picture surviving a fold with no
-second stream, the key commands reaching the app and listed while ⌘ is held, keyboard focus,
+second stream, the key commands reaching the app and listed while ⌘ is held, also with no text field focused,
+keyboard focus,
 VoiceOver moving to the column's channel, large text, and safe areas and bar placement.
 
 ## On the simulator

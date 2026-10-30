@@ -52,14 +52,16 @@ import {
 import { colors } from "./ui.tsx";
 import { currentSource } from "./sources.ts";
 
-/** Watch's keyboard shortcuts while it shows: Space, ← and → while a stream plays, Esc always. */
-const STREAMING: readonly Shortcut<"pause" | "rewind" | "skip" | "close">[] = [
+/** Watch's keyboard shortcuts while it shows: Space, ← and → while a stream plays, Esc or ⌘. always. */
+const STREAMING: readonly Shortcut<"pause" | "rewind" | "skip" | "close" | "dismiss">[] = [
   { id: "pause", input: " ", command: false, title: "Play or Pause" },
   { id: "rewind", input: "leftArrow", command: false, title: "Back 10 seconds" },
   { id: "skip", input: "rightArrow", command: false, title: "Forward 10 seconds" },
   { id: "close", input: "escape", command: false, title: "Close" },
+  // Keyboards without Esc, as the iPad's Magic Keyboard, use ⌘. instead.
+  { id: "dismiss", input: ".", command: true, title: "Close" },
 ];
-const STILL = STREAMING.filter((shortcut) => shortcut.id === "close");
+const STILL = STREAMING.filter((shortcut) => shortcut.id === "close" || shortcut.id === "dismiss");
 
 /**
  * Watch: the player full screen, over the tabs, with A3's controls: a close button, AirPlay,
@@ -187,7 +189,7 @@ export function WatchLayer() {
 
   const streaming = phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused";
   useShortcuts(!watch ? NO_SHORTCUTS : streaming ? STREAMING : STILL, (id) => {
-    if (id === "close") void closeWatch();
+    if (id === "close" || id === "dismiss") void closeWatch();
     else if (id === "pause") togglePause();
     else seekBy(id === "rewind" ? -10 : 10);
   });

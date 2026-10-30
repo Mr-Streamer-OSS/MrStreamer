@@ -183,12 +183,19 @@ describe("the tabs' keyboard shortcuts", () => {
     scenario.detailOpen = true;
     await draw();
     expect(await press("back")).toEqual(["close detail"]);
-    expect(await press("back")).toEqual(["back"]);
+    expect(await press("back")).toEqual([]);
     scenario.detailOpen = true;
     scenario.state = root("live", 2);
     await draw();
     // A screen pushed over Live's list goes first; the column stays as it was.
     expect(await press("back")).toEqual(["back"]);
     expect(scenario.detailOpen).toBe(true);
+  });
+
+  it("does nothing at a tab's root, where the iPhone has no Back", async () => {
+    scenario.state = root("films");
+    scenario.pathname = "/films";
+    await draw();
+    expect(await press("back")).toEqual([]);
   });
 });
