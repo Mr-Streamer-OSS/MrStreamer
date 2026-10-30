@@ -89,7 +89,7 @@ describe("external guides", () => {
     guides.load();
     await guides.add(LINK);
     await flush();
-    const [{ id }] = guides.links() as [{ id: string }];
+    const { id } = guides.links()[0]!;
     await guides.remove(id);
     const order = control.calls.filter((call) => call.endsWith(`:${id}`));
     expect(order.slice(-3)).toEqual([`revoke:${id}`, `forget:${id}`, `keychain-remove:${id}`]);
@@ -103,7 +103,7 @@ describe("external guides", () => {
     guides.load();
     await guides.add("https://first.test/a.xml", "First");
     await guides.add(LINK, "Second");
-    const [first] = guides.links() as [{ id: string }];
+    const first = guides.links()[0]!;
     expect(await guides.replace(first.id, "https://new.test/a.xml")).toBeNull();
     await flush();
     expect(guides.links().map(({ origin, name }) => [origin, name])).toEqual([
@@ -120,7 +120,7 @@ describe("external guides", () => {
     before.guides.load();
     await before.guides.add(LINK);
     await before.guides.add("https://other.test/epg.xml");
-    const [lost] = before.guides.links() as [{ id: string }];
+    const lost = before.guides.links()[0]!;
     disk.items.delete(lost.id);
     const after = launch(disk);
     const ids = after.guides.load();

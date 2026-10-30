@@ -827,6 +827,17 @@ generations through one atomic manifest. Cached queries and account controls run
 bindings report unavailable. Removal and password replacement revoke work before awaited erasure,
 including when viewing history is kept.
 
+Settings > Guides adds up to eight external XMLTV guides by link (`src/guide-sources.ts`). Each is
+its own owner of the same native store under an `xmltv-` id, so it downloads, publishes and keeps
+its last good guide within the same budgets and redirect rules, and removal revokes its work before
+erasure. Its link, which may hold a key, is a Keychain item; `guides.json` keeps its origin, name
+and a fingerprint, and a guide whose link the Keychain lost still reads its saved guide until the
+link is entered again. A new link is a new guide in the old one's place. Map channels maps a
+channel, by its key, to a guide id typed by hand, with a preview of which guide answers; mappings go
+with the subscription's history. A channel reads its mapped id in every guide first, then its own
+ids, its provider's guide before the external ones in order. The native store can't list a guide's
+channels, so no picker is offered.
+
 `src/guide-ui.tsx` reads the owner's immutable snapshot only while the screen is focused. Live
 queries at most 40 visible channels' listings, its Guide grid at most 24 visible channels' days,
 and Home at most 12 including Stage, with the existing two native read workers.
