@@ -43,6 +43,7 @@ import { posterGridScenario } from "./poster-grid.ts";
 import { B_SERIES, detailsBackScenario, withSecondSeason } from "./details-back.ts";
 import { removeDuringGuideScenario } from "./remove-during-guide.ts";
 import { recordingsScenario } from "./recordings.ts";
+import { schedulesScenario } from "./schedules.ts";
 import { remindersScenario } from "./reminders.ts";
 import {
   electronExecutable,
@@ -86,6 +87,7 @@ const scenarios = [
   "guide-grid-scroll",
   "reminders",
   "recordings",
+  "schedules",
   "titles",
   "details-back",
   "next-episode",
@@ -240,7 +242,7 @@ async function run(scenario: Scenario, prior?: string) {
                 : channel,
           }
         : {}),
-      ...(scenario === "recordings"
+      ...(scenario === "recordings" || scenario === "schedules"
         ? {
             // Half-hour programmes, so Record offers When it ends.
             guideHours: { past: 1, ahead: 3 },
@@ -1090,6 +1092,21 @@ async function run(scenario: Scenario, prior?: string) {
         });
       else if (scenario === "guide-grid-cells") await guideGridCellsScenario(driver);
       else await guideGridScrollScenario(driver);
+    } else if (scenario === "schedules") {
+      await schedulesScenario({
+        profile,
+        observed,
+        evaluate: livePage.evaluate,
+        send,
+        wait,
+        exists,
+        click,
+        key,
+        capture,
+        action,
+        launch,
+        quit,
+      });
     } else if (scenario === "recordings") {
       await recordingsScenario(
         {

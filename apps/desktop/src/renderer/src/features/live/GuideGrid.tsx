@@ -18,7 +18,9 @@
 //   A click on a programme opens its details, and on it again closes them; a double click does
 // what Enter does, and a click on the channel watches it. Wheels and trackpads scroll both ways.
 //   A programme still to come offers Remind me beside Watch live in its details, and once a
-// reminder is set its cell shows a bell (../reminders/).
+// reminder is set its cell shows a bell (../reminders/). One that hasn't ended offers Record,
+// which opens the schedule's controls in the details (../recordings/SchedulePanel.tsx); its cell
+// shows a ring once a schedule records it, and Record there changes or cancels that.
 //   The timeline goes back as far as the list's longest archive, and ahead to where the guide
 // ends: see `timeline`. Rows are drawn as they come into view, and each draws only the hours in
 // view. The grid reads slots with `guide.range` in pages of channels by hours, those in view and
@@ -42,8 +44,9 @@ import {
 } from "react";
 import type { GuideSlot, Programme } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import type { ScheduledRecording } from "@mrstreamer/contracts/recordings";
 import type { ReminderList } from "@mrstreamer/contracts/reminders";
-import { ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatDate, t } from "@mrstreamer/core/i18n";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
@@ -57,6 +60,8 @@ import { useOutput } from "../../player/output.ts";
 import { archiveHolds } from "@mrstreamer/core/catchup";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
+import { SchedulePanel } from "../recordings/SchedulePanel.tsx";
+import { basisOfProgramme, scheduleAt, useSchedules } from "../recordings/schedules.ts";
 import { ReminderButton } from "../reminders/ReminderButton.tsx";
 import {
   blocksIn,
@@ -173,6 +178,7 @@ export function GuideGrid({
   );
   const archiveDays = useMemo(() => longestArchive(channels), [channels]);
   const reminders = useReminders().data;
+  const schedules = useSchedules().data;
   const now = useNow();
   const visible = usePresentationVisible();
   const minute = Math.floor(now / MINUTE_MS) * MINUTE_MS;
@@ -596,6 +602,7 @@ export function GuideGrid({
                   }
                   remote={remote}
                   reminders={reminders}
+                  schedules={schedules}
                   onPick={pick}
                   onWatch={watch}
                   onPlay={play}
@@ -726,6 +733,7 @@ const GridRow = memo(function GridRow({
   remind,
   remote,
   reminders,
+  schedules,
   ids,
   onPick,
   onWatch,
@@ -756,6 +764,8 @@ const GridRow = memo(function GridRow({
   remote: boolean;
   /** The reminders set, whose programmes' cells show a bell. */
   reminders: ReminderList | undefined;
+  /** The recordings scheduled, whose programmes' cells show a ring. */
+  schedules: readonly ScheduledRecording[] | undefined;
   /** The grid's prefix for its cells' ids, which name the cursor's to assistive technology. */
   ids: string;
   onPick: (row: number, at: number) => void;
@@ -837,6 +847,7 @@ const GridRow = memo(function GridRow({
             const chosen = selected(block);
             const box = place(block);
             const reminded = reminderAt(reminders, channel, slot.start) !== undefined;
+            const scheduled = !ended && scheduleAt(schedules, channel, slot.start) !== undefined;
             return (
               <div
                 key={slot.start}
@@ -850,6 +861,7 @@ const GridRow = memo(function GridRow({
                   spanText(slot, minute),
                   replay && !remote && t("Catch-up"),
                   reminded && t("Reminder set"),
+                  scheduled && t("Recording scheduled"),
                 ]
                   .filter(Boolean)
                   .join(", ")}
@@ -869,6 +881,12 @@ const GridRow = memo(function GridRow({
                 {/* Padding stays inside the clipped cell, so tiny slots keep their timeline width.
                     The grid moves this title into view when the programme's start is scrolled past. */}
                 <span className={cn("truncate px-2.5 text-sm", on && "font-semibold")}>
+                  {scheduled && (
+                    <span
+                      aria-hidden
+                      className="mr-1.5 -mt-0.5 inline-block size-1.5 rounded-full align-middle ring-[1.5px] ring-destructive ring-inset"
+                    />
+                  )}
                   {reminded && (
                     <Bell aria-hidden className="mr-1.5 -mt-0.5 inline size-3 align-middle" />
                   )}
@@ -906,7 +924,8 @@ const GridRow = memo(function GridRow({
 
 /**
  * What the cursor's programme is, under its row: its title, when it is on, its description once
- * read, and what it plays, the first of `actions` foremost, then Remind me while it is to come.
+ * read, and what it plays, the first of `actions` foremost, then Remind me while it is to come and
+ * Record until it ends, which opens the schedule's controls under them.
  */
 function Details({
   channel,
@@ -933,6 +952,15 @@ function Details({
     enabled: slot !== null,
   }).data;
   const on = slot !== null && slot.start <= minute && minute < slot.stop;
+  const schedule = scheduleAt(useSchedules().data, channel, slot?.start ?? 0);
+  // The programme the controls are open for: another one under the cursor closes them.
+  const [scheduling, setScheduling] = useState<number | null>(null);
+  const open = slot !== null && scheduling === slot.start;
+  const record = useRef<HTMLButtonElement>(null);
+  const close = () => {
+    setScheduling(null);
+    record.current?.focus({ preventScroll: true });
+  };
   return (
     <div
       role="region"
@@ -971,7 +999,38 @@ function Details({
             start={slot.start}
           />
         )}
+        {slot && slot.stop > minute && (
+          <Button
+            ref={record}
+            variant="secondary"
+            size="sm"
+            aria-expanded={open}
+            onClick={() => setScheduling(open ? null : slot.start)}
+            className="aria-expanded:bg-white/16 aria-expanded:ring-1 aria-expanded:ring-white/30 aria-expanded:ring-inset"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "size-2 flex-none rounded-full",
+                schedule ? "ring-[1.5px] ring-destructive ring-inset" : "bg-destructive",
+              )}
+            />
+            {schedule ? t("Scheduled") : t("Record")}
+          </Button>
+        )}
       </div>
+      {slot && open && (
+        <SchedulePanel
+          key={`${ownedKey(channel)}:${slot.start}`}
+          basis={basisOfProgramme(ownedId(channel), slot)}
+          channelName={channel.title}
+          schedule={schedule}
+          autoFocus
+          onEscape={close}
+          onDone={close}
+          className="mt-3.5"
+        />
+      )}
     </div>
   );
 }

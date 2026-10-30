@@ -534,6 +534,8 @@ function make(deps: RecordingsDeps) {
      * answered, `hold` while its schedule was held then, or `starting` while a start is under way.
      */
     const why = new Map<string, ScheduleMiss | "hold" | "starting">();
+    /** When each occurrence whose time came was last asked to start, by `occurrenceKey`. */
+    const tried = new Map<string, number>();
     const occurrenceKey = (id: string, occurrence: Occurrence) => `${id}@${occurrence.start}`;
     /** The recording a schedule made of `occurrence`, if one did. */
     const recordOf = (id: string, occurrence: Occurrence) =>
@@ -728,16 +730,17 @@ function make(deps: RecordingsDeps) {
               missed = true;
             }
             why.delete(key);
+            tried.delete(key);
             if (settling) through = occurrence.stop;
             continue;
           }
           if (made || reason === "starting" || recordingOf(kept.id)) continue;
           if (hold) why.set(key, "hold");
           else if (hold === undefined) retry = true;
-          else {
-            if (reason === "busy" || reason === "stream") retry = true;
+          else if ((tried.get(key) ?? -Infinity) + RETRY_MS <= now) {
+            tried.set(key, now);
             startOccurrence(kept, occurrence, now);
-          }
+          } else retry = true;
         }
         kept = { ...kept, through };
         // A programme records once: settled, it goes.
