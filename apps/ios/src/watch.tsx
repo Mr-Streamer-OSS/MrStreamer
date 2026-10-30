@@ -1,8 +1,9 @@
 import { router, usePathname } from "expo-router";
+import type { Programme } from "@mrstreamer/contracts/guide";
 import type { Quality } from "@mrstreamer/contracts/library";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ActionSheetIOS,
   Alert,
@@ -18,12 +19,22 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { channelQuality, chooseChannelQuality, currentCatalogue, useCatalogue } from "./account.ts";
+import {
+  channelQuality,
+  chooseChannelQuality,
+  currentCatalogue,
+  playChannel,
+  useCatalogue,
+} from "./account.ts";
 import { starChannel, useFavouriteKeys } from "./favourites.ts";
 import { Glass, IconButton } from "./glass.tsx";
 import { DownloadStatusButton } from "./download-status.tsx";
+import { guide } from "./guide.ts";
+import { catchUpOf } from "./guide-screen.tsx";
+import { dayLabel, localDay, programmeRange } from "./guide-ui.tsx";
 import { openOnTabs, useTabs, type TabScreen } from "./header.tsx";
 import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
+import type { Channel } from "./library.ts";
 import {
   closeWatch,
   playbackState,
@@ -327,7 +338,7 @@ function Controls({
                 ? phase.error
                 : phase.kind === "loading"
                   ? "Connecting"
-                  : phase.item.place}
+                  : placeOf(phase.item)}
             </Text>
           </View>
           <View style={styles.buttons}>
@@ -392,10 +403,75 @@ function Controls({
           </View>
         </View>
         {streaming ? phase.item.live ? <Clock /> : <Scrubber /> : null}
+        {streaming && phase.item.live ? <StartOver item={phase.item} /> : null}
         {streaming && !phase.item.live ? <TitleButtons next={phase.item.next} /> : null}
       </Glass>
     </>
   );
+}
+
+/**
+ * The line under what plays: where a channel or title is listed, and for a programme from catch-up,
+ * that it is one and when it aired, "Estuary Max · Catch-up · Today 09:00–10:00", never Live.
+ */
+function placeOf(item: Playing) {
+  if (!item.past) return item.place;
+  const day = dayLabel(localDay(item.past.start), Date.now());
+  return `${item.place} · Catch-up · ${day} ${programmeRange(item.past)}`;
+}
+
+/**
+ * Play from start, while a live channel plays whose catch-up keeps the programme on now: it plays
+ * that programme from its start, as the Programme screen's does, in its place.
+ */
+function StartOver({ item }: { item: Playing }) {
+  const catalogue = useCatalogue();
+  const channel = catalogue.kind === "ready" ? catalogue.library.byKey.get(item.id) : undefined;
+  const programme = useOnNow(channel);
+  if (!channel || !programme || catchUpOf(channel, programme, Date.now()).kind !== "on")
+    return null;
+  return (
+    <View style={styles.titleButtons}>
+      <TextControl
+        label="Play from start"
+        accessibilityLabel={`Play ${programme.title} from start`}
+        onPress={() => playChannel(channel, channel.title, { watch: true, programme })}
+        testID="watch-from-start"
+      />
+    </View>
+  );
+}
+
+/**
+ * The programme on now on `channel`, by its guide: read as the guide changes and again as that
+ * programme ends, at least hourly. Null until read, or with nothing on.
+ */
+function useOnNow(channel: Channel | undefined) {
+  const snapshot = useSyncExternalStore(guide.subscribe, guide.getSnapshot);
+  const [ended, setEnded] = useState(0);
+  const [read, setRead] = useState<{ channel: Channel; programme: Programme | null } | null>(null);
+  useEffect(() => {
+    if (!channel) return;
+    const controller = new AbortController();
+    guide.listings([channel.key], { signal: controller.signal }).then(
+      (listings) => {
+        if (!controller.signal.aborted)
+          setRead({ channel, programme: listings.get(channel.key)?.now ?? null });
+      },
+      () => undefined,
+    );
+    return () => controller.abort();
+  }, [channel, snapshot, ended]);
+  const programme = read && read.channel === channel ? read.programme : null;
+  useEffect(() => {
+    if (!programme) return;
+    const timer = setTimeout(
+      () => setEnded((count) => count + 1),
+      Math.min(programme.stop - Date.now(), 3_600_000),
+    );
+    return () => clearTimeout(timer);
+  }, [programme]);
+  return programme;
 }
 
 /**
@@ -622,16 +698,19 @@ function TitleButtons({ next }: { next: boolean }) {
 
 function TextControl({
   label,
+  accessibilityLabel,
   onPress,
   testID,
 }: {
   label: string;
+  accessibilityLabel?: string;
   onPress: () => void;
   testID: string;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       onPress={onPress}
       style={({ pressed }) => [styles.textControl, pressed && styles.pressed]}
       testID={testID}

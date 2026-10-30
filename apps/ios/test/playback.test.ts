@@ -3,6 +3,7 @@ import { createRoot, document } from "./dom.ts";
 import * as React from "react";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import type { Programme } from "@mrstreamer/contracts/guide";
 import type { ArchiveWindow } from "@mrstreamer/contracts/playback";
 import type { Provider } from "@mrstreamer/core/provider";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +18,14 @@ const port = nativePlayer((source) => {
 });
 let provider: Provider;
 const keychain = new Map<string, string>();
+// What the guide says is on now on any channel: the native guide is a port too.
+let onNow: Programme | null = null;
+vi.mock("../src/guide.ts", async (original) => {
+  const actual = await original<typeof import("../src/guide.ts")>();
+  const listings = async (keys: readonly string[]) =>
+    new Map(keys.map((key) => [key, { now: onNow, next: null }]));
+  return { ...actual, guide: { ...actual.guide, listings } };
+});
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
 vi.mock("expo-secure-store", () => keychainStore(() => keychain));
@@ -62,6 +71,7 @@ const playback = await import("../src/playback.ts");
 const preferences = await import("../src/media-preferences.ts");
 const { demoProvider } = await import("../src/demo.ts");
 const { WatchLayer } = await import("../src/watch.tsx");
+const { programmeRange } = await import("../src/guide-ui.tsx");
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -78,6 +88,10 @@ async function until(ready: () => boolean) {
   expect(ready()).toBe(true);
 }
 const phase = () => playback.playbackState.get().phase;
+const fromStart = () =>
+  [...container.querySelectorAll("button")].find(
+    (button) => button.getAttribute("data-testid") === "watch-from-start",
+  ) ?? null;
 
 /** Connects a channel with FHD, HD and SD streams that keep `days` of catch-up each. */
 async function connect(days: readonly (number | null)[]) {
@@ -141,6 +155,7 @@ beforeEach(() => {
     start: window.start,
   }));
   opened.length = 0;
+  onNow = null;
   port.currentTime = 0;
   port.duration = 600;
   container = document.createElement("div");
@@ -178,6 +193,8 @@ describe("a programme from catch-up", () => {
     expect(playback.liveStream()).toBeNull();
     expect(container.textContent).toContain("-1:00:00");
     expect(container.textContent).not.toContain("Live");
+    expect(container.textContent).toContain(`${channel.title} · Catch-up · `);
+    expect(container.textContent).toContain(programmeRange(programme));
   });
 
   it("starts a programme still on over, as long as the programme, while it records", async () => {
@@ -250,5 +267,37 @@ describe("a programme from catch-up", () => {
       await tick();
     });
     expect(port.currentTime).toBe(900);
+  });
+
+  it("starts the programme on now over from a live channel whose catch-up keeps it", async () => {
+    await connect([3, 3, 3]);
+    onNow = { ...aired(HOUR / 4), description: null };
+    await React.act(async () => {
+      account.playChannel(channel, "News", { watch: true });
+      await tick();
+    });
+    await until(() => fromStart() !== null);
+    expect(fromStart()?.getAttribute("aria-label")).toBe("Play Morning Tide from start");
+    await React.act(async () => {
+      fromStart()?.click();
+      await tick();
+    });
+    expect(playback.playingItem(phase())).toMatchObject({
+      live: false,
+      past: { start: onNow.start, stop: onNow.stop },
+    });
+    expect(opened.at(-1)).toBe(`archive:10:${onNow.start}`);
+  });
+
+  it("offers no start over on a live channel without catch-up", async () => {
+    await connect([null, null, null]);
+    onNow = { ...aired(HOUR / 4), description: null };
+    await React.act(async () => {
+      account.playChannel(channel, "News", { watch: true });
+      await tick();
+    });
+    await until(() => opened.length === 1);
+    await React.act(tick);
+    expect(fromStart()).toBeNull();
   });
 });

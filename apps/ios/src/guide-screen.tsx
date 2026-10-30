@@ -247,6 +247,7 @@ export function Programme({
   const progress = programmePresentation(listing, read.now).progress;
   const catchUp: CatchUp =
     read.value && channel ? catchUpOf(channel, read.value, read.now) : { kind: "later" };
+  const kept = catchUp.kind === "past" || catchUp.kind === "on";
   if (!channel || !library) {
     return (
       <Message
@@ -271,7 +272,14 @@ export function Programme({
           <Text accessibilityRole="header" style={styles.title}>
             {read.value.title}
           </Text>
-          <Text style={styles.copy}>{programmeRange(read.value)}</Text>
+          {kept ? (
+            <Text
+              style={styles.copy}
+              accessibilityLabel={`${programmeRange(read.value)}, catch-up`}
+            >{`${programmeRange(read.value)} ↺`}</Text>
+          ) : (
+            <Text style={styles.copy}>{programmeRange(read.value)}</Text>
+          )}
           <ProgrammeProgress value={progress} />
           {read.value.description ? (
             <Text style={styles.copy}>{read.value.description}</Text>
@@ -290,19 +298,21 @@ export function Programme({
         message={guideMessage(read.snapshot.get(channel.subscriptionId))}
         origin={origin}
       />
-      {read.value && catchUp.kind === "past" ? (
-        <FromStart channel={channel} programme={read.value} />
-      ) : null}
-      <TextButton
-        label="Watch live"
-        onPress={() =>
-          playChannel(channel, library.placeOf.get(channel.key) ?? "", { watch: true })
-        }
-        testID="guide-watch-live"
-      />
-      {read.value && catchUp.kind === "on" ? (
-        <FromStart channel={channel} programme={read.value} />
-      ) : null}
+      <View style={styles.actions}>
+        {read.value && catchUp.kind === "past" ? (
+          <FromStart channel={channel} programme={read.value} />
+        ) : null}
+        <TextButton
+          label="Watch live"
+          onPress={() =>
+            playChannel(channel, library.placeOf.get(channel.key) ?? "", { watch: true })
+          }
+          testID="guide-watch-live"
+        />
+        {read.value && catchUp.kind === "on" ? (
+          <FromStart channel={channel} programme={read.value} />
+        ) : null}
+      </View>
       {read.value && read.value.stop <= read.now && catchUp.kind === "none" ? (
         <Text style={styles.copy}>{describeError({ kind: "catch-up", reason: "none" })}</Text>
       ) : null}
@@ -320,6 +330,7 @@ function FromStart({ channel, programme }: { channel: Channel; programme: Aired 
   return (
     <TextButton
       label="Play from start"
+      accessibilityLabel={`Play ${programme.title} from start`}
       onPress={() => playChannel(channel, channel.title, { watch: true, programme })}
       testID="guide-play-from-start"
     />
@@ -389,6 +400,7 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 24, fontWeight: "700", marginVertical: 12 },
   channel: { color: colors.text, fontSize: 17, marginTop: 12 },
   copy: { color: colors.text, fontSize: 15, marginVertical: 8 },
+  actions: { flexDirection: "row", flexWrap: "wrap", columnGap: 22 },
   days: {
     flexDirection: "row",
     flexWrap: "wrap",

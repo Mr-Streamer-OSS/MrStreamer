@@ -993,6 +993,7 @@ describe("a programme's catch-up", () => {
 
   it("plays an ended programme the channel keeps from its start, before Watch live", async () => {
     expect(await actions(ended, 3)).toEqual(["Play from start", "Watch live"]);
+    expect(container.textContent).toContain(`${programmeRange(ended)} ↺`);
     await click("Play from start");
     expect(state.did.at(-1)).toEqual({
       play: "a:1",
@@ -1018,6 +1019,7 @@ describe("a programme's catch-up", () => {
     },
   ])("watches live only, saying why: $says", async ({ days, programme, says }) => {
     expect(await actions(programme, days)).toEqual(["Watch live"]);
+    expect(container.textContent).not.toContain("↺");
     if (says) expect(container.textContent).toContain(says);
     else expect(container.textContent).not.toContain("catch-up");
   });
