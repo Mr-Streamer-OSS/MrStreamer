@@ -551,6 +551,19 @@ function make(deps: RecordingsDeps) {
       catch: () =>
         new Failed({ error: { kind: "unexpected", detail: t("Schedules could not be saved.") } }),
     });
+    /** Keeps `schedule` as `id`, or takes `id` out for null, putting it back if the write fails. */
+    const keep = (id: string, schedule: KeptSchedule | null) =>
+      Effect.gen(function* () {
+        const was = schedules.get(id);
+        if (schedule) schedules.set(id, schedule);
+        else schedules.delete(id);
+        const written = yield* Effect.result(saveSchedules);
+        if (written._tag === "Failure") {
+          if (was) schedules.set(id, was);
+          else schedules.delete(id);
+          return yield* written.failure;
+        }
+      });
 
     /**
      * `plan` as the lists and the guide stand now: its channel, and what holds it back, its
@@ -593,8 +606,16 @@ function make(deps: RecordingsDeps) {
         return [{ holder, start: record.start, first: true }];
       });
 
-    /** How `schedule` stands at `now`, against the others of `kept` and what records now. */
-    const standingOf = (schedule: KeptSchedule, kept: readonly KeptSchedule[], now: number) =>
+    /**
+     * How `schedule` stands at `now`, held back as `hold` says, against the others of `kept` and
+     * what records now.
+     */
+    const standingOf = (
+      schedule: KeptSchedule,
+      kept: readonly KeptSchedule[],
+      now: number,
+      hold = holds.get(schedule.id),
+    ) =>
       Effect.gen(function* () {
         const { plan } = schedule;
         const next = nextOccurrence(plan, now);
@@ -605,7 +626,6 @@ function make(deps: RecordingsDeps) {
           next,
           status,
         });
-        const hold = holds.get(schedule.id);
         if (hold) return as(hold);
         const recording = recordingOf(schedule.id);
         if (recording) return as({ kind: "recording", recording });
@@ -827,12 +847,11 @@ function make(deps: RecordingsDeps) {
             Math.max(now, ...[...schedules.values()].map((each) => each.created + 1)),
           through: (recording && nextOccurrence(found.plan, now)?.stop) || now,
         };
-        const kept = [...schedules.values()].filter((each) => each.id !== schedule.id);
-        const before = holds;
-        holds = new Map(before).set(schedule.id, found.hold ?? null);
-        const standing = yield* Effect.ensuring(
-          standingOf(schedule, [...kept, schedule], now),
-          Effect.sync(() => (holds = before)),
+        const standing = yield* standingOf(
+          schedule,
+          [...schedules.values()],
+          now,
+          found.hold ?? null,
         );
         return { schedule, standing };
       });
@@ -950,14 +969,7 @@ function make(deps: RecordingsDeps) {
           scheduling(
             Effect.gen(function* () {
               const { schedule, standing } = yield* draft(plan, id);
-              const was = schedules.get(schedule.id);
-              schedules.set(schedule.id, schedule);
-              const written = yield* Effect.result(saveSchedules);
-              if (written._tag === "Failure") {
-                if (was) schedules.set(schedule.id, was);
-                else schedules.delete(schedule.id);
-                return yield* written.failure;
-              }
+              yield* keep(schedule.id, schedule);
               return standing;
             }),
           ),
@@ -968,14 +980,7 @@ function make(deps: RecordingsDeps) {
           scheduling(
             Effect.gen(function* () {
               yield* schedulesUsable;
-              const was = schedules.get(id);
-              if (!was) return;
-              schedules.delete(id);
-              const written = yield* Effect.result(saveSchedules);
-              if (written._tag === "Failure") {
-                schedules.set(id, was);
-                return yield* written.failure;
-              }
+              if (schedules.has(id)) yield* keep(id, null);
             }),
           ),
           wake,

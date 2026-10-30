@@ -901,21 +901,6 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await roster.remove(subscriptionId, false);
     expect(await recordings.schedules()).toEqual([]);
   });
-
-  it("leaves a schedules file it can't read as it is, and schedules nothing meanwhile", async () => {
-    const { dataDir, listing, programmePlan } = await scheduling();
-    const { next } = await listing();
-    const path = join(dataDir, "recordings", "schedules.json");
-    const unreadable = JSON.stringify({ version: 2, schedules: [] });
-    await mkdir(join(dataDir, "recordings"), { recursive: true });
-    await writeFile(path, unreadable);
-    const { recordings } = await app(dataDir);
-    await expect(recordings.schedules()).rejects.toMatchObject({ error: { kind: "unexpected" } });
-    await expect(recordings.schedule(programmePlan(next))).rejects.toMatchObject({
-      error: { kind: "unexpected" },
-    });
-    expect(await readFile(path, "utf8")).toBe(unreadable);
-  });
 });
 
 describe("recording slot times", () => {

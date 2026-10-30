@@ -1,9 +1,9 @@
 // Record, in Live TV's now strip: a popover that records the channel from now, to when its
 // programme ends (two minutes after the guide's time, as guides run late), for an hour or two, or
 // until a time of day it is given (today's, or tomorrow's once that passed, within
-// RECORDING_MAX_MS), and says how many of its subscription's connections are in use. When every one is held, it says
-// so, and where only playing here holds them, offers to stop that and record. While the channel
-// records, the button reads Recording and opens Recordings.
+// RECORDING_MAX_MS), and says how many of its subscription's connections are in use. When every
+// one is held, it says so, and where only playing here holds them, offers to stop that and record.
+// While the channel records, the button reads Recording and opens Recordings.
 import { Popover } from "@base-ui/react/popover";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";

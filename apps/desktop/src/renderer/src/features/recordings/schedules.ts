@@ -51,8 +51,7 @@ export function scheduleAt(
   channel: OwnedId,
   start: number,
 ): ScheduledRecording | undefined {
-  if (!list?.length) return undefined;
-  return list.find(({ plan }) => {
+  return list?.find(({ plan }) => {
     if (!sameOwned(plan.channel, channel)) return false;
     if (plan.kind === "programme") return plan.start === start;
     return plan.days.includes(new Date(start).getDay()) && plan.at === minuteOfDay(start);
@@ -155,23 +154,17 @@ export function repeatText(plan: RecordingPlan): string {
   return formatList(plan.days.map((day) => weekdays(day)));
 }
 
-/** "until 22:17" for what holds a connection until then, else nothing. */
-function untilText(holder: ConnectionHolder): string {
-  return "until" in holder ? t("until {time}", { time: formatDate(holder.until, "time") }) : "";
-}
-
-/** What holds a connection, in a few words, and until when. */
+/** What holds a connection, in a few words, and until when: "until 22:17", else nothing. */
 export function holderText(holder: ConnectionHolder): { what: string; until: string } {
-  switch (holder.kind) {
-    case "recording":
-      return { what: t("Recording {title}", { title: holder.title }), until: untilText(holder) };
-    case "schedule":
-      return { what: t("Scheduled {title}", { title: holder.title }), until: untilText(holder) };
-    case "watch":
-      return { what: t("Playing in this window"), until: "" };
-    case "download":
-      return { what: t("A download"), until: "" };
-  }
+  if (!("until" in holder))
+    return {
+      what: holder.kind === "watch" ? t("Playing in this window") : t("A download"),
+      until: "",
+    };
+  const until = t("until {time}", { time: formatDate(holder.until, "time") });
+  return holder.kind === "recording"
+    ? { what: t("Recording {title}", { title: holder.title }), until }
+    : { what: t("Scheduled {title}", { title: holder.title }), until };
 }
 
 /** Who holds every connection, in one line: "Weather Watch and playing in this window". */
