@@ -8,8 +8,17 @@ export const URL_LENGTH = 2048;
 /** How many layers of encoding, or addresses within addresses, are looked through. */
 const LAYERS = 4;
 
-/** A subscription's login as `exposes` looks for it. */
-export type Login = { readonly username: string; readonly password: string };
+/**
+ * A subscription's login as `exposes` looks for it: an Xtream account's username and password,
+ * or a playlist link's secrets, with no username.
+ */
+export type Login = { readonly username: string; readonly passwords: readonly string[] };
+
+/** A Source's login parts, `[username, ...passwords]`, as the checks here read them. */
+export const loginFrom = ([username = "", ...passwords]: readonly string[]): Login => ({
+  username,
+  passwords: passwords.filter(Boolean),
+});
 
 const decoded = (text: string) => {
   try {
@@ -23,11 +32,11 @@ const decoded = (text: string) => {
  * `url` when the disk may keep it: an http(s) address of at most 2048 characters that doesn't
  * give the login away (`exposes`). Otherwise null.
  */
-export function safeUrl(url: string | null, username: string, password: string): string | null {
+export function safeUrl(url: string | null, login: Login): string | null {
   if (url === null || url.length > URL_LENGTH) return null;
   const parsed = URL.parse(url);
   if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) return null;
-  return exposes(url, { username, password }, LAYERS, parsed) ? null : url;
+  return exposes(url, login, LAYERS, parsed) ? null : url;
 }
 
 /**
@@ -43,8 +52,8 @@ export function exposes(
   layers = LAYERS,
   address = text.includes(":") ? URL.parse(text) : null,
 ): boolean {
-  const { username, password } = login;
-  if ((username !== "" && text === username) || (password !== "" && text.includes(password))) {
+  const { username, passwords } = login;
+  if ((username !== "" && text === username) || passwords.some((each) => text.includes(each))) {
     return true;
   }
   const next = new Set([decoded(text), decoded(text.replaceAll("+", " "))]);
@@ -58,12 +67,12 @@ export function exposes(
   return [...parts, ...next].some((part) => part !== null && exposes(part, login, layers - 1));
 }
 
-/** Whether a text within `value`, a copied row, holds `password`. Artwork kept has none. */
-export function holds(value: unknown, password: string): boolean {
-  if (typeof value === "string") return value.includes(password);
+/** Whether a text within `value`, a copied row, holds any of `passwords`. Artwork kept has none. */
+export function holds(value: unknown, passwords: readonly string[]): boolean {
+  if (typeof value === "string") return passwords.some((each) => value.includes(each));
   return (
     typeof value === "object" &&
     value !== null &&
-    Object.values(value).some((each: unknown) => holds(each, password))
+    Object.values(value).some((each: unknown) => holds(each, passwords))
   );
 }

@@ -243,9 +243,15 @@ const accountOf = (entry: SubscriptionEntry, secret: string): ProviderAccount =>
     ? { kind: "xtream", server: entry.server, username: entry.username, password: secret }
     : { kind: "m3u", link: secret, ...(entry.mapping ? { mapping: entry.mapping } : {}) };
 
-/** What of a password or link its addresses can carry, to keep out of failures. */
+/**
+ * The login's parts as `[username, ...passwords]`, which failures and saved copies keep out: an
+ * account's username and password, or no username and every secret of a playlist's link, with
+ * the link itself.
+ */
 const loginFor = (entry: SubscriptionEntry, secret: string): readonly string[] =>
-  entry.kind === "xtream" ? [entry.username, secret] : [secret, ...playlistLogin(secret).secrets];
+  entry.kind === "xtream"
+    ? [entry.username, secret]
+    : ["", ...playlistLogin(secret).secrets, secret];
 
 /** The registry as last written. */
 let registry: Registry = EMPTY_REGISTRY;
@@ -1011,6 +1017,12 @@ async function eraseDemo(): Promise<DemoErase> {
   });
 }
 
+const alreadySaved = () =>
+  new AppFailure({
+    kind: "incomplete-login",
+    detail: "Another provider already uses this playlist link.",
+  });
+
 /**
  * The playlist link typed to replace a saved one, made whole as a typed address is. A link that
  * carries a login is an Xtream panel's: another kind of subscription, which is added as one.
@@ -1067,7 +1079,9 @@ export async function playlistReport(id: string, signal?: AbortSignal): Promise<
  * group the playlist has now as Live; a group added later waits for a pick of its own. Saved, the
  * playlist signs in again and both its lists are read afresh, those shown before staying until
  * they land; its saved copies, made under the mapping before, go first. Rejects with nothing
- * changed when the group is gone, the playlist changed meanwhile, or the copies stay.
+ * changed when the group is gone, the playlist changed meanwhile, or the copies stay; when the
+ * mapping can't be written after that, the copies are gone and the playlist signs in again as it
+ * was.
  */
 export async function mapPlaylist(id: string, group: string, mode: PlaylistMode): Promise<void> {
   const { source, inspect } = signedPlaylist(id);
@@ -1241,11 +1255,19 @@ export async function update(
   if (!entry) throw new AppFailure({ kind: "no-subscription" });
   const password =
     change.password && entry.kind === "m3u" ? playlistLink(change.password) : change.password;
+  // A playlist goes by its new link from now on: adding that link again finds this one.
+  const key = password && entry.kind === "m3u" ? playlistKey(password) : null;
+  const taken = () =>
+    registry.subscriptions.some(
+      (each) => each.id !== id && key !== null && sameAccount(each, { kind: "m3u", key }),
+    );
+  if (taken()) throw alreadySaved();
   const status = password ? await authenticate(accountOf(entry, password), signal) : null;
   await serially(async () => {
     if (signal?.aborted) return;
     const now = registry.subscriptions.find((each) => each.id === id);
     if (!now) throw new AppFailure({ kind: "no-subscription" });
+    if (taken()) throw alreadySaved();
     const before = currentSource(id);
     if (password) {
       await fenceDownloads(id);
@@ -1255,8 +1277,10 @@ export async function update(
       if (password) await keychainSecrets.write(id, password);
       const name = nameOf(change.name);
       const named = name === undefined || name === now.name ? now : { ...now, name };
-      const server = password && now.kind === "m3u" ? new URL(password).origin : now.server;
-      const next = server === named.server ? named : { ...named, server };
+      const next =
+        password && named.kind === "m3u" && key !== null
+          ? { ...named, server: new URL(password).origin, key }
+          : named;
       if (next !== now) {
         commit({
           ...registry,

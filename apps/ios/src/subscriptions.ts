@@ -17,8 +17,10 @@ import type { SavedState } from "./storage.ts";
 //
 // M3U playlists are kept apart in the file, under `playlists` and `retiredPlaylists`, which
 // builds before them carry unchanged as fields they don't know: in `subscriptions` an older build
-// couldn't read the file, and would start a new one. Their link is the Keychain item: the file
-// holds its origin to show and a fingerprint (`playlistKey`) to know it again by.
+// couldn't read the file, and would start a new one. Each keeps its place among all of them
+// (`position`), and an entry this build can't read, as a later one may write, goes back as it
+// was. Their link is the Keychain item: the file holds its origin to show and a fingerprint
+// (`playlistKey`) to know it again by.
 
 const Xtream = lazy(() =>
   type({ id: "string", kind: "'xtream'", server: "string", username: "string" }),
@@ -68,13 +70,11 @@ export type SubscriptionEntry = Registry["subscriptions"][number];
 export type PlaylistEntry = Extract<SubscriptionEntry, { kind: "m3u" }>;
 type RetiredAccount = Registry["retired"][number];
 
-/** How the file keeps a saved playlist: with where it stood among all the subscriptions. */
-const SavedPlaylists = lazy(() =>
-  type(Playlist().and({ name: "string | null", "mapping?": PlaylistMapping(), position: "number" }))
-    .array()
-    .or("undefined"),
+/** How the file keeps a playlist: with where it stood among all the saved or retired ones. */
+const SavedPlaylist = lazy(() =>
+  Playlist().and({ name: "string | null", "mapping?": PlaylistMapping(), position: "number" }),
 );
-const RetiredPlaylists = lazy(() => Playlist().array().or("undefined"));
+const RetiredPlaylist = lazy(() => Playlist().and({ position: "number" }));
 
 const FILE = "subscriptions.json";
 /** Removed accounts remembered for their history; older ones are forgotten. */
@@ -114,18 +114,19 @@ export function readRegistry(): RegistryFile | null {
     retiredPlaylists,
     ...extra
   } = read as Record<string, unknown>;
-  const saved = SavedPlaylists()(playlists);
-  const gone = RetiredPlaylists()(retiredPlaylists);
-  if (saved instanceof type.errors || gone instanceof type.errors) return null;
+  const saved = readable(playlists, SavedPlaylist());
+  const gone = readable(retiredPlaylists, RetiredPlaylist());
   const parsed = Registry()({
     version,
-    subscriptions: withPlaylists(subscriptions, saved ?? []),
-    retired: Array.isArray(retired) ? [...retired, ...(gone ?? [])] : retired,
+    subscriptions: withPlaylists(subscriptions, saved.read),
+    retired: withPlaylists(retired, gone.read),
     pendingSecrets,
     ...(erasing === undefined ? {} : { erasing }),
   });
   if (parsed instanceof type.errors) return null;
-  const { demo, ...opaque } = extra;
+  const { demo, ...rest } = extra;
+  // Kept for the next write, which puts them back beside this build's own.
+  const opaque = { ...rest, ...fields({ playlists: saved.unread, retiredPlaylists: gone.unread }) };
   const marker = DemoValue()(demo);
   return {
     registry: parsed,
@@ -138,17 +139,35 @@ export function readRegistry(): RegistryFile | null {
   };
 }
 
-/** `subscriptions` as the file lists them, each playlist back where it stood. */
+/** The entries of `list` that `schema` reads, and those it doesn't, as they are. */
+function readable<A>(list: unknown, schema: (value: unknown) => A | type.errors) {
+  const read: A[] = [];
+  const unread: unknown[] = [];
+  for (const each of Array.isArray(list) ? list : []) {
+    const parsed = schema(each);
+    if (parsed instanceof type.errors) unread.push(each);
+    else read.push(parsed);
+  }
+  return { read, unread };
+}
+
+/** `accounts` as the file lists them, each playlist back where it stood among them. */
 function withPlaylists(
-  subscriptions: unknown,
+  accounts: unknown,
   playlists: readonly { readonly position: number }[],
 ): unknown {
-  if (!Array.isArray(subscriptions)) return subscriptions;
-  const all: unknown[] = [...subscriptions];
+  if (!Array.isArray(accounts)) return accounts;
+  const all: unknown[] = [...accounts];
   for (const { position, ...entry } of playlists.toSorted((a, b) => a.position - b.position))
     all.splice(position, 0, entry);
   return all;
 }
+
+/** Each playlist of `accounts` with its place among them. */
+const placed = <A extends { readonly kind: string }>(accounts: readonly A[]) =>
+  accounts.flatMap((entry, position) => (entry.kind === "m3u" ? [{ ...entry, position }] : []));
+
+const listed = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
 
 /** Replaces the file, carrying every unknown top-level field unchanged. */
 export function writeRegistry({ registry, demo, opaque }: RegistryFile): void {
@@ -159,10 +178,8 @@ export function writeRegistry({ registry, demo, opaque }: RegistryFile): void {
     subscriptions: subscriptions.filter((entry) => entry.kind === "xtream"),
     retired: retired.filter((entry) => entry.kind === "xtream"),
     ...fields({
-      playlists: subscriptions.flatMap((entry, position) =>
-        entry.kind === "m3u" ? [{ ...entry, position }] : [],
-      ),
-      retiredPlaylists: retired.filter((entry) => entry.kind === "m3u"),
+      playlists: [...placed(subscriptions), ...listed(opaque["playlists"])],
+      retiredPlaylists: [...placed(retired), ...listed(opaque["retiredPlaylists"])],
     }),
     ...(demo.kind === "absent"
       ? {}

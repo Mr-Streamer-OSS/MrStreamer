@@ -23,7 +23,7 @@ task stay until positive closure, even after reset. Personal providers, copies a
 preferences and analytics choices remain separate. Native playback, background/offline downloads,
 the exact reviewer journey and public-review approval retain their own acceptance gates.
 
-It connects Xtream subscriptions, one or several, and shows everything from all of them
+It connects Xtream subscriptions and M3U playlist links, one or several, and shows everything from all of them
 together, as the desktop does: there is no subscription to switch to. Live opens on All, every
 provider's channels of every country once, with their providers' logos; For you leads with the
 channel watched last behind Play, then recent channels and category shelves, and Categories has
@@ -256,7 +256,7 @@ Each responsibility has one owner, a plain module with a store the screens read:
 - `src/account.ts`: the saved subscriptions and their lists. It adds them (the provider checks
   the login before anything is saved; the same account added again updates the one saved),
   edits, retries and removes them, signs each in with core's Xtream adapter (shared with the
-  desktop) and loads each one's channels, and its movie and series lists once its login is
+  desktop) or a playlist link with `src/playlist.ts`, and loads each one's channels, and its movie and series lists once its login is
   checked. Each has its own login, loads and failures: one that fails, reloads or is removed
   leaves the others as they were. Changes to the registry and the Keychain run one at a time.
   Its requests to the provider ask iOS's URL cache to keep nothing: the cache would store each
@@ -350,7 +350,15 @@ Each responsibility has one owner, a plain module with a store the screens read:
   whose Keychain item an add or a removal was writing when the app stopped are listed, and the
   next launch removes those items; nothing else in the Keychain is touched. Ids removed with
   their history are listed until all of it is deleted: each launch deletes what is left, and no new
-  subscription takes one of those ids.
+  subscription takes one of those ids. Playlists, with their group mapping, are kept apart under
+  `playlists` and `retiredPlaylists`, each with its place among all of them, so builds before
+  playlists read the file as they wrote it.
+- `src/playlist.ts`: a playlist link as a provider. It reads the playlist as it arrives, within
+  64 MB and 100,000 entries, and imports it with core's parsing and group mapping, as the desktop
+  does. The link stays in it and the Keychain; its secrets are the login the failures and saved
+  copies keep out.
+- `src/playlist-groups.tsx`: a playlist's groups from Settings: what it holds, each group's pick of
+  Live TV, Movies, Series or Skip, and the entries left out with why.
 - `src/sources.ts`: each subscription's provider adapter and login, apart from every store, so no
   screen, snapshot or failure holds a password. Requests go to the subscription that lists what
   they name (`OwnedId`), and a failure hides only that subscription's login.
@@ -520,7 +528,8 @@ providers' lists are still loading or failed. `connect` shows until a subscripti
 the phone, Connect also opens `offline`, the same Downloads outside the tabs, so copies play with
 no provider saved, after a relaunch too. Connect and `provider` share `src/provider-form.tsx`. Settings lists each provider as a row with how it
 stands; pressing one offers Retry, its reloads, Edit and Remove as a system sheet, and Remove asks
-whether to delete its history too.
+whether to delete its history too. A playlist's sheet offers Playlist groups and one Reload
+playlist instead of the two reloads.
 
 Downloads' header entry and Watch's existing button show the queue's actual percentage, received
 bytes when its size is unknown, provider wait, queue count or failure. Search offers the same

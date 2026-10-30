@@ -21,7 +21,9 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-router", () => ({
   router: { push: () => undefined },
   useRootNavigationState: () => undefined,
+  useIsFocused: () => true,
 }));
+vi.mock("../src/playback.ts", () => ({ usePlayback: () => ({ watch: false }) }));
 vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
 // The top bar's queue button, which header.tsx brings, has separate coverage.
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));

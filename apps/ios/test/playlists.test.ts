@@ -186,12 +186,72 @@ describe("a playlist subscription", () => {
     );
   });
 
+  it("says when the host no longer serves the link, saving nothing", async () => {
+    const app = await launch();
+    host.fail(403);
+    await expect(app.add({ server: host.link(), ...PLAYLIST })).rejects.toMatchObject({
+      error: { kind: "incomplete-login", detail: expect.stringContaining("no longer works") },
+    });
+    expect(registry().playlists).toBeUndefined();
+  });
+
   it("keeps its place among Xtream accounts through a relaunch", async () => {
     const app = await launch();
-    const xtream = await app.add({ server: panel.url, username: "one", password: "one+Pw@1" });
     const playlist = await app.add({ server: host.link(), ...PLAYLIST, name: "Shared list" });
-    expect(ids(await launch())).toEqual([xtream, playlist]);
+    const xtream = await app.add({ server: panel.url, username: "one", password: "one+Pw@1" });
+    expect(ids(await launch())).toEqual([playlist, xtream]);
     expect(registry().subscriptions.map((each: { id: string }) => each.id)).toEqual([xtream]);
+  });
+
+  it("reads a file an older build rewrote, keeping what a later build wrote", async () => {
+    const app = await launch();
+    const playlist = await app.add({ server: host.link(), ...PLAYLIST });
+    const xtream = await app.add({ server: panel.url, username: "one", password: "one+Pw@1" });
+    // An older build removed the Xtream account, carrying the fields it doesn't know as they
+    // were; a later build saved a playlist this one can't read.
+    const later = { id: "m3u-later", kind: "m3u", server: host.origin, key: "m3u:0", position: 9 };
+    const file = registry();
+    memory.files.set(
+      "/documents/subscriptions.json",
+      JSON.stringify({
+        ...file,
+        subscriptions: [],
+        retired: [file.subscriptions[0]],
+        playlists: [...file.playlists, { ...later, mapping: { version: 2, groups: [] } }],
+      }),
+    );
+    const again = await launch();
+    expect(ids(again)).toEqual([playlist]);
+    // Adding the Xtream account again takes its id back, and the later entry is written back.
+    await again.add({ server: panel.url, username: "one", password: "one+Pw@1" });
+    expect(ids(again)).toEqual([playlist, xtream]);
+    expect(registry().playlists).toContainEqual(expect.objectContaining({ id: "m3u-later" }));
+  });
+
+  it("keeps every secret of its link out of the saved lists", async () => {
+    const link = `${host.origin}/list.m3u?user=viewer-7&pass=${TOKEN}&token=second-0ne`;
+    host.serve([
+      `#EXTINF:-1 tvg-logo="${host.origin}/logo.png?pass=${TOKEN}" group-title="News",News One`,
+      `${host.origin}/live/one.ts`,
+      `#EXTINF:-1 tvg-logo="${host.origin}/logo.png?k=second-0ne" group-title="News",News Two`,
+      `${host.origin}/live/two.ts`,
+      // A stream address where its name goes shows and saves as none.
+      `#EXTINF:-1 group-title="News",${host.origin}/live/three.ts?pass=${TOKEN}`,
+      `${host.origin}/live/three.ts`,
+    ]);
+    const app = await launch();
+    const id = await app.add({ server: link, ...PLAYLIST });
+    await until(() => channelNames(app).length === 3, "the channels");
+    expect(channelNames(app)[2]).toBe("[address]");
+    await until(
+      () => [...memory.files.keys()].some((path) => path.includes(`${id}.live`)),
+      "the saved channels",
+    );
+    for (const [path, text] of memory.files) {
+      if (path.startsWith("/documents/subscriptions") || path.includes(".live"))
+        for (const secret of [TOKEN, "second-0ne", "viewer-7"])
+          expect(text, path).not.toContain(secret);
+    }
   });
 
   it("stays the same subscription with a new link, added again, or removed and added back", async () => {
@@ -200,8 +260,15 @@ describe("a playlist subscription", () => {
     const moved = host.link("/moved.m3u");
     await app.update(id!, { password: moved });
     expect(memory.keychain.get(`s.${id}`)).toBe(moved);
-    await expect(app.add({ server: host.link(), ...PLAYLIST, name: "Again" })).resolves.toBe(id);
+    // It goes by its new link now: adding that link again finds it, the old one is another.
+    await expect(app.add({ server: moved, ...PLAYLIST, name: "Again" })).resolves.toBe(id);
     expect(ids(app)).toEqual([id]);
+    const other = await app.add({ server: host.link(), ...PLAYLIST });
+    expect(other).not.toBe(id);
+    await expect(app.update(other!, { password: moved })).rejects.toMatchObject({
+      error: { kind: "incomplete-login" },
+    });
+    await app.remove(other!, { keepHistory: false });
     // A login in the link makes it an Xtream panel's: another subscription, not this one's link.
     await expect(
       app.update(id!, { password: `${host.origin}/get.php?username=a&password=b` }),
@@ -209,7 +276,7 @@ describe("a playlist subscription", () => {
 
     await app.remove(id!, { keepHistory: true });
     expect(ids(app)).toEqual([]);
-    await expect(app.add({ server: host.link(), ...PLAYLIST })).resolves.toBe(id);
+    await expect(app.add({ server: moved, ...PLAYLIST })).resolves.toBe(id);
   });
 
   it("keeps the channels it showed when a reload fails, and loads them on Try again", async () => {
@@ -272,6 +339,15 @@ describe("mapping a playlist's groups", () => {
       groups: ["Kids"],
       reason: "unmapped",
     });
+  });
+
+  it("refuses a group the playlist no longer lists, changing nothing", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    await expect(app.mapPlaylist(id, "0".repeat(64), "movie")).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    expect(registry().playlists[0].mapping).toBeUndefined();
   });
 });
 

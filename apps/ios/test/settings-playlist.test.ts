@@ -74,6 +74,8 @@ const livingRoom: Member = {
     server: "https://tv.example.com",
     key: "k",
     name: "Living room",
+    // Mapped once: until then every group is Live, and none waits.
+    mapping: { version: 1, groups: [] },
   },
   label: "Living room",
   account: { state: "active", expiresAt: null, maxConnections: null, activeConnections: null },

@@ -7,7 +7,7 @@ import type {
   PlaylistSample,
 } from "@mrstreamer/contracts/playlist";
 import { formatNumber } from "@mrstreamer/core/i18n";
-import { router } from "expo-router";
+import { router, useIsFocused } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -30,6 +30,7 @@ import {
 import { appError, failureOf, type Failure } from "./errors.ts";
 import { useTabs, type Tab } from "./header.tsx";
 import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
+import { usePlayback } from "./playback.ts";
 import { colors, largeText, Message, Notice, TextButton, useListWidth } from "./ui.tsx";
 
 // A playlist's groups, from Settings: what each imports as, one group's pick with sample entries,
@@ -58,8 +59,8 @@ const OMISSIONS = {
 /** Left out entries shown at a time; Show more adds as many again. */
 const PAGE = 50;
 
-const ESCAPE: readonly Shortcut<"close">[] = [
-  { id: "close", input: "escape", command: false, title: "Back to the group" },
+const ESCAPE: readonly Shortcut<"playlist-back">[] = [
+  { id: "playlist-back", input: "escape", command: false, title: "Back to the group" },
 ];
 
 /** Where the playlist screen opens on `tab`: Home's at the root, the others' under their tab. */
@@ -83,7 +84,12 @@ type Reading =
 export function useUnmapped(member: Member): number | null {
   const { entry, live, needsSecret } = member;
   const read =
-    entry.kind === "m3u" && !needsSecret && live.kind === "ready" && live.from === "provider"
+    // Until a first pick every group is Live: none waits, and the playlist isn't inspected.
+    entry.kind === "m3u" &&
+    entry.mapping &&
+    !needsSecret &&
+    live.kind === "ready" &&
+    live.from === "provider"
       ? live.fetchedAt
       : null;
   const [counted, setCounted] = useState<{ read: number; unmapped: number } | null>(null);
@@ -231,7 +237,12 @@ function Groups({ id, ...detail }: Detail & { id: string }) {
     report.groups.find((each) => each.group === selected) ??
     report.groups.find((each) => each.mode === null) ??
     report.groups[0];
-  useShortcuts(split && leftOut ? ESCAPE : NO_SHORTCUTS, () => setLeftOut(false));
+  // Not under Watch, whose Escape closes it, nor under a screen pushed over this one.
+  const { watch } = usePlayback();
+  const focused = useIsFocused();
+  useShortcuts(split && leftOut && focused && !watch ? ESCAPE : NO_SHORTCUTS, () =>
+    setLeftOut(false),
+  );
 
   const push = (params: { group: string } | { left: "1" }) =>
     router.push({ pathname: playlistHref(tab), params: { id, ...params } });

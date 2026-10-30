@@ -236,7 +236,7 @@ function Field({
 }
 
 const styles = StyleSheet.create({
-  kinds: { flexDirection: "row", gap: 24 },
+  kinds: { flexDirection: "row", flexWrap: "wrap", columnGap: 24 },
   kind: { minHeight: 44, justifyContent: "center" },
   kindLabel: { color: colors.dim, fontSize: 17 },
   kindSelected: { color: colors.text, fontWeight: "600" },

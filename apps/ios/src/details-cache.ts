@@ -5,7 +5,7 @@ import type { EpisodeAbout, TitleAbout } from "@mrstreamer/core/metadata/tmdb";
 import type { ProviderDetails } from "@mrstreamer/core/provider";
 import { type } from "arktype";
 import { Directory, File, Paths } from "expo-file-system";
-import { holds, safeUrl, URL_LENGTH } from "./login-safety.ts";
+import { holds, loginFrom, safeUrl, URL_LENGTH } from "./login-safety.ts";
 
 // Title and season details the app has opened, kept in Caches/details so a launch shows them
 // before, or instead of, asking again: each provider's facts of a title, under its subscription,
@@ -438,9 +438,9 @@ export function writeTitle(
   stands: () => boolean,
 ): Promise<void> {
   return queued(`provider|${id}`, undefined, async () => {
-    const [username = "", password = ""] = login;
-    const value = providerCopy(saved.value, (url) => safeUrl(url, username, password));
-    if (password !== "" && holds(value, password)) return;
+    const known = loginFrom(login);
+    const value = providerCopy(saved.value, (url) => safeUrl(url, known));
+    if (holds(value, known.passwords)) return;
     const text = JSON.stringify({
       version: VERSION,
       subscriptionId: id,
@@ -517,7 +517,7 @@ export function writeSeason(
  * and with no text that gives `login` away (its username, or anything holding its password).
  */
 function keepable(file: SavedFile, now: number, login: readonly string[]): boolean {
-  const [username = "", password = ""] = login;
+  const { username, passwords } = loginFrom(login);
   const texts = [file.id, file.seriesId ?? "", file.name, file.container];
   const age = now - file.at;
   return (
@@ -526,7 +526,7 @@ function keepable(file: SavedFile, now: number, login: readonly string[]): boole
     file.subtitles.length <= FILE_TRACKS &&
     age <= MAX_AGE &&
     age >= -MAX_AHEAD &&
-    (password === "" || !holds(file, password))
+    !holds(file, passwords)
   );
 }
 

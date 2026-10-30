@@ -11,6 +11,7 @@ export interface Source {
   /** Rises with every new login of any subscription: an answer for an older one is dropped. */
   readonly revision: number;
   readonly provider: Provider;
+  /** `[username, ...passwords]`: a playlist has no username, and each secret of its link. */
   readonly login: readonly string[];
 }
 

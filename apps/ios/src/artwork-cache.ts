@@ -1,6 +1,6 @@
 import { Directory, File, Paths } from "expo-file-system";
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
-import { exposes, URL_LENGTH } from "./login-safety.ts";
+import { exposes, loginFrom, URL_LENGTH } from "./login-safety.ts";
 import { fetchPicture } from "./picture-transfer.ts";
 import { onSignedIn, retiredLogins, signedIn, type Source } from "./sources.ts";
 
@@ -143,9 +143,7 @@ function fetchable(url: string): boolean {
 
 /** The signed-in sources whose login `url` gives away. */
 const exposersOf = (url: string): readonly Source[] =>
-  signedIn().filter(({ login: [username = "", password = ""] }) =>
-    exposes(url, { username, password }),
-  );
+  signedIn().filter(({ login }) => exposes(url, loginFrom(login)));
 
 function failedLately(url: string): boolean {
   const at = failures.get(url);

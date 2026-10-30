@@ -5,6 +5,7 @@ import { archiveAddress } from "@mrstreamer/core/playlist/catchup";
 import {
   importPlaylist,
   inspectPlaylist,
+  safeName,
   type ImportedPlaylist,
 } from "@mrstreamer/core/playlist/import";
 import { m3uReader, type PlaylistEntry } from "@mrstreamer/core/playlist/m3u";
@@ -30,10 +31,14 @@ export interface PlaylistAccount {
 /** Reading the first line, to check the link answers with a playlist or for its guide. */
 const CHECK_TIMEOUT_MS = 15_000;
 const PLAYLIST_TIMEOUT_MS = 90_000;
+/** The whole guide download, as the desktop app allows it. */
+const GUIDE_TIMEOUT_MS = 15 * 60_000;
 /** Core's mapping limits, for every read on the phone. */
 const PLAYLIST_BYTES = 64 * 1024 * 1024;
 const PLAYLIST_ENTRIES = 100_000;
 const HEADER_CHARACTERS = 65_536;
+/** What a playlist host answers a link it no longer serves with. */
+const REFUSED: ReadonlySet<number> = new Set([401, 403, 404, 410]);
 /** Each line with its ending, and what is left of the last. */
 const LINES = /[^\r\n]*(?:\r\n|\r|\n|$)/g;
 
@@ -70,6 +75,13 @@ export function playlistProvider(
     }
     if (!response.ok || !response.body) {
       void response.body?.cancel().catch(() => {});
+      // The link refused or gone, as a revoked or expired token is: no later try helps.
+      if (url === account.link && REFUSED.has(response.status))
+        throw new AppFailure({
+          kind: "incomplete-login",
+          detail:
+            "This playlist link no longer works. Get a new one from your provider and enter it in Edit.",
+        });
       throw new AppFailure({ kind: "provider-error", status: response.status });
     }
     return { body: response.body, size: bodySize(response) };
@@ -117,7 +129,9 @@ export function playlistProvider(
         }
         take([...reader.push(decoder.decode()), ...reader.end()]);
         if (!reader.playlist) throw notAPlaylist(origin);
-        const snapshot = importPlaylist(entries, account.mapping);
+        const snapshot = account.mapping
+          ? importPlaylist(entries, account.mapping)
+          : importPlaylist(entries.map(withoutAddresses));
         last = {
           snapshot,
           entries: account.mapping ? null : entries,
@@ -228,7 +242,7 @@ export function playlistProvider(
     async liveGuide(signal) {
       const request = await guideRequest(signal);
       if (request.kind === "none") return request;
-      return { kind: "document", ...(await open(request.url, CHECK_TIMEOUT_MS, signal)) };
+      return { kind: "document", ...(await open(request.url, GUIDE_TIMEOUT_MS, signal)) };
     },
 
     async onDemandCatalogue(signal) {
@@ -270,6 +284,26 @@ export function playlistProvider(
     },
   };
 }
+
+/**
+ * `entry` with no address in what Live shows and saves of it, as a mapping's import has it.
+ * The desktop app keeps an unmapped playlist's names as they were for favourites saved before;
+ * the phone has none.
+ */
+const withoutAddresses = (entry: PlaylistEntry): PlaylistEntry => ({
+  ...entry,
+  name: safeName(entry.name),
+  group: entry.group === null ? null : safeName(entry.group),
+  attributes: {
+    ...entry.attributes,
+    ...Object.fromEntries(
+      (["tvg-id", "tvg-name", "group-title"] as const).flatMap((name) => {
+        const value = entry.attributes[name];
+        return value === undefined ? [] : [[name, safeName(value)]];
+      }),
+    ),
+  },
+});
 
 /** Query names whose values are as much a playlist link's login as the user info before its host. */
 const LOGIN_NAMES: ReadonlySet<string> = new Set([

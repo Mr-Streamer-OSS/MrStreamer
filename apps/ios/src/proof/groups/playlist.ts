@@ -1,4 +1,9 @@
 import { playlistCatalogue } from "@mrstreamer/core/playlist/catalogue";
+import {
+  importPlaylist,
+  mapPlaylistGroup,
+  playlistGroupId,
+} from "@mrstreamer/core/playlist/import";
 import { m3uReader, type PlaylistEntry } from "@mrstreamer/core/playlist/m3u";
 import { plain, type ProofCase } from "../cases.ts";
 
@@ -44,6 +49,23 @@ export const cases: readonly ProofCase[] = [
     run: () => {
       const { categories, channels } = playlistCatalogue(readPlaylist(64));
       return plain({ categories, channels });
+    },
+  },
+  {
+    // Group and title ids hash with core's own SHA-256 on Hermes: Node's must match.
+    name: "core: playlist mapping ids",
+    compare: "same",
+    run: () => {
+      const entries = readPlaylist(64);
+      const groups = ["NL | NEWS", "BE | VLAANDEREN", ""].map(playlistGroupId);
+      const mapping = mapPlaylistGroup(
+        undefined,
+        groups,
+        playlistGroupId("BE | VLAANDEREN"),
+        "movie",
+      );
+      const { catalogue, status } = importPlaylist(entries, mapping);
+      return plain({ groups, movies: catalogue.movies.map(({ id }) => id), status });
     },
   },
 ];
