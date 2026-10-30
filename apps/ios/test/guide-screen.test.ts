@@ -1372,8 +1372,7 @@ describe("Live's Guide grid", () => {
     expect(reads).toHaveLength(19);
     expect(new Set(reads).size).toBe(19);
     for (let i = 1; i <= 20; i++)
-      if (i !== 2)
-        expect(container.querySelector(`[data-testid^="grid-a:${i}-"]`)).not.toBeNull();
+      if (i !== 2) expect(container.querySelector(`[data-testid^="grid-a:${i}-"]`)).not.toBeNull();
   });
 
   it("starts no more reads in the background, even of a day being read", async () => {

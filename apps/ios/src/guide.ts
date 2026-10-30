@@ -352,29 +352,18 @@ export function createGuide(
     const { part, channel } = found;
     const own = part.guideIds.get(channel.id) ?? [];
     const mapped = mappings.get(channel.key);
-    const guides = [part.subscriptionId, ...externals.keys()];
+    const guides = [part.subscriptionId, ...externals.keys()].flatMap((owner) => {
+      const entry = entries.get(owner);
+      return entry?.generation && stands(owner, entry) && usable(entry.generation)
+        ? [{ owner, entry, generation: entry.generation }]
+        : [];
+    });
     const passes = trying ? [[trying]] : mapped ? [[mapped], own] : [own];
-    return passes.flatMap((ids) =>
-      ids.length === 0
-        ? []
-        : guides.flatMap((owner) => {
-            const entry = entries.get(owner);
-            return entry?.generation && stands(owner, entry) && usable(entry.generation)
-              ? [
-                  {
-                    owner,
-                    entry,
-                    part,
-                    generation: entry.generation,
-                    ids,
-                    key: channel.key,
-                    start: -1,
-                    layout,
-                  },
-                ]
-              : [];
-          }),
-    );
+    return passes
+      .filter((ids) => ids.length > 0)
+      .flatMap((ids) =>
+        guides.map((read) => ({ ...read, part, ids, key: channel.key, start: -1, layout })),
+      );
   };
   /** The first candidate whose guide has the channel, with its answer. */
   async function first(

@@ -119,11 +119,6 @@ export function createGuides(
       uncertain: playlistUncertain(link),
     };
   };
-  const signIn = (id: string, link: string) => {
-    origins.set(id, originFor(link));
-    publish();
-    void owner.attach(id);
-  };
   const newId = () => {
     const taken = new Set([...saved.guides.map(({ id }) => id), ...saved.pendingSecrets]);
     const base = `xmltv-${now().toString(36)}`;
@@ -131,12 +126,12 @@ export function createGuides(
     for (let next = 2; taken.has(id); next++) id = `${base}-${next}`;
     return id;
   };
-  /** Adds `link` where `at` stands, else last; replaces nothing. */
+  /** Adds `link` where `at` stands, else last, and downloads it; replaces nothing. */
   const added = async (
     link: string,
     name: string | null,
     at = saved.guides.length,
-  ): Promise<GuideRefusal | { readonly id: string }> => {
+  ): Promise<GuideRefusal | null> => {
     const url = URL.parse(link.trim());
     if (!url || (url.protocol !== "https:" && url.protocol !== "http:")) return "address";
     const key = sha256Hex(url.href);
@@ -153,9 +148,19 @@ export function createGuides(
     } catch {
       return "saving";
     }
-    signIn(id, url.href);
-    return { id };
+    origins.set(id, originFor(url.href));
+    publish();
+    void owner.attach(id);
+    return null;
   };
+  /** Removes `id`'s link from the Keychain, then from the pending ones; the next launch retries. */
+  const dropSecret = (id: string) =>
+    secrets
+      .remove(id)
+      .then(() =>
+        commit({ ...saved, pendingSecrets: saved.pendingSecrets.filter((each) => each !== id) }),
+      )
+      .catch(() => undefined);
   /**
    * Takes `id` out of the file and the owner, whose work on it is cancelled and closed before its
    * guide is erased, then its link out of the Keychain. A guide or link the disk or Keychain
@@ -171,14 +176,9 @@ export function createGuides(
     origins.delete(id);
     publish();
     await owner.forget(id);
-    await secrets
-      .remove(id)
-      .then(() =>
-        commit({ ...saved, pendingSecrets: saved.pendingSecrets.filter((each) => each !== id) }),
-      )
-      .catch(() => undefined);
+    await dropSecret(id);
   };
-  const service = {
+  return {
     useLinks: () => useStore(shown),
     links: shown.get,
     useMappings: () => useStore(mapped),
@@ -197,18 +197,8 @@ export function createGuides(
     /** After the native store restored: removes links left pending, and signs each guide in. */
     restore: () =>
       serially(async () => {
-        for (const id of saved.pendingSecrets) {
-          if (saved.guides.some((each) => each.id === id)) continue;
-          await secrets
-            .remove(id)
-            .then(() =>
-              commit({
-                ...saved,
-                pendingSecrets: saved.pendingSecrets.filter((each) => each !== id),
-              }),
-            )
-            .catch(() => undefined);
-        }
+        for (const id of saved.pendingSecrets)
+          if (!saved.guides.some((each) => each.id === id)) await dropSecret(id);
         for (const { id } of saved.guides) {
           const link = await secrets.read(id).catch(() => null);
           if (link) origins.set(id, originFor(link));
@@ -223,8 +213,7 @@ export function createGuides(
     add: (link: string, name = "") =>
       serially(async () => {
         if (saved.guides.length >= GUIDE_LIMIT) return "limit";
-        const result = await added(link, name.trim() || null);
-        return typeof result === "string" ? result : null;
+        return added(link, name.trim() || null);
       }),
     /**
      * Gives guide `id` a new link: a new guide in its place, with its name, and `id` removed as
@@ -234,10 +223,9 @@ export function createGuides(
       serially(async (): Promise<GuideRefusal | null> => {
         const at = saved.guides.findIndex((each) => each.id === id);
         if (at === -1) return null;
-        const result = await added(link, saved.guides[at]!.name, at);
-        if (typeof result === "string") return result;
-        await removed(id);
-        return null;
+        const refused = await added(link, saved.guides[at]!.name, at);
+        if (!refused) await removed(id);
+        return refused;
       }),
     remove: (id: string) => serially(() => removed(id)),
     refresh: (id: string) => owner.refresh(id),
@@ -265,7 +253,6 @@ export function createGuides(
         publish();
       }),
   };
-  return service;
 }
 
 export const guides = createGuides();

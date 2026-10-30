@@ -23,6 +23,14 @@ const scenario = vi.hoisted(() => ({
   previews: new Map<string, unknown>(),
 }));
 
+const stores = await vi.hoisted(async () => {
+  const { store } = await import("../src/store.ts");
+  return {
+    links: store<readonly GuideLink[]>([]),
+    mappings: store<ReadonlyMap<string, string>>(new Map()),
+  };
+});
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-router", () => ({
@@ -65,15 +73,12 @@ vi.mock("../src/account.ts", () => ({
   }),
 }));
 vi.mock("../src/guide-sources.ts", async () => {
-  const { store, useStore } = await import("../src/store.ts");
-  const links = store<readonly GuideLink[]>([]);
-  const mappings = store<ReadonlyMap<string, string>>(new Map());
+  const { useStore } = await import("../src/store.ts");
+  const { links, mappings } = stores;
   const log = (call: string) => scenario.calls.push(call);
   return {
     GUIDE_LIMIT: 8,
     MAPPING_MAX: 512,
-    links,
-    mappingsStore: mappings,
     guides: {
       useLinks: () => useStore(links),
       useMappings: () => useStore(mappings),
@@ -122,18 +127,14 @@ vi.mock("../src/guide.ts", () => ({
 }));
 
 const { GuidesScreen, GuideMapEditor, GuideMapScreen } = await import("../src/guides-screen.tsx");
-const sources = (await import("../src/guide-sources.ts")) as unknown as {
-  links: { set(next: readonly GuideLink[]): void };
-  mappingsStore: { set(next: ReadonlyMap<string, string>): void };
-};
 
 const SECRET = "https://epg.example.com/guide.xml?token=s3cret";
 const AT = new Date(2026, 9, 29, 10, 12).getTime();
 
 let unmount = () => {};
 beforeEach(() => {
-  sources.links.set([]);
-  sources.mappingsStore.set(new Map());
+  stores.links.set([]);
+  stores.mappings.set(new Map());
 });
 afterEach(() => {
   unmount();
@@ -191,7 +192,7 @@ it("shows a refusal inline, then adds the guide by its host, never its link", as
 });
 
 it("says why a guide failed and that its last good guide stays; a locked one asks for its link", async () => {
-  sources.links.set([
+  stores.links.set([
     { id: "xmltv-a", origin: "https://a.example", name: "Sport", locked: false },
     { id: "xmltv-b", origin: "https://b.example", name: null, locked: true },
     { id: "xmltv-c", origin: "https://c.example", name: "News", locked: false },
@@ -214,7 +215,7 @@ it("says why a guide failed and that its last good guide stays; a locked one ask
 });
 
 it("removes a guide only once Remove is confirmed", async () => {
-  sources.links.set([{ id: "xmltv-a", origin: "https://a.example", name: "Sport", locked: false }]);
+  stores.links.set([{ id: "xmltv-a", origin: "https://a.example", name: "Sport", locked: false }]);
   const screen = await render(React.createElement(GuidesScreen));
   await screen.press("guides-xmltv-a");
   const sheet = scenario.sheet!;
@@ -227,7 +228,7 @@ it("removes a guide only once Remove is confirmed", async () => {
 });
 
 it("lists mapped channels first, those no longer listed too, then Automatic ones", async () => {
-  sources.mappingsStore.set(
+  stores.mappings.set(
     new Map([
       ["home:1", "BBC1.uk"],
       ["home:99", "SVT1.se"],
@@ -244,10 +245,10 @@ it("lists mapped channels first, those no longer listed too, then Automatic ones
 });
 
 it("previews which guide answers a guide id, saves it, and clears back to Automatic", async () => {
-  sources.links.set([
+  stores.links.set([
     { id: "xmltv-a", origin: "https://a.example", name: "UK Freeview", locked: false },
   ]);
-  sources.mappingsStore.set(new Map([["home:1", "BBC1.uk"]]));
+  stores.mappings.set(new Map([["home:1", "BBC1.uk"]]));
   scenario.ownIds = ["bbc1.uk.hd"];
   scenario.previews.set("BBC1.uk", {
     guide: "xmltv-a",

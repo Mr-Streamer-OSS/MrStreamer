@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  type TextInputProps,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -165,12 +166,23 @@ export function GuidesScreen() {
           </Pressable>
         );
       })}
-      <Opens
-        label="Map channels"
-        value={mappings.size ? `${formatNumber(mappings.size)} mapped` : undefined}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={
+          mappings.size ? `Map channels, ${formatNumber(mappings.size)} mapped` : "Map channels"
+        }
         onPress={() => router.push(guidesHref(tab, "guide-map"))}
+        style={({ pressed }) => [styles.line, pressed && styles.pressed]}
         testID="guides-map"
-      />
+      >
+        <Text style={styles.label}>Map channels</Text>
+        <View style={styles.opens}>
+          {mappings.size ? (
+            <Text style={styles.value}>{formatNumber(mappings.size)} mapped</Text>
+          ) : null}
+          <SymbolView name="chevron.right" size={14} tintColor={colors.dim} weight="semibold" />
+        </View>
+      </Pressable>
       <LinkForm
         // A new guide's form starts again empty, as does another guide's.
         key={replacing?.id ?? "add"}
@@ -222,8 +234,31 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
       <Text style={styles.section} accessibilityRole="header">
         {replacing ? `New link for ${labelOf(replacing)}` : "Add guide"}
       </Text>
-      <Field label="XMLTV link" value={link} onChange={edit(setLink)} link onSubmit={submit} />
-      {replacing ? null : <Field label="Name" value={name} onChange={edit(setName)} />}
+      <Field
+        label="XMLTV link"
+        value={link}
+        onChangeText={edit(setLink)}
+        placeholder="https://epg.example.com/guide.xml.gz"
+        // A link can hold a key: masked, and no password for AutoFill to offer or keep.
+        secureTextEntry
+        textContentType="URL"
+        keyboardType="url"
+        autoCapitalize="none"
+        returnKeyType="go"
+        onSubmitEditing={submit}
+        testID="guides-xmltv-link"
+      />
+      {replacing ? null : (
+        <Field
+          label="Name"
+          value={name}
+          onChangeText={edit(setName)}
+          placeholder="Optional"
+          textContentType="none"
+          returnKeyType="next"
+          testID="guides-name"
+        />
+      )}
       {refusal ? (
         <View accessible accessibilityLiveRegion="polite" testID="guides-refusal">
           <Text style={styles.refusal}>{REFUSALS[refusal]}</Text>
@@ -244,40 +279,18 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
   );
 }
 
-/** A labelled field: the masked link, or an optional name. */
-function Field({
-  label,
-  value,
-  onChange,
-  link,
-  onSubmit,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  link?: true;
-  onSubmit?: () => void;
-}) {
+/** A labelled text field, as the add form and a channel's mapping use it. */
+function Field({ label, ...input }: { label: string } & TextInputProps) {
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
-        value={value}
-        onChangeText={onChange}
-        placeholder={link ? "https://epg.example.com/guide.xml.gz" : "Optional"}
         placeholderTextColor="#636366"
-        // A link can hold a key: masked, and no password for AutoFill to offer or keep.
-        secureTextEntry={link ?? false}
-        textContentType={link ? "URL" : "none"}
-        keyboardType={link ? "url" : "default"}
-        autoCapitalize={link ? "none" : "sentences"}
         autoCorrect={false}
         keyboardAppearance="dark"
-        returnKeyType={onSubmit ? "go" : "next"}
-        onSubmitEditing={onSubmit}
         style={styles.input}
-        testID={`guides-${label.toLowerCase().replaceAll(" ", "-")}`}
+        {...input}
       />
     </View>
   );
@@ -326,12 +339,7 @@ export function GuideMapScreen() {
     .filter(found);
   const others = (library?.channels ?? [])
     .filter((channel) => !mappings.has(channel.key))
-    .map((channel) => ({
-      key: channel.key,
-      title: channel.title,
-      line: library?.placeOf.get(channel.key) ?? null,
-      mapped: null,
-    }))
+    .map((channel) => ({ ...describe(channel.key, library), mapped: null }))
     .filter(found);
   const sections = [
     { title: "Mapped", data: mapped },
@@ -429,10 +437,10 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
   const channel = describe(channelKey, library);
   const own = guide.guideIdsOf(channelKey);
   const [id, setId] = useState(saved ?? "");
-  // The last answer stays while the same id is read again, and shows only for that id.
-  const [answered, setPreview] = useState<Preview | null>(null);
+  const [answered, setAnswered] = useState<Preview | null>(null);
   const [refusal, setRefusal] = useState<GuideRefusal | null>(null);
   const wanted = id.trim();
+  // The last answer stays while the same id is read again, and shows only for that id.
   const preview = answered?.id === wanted ? answered : null;
   const read = preview?.read ?? null;
   useEffect(() => {
@@ -442,7 +450,7 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
       .preview(channelKey, wanted, { signal: controller.signal })
       .catch(() => null)
       .then((read) => {
-        if (!controller.signal.aborted) setPreview({ id: wanted, read });
+        if (!controller.signal.aborted) setAnswered({ id: wanted, read });
       });
     return () => controller.abort();
   }, [channelKey, wanted, snapshot]);
@@ -472,26 +480,19 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
         <Text style={styles.text}>{own.length ? own.join(", ") : "None"}</Text>
       </View>
       <View style={styles.form}>
-        <View style={styles.field}>
-          <Text style={styles.fieldLabel}>Guide id</Text>
-          <TextInput
-            accessibilityLabel="Guide id"
-            value={id}
-            onChangeText={(value) => {
-              setId(value);
-              setRefusal(null);
-            }}
-            placeholder={own[0] ?? "Automatic"}
-            placeholderTextColor="#636366"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardAppearance="dark"
-            returnKeyType="done"
-            onSubmitEditing={() => change(id)}
-            style={styles.input}
-            testID="guide-map-id"
-          />
-        </View>
+        <Field
+          label="Guide id"
+          value={id}
+          onChangeText={(value) => {
+            setId(value);
+            setRefusal(null);
+          }}
+          placeholder={own[0] ?? "Automatic"}
+          autoCapitalize="none"
+          returnKeyType="done"
+          onSubmitEditing={() => change(id)}
+          testID="guide-map-id"
+        />
         {preview ? (
           <View accessible accessibilityLiveRegion="polite" testID="guide-map-preview">
             {read ? (
@@ -531,34 +532,6 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
         </Text>
       </View>
     </ScrollView>
-  );
-}
-
-function Opens({
-  label,
-  value,
-  onPress,
-  testID,
-}: {
-  label: string;
-  value?: string | undefined;
-  onPress: () => void;
-  testID: string;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={value ? `${label}, ${value}` : label}
-      onPress={onPress}
-      style={({ pressed }) => [styles.line, pressed && styles.pressed]}
-      testID={testID}
-    >
-      <Text style={styles.label}>{label}</Text>
-      <View style={styles.opens}>
-        {value ? <Text style={styles.value}>{value}</Text> : null}
-        <SymbolView name="chevron.right" size={14} tintColor={colors.dim} weight="semibold" />
-      </View>
-    </Pressable>
   );
 }
 
