@@ -320,7 +320,9 @@ function make(deps: RecordingsDeps) {
           ),
         );
         const { promise: settled, resolve } = Promise.withResolvers<Failed | null>();
-        const live: Active = { controller, bytes: capture.bytes, asked: null, settled };
+        // Stopped by its subscription going as it started: it ends as one the viewer stopped.
+        const asked = controller.signal.reason === "stopped" ? "stopped" : null;
+        const live: Active = { controller, bytes: capture.bytes, asked, settled };
         records.set(id, record);
         active.set(id, live);
         settle();
@@ -428,7 +430,7 @@ function make(deps: RecordingsDeps) {
             Promise.all(
               [...starting].flatMap(([controller, start]) => {
                 if (start.subscriptionId !== subscriptionId) return [];
-                controller.abort();
+                controller.abort("stopped");
                 return [start.done];
               }),
             ),
