@@ -368,6 +368,15 @@ describe("a row's lists", () => {
     expect(saved()).toEqual(["Sport: a:11", "Kids: "]);
     expect(scenario.did).toEqual([]);
   });
+
+  it("name the provider of a channel two providers list alike", () => {
+    shows([NOS, ZIGGO], [channel("10", "NL | NOS Journaal HD"), ZAPPELIN]);
+    open(LiveHome);
+    hold("channel-b:10");
+    expect(lastSheet().title).toBe("NOS Journaal, Cabin");
+    choose("New list…");
+    expect(scenario.prompts.at(-1)?.message).toBe("NOS Journaal, Cabin goes in it.");
+  });
 });
 
 describe("a list's screen", () => {
@@ -479,6 +488,13 @@ describe("a list's screen", () => {
     confirm("Delete");
     expect(saved()).toEqual(["News: "]);
     expect(scenario.did).toEqual(["back"]);
+  });
+
+  it("counts the channels it keeps for a removed provider", () => {
+    const id = lists.createList("Kids", live("b:11"));
+    scenario.members = [member("a", "Home")];
+    open(listScreen(id));
+    expect(text("list")).toContain("1 kept for a removed provider");
   });
 });
 

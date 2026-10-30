@@ -19,6 +19,7 @@ import {
 } from "./account.ts";
 import { listedNow, type Unavailable } from "./favourites.ts";
 import { readJson, removeJson, writeJson } from "./files.ts";
+import { DEMO_ID } from "./demo.ts";
 import type { Channel } from "./library.ts";
 import { readRegistry } from "./subscriptions.ts";
 
@@ -394,7 +395,8 @@ export function removeMember(id: string, member: string): void {
 /**
  * Saves an edit of the list `from` shows: takes out the channels `removed` names, by member id, and
  * puts those `order` names in that order, in the places they had among its channels, so one that
- * doesn't open now moves as it showed too; those kept for removed subscriptions keep theirs.
+ * doesn't open now moves as it showed too, and a twin it hides moves with it; those kept for
+ * removed subscriptions keep theirs.
  * Refuses with `list-changed`, changing nothing, once its revision or the channels it opens are
  * others than `from`'s, `removed` names one it didn't show, or `order` isn't the rest of those it
  * showed.
@@ -422,16 +424,23 @@ export function arrangeList(
       throw new AppFailure({ kind: "list-changed" });
     }
     const gone = withTwins(list, removed);
+    const shown = new Set(now.entries.map((entry) => entry.member));
+    // A twin the list hides goes with the channel it shows as, right after it.
+    const twins = new Map(
+      order.map((id) => [id, [...withTwins(list, [id])].filter((twin) => !shown.has(twin))]),
+    );
+    const hidden = new Set([...twins.values()].flat());
     const moved = new Set(order);
     const byMember = new Map(list.members.map((each) => [each.member, each]));
     const next = order.values();
     return withMembers(
       list,
-      list.members.flatMap((each) =>
-        gone.has(each.member)
-          ? []
-          : [moved.has(each.member) ? byMember.get(next.next().value!)! : each],
-      ),
+      list.members.flatMap((each) => {
+        if (gone.has(each.member) || hidden.has(each.member)) return [];
+        if (!moved.has(each.member)) return [each];
+        const id = next.next().value!;
+        return [id, ...twins.get(id)!].map((member) => byMember.get(member)!);
+      }),
     );
   });
 }
@@ -452,9 +461,13 @@ function align(catalogue: Catalogue, roster: Roster) {
   let registry: ReadonlySet<string> | null | undefined;
   const kept = (id: string) => {
     if (registry === undefined) {
-      const file = readRegistry()?.registry;
+      const file = readRegistry();
       registry = file
-        ? new Set([...file.subscriptions, ...file.retired].map((each) => each.id))
+        ? new Set([
+            ...[...file.registry.subscriptions, ...file.registry.retired].map((each) => each.id),
+            // The Demo is erased only once the registry says so.
+            ...(file.demo.kind === "absent" || file.demo.kind === "erasing" ? [] : [DEMO_ID]),
+          ])
         : null;
     }
     return registry === null || registry.has(id);

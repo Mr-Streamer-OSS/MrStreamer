@@ -18,6 +18,8 @@ const scenario = vi.hoisted(() => ({
   catalogue: { kind: "loading" } as Catalogue,
   /** Subscriptions removed with their history kept; null while the registry doesn't read. */
   retired: [] as string[] | null,
+  /** How the registry's Demo stands. */
+  demo: "absent" as string,
   /** Subscriptions the registry saves, which the roster may not show yet. */
   registered: [] as string[],
   /** What account.ts tells as its roster or channels change. */
@@ -38,6 +40,7 @@ vi.mock("../src/account.ts", () => ({
 vi.mock("../src/subscriptions.ts", () => ({
   readRegistry: () =>
     scenario.retired && {
+      demo: { kind: scenario.demo },
       registry: {
         subscriptions: scenario.registered.map((id) => ({ id })),
         retired: scenario.retired.map((id) => ({ id })),
@@ -130,12 +133,15 @@ const file = () => join(native.root, "documents", "custom-lists.json");
 const only = () => lists.currentChannelLists()[0]!;
 
 beforeEach(async () => {
+  // The last test's module hears no more.
+  scenario.changed.clear();
   rmSync(file(), { force: true });
   rmSync(`${file()}.next`, { force: true });
   native.sync = null;
   scenario.members = [member("a", "Home"), member("b", "Cabin")];
   scenario.retired = [];
   scenario.registered = [];
+  scenario.demo = "absent";
   shows([NOS, NOS_FHD, ZIGGO]);
   await launch();
 });
@@ -327,6 +333,23 @@ describe("a list's channels", () => {
     expect(shown()).toEqual(["News: "]);
   });
 
+  it("of the Demo stay while the registry's Demo doesn't read, and go once it says erasing", () => {
+    scenario.members = [member("demo", "Demo"), member("b", "Cabin")];
+    scenario.catalogue = {
+      kind: "ready",
+      library: buildLibrary([{ subscriptionId: "demo", label: "Demo", catalogue: listing(NOS) }]),
+      failing: [],
+    };
+    lists.createList("News", live("demo:10"));
+    scenario.members = [member("b", "Cabin")];
+    scenario.demo = "unreadable";
+    shows([NOS]);
+    expect(readFileSync(file(), "utf8")).toContain("NOS");
+    scenario.demo = "erasing";
+    shows([NOS]);
+    expect(readFileSync(file(), "utf8")).not.toContain("NOS");
+  });
+
   it("of a provider removed while the registry doesn't read stay", () => {
     lists.createList("News", live("a:10"));
     scenario.members = [member("b", "Cabin")];
@@ -399,6 +422,23 @@ describe("arranging a list", () => {
     const [first, second, rtl] = only().entries.map((entry) => entry.member);
     lists.arrangeList(only(), [second!, rtl!], [first!]);
     expect(shown()).toEqual(["Mix: NOS Journaal (needs-secret), b:10"]);
+  });
+
+  it("moves a twin the list hides with the channel it shows as", async () => {
+    const apart = channel("14", "NL | NPO 1");
+    shows([NOS, apart, ZIGGO]);
+    const id = lists.createList("Mix", live("a:10"));
+    lists.setMember(id, live("a:14"), true);
+    lists.setMember(id, live("a:11"), true);
+    lists.setMember(id, live("b:10"), true);
+    shows([NOS, NOS_FHD, ZIGGO]);
+    expect(shown()).toEqual(["Mix: a:10, a:11, b:10"]);
+    lists.arrangeList(only(), ["a:11", "b:10", "a:10"].map(memberOf));
+    await launch();
+    expect(shown()).toEqual(["Mix: a:11, b:10, a:10"]);
+    // Split again, the twin is still beside it.
+    shows([NOS, apart, ZIGGO]);
+    expect(shown()).toEqual(["Mix: a:11, b:10, a:10, a:14"]);
   });
 
   it("refuses a second save from the same edit, though only channels that don't open moved", () => {

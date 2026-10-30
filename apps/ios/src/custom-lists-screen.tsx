@@ -445,9 +445,7 @@ export function ChannelListScreen({ id }: { id: string }) {
             />
           </View>
         ) : list.away > 0 ? (
-          <Text style={styles.away} testID="list-away">
-            {awayLine(list.away)}
-          </Text>
+          <Text style={styles.away}>{awayLine(list.away)}</Text>
         ) : undefined
       }
       ListEmptyComponent={
@@ -494,7 +492,8 @@ function ListRow({
         <View
           accessible
           accessibilityLabel={`${entry.name}, ${detail}`}
-          accessibilityActions={[removeAction]}
+          // As the screen offers Remove: once its provider no longer lists it.
+          accessibilityActions={entry.why === "not-listed" ? [removeAction] : []}
           onAccessibilityAction={({ nativeEvent }) => {
             if (nativeEvent.actionName === "remove") onRemove(entry);
           }}
