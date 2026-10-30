@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type ComponentRef } from "react";
 import {
   AccessibilityInfo,
   Alert,
@@ -240,6 +240,7 @@ const FavouriteRow = memo(function FavouriteRow({
   onPress: (channel: Channel) => void;
 }) {
   const { channel } = favourite;
+  const row = useRef<ComponentRef<typeof Pressable>>(null);
   const act = ({ nativeEvent }: AccessibilityActionEvent) => {
     if (nativeEvent.actionName === "activate") onPress(channel);
     if (nativeEvent.actionName === "unstar") starChannel(channel, false);
@@ -248,6 +249,7 @@ const FavouriteRow = memo(function FavouriteRow({
   return (
     <View style={[styles.row, { height }]}>
       <Pressable
+        ref={row}
         accessibilityRole="button"
         accessibilityLabel={channel.title}
         accessibilityHint={detail}
@@ -258,7 +260,7 @@ const FavouriteRow = memo(function FavouriteRow({
         ]}
         onAccessibilityAction={act}
         onPress={() => onPress(channel)}
-        onLongPress={(event) => openListSheet(channel, anchorOf(event))}
+        onLongPress={() => openListSheet(channel, anchorOf(row.current))}
         style={({ pressed }) => [styles.main, pressed && styles.pressed]}
         testID={`favourite-${channel.key}`}
       >

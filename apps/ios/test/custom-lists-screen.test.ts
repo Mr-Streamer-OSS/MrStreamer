@@ -28,6 +28,7 @@ interface Sheet {
   readonly title: string;
   readonly options: readonly string[];
   readonly choose: (index: number) => void;
+  readonly anchor?: number;
 }
 
 const scenario = vi.hoisted(() => ({
@@ -65,6 +66,7 @@ vi.mock("react-native", async () => {
       disabled,
       onPress,
       onLongPress,
+      ref,
     }: {
       children?: React.ReactNode;
       testID?: string;
@@ -72,6 +74,7 @@ vi.mock("react-native", async () => {
       disabled?: boolean;
       onPress?: () => void;
       onLongPress?: (event: { currentTarget: null }) => void;
+      ref?: React.Ref<HTMLButtonElement>;
     }) =>
       createElement(
         "button",
@@ -79,12 +82,13 @@ vi.mock("react-native", async () => {
           "data-testid": testID,
           "aria-label": accessibilityLabel,
           disabled,
+          ref,
           onClick: onPress,
           onContextMenu: () => onLongPress?.({ currentTarget: null }),
         },
         children,
       ),
-    findNodeHandle: () => null,
+    findNodeHandle: (view: unknown) => (view == null ? null : 17),
     Alert: {
       alert: (title: string, message?: string, buttons?: readonly Button[]) =>
         void scenario.alerts.push({
@@ -102,9 +106,15 @@ vi.mock("react-native", async () => {
     },
     ActionSheetIOS: {
       showActionSheetWithOptions: (
-        { title, options }: { title: string; options: string[] },
+        { title, options, anchor }: { title: string; options: string[]; anchor?: number },
         choose: (index: number) => void,
-      ) => void scenario.sheets.push({ title, options, choose }),
+      ) =>
+        void scenario.sheets.push({
+          title,
+          options,
+          choose,
+          ...(anchor === undefined ? {} : { anchor }),
+        }),
     },
   };
 });
@@ -317,6 +327,7 @@ describe("a row's lists", () => {
     expect(container.querySelector('[data-testid^="live-list-"]')).toBeNull();
     hold("channel-a:11");
     expect(lastSheet().title).toBe("Ziggo Sport");
+    expect(lastSheet().anchor).toBe(17);
     expect(lastSheet().options).toEqual(["New list…", "Cancel"]);
     choose("New list…");
     expect(scenario.prompts.at(-1)).toMatchObject({
@@ -386,6 +397,7 @@ describe("a row's lists", () => {
     lists.createList("News", live("b:10"));
     open(listScreen(id));
     hold("list-row-a:10");
+    expect(lastSheet().anchor).toBe(17);
     choose("News");
     const library = scenario.catalogue.kind === "ready" ? scenario.catalogue.library : null;
     const region = library!.regions[0]!;
@@ -564,6 +576,7 @@ describe("Favourites", () => {
     hold("favourite-a:10");
     expect(lastSheet()).toMatchObject({
       title: "NOS Journaal",
+      anchor: 17,
       options: ["New list…", "Cancel"],
     });
     choose("New list…");

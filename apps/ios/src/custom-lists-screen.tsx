@@ -1,7 +1,7 @@
 import { normalize } from "@mrstreamer/core/text";
 import { router, useIsFocused } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentRef } from "react";
 import {
   AccessibilityInfo,
   ActionSheetIOS,
@@ -485,6 +485,7 @@ function ListRow({
   onPlay: (entry: ListEntry & { kind: "listed" }) => void;
   onRemove: (entry: ListEntry) => void;
 }) {
+  const row = useRef<ComponentRef<typeof Pressable>>(null);
   const removeAction = { name: "remove", label: `Remove from ${listName}` };
   if (entry.kind === "unavailable") {
     return (
@@ -528,6 +529,7 @@ function ListRow({
   return (
     <View style={[styles.row, { minHeight: height }]}>
       <Pressable
+        ref={row}
         accessibilityRole="button"
         accessibilityLabel={[channel.title, detail.replaceAll(" · ", ", ")]
           .filter(Boolean)
@@ -539,7 +541,7 @@ function ListRow({
         ]}
         onAccessibilityAction={act}
         onPress={() => onPlay(entry)}
-        onLongPress={(event) => openListSheet(channel, anchorOf(event))}
+        onLongPress={() => openListSheet(channel, anchorOf(row.current))}
         style={({ pressed }) => [styles.main, pressed && styles.pressed]}
         testID={`list-row-${channel.key}`}
       >

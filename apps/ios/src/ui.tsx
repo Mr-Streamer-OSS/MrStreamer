@@ -1,7 +1,7 @@
 import type { ListedChannel } from "@mrstreamer/core/catalogue/variants";
 import { SymbolView } from "expo-symbols";
 import type { Channel } from "./library.ts";
-import { memo, type ReactNode } from "react";
+import { memo, useRef, type ComponentRef, type ReactNode } from "react";
 import {
   findNodeHandle,
   Image,
@@ -11,7 +11,6 @@ import {
   useWindowDimensions,
   View,
   type AccessibilityActionEvent,
-  type GestureResponderEvent,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
@@ -103,9 +102,9 @@ export function ChannelLogo({
   );
 }
 
-/** The view a hold landed on, for a sheet to point at on iPad. */
-export const anchorOf = (event: GestureResponderEvent) =>
-  findNodeHandle(event.currentTarget) ?? undefined;
+/** The held row's mounted view, for a sheet to point at on iPad. */
+export const anchorOf = (view: ComponentRef<typeof Pressable> | null) =>
+  findNodeHandle(view) ?? undefined;
 
 /**
  * A channel as a row that plays it when pressed. With `onFavourite`, a star at its end stars or
@@ -139,6 +138,7 @@ export const ChannelRow = memo(function ChannelRow({
   /** Opens the channel's lists, pointing at the row when held. */
   onLists?: ((channel: Channel, anchor?: number) => void) | undefined;
 }) {
+  const row = useRef<ComponentRef<typeof Pressable>>(null);
   const tags = channel.tags.join(" ");
   const star = favourite ? "Remove from Favourites" : "Add to Favourites";
   const actions = [
@@ -152,6 +152,7 @@ export const ChannelRow = memo(function ChannelRow({
       style={[styles.row, { height }, onFavourite && styles.starred, stacked && styles.stacked]}
     >
       <Pressable
+        ref={row}
         accessibilityRole="button"
         accessibilityLabel={[
           channel.title,
@@ -174,9 +175,7 @@ export const ChannelRow = memo(function ChannelRow({
             }
           : {})}
         onPress={() => onPress(channel)}
-        {...(onLists
-          ? { onLongPress: (event: GestureResponderEvent) => onLists(channel, anchorOf(event)) }
-          : {})}
+        {...(onLists ? { onLongPress: () => onLists(channel, anchorOf(row.current)) } : {})}
         style={({ pressed }) => [styles.main, pressed && styles.pressed]}
         testID={`channel-${channel.key}`}
       >

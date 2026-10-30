@@ -318,14 +318,14 @@ const showProgramme = (split: boolean, channel: string, programme: string) =>
     ? detail.set({ channel, day: null, programme, alone: true })
     : openProgramme("live", channel, programme);
 
-/** The Live tab's list. Its Favourites and Find rows show whatever the channels' state. */
+/** The Live tab's list. Favourites, custom lists and Find show whatever the channels' state. */
 export function LiveHome() {
   return <Channels lead={<Entries />}>{(library) => <Browse library={library} />}</Channels>;
 }
 
 /**
- * Live's own rows, before its tabs: Favourites, the viewer's lists, and Find countries or categories. On the tab only:
- * a category's screen has neither.
+ * Live's own rows, before its tabs: Favourites, the viewer's lists, and Find countries or
+ * categories. A category's screen has none of these rows.
  */
 function Entries() {
   return (
