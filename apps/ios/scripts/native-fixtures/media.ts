@@ -22,7 +22,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 
 /** A looped recording, cut into segments of the durations its playlist gives. */
 export interface Media {
@@ -60,6 +60,9 @@ interface Artifact {
   }[];
 }
 
+/** `to` from `from` as provenance declares it, with "/" between its parts on every system. */
+const declaredPath = (from: string, to: string) => relative(from, to).split(sep).join("/");
+
 /**
  * Makes and records media under `out`, for a server whose sources are in the checkout at `root`.
  * `make` cuts what ffmpeg `args` give into HLS segments; `record` adds files written otherwise.
@@ -79,7 +82,11 @@ export function mediaMaker(root: string, out: string, declaration: string) {
       .toSorted()
       .map((file) => {
         const bytes = readFileSync(join(dir, file));
-        return { file: relative(out, join(dir, file)), bytes: bytes.length, sha256: sha256(bytes) };
+        return {
+          file: declaredPath(out, join(dir, file)),
+          bytes: bytes.length,
+          sha256: sha256(bytes),
+        };
       });
   const git = (args: readonly string[]) => {
     try {
@@ -116,7 +123,7 @@ export function mediaMaker(root: string, out: string, declaration: string) {
         ? []
         : args[index - 2] === "lavfi"
           ? [{ lavfi: arg }]
-          : [{ file: relative(root, arg), sha256: sha256(readFileSync(arg)) }],
+          : [{ file: declaredPath(root, arg), sha256: sha256(readFileSync(arg)) }],
     );
     const options = ["-v", "error", "-y", ...args];
     const key = sha256(JSON.stringify([ffmpeg, options, local("."), output, inputs]));
@@ -144,7 +151,7 @@ export function mediaMaker(root: string, out: string, declaration: string) {
     }
     const path = join(dir, output);
     const command = [...options, ...local(dir), path];
-    const named = command.map((arg) => (arg.startsWith(root) ? relative(root, arg) : arg));
+    const named = command.map((arg) => (arg.startsWith(root) ? declaredPath(root, arg) : arg));
     add({ name, command: ["ffmpeg", ...named], inputs, files: filesOf(dir) });
     return { dir, output: path };
   }
@@ -171,8 +178,8 @@ export function mediaMaker(root: string, out: string, declaration: string) {
       add({
         name,
         command: "served as it is",
-        inputs: [{ file: relative(root, file), sha256: hash }],
-        files: [{ file: relative(root, file), bytes: bytes.length, sha256: hash }],
+        inputs: [{ file: declaredPath(root, file), sha256: hash }],
+        files: [{ file: declaredPath(root, file), bytes: bytes.length, sha256: hash }],
       });
     },
     /** Records the files in `dir`, written by `writer` rather than ffmpeg. */

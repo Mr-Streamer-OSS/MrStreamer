@@ -125,14 +125,22 @@ describe("the native verification fixture", () => {
         `${each.codec_type} ${each.codec_name} ${each.tags?.language ?? ""}`.trim(),
       ),
     ).toEqual(expect.arrayContaining(["video h264", "audio aac en", "audio aac nl"]));
-    // ffprobe 6.1, which CI installs, leaves HLS subtitles out, so their listing is read as is.
+    // ffprobe 6.1, which CI installs, leaves HLS subtitles out, so they are followed as listed.
     const listed = await text(url);
-    for (const language of ["en", "nl"]) {
-      expect(listed).toMatch(
-        new RegExp(`#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",.*LANGUAGE="${language}"`),
-      );
-    }
     expect(listed).toMatch(/#EXT-X-STREAM-INF:.*SUBTITLES="subtitles"/);
+    for (const [language, name] of [
+      ["en", "English"],
+      ["nl", "Nederlands"],
+    ]) {
+      const declared = new RegExp(
+        `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",.*LANGUAGE="${language}".*URI="([^"]+)"`,
+      ).exec(listed)?.[1];
+      const playlist = new URL(declared ?? "", url);
+      const segment = /^[^#\s].*$/m.exec(await text(playlist.href))?.[0];
+      const cues = await text(new URL(segment ?? "", playlist).href);
+      expect(cues).toMatch(/^WEBVTT\n/);
+      expect(cues).toMatch(new RegExp(`\n${name} \\d+:\\d{2}\n`));
+    }
 
     // Each rendition lists the same segments, so a switch lands where the picture is.
     const sequences = await Promise.all(
