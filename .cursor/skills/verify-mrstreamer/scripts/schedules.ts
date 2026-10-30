@@ -14,6 +14,15 @@ const POPUP = "document.querySelector('[role=dialog][aria-label=Record]')";
 const GRID = "document.querySelector('[role=grid]')";
 const DETAILS = "document.querySelector('[role=grid] [role=region]')";
 const PANEL = "document.querySelector('[role=grid] [role=group]')";
+/** The cursor's programme lies whole under the grid's sticky times, its first child's first. */
+const CURSOR_SHOWN = `(() => {
+  const grid = ${GRID};
+  const times = grid.firstElementChild.firstElementChild.getBoundingClientRect();
+  const id = grid.getAttribute('aria-activedescendant');
+  const cell = id && document.getElementById(id)?.getBoundingClientRect();
+  return !!cell && cell.top >= times.bottom - 0.5 &&
+    cell.bottom <= grid.getBoundingClientRect().bottom + 0.5;
+})()`;
 const expect = (value: boolean, message: string, seen?: unknown) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
@@ -287,17 +296,8 @@ export async function schedulesScenario(d: Driver) {
   await d.key("ArrowRight", 39);
   await d.wait(() => d.exists(DETAILS));
   // Its row and details are taller than the room under the times: the cursor's programme shows
-  // below them (the grid's first child holds the sticky times), not only its details' foot.
-  await d.wait(() =>
-    d.evaluate<boolean>(`(() => {
-      const grid = ${GRID};
-      const times = grid.firstElementChild.firstElementChild.getBoundingClientRect();
-      const id = grid.getAttribute('aria-activedescendant');
-      const cell = id && document.getElementById(id)?.getBoundingClientRect();
-      return !!cell && cell.top >= times.bottom - 0.5 &&
-        cell.bottom <= grid.getBoundingClientRect().bottom + 0.5;
-    })()`),
-  );
+  // below them, not only its details' foot.
+  await d.wait(() => d.evaluate<boolean>(CURSOR_SHOWN));
   await d.capture("10-guide-960-larger-cursor");
   await d.click(
     "Record, larger",
@@ -307,6 +307,14 @@ export async function schedulesScenario(d: Driver) {
   await d.wait(async () => (await text(d, PANEL)).includes(" on "));
   await d.capture("10-guide-960-larger");
   await d.key("Escape", 27);
+  // The last channel, a row not drawn yet, shows its programme under the times too.
+  await d.key("End", 35);
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      `${GRID}.getAttribute('aria-activedescendant')?.includes('-36-') && ${CURSOR_SHOWN}`,
+    ),
+  );
+  await d.capture("10-guide-960-larger-end");
 
   // Another language.
   await d.quit();

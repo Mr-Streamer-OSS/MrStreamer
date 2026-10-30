@@ -749,8 +749,8 @@ function make(deps: RecordingsDeps) {
           Effect.match({
             onSuccess: (answer) =>
               answer.kind === "started" ? why.delete(key) : why.set(key, "busy"),
-            // Storage failures are unexpected; lost credentials and other provider failures
-            // must not be reported as a problem with this computer's disk.
+            // This computer's when unexpected, as a file it couldn't write; else the stream's,
+            // a lost login included.
             onFailure: ({ error }) => why.set(key, error.kind === "unexpected" ? "disk" : "stream"),
           }),
           // A defect, as a capture folder this computer won't remove, is this computer's too.

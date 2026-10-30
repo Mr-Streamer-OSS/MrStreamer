@@ -10,7 +10,7 @@ import type { Writable } from "node:stream";
 import type { Recording, RecordingPlan } from "@mrstreamer/contracts/recordings";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { nextOccurrence, occurrences } from "../src/main/recordings/schedules.ts";
+import { occurrences } from "../src/main/recordings/schedules.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Downloads } from "../src/main/services/downloads.ts";
 import { Library } from "../src/main/services/library.ts";
@@ -675,6 +675,7 @@ describe.skipIf(!hasTools)("recordings", () => {
 
 const GUIDED = "TEST | H.264 + AAC";
 const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
 /** Ten past seven in the evening, UTC: the fake guide's half-hour programmes start at :00 and :30. */
 const TEN_PAST = Date.UTC(2026, 9, 30, 19, 10);
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
@@ -918,6 +919,14 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(await recordings.schedules()).toEqual([]);
     expect((await recordings.list()).map((each) => each.id)).toEqual([recording!.id]);
     expect(await allClosed(provider)).toBe(true);
+  });
+
+  it("plans a programme listed more than a week ahead", async () => {
+    const { recordings, listing, programmePlan } = await scheduling();
+    const { next } = await listing();
+    const later = { ...next, start: next.start + 9 * DAY, stop: next.stop + 9 * DAY };
+    const planned = await recordings.plan(programmePlan(later));
+    expect(planned.next).toEqual({ start: later.start, stop: later.stop });
   });
 
   it("cancels a schedule before its time, and leaves a recording it started going", async () => {
@@ -1229,22 +1238,6 @@ describe("recording slot times", () => {
           Date.parse("2026-10-31T01:00:00Z"),
         ),
       ).toHaveLength(1);
-    });
-  });
-
-  it("finds a programme's time however far ahead the guide lists it", () => {
-    const start = Date.parse("2026-11-20T20:00:00Z");
-    const programme: RecordingPlan = {
-      kind: "programme",
-      channel: { subscriptionId: "s", id: "1" },
-      start,
-      stop: start + 60 * MINUTE,
-      title: "Final",
-      padding: { before: 2, after: 5 },
-    };
-    expect(nextOccurrence(programme, Date.parse("2026-11-01T12:00:00Z"))).toEqual({
-      start: start - 2 * MINUTE,
-      stop: start + 65 * MINUTE,
     });
   });
 });

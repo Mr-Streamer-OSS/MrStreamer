@@ -498,14 +498,16 @@ export function GuideGrid({
   // A key that moved the cursor brings it into view, the row and then the programme. A row whose
   // details leave it taller than the room under the times, as larger text in a short window
   // does, shows its top: the cursor's programme, rather than the foot of its details. It is
-  // measured as drawn now, as the last programme's details may still be counted.
+  // measured as drawn now, as the last programme's details may still be counted; one not drawn
+  // yet, as after End, shows its top too.
   useEffect(() => {
     if (cursor.asked === 0) return;
     const element = scroller.current;
     if (!element) return;
+    const outgrows = (row: HTMLElement) => row.offsetHeight > element.clientHeight - headPx;
     const row = element.querySelector<HTMLElement>(`[data-index="${index}"]`);
     if (row) virtualizer.measureElement(row);
-    const tall = (row?.offsetHeight ?? 0) > element.clientHeight - headPx;
+    const tall = !row || outgrows(row);
     virtualizer.scrollToIndex(index, { align: tall ? "start" : "auto" });
     const { programmes } = latest.current.rowGuide(index);
     const cell = cellAt(programmes, latest.current.at, latest.current.bounds);
@@ -519,6 +521,16 @@ export function GuideGrid({
     if (from < left) target = from - margin;
     else if (to > left + room) target = Math.min(from - margin, to - room + margin);
     if (target !== left) scrollTo(origin + Math.max(target, 0) / msPx);
+    if (tall || !row) return;
+    // Details read a moment later, as a description, can still make it outgrow the room: it then
+    // shows its top too, while the keys are in the grid, not once its schedule panel took them.
+    const observer = new ResizeObserver(() => {
+      if (document.activeElement !== element || !outgrows(row)) return;
+      observer.disconnect();
+      virtualizer.scrollToIndex(index, { align: "start" });
+    });
+    observer.observe(row);
+    return () => observer.disconnect();
   }, [cursor.asked]);
 
   const watchLive = useRef(onWatch);
