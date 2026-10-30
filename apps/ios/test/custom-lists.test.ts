@@ -267,16 +267,9 @@ describe("arranging a list", () => {
   const memberOf = (key: string) =>
     only().entries.find((entry) => entry.kind === "listed" && entry.channel.key === key)!.member;
 
-  it("saves the order, kept after a relaunch", async () => {
+  it("saves the order and takes out the channels removed with it, kept after a relaunch", async () => {
     three();
-    lists.arrangeList(only(), ["b:10", "a:10", "a:11"].map(memberOf));
-    await launch();
-    expect(shown()).toEqual(["Mix: b:10, a:10, a:11"]);
-  });
-
-  it("takes out the channels removed with the order", async () => {
-    three();
-    const removed = only().entries[1]!.member;
+    const removed = memberOf("a:11");
     lists.arrangeList(only(), ["b:10", "a:10"].map(memberOf), [removed]);
     await launch();
     expect(shown()).toEqual(["Mix: b:10, a:10"]);

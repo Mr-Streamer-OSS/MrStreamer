@@ -320,9 +320,9 @@ export function ChannelListScreen({ id }: { id: string }) {
       setDraft(null);
     } catch (cause) {
       const error = appError(cause);
-      if (error.kind === "list-changed" || error.kind === "no-list") setDraft(null);
-      if (error.kind === "no-list") return closed();
-      if (error.kind === "list-changed") {
+      if (error.kind === "no-list" || error.kind === "list-changed") {
+        setDraft(null);
+        if (error.kind === "no-list") return closed();
         return Alert.alert(
           `${name} changed`,
           "Nothing was moved or removed. It changed while you edited it: edit it as it is now.",
@@ -472,7 +472,7 @@ function ListRow({
             if (nativeEvent.actionName === "remove") onRemove(entry);
           }}
           style={styles.main}
-          testID={`list-row-${entry.member}`}
+          testID={`list-row-${rowId(entry)}`}
         >
           <Lines entry={entry} detail={detail} large={large} />
         </View>
@@ -486,7 +486,7 @@ function ListRow({
             <TextButton
               label="Remove"
               onPress={() => onRemove(entry)}
-              testID={`list-row-${entry.member}-remove`}
+              testID={`list-row-${rowId(entry)}-remove`}
             />
           </View>
         ) : null}
@@ -582,7 +582,6 @@ function ArrangedRow({
         <Hidden
           symbol="minus.circle"
           size={large ? 28 : 22}
-          disabled={false}
           onPress={() => onRemove(entry)}
           testID={`arranged-${id}-remove`}
         />
@@ -617,7 +616,7 @@ function Hidden({
 }: {
   symbol: "chevron.up" | "chevron.down" | "minus.circle";
   size: number;
-  disabled: boolean;
+  disabled?: boolean;
   onPress: () => void;
   testID: string;
 }) {
