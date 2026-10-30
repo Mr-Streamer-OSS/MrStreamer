@@ -311,7 +311,7 @@ export async function schedulesScenario(d: Driver) {
   await d.key("End", 35);
   await d.wait(() =>
     d.evaluate<boolean>(
-      `${GRID}.getAttribute('aria-activedescendant')?.includes('-36-') && ${CURSOR_SHOWN}`,
+      `${GRID}.getAttribute('aria-activedescendant')?.includes('-' + (${GRID}.getAttribute('aria-rowcount') - 1) + '-') && ${CURSOR_SHOWN}`,
     ),
   );
   await d.capture("10-guide-960-larger-end");
