@@ -15,11 +15,12 @@ import {
   type AccessibilityActionEvent,
 } from "react-native";
 import type { AppError } from "@mrstreamer/contracts/errors";
-import { playChannel, useCatalogue } from "./account.ts";
+import { currentCatalogue, playChannel, useCatalogue } from "./account.ts";
 import {
   arrangeList,
   createList,
   currentChannelLists,
+  listsHolding,
   deleteList,
   removeMember,
   renameList,
@@ -29,6 +30,7 @@ import {
   type ListEntry,
 } from "./custom-lists.ts";
 import { appError, describeError } from "./errors.ts";
+import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
 import type { Unavailable } from "./favourites.ts";
 import type { Channel } from "./library.ts";
 import { useDockInset } from "./loading.tsx";
@@ -128,6 +130,9 @@ function askName(naming: Naming) {
             naming.write(name);
           } catch (cause) {
             const error = appError(cause);
+            if (error.kind === "invalid-input") {
+              return askName({ ...naming, message: error.detail, typed });
+            }
             if (error.kind !== "list-name-taken") {
               return Alert.alert(naming.failed(name), whyNot(error));
             }
@@ -153,12 +158,17 @@ function askName(naming: Naming) {
  */
 export function openListSheet(channel: Channel, anchor?: number) {
   const lists = currentChannelLists();
-  const holds = lists.map((list) =>
-    list.entries.some((entry) => entry.kind === "listed" && entry.channel.key === channel.key),
-  );
+  const holding = listsHolding(channel);
+  const holds = lists.map((list) => holding.has(list.id));
+  const catalogue = currentCatalogue();
+  const provider =
+    channel.ambiguous && catalogue.kind === "ready"
+      ? catalogue.library.labels.get(channel.subscriptionId)
+      : undefined;
+  const named = provider ? `${channel.title}, ${provider}` : channel.title;
   ActionSheetIOS.showActionSheetWithOptions(
     {
-      title: channel.title,
+      title: named,
       options: [
         ...lists.map((list, at) => (holds[at] ? `✓ ${list.name}` : list.name)),
         "New list…",
@@ -173,7 +183,7 @@ export function openListSheet(channel: Channel, anchor?: number) {
       if (index !== lists.length) return;
       askName({
         title: "New list",
-        message: `${channel.title} goes in it.`,
+        message: `${named} goes in it.`,
         action: "Create",
         typed: "",
         failed: (name) => `Couldn't make ${name}`,
@@ -242,6 +252,15 @@ interface Draft {
 const rowId = (entry: ListEntry) => (entry.kind === "listed" ? entry.channel.key : entry.member);
 const titleOf = (entry: ListEntry) => (entry.kind === "listed" ? entry.channel.title : entry.name);
 
+/** Escape, which throws an edit away as Cancel does. */
+const CANCEL: readonly Shortcut<"cancel">[] = [
+  { id: "cancel", input: "escape", command: false, title: "Cancel" },
+];
+
+/** "2 kept for removed providers": the channels kept for subscriptions removed with their history. */
+const awayLine = (away: number) =>
+  away === 1 ? "1 kept for a removed provider" : `${away} kept for removed providers`;
+
 /** List `id`'s channels, pushed on Live; a list deleted meanwhile says so. */
 export function ChannelListScreen({ id }: { id: string }) {
   const list = useChannelLists().find((each) => each.id === id);
@@ -251,6 +270,7 @@ export function ChannelListScreen({ id }: { id: string }) {
   const large = largeText(useWindowDimensions().fontScale);
   const playing = channelStatus(usePlayback().phase);
   const [draft, setDraft] = useState<Draft | null>(null);
+  useShortcuts(draft ? CANCEL : NO_SHORTCUTS, () => setDraft(null));
   // The draft on show, for a Try again that comes later; none once the list closed.
   const open = useRef<Draft | null>(null);
   useEffect(() => {
@@ -421,6 +441,10 @@ export function ChannelListScreen({ id }: { id: string }) {
               testID="list-delete"
             />
           </View>
+        ) : list.away > 0 ? (
+          <Text style={styles.away} testID="list-away">
+            {awayLine(list.away)}
+          </Text>
         ) : undefined
       }
       ListEmptyComponent={
@@ -699,6 +723,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   footer: { paddingHorizontal: 16, paddingTop: 16, alignItems: "flex-start" },
+  away: { color: colors.text, fontSize: 15, paddingHorizontal: 16, paddingTop: 16 },
   row: { flexDirection: "row", alignItems: "center", paddingLeft: 16, paddingRight: 4 },
   main: { flex: 1, flexDirection: "row", alignItems: "center", alignSelf: "stretch" },
   remove: { paddingHorizontal: 12 },

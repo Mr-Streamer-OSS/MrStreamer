@@ -18,6 +18,8 @@ const scenario = vi.hoisted(() => ({
   catalogue: { kind: "loading" } as Catalogue,
   /** Subscriptions removed with their history kept; null while the registry doesn't read. */
   retired: [] as string[] | null,
+  /** Subscriptions the registry saves, which the roster may not show yet. */
+  registered: [] as string[],
   /** What account.ts tells as its roster or channels change. */
   changed: new Set<() => void>(),
 }));
@@ -35,7 +37,12 @@ vi.mock("../src/account.ts", () => ({
 }));
 vi.mock("../src/subscriptions.ts", () => ({
   readRegistry: () =>
-    scenario.retired && { registry: { retired: scenario.retired.map((id) => ({ id })) } },
+    scenario.retired && {
+      registry: {
+        subscriptions: scenario.registered.map((id) => ({ id })),
+        retired: scenario.retired.map((id) => ({ id })),
+      },
+    },
 }));
 
 const channel = (id: string, name: string): ProviderChannel => ({
@@ -128,6 +135,7 @@ beforeEach(async () => {
   native.sync = null;
   scenario.members = [member("a", "Home"), member("b", "Cabin")];
   scenario.retired = [];
+  scenario.registered = [];
   shows([NOS, NOS_FHD, ZIGGO]);
   await launch();
 });
@@ -285,6 +293,24 @@ describe("a list's channels", () => {
     expect(readFileSync(file(), "utf8")).not.toContain("NOS");
   });
 
+  it("of a provider saved again before the roster shows it stay", () => {
+    lists.createList("News", live("a:10"));
+    scenario.members = [member("b", "Cabin")];
+    scenario.registered = ["a", "b"];
+    shows([NOS]);
+    expect(readFileSync(file(), "utf8")).toContain("NOS");
+  });
+
+  it("count as held where their provider needs its password, so the sheet can take them out", () => {
+    const news = lists.createList("News", live("a:10"));
+    const nos = live("a:10");
+    scenario.members = [member("a", "Home", true), member("b", "Cabin")];
+    shows([NOS, NOS_FHD]);
+    expect(lists.listsHolding(nos)).toEqual(new Set([news]));
+    lists.setMember(news, nos, false);
+    expect(shown()).toEqual(["News: "]);
+  });
+
   it("of a provider removed while the registry doesn't read stay", () => {
     lists.createList("News", live("a:10"));
     scenario.members = [member("b", "Cabin")];
@@ -341,6 +367,18 @@ describe("arranging a list", () => {
     );
     lists.arrangeList(only(), [ziggo, ...["b:10", "a:10"].map(memberOf)]);
     expect(shown()).toEqual(["Mix: Ziggo Sport (not-listed), b:10, a:10"]);
+  });
+
+  it("refuses a second save from the same edit, though only channels that don't open moved", () => {
+    three();
+    shows([NOS, NOS_FHD], [RTL]);
+    const before = only();
+    const ziggo = before.entries[1]!.member;
+    lists.arrangeList(before, [ziggo, memberOf("a:10"), memberOf("b:10")]);
+    expect(() => lists.arrangeList(before, [memberOf("a:10"), memberOf("b:10"), ziggo])).toThrow(
+      expect.objectContaining({ error: { kind: "list-changed" } }),
+    );
+    expect(shown()).toEqual(["Mix: Ziggo Sport (not-listed), a:10, b:10"]);
   });
 
   it("refuses an order made before the list or its channels changed, moving nothing", () => {

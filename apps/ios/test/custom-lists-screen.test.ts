@@ -331,6 +331,14 @@ describe("a row's lists", () => {
       typed: "sport",
     });
     expect(saved()).toEqual(["Sport: a:11"]);
+    // So does one too long.
+    const long = "x".repeat(61);
+    answer("Create", long);
+    expect(scenario.prompts.at(-1)).toMatchObject({
+      message: "A list's name has 1 to 60 characters.",
+      typed: long,
+    });
+    expect(saved()).toEqual(["Sport: a:11"]);
 
     press(`live-list-${id}`);
     expect(scenario.did).toEqual([`push /live/list?id=${encodeURIComponent(id)}`]);

@@ -197,6 +197,27 @@ export function useChannelLists(): readonly ChannelList[] {
   );
 }
 
+/**
+ * The ids of the lists holding `channel` as Live lists it now, as `setMember` finds it: one of a
+ * provider that needs its password too, which its list shows but doesn't open.
+ */
+export function listsHolding(channel: Channel): ReadonlySet<string> {
+  const from = keptNow();
+  const catalogue = currentCatalogue();
+  if (from.kind !== "read") return new Set();
+  return new Set(
+    from.lists.flatMap((list) =>
+      list.members.some(
+        (stored) =>
+          stored.subscriptionId === channel.subscriptionId &&
+          resolve(catalogue, stored)?.channel.key === channel.key,
+      )
+        ? [list.id]
+        : [],
+    ),
+  );
+}
+
 /** Every list as it shows now, for handlers outside React. */
 export const currentChannelLists = (): readonly ChannelList[] =>
   listsOf(keptNow(), currentCatalogue(), members());
@@ -409,15 +430,18 @@ function align(catalogue: Catalogue, roster: Roster) {
   const from = keptNow();
   if (from.kind !== "read" || roster.kind !== "ready") return;
   const saved = new Set(roster.members.map((member) => member.entry.id));
-  // Read only once a list holds a subscription that isn't saved. While the registry doesn't read,
-  // whose history went is unknown, and every list keeps what it holds.
-  let retired: ReadonlySet<string> | null | undefined;
+  // Read only once a list holds a subscription the roster doesn't, and taken whole from the
+  // registry as it stands: one saved there, as when it is being added again, or removed with its
+  // history kept, keeps its channels. While the registry doesn't read, every list keeps them all.
+  let registry: ReadonlySet<string> | null | undefined;
   const kept = (id: string) => {
-    if (retired === undefined) {
-      const file = readRegistry();
-      retired = file ? new Set(file.registry.retired.map((each) => each.id)) : null;
+    if (registry === undefined) {
+      const file = readRegistry()?.registry;
+      registry = file
+        ? new Set([...file.subscriptions, ...file.retired].map((each) => each.id))
+        : null;
     }
-    return retired === null || retired.has(id);
+    return registry === null || registry.has(id);
   };
   let changed = false;
   const lists = from.lists.map((list) => ({
