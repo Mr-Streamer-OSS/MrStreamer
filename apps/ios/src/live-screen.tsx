@@ -61,9 +61,10 @@ import {
 } from "./ui.tsx";
 
 // Live, in Movies' and Series' shape: a large title, its Favourites row, which opens every
-// favourite (favourites-screen.tsx), and Find countries or categories, which finds them by name
-// in every provider's channels (live-discover.tsx), then For you, Categories, All and Guide as text
-// tabs, with the country first in their row, reading All countries until one is chosen. All lists
+// favourite (favourites-screen.tsx), a row for each of the viewer's lists
+// (custom-lists-screen.tsx), and Find countries or categories, which finds them by name in every
+// provider's channels (live-discover.tsx), then For you, Categories, All and Guide as text tabs,
+// with the country first in their row, reading All countries until one is chosen. All lists
 // every channel of every provider and country once, in a virtualised list of rows of one fixed
 // height, and is where Live opens at launch. For you leads with the channel watched last and Play,
 // then the recent channels and a few categories as shelves of logos; Categories is every category
