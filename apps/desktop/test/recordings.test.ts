@@ -20,7 +20,7 @@ import { Recordings } from "../src/main/services/recordings.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { startFakeHls } from "./fake-hls.ts";
-import { fixture, liveStreams, type FakeProviderOptions } from "./fake-provider.ts";
+import { fakeGuide, fixture, liveStreams, type FakeProviderOptions } from "./fake-provider.ts";
 import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 
 const hasTools =
@@ -975,6 +975,125 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       stop: tomorrow.getTime() + 40 * MINUTE,
       scheduled: { schedule: saved.id, late: null },
     });
+  });
+
+  it("follows the guide's revised end until it records, then keeps the end it started with", async () => {
+    const { provider, subscriptionId, guide, recordings, listing, programmePlan, clockTo } =
+      await scheduling();
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next));
+    /** The guide, with the next programme ending `minutes` later (earlier, below 0). */
+    const ending = async (minutes: number) => {
+      const at = (time: number) =>
+        `${new Date(time + 2 * 60 * MINUTE).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0200`;
+      provider.serveGuide(
+        fakeGuide(provider.catalogue, TEN_PAST).replace(
+          `start="${at(next.start)}" stop="${at(next.stop)}"`,
+          `start="${at(next.start)}" stop="${at(next.stop + minutes * MINUTE)}"`,
+        ),
+      );
+      await guide.refresh(subscriptionId);
+      await recordings.check();
+    };
+    // Sooner: a later end would overlap the programme after it.
+    await ending(-10);
+    expect((await recordings.schedules())[0]?.next?.stop).toBe(next.stop - 10 * MINUTE);
+
+    await clockTo(next.start);
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    expect(recording?.stop).toBe(next.stop - 10 * MINUTE);
+    await ending(-20);
+    expect((await recordings.schedules())[0]).toMatchObject({
+      id: saved.id,
+      next: { stop: next.stop - 10 * MINUTE },
+      status: { kind: "recording", recording: recording?.id },
+    });
+  });
+
+  it("holds a repeat whose channel is listed under another name, as after a playlist was replaced", async () => {
+    const { provider, subscriptionId, library, channel, recordings, clockTo } = await scheduling();
+    const at = new Date(TEN_PAST + 10 * MINUTE);
+    await recordings.schedule({
+      kind: "slot",
+      channel: channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 10,
+      title: "Evening",
+      padding: { before: 0, after: 0 },
+    });
+    // The same id, another channel.
+    provider.serveChannels((all) =>
+      all.map((each) => (each.name === GUIDED ? { ...each, name: "Another channel" } : each)),
+    );
+    await library.refresh(subscriptionId);
+    await recordings.check();
+    expect((await recordings.schedules())[0]?.status).toEqual({ kind: "gone" });
+
+    await clockTo(at.getTime() + MINUTE);
+    await clockTo(at.getTime() + 11 * MINUTE);
+    expect(provider.streamRequests()).toBe(0);
+    expect((await recordings.list())[0]?.status).toEqual({ kind: "missed", why: "held" });
+  });
+
+  it("tries a start that failed again, and says why it was missed", async () => {
+    const { provider, channel, recordings, clockTo } = await scheduling();
+    const at = new Date(TEN_PAST - 5 * MINUTE);
+    await recordings.schedule({
+      kind: "slot",
+      channel: channel("TEST | Offline"),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 10,
+      title: "Offline",
+      padding: { before: 0, after: 0 },
+    });
+    const [retrying] = await until(
+      recordings.schedules,
+      ([each]) => each?.status.kind === "retrying",
+    );
+    expect(retrying?.status).toEqual({ kind: "retrying", why: "stream" });
+    const asked = provider.streamRequests();
+    // Not before a minute has passed.
+    await clockTo(TEN_PAST + 30_000);
+    expect(provider.streamRequests()).toBe(asked);
+    await clockTo(TEN_PAST + 2 * MINUTE);
+    await until(recordings.schedules, () => provider.streamRequests() > asked);
+    expect(provider.streamRequests()).toBeGreaterThan(asked);
+
+    await clockTo(at.getTime() + 11 * MINUTE);
+    expect((await recordings.list())[0]?.status).toEqual({ kind: "missed", why: "stream" });
+  });
+
+  it("leaves a schedules file it can't read as it is, and schedules nothing meanwhile", async () => {
+    const { dataDir, listing, programmePlan } = await scheduling();
+    const { next } = await listing();
+    const path = join(dataDir, "recordings", "schedules.json");
+    await mkdir(join(dataDir, "recordings"), { recursive: true });
+    for (const unreadable of [
+      JSON.stringify({ version: 2, schedules: [] }),
+      // A plan outside what the window may send.
+      JSON.stringify({
+        version: 1,
+        schedules: [
+          {
+            id: "a",
+            plan: { ...programmePlan(next), padding: { before: 600, after: 0 } },
+            channelName: GUIDED,
+            created: 0,
+            through: 0,
+          },
+        ],
+      }),
+    ]) {
+      await writeFile(path, unreadable);
+      const { recordings } = await app(dataDir);
+      await expect(recordings.schedules()).rejects.toMatchObject({ error: { kind: "unexpected" } });
+      await expect(recordings.schedule(programmePlan(next))).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      expect(await readFile(path, "utf8")).toBe(unreadable);
+    }
   });
 
   it("goes with its subscription", async () => {
