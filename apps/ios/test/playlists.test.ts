@@ -147,8 +147,7 @@ const titleNames = (app: App, kind: "movie" | "series") => {
   const lists = app.titleLists();
   return lists.kind === "ready" ? kindOf(lists.index, kind).titles.map((each) => each.name) : [];
 };
-const signedIn = (app: App) =>
-  app.members().every((each) => each.account?.state === "active" && each.live.kind === "ready");
+const signedIn = (app: App) => app.members().every((each) => each.live.kind === "ready");
 const registry = () => JSON.parse(memory.files.get("/documents/subscriptions.json") ?? "null");
 const modes = (report: Awaited<ReturnType<App["playlistReport"]>>) =>
   Object.fromEntries(report.groups.map((group) => [group.name, group.mode]));
