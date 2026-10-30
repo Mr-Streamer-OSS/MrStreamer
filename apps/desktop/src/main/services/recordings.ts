@@ -802,6 +802,8 @@ function make(deps: RecordingsDeps) {
                   (each) => each.start <= at && at < each.stop,
                 )
               : undefined;
+          // Taken out meanwhile, as with its subscription, it starts nothing.
+          if (!schedules.has(schedule.id)) return null;
           return yield* start(plan.channel, occurrence.stop, {
             scheduled: scheduledOf(schedule, occurrence, late),
             title: listed?.title ?? plan.title,
@@ -809,7 +811,7 @@ function make(deps: RecordingsDeps) {
         }).pipe(
           Effect.match({
             onSuccess: (answer) =>
-              answer.kind === "started" ? why.delete(key) : why.set(key, "busy"),
+              answer === null || answer.kind === "started" ? why.delete(key) : why.set(key, "busy"),
             // This computer's when unexpected, as a file it couldn't write; else the stream's,
             // a lost login included.
             onFailure: ({ error }) => why.set(key, error.kind === "unexpected" ? "disk" : "stream"),
@@ -989,17 +991,42 @@ function make(deps: RecordingsDeps) {
     yield* Effect.forkScoped(Stream.runForEach(library.changes, () => wake));
 
     /**
+     * Runs `turn` in a turn once `id`'s start under way, if any, answered, waiting for it outside
+     * the turn so other schedules go on meanwhile. What it began for then records, or is still to
+     * record, as a change finds it: its recording names the time it began for, which a changed
+     * start would no longer find.
+     */
+    const onceAnswered = <A, E>(
+      id: string | undefined,
+      turn: Effect.Effect<A, E>,
+    ): Effect.Effect<A, E> =>
+      Effect.suspend(() => {
+        const answering = id === undefined ? undefined : startsOf.get(id);
+        if (answering)
+          return Effect.andThen(
+            Effect.promise(() => answering),
+            onceAnswered(id, turn),
+          );
+        // Another may have started before the turn came.
+        return Effect.flatMap(
+          scheduling(
+            Effect.suspend(() =>
+              id !== undefined && startsOf.has(id)
+                ? Effect.succeed(null)
+                : Effect.map(turn, (value) => ({ value })),
+            ),
+          ),
+          (done) => (done ? Effect.succeed(done.value) : onceAnswered(id, turn)),
+        );
+      });
+
+    /**
      * `plan` as `recordings.plan` and `recordings.schedule` take it: the schedule it would be,
      * new or the one `id` names, and how it would stand. Only runs in a turn.
      */
     const draft = (plan: RecordingPlan, id: string | undefined) =>
       Effect.gen(function* () {
         yield* schedulesUsable;
-        // A start under way answers first: what it began for then records, or is still to record,
-        // as the change finds it. Its recording names the time it began for, which a changed start
-        // would no longer find.
-        const answering = id === undefined ? undefined : startsOf.get(id);
-        if (answering) yield* Effect.promise(() => answering);
         const now = Date.now();
         const was = id === undefined ? undefined : schedules.get(id);
         if (id !== undefined && !was)
@@ -1189,10 +1216,14 @@ function make(deps: RecordingsDeps) {
         ),
       ),
       plan: (plan: RecordingPlan, id?: string) =>
-        scheduling(Effect.map(draft(plan, id), ({ standing }) => ({ ...standing, id: id ?? "" }))),
+        onceAnswered(
+          id,
+          Effect.map(draft(plan, id), ({ standing }) => ({ ...standing, id: id ?? "" })),
+        ),
       schedule: (plan: RecordingPlan, id?: string) =>
         Effect.tap(
-          scheduling(
+          onceAnswered(
+            id,
             Effect.gen(function* () {
               const { schedule, standing } = yield* draft(plan, id);
               yield* keep(schedule.id, schedule);

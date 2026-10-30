@@ -1162,8 +1162,14 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const saved = await recordings.schedule(programmePlan(next));
     await clockTo(next.start);
     await asked;
-    // The change waits for the start's answer.
+    // The change waits for the start's answer, and the schedules go on meanwhile.
     const changing = recordings.schedule(programmePlan(next, { before: 2, after: 0 }), saved.id);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const listed = await Promise.race([
+      recordings.schedules().then(() => "listed"),
+      new Promise((resolve) => setTimeout(resolve, 2000, "held")),
+    ]);
+    expect(listed).toBe("listed");
     open();
     await changing;
     const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
