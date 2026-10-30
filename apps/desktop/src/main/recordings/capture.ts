@@ -70,7 +70,7 @@ export async function startCapture(
   },
 ): Promise<Capture> {
   const file = await open(path, "wx").catch((cause: unknown) => {
-    throw new DiskFailure(String(cause));
+    throw new DiskFailure(cause instanceof Error ? cause.message : String(cause));
   });
   // The stop time also ends a start that takes that long.
   const deadline = AbortSignal.timeout(Math.max(0, options.until - Date.now()));
@@ -206,12 +206,18 @@ async function run(
   file: Awaited<ReturnType<typeof open>>,
   stop: AbortController,
   deadline: AbortSignal,
-  options: { readonly signal: AbortSignal },
+  options: { readonly signal: AbortSignal; readonly until: number },
 ): Promise<CaptureEnd> {
   let end: CaptureEnd = "stream";
+  // Its timer waits out a computer's sleep: the clock says when the stop time passed meanwhile.
+  let late = false;
   for (;;) {
     const next = await opened.chunks.next().catch(() => null);
     if (!next || next.done) break;
+    if (Date.now() >= options.until) {
+      late = true;
+      break;
+    }
     const wrote = await write(next.value).then(
       () => true,
       () => false,
@@ -224,7 +230,7 @@ async function run(
   stop.abort();
   await opened.close();
   if (end !== "disk" && options.signal.aborted) end = "aborted";
-  else if (end !== "disk" && deadline.aborted) end = "until";
+  else if (end !== "disk" && (deadline.aborted || late)) end = "until";
   const flushed = await file.sync().then(
     () => true,
     () => false,

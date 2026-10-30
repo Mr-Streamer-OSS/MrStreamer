@@ -184,7 +184,8 @@ describe.skipIf(!hasTools)("recordings", () => {
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 100_000);
 
     await recordings.stop(answer.recording.id);
-    // Answered once the provider's request ended: its slot is free as it hears that.
+    // Answered once the provider's request ended. The provider frees its slot as it hears the
+    // close, which writing down how it ended gives it the turns for.
     await new Promise((resolve) => setImmediate(resolve));
     expect(provider.activeStreams()).toBe(0);
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: [] });
@@ -201,6 +202,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
     await roster.remove(subscriptionId, false);
+    // As in the stop above: the removal's own writes give the provider the turns to hear it.
     expect(provider.activeStreams()).toBe(0);
     expect((await recordings.list())[0]?.status).toEqual({ kind: "stopped" });
   });

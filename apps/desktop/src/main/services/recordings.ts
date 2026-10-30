@@ -378,7 +378,14 @@ function make(deps: RecordingsDeps) {
       );
     yield* Effect.addFinalizer(() =>
       Effect.andThen(
-        Effect.sync(() => starting.forEach((_start, controller) => controller.abort())),
+        Effect.promise(() =>
+          Promise.all(
+            [...starting].map(([controller, start]) => {
+              controller.abort();
+              return start.done;
+            }),
+          ),
+        ),
         Effect.ignore(end([...active.keys()], "quit")),
       ),
     );

@@ -90,6 +90,8 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
   await d.click("Stop playing and record", stopAndRecord);
   const recordingButton = named("button", "Recording");
   await d.wait(() => d.exists(recordingButton), 60_000);
+  // The keys go on from Recording, which took Record's place.
+  await d.wait(() => d.evaluate<boolean>(`document.activeElement === ${recordingButton}`));
   const first = await listed(d);
   expect(first.length === 1 && first[0]!.status.kind === "recording", "Not recording", first);
   await d.wait(async () => fixture.streams().active === 1);

@@ -63,7 +63,8 @@ export function RecordButton({
   const recording = useRecordingOf(channel);
   const [open, setOpen] = useState(false);
   const popup = useRef<HTMLDivElement>(null);
-  // Started from the popover: the keys go to Recording, which takes Record's place.
+  // Started from the popover: the keys go to Recording, which takes Record's place, whether the
+  // list or the answer says so first.
   const started = useRef(false);
   const recordingButton = useCallback((button: HTMLButtonElement | null) => {
     if (button && started.current) button.focus();
@@ -101,6 +102,7 @@ export function RecordButton({
             // Its keys are its own: Live TV's list behind it neither moves nor plays. A focused
             // button keeps its Enter and Space, and Escape and Tab do what they do in a popup.
             onKeyDown={(event) => {
+              if (event.metaKey || event.ctrlKey || event.altKey) return;
               const pressed =
                 (event.key === "Enter" || event.key === " ") &&
                 event.target instanceof Element &&
@@ -115,10 +117,8 @@ export function RecordButton({
             <RecordPanel
               channel={channel}
               programme={programme}
-              onDone={(recorded) => {
-                started.current = recorded;
-                setOpen(false);
-              }}
+              onStarting={(starting) => (started.current = starting)}
+              onDone={() => setOpen(false)}
             />
           </Popover.Popup>
         </Popover.Positioner>
@@ -131,12 +131,14 @@ export function RecordButton({
 function RecordPanel({
   channel,
   programme,
+  onStarting,
   onDone,
 }: {
   channel: LiveChannel;
   programme: Programme | null;
-  /** Closes it, `recorded` once a recording started. */
-  onDone: (recorded: boolean) => void;
+  /** Whether a start is under way, or started; false once it was busy or failed. */
+  onStarting: (starting: boolean) => void;
+  onDone: () => void;
 }) {
   const now = useNow();
   const [choice, setChoice] = useState<StopChoice>(
@@ -156,11 +158,14 @@ function RecordPanel({
       const stop = stopOf(choice, programme, Date.now());
       if (stop === null) return null;
       if (stopPlaying) player.stop();
+      onStarting(true);
       return call("recordings.start", { channel: ownedId(channel), stop, stopPlaying });
     },
+    onError: () => onStarting(false),
     onSuccess: (answer) => {
       if (answer === null) return;
-      if (answer.kind === "started") return onDone(true);
+      if (answer.kind === "started") return onDone();
+      onStarting(false);
       setBusy(answer.connections);
       void connections.refetch();
     },
@@ -210,7 +215,10 @@ function RecordPanel({
               role="radio"
               data-choice={each.choice}
               aria-checked={chosen}
-              tabIndex={chosen ? 0 : -1}
+              // With its choice gone, as "When it ends" after its programme, Tab finds the first.
+              tabIndex={
+                chosen || (!offered.includes(choice) && each.choice === offered[0]) ? 0 : -1
+              }
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => setChoice(each.choice)}
               className={cn(
@@ -254,7 +262,7 @@ function RecordPanel({
         )}
       </div>
       <div className="flex justify-end gap-2 pl-2">
-        <Button variant="ghost" size="sm" onClick={() => onDone(false)}>
+        <Button variant="ghost" size="sm" onClick={onDone}>
           {t("Cancel")}
         </Button>
         <Button
