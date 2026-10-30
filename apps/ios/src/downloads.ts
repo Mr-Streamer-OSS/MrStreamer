@@ -1334,6 +1334,15 @@ async function firstForeground(): Promise<void> {
 
 // The queue's window of authorizations.
 
+/**
+ * After a viewer's ask that may clear what held the first foreground back, a pause that wasn't
+ * kept: tries that again, and otherwise refills.
+ */
+function goOn() {
+  if (barrier !== "pending") refill();
+  else if (foreground) void firstForeground();
+}
+
 /** Fills the native queue's window in the foreground, one refill at a time. */
 function refill() {
   if (!foreground || barrier !== "done" || phase !== "ready") return;
@@ -1742,7 +1751,7 @@ export async function removeDownload(id: string): Promise<void> {
   const removed = await removeRecord(id, "user");
   tell();
   if (removed.kind === "removed") await removed.cleanup;
-  refill();
+  goOn();
 }
 
 /** What removing a subscription's downloads for its reset established. */
@@ -1889,8 +1898,9 @@ export async function pauseDownload(id: string): Promise<Paused> {
   const bound = boundOf(record);
   try {
     if (bound) await transfers.holdAuthorization(bound.authorization, true);
+    goOn();
   } catch (cause) {
-    if (unanswered(cause)) refill();
+    if (unanswered(cause)) goOn();
     // Ended meanwhile: its receipt says what that means, and it stays paused if it stays queued.
     else if (refusalOf(cause) !== "obsolete") {
       update(id, withoutPause);
@@ -1926,7 +1936,7 @@ export async function resumeDownload(id: string): Promise<void> {
       throw new AppFailure({ kind: "unexpected", detail: "The download couldn't be resumed." });
     }
   }
-  refill();
+  goOn();
 }
 
 /**
@@ -1936,6 +1946,9 @@ export async function resumeDownload(id: string): Promise<void> {
  */
 const waitingTurn = (record: Stored) =>
   unfinished(record) && (record.paused === true || transferring(record) === null);
+
+/** Counts the viewer's moves: a refused one is put back only while no other came since. */
+let reorders = 0;
 
 /**
  * Moves a download waiting its turn one place earlier (-1) or later (1) among those waiting, the
@@ -1951,25 +1964,23 @@ export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
   const swap = (each: Stored) => (each === record ? other : each === other ? record : each);
   commit({ ...doc, items: doc.items.map(swap) });
   tell();
-  const moved = orderOf(doc.items);
+  const moved = ++reorders;
   try {
     await arrange();
   } catch (cause) {
     if (unanswered(cause)) {
-      refill();
+      goOn();
       return;
     }
     // Put back while both still stand as they were and nothing moved since; otherwise the next
     // refill orders the native queue as the list stands.
-    if (find(id) === record && find(other.id) === other && orderOf(doc.items) === moved) {
+    if (find(id) === record && find(other.id) === other && reorders === moved) {
       commit({ ...doc, items: doc.items.map(swap) });
       tell();
     }
     throw new AppFailure({ kind: "unexpected", detail: "The new order couldn't be kept." });
   }
 }
-
-const orderOf = (items: readonly Stored[]) => items.map((each) => each.id).join("\n");
 
 /** A complete copy that isn't being removed: the only kind that plays. */
 const playable = (record: Stored | undefined): record is Stored =>
