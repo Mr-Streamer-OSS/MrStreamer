@@ -2,13 +2,15 @@
 // fixtures captured to a temporary data folder, and ffprobe and the app's own copy playback for
 // what was written.
 import { spawnSync } from "node:child_process";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import type { Recording } from "@mrstreamer/contracts/recordings";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { mainLayer } from "../src/main/runtime.ts";
+import { Downloads } from "../src/main/services/downloads.ts";
 import { Library } from "../src/main/services/library.ts";
+import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Recordings } from "../src/main/services/recordings.ts";
 import { Roster } from "../src/main/services/roster.ts";
@@ -24,10 +26,20 @@ const TRACKS = "TEST | Subtitles and two sound tracks";
 /** The app's services on `dataDir`, as one start of the app has them. */
 async function app(dataDir: string) {
   const runtime = runtimeFor(
-    mainLayer({ ...testConfig(dataDir), ffmpeg: "ffmpeg", ffprobe: "ffprobe" }),
+    mainLayer({
+      ...testConfig(dataDir),
+      ffmpeg: "ffmpeg",
+      ffprobe: "ffprobe",
+      // A picture for every artwork address, so a download needs no network.
+      downloads: {
+        fetch: async () => new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47])),
+      },
+    }),
   );
   return {
     recordings: await promised(runtime, Recordings),
+    downloads: await promised(runtime, Downloads),
+    onDemand: await promised(runtime, OnDemand),
     playback: await promised(runtime, Playback),
     subscriptions: await promised(runtime, Subscriptions),
     library: await promised(runtime, Library),
@@ -274,8 +286,8 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("goes on to the channel's next stream when one has no program, from the file's start", async () => {
     const junk = "TEST | H.264 + AAC";
-    // A name longer in bytes than a file system takes whole.
-    const long = "長い番組名".repeat(24);
+    // A name with what file systems refuse, longer in bytes than one takes whole.
+    const long = `News/Sport: "live"? <a|b>*\t${"長い番組名".repeat(24)}`;
     const { dataDir, channel, provider, recordings } = await connected({
       channelOf: (each) => (each.name === TRACKS ? { ...each, name: long } : each),
       // It sends what isn't MPEG-TS, and keeps its connection open.
@@ -293,8 +305,11 @@ describe.skipIf(!hasTools)("recordings", () => {
     const [done] = await until(recordings.list, ([first]) => first?.status.kind !== "recording");
     const file = await fileOf(dataDir, done!);
     expect(Buffer.byteLength(file.name)).toBeLessThanOrEqual(255);
+    // oxlint-disable-next-line no-control-regex -- control characters are what it must not hold
+    expect(file.name).not.toMatch(/[\u0000-\u001f<>:"/\\|?*]/);
     expect(file.size).toBe(done?.bytes);
     expect((await readFile(file.path))[0]).toBe(0x47);
+    expect(decodes(file.path)).toBe(true);
     expect(provider.streamRequests()).toBe(2);
   });
 
@@ -326,5 +341,95 @@ describe.skipIf(!hasTools)("recordings", () => {
       recordings.start(channel("excluded"), Date.now() + 60_000, {}),
     ).rejects.toMatchObject({ error: { kind: "stream", failure: { kind: "unsupported" } } });
     expect(await recordings.list()).toHaveLength(1);
+  });
+
+  it("takes no connection a download holds, and a download waits for the one it holds", async () => {
+    const { provider, channel, subscriptionId, recordings, downloads, onDemand } =
+      await connected();
+    await onDemand.refresh(subscriptionId);
+    const film = provider.titles.movies.find((each) =>
+      each.name.startsWith("TEST | Two sound tracks and subtitles"),
+    )!;
+    provider.stallMovieFile(film.id, 200_000, 60_000);
+    const queued = await downloads.add({ kind: "movie", subscriptionId, id: String(film.id) });
+    const statusOf = async () =>
+      (await downloads.list()).items.find((each) => each.id === queued.id)?.status.kind;
+    await until(statusOf, (status) => status === "transferring");
+
+    const busy = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    expect(busy).toEqual({ kind: "busy", connections: { limit: 1, uses: ["download"] } });
+
+    await downloads.pause(queued.id);
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (started.kind !== "started") throw new Error("Not started");
+    await downloads.resume(queued.id);
+    expect(await until(statusOf, (status) => status === "waiting")).toBe("waiting");
+    expect(provider.activeStreams()).toBe(1);
+
+    await recordings.stop(started.recording.id);
+    expect(await until(statusOf, (status) => status !== "waiting")).not.toBe("waiting");
+  });
+
+  it("refuses a stop time already past or more than 12 hours ahead, asking the provider nothing", async () => {
+    const { provider, channel, recordings } = await connected();
+    for (const stop of [Date.now() - 1000, Date.now() + 12 * 60 * 60 * 1000 + 60_000]) {
+      await expect(recordings.start(channel(TRACKS), stop, {})).rejects.toMatchObject({
+        error: { kind: "invalid-input" },
+      });
+    }
+    expect(provider.streamRequests()).toBe(0);
+  });
+
+  it("reads one it never saw end as cut by the quit, and a gone file as missing", async () => {
+    const dataDir = await tempDir();
+    const record = (id: string, file: string) => ({
+      id,
+      file,
+      channel: { subscriptionId: "gone", id: "1" },
+      channelName: "Channel",
+      title: "Programme",
+      start: 1_000,
+      stop: 2_000_000_000_000,
+      ended: null,
+      bytes: 0,
+      status: { kind: "recording" },
+    });
+    const crashed = "00000000-0000-4000-8000-000000000001";
+    const gone = "00000000-0000-4000-8000-000000000002";
+    await mkdir(join(dataDir, "recordings", crashed), { recursive: true });
+    await writeFile(join(dataDir, "recordings", crashed, "a.ts"), fixture("h264-aac.mpegts"));
+    await writeFile(
+      join(dataDir, "recordings", "recordings.json"),
+      JSON.stringify({
+        version: 1,
+        recordings: [
+          record(crashed, "a.ts"),
+          { ...record(gone, "b.ts"), status: { kind: "complete" } },
+        ],
+      }),
+    );
+    const { recordings } = await app(dataDir);
+    const listed = await recordings.list();
+    expect(listed.find((each) => each.id === crashed)).toMatchObject({
+      status: { kind: "partial", cut: "quit" },
+      bytes: fixture("h264-aac.mpegts").length,
+    });
+    expect(listed.find((each) => each.id === gone)?.status).toEqual({ kind: "missing" });
+  });
+
+  it("leaves a recordings file it can't read as it is, and records nothing meanwhile", async () => {
+    const { dataDir, channel, provider } = await connected();
+    const path = join(dataDir, "recordings", "recordings.json");
+    await mkdir(join(dataDir, "recordings"), { recursive: true });
+    for (const unreadable of ["{ not json", JSON.stringify({ version: 2, recordings: [] })]) {
+      await writeFile(path, unreadable);
+      const { recordings } = await app(dataDir);
+      await expect(recordings.list()).rejects.toMatchObject({ error: { kind: "unexpected" } });
+      await expect(
+        recordings.start(channel(TRACKS), Date.now() + 60_000, {}),
+      ).rejects.toMatchObject({ error: { kind: "unexpected" } });
+      expect(await readFile(path, "utf8")).toBe(unreadable);
+    }
+    expect(provider.streamRequests()).toBe(0);
   });
 });
