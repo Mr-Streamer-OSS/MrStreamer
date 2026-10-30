@@ -13,7 +13,7 @@
 // Every rendition loops in step with the picture: segment n of each is its loop's n % 30, the
 // playlists list the same five, and each pass starts again with a discontinuity.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { FakeChannel } from "../../../desktop/test/fake-provider.ts";
 import { livePlaylist, type Media, type mediaMaker } from "./media.ts";
@@ -93,8 +93,10 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number
       const segments = picture.segments.map((segment, index) => {
         const file = `${String(index).padStart(3, "0")}.vtt`;
         const second = Math.round(at);
+        // Written beside it and moved into place, as another server may be serving it already.
+        const making = join(dir, `${file}.making-${process.pid}`);
         writeFileSync(
-          join(dir, file),
+          making,
           [
             "WEBVTT",
             `X-TIMESTAMP-MAP=MPEGTS:${base},LOCAL:00:00:00.000`,
@@ -104,6 +106,7 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number
             "",
           ].join("\n"),
         );
+        renameSync(making, join(dir, file));
         at += segment.seconds;
         return { file, seconds: segment.seconds };
       });

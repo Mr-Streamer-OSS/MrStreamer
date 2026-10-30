@@ -230,6 +230,9 @@ let titleFailure: number | null = null;
 /** How long movie and series details wait before the panel is asked. */
 let detailsDelay = 0;
 const channels = new Map(provider.catalogue.channels.map((each) => [String(each.streamId), each]));
+if (!channels.get(String(TRACKS_STREAM_ID))?.name.startsWith("TEST")) {
+  throw new Error(`The panel lists no stream ${TRACKS_STREAM_ID} to give sound and subtitles`);
+}
 const mediaOf = (channel: FakeChannel): Media | null =>
   channel.offline
     ? null
