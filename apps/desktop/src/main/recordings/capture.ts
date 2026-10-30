@@ -5,6 +5,7 @@
 // provider sent it. Each read waits for the write before it, so no more than one piece of the
 // stream is ever held in memory.
 import { open, rm } from "node:fs/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { StreamFailure, StreamFormat } from "@mrstreamer/contracts/playback";
 import type { RecordingCut } from "@mrstreamer/contracts/recordings";
 import type { Provider } from "@mrstreamer/core/provider";
@@ -14,6 +15,11 @@ import { classify } from "../services/playback.ts";
 
 /** How long the provider may send nothing before a recording counts its stream as broken. */
 const SILENCE_MS = 15_000;
+/**
+ * Waits before asking again after a refusal: a provider can take a moment to free the slot of a
+ * stream that just closed, as Watch's does when the viewer stops it to record.
+ */
+const REFUSED_RETRY_MS = [500, 1500];
 /** How much of a stream may pass before its program table, while capture starts. */
 const START_LIMIT = { bytes: 4 * 1024 * 1024, ms: 15_000 };
 
@@ -96,23 +102,20 @@ async function openSource(
   options: { readonly request: Provider["request"]; readonly userAgent: string },
   signal: AbortSignal,
 ): Promise<Chunks> {
-  const ask = async (address: string, within: AbortSignal) => {
+  const ask = async (address: string, asked: AbortSignal) => {
     const headers = new Headers({ "User-Agent": options.userAgent, ...source.headers });
-    const answer = await options.request(address, { headers, signal: within }, source.url);
-    if (!answer.ok) {
+    for (const delay of [...REFUSED_RETRY_MS, null]) {
+      const answer = await options.request(address, { headers, signal: asked }, source.url);
+      if (answer.ok) return answer;
       await answer.body?.cancel().catch(() => {});
-      throw new CaptureFailure(classify(answer.status));
+      const failure = classify(answer.status);
+      if (failure.kind !== "refused" || delay === null) throw new CaptureFailure(failure);
+      await sleep(delay, undefined, { signal: asked });
     }
-    return answer;
+    throw new CaptureFailure({ kind: "refused", status: 0 });
   };
   if (source.format === "hls") {
-    const input = await openHlsTsInput(
-      source.url,
-      async (address, within) => ask(address, within),
-      signal,
-      false,
-      null,
-    );
+    const input = await openHlsTsInput(source.url, ask, signal, false, null);
     return (async function* () {
       try {
         for await (const epoch of input.epochs) yield* epoch.chunks;

@@ -120,8 +120,14 @@ describe.skipIf(!hasTools)("recordings", () => {
   });
 
   it("takes no connection Watch holds, and keeps the one it holds from Watch", async () => {
-    const { provider, channel, subscriptionId, recordings, playback } = await connected();
+    // The provider frees a closed stream's slot a moment after it closes, as real panels do.
+    const { provider, channel, subscriptionId, recordings, playback } = await connected({
+      slotReleaseMs: 300,
+    });
     const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
+    const player = await fetch(watching.url);
+    await player.body?.getReader().read();
+    expect(provider.activeStreams()).toBe(1);
     const before = provider.streamRequests();
 
     const busy = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
