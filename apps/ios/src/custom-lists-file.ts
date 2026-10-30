@@ -8,7 +8,7 @@ import { readJsonStrictly, removeJson, writeJson } from "./files.ts";
 // Documents, written whole before any screen shows a change: a write the folder refuses throws and
 // changes nothing, the lists the screens show written back so a write cut short isn't read at the
 // next launch. A file there that doesn't read now, or that a later build wrote, shows no lists
-// and is never written over.
+// and is never written over, and a subscription's erasure waits on it (`eraseListMembers`).
 
 const FILE = "custom-lists.json";
 

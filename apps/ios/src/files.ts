@@ -15,7 +15,7 @@ export function readJson(name: string): unknown {
 
 /**
  * As `readJson`, but throws when a file there can't be read now, rather than answering none: for
- * a caller that mustn't write over what it couldn't read.
+ * a caller that mustn't write over what it couldn't read. Text that isn't JSON still reads as none.
  */
 export function readJsonStrictly(name: string): unknown {
   return read(name, true);

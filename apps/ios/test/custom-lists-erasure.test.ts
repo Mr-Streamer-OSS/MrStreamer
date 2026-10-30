@@ -134,6 +134,7 @@ describe("a list's channels, as their subscription's history is erased", () => {
 
     refused = true;
     expect(await app.resetDemo()).toEqual({ kind: "incomplete", pending: ["history"] });
+    expect(await app.startDemo()).toEqual({ kind: "incomplete", pending: ["history"] });
     expect(lists()).toContain("Demo One");
 
     refused = false;
