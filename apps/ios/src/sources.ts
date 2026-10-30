@@ -37,7 +37,7 @@ export function sourceOf(subscriptionId: string): Source {
 export const currentSource = (subscriptionId: string): Source | undefined =>
   sources.get(subscriptionId);
 
-/** What stream addresses of `subscriptionId` carry, to keep out of failures. */
+/** Recognized login parts. Playback also redacts its captured Source's uncertain values. */
 export const loginOf = (subscriptionId: string): readonly string[] =>
   sources.get(subscriptionId)?.login ?? [];
 

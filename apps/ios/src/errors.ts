@@ -87,7 +87,11 @@ export interface Failure {
 
 /** "tv.example.net" from "http://tv.example.net:8080/": how the screens name a provider. */
 export function hostOf(server: string): string {
-  return URL.parse(server)?.hostname || server.replace(/^https?:\/\//, "").replace(/[:/].*$/, "");
+  return (
+    URL.parse(server)?.hostname ||
+    URL.parse(`http://${server}`)?.hostname ||
+    server.replace(/^https?:\/\//, "").replace(/[:/?#].*$/, "")
+  );
 }
 
 /**
@@ -142,20 +146,40 @@ export function failureOf(error: AppError, server: string): Failure {
 
 /**
  * `text` as the viewer may see it, for messages the native player writes: every address cut to
- * its origin (core's rule for provider messages), and each part of `login` gone however an
- * address spells it, should a message quote a path or query without its scheme.
+ * its origin (core's rule for provider messages), and the raw, URI and form spellings of each
+ * login part removed. Uncertain query values are removed only as whole names, as core's `whole`
+ * reads them, so an ordinary word containing a short setting still reads whole.
  */
-export function withoutLogin(text: string, login: readonly string[]): string {
-  const spellings = login
-    .filter((part) => part !== "")
-    .flatMap((part) => [
-      part,
-      encodeURIComponent(part),
-      new URLSearchParams({ part }).toString().slice("part=".length),
-    ])
-    // The longest first, so a part inside a longer spelling doesn't leave the rest behind.
-    .toSorted((a, b) => b.length - a.length)
-    .map((spelling) => spelling.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const shown = withoutAddresses(text);
-  return spellings.length === 0 ? shown : shown.replace(new RegExp(spellings.join("|"), "gi"), "…");
+export function withoutLogin(
+  text: string,
+  login: readonly string[],
+  uncertain: readonly string[] = [],
+): string {
+  const spellings = (parts: readonly string[]) =>
+    parts
+      .filter((part) => part !== "")
+      .flatMap((part) => [
+        part,
+        encodeURIComponent(part),
+        new URLSearchParams({ part }).toString().slice("part=".length),
+      ])
+      // The longest first, so a part inside a longer spelling doesn't leave the rest behind.
+      .toSorted((a, b) => b.length - a.length)
+      .map((spelling) => spelling.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const known = spellings(login);
+  const shown =
+    known.length === 0
+      ? withoutAddresses(text)
+      : withoutAddresses(text).replace(new RegExp(known.join("|"), "gi"), "…");
+  const words = spellings(uncertain);
+  if (words.length === 0) return shown;
+  const name = /[\p{L}\p{N}\-._~]/u;
+  // One failed boundary must not consume a shorter value that does match whole.
+  return words.reduce(
+    (text, word) =>
+      text.replace(new RegExp(word, "gi"), (part: string, at: number, full: string) =>
+        name.test(full[at - 1] ?? "") || name.test(full[at + part.length] ?? "") ? part : "…",
+      ),
+    shown,
+  );
 }

@@ -179,14 +179,18 @@ describe("a playlist link", () => {
     ]);
   });
 
-  it("names the new playlist's host when its provider refuses the replacement", async () => {
+  it.each([
+    "https://new.example.com/another.m3u?token=form-canary-942",
+    "new.example.com?token=form-canary-942",
+  ])("names only the new playlist's host after a refused replacement: %s", async (link) => {
     const form = mount({ kind: "edit", member: playlist });
-    form.type("new-playlist-link", "https://new.example.com/another.m3u");
+    form.type("new-playlist-link", link);
     form.press();
     await form.answer(() =>
       asked[0]!.fail(new AppFailure({ kind: "provider-error", status: 503 })),
     );
     expect(form.text()).toContain("new.example.com isn't answering");
     expect(form.text()).not.toContain("tv.example.com isn't answering");
+    expect(form.text()).not.toContain("form-canary-942");
   });
 });
