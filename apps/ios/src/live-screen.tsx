@@ -25,6 +25,7 @@ import { FavouritesEntry } from "./favourites-screen.tsx";
 import { Glass, IconButton } from "./glass.tsx";
 import {
   guideMessage,
+  openProgramme,
   openSchedule,
   ProgrammeLines,
   programmePresentation,
@@ -113,13 +114,15 @@ const watch = (library: Library, channel: Channel) =>
 
 /**
  * What Live's detail column shows, beside the list from the split width (`splitAt` in ui.tsx): a
- * channel's Schedule on a day (null for Today), with one of its programmes over it. Below that
- * width the same Schedule and Programme are screens pushed on Live's stack instead.
+ * channel's Schedule on a day (null for Today), with one of its programmes over it, or, `alone`,
+ * a programme chosen in the Guide grid with no Schedule under it. Below that width the same
+ * Schedule and Programme are screens pushed on Live's stack instead.
  */
 interface Detail {
   readonly channel: string;
   readonly day: number | null;
   readonly programme: string | null;
+  readonly alone?: true;
 }
 
 const detail = store<Detail | null>(null);
@@ -172,6 +175,15 @@ function useHandover(split: boolean) {
   useEffect(() => {
     if (!split || !stack || !target) return;
     const [, schedule, programme, ...rest] = stack.routes;
+    // A programme pushed from the Guide grid, with no Schedule under it.
+    const chosen = schedule?.name === "programme" && !programme ? schedule : null;
+    const alone = text(chosen?.params, "channel");
+    const token = text(chosen?.params, "detail");
+    if (alone && token) {
+      detail.set({ channel: alone, day: null, programme: token, alone: true });
+      navigation.dispatch({ type: "POP_TO_TOP", target });
+      return;
+    }
     const channel = text(schedule?.params, "channel");
     if (schedule?.name !== "schedule" || !channel || rest.length > 0) return;
     if (programme && programme.name !== "programme") return;
@@ -192,6 +204,10 @@ function useHandover(split: boolean) {
     const day = shown.day === null ? {} : { day: String(shown.day) };
     const push = (name: string, params: object) =>
       navigation.dispatch({ type: "PUSH", payload: { name, params }, target });
+    if (shown.alone && shown.programme) {
+      push("programme", { channel: shown.channel, detail: shown.programme });
+      return;
+    }
     push("schedule", { channel: shown.channel, ...day });
     if (shown.programme) push("programme", { channel: shown.channel, detail: shown.programme });
   }, [navigation, target, atRoot, split, shown]);
@@ -216,6 +232,19 @@ function LiveDetail() {
       >
         <Text style={styles.empty}>Choose a channel's Schedule</Text>
       </ScrollView>
+    );
+  }
+  if (shown.alone && shown.programme) {
+    return (
+      <View style={styles.detail} testID="live-detail">
+        <Programme
+          key={shown.programme}
+          channel={shown.channel}
+          detail={shown.programme}
+          origin="live"
+          onBack={closeDetail}
+        />
+      </View>
     );
   }
   return (
@@ -248,13 +277,14 @@ function LiveDetail() {
 }
 
 /**
- * Back in the detail column: from a programme to its Schedule, from a Schedule to the empty
- * column. False when it shows nothing, so the stack's own Back can act instead.
+ * Back in the detail column: from a programme to its Schedule, from a Schedule, or a programme
+ * chosen in the Guide grid, to the empty column. False when it shows nothing, so the stack's own
+ * Back can act instead.
  */
 export function closeDetail(): boolean {
   const shown = detail.get();
   if (!shown) return false;
-  detail.set(shown.programme ? { ...shown, programme: null } : null);
+  detail.set(shown.programme && !shown.alone ? { ...shown, programme: null } : null);
   return true;
 }
 
@@ -268,6 +298,15 @@ const showSchedule = (split: boolean, channel: Channel) =>
           : { channel: channel.key, day: null, programme: null },
       )
     : openSchedule("live", channel.key);
+
+/**
+ * Opens a programme chosen in the Guide grid: alone in the detail column from the split width,
+ * else pushed on Live, so Back returns to the grid either way.
+ */
+const showProgramme = (split: boolean, channel: string, programme: string) =>
+  split
+    ? detail.set({ channel, day: null, programme, alone: true })
+    : openProgramme("live", channel, programme);
 
 /** The Live tab's list. Its Favourites and Find rows show whatever the channels' state. */
 export function LiveHome() {

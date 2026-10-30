@@ -2,7 +2,7 @@ import type { Listing, Programme } from "@mrstreamer/contracts/guide";
 import { router, useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { StyleSheet, Text, View, type StyleProp, type TextStyle } from "react-native";
-import { guide, type Day, type DayPage, type GuideStatus } from "./guide.ts";
+import { guide, type Day, type DayPage, type GuideStatus, type ScheduleItem } from "./guide.ts";
 import { usePlayback } from "./playback.ts";
 import type { Library } from "./library.ts";
 import { currentSource, onSignedIn } from "./sources.ts";
@@ -140,6 +140,89 @@ export function useGuideListings(keys: readonly string[], catalogue: Library | n
     load,
     requested.map((key) => key.slice(0, key.indexOf(":"))),
   );
+}
+
+/** How many channels of the Guide grid read their day at once: about a tall window's rows. */
+export const GRID_ROWS = 16;
+/** A channel's programmes on a day, in the grid: at most this many of the owner's day pages. */
+const GRID_PAGES = 4;
+const NO_ROWS: ReadonlyMap<string, readonly ScheduleItem[]> = new Map();
+
+async function readDay(keys: readonly string[], day: Day, signal: AbortSignal) {
+  const read = new Map<string, readonly ScheduleItem[]>();
+  // Two at a time, as listings are read.
+  for (let offset = 0; offset < keys.length; offset += 2)
+    await Promise.all(
+      keys.slice(offset, offset + 2).map(async (key) => {
+        let programmes: ScheduleItem[] = [];
+        let cursor: string | undefined;
+        for (let page = 0; page < GRID_PAGES; page++) {
+          const got = await guide.schedule(key, day, cursor, { signal });
+          programmes = [...programmes, ...got.programmes];
+          cursor = got.cursor ?? undefined;
+          if (!cursor) break;
+        }
+        read.set(key, programmes);
+      }),
+    );
+  return read;
+}
+
+/**
+ * The Guide grid's programmes on a local day, by channel key, for the first GRID_ROWS of `keys`:
+ * those in view. Rows already read stay as others scroll in, and only those are read. A day is
+ * the same all through a guide's generation, so the rows are read again only when one is
+ * replaced, all at once, keeping the last ones shown until they land. Another login or day
+ * starts empty.
+ */
+export function useGuideGrid(keys: readonly string[], day: Day, catalogue: Library) {
+  const signature = JSON.stringify(keys.slice(0, GRID_ROWS));
+  const requested = useMemo(() => JSON.parse(signature) as string[], [signature]);
+  // Every provider's, so scrolling into another provider's channels keeps the rows read.
+  const ids = useMemo(() => [...catalogue.labels.keys()], [catalogue]);
+  const { snapshot, focused, now, identity, valid, revision } = useGuideOwner(ids);
+  const scope = useMemo(
+    () => ({ day: { from: day.from, until: day.until }, catalogue, identity }),
+    [day.from, day.until, catalogue, identity],
+  );
+  type Settled = {
+    scope: typeof scope;
+    revision: string;
+    rows: ReadonlyMap<string, readonly ScheduleItem[]>;
+  };
+  const [settled, setSettled] = useState<Settled | null>(null);
+  const latest = useRef(settled);
+  latest.current = settled;
+  useEffect(() => {
+    if (!focused) return;
+    const before = latest.current?.scope === scope ? latest.current : null;
+    const kept = before?.revision === revision ? before.rows : null;
+    const wanted = requested.filter((key) => catalogue.byKey.has(key) && !kept?.has(key));
+    if (kept && wanted.length === 0) return;
+    const controller = new AbortController();
+    void readDay(wanted, scope.day, controller.signal).then(
+      (read) => {
+        if (controller.signal.aborted || !valid()) return;
+        const rows = new Map<string, readonly ScheduleItem[]>();
+        for (const key of requested) {
+          const row = read.get(key) ?? kept?.get(key);
+          if (row) rows.set(key, row);
+        }
+        setSettled({ scope, revision, rows });
+      },
+      () => {
+        // A refused day keeps what was read, as a Schedule keeps its rows.
+      },
+    );
+    return () => controller.abort();
+  }, [scope, revision, requested, catalogue, focused, valid]);
+  const current = settled?.scope === scope ? settled : null;
+  return {
+    rows: current?.rows ?? NO_ROWS,
+    pending: focused && (!current || current.revision !== revision),
+    snapshot,
+    now,
+  };
 }
 
 /** Reload the represented page span atomically; never append with a prior generation's cursor. */

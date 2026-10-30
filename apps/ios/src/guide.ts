@@ -540,6 +540,9 @@ export function createGuide(
     ): Promise<Programme | null> {
       const captured = tokens.get(detail);
       if (!captured || !validToken(captured)) return null;
+      // Newest again, so a programme read as it shows outlasts the day pages minted after it.
+      tokens.delete(detail);
+      tokens.set(detail, captured);
       const answer = await query(captured, "detail", { from: 0, until: 0 }, options?.signal);
       return !options?.signal?.aborted && validToken(captured) ? (answer?.rows[0] ?? null) : null;
     },
