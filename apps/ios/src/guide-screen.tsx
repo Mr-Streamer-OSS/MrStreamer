@@ -1,6 +1,14 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
-import { FlatList, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AccessibilityInfo,
+  FlatList,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type HostInstance,
+} from "react-native";
 import { playChannel, useCatalogue } from "./account.ts";
 import { guide } from "./guide.ts";
 import {
@@ -22,16 +30,65 @@ import { colors, Message, TextButton } from "./ui.tsx";
 const parameter = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : "";
 
-/** Same pushed screen on both stacks, so native Back retains the originating browse state. */
+/** A chosen day as a route carries it: its first instant, or nothing for Today. */
+const dayOf = (value: string | string[] | undefined) => {
+  const day = Number(parameter(value));
+  return parameter(value) && Number.isFinite(day) ? day : null;
+};
+
+/**
+ * Same pushed screen on both stacks, so native Back retains the originating browse state. The
+ * day chosen goes into the route's `day`, so Live's detail column can take the screen over, on
+ * the same day, when the window widens (live-screen.tsx).
+ */
 export function ScheduleScreen({ origin }: { origin: GuideOrigin }) {
-  const params = useLocalSearchParams<{ channel?: string }>();
+  const params = useLocalSearchParams<{ channel?: string; day?: string }>();
+  return (
+    <ChannelSchedule
+      channel={parameter(params.channel)}
+      day={dayOf(params.day)}
+      onDay={(day) => router.setParams({ day: day === null ? undefined : String(day) })}
+      onProgramme={(channel, detail) => openProgramme(origin, channel, detail)}
+      origin={origin}
+    />
+  );
+}
+
+/**
+ * A channel's Schedule by its key, from `day` (null for Today), wherever it shows: a pushed
+ * screen, or Live's detail column. `onDay` hears each day chosen and `onProgramme` each programme
+ * opened. With `announce`, VoiceOver moves to the channel's name as it shows.
+ */
+export function ChannelSchedule({
+  channel: key,
+  day,
+  onDay,
+  onProgramme,
+  origin,
+  announce = false,
+}: {
+  channel: string;
+  day: number | null;
+  onDay: (day: number | null) => void;
+  onProgramme: (channel: string, detail: string) => void;
+  origin: GuideOrigin;
+  announce?: boolean;
+}) {
   const catalogue = useCatalogue();
-  const key = parameter(params.channel);
   const channel = catalogue.kind === "ready" ? catalogue.library.byKey.get(key) : undefined;
   if (catalogue.kind === "loading") return <Message text="Loading channels…" />;
   if (!channel || catalogue.kind !== "ready") return <Message text="Channel unavailable" />;
   return (
-    <Schedule key={channel.key} channel={channel} library={catalogue.library} origin={origin} />
+    <Schedule
+      key={channel.key}
+      channel={channel}
+      library={catalogue.library}
+      origin={origin}
+      initialDay={day}
+      onDay={onDay}
+      onProgramme={onProgramme}
+      announce={announce}
+    />
   );
 }
 
@@ -39,14 +96,27 @@ function Schedule({
   channel,
   library,
   origin,
+  initialDay,
+  onDay,
+  onProgramme,
+  announce,
 }: {
   channel: Channel;
   library: Library;
   origin: GuideOrigin;
+  initialDay: number | null;
+  onDay: (day: number | null) => void;
+  onProgramme: (channel: string, detail: string) => void;
+  announce: boolean;
 }) {
   const clock = useGuideOwner();
   // null follows Today across midnight; a chosen calendar date stays on that date.
-  const [chosen, setChosen] = useState<number | null>(null);
+  const [chosen, choose] = useState<number | null>(initialDay);
+  const setChosen = (day: number | null) => {
+    choose(day);
+    onDay(day);
+  };
+  const heading = useAnnounced(announce);
   const day = localDay(chosen ?? clock.now);
   const schedule = useGuideSchedule(channel.key, day, library);
   const today = localDay(clock.now).from;
@@ -73,7 +143,7 @@ function Schedule({
       windowSize={7}
       ListHeaderComponent={
         <>
-          <Text accessibilityRole="header" style={styles.title}>
+          <Text ref={heading} accessibilityRole="header" style={styles.title}>
             {channel.title}
           </Text>
           <View style={styles.days}>
@@ -106,7 +176,7 @@ function Schedule({
       renderItem={({ item }) => (
         <TextButton
           label={`${programmeRange(item)} · ${item.title}`}
-          onPress={() => openProgramme(origin, channel.key, item.detail)}
+          onPress={() => onProgramme(channel.key, item.detail)}
           testID={`programme-${item.start}`}
         />
       )}
@@ -132,9 +202,32 @@ function Schedule({
 
 export function ProgrammeScreen({ origin }: { origin: GuideOrigin }) {
   const params = useLocalSearchParams<{ channel?: string; detail?: string }>();
+  return (
+    <Programme
+      channel={parameter(params.channel)}
+      detail={parameter(params.detail)}
+      origin={origin}
+    />
+  );
+}
+
+/**
+ * One programme of a channel's Schedule, by the owner's detail token: a pushed screen, or Live's
+ * detail column, which passes `onBack` for the Back a pushed screen has in its top bar.
+ */
+export function Programme({
+  channel: key,
+  detail,
+  origin,
+  onBack,
+}: {
+  channel: string;
+  detail: string;
+  origin: GuideOrigin;
+  onBack?: () => void;
+}) {
   const catalogue = useCatalogue();
-  const key = parameter(params.channel);
-  const detail = parameter(params.detail);
+  const heading = useAnnounced(onBack !== undefined);
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const channel = library?.byKey.get(key);
   const load = useCallback(
@@ -153,7 +246,10 @@ export function ProgrammeScreen({ origin }: { origin: GuideOrigin }) {
       contentContainerStyle={styles.content}
       testID="guide-programme"
     >
-      <Text style={styles.channel}>{channel.title}</Text>
+      {onBack ? <TextButton label="Back to Schedule" onPress={onBack} /> : null}
+      <Text ref={heading} style={styles.channel}>
+        {channel.title}
+      </Text>
       {read.value ? (
         <>
           <Text accessibilityRole="header" style={styles.title}>
@@ -185,6 +281,16 @@ export function ProgrammeScreen({ origin }: { origin: GuideOrigin }) {
       />
     </ScrollView>
   );
+}
+
+/** A heading VoiceOver moves to once it shows, when `announce`: a detail column opened beside Live. */
+function useAnnounced(announce: boolean) {
+  const heading = useRef<HostInstance>(null);
+  useEffect(() => {
+    const shown = announce ? heading.current : null;
+    if (shown) AccessibilityInfo.sendAccessibilityEvent(shown, "focus");
+  }, [announce]);
+  return heading;
 }
 
 function GuideNotice({ message, origin }: { message: string | null; origin: GuideOrigin }) {

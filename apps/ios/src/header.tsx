@@ -49,6 +49,7 @@ interface Navigated {
   readonly routes: readonly {
     readonly key?: string;
     readonly name: string;
+    readonly params?: object | undefined;
     readonly state?: Navigated;
   }[];
 }
@@ -90,6 +91,11 @@ export function tabsAt(state: Navigated | undefined): TabsAt | null {
   return { tab: isTab(name) ? name : "(home)", above: found.above };
 }
 
+/** `tab`'s own stack in navigation's `state`, under the tabs nearest under what shows. */
+export function tabStack(state: Navigated | undefined, tab: Tab): Navigated | undefined {
+  return nearestTabs(state)?.tabs?.routes.find((route) => route.name === tab)?.state;
+}
+
 /** The tabs under what shows, from navigation's own state, as `tabsAt` finds them. */
 export function useTabs(): TabsAt | null {
   return tabsAt(useRootNavigationState());
@@ -103,6 +109,22 @@ export function useTabs(): TabsAt | null {
 export function openOnTabs({ tab, above }: TabsAt, screen: TabScreen) {
   if (above > 0) router.dismiss(above);
   router.push(tabHref(tab, screen));
+}
+
+/**
+ * Selects `tab` as its button in the tab bar does, keeping its stack, from anywhere over the tabs:
+ * the screens above them close first. `navigation` is any navigation the tabs are under.
+ */
+export function selectTab(
+  navigation: { dispatch(action: { type: string; payload: object; target: string }): void },
+  state: Navigated | undefined,
+  tab: Tab,
+) {
+  const found = nearestTabs(state);
+  const target = found?.tabs?.key;
+  if (!found || !target) return;
+  if (found.above > 0) router.dismiss(found.above);
+  navigation.dispatch({ type: "JUMP_TO", payload: { name: tab }, target });
 }
 
 /** Search, over the tabs. What it opens goes on the tab under it. */

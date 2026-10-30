@@ -26,6 +26,23 @@ export function useRowHeight(): number {
   return Math.round(Math.max(60, 24 + 38 * fontScale));
 }
 
+/**
+ * Whether Live shows its list and a detail column side by side, from the window's width alone:
+ * 700 points, or 1000 at accessibility text sizes (iOS's AX1 is 1.786). Never the device, screen
+ * or orientation, so an iPhone, a Duo's outer display, its inner one in portrait and an iPad's
+ * half-width window keep the iPhone's layout, and a resize or fold crosses it as the width does.
+ */
+export function splitAt(width: number, fontScale: number): boolean {
+  return width >= (fontScale >= 1.5 ? 1000 : 700);
+}
+
+/** Live's list column, as wide as the window when compact; beside the detail column otherwise. */
+export function useListWidth(): { readonly split: boolean; readonly width: number } {
+  const { width, fontScale } = useWindowDimensions();
+  const split = splitAt(width, fontScale);
+  return { split, width: split ? Math.round(Math.max(400, Math.min(520, width * 0.45))) : width };
+}
+
 /** "VRT 1" as "V1", "Channel 4" as "C4": the stand-in for a channel without a logo. */
 function monogram(title: string): string {
   const words = title.split(/\s+/).filter(Boolean);
@@ -88,6 +105,7 @@ export const ChannelRow = memo(function ChannelRow({
   programmeHint,
   providerLabel,
   onSchedule,
+  selected = false,
 }: {
   channel: Channel;
   detail: string;
@@ -95,6 +113,8 @@ export const ChannelRow = memo(function ChannelRow({
   programmeHint?: string;
   providerLabel?: string | undefined;
   onSchedule?: ((channel: Channel) => void) | undefined;
+  /** Whether its Schedule shows beside the list, in Live's detail column. */
+  selected?: boolean;
   /** How the channel stands while it is the one playing (`channelStatus`), in place of `detail`. */
   status: string | null;
   height: number;
@@ -105,7 +125,9 @@ export const ChannelRow = memo(function ChannelRow({
   const tags = channel.tags.join(" ");
   const star = favourite ? "Remove from Favourites" : "Add to Favourites";
   return (
-    <View style={[styles.row, { height }, onFavourite && styles.starred]}>
+    <View
+      style={[styles.row, { height }, onFavourite && styles.starred, selected && styles.selected]}
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={[
@@ -127,6 +149,7 @@ export const ChannelRow = memo(function ChannelRow({
               },
             }
           : {})}
+        accessibilityState={{ selected }}
         onPress={() => onPress(channel)}
         style={({ pressed }) => [styles.main, pressed && styles.pressed]}
         testID={`channel-${channel.key}`}
@@ -265,6 +288,7 @@ export function TextButton({
 const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16 },
   starred: { paddingRight: 4 },
+  selected: { backgroundColor: colors.fill },
   main: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, alignSelf: "stretch" },
   star: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   pressed: { opacity: 0.5 },

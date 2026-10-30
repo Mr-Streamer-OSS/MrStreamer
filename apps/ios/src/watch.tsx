@@ -23,6 +23,7 @@ import { starChannel, useFavouriteKeys } from "./favourites.ts";
 import { Glass, IconButton } from "./glass.tsx";
 import { DownloadStatusButton } from "./download-status.tsx";
 import { openOnTabs, useTabs, type TabScreen } from "./header.tsx";
+import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
 import {
   closeWatch,
   playbackState,
@@ -51,6 +52,15 @@ import {
 import { colors } from "./ui.tsx";
 import { currentSource } from "./sources.ts";
 
+/** Watch's keyboard shortcuts while it shows: Space, ← and → while a stream plays, Esc always. */
+const STREAMING: readonly Shortcut<"pause" | "back" | "forward" | "close">[] = [
+  { id: "pause", input: " ", command: false, title: "Play or Pause" },
+  { id: "back", input: "leftArrow", command: false, title: "Back 10 seconds" },
+  { id: "forward", input: "rightArrow", command: false, title: "Forward 10 seconds" },
+  { id: "close", input: "escape", command: false, title: "Close" },
+];
+const STILL = STREAMING.filter((shortcut) => shortcut.id === "close");
+
 /**
  * Watch: the player full screen, over the tabs, with A3's controls: a close button, AirPlay,
  * Picture in Picture, Downloads and Settings at the top, and everything else in one large glass
@@ -59,8 +69,9 @@ import { currentSource } from "./sources.ts";
  * and the next episode. It is the app's own layer rather than a route, because
  * the view that starts Picture in Picture has to stay while it plays: Watch then hides, and the
  * tabs and accessory take over. Closing it shows the screen under it, a title's details among
- * them. A movie or an episode turns Watch to landscape while it shows; the screens under it turn
- * as the phone does again once it closes.
+ * them. A movie or an episode turns Watch to landscape while it shows in a window under 700 points
+ * on its short side, as on a phone; the screens under it turn as the phone does again once it
+ * closes. A larger window, as an iPad's, shows the picture as the window stands.
  *
  * Downloads and Settings open on the tab under Watch without stopping what plays: where Picture in
  * Picture can, it takes the picture over, as its own button does; otherwise Watch is set aside,
@@ -158,7 +169,9 @@ export function WatchLayer() {
     if (item === null) void from.finishPictureInPictureRestore(request, false);
     else setRestoring({ from, request, item });
   };
-  const landscape = watch && phase.kind !== "idle" && !phase.item.live;
+  const frame = useWindowDimensions();
+  const small = Math.min(frame.width, frame.height) < 700;
+  const landscape = watch && phase.kind !== "idle" && !phase.item.live && small;
   useEffect(() => {
     if (!landscape) return;
     turn(() => lockAsync(OrientationLock.LANDSCAPE));
@@ -172,8 +185,14 @@ export function WatchLayer() {
     Keyboard.dismiss();
   }, [watch]);
 
-  if (!watch && !pip) return null;
   const streaming = phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused";
+  useShortcuts(!watch ? NO_SHORTCUTS : streaming ? STREAMING : STILL, (id) => {
+    if (id === "close") void closeWatch();
+    else if (id === "pause") togglePause();
+    else seekBy(id === "back" ? -10 : 10);
+  });
+
+  if (!watch && !pip) return null;
   return (
     <View
       style={[StyleSheet.absoluteFill, watch ? styles.layer : styles.hidden]}

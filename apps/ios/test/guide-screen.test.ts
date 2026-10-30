@@ -19,6 +19,10 @@ const state = vi.hoisted(() => ({
   params: {} as { channel?: string; detail?: string },
   focused: true,
   focusContext: null as React.Context<boolean> | null,
+  window: { width: 390, height: 844, fontScale: 1 },
+  /** Live's stack, as navigation's state has it under the tabs. */
+  stack: undefined as
+    { key: string; index: number; routes: { name: string; params?: object }[] } | undefined,
   visible: 12,
   did: [] as unknown[],
   queries: [] as {
@@ -70,12 +74,16 @@ vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("expo-router", async () => {
   const { createContext, useContext } = await import("react");
   state.focusContext = createContext(true);
+  const navigation = { dispatch: (action: unknown) => state.did.push(action) };
   return {
     useIsFocused: () => useContext(state.focusContext!) && state.focused,
     useLocalSearchParams: () => state.params,
+    useNavigation: () => navigation,
+    useRootNavigationState: () => state.stack,
     router: {
       push: (href: unknown) => state.did.push(href),
       navigate: (href: unknown) => state.did.push(href),
+      setParams: (params: unknown) => state.did.push({ setParams: params }),
     },
   };
 });
@@ -90,6 +98,7 @@ vi.mock("../src/account.ts", () => ({
 }));
 vi.mock("../src/header.tsx", () => ({
   tabHref: (tab: string, name: string) => (tab === "live" ? `/live/${name}` : `/${name}`),
+  tabStack: (_state: unknown, tab: string) => (tab === "live" ? state.stack : undefined),
 }));
 vi.mock("../src/loading.tsx", async () => {
   const { createElement } = await import("react");
@@ -170,6 +179,7 @@ vi.mock("react-native", async () => {
     !value ? null : isValidElement(value) ? value : createElement(value as React.ComponentType);
   return {
     ...reactNative,
+    useWindowDimensions: () => state.window,
     View: box,
     ScrollView: box,
     Text: box,
@@ -211,7 +221,8 @@ vi.mock("react-native", async () => {
     },
   };
 });
-const { LiveHome } = await import("../src/live-screen.tsx");
+const { LiveHome, LiveTab } = await import("../src/live-screen.tsx");
+const { splitAt } = await import("../src/ui.tsx");
 const { default: Home } = await import("../src/app/(tabs)/(home)/index.tsx");
 const { ScheduleScreen, ProgrammeScreen } = await import("../src/guide-screen.tsx");
 let root: ReturnType<typeof createRoot>;
@@ -322,6 +333,8 @@ beforeEach(async () => {
   vi.setSystemTime(at);
   for (const id of ["a", "b", "c"]) dropSource(id);
   state.focused = true;
+  state.window = { width: 390, height: 844, fontScale: 1 };
+  state.stack = undefined;
   state.visible = 12;
   state.params = {};
   state.did = [];
@@ -917,5 +930,134 @@ describe("selected A public guide UI with the real guide owner", () => {
     expect(container.textContent).toContain(current.title);
     expect(container.textContent).toContain("Couldn't update schedule");
     expect(container.textContent).not.toContain("private pagination error");
+  });
+});
+
+describe("Live on iPad and Duo windows", () => {
+  const detail = () => container.querySelector('[data-testid="live-detail"]');
+  const pushes = () => state.did.filter((did) => typeof did === "object" && did && "type" in did);
+  afterEach(async () => {
+    const { closeDetail } = await import("../src/live-screen.tsx");
+    while (closeDetail());
+  });
+
+  it("splits by window width alone: from 700 points, or 1000 at accessibility text sizes", () => {
+    // iPhone, Duo outer, Duo inner portrait and an iPad half-width window stay compact.
+    for (const width of [402, 466, 669, 684]) expect(splitAt(width, 1)).toBe(false);
+    // Duo inner landscape and iPad portrait and landscape split.
+    for (const width of [700, 951, 1032, 1376]) expect(splitAt(width, 1)).toBe(true);
+    expect(splitAt(951, 1.786)).toBe(false);
+    expect(splitAt(1032, 1.786)).toBe(true);
+  });
+
+  it("shows a Schedule and its programme beside the list, keeping the day, without navigating", async () => {
+    state.window = { width: 1032, height: 1376, fontScale: 1 };
+    state.answer = async (mode, ids) =>
+      mode === "detail" || ids[0] === "trusted-1" ? answer([current, next]) : answer([]);
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(detail()?.textContent).toBe("Choose a channel's Schedule");
+    await click("Guide");
+    state.did = [];
+    await click("schedule-a:1");
+    expect(detail()?.textContent).toContain("Channel 1");
+    expect(detail()?.textContent).toContain("Today");
+    await click("Next day");
+    const tomorrow = new Date(at + 86400_000).toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+    expect(detail()?.textContent).toContain(tomorrow);
+    await click(`programme-${current.start}`);
+    expect(detail()?.textContent).toContain(current.description);
+    await click("Back to Schedule");
+    expect(detail()?.textContent).not.toContain(current.description);
+    expect(detail()?.textContent).toContain(tomorrow);
+    // The list and the column changed; no screen was pushed and nothing played.
+    expect(state.did).toEqual([]);
+  });
+
+  it("moves a pushed Schedule into the column as the window widens, and back as it narrows", async () => {
+    const day = new Date(2026, 9, 25).getTime();
+    state.answer = async (mode) => (mode === "detail" ? answer([current]) : answer([next]));
+    state.stack = {
+      key: "live-stack",
+      index: 2,
+      routes: [
+        { name: "index" },
+        { name: "schedule", params: { channel: "a:1", day: String(day) } },
+        { name: "programme", params: { channel: "a:1", detail: "g-detail" } },
+      ],
+    };
+    state.window = { width: 951, height: 669, fontScale: 1 };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(pushes()).toEqual([{ type: "POP_TO_TOP", target: "live-stack" }]);
+    state.stack = { key: "live-stack", index: 0, routes: [{ name: "index" }] };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    // The programme shows over its Schedule, which stays on the day the stack had.
+    expect(container.querySelector('[data-testid="guide-programme"]')).not.toBeNull();
+    await click("Back to Schedule");
+    expect(container.querySelector('[data-testid="guide-programme"]')).toBeNull();
+    expect(detail()?.textContent).toContain(next.title);
+    expect(detail()?.textContent).toContain(
+      new Date(day).toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      }),
+    );
+    await click(`programme-${next.start}`);
+
+    // A fold back to the outer display puts both screens back on Live's stack, on the same day.
+    state.did = [];
+    state.window = { width: 466, height: 678, fontScale: 1 };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(detail()).toBeNull();
+    const [schedule, programme] = pushes();
+    expect(schedule).toEqual({
+      type: "PUSH",
+      payload: { name: "schedule", params: { channel: "a:1", day: String(day) } },
+      target: "live-stack",
+    });
+    expect(programme).toMatchObject({
+      type: "PUSH",
+      payload: { name: "programme", params: { channel: "a:1" } },
+      target: "live-stack",
+    });
+  });
+
+  it("leaves a Schedule under another pushed screen until it is the stack's top again", async () => {
+    state.stack = {
+      key: "live-stack",
+      index: 2,
+      routes: [
+        { name: "index" },
+        { name: "schedule", params: { channel: "a:1" } },
+        { name: "settings" },
+      ],
+    };
+    state.window = { width: 1376, height: 1032, fontScale: 1 };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(pushes()).toEqual([]);
+    state.stack = { ...state.stack, index: 1, routes: state.stack.routes.slice(0, 2) };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(pushes()).toEqual([{ type: "POP_TO_TOP", target: "live-stack" }]);
+  });
+
+  it("keeps the compact layout at accessibility text sizes below 1000 points", async () => {
+    state.window = { width: 951, height: 669, fontScale: 2.143 };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    await click("Guide");
+    state.did = [];
+    await click("schedule-a:1");
+    expect(detail()).toBeNull();
+    expect(state.did).toEqual([{ pathname: "/live/schedule", params: { channel: "a:1" } }]);
   });
 });
