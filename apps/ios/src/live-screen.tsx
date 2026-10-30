@@ -25,6 +25,7 @@ import { FavouritesEntry } from "./favourites-screen.tsx";
 import { Glass, IconButton } from "./glass.tsx";
 import type { ScheduleItem } from "./guide.ts";
 import {
+  dayLabel,
   GRID_ROWS,
   guideMessage,
   localDay,
@@ -677,6 +678,8 @@ const gridPlace = store<{
   readonly offset: number | null;
   readonly chosen: { readonly channel: string; readonly start: number } | null;
 }>({ day: null, offset: null, chosen: null });
+const moveGrid = (next: Partial<ReturnType<typeof gridPlace.get>>) =>
+  gridPlace.set((current) => ({ ...current, ...next }));
 
 /** Each country's Guide grid scroll offset ("" for every country), as it was left. */
 const gridScroll = new Map<string, number>();
@@ -744,10 +747,7 @@ function GuideGrid({
   const now = Date.now();
   const { day, offset, latest, from, until } = gridWindow(place, now, span);
   const read = useGuideGrid(visible, day, library);
-  const today = localDay(now).from;
   const step = (span / 2) * MINUTE;
-  const move = (next: { day: number | null; offset: number | null }) =>
-    gridPlace.set((current) => ({ ...current, ...next }));
   const messages = [
     ...new Set(
       visible
@@ -757,7 +757,7 @@ function GuideGrid({
   ];
   const onProgramme = useCallback(
     (channel: string, programme: ScheduleItem) => {
-      gridPlace.set((current) => ({ ...current, chosen: { channel, start: programme.start } }));
+      moveGrid({ chosen: { channel, start: programme.start } });
       showProgramme(split, channel, programme.detail);
     },
     [split],
@@ -791,35 +791,29 @@ function GuideGrid({
           <View style={styles.moves}>
             <TextButton
               label="Previous day"
-              onPress={() => move({ day: localDay(day.from, -1).from, offset })}
+              onPress={() => moveGrid({ day: localDay(day.from, -1).from, offset })}
             />
             <Text accessibilityRole="header" style={styles.day}>
-              {day.from === today
-                ? "Today"
-                : new Date(day.from).toLocaleDateString(undefined, {
-                    weekday: "short",
-                    month: "short",
-                    day: "numeric",
-                  })}
+              {dayLabel(day, now)}
             </Text>
             <TextButton
               label="Next day"
-              onPress={() => move({ day: localDay(day.from, 1).from, offset })}
+              onPress={() => moveGrid({ day: localDay(day.from, 1).from, offset })}
             />
           </View>
           <View style={styles.moves}>
             <TextButton
               label="Earlier"
               disabled={offset <= 0}
-              onPress={() => move({ day: place.day, offset: offset - step })}
+              onPress={() => moveGrid({ offset: offset - step })}
             />
             {place.day !== null || place.offset !== null ? (
-              <TextButton label="Now" onPress={() => move({ day: null, offset: null })} />
+              <TextButton label="Now" onPress={() => moveGrid({ day: null, offset: null })} />
             ) : null}
             <TextButton
               label="Later"
               disabled={offset >= latest}
-              onPress={() => move({ day: place.day, offset: offset + step })}
+              onPress={() => moveGrid({ offset: offset + step })}
             />
           </View>
           <TimeAxis from={from} until={until} now={now} strip={strip} large={large} />
@@ -838,9 +832,7 @@ function GuideGrid({
             message={
               programmes?.length
                 ? null
-                : programmes
-                  ? (reason ?? "No programme information")
-                  : reason
+                : (reason ?? (programmes ? "No programme information" : null))
             }
             from={from}
             until={until}

@@ -12,6 +12,7 @@ import {
 import { playChannel, useCatalogue } from "./account.ts";
 import { guide } from "./guide.ts";
 import {
+  dayLabel,
   guideMessage,
   localDay,
   openProgramme,
@@ -127,14 +128,6 @@ function Schedule({
   const day = localDay(chosen ?? clock.now);
   const schedule = useGuideSchedule(channel.key, day, library);
   const today = localDay(clock.now).from;
-  const label =
-    day.from === today
-      ? "Today"
-      : new Date(day.from).toLocaleDateString(undefined, {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-        });
   const message = schedule.stale
     ? "Guide may be out of date"
     : guideMessage(schedule.snapshot.get(channel.subscriptionId));
@@ -159,7 +152,7 @@ function Schedule({
               onPress={() => setChosen(localDay(day.from, -1).from)}
             />
             <Text accessibilityRole="header" style={styles.day}>
-              {label}
+              {dayLabel(day, clock.now)}
             </Text>
             <TextButton label="Next day" onPress={() => setChosen(localDay(day.from, 1).from)} />
           </View>

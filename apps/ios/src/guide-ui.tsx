@@ -32,6 +32,16 @@ export function localDay(at: number, offset = 0): Day {
   return { from: from.getTime(), until: until.getTime() };
 }
 
+/** A day's heading over a Schedule or the Guide grid: Today, else its short date. */
+export const dayLabel = (day: Day, now: number) =>
+  day.from === localDay(now).from
+    ? "Today"
+    : new Date(day.from).toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      });
+
 export const programmeTime = (at: number) =>
   new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 export const programmeRange = (programme: Pick<Programme, "start" | "stop">) =>
@@ -154,11 +164,11 @@ async function readDay(keys: readonly string[], day: Day, signal: AbortSignal) {
   for (let offset = 0; offset < keys.length; offset += 2)
     await Promise.all(
       keys.slice(offset, offset + 2).map(async (key) => {
-        let programmes: ScheduleItem[] = [];
+        const programmes: ScheduleItem[] = [];
         let cursor: string | undefined;
         for (let page = 0; page < GRID_PAGES; page++) {
           const got = await guide.schedule(key, day, cursor, { signal });
-          programmes = [...programmes, ...got.programmes];
+          programmes.push(...got.programmes);
           cursor = got.cursor ?? undefined;
           if (!cursor) break;
         }
