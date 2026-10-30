@@ -131,16 +131,15 @@ afterEach(() => {
 });
 
 describe("lists", () => {
-  it("are made, renamed, ordered and deleted, and stay so after a relaunch", async () => {
+  it("are made, renamed and deleted, in the order made, and stay so after a relaunch", async () => {
     const news = lists.createList("  News ");
-    const sport = lists.createList("Sport", live("a:11"));
+    lists.createList("Sport", live("a:11"));
     lists.renameList(news, "Nieuws");
-    lists.orderLists({ from: [news, sport], order: [sport, news] });
     await launch();
-    expect(shown()).toEqual(["Sport: a:11", "Nieuws: "]);
-    lists.deleteList(sport);
+    expect(shown()).toEqual(["Nieuws: ", "Sport: a:11"]);
+    lists.deleteList(news);
     await launch();
-    expect(shown()).toEqual(["Nieuws: "]);
+    expect(shown()).toEqual(["Sport: a:11"]);
   });
 
   it("refuse a name another list has, apart from case and accents, and an empty one", () => {
@@ -152,16 +151,6 @@ describe("lists", () => {
       expect.objectContaining({ error: expect.objectContaining({ kind: "invalid-input" }) }),
     );
     expect(lists.currentChannelLists().map((list) => list.name)).toEqual(["Séries"]);
-  });
-
-  it("refuse an order made from lists that changed since", () => {
-    const one = lists.createList("One");
-    const two = lists.createList("Two");
-    lists.createList("Three");
-    expect(() => lists.orderLists({ from: [one, two], order: [two, one] })).toThrow(
-      expect.objectContaining({ error: { kind: "list-changed" } }),
-    );
-    expect(lists.currentChannelLists().map((list) => list.name)).toEqual(["One", "Two", "Three"]);
   });
 
   it("change nothing, on screen or on disk, when the folder refuses a write", async () => {
@@ -283,6 +272,14 @@ describe("arranging a list", () => {
     lists.arrangeList(only(), ["b:10", "a:10", "a:11"].map(memberOf));
     await launch();
     expect(shown()).toEqual(["Mix: b:10, a:10, a:11"]);
+  });
+
+  it("takes out the channels removed with the order", async () => {
+    three();
+    const removed = only().entries[1]!.member;
+    lists.arrangeList(only(), ["b:10", "a:10"].map(memberOf), [removed]);
+    await launch();
+    expect(shown()).toEqual(["Mix: b:10, a:10"]);
   });
 
   it("moves only the channels that open, the rest keeping their places", () => {

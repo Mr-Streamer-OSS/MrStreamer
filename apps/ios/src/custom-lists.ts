@@ -35,8 +35,9 @@ import { readRegistry } from "./subscriptions.ts";
 // deleted from every list. Both happen while a screen shows the lists (`useChannelLists`), as Live's
 // own rows always do.
 //
-// An order is made from the list as it showed: it lands only while the list's revision and the
-// channels it showed still hold, so nothing moves under channels that changed meanwhile.
+// Lists keep the order they were made in. An edit of a list's channels is made from the list as it
+// showed: it lands only while the list's revision and the channels it opened still hold, so nothing
+// moves or goes under channels that changed meanwhile.
 
 const FILE = "custom-lists.json";
 
@@ -276,23 +277,6 @@ export function deleteList(id: string): void {
   save(lists.filter((list) => list.id !== id));
 }
 
-/**
- * Puts the lists in `order`, by id, `from` being the order they showed in when it was arranged.
- * Refuses with `list-changed`, moving nothing, once the lists are others than `from`.
- */
-export function orderLists({ from, order }: { from: readonly string[]; order: readonly string[] }) {
-  const lists = stored();
-  const now = lists.map((list) => list.id);
-  if (
-    now.join("\n") !== from.join("\n") ||
-    [...order].sort().join("\n") !== [...now].sort().join("\n")
-  ) {
-    throw new AppFailure({ kind: "list-changed" });
-  }
-  const byId = new Map(lists.map((list) => [list.id, list]));
-  save(order.map((id) => byId.get(id)!));
-}
-
 const memberOf = (channel: Channel): StoredMember => ({
   member: newId(),
   subscriptionId: channel.subscriptionId,
@@ -343,12 +327,17 @@ export function removeMember(id: string, member: string): void {
 }
 
 /**
- * Puts the channels of the list `from` shows that `order` names, by member id, in that order, in the places
- * they had among its channels; the rest keep theirs. `from` is the list as it showed when arranged.
- * Refuses with `list-changed`, moving nothing, once its revision or the channels it opens are
- * others than `from`'s, or `order` isn't those channels.
+ * Saves an edit of the list `from` shows: takes out the channels `removed` names, by member id, and
+ * puts those `order` names in that order, in the places they had among its channels; the rest keep
+ * theirs. Refuses with `list-changed`, changing nothing, once its revision or the channels it opens
+ * are others than `from`'s, `removed` names one it didn't show, or `order` isn't the rest of those
+ * it opened.
  */
-export function arrangeList(from: ChannelList, order: readonly string[]): void {
+export function arrangeList(
+  from: ChannelList,
+  order: readonly string[],
+  removed: readonly string[] = [],
+): void {
   const lists = stored();
   const list = lists.find((each) => each.id === from.id);
   if (!list) throw new AppFailure({ kind: "no-list" });
@@ -357,19 +346,24 @@ export function arrangeList(from: ChannelList, order: readonly string[]): void {
       entry.kind === "listed" ? [`${entry.member} ${entry.channel.key}`] : [],
     );
   const now = shownOf(list, currentCatalogue(), members());
-  const listed = now.entries.flatMap((entry) => (entry.kind === "listed" ? [entry.member] : []));
+  const out = new Set(removed);
+  const kept = now.entries.flatMap((entry) =>
+    entry.kind === "listed" && !out.has(entry.member) ? [entry.member] : [],
+  );
+  const sorted = (ids: Iterable<string>) => [...ids].sort().join("\n");
   if (
     list.revision !== from.revision ||
     opened(now).join("\n") !== opened(from).join("\n") ||
-    [...order].sort().join("\n") !== [...listed].sort().join("\n")
+    !removed.every((member) => from.entries.some((entry) => entry.member === member)) ||
+    sorted(order) !== sorted(kept)
   ) {
     throw new AppFailure({ kind: "list-changed" });
   }
   const moved = new Set(order);
   const byMember = new Map(list.members.map((each) => [each.member, each]));
   const next = order.values();
-  const arranged = list.members.map((each) =>
-    moved.has(each.member) ? byMember.get(next.next().value!)! : each,
+  const arranged = list.members.flatMap((each) =>
+    out.has(each.member) ? [] : [moved.has(each.member) ? byMember.get(next.next().value!)! : each],
   );
   save(
     withList(lists, from.id, (list) => ({
