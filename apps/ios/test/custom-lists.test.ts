@@ -246,11 +246,50 @@ describe("lists", () => {
     expect(readFileSync(file(), "utf8")).toBe(later);
   });
 
-  it("show none of a file that doesn't read, write nothing over it, and show it once it reads", async () => {
+  it.each([
+    {
+      once: "the app comes to the front",
+      reads: () => {
+        for (const listener of scenario.appState) listener("active");
+      },
+      then: ["News: a:10"],
+    },
+    { once: "the channels change", reads: () => shows([NOS, ZIGGO]), then: ["News: a:10"] },
+    {
+      once: "a change is made",
+      reads: () => void lists.createList("Sport"),
+      then: ["News: a:10", "Sport: "],
+    },
+  ])(
+    "show none of a file that doesn't read, write nothing over it, and show it once $once",
+    async ({ reads, then }) => {
+      lists.createList("News", live("a:10"));
+      const before = readFileSync(file(), "utf8");
+      native.sync = (operation) => {
+        if (operation === "text") throw new Error("The disk went away.");
+      };
+      await launch();
+      expect(shown()).toEqual([]);
+      expect(() => lists.createList("Sport")).toThrow(
+        expect.objectContaining({
+          error: expect.objectContaining({ detail: expect.stringMatching(/couldn't be read/) }),
+        }),
+      );
+      shows([NOS, ZIGGO]);
+      expect(readFileSync(file(), "utf8")).toBe(before);
+      native.sync = null;
+      // The open screen, drawn again only as it is told.
+      React.act(reads);
+      expect(drawn).toEqual(then);
+    },
+  );
+
+  it("take none from a write left halfway while the file itself doesn't read, and none from text that isn't JSON", async () => {
     lists.createList("News", live("a:10"));
     const before = readFileSync(file(), "utf8");
-    native.sync = (operation) => {
-      if (operation === "text") throw new Error("The disk went away.");
+    writeFileSync(`${file()}.next`, JSON.stringify({ version: 1, lists: [] }));
+    native.sync = (operation, path) => {
+      if (operation === "text" && !path.endsWith(".next")) throw new Error("The disk went away.");
     };
     await launch();
     expect(shown()).toEqual([]);
@@ -259,16 +298,14 @@ describe("lists", () => {
         error: expect.objectContaining({ detail: expect.stringMatching(/couldn't be read/) }),
       }),
     );
-    shows([NOS, ZIGGO]);
     expect(readFileSync(file(), "utf8")).toBe(before);
     native.sync = null;
-    // The open screen shows them as the app comes to the front.
-    React.act(() => {
-      for (const listener of scenario.appState) listener("active");
-    });
-    expect(drawn).toEqual(["News: a:10"]);
+    rmSync(`${file()}.next`);
+    writeFileSync(file(), "{");
+    await launch();
+    expect(shown()).toEqual([]);
     lists.createList("Sport");
-    expect(shown()).toEqual(["News: a:10", "Sport: "]);
+    expect(shown()).toEqual(["Sport: "]);
   });
 });
 
