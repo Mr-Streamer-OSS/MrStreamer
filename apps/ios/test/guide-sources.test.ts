@@ -41,6 +41,7 @@ function launch(disk: { file: unknown; items: Map<string, string> }) {
     owner,
     () => disk.file,
     (value) => {
+      if (refused.has("file")) throw new Error("The disk is full.");
       disk.file = JSON.parse(JSON.stringify(value));
     },
   );
@@ -69,6 +70,7 @@ describe("external guides", () => {
     expect(await guides.add("not a link")).toBe("address");
     expect(await guides.add(LINK)).toBeNull();
     expect(await guides.add(LINK)).toBe("duplicate");
+    expect(await guides.add("https://named.test/epg.xml", LINK)).toBe("name");
     refused.add("write");
     expect(await guides.add("https://other.test/epg.xml")).toBe("saving");
     expect(guides.links()).toHaveLength(1);
@@ -84,12 +86,17 @@ describe("external guides", () => {
   });
 
   it("revokes a removed guide's native work before erasing it, then its link", async () => {
-    const { guides, control, disk } = launch(fresh());
+    const { guides, control, disk, refused } = launch(fresh());
     guides.load();
     await guides.add(LINK);
     await flush();
     const { id } = guides.links()[0]!;
-    await guides.remove(id);
+    refused.add("file");
+    expect(await guides.remove(id)).toBe("saving");
+    expect(guides.links()).toHaveLength(1);
+    expect(control.calls).not.toContain(`revoke:${id}`);
+    refused.clear();
+    expect(await guides.remove(id)).toBeNull();
     const order = control.calls.filter((call) => call.endsWith(`:${id}`));
     expect(order.slice(-3)).toEqual([`revoke:${id}`, `forget:${id}`, `keychain-remove:${id}`]);
     expect(guides.links()).toEqual([]);

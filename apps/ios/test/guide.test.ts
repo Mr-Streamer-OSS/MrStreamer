@@ -312,7 +312,7 @@ describe("external guides and mappings", () => {
     owner.setPart(part());
     owner.configure(new Map([["xmltv-1", external]]), new Map());
     await owner.attach("xmltv-1");
-    return { owner, has };
+    return { owner, has, control };
   }
   const titleOf = async (owner: ReturnType<typeof createGuide>, key: string) =>
     (await owner.listings([key])).get(key)?.now?.title ?? null;
@@ -353,6 +353,41 @@ describe("external guides and mappings", () => {
     expect(await owner.programme(programmes[0]!.detail)).toBeNull();
     expect(owner.withdrawn("a:1", day.from)).toBe(1);
     expect(await titleOf(owner, "a:1")).toBeNull();
+  });
+
+  it("withdraws what another guide answered once an external guide publishes", async () => {
+    const { owner, has, control } = await twoGuides();
+    has.set("a", ["trusted.tv"]);
+    const from = new Date(at);
+    from.setHours(0, 0, 0, 0);
+    const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
+    const { programmes } = await owner.schedule("a:1", day);
+    expect(programmes).toHaveLength(1);
+    control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "next" } });
+    owner.configure(
+      new Map([
+        [
+          "xmltv-1",
+          {
+            ...external,
+            revision: 2,
+            provider: {
+              liveGuideRequest: async () => ({
+                kind: "request",
+                url: "https://guide.test/x.xml",
+                headers: {},
+              }),
+            },
+          },
+        ],
+      ]),
+      new Map(),
+    );
+    await owner.attach("xmltv-1");
+    const { programmes: again } = await owner.schedule("a:1", day);
+    await owner.refresh("xmltv-1");
+    expect(owner.withdrawn("a:1", day.from)).toBe(2);
+    expect(await owner.programme(again[0]!.detail)).toBeNull();
   });
 
   it("downloads an external guide by its own link and keeps its last good guide on failure", async () => {

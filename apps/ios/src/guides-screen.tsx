@@ -70,6 +70,7 @@ const PROBLEMS: Record<GuideProblem, string> = {
 const REFUSALS: Record<GuideRefusal, string> = {
   address: "That isn't a web link",
   duplicate: "That guide is added already",
+  name: "A name can't be a link",
   limit: `${GUIDE_LIMIT} guides is the most this iPhone reads`,
   long: `A guide id is at most ${MAPPING_MAX} bytes`,
   saving: "Couldn't save. Nothing changed.",
@@ -134,7 +135,9 @@ export function GuidesScreen() {
           style: "destructive",
           onPress: () => {
             setReplacing((now) => (now?.id === link.id ? null : now));
-            void guides.remove(link.id);
+            void guides.remove(link.id).then((refused) => {
+              if (refused) Alert.alert(`Couldn't remove ${labelOf(link)}`, "Try again.");
+            });
           },
         },
       ],

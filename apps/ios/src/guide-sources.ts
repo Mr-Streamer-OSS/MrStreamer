@@ -52,6 +52,8 @@ export type GuideRefusal =
   | "address"
   /** That link is added already. */
   | "duplicate"
+  /** The name holds an address ("://"), as a link pasted there: names aren't kept as secrets. */
+  | "name"
   /** `GUIDE_LIMIT` guides are added already. */
   | "limit"
   /** A guide id longer than the native store reads, `MAPPING_MAX` bytes. */
@@ -182,16 +184,21 @@ export function createGuides(
     return null;
   };
   /** Takes `id` out of the file and the owner, then retires it. */
-  const removed = async (id: string) => {
-    if (!saved.guides.some((each) => each.id === id)) return;
-    commit({
-      ...saved,
-      guides: saved.guides.filter((each) => each.id !== id),
-      pendingSecrets: [...saved.pendingSecrets, id],
-    });
+  const removed = async (id: string): Promise<GuideRefusal | null> => {
+    if (!saved.guides.some((each) => each.id === id)) return null;
+    try {
+      commit({
+        ...saved,
+        guides: saved.guides.filter((each) => each.id !== id),
+        pendingSecrets: [...saved.pendingSecrets, id],
+      });
+    } catch {
+      return "saving";
+    }
     origins.delete(id);
     publish();
     await retire(id);
+    return null;
   };
   return {
     useLinks: () => useStore(shown),
@@ -228,6 +235,7 @@ export function createGuides(
     add: (link: string, name = "") =>
       serially(async () => {
         if (saved.guides.length >= GUIDE_LIMIT) return "limit";
+        if (name.includes("://")) return "name";
         return added(link, name.trim() || null);
       }),
     /**

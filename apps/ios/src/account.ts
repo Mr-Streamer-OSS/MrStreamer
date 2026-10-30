@@ -839,10 +839,12 @@ export function restore(): Promise<void> {
     } catch {
       // Shown from memory for now.
     }
+    // Before erasing histories, which take their channels' guide mappings.
+    const external = guides.load();
     for (const id of registry.pendingSecrets) await settleSecret(id).catch(() => undefined);
     for (const id of registry.erasing) await eraseHistory(id).catch(() => undefined);
     const ids = entriesOf().map((entry) => entry.id);
-    await guide.restore([...ids, ...guides.load()]);
+    await guide.restore([...ids, ...external]);
     void guides.restore();
     pruneLists(ids);
     pruneDetails(ids);

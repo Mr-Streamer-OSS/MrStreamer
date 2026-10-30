@@ -216,6 +216,11 @@ export function createGuide(
     parts.get(value.part.subscriptionId) === value.part &&
     value.entry.generation === value.generation &&
     usable(value.generation);
+  const withdrawAll = () => {
+    for (const value of tokens.values()) withdraw(value);
+    tokens.clear();
+    minted.clear();
+  };
   const cancelEntry = (entry: Entry) => {
     entry.refreshAbort?.abort();
     invalidate(entry);
@@ -301,7 +306,9 @@ export function createGuide(
         if (!stands(key, entry) || entry.activation.lease !== lease) return;
         if (result.kind === "ok") {
           entry.generation = result.value;
-          invalidate(entry);
+          // An external guide can now answer channels another guide answered before.
+          if (externals.has(key)) withdrawAll();
+          else invalidate(entry);
           entry.failedAt = -Infinity;
           update(key, { availability: "available", error: null });
         } else if (wanted() && result.kind === "failed") throw new GuideFault(result.error);
@@ -465,9 +472,7 @@ export function createGuide(
       const cycle = ++era;
       for (const entry of entries.values()) cancelEntry(entry);
       entries.clear();
-      for (const value of tokens.values()) withdraw(value);
-      tokens.clear();
-      minted.clear();
+      withdrawAll();
       try {
         connect();
         const restored = await port().restore(ids);
@@ -569,9 +574,7 @@ export function createGuide(
       externals = guides;
       mappings = mapped;
       layout++;
-      for (const value of tokens.values()) withdraw(value);
-      tokens.clear();
-      minted.clear();
+      withdrawAll();
       state.set(new Map(state.get()));
     },
     /** The guide ids channel `key`'s provider names it by, as its own guide is read. */
