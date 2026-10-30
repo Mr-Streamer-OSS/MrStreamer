@@ -25,20 +25,12 @@ describe("Xtream live streams", () => {
 });
 
 // Catch-up recordings come in the format live channels are asked for, on the panel's own clock.
+// The desktop app's MPEG-TS default is proven through its own catch-up playback.
 describe("Xtream catch-up recordings", () => {
   const panel: typeof fetch = async () =>
     Response.json({ user_info: { auth: 1 }, server_info: { timezone: "Europe/Amsterdam" } });
   // 14:05:30 UTC on 13 October 2026, for an hour: 16:05 in Amsterdam, from the minute before.
   const window = { start: Date.UTC(2026, 9, 13, 14, 5, 30), end: Date.UTC(2026, 9, 13, 15, 5) };
-
-  it("asks for MPEG-TS unless told otherwise", async () => {
-    const provider = xtreamProvider(account, { userAgent: "fixture", fetch: panel });
-    expect(await provider.archiveStream("1001", window)).toEqual({
-      url: "http://panel.test:8080/timeshift/fixture%20user/p%2Fw/60/2026-10-13:16-05/1001.ts",
-      format: "mpegts",
-      start: Date.UTC(2026, 9, 13, 14, 5),
-    });
-  });
 
   it("asks for HLS for a player that takes only HLS", async () => {
     const provider = xtreamProvider(account, { userAgent: "fixture", fetch: panel, live: "hls" });

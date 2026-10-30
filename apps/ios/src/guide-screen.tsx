@@ -272,14 +272,12 @@ export function Programme({
           <Text accessibilityRole="header" style={styles.title}>
             {read.value.title}
           </Text>
-          {kept ? (
-            <Text
-              style={styles.copy}
-              accessibilityLabel={`${programmeRange(read.value)}, catch-up`}
-            >{`${programmeRange(read.value)} ↺`}</Text>
-          ) : (
-            <Text style={styles.copy}>{programmeRange(read.value)}</Text>
-          )}
+          <Text
+            style={styles.copy}
+            accessibilityLabel={kept ? `${programmeRange(read.value)}, catch-up` : undefined}
+          >
+            {kept ? `${programmeRange(read.value)} ↺` : programmeRange(read.value)}
+          </Text>
           <ProgrammeProgress value={progress} />
           {read.value.description ? (
             <Text style={styles.copy}>{read.value.description}</Text>
@@ -343,7 +341,7 @@ function FromStart({ channel, programme }: { channel: Channel; programme: Aired 
  * it is still on, to start over. Otherwise it doesn't, and says why: it hasn't started, the
  * channel keeps no catch-up (`none`), or it aired before the `days` it keeps (`expired`).
  */
-export type CatchUp =
+type CatchUp =
   | { readonly kind: "past" | "on" | "later" | "none" }
   | { readonly kind: "expired"; readonly days: number };
 

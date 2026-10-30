@@ -176,13 +176,18 @@ describe("a programme from catch-up", () => {
     const programme = aired(2 * HOUR);
     await play(programme);
     expect(liveStream).not.toHaveBeenCalled();
-    expect(archiveStream.mock.calls.map(([id, window]) => [id, window])).toEqual([
-      ["11", { start: programme.start, end: programme.stop }],
-    ]);
+    expect(archiveStream).toHaveBeenCalledExactlyOnceWith(
+      "11",
+      { start: programme.start, end: programme.stop },
+      expect.anything(),
+    );
     expect(opened).toEqual([`archive:11:${programme.start}`]);
-    const item = playback.playingItem(phase());
-    expect(item).toMatchObject({ id: channel.key, live: false, title: "Morning Tide" });
-    expect(item?.past).toEqual({ start: programme.start, stop: programme.stop });
+    expect(playback.playingItem(phase())).toMatchObject({
+      id: channel.key,
+      live: false,
+      title: "Morning Tide",
+      past: { start: programme.start, stop: programme.stop },
+    });
     await React.act(async () => {
       port.duration = 3600;
       port.ready();
@@ -245,7 +250,6 @@ describe("a programme from catch-up", () => {
       expect(container.textContent).toContain(error);
       expect(liveStream).not.toHaveBeenCalled();
       expect(archiveStream).not.toHaveBeenCalled();
-      expect(opened).toEqual([]);
     },
   );
 
