@@ -82,6 +82,13 @@ function classifiedPlaylist(
     if (!unique.has(exact)) unique.set(exact, entry);
   }
   const modes = new Map(mapping?.groups.map(({ group, mode }) => [group, mode]));
+  // Hashed once per group, not for each of its entries.
+  const groupIds = new Map<string, string>();
+  const groupId = (group: string) => {
+    let id = groupIds.get(group);
+    if (id === undefined) groupIds.set(group, (id = playlistGroupId(group)));
+    return id;
+  };
   const files = new Map<string, PlaylistFile>();
   const details = new Map<string, ProviderDetails>();
   const groups = new Map<string, PlaylistSample[]>();
@@ -94,7 +101,7 @@ function classifiedPlaylist(
   let episodeCount = 0;
   for (const [exact, entry] of unique) {
     const names = playlistGroups(entry);
-    const choices = names.map((group) => (mapping ? modes.get(playlistGroupId(group)) : "live"));
+    const choices = names.map((group) => (mapping ? modes.get(groupId(group)) : "live"));
     const chosen = new Set(choices);
     const mode = chosen.size === 1 ? choices[0] : undefined;
     const name = entry.name || entry.attributes["tvg-name"] || "";
@@ -154,7 +161,7 @@ function classifiedPlaylist(
     const container = fileContainer(entry.url);
     const categories = mode === "movie" ? movieCategories : seriesCategories;
     for (const group of names)
-      categories.set(group, { id: playlistGroupId(group), name: safeName(group || "Ungrouped") });
+      categories.set(group, { id: groupId(group), name: safeName(group || "Ungrouped") });
     const poster = artwork(entry.attributes["tvg-logo"]);
     const explicitTmdb = entry.attributes["tmdb-id"] ?? entry.attributes["tmdb_id"];
     const tmdbId = explicitTmdb && /^[1-9]\d{0,9}$/.test(explicitTmdb) ? explicitTmdb : null;
@@ -166,7 +173,7 @@ function classifiedPlaylist(
       rating: null,
       addedAt: null,
       releaseDate: null,
-      categoryIds: names.map(playlistGroupId),
+      categoryIds: names.map(groupId),
       adult: false,
       container,
       metadata: "lazy",

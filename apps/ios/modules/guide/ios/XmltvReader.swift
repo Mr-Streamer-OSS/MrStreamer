@@ -172,6 +172,55 @@ func guideTime(_ raw: String?) -> Double? {
   return (date.timeIntervalSince1970 - Double(offset)) * 1000
 }
 
+/** Whether `text` holds any of `passwords`, as written or decoded as percent or form encoding
+    ("+" a space) spells it, up to four more decodings, as login-safety.ts holds() reads saved
+    text. Text that still decodes after the last counts as holding one. */
+func guideHolds(_ text: String, _ passwords: [String]) -> Bool {
+  guard !passwords.isEmpty else { return false }
+  var forms: Set<String> = [text]
+  var layer = [text]
+  for _ in 0...4 {
+    if layer.contains(where: { form in passwords.contains(where: { form.contains($0) }) }) { return true }
+    var next = Set<String>()
+    for form in layer {
+      for read in [guideUnescaped(form), guideUnescaped(form.replacingOccurrences(of: "+", with: " "))] where !forms.contains(read) { next.insert(read) }
+    }
+    if next.isEmpty { return false }
+    forms.formUnion(next)
+    layer = Array(next)
+  }
+  return true
+}
+
+/** `text` with each percent escape read as a byte and the bytes as UTF-8: bytes that are no
+    UTF-8 read as U+FFFD, and a "%" that escapes nothing stays, as in "100%". */
+func guideUnescaped(_ text: String) -> String {
+  guard text.utf8.contains(37) else { return text }
+  let source = Array(text.utf8)
+  var bytes = [UInt8]()
+  bytes.reserveCapacity(source.count)
+  var at = 0
+  while at < source.count {
+    if source[at] == 37, at + 2 < source.count, let high = hexDigit(source[at + 1]), let low = hexDigit(source[at + 2]) {
+      bytes.append(high << 4 | low)
+      at += 3
+    } else {
+      bytes.append(source[at])
+      at += 1
+    }
+  }
+  return String(decoding: bytes, as: UTF8.self)
+}
+
+private func hexDigit(_ byte: UInt8) -> UInt8? {
+  switch byte {
+  case 48...57: return byte - 48
+  case 65...70: return byte - 55
+  case 97...102: return byte - 87
+  default: return nil
+  }
+}
+
 final class XmltvReader: NSObject, XMLParserDelegate {
   private let index: GuideIndex
   private let job: GuideJob
@@ -251,10 +300,11 @@ final class XmltvReader: NSObject, XMLParserDelegate {
       if stack == ["tv", "programme", "title"], title == nil { title = String(String.UnicodeScalarView(normalized.unicodeScalars.prefix(300))) }
       if stack == ["tv", "programme", "desc"], descriptionText == nil { descriptionText = String(String.UnicodeScalarView(normalized.unicodeScalars.prefix(2000))) }
       if elementName == "programme", let id = channel, id.unicodeScalars.count <= 128, !id.isEmpty, let start = start, let title = title, !title.isEmpty, stop == nil || stop! - start >= 60000 {
-        // Same prose policy as catalogue-cache holds(): any raw password anywhere refuses persistence.
-        // Username substrings in ordinary text are allowed. No artwork/URL fields are saved.
+        // Same prose policy as login-safety.ts holds(): any password anywhere, as written or
+        // percent/form decoded, refuses persistence. Username substrings in ordinary text are
+        // allowed. No artwork/URL fields are saved.
         let fields = [id, title, descriptionText ?? ""]
-        if fields.contains(where: { field in passwords.contains(where: { field.contains($0) }) }) { throw GuideFailure("xml") }
+        if fields.contains(where: { guideHolds($0, passwords) }) { throw GuideFailure("xml") }
         try index.insert(id, start, stop, title, descriptionText)
       }
       if stack == ["tv"] { closed = true }

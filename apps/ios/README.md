@@ -355,8 +355,8 @@ Each responsibility has one owner, a plain module with a store the screens read:
   playlists read the file as they wrote it.
 - `src/playlist.ts`: a playlist link as a provider. It reads the playlist as it arrives, within
   64 MB and 100,000 entries, and imports it with core's parsing and group mapping, as the desktop
-  does. The link stays in it and the Keychain; its secrets are the login the failures and saved
-  copies keep out.
+  does. The link stays in it and the Keychain; its secrets, and query values long enough to be a
+  token, are the login the failures and saved copies keep out, as written or encoded.
 - `src/playlist-groups.tsx`: a playlist's groups from Settings: what it holds, each group's pick of
   Live TV, Movies, Series or Skip, and the entries left out with why.
 - `src/sources.ts`: each subscription's provider adapter and login, apart from every store, so no

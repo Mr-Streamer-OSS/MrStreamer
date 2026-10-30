@@ -36,8 +36,6 @@ const Playlist = lazy(() =>
   }),
 );
 
-const Account = lazy(() => Xtream().or(Playlist()));
-
 const Registry = lazy(() =>
   type({
     version: "1",
@@ -48,9 +46,11 @@ const Registry = lazy(() =>
       .array(),
     /**
      * Accounts removed with their history kept, the latest first. Adding one again takes its id
-     * back, so its favourites, watchlist, history and progress return.
+     * back, so its favourites, watchlist, history and progress return, and a playlist its mapping.
      */
-    retired: Account().array(),
+    retired: Xtream()
+      .or(Playlist().and({ "mapping?": PlaylistMapping() }))
+      .array(),
     /**
      * Ids whose Keychain item an add or a removal was writing or removing when the app last
      * stopped. Launch removes the item of any that isn't saved; nothing else in the Keychain is
@@ -74,7 +74,9 @@ type RetiredAccount = Registry["retired"][number];
 const SavedPlaylist = lazy(() =>
   Playlist().and({ name: "string | null", "mapping?": PlaylistMapping(), position: "number" }),
 );
-const RetiredPlaylist = lazy(() => Playlist().and({ position: "number" }));
+const RetiredPlaylist = lazy(() =>
+  Playlist().and({ "mapping?": PlaylistMapping(), position: "number" }),
+);
 
 const FILE = "subscriptions.json";
 /** Removed accounts remembered for their history; older ones are forgotten. */
@@ -236,7 +238,13 @@ export function withoutSubscription(
   const account: RetiredAccount =
     entry.kind === "xtream"
       ? { id: entry.id, kind: entry.kind, server: entry.server, username: entry.username }
-      : { id: entry.id, kind: entry.kind, server: entry.server, key: entry.key };
+      : {
+          id: entry.id,
+          kind: entry.kind,
+          server: entry.server,
+          key: entry.key,
+          ...(entry.mapping ? { mapping: entry.mapping } : {}),
+        };
   const others = registry.retired.filter(
     (each) => each.id !== entry.id && !sameAccount(each, entry),
   );

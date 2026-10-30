@@ -258,6 +258,47 @@ describe("a playlist subscription", () => {
     }
   });
 
+  it("keeps a token under a name of its own, and a secret encoded as the link has it, out of saved lists", async () => {
+    // A long value under a name the app doesn't know is taken for a token; `output=ts` is a setting.
+    const signature = "f3a9c0d2e7b14a6c55";
+    const link = `${host.origin}/list.m3u?signature=${signature}&output=ts&token=Ab%2F12-canary`;
+    host.serve([
+      `#EXTINF:-1 tvg-logo="${host.origin}/logo.png?sig=${signature}" group-title="News",News One`,
+      `${host.origin}/live/one.ts`,
+      `#EXTINF:-1 tvg-logo="${host.origin}/ts/logo.png" group-title="News",News Two`,
+      `${host.origin}/live/two.ts`,
+      '#EXTINF:-1 group-title="Films",Harbour Lights',
+      `${host.origin}/films/harbour.mp4`,
+    ]);
+    const app = await launch();
+    const id = (await app.add({ server: link, ...PLAYLIST }))!;
+    await until(
+      () => memory.files.get(`/cache/catalogues/${id}.live.json`) !== undefined,
+      "the saved channels",
+    );
+    const live = memory.files.get(`/cache/catalogues/${id}.live.json`)!;
+    expect(live).toContain(`${host.origin}/ts/logo.png`);
+    expect(live).not.toContain(signature);
+
+    // A channel whose id is the token as the link encodes it leaves Live unsaved.
+    host.serve([
+      '#EXTINF:-1 tvg-id="Ab%2F12-canary" group-title="News",News One',
+      `${host.origin}/live/one.ts`,
+      '#EXTINF:-1 group-title="Films",Harbour Lights',
+      `${host.origin}/films/harbour.mp4`,
+    ]);
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Films"), "movie");
+    await until(
+      () => memory.files.get(`/cache/catalogues/${id}.titles.json`)?.includes("Harbour") === true,
+      "the saved films",
+    );
+    await new Promise((settled) => setTimeout(settled, 200));
+    expect(channelNames(app)).toEqual(["News One"]);
+    for (const [path, text] of memory.files)
+      for (const secret of [signature, "Ab%2F12", "Ab/12"])
+        expect(text, path).not.toContain(secret);
+  });
+
   it("stays the same subscription with a new link, added again, or removed and added back", async () => {
     const app = await launch();
     const id = await app.add({ server: host.link(), ...PLAYLIST });
@@ -287,6 +328,20 @@ describe("a playlist subscription", () => {
     await app.remove(id!, { keepHistory: true });
     expect(ids(app)).toEqual([]);
     await expect(app.add({ server: moved, ...PLAYLIST })).resolves.toBe(id);
+  });
+
+  it("goes by the link the Keychain holds when the app stopped while saving a new one", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    // Stopped after the Keychain took the new link, before the registry did.
+    const moved = host.link("/moved.m3u");
+    memory.keychain.set(`s.${id}`, moved);
+    const again = await launch();
+    await until(() => channelNames(again).length === 6, "the channels after a relaunch");
+    await expect(again.add({ server: moved, ...PLAYLIST })).resolves.toBe(id);
+    expect(ids(again)).toEqual([id]);
+    const other = await again.add({ server: host.link(), ...PLAYLIST });
+    expect(other).not.toBe(id);
   });
 
   it("keeps the channels it showed when a reload fails, and loads them on Try again", async () => {
@@ -349,6 +404,19 @@ describe("mapping a playlist's groups", () => {
       groups: ["Kids"],
       reason: "unmapped",
     });
+  });
+
+  it("keeps its picks when removed with its history and added back", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Films"), "movie");
+    await until(() => titleNames(app, "movie").length === 1, "the mapped films");
+    await app.remove(id, { keepHistory: true });
+
+    const again = await launch();
+    await expect(again.add({ server: host.link(), ...PLAYLIST })).resolves.toBe(id);
+    await until(() => titleNames(again, "movie").length === 1, "the films without a new pick");
+    expect(modes(await again.playlistReport(id))).toMatchObject({ Films: "movie" });
   });
 
   it("skips a group, and gives it back to Live", async () => {

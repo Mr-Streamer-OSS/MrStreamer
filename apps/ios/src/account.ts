@@ -48,7 +48,7 @@ import {
   getMediaPreferences,
   updateChannelPick,
 } from "./media-preferences.ts";
-import { playlistLogin, playlistProvider, type PlaylistAccount } from "./playlist.ts";
+import { playlistProvider, playlistSecrets, type PlaylistAccount } from "./playlist.ts";
 import { keychainSecrets } from "./secrets.ts";
 import {
   currentSource,
@@ -245,13 +245,11 @@ const accountOf = (entry: SubscriptionEntry, secret: string): ProviderAccount =>
 
 /**
  * The login's parts as `[username, ...passwords]`, which failures and saved copies keep out: an
- * account's username and password, or no username and every secret of a playlist's link, with
- * the link itself.
+ * account's username and password, or no username and every secret of a playlist's link
+ * (`playlistSecrets`), with the link itself.
  */
 const loginFor = (entry: SubscriptionEntry, secret: string): readonly string[] =>
-  entry.kind === "xtream"
-    ? [entry.username, secret]
-    : ["", ...playlistLogin(secret).secrets, secret];
+  entry.kind === "xtream" ? [entry.username, secret] : ["", ...playlistSecrets(secret), secret];
 
 /** The registry as last written. */
 let registry: Registry = EMPTY_REGISTRY;
@@ -761,12 +759,43 @@ async function restorePassword(entry: SubscriptionEntry): Promise<void> {
       stopReading(id, undefined, null);
       return;
     }
-    if (password) signIn(now, password, null);
+    if (password) signIn(keyedBy(now, password), password, null);
     else {
       setMember(id, (member) => ({ ...member, needsSecret: true }));
       stopReading(id, undefined, null);
     }
   });
+}
+
+/**
+ * `entry` as the link the Keychain holds names it. An app stopped while a playlist's new link was
+ * saved can leave the Keychain with that link and the registry with the old one's origin and
+ * fingerprint: the registry takes the link's. Unchanged when they agree, when another saved
+ * playlist goes by that link, or when the registry refuses the write.
+ */
+function keyedBy(entry: SubscriptionEntry, link: string): SubscriptionEntry {
+  if (entry.kind !== "m3u") return entry;
+  const key = playlistKey(link);
+  const server = URL.parse(link)?.origin;
+  if (
+    key === entry.key ||
+    !server ||
+    registry.subscriptions.some(
+      (each) => each.id !== entry.id && sameAccount(each, { kind: "m3u", key }),
+    )
+  )
+    return entry;
+  const next = { ...entry, server, key };
+  try {
+    commit({
+      ...registry,
+      subscriptions: registry.subscriptions.map((each) => (each === entry ? next : each)),
+    });
+  } catch {
+    return entry;
+  }
+  syncRoster();
+  return next;
 }
 
 /**
@@ -1189,7 +1218,12 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
             username: identity.username,
             name: name ?? null,
           }
-        : { ...identity, id, name: name ?? null };
+        : {
+            ...identity,
+            id,
+            name: name ?? null,
+            ...(retired?.kind === "m3u" && retired.mapping ? { mapping: retired.mapping } : {}),
+          };
     const first = registry.subscriptions.length === 0;
     try {
       // A retired id's lists and downloads went with its removal, unless refused then.
@@ -1270,9 +1304,11 @@ export async function update(
     if (taken()) throw alreadySaved();
     const before = currentSource(id);
     // A playlist's link and its fingerprint change together: should the registry refuse the new
-    // fingerprint, the link it had goes back to the Keychain.
+    // fingerprint, the link it had goes back to the Keychain. Once the registry has it, the new
+    // link stays, whatever fails after.
     const previous = now.kind === "m3u" && before ? secrets.get(before) : undefined;
     let written = false;
+    let committed = false;
     if (password) {
       await fenceDownloads(id);
       await clearSaved(id);
@@ -1293,11 +1329,13 @@ export async function update(
           ...registry,
           subscriptions: registry.subscriptions.map((each) => (each === now ? next : each)),
         });
+        committed = true;
         syncRoster();
       }
       if (password && status) signIn(next, password, status);
     } catch (cause) {
-      if (written && previous) await keychainSecrets.write(id, previous).catch(() => undefined);
+      if (written && !committed && previous)
+        await keychainSecrets.write(id, previous).catch(() => undefined);
       if (password) await recoverLogin(id, before).catch(() => undefined);
       throw cause;
     }

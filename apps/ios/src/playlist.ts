@@ -339,6 +339,19 @@ export function playlistLogin(...links: string[]): ProviderLogin {
   return { secrets: secrets.filter(Boolean), uncertain };
 }
 
+/** An uncertain value this long is taken for a token: settings, as `output=ts`, are shorter. */
+const TOKEN_LENGTH = 16;
+
+/**
+ * What of a playlist link no saved copy may hold: its login (`playlistLogin`), and each other
+ * query value long enough to be a token under a name of the publisher's own, as a `signature`.
+ * Shorter ones, as `output=ts` or `hd=1`, would be found in ordinary names, and stay out of it.
+ */
+export function playlistSecrets(link: string): string[] {
+  const { secrets, uncertain = [] } = playlistLogin(link);
+  return [...secrets, ...uncertain.filter((value) => value.length >= TOKEN_LENGTH)];
+}
+
 function decoded(text: string): string {
   try {
     return decodeURIComponent(text);

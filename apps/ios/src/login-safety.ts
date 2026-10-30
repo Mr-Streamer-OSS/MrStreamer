@@ -67,12 +67,43 @@ export function exposes(
   return [...parts, ...next].some((part) => part !== null && exposes(part, login, layers - 1));
 }
 
-/** Whether a text within `value`, a copied row, holds any of `passwords`. Artwork kept has none. */
+/**
+ * Whether a text within `value`, a copied row, holds any of `passwords`, as written or decoded as
+ * percent or form encoding ("+" a space) spells it, and so on for `LAYERS` more decodings. Text that
+ * still decodes after the last counts as holding one. Artwork kept has none.
+ */
 export function holds(value: unknown, passwords: readonly string[]): boolean {
-  if (typeof value === "string") return passwords.some((each) => value.includes(each));
+  if (typeof value === "string") return passwords.length > 0 && textHolds(value, passwords);
   return (
     typeof value === "object" &&
     value !== null &&
     Object.values(value).some((each: unknown) => holds(each, passwords))
   );
 }
+
+function textHolds(text: string, passwords: readonly string[]): boolean {
+  const forms = new Set([text]);
+  for (let layer = [text], times = 0; ; times++) {
+    if (layer.some((form) => passwords.some((each) => form.includes(each)))) return true;
+    const next = new Set<string>();
+    for (const form of layer) {
+      for (const read of [unescaped(form), unescaped(form.replaceAll("+", " "))])
+        if (!forms.has(read)) next.add(read);
+    }
+    if (next.size === 0) return false;
+    if (times === LAYERS) return true;
+    for (const form of next) forms.add(form);
+    layer = [...next];
+  }
+}
+
+const utf8 = new TextDecoder("utf-8", { ignoreBOM: true, fatal: false });
+
+/**
+ * `text` with each run of percent escapes read as UTF-8, as prose holds them: bytes that are no
+ * UTF-8 read as U+FFFD, and a "%" that escapes nothing stays, as in "100%".
+ */
+const unescaped = (text: string) =>
+  text.replace(/(?:%[\da-f]{2})+/gi, (run) =>
+    utf8.decode(Uint8Array.from(run.slice(1).split("%"), (hex) => Number.parseInt(hex, 16))),
+  );
