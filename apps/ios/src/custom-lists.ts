@@ -227,7 +227,7 @@ function stored(): readonly StoredList[] {
   const from = keptNow();
   if (from.kind === "foreign") {
     throw new AppFailure({
-      kind: "invalid-input",
+      kind: "unexpected",
       detail: "These lists were saved by a newer version of the app. Nothing was changed.",
     });
   }
