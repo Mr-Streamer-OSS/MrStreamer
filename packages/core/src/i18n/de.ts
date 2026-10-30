@@ -1336,8 +1336,6 @@ export const de: Translation = {
   "Recordings could not be read.": "Aufnahmen konnten nicht gelesen werden.",
   "Recordings could not be saved.": "Aufnahmen konnten nicht gespeichert werden.",
   "Choose a stop time within 12 hours.": "Wähle ein Ende innerhalb von 12 Stunden.",
-  "The recording couldn't be written: {detail}":
-    "Die Aufnahme konnte nicht geschrieben werden: {detail}",
   "Stop the recording before deleting it.": "Beende die Aufnahme, bevor du sie löschst.",
   "It is still recording.": "Die Aufnahme läuft noch.",
   Recordings: "Aufnahmen",
@@ -1369,8 +1367,6 @@ export const de: Translation = {
   "Ends 2 min after the guide time.": "Endet 2 Min. nach der Zeit im Programm.",
   "Stop playing and record": "Wiedergabe beenden und aufnehmen",
   "Start recording": "Aufnahme starten",
-  "The recording couldn't be deleted: {detail}":
-    "Die Aufnahme konnte nicht gelöscht werden: {detail}",
   "A recording uses this subscription's connection. Stop it in Recordings to watch.":
     "Eine Aufnahme nutzt die Verbindung dieses Abos. Beende sie unter Aufnahmen, um zu schauen.",
   "Stop recording {title}": "Aufnahme von {title} beenden",
@@ -1379,4 +1375,7 @@ export const de: Translation = {
   "The channel has no stream right now.": "Der Sender hat gerade keinen Stream.",
   "This channel's stream can't be recorded.":
     "Der Stream dieses Senders kann nicht aufgenommen werden.",
+  "The recording couldn't be written to this computer.":
+    "Die Aufnahme konnte nicht auf diesem Computer gespeichert werden.",
+  "The recording couldn't be deleted.": "Die Aufnahme konnte nicht gelöscht werden.",
 };

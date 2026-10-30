@@ -1326,7 +1326,6 @@ export const nl: Translation = {
   "Recordings could not be read.": "Opnames konden niet worden gelezen.",
   "Recordings could not be saved.": "Opnames konden niet worden opgeslagen.",
   "Choose a stop time within 12 hours.": "Kies een eindtijd binnen 12 uur.",
-  "The recording couldn't be written: {detail}": "De opname kon niet worden geschreven: {detail}",
   "Stop the recording before deleting it.": "Stop de opname voordat je hem verwijdert.",
   "It is still recording.": "De opname loopt nog.",
   Recordings: "Opnames",
@@ -1358,7 +1357,6 @@ export const nl: Translation = {
   "Ends 2 min after the guide time.": "Stopt 2 min na de tijd in de gids.",
   "Stop playing and record": "Stop afspelen en neem op",
   "Start recording": "Opname starten",
-  "The recording couldn't be deleted: {detail}": "De opname kon niet worden verwijderd: {detail}",
   "A recording uses this subscription's connection. Stop it in Recordings to watch.":
     "Een opname gebruikt de verbinding van dit abonnement. Stop hem bij Opnames om te kijken.",
   "Stop recording {title}": "Opname van {title} stoppen",
@@ -1366,4 +1364,7 @@ export const nl: Translation = {
     "De aanbieder weigerde de stream. Misschien gebruikt een ander apparaat je verbinding.",
   "The channel has no stream right now.": "Het kanaal heeft nu geen stream.",
   "This channel's stream can't be recorded.": "De stream van dit kanaal kan niet worden opgenomen.",
+  "The recording couldn't be written to this computer.":
+    "De opname kon niet op deze computer worden opgeslagen.",
+  "The recording couldn't be deleted.": "De opname kon niet worden verwijderd.",
 };

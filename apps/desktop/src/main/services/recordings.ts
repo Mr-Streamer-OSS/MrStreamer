@@ -300,9 +300,8 @@ function make(deps: RecordingsDeps) {
               : new Failed({
                   error: {
                     kind: "unexpected",
-                    detail: t("The recording couldn't be written: {detail}", {
-                      detail: cause instanceof Error ? cause.message : String(cause),
-                    }),
+                    // The system's own words name paths and codes, not what to do.
+                    detail: t("The recording couldn't be written to this computer."),
                   },
                 }),
         }).pipe(
@@ -434,13 +433,11 @@ function make(deps: RecordingsDeps) {
           // delete again, and a record whose file went lists it as missing until it is deleted.
           yield* Effect.tryPromise({
             try: () => rm(join(root, id), { recursive: true, force: true }),
-            catch: (cause) =>
+            catch: () =>
               new Failed({
                 error: {
                   kind: "unexpected",
-                  detail: t("The recording couldn't be deleted: {detail}", {
-                    detail: cause instanceof Error ? cause.message : String(cause),
-                  }),
+                  detail: t("The recording couldn't be deleted."),
                 },
               }),
           });

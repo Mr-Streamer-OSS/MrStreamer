@@ -152,7 +152,10 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
             <span aria-hidden className="size-1.5 flex-none rounded-full bg-destructive" />
           )}
           <span className="flex-none font-semibold text-foreground">{word}</span>
-          <span className={cn("truncate", failure ? "text-destructive" : "text-muted-foreground")}>
+          <span
+            title={failure ?? undefined}
+            className={cn("truncate", failure ? "text-destructive" : "text-muted-foreground")}
+          >
             {failure ?? `${minutes}. ${reason}`}
           </span>
         </span>
@@ -160,7 +163,10 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
       <span className="hidden min-w-0 flex-1 items-center gap-2 text-[0.8125rem] lg:flex">
         {active && <span aria-hidden className="size-2 flex-none rounded-full bg-destructive" />}
         <span className="flex-none font-semibold text-foreground">{word}</span>
-        <span className={cn("truncate", failure ? "text-destructive" : "text-muted-foreground")}>
+        <span
+          title={failure ?? undefined}
+          className={cn("truncate", failure ? "text-destructive" : "text-muted-foreground")}
+        >
           {failure ?? reason}
         </span>
       </span>

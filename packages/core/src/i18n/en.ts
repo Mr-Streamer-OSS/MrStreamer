@@ -1301,7 +1301,6 @@ export const en = {
   "Recordings could not be read.": "Recordings could not be read.",
   "Recordings could not be saved.": "Recordings could not be saved.",
   "Choose a stop time within 12 hours.": "Choose a stop time within 12 hours.",
-  "The recording couldn't be written: {detail}": "The recording couldn't be written: {detail}",
   "Stop the recording before deleting it.": "Stop the recording before deleting it.",
   "It is still recording.": "It is still recording.",
   Recordings: "Recordings",
@@ -1333,7 +1332,6 @@ export const en = {
   "Ends 2 min after the guide time.": "Ends 2 min after the guide time.",
   "Stop playing and record": "Stop playing and record",
   "Start recording": "Start recording",
-  "The recording couldn't be deleted: {detail}": "The recording couldn't be deleted: {detail}",
   "A recording uses this subscription's connection. Stop it in Recordings to watch.":
     "A recording uses this subscription's connection. Stop it in Recordings to watch.",
   "Stop recording {title}": "Stop recording {title}",
@@ -1341,4 +1339,7 @@ export const en = {
     "The provider refused the stream. Another device may be using your connection.",
   "The channel has no stream right now.": "The channel has no stream right now.",
   "This channel's stream can't be recorded.": "This channel's stream can't be recorded.",
+  "The recording couldn't be written to this computer.":
+    "The recording couldn't be written to this computer.",
+  "The recording couldn't be deleted.": "The recording couldn't be deleted.",
 } as const satisfies Readonly<Record<string, string | Plural>>;
