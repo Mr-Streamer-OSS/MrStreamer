@@ -16,7 +16,8 @@ import { native } from "./native-files.ts";
 // - Every ending is a receipt under the next sequence, kept until acknowledged. A pause keeps the
 //   same authorization runnable; a removal ends it cancelled; a revoke ends its source's with a
 //   refresh; a resume the server refuses starts once more from nothing, with no receipt, after
-//   its resume data is deleted. At most 32 unfinished authorizations the viewer doesn't hold, and 128 with receipts.
+//   its resume data is deleted. At most 32 unfinished authorizations the viewer doesn't hold,
+//   and 127 with receipts: the pump admits only below 128, and held ones never end by themselves.
 // - A removal or revoke is fenced by its ledger write, or when the ledger refuses (`faults`), by
 //   deleting its request items; neither waits for its task to end.
 // - The viewer's hold pauses its authorization's task, keeping its resume data, and keeps it from
@@ -908,8 +909,8 @@ const module = {
       throw refused("ERR_DOWNLOADS_OBSOLETE");
     }
     const { open, receipts } = load();
-    // Held ones wait outside the window, within the queue's capacity, leaving the pump the one
-    // place it needs to admit anything.
+    // Held ones wait outside the window. The pump admits only below 128 and held ones never end
+    // by themselves, so a reservation stops one short of it.
     const waiting = [...background.grants.values()].filter(
       (grant) => grant.state !== "terminal" && !grant.held,
     ).length;

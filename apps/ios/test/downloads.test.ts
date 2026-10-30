@@ -1431,7 +1431,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const film = await app.addDownload(movieRef(a));
     const next = await app.addDownload(movieRef(a, otherMovie().id));
     await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
-    await app.pauseDownload(film.id);
+    await expect(app.pauseDownload(film.id)).resolves.toBe("closed");
     // Answered once its request actually ended: the next one's waits its second of grace.
     expect(native.open).toBe(0);
     expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
@@ -1442,6 +1442,8 @@ describe("downloads", { timeout: 30_000 }, () => {
     app = await launch();
     await sleep(1_500);
     expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+    // Its bytes still count among what the downloads take.
+    expect(app.downloadList().bytes).toBe(20_000 + (mediaFile(next.id)?.size ?? NaN));
     expect(background.events.filter((each) => each === `start:${film.id}`)).toHaveLength(1);
     one.stallMovieFile(movie().id, 0, 0);
     native.requests.length = 0;
@@ -1449,6 +1451,22 @@ describe("downloads", { timeout: 30_000 }, () => {
     await until(() => isComplete(app, film.id), "the resumed copy");
     expect(native.requests.map((each) => each.range)).toEqual(["bytes=20000-"]);
     expect(mediaFile(film.id)?.size).toBe(fixture(movie().fixture!).length);
+  });
+
+  it("keeps a pause whose request didn't end in time, saying it is still closing", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    const { transfers } = await import("../src/download-task.ts");
+    const drain = vi.spyOn(transfers, "drainDownload").mockRejectedValueOnce(new Error("busy"));
+    onTestFinished(() => drain.mockRestore());
+    await expect(app.pauseDownload(film.id)).resolves.toBe("closing");
+    expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+    expect(doc().items[0]).toMatchObject({ id: film.id, paused: true });
+    expect([...background.grants.values()].find((grant) => grant.id === film.id)?.held).toBe(true);
+    await until(() => native.open === 0, "the transfer to pause");
   });
 
   it("pauses at the next launch a transfer whose pause was written down but never reached the native side", async () => {
@@ -1524,11 +1542,42 @@ describe("downloads", { timeout: 30_000 }, () => {
     await until(() => receivedOf(app, running.id) === 5_000, "the next transfer to stall");
     await app.moveDownload(show.id, -1);
     expect(app.downloadList().items.map((item) => item.id)).toEqual([
-      show.id,
       running.id,
+      show.id,
       paused.id,
     ]);
     expect(statusOf(app, running.id)?.kind).toBe("transferring");
+  });
+
+  it("leads with a transfer the native side started before a Move this side asked passed it", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    const { series, first } = episode();
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    one.stallMovieFile(otherMovie().id, 5_000, 60_000);
+    const paused = await app.addDownload(movieRef(a));
+    const started = await app.addDownload(movieRef(a, otherMovie().id));
+    const show = await app.addDownload({
+      kind: "episode",
+      subscriptionId: a,
+      id: String(first.id),
+      seriesId: String(series.id),
+      season: 1,
+      episode: first.number ?? 1,
+    });
+    await until(() => background.open(show.id).length === 1, "the last one authorized");
+    await until(() => receivedOf(app, paused.id) === 20_000, "the first transfer to stall");
+    await app.pauseDownload(paused.id);
+    // Admitted natively as the pause ended, before this side heard it start.
+    expect(statusOf(app, started.id)?.kind).toBe("queued");
+    await app.moveDownload(started.id, 1);
+    await until(() => receivedOf(app, started.id) === 5_000, "the started transfer to stall");
+    expect(app.downloadList().items.map((item) => item.id)).toEqual([
+      started.id,
+      paused.id,
+      show.id,
+    ]);
+    expect(statusOf(app, started.id)?.kind).toBe("transferring");
   });
 
   it("starts a paused download over under its changed login rather than resume the old login's bytes", async () => {

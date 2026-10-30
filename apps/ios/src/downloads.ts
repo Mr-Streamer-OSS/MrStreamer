@@ -516,18 +516,23 @@ function view(): DownloadList {
   const names = new Map(members().map((member) => [member.entry.id, member.label]));
   const busy = borrowed();
   const visible = doc.items.filter((record) => !excludedDownload(record));
+  // The transfer leads, as the native side runs it, wherever a Move that raced its start put it.
+  const leads = (record: Stored) =>
+    record.state === "queued" && !record.paused && transferring(record) !== null;
   const queue = visible.filter((record) => record.state !== "complete");
   const copies = visible
     .filter((record) => record.state === "complete")
     .toSorted((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
   return {
-    items: [...queue, ...copies].map((record) => viewOf(record, names, busy)),
+    items: [...queue.filter(leads), ...queue.filter((record) => !leads(record)), ...copies].map(
+      (record) => viewOf(record, names, busy),
+    ),
     series: {},
+    // Partial ones included: a waiting or paused one keeps the bytes it received.
     bytes: doc.items.reduce((sum, record) => {
-      const moving = record.state === "queued" ? transferring(record) : null;
-      return (
-        sum + (moving ? moving.received : record.state === "complete" ? (record.size ?? 0) : 0)
-      );
+      if (record.state === "complete") return sum + (record.size ?? 0);
+      if (record.state !== "queued") return sum;
+      return sum + (transferring(record)?.received ?? record.received);
     }, 0),
     free: freeBytes(),
     ended,
@@ -1857,30 +1862,40 @@ const unfinished = (record: Stored | undefined): record is Stored =>
   record?.state === "queued" && standing(record) && !excludedDownload(record);
 
 /**
+ * What Pause did: `closed` once no request of the download is left; `closing` when the pause is
+ * kept but its request hadn't ended in time, which still admits nothing else meanwhile and ends
+ * natively; `unchanged` when there was nothing to pause.
+ */
+export type Paused = "closed" | "closing" | "unchanged";
+
+/**
  * Pauses a queued or transferring download where it is: written on its record, then held on the
  * native side, so neither the queue nor a relaunch starts it again until it is resumed. Resolves
- * once its request actually ended, or the native side stopped waiting for it, which still admits
- * nothing else meanwhile. Rejects, leaving it as it was, when the native side can't keep the
- * pause.
+ * once its request ended or the wait for it did. Rejects, leaving it as it was, when the native
+ * side can't keep the pause.
  */
-export async function pauseDownload(id: string): Promise<void> {
+export async function pauseDownload(id: string): Promise<Paused> {
   const record = find(id);
-  if (!unfinished(record) || record.paused) return;
+  if (!unfinished(record) || record.paused) return "unchanged";
   update(id, (latest) => ({ ...latest, paused: true }));
   tell();
   const bound = boundOf(record);
-  if (!bound) return;
   try {
-    await transfers.holdAuthorization(bound.authorization, true);
+    if (bound) await transfers.holdAuthorization(bound.authorization, true);
   } catch (cause) {
     // Ended meanwhile: its receipt says what that means, and it stays paused if it stays queued.
-    if (refusalOf(cause) === "obsolete") return;
-    update(id, withoutPause);
-    tell();
-    throw new AppFailure({ kind: "unexpected", detail: "The pause couldn't be kept." });
+    if (refusalOf(cause) !== "obsolete") {
+      update(id, withoutPause);
+      tell();
+      throw new AppFailure({ kind: "unexpected", detail: "The pause couldn't be kept." });
+    }
   }
-  await transfers.drainDownload(id).catch(() => undefined);
+  const closed = await transfers.drainDownload(id).then(
+    () => "closed" as const,
+    () => "closing" as const,
+  );
   tell();
+  return closed;
 }
 
 /**
@@ -1908,7 +1923,8 @@ export async function resumeDownload(id: string): Promise<void> {
 
 /**
  * Waiting its turn, paused or not, as its status says: what Move passes. The transfer under way
- * keeps its place; one paused while its request is still closing shows paused, and moves.
+ * stays first; one paused while its request is still closing shows paused, and moves. One the
+ * native side started before this side heard moves too, and leads the list once heard.
  */
 const waitingTurn = (record: Stored) =>
   unfinished(record) && (record.paused === true || transferring(record) === null);

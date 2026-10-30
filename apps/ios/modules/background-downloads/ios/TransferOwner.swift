@@ -831,8 +831,8 @@ final class TransferOwner: NSObject, URLSessionDownloadDelegate {
       self.commit({ ledger in
         guard ledger.sources[source] == enabled, !self.gated(source) else { return false }
         let load = ledger.load
-        // Held ones wait outside the window, within the queue's capacity, leaving the pump the
-        // one place it needs to admit anything.
+        // Held ones wait outside the window. The pump admits only below capacity and held ones
+        // never end by themselves, so a reservation stops one short of it.
         let waiting = ledger.authorizations.values.filter { $0.state != .terminal && $0.held != true }
         guard waiting.count < Self.window,
           load.authorizations + load.receipts + 1 < Self.capacity
