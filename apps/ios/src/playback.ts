@@ -1378,8 +1378,9 @@ async function admit(owned: NonNullable<typeof current>) {
   if (!sourceStands(owned) || !attended() || held !== null) return terminal(owned);
   const resource = makeResource(owned.choice, owned.epoch, true);
   owned.resource = resource;
-  // A recording reconnects where it got to; a channel plays live again.
-  if (!owned.item.live && owned.stoppedAt !== null) owned.seek = owned.stoppedAt;
+  // A recording plays on where it got to, or where it was to start, even from another stream
+  // whose recording starts elsewhere; a channel plays live again.
+  if (owned.item.past) owned.seek = owned.stoppedAt ?? owned.options.from ?? 0;
   owned.loaded = false;
   owned.epoch.playingSince = null;
   owned.epoch.playedMs = 0;
@@ -1603,31 +1604,35 @@ export function togglePause() {
   attentionChanged();
 }
 
+/** Moves by `seconds`; a programme from catch-up, within the programme. */
 export function seekBy(seconds: number) {
-  player().seekBy(seconds);
-  endAtLength(state.get().phase.kind === "playing");
+  if (!current?.item.past) return player().seekBy(seconds);
+  const at = player().currentTime - current.offset + seconds;
+  seekTo(Math.min(length.get(), at));
 }
 
 /** Moves a title to `seconds` from its start. */
 export function seekTo(seconds: number) {
-  player().currentTime = Math.max(0, seconds) + (current?.offset ?? 0);
-  clock.set(Math.max(0, seconds));
-  endAtLength(state.get().phase.kind === "playing");
+  const at = Math.max(0, seconds);
+  player().currentTime = at + (current?.offset ?? 0);
+  clock.set(at);
+  endAtLength(state.get().phase.kind === "playing", at);
 }
 
 /** Pauses a programme from catch-up at its end, which no event of the player's marks. */
 let ending: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Times the pause at a programme's end from where it is, while it plays: told each time it starts
- * or stops playing and after each seek. A timer that fires early, after a seek back, times again.
+ * Times the pause at a programme's end from where it is, or `at` where a seek still lands, while
+ * it plays: told each time it starts or stops playing and after each seek. A timer that fires
+ * early, as after a seek back, times again from where it is then.
  */
-function endAtLength(playing: boolean) {
+function endAtLength(playing: boolean, at?: number) {
   if (ending) clearTimeout(ending);
   ending = null;
   const owned = current;
   if (!playing || !owned?.item.past) return;
-  const left = () => length.get() - (player().currentTime - owned.offset);
+  const left = (from = player().currentTime - owned.offset) => length.get() - from;
   ending = setTimeout(
     () => {
       ending = null;
@@ -1635,7 +1640,7 @@ function endAtLength(playing: boolean) {
       if (left() > 0.5) endAtLength(true);
       else player().pause();
     },
-    Math.max(0, left()) * 1000,
+    Math.max(0, left(at)) * 1000,
   );
 }
 

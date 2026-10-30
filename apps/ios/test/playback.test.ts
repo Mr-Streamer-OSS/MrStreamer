@@ -234,6 +234,12 @@ describe("a programme from catch-up", () => {
       await tick();
     });
     expect(port.currentTime).toBe(30);
+    // Back from the programme's start stays at its start, short of the programme before.
+    port.seekBy.mockImplementationOnce((seconds: number) => {
+      port.currentTime += seconds;
+    });
+    playback.seekBy(-10);
+    expect(port.currentTime).toBe(30);
     // The player marks no moment while it plays on: the end is timed from where it is.
     await React.act(async () => {
       port.currentTime = 30 + 3500;
@@ -250,6 +256,28 @@ describe("a programme from catch-up", () => {
       await tick();
     });
     await until(() => port.pause.mock.calls.length > 0);
+  });
+
+  it("starts the next stream at the programme's start when one fails before it plays", async () => {
+    await connect([3, 3, 3]);
+    archiveStream.mockImplementation(async (id, window) => ({
+      url: `archive:${id}:${window.start}`,
+      format: "hls",
+      start: window.start - 30_000,
+    }));
+    await play(aired(2 * HOUR));
+    await React.act(async () => {
+      port.ready();
+      port.failure({ kind: "missing", evidence: null });
+      await tick();
+    });
+    await until(() => opened.length === 2);
+    port.currentTime = 0;
+    await React.act(async () => {
+      port.ready();
+      await tick();
+    });
+    expect(port.currentTime).toBe(30);
   });
 
   it("plays the accepted stream where it keeps the programme", async () => {
