@@ -549,6 +549,8 @@ function make(deps: RecordingsDeps) {
      * start and then by when it was saved, takes a connection first.
      */
     const startingOn = new Set<string>();
+    /** When this run of the app began checking schedules. */
+    const started = Date.now();
     /** What a check couldn't write, to write again at the next. */
     const unsaved = { recordings: false, schedules: false };
     const occurrenceKey = (id: string, occurrence: Occurrence) => `${id}@${occurrence.start}`;
@@ -790,9 +792,11 @@ function make(deps: RecordingsDeps) {
         );
         const hold = seen?.hold;
         found.set(schedule.id, hold ?? null);
+        // While it records, its plan stays as the recording was started: a guide that moves the
+        // end then moves it for no recording.
         let kept: KeptSchedule = {
           ...schedule,
-          plan: seen?.plan ?? schedule.plan,
+          plan: (!recordingOf(schedule.id) && seen?.plan) || schedule.plan,
         };
         // Each occurrence since it was last settled, up to now. One that ended is settled, as
         // recorded, missed or let go; one on now starts, unless it is held or one records.
@@ -833,7 +837,8 @@ function make(deps: RecordingsDeps) {
           if (made || reason === "starting" || recordingOf(kept.id)) continue;
           if (hold) why.set(key, "held");
           else if (hold === undefined) {
-            if (reason === undefined) why.set(key, "unread");
+            // Not for a time that began before the app started: that one was missed while away.
+            if (reason === undefined && occurrence.start >= started) why.set(key, "unread");
             retry = true;
           } else if (startingOn.has(kept.plan.channel.subscriptionId)) retry = true;
           // Busy asks again soon; a failed start, which may not change, once a minute.

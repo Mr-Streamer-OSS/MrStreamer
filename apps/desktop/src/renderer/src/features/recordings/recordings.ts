@@ -99,7 +99,8 @@ export function coverage(
   const from = recording.scheduled?.from ?? recording.start;
   const planned = Math.max(1, Math.round((recording.stop - from) / MINUTE_MS));
   if (recording.status.kind === "missed") return { captured: 0, planned, missed: planned };
-  const missed = Math.min(planned, Math.max(0, Math.round((recording.start - from) / MINUTE_MS)));
+  // Whole minutes, as main counts a start within one as on time.
+  const missed = Math.min(planned, Math.max(0, Math.floor((recording.start - from) / MINUTE_MS)));
   const until =
     recording.status.kind === "complete"
       ? recording.stop
