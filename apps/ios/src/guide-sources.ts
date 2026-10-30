@@ -126,33 +126,6 @@ export function createGuides(
     for (let next = 2; taken.has(id); next++) id = `${base}-${next}`;
     return id;
   };
-  /** Adds `link` where `at` stands, else last, and downloads it; replaces nothing. */
-  const added = async (
-    link: string,
-    name: string | null,
-    at = saved.guides.length,
-  ): Promise<GuideRefusal | null> => {
-    const url = URL.parse(link.trim());
-    if (!url || (url.protocol !== "https:" && url.protocol !== "http:")) return "address";
-    const key = sha256Hex(url.href);
-    if (saved.guides.some((each) => each.key === key)) return "duplicate";
-    const id = newId();
-    try {
-      commit({ ...saved, pendingSecrets: [...saved.pendingSecrets, id] });
-      await secrets.write(id, url.href);
-      commit({
-        ...saved,
-        guides: saved.guides.toSpliced(at, 0, { id, origin: url.origin, name, key }),
-        pendingSecrets: saved.pendingSecrets.filter((each) => each !== id),
-      });
-    } catch {
-      return "saving";
-    }
-    origins.set(id, originFor(url.href));
-    publish();
-    void owner.attach(id);
-    return null;
-  };
   /** Removes `id`'s link from the Keychain, then from the pending ones; the next launch retries. */
   const dropSecret = (id: string) =>
     secrets
@@ -162,10 +135,53 @@ export function createGuides(
       )
       .catch(() => undefined);
   /**
-   * Takes `id` out of the file and the owner, whose work on it is cancelled and closed before its
-   * guide is erased, then its link out of the Keychain. A guide or link the disk or Keychain
-   * keeps goes at the next launch.
+   * Cancels and closes the owner's work on `id`, already out of the file and the owner's guides,
+   * before its guide is erased, then takes its link out of the Keychain. A guide or link the disk
+   * or Keychain keeps goes at the next launch.
    */
+  const retire = async (id: string) => {
+    await owner.forget(id);
+    await dropSecret(id);
+  };
+  /**
+   * Adds `link` last, or in the place of guide `replacing`, which goes in the same write, and
+   * downloads it.
+   */
+  const added = async (
+    link: string,
+    name: string | null,
+    replacing?: string,
+  ): Promise<GuideRefusal | null> => {
+    const url = URL.parse(link.trim());
+    if (!url || (url.protocol !== "https:" && url.protocol !== "http:")) return "address";
+    const key = sha256Hex(url.href);
+    // A guide whose link the Keychain lost takes the same link back.
+    if (saved.guides.some((each) => each.key === key && each.id !== replacing)) return "duplicate";
+    const at = replacing ? saved.guides.findIndex((each) => each.id === replacing) : -1;
+    const id = newId();
+    try {
+      commit({ ...saved, pendingSecrets: [...saved.pendingSecrets, id] });
+      await secrets.write(id, url.href);
+      const guide = { id, origin: url.origin, name, key };
+      commit({
+        ...saved,
+        guides: at === -1 ? [...saved.guides, guide] : saved.guides.toSpliced(at, 1, guide),
+        pendingSecrets: [
+          ...saved.pendingSecrets.filter((each) => each !== id),
+          ...(replacing ? [replacing] : []),
+        ],
+      });
+    } catch {
+      return "saving";
+    }
+    origins.set(id, originFor(url.href));
+    if (replacing) origins.delete(replacing);
+    publish();
+    void owner.attach(id);
+    if (replacing) await retire(replacing);
+    return null;
+  };
+  /** Takes `id` out of the file and the owner, then retires it. */
   const removed = async (id: string) => {
     if (!saved.guides.some((each) => each.id === id)) return;
     commit({
@@ -175,8 +191,7 @@ export function createGuides(
     });
     origins.delete(id);
     publish();
-    await owner.forget(id);
-    await dropSecret(id);
+    await retire(id);
   };
   return {
     useLinks: () => useStore(shown),
@@ -216,16 +231,13 @@ export function createGuides(
         return added(link, name.trim() || null);
       }),
     /**
-     * Gives guide `id` a new link: a new guide in its place, with its name, and `id` removed as
-     * `remove` does, so nothing of the old link's guide or work stays.
+     * Gives guide `id` a new link, its own one again included: a new guide in its place, with its
+     * name, and `id` removed as `remove` does, so nothing of the old link's guide or work stays.
      */
     replace: (id: string, link: string) =>
       serially(async (): Promise<GuideRefusal | null> => {
-        const at = saved.guides.findIndex((each) => each.id === id);
-        if (at === -1) return null;
-        const refused = await added(link, saved.guides[at]!.name, at);
-        if (!refused) await removed(id);
-        return refused;
+        const old = saved.guides.find((each) => each.id === id);
+        return old ? added(link, old.name, id) : null;
       }),
     remove: (id: string) => serially(() => removed(id)),
     refresh: (id: string) => owner.refresh(id),

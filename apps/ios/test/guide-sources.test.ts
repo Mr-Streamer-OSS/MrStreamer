@@ -128,6 +128,14 @@ describe("external guides", () => {
     await flush();
     expect(after.guides.links().map((each) => each.locked)).toEqual([true, false]);
     expect(after.prepared).toEqual(["https://other.test/epg.xml"]);
+    // Its own link again unlocks it, in its place.
+    expect(await after.guides.replace(lost.id, LINK)).toBeNull();
+    await flush();
+    expect(after.guides.links().map((each) => [each.origin, each.locked])).toEqual([
+      ["https://guide.test", false],
+      ["https://other.test", false],
+    ]);
+    expect(after.prepared.at(-1)).toBe(LINK);
   });
 
   it("starts empty from a guides file it can't read", () => {
