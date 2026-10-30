@@ -258,6 +258,22 @@ describe("a playlist subscription", () => {
     }
   });
 
+  it("saves lists that name its user within a longer text, but no address that holds it", async () => {
+    host.serve([
+      `#EXTINF:-1 tvg-logo="${host.origin}/logo.png?u=tv" group-title="News",tv news`,
+      `${host.origin}/live/one.ts`,
+    ]);
+    const app = await launch();
+    const id = (await app.add({ server: `${host.link()}&user=tv`, ...PLAYLIST }))!;
+    await until(
+      () => memory.files.get(`/cache/catalogues/${id}.live.json`) !== undefined,
+      "the saved channels",
+    );
+    const live = memory.files.get(`/cache/catalogues/${id}.live.json`)!;
+    expect(live).toContain("tv news");
+    expect(live).not.toContain("u=tv");
+  });
+
   it("keeps a token under a name of its own, and a secret encoded as the link has it, out of saved lists", async () => {
     // A long value under a name the app doesn't know is taken for a token; `output=ts` is a setting.
     const signature = "f3a9c0d2e7b14a6c55";
@@ -463,6 +479,51 @@ describe("mapping a playlist's groups", () => {
       error: { kind: "unexpected" },
     });
     expect(registry().playlists[0].mapping).toBeUndefined();
+  });
+});
+
+describe("a playlist's guide", () => {
+  /** The adapter over an https link whose playlist names `guide`, and every address it asked. */
+  async function guideOf(link: string, guide: string) {
+    const asked: string[] = [];
+    const { playlistProvider } = await import("../src/playlist.ts");
+    const provider = playlistProvider(
+      { link },
+      {
+        userAgent: "test",
+        fetch: async (input) => {
+          asked.push(String(input));
+          return new Response(`#EXTM3U x-tvg-url="${guide}"\n`);
+        },
+      },
+    );
+    return { provider, asked };
+  }
+
+  it("is not asked over http with the login of an https link", async () => {
+    const guide = `http://guide.example/guide.xml?token=${TOKEN}`;
+    const { provider, asked } = await guideOf(`https://tv.example/list.m3u?token=${TOKEN}`, guide);
+    await expect(provider.liveGuideRequest!()).rejects.toMatchObject({
+      error: { kind: "unreachable", server: "https://tv.example" },
+    });
+    await expect(provider.liveGuide!()).rejects.toMatchObject({ error: { kind: "unreachable" } });
+    expect(asked.some((each) => each.startsWith("http://guide.example"))).toBe(false);
+  });
+
+  it("is asked where it is when it holds no login, or the link is http too", async () => {
+    for (const [link, guide] of [
+      [`https://tv.example/list.m3u?token=${TOKEN}`, "http://guide.example/guide.xml"],
+      [
+        `http://tv.example/list.m3u?token=${TOKEN}`,
+        `http://guide.example/guide.xml?token=${TOKEN}`,
+      ],
+    ] as const) {
+      const { provider } = await guideOf(link, guide);
+      await expect(provider.liveGuideRequest!()).resolves.toMatchObject({
+        kind: "request",
+        url: guide,
+      });
+    }
   });
 });
 

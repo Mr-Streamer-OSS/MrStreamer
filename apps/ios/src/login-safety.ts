@@ -10,7 +10,7 @@ const LAYERS = 4;
 
 /**
  * A subscription's login as `exposes` looks for it: an Xtream account's username and password,
- * or a playlist link's secrets, with no username.
+ * or the user and secrets a playlist link names.
  */
 export type Login = { readonly username: string; readonly passwords: readonly string[] };
 
@@ -86,7 +86,8 @@ function textHolds(text: string, passwords: readonly string[]): boolean {
   for (let layer = [text], times = 0; ; times++) {
     if (layer.some((form) => passwords.some((each) => form.includes(each)))) return true;
     const next = new Set<string>();
-    for (const form of layer) {
+    // Only text with an escape or a "+" reads otherwise decoded.
+    for (const form of layer.filter((each) => /[%+]/.test(each))) {
       for (const read of [unescaped(form), unescaped(form.replaceAll("+", " "))])
         if (!forms.has(read)) next.add(read);
     }

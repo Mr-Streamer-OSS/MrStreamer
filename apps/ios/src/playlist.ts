@@ -10,6 +10,7 @@ import {
 } from "@mrstreamer/core/playlist/import";
 import { m3uReader, type PlaylistEntry } from "@mrstreamer/core/playlist/m3u";
 import {
+  nextProviderRedirect,
   providerFetch,
   type GuideRequest,
   type Provider,
@@ -192,12 +193,32 @@ export function playlistProvider(
     return stream;
   }
 
+  /**
+   * The guide the playlist names, held to the link as a redirect from it is: an https link's
+   * login goes to no http guide (`nextProviderRedirect`), as an HLS playlist's segments are held
+   * to its address.
+   */
   async function guideRequest(signal?: AbortSignal): Promise<GuideRequest> {
     const { playlist, guideUrl } = await firstLine(signal);
     if (!playlist) throw notAPlaylist(origin);
-    return guideUrl
-      ? { kind: "request", url: guideUrl, headers: { "User-Agent": options.userAgent } }
-      : { kind: "none" };
+    if (!guideUrl) return { kind: "none" };
+    let url: string;
+    try {
+      url = nextProviderRedirect({
+        original: account.link,
+        current: account.link,
+        location: guideUrl,
+        followed: 0,
+        login: playlistLogin(account.link),
+      });
+    } catch {
+      throw new AppFailure({
+        kind: "unreachable",
+        server: origin,
+        detail: "The playlist names an unencrypted guide address with your login in it.",
+      });
+    }
+    return { kind: "request", url, headers: { "User-Agent": options.userAgent } };
   }
 
   return {
@@ -342,14 +363,32 @@ export function playlistLogin(...links: string[]): ProviderLogin {
 /** An uncertain value this long is taken for a token: settings, as `output=ts`, are shorter. */
 const TOKEN_LENGTH = 16;
 
+/** Query names whose values name the viewer, as the user info before the host does. */
+const USER_NAMES: ReadonlySet<string> = new Set(["username", "user", "login"]);
+
 /**
- * What of a playlist link no saved copy may hold: its login (`playlistLogin`), and each other
- * query value long enough to be a token under a name of the publisher's own, as a `signature`.
- * Shorter ones, as `output=ts` or `hd=1`, would be found in ordinary names, and stay out of it.
+ * What of a playlist link no saved copy may hold, as a Source's `[username, ...passwords]`: the
+ * user it names, found only as a whole text as an account's username is, and as passwords the
+ * rest of its login (`playlistLogin`) and each other query value long enough to be a token under
+ * a name of the publisher's own, as a `signature`. Shorter ones, as `output=ts` or `hd=1`, would
+ * be found in ordinary names, and stay out of it.
  */
-export function playlistSecrets(link: string): string[] {
+export function playlistSecrets(link: string): readonly string[] {
+  const url = new URL(link);
+  const username =
+    [
+      decoded(url.username),
+      ...[...url.searchParams].flatMap(([name, value]) =>
+        USER_NAMES.has(name.toLowerCase()) ? [value] : [],
+      ),
+    ].find(Boolean) ?? "";
   const { secrets, uncertain = [] } = playlistLogin(link);
-  return [...secrets, ...uncertain.filter((value) => value.length >= TOKEN_LENGTH)];
+  const at = secrets.indexOf(username);
+  return [
+    username,
+    ...(at === -1 ? secrets : secrets.toSpliced(at, 1)),
+    ...uncertain.filter((value) => value.length >= TOKEN_LENGTH),
+  ];
 }
 
 function decoded(text: string): string {

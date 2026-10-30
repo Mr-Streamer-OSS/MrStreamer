@@ -223,7 +223,8 @@ function Field({
         placeholder={placeholder ?? (optional ? "Optional" : undefined)}
         placeholderTextColor="#636366"
         secureTextEntry={secret ?? false}
-        textContentType={secret ? "password" : keyboard ? "URL" : optional ? "none" : "username"}
+        // A playlist link is masked, but no password for AutoFill to offer or keep.
+        textContentType={keyboard ? "URL" : secret ? "password" : optional ? "none" : "username"}
         keyboardType={keyboard === "url" ? "url" : "default"}
         autoCapitalize={optional ? "sentences" : "none"}
         autoCorrect={false}

@@ -182,7 +182,8 @@ func guideHolds(_ text: String, _ passwords: [String]) -> Bool {
   for _ in 0...4 {
     if layer.contains(where: { form in passwords.contains(where: { form.contains($0) }) }) { return true }
     var next = Set<String>()
-    for form in layer {
+    // Only text with an escape or a "+" reads otherwise decoded.
+    for form in layer where form.contains("%") || form.contains("+") {
       for read in [guideUnescaped(form), guideUnescaped(form.replacingOccurrences(of: "+", with: " "))] where !forms.contains(read) { next.insert(read) }
     }
     if next.isEmpty { return false }

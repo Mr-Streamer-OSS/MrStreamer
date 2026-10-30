@@ -245,11 +245,10 @@ const accountOf = (entry: SubscriptionEntry, secret: string): ProviderAccount =>
 
 /**
  * The login's parts as `[username, ...passwords]`, which failures and saved copies keep out: an
- * account's username and password, or no username and every secret of a playlist's link
- * (`playlistSecrets`), with the link itself.
+ * account's username and password, or a playlist link's (`playlistSecrets`) with the link itself.
  */
 const loginFor = (entry: SubscriptionEntry, secret: string): readonly string[] =>
-  entry.kind === "xtream" ? [entry.username, secret] : ["", ...playlistSecrets(secret), secret];
+  entry.kind === "xtream" ? [entry.username, secret] : [...playlistSecrets(secret), secret];
 
 /** The registry as last written. */
 let registry: Registry = EMPTY_REGISTRY;
