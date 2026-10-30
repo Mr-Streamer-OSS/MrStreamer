@@ -397,7 +397,12 @@ function make(deps: RecordingsDeps) {
           return { limit, uses: yield* coordination.uses(subscriptionId) };
         }),
       start,
-      stop: (id: string) => end([id], "stopped"),
+      stop: (id: string) =>
+        Effect.andThen(
+          end([id], "stopped"),
+          // Capture may have ended before Stop arrived. Retry its terminal record too.
+          Effect.suspend(() => (records.has(id) ? save : Effect.void)),
+        ),
       subscriptionGone: (subscriptionId: string) =>
         Effect.andThen(
           // Those starting end, or become active and are ended with the others.

@@ -18,6 +18,8 @@ What is captured, and its limits: the MPEG-TS packets as the provider sends them
 
 Service contracts are in `apps/desktop/test/recordings.test.ts`: every track of the subtitles fixture recorded to its stop time and played through `openCopy`, busy without a provider request while Watch holds the one connection, **Stop playing and record** while the provider frees the stopped stream's slot late, beside Watch with two connections, stop and broken-stream partials, quit then restart, the next stream after one with no program, a name within the file system's bytes, and HLS segments with a refused separate-audio rendition.
 
+Stop also retries saving an ended recording's current status. A failed terminal save never makes a later Stop silently succeed: it reports the save error while storage remains unavailable, then persists the retained outcome when storage works again. The public-service check blocks manifest replacement after start, lets the source end, and verifies failure, released connections and a successful retry against the file.
+
 ## Gotchas
 
 A provider can take a moment to free the slot of the preview **Stop playing and record** just closed: capture asks again after 0.5 and 1.5 s when refused, as playback does.

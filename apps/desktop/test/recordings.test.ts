@@ -2,7 +2,7 @@
 // fixtures captured to a temporary data folder, and ffprobe and the app's own copy playback for
 // what was written.
 import { spawnSync } from "node:child_process";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import type { Recording } from "@mrstreamer/contracts/recordings";
@@ -250,6 +250,43 @@ describe.skipIf(!hasTools)("recordings", () => {
     const file = await fileOf(dataDir, ended!);
     expect(file.size).toBe(ended?.bytes);
     expect(decodes(file.path)).toBe(true);
+  });
+
+  it("reports an unsaved automatic end to Stop, then persists it when Stop retries", async () => {
+    let source: Writable | undefined;
+    const { dataDir, channel, subscriptionId, provider, recordings } = await connected({
+      streams: (_channel, out) => {
+        source = out;
+        out.write(fixture("h264-aac.mpegts"));
+      },
+    });
+    const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (started.kind !== "started" || !source) throw new Error("Not started");
+    const manifest = join(dataDir, "recordings", "recordings.json");
+    await rename(manifest, `${manifest}.saved`);
+    await mkdir(manifest);
+    source.end();
+    const [ended] = await until(recordings.list, ([first]) => first?.status.kind !== "recording");
+    expect(ended?.status).toEqual({ kind: "partial", cut: "stream" });
+    await expect(recordings.stop(started.recording.id)).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Recordings could not be saved." },
+    });
+    expect(await allClosed(provider)).toBe(true);
+    expect((await recordings.connections(subscriptionId)).uses).toEqual([]);
+
+    await rm(manifest, { recursive: true });
+    await rename(`${manifest}.saved`, manifest);
+    await recordings.stop(started.recording.id);
+    expect(JSON.parse(await readFile(manifest, "utf8"))).toMatchObject({
+      recordings: [
+        {
+          id: started.recording.id,
+          bytes: ended?.bytes,
+          ended: ended?.ended,
+          status: { kind: "partial", cut: "stream" },
+        },
+      ],
+    });
   });
 
   it("ends with the app as cut short by the quit, and is there after the next start", async () => {
