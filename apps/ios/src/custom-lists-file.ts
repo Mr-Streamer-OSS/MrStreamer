@@ -92,7 +92,7 @@ export function stored(): readonly StoredList[] {
     kind: "unexpected",
     detail:
       from.kind === "foreign"
-        ? "These lists were saved by a newer version of the app. Nothing was changed."
+        ? "These lists use a format this version of the app cannot read. Nothing was changed."
         : "Your lists couldn't be read. Nothing was changed.",
   });
 }

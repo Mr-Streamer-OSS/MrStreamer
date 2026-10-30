@@ -240,7 +240,7 @@ describe("lists", () => {
     expect(shown()).toEqual([]);
     expect(() => lists.createList("News")).toThrow(
       expect.objectContaining({
-        error: expect.objectContaining({ detail: expect.stringMatching(/newer version/) }),
+        error: expect.objectContaining({ detail: expect.stringMatching(/cannot read/) }),
       }),
     );
     expect(readFileSync(file(), "utf8")).toBe(later);
