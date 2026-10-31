@@ -778,10 +778,12 @@ describe("downloads", { timeout: 30_000 }, () => {
     ).toBe(true);
     // Neither SubDL nor the provider's file is asked for while the copy opens with its subtitle.
     const requests = one.fileRequests();
-    const asked = vi.fn(async () => {
-      throw new TypeError("Network request failed");
+    const before = globalThis.fetch;
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
+      asked.push(String(input instanceof Request ? input.url : input));
+      return before(input, init);
     });
-    vi.stubGlobal("fetch", asked);
     try {
       app.playDownload(copy.id);
       await until(() => memory.played.length > 0, "the copy to open");
@@ -789,12 +791,10 @@ describe("downloads", { timeout: 30_000 }, () => {
         title: { subscriptionId: a, version: `movie|${ref.id}` },
         subtitle: { release: "Movie.2001" },
       });
-      expect(
-        asked.mock.calls.map((call) => String(call[0])).filter((url) => url.includes("subdl")),
-      ).toEqual([]);
+      expect(asked.filter((url) => url.includes("subdl"))).toEqual([]);
       expect(one.fileRequests()).toBe(requests);
     } finally {
-      vi.unstubAllGlobals();
+      vi.stubGlobal("fetch", before);
     }
   });
 
