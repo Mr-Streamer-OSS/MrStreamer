@@ -94,6 +94,7 @@ const { native } = await import("./native-files.ts");
 const account = await import("../src/account.ts");
 const playback = await import("../src/playback.ts");
 const preferences = await import("../src/media-preferences.ts");
+const sources = await import("../src/sources.ts");
 const { demoProvider } = await import("../src/demo.ts");
 const { WatchLayer } = await import("../src/watch.tsx");
 const { programmeRange } = await import("../src/guide-ui.tsx");
@@ -616,8 +617,14 @@ describe("a live channel's sound and subtitles in Watch", () => {
     [...container.querySelectorAll("button")].find(
       (each) => each.getAttribute("data-testid") === id,
     ) ?? null;
-  /** What the stream playing offers, as the native player reads it for this attempt. */
-  function offer(groups: Partial<Pick<ObservedTrackSnapshot, "audio" | "subtitles">> = {}) {
+  /**
+   * What the stream playing offers, as the native player reads it for this attempt: the main
+   * sound, selected, and an audio description, under the native ids `ids` names.
+   */
+  function offer(
+    groups: Partial<Pick<ObservedTrackSnapshot, "audio" | "subtitles">> = {},
+    ids = { main: "main", description: "ad" },
+  ) {
     const identity = port.identity();
     const track = { ...identity, revision: 1, isPlayable: true };
     port.tracks = {
@@ -628,7 +635,7 @@ describe("a live channel's sound and subtitles in Watch", () => {
         options: [
           {
             ...track,
-            id: "main",
+            id: ids.main,
             group: "audio",
             language: "en",
             label: "English",
@@ -637,7 +644,7 @@ describe("a live channel's sound and subtitles in Watch", () => {
           },
           {
             ...track,
-            id: "ad",
+            id: ids.description,
             group: "audio",
             language: "en",
             label: "English",
@@ -661,7 +668,7 @@ describe("a live channel's sound and subtitles in Watch", () => {
         ],
       },
       subtitleOffAllowed: true,
-      selectedAudioId: "main",
+      selectedAudioId: ids.main,
       selectedSubtitleId: null,
       ...groups,
     };
@@ -692,6 +699,8 @@ describe("a live channel's sound and subtitles in Watch", () => {
     await until(() => opened.length === 1);
   }
   afterEach(() => {
+    // Watch holds the keyboard while a sheet shows, past its unmount, until the sheet answers.
+    for (const sheet of sheets) sheet.pick(sheet.options.length - 1);
     port.selectObservedTrackAsync.mockReset();
     port.selectObservedTrackAsync.mockResolvedValue({ kind: "requested" });
   });
@@ -722,7 +731,8 @@ describe("a live channel's sound and subtitles in Watch", () => {
     await until(() => opened.length === 2);
     expect(opened[1]).toBe("live:11");
     port.selectObservedTrackAsync.mockClear();
-    offer();
+    // The new stream lists the same sounds under each other's native ids.
+    offer({}, { main: "ad", description: "main" });
     await React.act(async () => {
       port.ready();
       await tick();
@@ -731,8 +741,51 @@ describe("a live channel's sound and subtitles in Watch", () => {
     expect(port.selectObservedTrackAsync).toHaveBeenLastCalledWith(
       expect.objectContaining(port.identity()),
       1,
-      expect.objectContaining({ kind: "audio", track: expect.objectContaining({ id: "ad" }) }),
+      expect.objectContaining({
+        kind: "audio",
+        track: expect.objectContaining({ id: "main", name: "Audio description" }),
+      }),
     );
+  });
+
+  it("starts a replay with no picks once the channel's login changed", async () => {
+    await watchLive();
+    offer();
+    const audio = await open("watch-audio");
+    await React.act(async () => {
+      audio.pick(1);
+      await tick();
+    });
+    expect((await open("watch-audio")).options[1]).toBe("✓ English · Audio description");
+    // Watch closed, the stream fails for good; its login is then entered again.
+    await React.act(async () => {
+      await playback.closeWatch();
+      port.failure({ kind: "network", evidence: null });
+      await tick();
+    });
+    expect(phase().kind).toBe("failed");
+    await React.act(async () => {
+      const source = sources.sourceOf(channel.subscriptionId);
+      sources.setSource(channel.subscriptionId, { ...source, revision: source.revision + 1 });
+      await tick();
+    });
+    port.selectObservedTrackAsync.mockClear();
+    await React.act(async () => {
+      account.playChannel(channel, "News", { watch: true });
+      await tick();
+    });
+    await until(() => opened.length === 2);
+    offer();
+    await React.act(async () => {
+      port.ready();
+      await tick();
+    });
+    expect((await open("watch-audio")).options).toEqual([
+      "✓ English · Main",
+      "English · Audio description",
+      "Cancel",
+    ]);
+    expect(port.selectObservedTrackAsync).not.toHaveBeenCalled();
   });
 
   it("says tracks aren't known yet while loading, and none where the stream has none", async () => {

@@ -1248,11 +1248,12 @@ async function attach(
 /**
  * A new viewer choice freezes the accepted policies and the caller's actual language context.
  * Playing the live channel already chosen again, as a Quality pick does, keeps its confirmed
- * track picks: each holds by what describes it until the new stream offers one alike.
+ * track picks while its login stands: each holds by what describes it until the new stream offers
+ * one alike.
  */
 export function play(item: Playing, plan: Plan, options: PlayOptions) {
   const { audio, subtitles } = getMediaPreferences();
-  const before = current?.choice;
+  const before = current && sourceStands(current) ? current.choice : undefined;
   const choice: Choice = {
     item,
     plan,
