@@ -618,8 +618,9 @@ read only when it is the last to begin before the segment. A file whose index le
 shows it only once playing passes where it begins. The other subtitle tracks, pictures such as PGS, DVD and DVB, teletext, formats the session
 doesn't know, and text tracks compressed with zlib or bzip2 or encrypted, which its FFmpeg can't
 read, aren't served, and Watch's Subtitles names them, with their format, as ones that can't show
-here. Track numbers and encodings come from the Tracks within the file's first 256 KB, as opening
-read them; a file whose Tracks lie further has no line brought back from its index. A track with
+here. Track numbers and encodings come from the file's Tracks: from its first 256 KB, as opening read
+them, else from where its SeekHead says, 1 MB at most. A file whose Tracks can't be read that way
+has its text tracks named as ones that can't show, their encoding unknown. A track with
 more than 4 MB of text, or a line over 64 KB, can't be shown: once chosen, its session fails with
 that reason.
 

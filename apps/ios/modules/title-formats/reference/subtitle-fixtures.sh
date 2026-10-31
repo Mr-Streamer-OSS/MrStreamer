@@ -15,6 +15,8 @@
 # - subs-zlib.mkv: the same with the forced English track marked as zlib-compressed, its lines
 #   left as they are. An ffmpeg with zlib can't read them, so verify.py doesn't check this one;
 #   its picture and sound are those of subs.mkv.
+# - subs-far.mkv: the same mark, in a copy whose 300 KB ASS header puts its Tracks past the first
+#   256 KB.
 # - subs-badcues.mkv: the same with the index's last field running past the end of the index.
 # Needs an ffmpeg with libx264 and its AAC encoder on PATH, as Ubuntu's and Homebrew's builds have.
 set -euo pipefail
@@ -93,9 +95,19 @@ ffmpeg -v error -y \
   -metadata:s:s:3 language=ger -disposition:s:0 0 -disposition:s:1 forced \
   -disposition:s:2 0 -disposition:s:3 0 -fflags +bitexact "$out/subs.mkv"
 
+# The same with an ASS header of 300 KB of comments, for subs-far.mkv.
+{
+  sed -n '1,/^PlayResY/p' "$work/french.ass"
+  for i in $(seq 1 6000); do echo "; padding line $i of a long ASS header, as some typesetting has"; done
+  sed -n '/^PlayResY/,$p' "$work/french.ass" | tail -n +2
+} >"$work/french-long.ass"
+ffmpeg -v error -y -i "$out/subs.mkv" -i "$work/french-long.ass" -map 0:0 -map 0:1 -map 0:2 \
+  -map 0:3 -map 1 -map 0:5 -c copy -c:s:2 ass -metadata:s:s:2 language=fra -fflags +bitexact \
+  "$out/far.mkv"
+
 # The subtitle tracks are the file's third to sixth.
 python3 -I - "$out" <<'PY'
-import sys
+import os, sys
 out = sys.argv[1]
 source = bytearray(open(f"{out}/subs.mkv", "rb").read())
 
@@ -150,38 +162,43 @@ b[three[1]:four[4]] = b[four[1]:four[4]] + b[three[1]:three[4]]
 open(f"{out}/subs-reordered.mkv", "wb").write(b)
 print("subs-reordered.mkv: tracks 4 and 3 in that order")
 
+def zlib(b):
+    """The forced English track, track 4, marked as zlib-compressed, its lines as they are. The
+    Void before the Tracks gives up the room, so nothing after them moves."""
+    added = bytes.fromhex("6d808a" "624087" "503484" "42548100")
+    four = next(x for x in entries(b) if number(b, x) == 4)
+    _, at, header, s, e = four
+    assert header == 9
+    entry = b[at:at + 1] + (0x01 << 56 | (e - s + len(added))).to_bytes(8, "big") + b[s:e] + added
+    _, tat, theader, ts, te = top(b, 0x1654AE6B)
+    size_length = theader - 4
+    tracks = b[tat:tat + 4] + ((1 << (7 * size_length)) | (te - ts + len(added))).to_bytes(size_length, "big")
+    tracks += b[ts:at] + entry + b[e:te]
+    _, vat, vheader, vs, ve = top(b, 0xEC)
+    assert vheader == 9 and ve - vs >= len(added) and ve <= tat
+    shrunk = b"\xec" + (0x01 << 56 | (ve - vs - len(added))).to_bytes(8, "big") + bytes(ve - vs - len(added))
+    b[vat:te] = shrunk + b[ve:tat] + tracks
+    # The SeekHead's positions of what moved.
+    _, _, _, ss, se = top(b, 0x114D9B74)
+    seg = segment(b)[3]
+    for i, _, _, s2, e2 in elements(b, ss, se):
+        if i != 0x4DBB: continue
+        s3, e3 = {k: (x, y) for k, _, _, x, y in elements(b, s2, e2)}[0x53AC]
+        position = int.from_bytes(b[s3:e3], "big")
+        if vat - seg < position < te - seg:
+            b[s3:e3] = (position - len(added)).to_bytes(e3 - s3, "big")
+    return b
+
 # subs-zlib.mkv: the forced English track marked as zlib-compressed, which FFmpeg here passes on
-# as it is. The Void before the Tracks gives up the room, so nothing after them moves.
-b = bytearray(source)
-added = bytes.fromhex("6d808a" "624087" "503484" "42548100")
-four = next(x for x in entries(b) if number(b, x) == 4)
-_, at, header, s, e = four
-assert header == 9
-entry = b[at:at + 1] + (0x01 << 56 | (e - s + len(added))).to_bytes(8, "big") + b[s:e] + added
-_, tat, theader, ts, te = top(b, 0x1654AE6B)
-assert theader in (6, 12)
-size_length = theader - 4
-tracks_size = te - ts + len(added)
-tracks = b[tat:tat + 4] + ((1 << (7 * size_length)) | tracks_size).to_bytes(size_length, "big")
-tracks += b[ts:at] + entry + b[e:te]
-void = top(b, 0xEC)
-_, vat, vheader, vs, ve = void
-assert vheader == 9 and ve - vs >= len(added)
-shrunk = b"\xec" + (0x01 << 56 | (ve - vs - len(added))).to_bytes(8, "big") + bytes(ve - vs - len(added))
-assert ve <= tat
-b[vat:te] = shrunk + b[ve:tat] + tracks
-# The SeekHead's positions of what moved.
-_, _, _, ss, se = top(b, 0x114D9B74)
-seg = segment(b)[3]
-for i, _, _, s2, e2 in elements(b, ss, se):
-    if i != 0x4DBB: continue
-    fields = {k: (s3, e3) for k, _, _, s3, e3 in elements(b, s2, e2)}
-    s3, e3 = fields[0x53AC]
-    position = int.from_bytes(b[s3:e3], "big")
-    if vat - seg < position < te - seg:
-        b[s3:e3] = (position - len(added)).to_bytes(e3 - s3, "big")
-open(f"{out}/subs-zlib.mkv", "wb").write(b)
+# as it is.
+open(f"{out}/subs-zlib.mkv", "wb").write(zlib(bytearray(source)))
 print("subs-zlib.mkv: track 4 marked zlib-compressed")
+
+# subs-far.mkv: the same mark in a file whose ASS header makes its Tracks larger than the start
+# the core keeps, so the core reads them from where the SeekHead says.
+open(f"{out}/subs-far.mkv", "wb").write(zlib(bytearray(open(f"{out}/far.mkv", "rb").read())))
+os.remove(f"{out}/far.mkv")
+print("subs-far.mkv: track 4 marked zlib-compressed, its Tracks past the first 256 KB")
 
 # subs-badcues.mkv: the index's last field says it is eight bytes long, past the end of the
 # Cues, as a damaged file might.

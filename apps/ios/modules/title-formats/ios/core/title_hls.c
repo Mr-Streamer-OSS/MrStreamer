@@ -129,8 +129,12 @@
  */
 #define RECALLS_MOST 8
 #define RECALL_BYTES_MOST (8 * 1024 * 1024)
-/** How much of the file's start opening keeps, for its SeekHead and Tracks. */
+/**
+ * How much of the file's start opening keeps, for its SeekHead and Tracks, and the most read for
+ * Tracks that lie past it.
+ */
 #define HEAD_BYTES (256 * 1024)
+#define TRACKS_BYTES_MOST (1024 * 1024)
 /** Segments kept after they were made, every rendition of each. */
 #define KEPT 2
 #define IO_BUFFER 65536
@@ -1259,72 +1263,90 @@ static int encoded(const uint8_t *data, int64_t from, int64_t end) {
 }
 
 /**
- * Reads what opening read of the file's start, `title->head`: where its Segment's data starts,
- * which the index's positions count from, where its SeekHead says its Cues are, and from its
- * Tracks each stream's track number and whether its frames are encoded in a way this can't read.
- * FFmpeg makes a stream of each track it accepts, in their order; a stream whose kind isn't its
- * track's leaves every number unknown. Anything the start doesn't hold stays unknown.
+ * Reads the Tracks element's data, from `from` to `end` of `data`: each stream's track number and
+ * whether its frames are encoded in a way this can't read. FFmpeg makes a stream of each track it
+ * accepts, in their order; 0 when a stream's kind isn't its track's, which leaves both unknown.
  */
-static void read_head(TitleHls *title, int64_t *numbers, int *unreadable) {
-  const uint8_t *head = title->head;
-  int64_t size = title->head_size, at = 0, id, from, length;
+static int read_tracks(const TitleHls *title, const uint8_t *data, int64_t from, int64_t end,
+                       int64_t *numbers, int *unreadable) {
   unsigned streams = title->input->nb_streams, made = 0;
-  for (unsigned i = 0; i < streams; i++) numbers[i] = -1;
-  if (!child(head, size, &at, &id, &from, &length) || id != 0x1A45DFA3) return;
-  // The Segment holds the rest of the file, beyond what the start holds.
-  if (ebml(head, size, &at, 1) != 0x18538067 || ebml(head, size, &at, 0) < 0) return;
-  title->segment = at;
   int64_t found[TEXTS_MOST + UNSHOWN_MOST + SOUNDS_MOST + 64];
   int encodings[sizeof(found) / sizeof(*found)] = {0};
-  int ok = 1;
-  while (child(head, size, &at, &id, &from, &length)) {
-    if (id == 0x114D9B74) {
-      for (int64_t seek = from, kind, s, l; child(head, from + length, &seek, &kind, &s, &l);) {
-        if (kind != 0x4DBB) continue;
-        int cues = 0;
-        int64_t position = -1;
-        for (int64_t in = s, k, s2, l2; child(head, s + l, &in, &k, &s2, &l2);) {
-          if (k == 0x53AB) cues = l2 == 4 && ebml_uint(head + s2, 4) == 0x1C53BB6B;
-          if (k == 0x53AC) position = (int64_t)ebml_uint(head + s2, l2);
-        }
-        if (cues && position >= 0 && position <= INT64_MAX - title->segment)
-          title->cues = title->segment + position;
-      }
+  for (int64_t entry = from, kind, s, l; child(data, end, &entry, &kind, &s, &l);) {
+    if (kind != 0xAE) continue;
+    int64_t number = -1;
+    uint64_t type = 0;
+    char letter = 0;
+    int unread = 0;
+    for (int64_t in = s, k, s2, l2; child(data, s + l, &in, &k, &s2, &l2);) {
+      if (k == 0xD7) number = (int64_t)ebml_uint(data + s2, l2);
+      if (k == 0x83) type = ebml_uint(data + s2, l2);
+      if (k == 0x86 && l2 > 0) letter = (char)data[s2];
+      if (k == 0x6D80) unread = encoded(data, s2, s2 + l2);
     }
-    if (id != 0x1654AE6B) continue;
-    for (int64_t entry = from, kind, s, l; child(head, from + length, &entry, &kind, &s, &l);) {
-      if (kind != 0xAE) continue;
-      int64_t number = -1;
-      uint64_t type = 0;
-      char letter = 0;
-      int unread = 0;
-      for (int64_t in = s, k, s2, l2; child(head, s + l, &in, &k, &s2, &l2);) {
-        if (k == 0xD7) number = (int64_t)ebml_uint(head + s2, l2);
-        if (k == 0x83) type = ebml_uint(head + s2, l2);
-        if (k == 0x86 && l2 > 0) letter = (char)head[s2];
-        if (k == 0x6D80) unread = encoded(head, s2, s2 + l2);
-      }
-      // The tracks FFmpeg makes no stream of: of no kind it plays, or a codec of another kind.
-      int video = type == 1, audio = type == 2, text = type == 0x11 || type == 0x21;
-      if (!(video || audio || text) || !letter || (video && letter != 'V') ||
-          (audio && letter != 'A') || (text && letter != 'D' && letter != 'S'))
-        continue;
-      if (made >= streams || made >= sizeof(found) / sizeof(*found)) {
-        ok = 0;
-        break;
-      }
-      enum AVMediaType kind2 = title->input->streams[made]->codecpar->codec_type;
-      if ((video && kind2 != AVMEDIA_TYPE_VIDEO) || (audio && kind2 != AVMEDIA_TYPE_AUDIO) ||
-          (type == 0x11 && kind2 != AVMEDIA_TYPE_SUBTITLE))
-        ok = 0;
-      encodings[made] = unread;
-      found[made++] = number;
-    }
+    // The tracks FFmpeg makes no stream of: of no kind it plays, or a codec of another kind.
+    int video = type == 1, audio = type == 2, text = type == 0x11 || type == 0x21;
+    if (!(video || audio || text) || !letter || (video && letter != 'V') ||
+        (audio && letter != 'A') || (text && letter != 'D' && letter != 'S'))
+      continue;
+    if (made >= streams || made >= sizeof(found) / sizeof(*found)) return 0;
+    enum AVMediaType made_kind = title->input->streams[made]->codecpar->codec_type;
+    if ((video && made_kind != AVMEDIA_TYPE_VIDEO) || (audio && made_kind != AVMEDIA_TYPE_AUDIO) ||
+        (type == 0x11 && made_kind != AVMEDIA_TYPE_SUBTITLE))
+      return 0;
+    encodings[made] = unread;
+    found[made++] = number;
   }
-  for (unsigned i = 0; ok && i < made; i++) {
+  for (unsigned i = 0; i < made; i++) {
     numbers[i] = found[i];
     unreadable[i] = encodings[i];
   }
+  return made > 0;
+}
+
+/**
+ * Reads the file's start as opening read it, `title->head`: where its Segment's data starts,
+ * which the index's positions count from, where its SeekHead says its Cues are, and its Tracks
+ * (see read_tracks), from the start or, where they lie past it, from where the SeekHead says,
+ * within TRACKS_BYTES_MOST. 0 when the Tracks couldn't be read: every number stays unknown.
+ */
+static int read_head(TitleHls *title, int64_t *numbers, int *unreadable) {
+  const uint8_t *head = title->head;
+  int64_t size = title->head_size, at = 0, id, from, length, tracks = -1;
+  for (unsigned i = 0; i < title->input->nb_streams; i++) numbers[i] = -1;
+  if (!child(head, size, &at, &id, &from, &length) || id != 0x1A45DFA3) return 0;
+  // The Segment holds the rest of the file, beyond what the start holds.
+  if (ebml(head, size, &at, 1) != 0x18538067 || ebml(head, size, &at, 0) < 0) return 0;
+  title->segment = at;
+  while (child(head, size, &at, &id, &from, &length)) {
+    if (id == 0x1654AE6B) return read_tracks(title, head, from, from + length, numbers, unreadable);
+    if (id != 0x114D9B74) continue;
+    for (int64_t seek = from, kind, s, l; child(head, from + length, &seek, &kind, &s, &l);) {
+      if (kind != 0x4DBB) continue;
+      uint64_t named = 0;
+      int64_t position = -1;
+      for (int64_t in = s, k, s2, l2; child(head, s + l, &in, &k, &s2, &l2);) {
+        if (k == 0x53AB && l2 == 4) named = ebml_uint(head + s2, 4);
+        if (k == 0x53AC) position = (int64_t)ebml_uint(head + s2, l2);
+      }
+      if (position < 0 || position > INT64_MAX - title->segment) continue;
+      if (named == 0x1C53BB6B) title->cues = title->segment + position;
+      if (named == 0x1654AE6B) tracks = title->segment + position;
+    }
+  }
+  if (tracks < 0) return 0;
+  uint8_t header[16];
+  int64_t got = read_whole(title, tracks, header, sizeof(header));
+  at = 0;
+  if (got < 0 || ebml(header, got, &at, 1) != 0x1654AE6B ||
+      (length = ebml(header, got, &at, 0)) < 0 || length > TRACKS_BYTES_MOST)
+    return 0;
+  uint8_t *data = av_malloc(length ? (size_t)length : 1);
+  if (!data) return 0;
+  int64_t read = read_whole(title, tracks + at, data, length);
+  int known = read == length && read_tracks(title, data, 0, length, numbers, unreadable);
+  av_free(data);
+  return known;
 }
 
 static int by_time(const void *a, const void *b) {
@@ -1984,7 +2006,10 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
     av_free(encoded);
     return TITLE_HLS_NO_MEMORY;
   }
-  read_head(title, numbers, encoded);
+  // Without the Tracks, a text track's encoding isn't known: it isn't served.
+  if (!read_head(title, numbers, encoded)) {
+    for (unsigned i = 0; i < title->input->nb_streams; i++) encoded[i] = 2;
+  }
   int any = 0;
   for (unsigned i = 0; i < title->input->nb_streams; i++) {
     AVStream *st = title->input->streams[i];
@@ -2009,7 +2034,7 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
         text->forced = !!(st->disposition & AV_DISPOSITION_FORCED);
         offered = 1;
       } else if (title->unshown_count < UNSHOWN_MOST) {
-        title->unshown_encoded[title->unshown_count] = encoded[i];
+        title->unshown_encoded[title->unshown_count] = text_codec(st->codecpar->codec_id) ? encoded[i] : 0;
         title->unshown[title->unshown_count++] = (int)i;
       }
     }
@@ -2281,12 +2306,6 @@ static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, co
                                        size_t *size, const char **type, char *detail,
                                        size_t detail_size) {
   title->texts[track].wanted = 1;
-  for (int t = 0; t < title->text_count; t++) {
-    if (folds(title, track, t) && title->texts[t].overflow) {
-      say(detail, detail_size, "These subtitles are too large to show.");
-      return TITLE_HLS_UNSUPPORTED;
-    }
-  }
   if (!passed(title, index)) {
     Made *made = NULL;
     TitleHlsResult result = make(title, index, &made, detail, detail_size);
@@ -2294,6 +2313,13 @@ static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, co
   }
   int budget = RECALLS_MOST;
   int error = recall_for(title, track, index, INT64_MAX, &budget);
+  // A line the reads couldn't keep would be missing here: the rendition is refused instead.
+  for (int t = 0; error >= 0 && t < title->text_count; t++) {
+    if (folds(title, track, t) && title->texts[t].overflow) {
+      say(detail, detail_size, "These subtitles are too large to show.");
+      return TITLE_HLS_UNSUPPORTED;
+    }
+  }
   AVBPrint text;
   av_bprint_init(&text, 0, AV_BPRINT_SIZE_UNLIMITED);
   if (error >= 0) error = write_vtt(title, track, index, &text);
@@ -2441,7 +2467,10 @@ int title_hls_unshown(const TitleHls *title, int index, TitleHlsUnshown *out) {
   if (index < 0 || index >= title->unshown_count) return 0;
   const AVStream *st = title->input->streams[title->unshown[index]];
   out->language = language_of(st);
-  out->format = title->unshown_encoded[index] ? "compressed text" : format_name(st->codecpar->codec_id);
+  int encoded = title->unshown_encoded[index];
+  out->format = encoded == 1   ? "compressed text"
+                : encoded == 2 ? "text of unknown encoding"
+                               : format_name(st->codecpar->codec_id);
   out->forced = !!(st->disposition & AV_DISPOSITION_FORCED);
   return 1;
 }
