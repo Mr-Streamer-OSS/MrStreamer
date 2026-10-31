@@ -1394,6 +1394,8 @@ export const fr: Translation = {
   "{episode} didn't download": "{episode} n'a pas été téléchargé",
   "Recordings could not be read.": "Impossible de lire les enregistrements.",
   "Recordings could not be saved.": "Impossible d’enregistrer la liste des enregistrements.",
+  "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.":
+    "Impossible d’enregistrer comme arrêté un enregistrement que vous avez arrêté. Vérifiez son stockage, puis réessayez.",
   "The folder for recordings isn't there.": "Le dossier des enregistrements est introuvable.",
   "The folder couldn't be opened.": "Impossible d’ouvrir le dossier.",
   "There isn't enough free space to record.": "Il n’y a pas assez d’espace libre pour enregistrer.",

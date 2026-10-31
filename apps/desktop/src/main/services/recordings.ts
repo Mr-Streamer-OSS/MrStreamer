@@ -200,6 +200,12 @@ export class Recordings extends Context.Service<
      */
     holdStarts(on: boolean): Effect.Effect<boolean>;
     /**
+     * Writes again how each recording the viewer stopped, its time remaining, ended, while
+     * neither recordings.json nor its mark (see ENDED) keeps that yet, answering whether every one
+     * is kept now: a relaunch would go on with one that isn't. An update's restart asks first.
+     */
+    readonly keepStops: Effect.Effect<boolean>;
+    /**
      * Whether a recording's time goes on, capturing or paused, whether a schedule is kept, and
      * whether a write of either waits to be tried again.
      */
@@ -1961,6 +1967,25 @@ function make(deps: RecordingsDeps) {
           held = on && starting.size === 0 && ![...records.values()].some(isLive);
           return held === on;
         }),
+      keepStops: Effect.gen(function* () {
+        const unkept = Effect.promise(async () => {
+          const now = Date.now();
+          const stopped = [...unsavedEnds].flatMap((id) => {
+            const record = records.get(id);
+            return record?.status.kind === "stopped" && record.stop > now ? [record] : [];
+          });
+          const marked = await Promise.all(stopped.map(endedAs));
+          return stopped.filter((_, index) => !marked[index]);
+        });
+        const left = yield* unkept;
+        if (left.length === 0) return true;
+        if ((yield* Effect.result(save))._tag === "Success") {
+          yield* publish;
+          return true;
+        }
+        yield* Effect.forEach(left, (record) => markEnded(record, "stopped"), { discard: true });
+        return (yield* unkept).length === 0;
+      }),
       changes: Stream.fromPubSub(changes),
       schedules: scheduling(
         Effect.andThen(
