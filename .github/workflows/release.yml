@@ -892,15 +892,23 @@ jobs:
           (cd dist-snap && sha256sum -- *.snap | tee SHA256SUMS.txt)
       - name: Smoke test the installed Snap
         # With Chromium's sandbox, and a keyring the app has to reach: it saves no login otherwise.
-        # The Snap has its own /tmp and can't see dot folders, so the profile goes in a visible one.
+        # Snap run tracks the app in a scope of the user's own systemd, which a runner step lacks,
+        # so the test runs in the user's manager. The Snap has its own /tmp and can't see dot
+        # folders, so the profile goes in a visible one.
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb gnome-keyring
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb gnome-keyring dbus-user-session
           sudo snap install --dangerous dist-snap/*.snap
           sudo snap connect mr-streamer:browser-support
           sudo snap connect mr-streamer:password-manager-service
+          sudo loginctl enable-linger "$USER"
+          XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          for _ in $(seq 60); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
           mkdir -p ~/snap-e2e
-          TMPDIR=~/snap-e2e MR_STREAMER_FFMPEG=/snap/mr-streamer/current/app/resources/ffmpeg/ffmpeg \
-            dbus-run-session -- sh -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null &&
+          systemd-run --user --wait --pipe --collect --working-directory="$PWD" \
+            --setenv=PATH="$PATH" --setenv=TMPDIR="$HOME/snap-e2e" \
+            --setenv=MR_STREAMER_FFMPEG=/snap/mr-streamer/current/app/resources/ffmpeg/ffmpeg \
+            sh -c 'printf ci | gnome-keyring-daemon --replace --unlock --components=secrets -d >/dev/null &&
               xvfb-run -a node apps/desktop/test/e2e/packaged-app.ts /snap/bin/mr-streamer'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

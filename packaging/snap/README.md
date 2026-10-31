@@ -61,16 +61,21 @@ sudo snap connect mr-streamer:password-manager-service
 snap connections mr-streamer
 ```
 
-1. Run the packaged-app smoke from a checkout, with an unlocked keyring on the session bus and
-   a profile the Snap can see (it has its own `/tmp`, and the `home` plug hides dot folders):
+1. Run the packaged-app smoke from a checkout, with an unlocked keyring on the user's session bus
+   and a profile the Snap can see (it has its own `/tmp`, and the `home` plug hides dot folders).
+   Snap run tracks the app in a scope of the user's systemd: a private `dbus-run-session` bus
+   fails with `is not a snap cgroup`. From a desktop session's terminal:
 
    ```sh
    mkdir -p ~/snap-e2e
+   printf ci | gnome-keyring-daemon --replace --unlock --components=secrets -d >/dev/null
    TMPDIR=~/snap-e2e MR_STREAMER_FFMPEG=/snap/mr-streamer/current/app/resources/ffmpeg/ffmpeg \
-     dbus-run-session -- sh -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null &&
-       xvfb-run -a node apps/desktop/test/e2e/packaged-app.ts /snap/bin/mr-streamer'
+     xvfb-run -a node apps/desktop/test/e2e/packaged-app.ts /snap/bin/mr-streamer
    ```
 
+   The first line replaces the session's keyring daemon with one whose `login` keyring is
+   unlocked: use it only on a throwaway machine. Without a session (over SSH, or in CI), enable
+   lingering and run it in the user's manager with `systemd-run --user`, as the release job does.
    It must report `Updates: snap, for a snap build` and pass every check.
 
 2. Disconnect `password-manager-service`, or run without a Secret Service: adding a subscription
