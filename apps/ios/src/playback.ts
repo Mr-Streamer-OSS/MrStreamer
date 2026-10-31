@@ -1252,8 +1252,7 @@ async function attach(
  */
 export function play(item: Playing, plan: Plan, options: PlayOptions) {
   const { audio, subtitles } = getMediaPreferences();
-  const before = current?.choice.item;
-  const sameChannel = item.live && before?.live === true && before.id === item.id;
+  const before = current?.choice;
   const choice: Choice = {
     item,
     plan,
@@ -1264,7 +1263,7 @@ export function play(item: Playing, plan: Plan, options: PlayOptions) {
       titleLanguage: languageCode(effectiveTitleLanguage()),
       originalLanguage: plan.kind === "file" ? languageCode(plan.originalLanguage) : null,
     }),
-    holds: sameChannel ? { ...current!.choice.holds } : {},
+    holds: item.live && before?.item.live && before.item.id === item.id ? { ...before.holds } : {},
   };
   return start(choice, choice.options);
 }
