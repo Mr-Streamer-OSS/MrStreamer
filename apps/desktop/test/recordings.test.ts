@@ -1624,8 +1624,12 @@ describe.skipIf(!hasTools)("recordings", () => {
   });
 
   // An empty folder left at the chosen folder's place, as a drive's mount point while it is away.
-  for (const when of ["capturing", "starting"] as const)
-    it(`records nothing into an empty folder at the chosen folder's place, and goes on there once it is back (${when})`, async () => {
+  for (const { when, stale } of [
+    { when: "capturing", stale: false },
+    { when: "starting", stale: false },
+    { when: "capturing", stale: true },
+  ] as const)
+    it(`records nothing into an empty folder at the chosen folder's place, and goes on there once it is back (${when}${stale ? ", stale failed marker" : ""})`, async () => {
       // Starting, the first request answers nothing, so the start waits for its program table.
       let asked = 0;
       const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
@@ -1661,6 +1665,11 @@ describe.skipIf(!hasTools)("recordings", () => {
         : 0;
       await rename(chosen, `${chosen}.away`);
       await mkdir(chosen);
+      if (stale) {
+        await writeFile(join(chosen, ".mrstreamer-storage"), "another-storage-folder");
+        await mkdir(join(chosen, id!));
+        await writeFile(join(chosen, id!, ".mrstreamer-failed"), "");
+      }
 
       const requests = provider.streamRequests();
       const again = await app(data);
@@ -1671,23 +1680,29 @@ describe.skipIf(!hasTools)("recordings", () => {
         await new Promise((resolve) => setTimeout(resolve, 500));
         const [paused] = await again.recordings.list();
         expect(paused?.status).toMatchObject({ kind: "paused" });
-        await expect(
-          again.recordings.start(channel(TRACKS), Date.now() + 60_000, {}),
-        ).rejects.toMatchObject({
-          error: {
-            detail:
-              "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
-          },
-        });
+        if (!stale)
+          await expect(
+            again.recordings.start(channel(TRACKS), Date.now() + 60_000, {}),
+          ).rejects.toMatchObject({
+            error: {
+              detail:
+                "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
+            },
+          });
         expect(provider.streamRequests()).toBe(requests);
-        expect(readdirSync(chosen)).toEqual([]);
+        expect(readdirSync(chosen).sort()).toEqual(
+          stale ? [".mrstreamer-storage", id!].sort() : [],
+        );
         // Chosen again, as the refusal says, that empty folder takes new recordings, but this one
         // goes on only in the folder it began in.
         await again.recordings.setFolder(chosen);
         await again.recordings.check();
         await new Promise((resolve) => setTimeout(resolve, 500));
         expect(provider.streamRequests()).toBe(requests);
-        expect(readdirSync(chosen)).toEqual([".mrstreamer-storage"]);
+        expect(readdirSync(chosen).sort()).toEqual(
+          stale ? [".mrstreamer-storage", id!].sort() : [".mrstreamer-storage"],
+        );
+        if (stale) expect(existsSync(join(chosen, id!, ".mrstreamer-failed"))).toBe(true);
       } finally {
         await rm(chosen, { recursive: true });
         await rename(`${chosen}.away`, chosen);

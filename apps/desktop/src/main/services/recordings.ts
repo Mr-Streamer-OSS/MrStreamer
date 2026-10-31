@@ -417,18 +417,17 @@ function make(deps: RecordingsDeps) {
       const now = await markOf(folder);
       return now !== null && (mark === undefined || now === mark);
     };
-    /** Whether `record` is a failed start (see FAILED), or null while its mark can't be read. */
+    /** Whether its own chosen folder marks `record` as a failed start; null while unknown. */
     const failedStart = (record: StoredRecording) =>
-      Effect.promise(() =>
-        stat(join(folderOf(record), FAILED)).then(
+      Effect.promise(async () => {
+        const failed = await stat(join(folderOf(record), FAILED)).then(
           (): boolean | null => true,
-          async (cause: NodeJS.ErrnoException): Promise<boolean | null> => {
-            if (cause.code !== "ENOENT" && cause.code !== "ENOTDIR") return null;
-            // A chosen folder on a drive away cannot say whether it holds the mark.
-            return (await isThere(placeOf(record), record.mark)) ? false : null;
-          },
-        ),
-      );
+          (cause: NodeJS.ErrnoException) =>
+            cause.code === "ENOENT" || cause.code === "ENOTDIR" ? false : null,
+        );
+        // A failed-start mark on a different storage folder says nothing about this recording.
+        return (await isThere(placeOf(record), record.mark)) ? failed : null;
+      });
 
     const unreadable = () =>
       new Failed({ error: { kind: "unexpected", detail: t("Recordings could not be read.") } });
