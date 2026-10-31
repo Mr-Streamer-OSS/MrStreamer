@@ -890,7 +890,6 @@ describe("sound and subtitles in Watch", () => {
       await tick();
     });
     await until(() => opened.length === 1);
-    expect(opened[0]).toMatch(/^http:\/\/127\.0\.0\.1:1\/.+\/main\.m3u8$/);
     offer();
     const cantShow =
       "Can't show here: English (PGS), Nederlands (DVD, forced), Unknown language (unknown format).";

@@ -92,7 +92,10 @@ typedef struct TitleHlsUnshown {
   int forced;
 } TitleHlsUnshown;
 
-/** Subtitle track `index` of those the stream doesn't carry, valid while the title is: 0 past the last. */
+/**
+ * Subtitle track `index` of those the stream doesn't carry, valid while the title is: 0 past the
+ * last.
+ */
 int title_hls_unshown(const TitleHls *title, int index, TitleHlsUnshown *out);
 
 void title_hls_interrupt(TitleHls *title);

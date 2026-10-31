@@ -53,7 +53,26 @@ static int save(const char *folder, const char *name, const uint8_t *data, size_
  * Copies one resource. A sound segment refused as unsupported, for a gap it can't be played
  * through, is an empty copy and returns 1, once printed; any other failure returns -1.
  */
-static int get(TitleHls *title, const char *name, uint8_t **copy, size_t *size);
+static int get(TitleHls *title, const char *name, uint8_t **copy, size_t *size) {
+  const uint8_t *data;
+  const char *type;
+  char detail[256] = "";
+  TitleHlsResult result = title_hls_get(title, name, &data, size, &type, detail, sizeof(detail));
+  if (result == TITLE_HLS_UNSUPPORTED && name[0] == 'a' && strchr(name, '-')) {
+    printf("%s refused: %s\n", name, detail);
+    *copy = calloc(1, 1);
+    *size = 0;
+    return 1;
+  }
+  if (result != TITLE_HLS_OK) {
+    printf("%s result=%d detail=%s\n", name, result, detail);
+    return -1;
+  }
+  *copy = malloc(*size + 1);
+  memcpy(*copy, data, *size);
+  (*copy)[*size] = 0;
+  return 0;
+}
 
 /**
  * Asks a title just opened from the start for segment `index` of subtitle rendition `track`
@@ -85,27 +104,6 @@ static int fresh(TitleHlsSource *source, int track, int index, int chosen, const
 done:
   title_hls_close(title);
   return status;
-}
-
-static int get(TitleHls *title, const char *name, uint8_t **copy, size_t *size) {
-  const uint8_t *data;
-  const char *type;
-  char detail[256] = "";
-  TitleHlsResult result = title_hls_get(title, name, &data, size, &type, detail, sizeof(detail));
-  if (result == TITLE_HLS_UNSUPPORTED && name[0] == 'a' && strchr(name, '-')) {
-    printf("%s refused: %s\n", name, detail);
-    *copy = calloc(1, 1);
-    *size = 0;
-    return 1;
-  }
-  if (result != TITLE_HLS_OK) {
-    printf("%s result=%d detail=%s\n", name, result, detail);
-    return -1;
-  }
-  *copy = malloc(*size + 1);
-  memcpy(*copy, data, *size);
-  (*copy)[*size] = 0;
-  return 0;
 }
 
 int main(int argc, char **argv) {

@@ -145,11 +145,10 @@ ok &= good
 print(f"v {video['codec_name']}: {len(mine)} of {len(theirs)} packets, times within {drift * 1000:.2f} ms, "
       f"decode {'clean' if not errors else 'ERRORS ' + errors[:200]} -> {'ok' if good else 'FAIL'}")
 
-# Which stream of the file each sound rendition carries, as the core reported it to check.c.
-carries, carries_all = {}, {}
+# Which streams of the file each rendition carries, as the core reported them to check.c.
+carries = {}
 if os.path.exists(f"{folder}/streams.txt"):
-    carries_all = {name: rest for name, *rest in (line.split() for line in open(f"{folder}/streams.txt") if line.strip())}
-    carries = {name: int(rest[0]) for name, rest in carries_all.items() if name.startswith("a")}
+    carries = {name: [int(x) for x in rest] for name, *rest in (line.split() for line in open(f"{folder}/streams.txt") if line.strip())}
 for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     playlist = open(f"{folder}/{rendition}.m3u8").read()
     raw = "#EXT-X-MAP" not in playlist
@@ -157,7 +156,7 @@ for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     names = segments(rendition, "mp3" if raw else "m4s")
     mine = packed(names) if raw else fragments(f"{folder}/{rendition}.mp4", names)
     # The source track the core says this carries; without that, nothing is checked.
-    track = next((s for s in streams if s["index"] == carries.get(rendition) and s["codec_type"] == "audio"), None)
+    track = next((s for s in streams if s["index"] == carries.get(rendition, [None])[0] and s["codec_type"] == "audio"), None)
     if not track:
         print(f"{rendition}: no source track known for it -> FAIL"); ok = False; continue
     codec, rate = track["codec_name"], int(track["sample_rate"])
@@ -282,7 +281,7 @@ def dialogues(ass):
 
 base = round(origin * 1000)
 for rendition in re.findall(r'TYPE=SUBTITLES[^\n]*URI="(s\d+)\.m3u8"', master):
-    sources = [int(x) for x in carries_all.get(rendition, [])]
+    sources = carries.get(rendition, [])
     if not sources:
         print(f"{rendition}: no source track known for it -> FAIL"); ok = False; continue
     lines = set()

@@ -1039,6 +1039,17 @@ static void from_vtt(const uint8_t *x, int size, AVBPrint *out) {
   }
 }
 
+/** The first kept line of the track that begins at or after `from`. */
+static int first_from(const Text *text, int64_t from) {
+  int low = 0, high = text->count;
+  while (low < high) {
+    int middle = (low + high) / 2;
+    if (text->cues[middle].from < from) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 static int by_cue(const Cue *a, int64_t from, int64_t to, const char *text) {
   if (a->from != from) return a->from < from ? -1 : 1;
   if (a->to != to) return a->to < to ? -1 : 1;
@@ -1074,12 +1085,8 @@ static int keep_cue(TitleHls *title, Text *text, const AVPacket *packet) {
   int64_t from = packet->pts;
   int64_t to = from + (packet->duration > 0 ? packet->duration
                                             : llrint(UNTIMED_S / av_q2d(text->base)));
-  int at = 0, high = text->count;
-  while (at < high) {
-    int middle = (at + high) / 2;
-    if (by_cue(&text->cues[middle], from, to, line.str) < 0) at = middle + 1;
-    else high = middle;
-  }
+  int at = first_from(text, from);
+  while (at < text->count && by_cue(&text->cues[at], from, to, line.str) < 0) at++;
   if (at < text->count && by_cue(&text->cues[at], from, to, line.str) == 0) goto end;
   if (text->count == text->capacity) {
     int capacity = text->capacity ? text->capacity * 2 : 64;
@@ -1330,13 +1337,8 @@ end:
 
 /** Whether a line beginning at `time` of the track is kept: the index lists it once it is. */
 static int kept_at(const Text *text, int64_t time) {
-  int low = 0, high = text->count;
-  while (low < high) {
-    int middle = (low + high) / 2;
-    if (text->cues[middle].from < time) low = middle + 1;
-    else high = middle;
-  }
-  return low < text->count && text->cues[low].from == time;
+  int at = first_from(text, time);
+  return at < text->count && text->cues[at].from == time;
 }
 
 /** A time of the track in milliseconds of the title. */
@@ -2289,11 +2291,11 @@ int title_hls_sound_stream(const TitleHls *title, int track) {
 }
 
 int title_hls_subtitle_streams(const TitleHls *title, int track, int *streams, int most) {
-  if (track < 0 || track >= title->text_count) return 0;
+  if (track < 0 || track >= title->text_count || most < 1) return 0;
   int count = 0;
-  if (count < most) streams[count++] = title->texts[track].stream;
-  for (int t = 0; t < title->text_count; t++) {
-    if (t != track && folds(title, track, t) && count < most) streams[count++] = title->texts[t].stream;
+  streams[count++] = title->texts[track].stream;
+  for (int t = 0; t < title->text_count && count < most; t++) {
+    if (t != track && folds(title, track, t)) streams[count++] = title->texts[t].stream;
   }
   return count;
 }

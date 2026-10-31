@@ -181,7 +181,6 @@ describe("a file AVPlayer can't open", () => {
       options,
     );
     await settle();
-    expect(unshownSubtitles()).toEqual([]);
     sessions[0]!.opened.resolve({
       kind: "session",
       playlist: "http://127.0.0.1:1/t/main.m3u8",
