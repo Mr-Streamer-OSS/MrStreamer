@@ -130,15 +130,27 @@ async function connect(days: readonly (number | null)[]) {
     archiveStream,
     liveCatalogue: async () => ({
       categories: [{ id: "news", name: "NL | News" }],
-      channels: ["FHD", "HD", "SD"].map((quality, i) => ({
-        id: String(10 + i),
-        name: `NL | News ${quality}`,
-        number: null,
-        logoUrl: null,
-        categoryIds: ["news"],
-        guideId: "news.nl",
-        catchupDays: days[i] ?? null,
-      })),
+      channels: [
+        ...["FHD", "HD", "SD"].map((quality, i) => ({
+          id: String(10 + i),
+          name: `NL | News ${quality}`,
+          number: null,
+          logoUrl: null,
+          categoryIds: ["news"],
+          guideId: "news.nl",
+          catchupDays: days[i] ?? null,
+        })),
+        // Another channel, beside News.
+        {
+          id: "20",
+          name: "NL | Weather",
+          number: null,
+          logoUrl: null,
+          categoryIds: ["news"],
+          guideId: "weather.nl",
+          catchupDays: null,
+        },
+      ],
     }),
   };
   const id = await account.add({
@@ -826,6 +838,48 @@ describe("a live channel's sound and subtitles in Watch", () => {
     const subtitles = await open("watch-subtitles");
     expect(subtitles.options).toEqual(["Cancel"]);
     expect(subtitles.message).toBe("No choices on this channel.");
+  });
+
+  it("says tracks aren't known yet when their read fails or the group is unavailable", async () => {
+    await watchLive();
+    offer({ subtitles: { state: "unavailable", options: [] } });
+    const subtitles = await open("watch-subtitles");
+    expect(subtitles.options).toEqual(["Cancel"]);
+    expect(subtitles.message).toBe("Not known yet. Try again in a moment.");
+    port.getObservedTracksAsync.mockRejectedValueOnce(new Error("Read failed"));
+    const audio = await open("watch-audio");
+    expect(audio.options).toEqual(["Cancel"]);
+    expect(audio.message).toBe("Not known yet. Try again in a moment.");
+    expect((await open("watch-audio")).options[0]).toBe("✓ English · Main");
+  });
+
+  it("keeps a channel's pick out of another channel", async () => {
+    await watchLive();
+    offer();
+    const audio = await open("watch-audio");
+    await React.act(async () => {
+      audio.pick(1);
+      await tick();
+    });
+    expect((await open("watch-audio")).options[1]).toBe("✓ English · Audio description");
+    const now = account.currentCatalogue();
+    const weather =
+      now.kind === "ready" ? now.library.byKey.get(`${channel.subscriptionId}:20`) : undefined;
+    if (!weather) throw new Error("No second channel");
+    port.selectObservedTrackAsync.mockClear();
+    await React.act(async () => {
+      account.playChannel(weather, "News", { watch: true });
+      await tick();
+    });
+    await until(() => opened.length === 2);
+    expect(opened[1]).toBe("live:20");
+    offer();
+    await React.act(async () => {
+      port.ready();
+      await tick();
+    });
+    expect((await open("watch-audio")).options[0]).toBe("✓ English · Main");
+    expect(port.selectObservedTrackAsync).not.toHaveBeenCalled();
   });
 
   it("asks nothing of a newer attempt for a sheet the stream outlived", async () => {
