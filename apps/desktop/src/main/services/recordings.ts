@@ -864,7 +864,7 @@ function make(deps: RecordingsDeps) {
         const folder = resumes ? placeOf(resumes) : (storage.folder ?? root);
         // A new one keeps its folder's mark, to go on only there.
         const mark = resumes ? resumes.mark : yield* Effect.promise(() => markOf(folder));
-        if (mark === null || !(yield* Effect.promise(() => isThere(folder, mark))))
+        if (mark === null || (resumes && !(yield* Effect.promise(() => isThere(folder, mark)))))
           return yield* notThere;
         // A disk without room records nothing, asks the provider nothing and holds no connection
         // for it.
@@ -2139,18 +2139,20 @@ function make(deps: RecordingsDeps) {
         ),
       setFolder: (folder: string) =>
         Effect.gen(function* () {
-          // Written to, as a recording would be, before anything goes there: its mark, once, kept
-          // as it is after that (see CHOSEN).
+          // Written to, as a recording would be, before anything goes there. Its mark is made once
+          // and never written over (see CHOSEN).
           yield* Effect.tryPromise({
             try: async () => {
               await mkdir(folder, { recursive: true });
-              if (folder !== root && !(await markOf(folder)))
-                await writeFile(join(folder, CHOSEN), randomUUID());
-              else {
-                const probe = join(folder, `.mrstreamer-${randomUUID()}`);
-                await writeFile(probe, "");
-                await rm(probe, { force: true });
-              }
+              const probe = join(folder, `.mrstreamer-${randomUUID()}`);
+              await writeFile(probe, "");
+              await rm(probe, { force: true });
+              if (folder === root) return;
+              await writeFile(join(folder, CHOSEN), randomUUID(), { flag: "wx" }).catch(
+                (cause: NodeJS.ErrnoException) => {
+                  if (cause.code !== "EEXIST") throw cause;
+                },
+              );
             },
             catch: () =>
               new Failed({
