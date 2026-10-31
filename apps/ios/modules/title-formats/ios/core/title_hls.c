@@ -42,6 +42,22 @@
 //   frames as they are. A frame may take part of its data from up to the last 511 bytes of the
 //   frames before it (the bit reservoir), so playing from a segment reached by a seek, its first
 //   few frames may not decode fully.
+// - A text subtitle track is a WebVTT rendition cut at the picture's cuts. Every line read of it,
+//   in any segment's pass, after a seek too, is kept as cue text for the title's life; a segment
+//   holds each kept line on screen during it, so a line spanning segments is in each, as HLS has
+//   it. A track that outgrows what a title keeps (see keep_cue) says so in each segment instead. The forced lines of a language are in its regular track's
+//   rendition too, which AVPlayer shows in place of the forced one once chosen.
+// - A file holds a line only where it begins, so a pass from a seek doesn't read the line on
+//   screen there, nor one a muxer stored ahead of its time. The file's index (Cues), which
+//   FFmpeg and mkvmerge write for every subtitle packet, says when each line begins, how long it
+//   lasts and in which cluster it is: those lines of a chosen rendition's segment that no read
+//   found are read from their clusters, RECALLS_MOST a segment and RECALL_BYTES_MOST past the
+//   start of each cluster. FFmpeg keeps neither an index entry's length nor which
+//   track number is whose stream, so opening keeps the file's start, whose SeekHead says where
+//   the Cues are and whose Tracks number the streams, and the Cues are read again once a
+//   rendition is chosen. A line the index leaves out shows only where a pass reads it.
+// - A text track whose frames this FFmpeg can't decode, zlib or bzip2 compressed or encrypted, is
+//   named with the picture subtitles as one the stream doesn't carry.
 #include "title_hls.h"
 
 #include <libavcodec/avcodec.h>
@@ -49,6 +65,7 @@
 #include <libavutil/avstring.h>
 #include <libavutil/bprint.h>
 #include <libavutil/mathematics.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -95,6 +112,32 @@
 #define EDGE_S 0.1
 /** Sound tracks offered at most. */
 #define SOUNDS_MOST 8
+/** Text subtitle tracks served at most, and other subtitle tracks named as unshown at most. */
+#define TEXTS_MOST 16
+#define UNSHOWN_MOST 16
+/**
+ * Bytes of cue text a track keeps at most, and the largest packet read as a line. A track with
+ * more can't be shown: its segments are refused once chosen.
+ */
+#define TEXT_BYTES_MOST (4 * 1024 * 1024)
+#define LINE_BYTES_MOST (64 * 1024)
+/** Bytes of cue text a title keeps at most, every track together, and the largest packet read. */
+#define CUE_BYTES_MOST (16 * 1024 * 1024)
+#define PACKET_BYTES_MOST (1024 * 1024)
+/** How long a line shows whose packet doesn't say. Seconds. */
+#define UNTIMED_S 5.0
+/**
+ * Lines the index lists that one segment reads from their clusters at most, and how far past
+ * the start of a line's cluster reading it may go.
+ */
+#define RECALLS_MOST 8
+#define RECALL_BYTES_MOST (8 * 1024 * 1024)
+/**
+ * How much of the file's start opening keeps, for its SeekHead and Tracks, and the most read for
+ * Tracks that lie past it.
+ */
+#define HEAD_BYTES (256 * 1024)
+#define TRACKS_BYTES_MOST (1024 * 1024)
 /** Segments kept after they were made, every rendition of each. */
 #define KEPT 2
 #define IO_BUFFER 65536
@@ -125,6 +168,44 @@ typedef struct Sound {
   /** A frame of silence, filling where the track has none; NULL when one can't be made. */
   AVPacket *silence;
 } Sound;
+
+/** A line of a text subtitle track, as WebVTT cue text, at its times in the track's base. */
+typedef struct Cue {
+  int64_t from, to;
+  char *text;
+  /** WebVTT cue settings the file gives the line, or NULL. */
+  char *settings;
+} Cue;
+
+/** A line of a text subtitle track the file's index lists. */
+typedef struct Listed {
+  /** When it begins and how long it lasts, in the track's base; the length -1 when unlisted. */
+  int64_t time, duration;
+  /** The file offset of its cluster. */
+  int64_t cluster;
+  /** Its cluster was read for it already, whatever that found; a read the source failed doesn't count. */
+  int tried;
+} Listed;
+
+/** A text subtitle track served as a WebVTT rendition. */
+typedef struct Text {
+  int stream;
+  /** Its track's number in the file, which the index names it by; -1 when not known. */
+  int64_t number;
+  AVRational base;
+  int forced;
+  /** What its kept lines take; and whether a line went unkept for the bounds keep_cue keeps. */
+  size_t bytes;
+  int overflow;
+  /** Its rendition was asked for: AVPlayer shows it, or may. */
+  int wanted;
+  /** Kept lines, by `from`. */
+  Cue *cues;
+  int count, capacity;
+  /** The lines the index lists, by `time`. */
+  Listed *listed;
+  int listed_count, listed_capacity;
+} Text;
 
 /** Every rendition of one segment; a sound rendition without data was refused for a gap. */
 typedef struct Made {
@@ -158,13 +239,31 @@ struct TitleHls {
   Packets lead;
   Made kept[KEPT];
   int kept_next;
-  /** The last playlist asked for. */
+  /** The last playlist or subtitle segment asked for. */
   char *text;
+  Text texts[TEXTS_MOST];
+  int text_count;
+  /** The file's subtitle streams the stream doesn't carry, and which of them are encoded. */
+  int unshown[UNSHOWN_MOST], unshown_encoded[UNSHOWN_MOST];
+  /** How many it names, and how many more it has past UNSHOWN_MOST. */
+  int unshown_count, unshown_more;
+  /** Bytes every track's kept lines take together. */
+  size_t cue_bytes;
+  /** The file's first HEAD_BYTES, as opening read them, until the tracks are chosen. */
+  uint8_t *head;
+  int64_t head_size;
+  /** Where the Segment's data starts, 0 when not known, and where its Cues are, -1 when not. */
+  int64_t segment, cues;
+  /** A bit for each segment whose pass was made: every line stored from its cut on was read. */
+  uint8_t *passed;
+  /** Whether the index's lines were read: 0 not yet, 1 read, -1 there are none to read. */
+  int listing;
 };
 
 static const char *const MPEGURL = "application/vnd.apple.mpegurl";
 static const char *const MP4 = "video/mp4";
 static const char *const MPEG_AUDIO = "audio/mpeg";
+static const char *const VTT = "text/vtt";
 
 static void say(char *detail, size_t size, const char *text) {
   if (detail && size) av_strlcpy(detail, text, size);
@@ -178,6 +277,11 @@ static int read_packet(void *opaque, uint8_t *buffer, int size) {
   int read = title->source.read_at(title->source.opaque, title->position, buffer, size);
   if (read < 0) return atomic_load(&title->interrupted) ? AVERROR_EXIT : AVERROR(EIO);
   if (read == 0) return AVERROR_EOF;
+  if (title->head && title->position <= title->head_size && title->position < HEAD_BYTES) {
+    int64_t kept = FFMIN(read, HEAD_BYTES - title->position);
+    memcpy(title->head + title->position, buffer, (size_t)kept);
+    title->head_size = FFMAX(title->head_size, title->position + kept);
+  }
   title->position += read;
   if (title->budget > 0) title->budget -= read;
   return read;
@@ -818,6 +922,7 @@ static TitleHlsResult plan(TitleHls *title, char *detail, size_t detail_size) {
   }
   title->cuts[count] = end;
   title->count = count;
+  if (!(title->passed = av_mallocz((size_t)count / 8 + 1))) return TITLE_HLS_NO_MEMORY;
   return TITLE_HLS_OK;
 }
 
@@ -829,6 +934,704 @@ static int segment_at(const TitleHls *title, double at) {
   return index;
 }
 
+/** The text subtitle codecs served as WebVTT. */
+static int text_codec(enum AVCodecID codec) {
+  return codec == AV_CODEC_ID_SUBRIP || codec == AV_CODEC_ID_TEXT || codec == AV_CODEC_ID_ASS ||
+         codec == AV_CODEC_ID_SSA || codec == AV_CODEC_ID_WEBVTT;
+}
+
+/** The served text track a packet belongs to, or NULL. */
+static Text *text_of(TitleHls *title, const AVPacket *packet) {
+  for (int i = 0; i < title->text_count; i++) {
+    if (title->texts[i].stream == packet->stream_index) return &title->texts[i];
+  }
+  return NULL;
+}
+
+static const char *language_of(const AVStream *st) {
+  const AVDictionaryEntry *language = av_dict_get(st->metadata, "language", NULL, 0);
+  return language && *language->value && strcmp(language->value, "und") != 0 ? language->value
+                                                                              : NULL;
+}
+
+/**
+ * Whether rendition `track` carries the lines of text track `other`: its own, and a forced
+ * track's in the regular track of the same language, as HLS has forced lines.
+ */
+static int folds(const TitleHls *title, int track, int other) {
+  if (track == other) return 1;
+  const Text *a = &title->texts[track], *b = &title->texts[other];
+  if (a->forced || !b->forced) return 0;
+  const char *x = language_of(title->input->streams[a->stream]);
+  const char *y = language_of(title->input->streams[b->stream]);
+  return x && y && strcmp(x, y) == 0;
+}
+
+/** Appends a character of text as WebVTT cue text holds it. */
+static void vtt_char(AVBPrint *out, char c) {
+  if (c == '&') av_bprintf(out, "&amp;");
+  else if (c == '<') av_bprintf(out, "&lt;");
+  else if (c == '>') av_bprintf(out, "&gt;");
+  else av_bprint_chars(out, c, 1);
+}
+
+/** Starts a new line, unless the text is empty or a line just started: cue text has no blank line. */
+static void vtt_break(AVBPrint *out) {
+  if (out->len && out->str[out->len - 1] != '\n') av_bprint_chars(out, '\n', 1);
+}
+
+/**
+ * SubRip's text as WebVTT: its <i>, <b> and <u> are WebVTT's too; other tags, such as <font>,
+ * and the ASS overrides some files carry, go.
+ */
+static void from_subrip(const uint8_t *x, int size, AVBPrint *out) {
+  for (int i = 0; i < size && x[i]; i++) {
+    const uint8_t *end = NULL;
+    if (x[i] == '{' && i + 1 < size && x[i + 1] == '\\') end = memchr(x + i, '}', size - i);
+    // A tag's name begins with a letter or "/" and runs to its ">", without another "<".
+    if (x[i] == '<' && i + 1 < size && (isalpha(x[i + 1]) || x[i + 1] == '/')) {
+      end = memchr(x + i, '>', size - i);
+      const uint8_t *other = memchr(x + i + 1, '<', size - i - 1);
+      if (other && end && other < end) end = NULL;
+    }
+    if (end) {
+      const uint8_t *tag = x + i + 1;
+      int length = (int)(end - tag), closing = length > 0 && tag[0] == '/';
+      char name = x[i] == '<' && length == 1 + closing ? (char)tolower(tag[closing]) : 0;
+      if (name == 'i' || name == 'b' || name == 'u') av_bprintf(out, closing ? "</%c>" : "<%c>", name);
+      i = (int)(end - x);
+    } else if (x[i] == '\n') {
+      vtt_break(out);
+    } else if (x[i] != '\r') {
+      vtt_char(out, (char)x[i]);
+    }
+  }
+}
+
+/**
+ * An ASS line as Matroska keeps it, ReadOrder, Layer, Style, Name, MarginL, MarginR, MarginV and
+ * Effect before its text, as WebVTT: italics, bold and underline as tags, \N as a new line and \h
+ * as a no-break space. Other overrides, such as positions, go, and so do drawings.
+ */
+static void from_ass(const uint8_t *x, int size, AVBPrint *out) {
+  int i = 0;
+  for (int commas = 0; i < size && commas < 8; i++) commas += x[i] == ',';
+  // The styles open now, italic, bold, underline, as WebVTT's tags; and drawing mode.
+  static const char TAGS[3] = {'i', 'b', 'u'};
+  int open[3] = {0}, drawing = 0;
+  for (; i < size && x[i]; i++) {
+    const uint8_t *end = x[i] == '{' ? memchr(x + i, '}', size - i) : NULL;
+    if (end) {
+      int want[3] = {open[0], open[1], open[2]};
+      for (const uint8_t *at = x + i + 1; at < end; at++) {
+        if (*at != '\\') continue;
+        const uint8_t *name = ++at;
+        while (at < end && isalpha(*at)) at++;
+        int length = (int)(at - name);
+        long value = strtol((const char *)at, NULL, 10);
+        int number = at < end && isdigit(*at);
+        if (length == 1 && (*name == 'i' || *name == 'u')) want[*name == 'u' ? 2 : 0] = number && value;
+        // \b1 or a weight of 700 and over is bold.
+        else if (length == 1 && *name == 'b') want[1] = number && (value == 1 || value >= 700);
+        else if (length == 1 && *name == 'p') drawing = number && value > 0;
+        else if (length >= 1 && *name == 'r') want[0] = want[1] = want[2] = 0;
+        // An override's arguments, such as \t's, may hold overrides of their own: they go too.
+        if (at < end && *at == '(') {
+          const uint8_t *close = memchr(at, ')', (size_t)(end - at));
+          at = close ? close : end;
+        }
+        at--;
+      }
+      for (int t = 2; t >= 0; t--) {
+        if (open[t] && !want[t]) av_bprintf(out, "</%c>", TAGS[t]);
+      }
+      for (int t = 0; t < 3; t++) {
+        if (!open[t] && want[t]) av_bprintf(out, "<%c>", TAGS[t]);
+        open[t] = want[t];
+      }
+      i = (int)(end - x);
+    } else if (drawing) {
+      continue;
+    } else if (x[i] == '\\' && i + 1 < size && (x[i + 1] == 'N' || x[i + 1] == 'n')) {
+      vtt_break(out);
+      i++;
+    } else if (x[i] == '\\' && i + 1 < size && x[i + 1] == 'h') {
+      av_bprintf(out, "\xc2\xa0");
+      i++;
+    } else if (x[i] == '\n') {
+      vtt_break(out);
+    } else if (x[i] != '\r') {
+      vtt_char(out, (char)x[i]);
+    }
+  }
+}
+
+/** WebVTT's own cue text, as it is, but for carriage returns and blank lines. */
+static void from_vtt(const uint8_t *x, int size, AVBPrint *out) {
+  for (int i = 0; i < size && x[i]; i++) {
+    if (x[i] == '\n') vtt_break(out);
+    else if (x[i] != '\r') av_bprint_chars(out, (char)x[i], 1);
+  }
+}
+
+/** The first kept line of the track that begins at or after `from`. */
+static int first_from(const Text *text, int64_t from) {
+  int low = 0, high = text->count;
+  while (low < high) {
+    int middle = (low + high) / 2;
+    if (text->cues[middle].from < from) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+static int by_cue(const Cue *a, int64_t from, int64_t to, const char *text) {
+  if (a->from != from) return a->from < from ? -1 : 1;
+  if (a->to != to) return a->to < to ? -1 : 1;
+  return strcmp(a->text, text);
+}
+
+/**
+ * Keeps the line of a text track's packet, once: a line read again, after a seek or for the
+ * index, is the same line. A packet past PACKET_BYTES_MOST or a line past LINE_BYTES_MOST is kept
+ * as a line saying it is too large to show; one past the track's TEXT_BYTES_MOST or the title's
+ * CUE_BYTES_MOST isn't kept, and the track is marked as one that can't be shown.
+ */
+static int keep_cue(TitleHls *title, Text *text, const AVPacket *packet) {
+  if (packet->pts == AV_NOPTS_VALUE || !packet->data) return 0;
+  enum AVCodecID codec = title->input->streams[text->stream]->codecpar->codec_id;
+  AVBPrint line, settings;
+  av_bprint_init(&line, 0, AV_BPRINT_SIZE_UNLIMITED);
+  av_bprint_init(&settings, 0, AV_BPRINT_SIZE_UNLIMITED);
+  int large = packet->size > PACKET_BYTES_MOST;
+  if (!large && (codec == AV_CODEC_ID_ASS || codec == AV_CODEC_ID_SSA))
+    from_ass(packet->data, packet->size, &line);
+  else if (!large && codec == AV_CODEC_ID_WEBVTT) from_vtt(packet->data, packet->size, &line);
+  else if (!large) from_subrip(packet->data, packet->size, &line);
+  while (line.len && line.str[line.len - 1] == '\n') line.str[--line.len] = 0;
+  size_t given = 0;
+  const uint8_t *cue = av_packet_get_side_data(packet, AV_PKT_DATA_WEBVTT_SETTINGS, &given);
+  for (size_t i = 0; cue && i < given && cue[i]; i++) {
+    av_bprint_chars(&settings, cue[i] == '\n' || cue[i] == '\r' ? ' ' : (char)cue[i], 1);
+  }
+  // A line too large to keep shows, at its time, that it is.
+  if (large || line.len + settings.len > LINE_BYTES_MOST) {
+    av_bprint_clear(&line);
+    av_bprint_clear(&settings);
+    av_bprintf(&line, "This line is too large to show.");
+  }
+  int error = 0;
+  char *kept = NULL, *placed = NULL;
+  if (!av_bprint_is_complete(&line) || !av_bprint_is_complete(&settings)) {
+    error = AVERROR(ENOMEM);
+    goto end;
+  }
+  if (!line.len) goto end;
+  int64_t from = packet->pts;
+  int64_t to = from + (packet->duration > 0 ? packet->duration
+                                            : llrint(UNTIMED_S / av_q2d(text->base)));
+  int at = first_from(text, from);
+  while (at < text->count && by_cue(&text->cues[at], from, to, line.str) < 0) at++;
+  if (at < text->count && by_cue(&text->cues[at], from, to, line.str) == 0) goto end;
+  // What a line takes, its own allocations too.
+  size_t cost = line.len + settings.len + sizeof(Cue) + 64;
+  if (text->bytes + cost > TEXT_BYTES_MOST || title->cue_bytes + cost > CUE_BYTES_MOST) {
+    text->overflow = 1;
+    goto end;
+  }
+  if (text->count == text->capacity) {
+    int capacity = text->capacity ? text->capacity * 2 : 64;
+    Cue *cues = av_realloc_array(text->cues, capacity, sizeof(*cues));
+    if (!cues) {
+      error = AVERROR(ENOMEM);
+      goto end;
+    }
+    text->cues = cues;
+    text->capacity = capacity;
+  }
+  if ((error = av_bprint_finalize(&line, &kept)) < 0 ||
+      (settings.len && (error = av_bprint_finalize(&settings, &placed)) < 0))
+    goto end;
+  memmove(&text->cues[at + 1], &text->cues[at], (size_t)(text->count - at) * sizeof(Cue));
+  text->cues[at] = (Cue){from, to, kept, placed};
+  text->count++;
+  text->bytes += cost;
+  title->cue_bytes += cost;
+  kept = placed = NULL;
+end:
+  av_free(kept);
+  av_free(placed);
+  av_bprint_finalize(&line, NULL);
+  av_bprint_finalize(&settings, NULL);
+  return error;
+}
+
+/**
+ * Marks the listed lines of the track beginning at `time` as read: a line read and not kept,
+ * such as an ASS drawing, isn't read again for the index.
+ */
+static void mark_read(Text *text, int64_t time) {
+  int low = 0, high = text->listed_count;
+  while (low < high) {
+    int middle = (low + high) / 2;
+    if (text->listed[middle].time < time) low = middle + 1;
+    else high = middle;
+  }
+  for (; low < text->listed_count && text->listed[low].time == time; low++)
+    text->listed[low].tried = 1;
+}
+
+/** Reads the next packet of the file, keeping a text track's line as it goes. */
+static int read_frame(TitleHls *title, AVPacket *packet) {
+  int error = av_read_frame(title->input, packet);
+  Text *text = error < 0 ? NULL : text_of(title, packet);
+  if (text && (error = keep_cue(title, text, packet)) < 0) av_packet_unref(packet);
+  else if (text && packet->pts != AV_NOPTS_VALUE) mark_read(text, packet->pts);
+  return error;
+}
+
+/** Reads all `size` bytes at `offset` of the file, unless it ends first: how many, or -1. */
+static int64_t read_whole(TitleHls *title, int64_t offset, uint8_t *buffer, int64_t size) {
+  int64_t done = 0;
+  while (done < size) {
+    if (atomic_load(&title->interrupted)) return -1;
+    int64_t want = size - done > IO_BUFFER ? IO_BUFFER : size - done;
+    int read = title->source.read_at(title->source.opaque, offset + done, buffer + done, (int)want);
+    if (read < 0) return -1;
+    if (read == 0) break;
+    done += read;
+  }
+  return done;
+}
+
+/**
+ * An EBML number at `at` of `data`: an element's ID, with its marker, or its size, without; -1
+ * when it runs past `size` or is longer than eight bytes. A size of all ones, unknown, is
+ * INT64_MAX.
+ */
+static int64_t ebml(const uint8_t *data, int64_t size, int64_t *at, int id) {
+  if (*at < 0 || *at >= size || !data[*at]) return -1;
+  int length = 1;
+  while (!(data[*at] & (0x80 >> (length - 1)))) length++;
+  if (length > size - *at) return -1;
+  int64_t value = id ? data[*at] : data[*at] & (0xFF >> length);
+  int ones = value == (0xFF >> length);
+  for (int i = 1; i < length; i++) {
+    value = value << 8 | data[*at + i];
+    ones &= data[*at + i] == 0xFF;
+  }
+  *at += length;
+  return !id && ones ? INT64_MAX : value;
+}
+
+/**
+ * The element at `*at`, inside `end`: its ID, where its data starts and how long it is, and `*at`
+ * moved past it. 0 when there is none, or its data doesn't fit inside `end`, an unknown size
+ * included: nothing past that is read.
+ */
+static int child(const uint8_t *data, int64_t end, int64_t *at, int64_t *id, int64_t *from,
+                 int64_t *length) {
+  int64_t here = *at;
+  if ((*id = ebml(data, end, &here, 1)) < 0 || (*length = ebml(data, end, &here, 0)) < 0 ||
+      *length > end - here)
+    return 0;
+  *from = here;
+  *at = here + *length;
+  return 1;
+}
+
+/** An unsigned integer element's value, of its first eight bytes at most. */
+static uint64_t ebml_uint(const uint8_t *data, int64_t length) {
+  uint64_t value = 0;
+  for (int64_t i = 0; i < length && i < 8; i++) value = value << 8 | data[i];
+  return value;
+}
+
+/**
+ * Whether a track's ContentEncodings leave its frames as FFmpeg can't read them here: encrypted,
+ * or compressed with zlib or bzip2, which this build of FFmpeg passes on still compressed.
+ * Header stripping and LZO it undoes, and encodings of the codec's private data only don't count.
+ */
+static int encoded(const uint8_t *data, int64_t from, int64_t end) {
+  int count = 0, unreadable = 0;
+  for (int64_t at = from, id, start, length; child(data, end, &at, &id, &start, &length);) {
+    if (id != 0x6240) continue;
+    // ContentEncodingType 1, or a ContentEncryption, is encryption.
+    count++;
+    uint64_t scope = 1, type = 0, algo = 0;
+    int compression = 0, encryption = 0;
+    for (int64_t in = start, kind, s, l; child(data, start + length, &in, &kind, &s, &l);) {
+      if (kind == 0x5032) scope = ebml_uint(data + s, l);
+      if (kind == 0x5033) type = ebml_uint(data + s, l);
+      if (kind == 0x5035) encryption = 1;
+      if (kind != 0x5034) continue;
+      compression = 1;
+      for (int64_t c = s, k, s2, l2; child(data, s + l, &c, &k, &s2, &l2);) {
+        if (k == 0x4254) algo = ebml_uint(data + s2, l2);
+      }
+    }
+    // Without a ContentCompression, compression is zlib's, the default.
+    if (!(scope & 1)) continue;
+    if (type != 0 || encryption) unreadable = 3;
+    else if ((!compression || algo < 2) && !unreadable) unreadable = 1;
+  }
+  // FFmpeg reads one encoding at most; with more it reads none.
+  return unreadable ? unreadable : count > 1;
+}
+
+/**
+ * Reads the Tracks element's data, from `from` to `end` of `data`: each stream's track number and
+ * whether its frames are encoded in a way this can't read. FFmpeg makes a stream of each track it
+ * accepts, in their order; 0 when a stream's kind isn't its track's, which leaves both unknown.
+ */
+static int read_tracks(const TitleHls *title, const uint8_t *data, int64_t from, int64_t end,
+                       int64_t *numbers, int *unreadable) {
+  unsigned streams = title->input->nb_streams, made = 0;
+  int64_t found[TEXTS_MOST + UNSHOWN_MOST + SOUNDS_MOST + 64];
+  int encodings[sizeof(found) / sizeof(*found)] = {0};
+  for (int64_t entry = from, kind, s, l; child(data, end, &entry, &kind, &s, &l);) {
+    if (kind != 0xAE) continue;
+    int64_t number = -1;
+    uint64_t type = 0;
+    char letter = 0;
+    int unread = 0;
+    for (int64_t in = s, k, s2, l2; child(data, s + l, &in, &k, &s2, &l2);) {
+      if (k == 0xD7) number = (int64_t)ebml_uint(data + s2, l2);
+      if (k == 0x83) type = ebml_uint(data + s2, l2);
+      if (k == 0x86 && l2 > 0) letter = (char)data[s2];
+      if (k == 0x6D80) unread = encoded(data, s2, s2 + l2);
+    }
+    // The tracks FFmpeg makes no stream of: of no kind it plays, or a codec of another kind.
+    int video = type == 1, audio = type == 2, text = type == 0x11 || type == 0x21;
+    if (!(video || audio || text) || !letter || (video && letter != 'V') ||
+        (audio && letter != 'A') || (text && letter != 'D' && letter != 'S'))
+      continue;
+    if (made >= streams || made >= sizeof(found) / sizeof(*found)) return 0;
+    enum AVMediaType made_kind = title->input->streams[made]->codecpar->codec_type;
+    if ((video && made_kind != AVMEDIA_TYPE_VIDEO) || (audio && made_kind != AVMEDIA_TYPE_AUDIO) ||
+        (type == 0x11 && made_kind != AVMEDIA_TYPE_SUBTITLE))
+      return 0;
+    encodings[made] = unread;
+    found[made++] = number;
+  }
+  for (unsigned i = 0; i < made; i++) {
+    numbers[i] = found[i];
+    unreadable[i] = encodings[i];
+  }
+  return made > 0;
+}
+
+/**
+ * Reads the file's start as opening read it, `title->head`: where its Segment's data starts,
+ * which the index's positions count from, where its SeekHead says its Cues are, and its Tracks
+ * (see read_tracks), from the start or, where they lie past it, from where the SeekHead says,
+ * within TRACKS_BYTES_MOST. 0 when the Tracks couldn't be read: every number stays unknown.
+ */
+static int read_head(TitleHls *title, int64_t *numbers, int *unreadable) {
+  const uint8_t *head = title->head;
+  int64_t size = title->head_size, at = 0, id, from, length, tracks = -1;
+  for (unsigned i = 0; i < title->input->nb_streams; i++) numbers[i] = -1;
+  if (!child(head, size, &at, &id, &from, &length) || id != 0x1A45DFA3) return 0;
+  // The Segment holds the rest of the file, beyond what the start holds.
+  if (ebml(head, size, &at, 1) != 0x18538067 || ebml(head, size, &at, 0) < 0) return 0;
+  title->segment = at;
+  while (child(head, size, &at, &id, &from, &length)) {
+    if (id == 0x1654AE6B) return read_tracks(title, head, from, from + length, numbers, unreadable);
+    if (id != 0x114D9B74) continue;
+    for (int64_t seek = from, kind, s, l; child(head, from + length, &seek, &kind, &s, &l);) {
+      if (kind != 0x4DBB) continue;
+      uint64_t named = 0;
+      int64_t position = -1;
+      for (int64_t in = s, k, s2, l2; child(head, s + l, &in, &k, &s2, &l2);) {
+        if (k == 0x53AB && l2 == 4) named = ebml_uint(head + s2, 4);
+        if (k == 0x53AC) position = (int64_t)ebml_uint(head + s2, l2);
+      }
+      if (position < 0 || position > INT64_MAX - title->segment) continue;
+      if (named == 0x1C53BB6B) title->cues = title->segment + position;
+      if (named == 0x1654AE6B) tracks = title->segment + position;
+    }
+  }
+  if (tracks < 0) return 0;
+  uint8_t header[16];
+  int64_t got = read_whole(title, tracks, header, sizeof(header));
+  at = 0;
+  if (got < 0 || ebml(header, got, &at, 1) != 0x1654AE6B ||
+      (length = ebml(header, got, &at, 0)) < 0 || length > TRACKS_BYTES_MOST)
+    return 0;
+  uint8_t *data = av_malloc(length ? (size_t)length : 1);
+  if (!data) return 0;
+  int64_t read = read_whole(title, tracks + at, data, length);
+  int known = read == length && read_tracks(title, data, 0, length, numbers, unreadable);
+  av_free(data);
+  return known;
+}
+
+static int by_time(const void *a, const void *b) {
+  const Listed *x = a, *y = b;
+  if (x->time != y->time) return x->time < y->time ? -1 : 1;
+  return (x->cluster > y->cluster) - (x->cluster < y->cluster);
+}
+
+/** Whether FFmpeg's index of stream `st` has every line listed: the same index, the same track. */
+static int indexes(AVStream *st, const Listed *listed, int count) {
+  for (int i = 0; i < count; i++) {
+    int at = av_index_search_timestamp(st, listed[i].time, AVSEEK_FLAG_ANY);
+    const AVIndexEntry *entry = at >= 0 ? avformat_index_get_entry(st, at) : NULL;
+    if (!entry || entry->timestamp != listed[i].time || entry->pos != listed[i].cluster) return 0;
+  }
+  return 1;
+}
+
+/** Lists line `listed` for `text`. */
+static int list(Text *text, Listed listed) {
+  if (text->listed_count == text->listed_capacity) {
+    int capacity = text->listed_capacity ? text->listed_capacity * 2 : 64;
+    Listed *more = av_realloc_array(text->listed, capacity, sizeof(*more));
+    if (!more) return AVERROR(ENOMEM);
+    text->listed = more;
+    text->listed_capacity = capacity;
+  }
+  text->listed[text->listed_count++] = listed;
+  return 0;
+}
+
+/**
+ * Reads the lines of each text track whose number is known that the file's index lists, within
+ * INDEX_BYTES_MOST, once. A track's lines are kept only where FFmpeg's index of its stream, read
+ * from the same Cues, has them all, and the same entry listed twice is one line. None when the
+ * SeekHead names no Cues or they aren't Cues; a read that fails leaves them unread, failing the
+ * request as any failed read does.
+ */
+static int list_cues(TitleHls *title) {
+  int64_t at = 0, length;
+  uint8_t header[16];
+  if (title->cues < 0) {
+    title->listing = -1;
+    return 0;
+  }
+  int64_t got = read_whole(title, title->cues, header, sizeof(header));
+  if (got < 0) return AVERROR(EIO);
+  if (ebml(header, got, &at, 1) != 0x1C53BB6B || (length = ebml(header, got, &at, 0)) < 0 ||
+      length > INDEX_BYTES_MOST) {
+    title->listing = -1;
+    return 0;
+  }
+  uint8_t *data = av_malloc(length ? (size_t)length : 1);
+  if (!data) return AVERROR(ENOMEM);
+  int64_t size = read_whole(title, title->cues + at, data, length);
+  int error = size < 0 ? AVERROR(EIO) : 0;
+  for (int64_t point = 0, kind, p0, part; !error && child(data, size, &point, &kind, &p0, &part);) {
+    if (kind != 0xBB) continue;
+    int64_t time = -1;
+    for (int64_t in = p0, k, s, l; !error && child(data, p0 + part, &in, &k, &s, &l);) {
+      if (k == 0xB3) time = (int64_t)ebml_uint(data + s, l);
+      if (k != 0xB7 || time < 0) continue;
+      int64_t track = -1, cluster = -1, duration = -1;
+      for (int64_t field = s, f, s2, l2; child(data, s + l, &field, &f, &s2, &l2);) {
+        uint64_t value = ebml_uint(data + s2, l2);
+        if (f == 0xF7) track = (int64_t)value;
+        if (f == 0xF1 && value <= (uint64_t)(INT64_MAX - title->segment)) cluster = (int64_t)value;
+        if (f == 0xB2 && value <= INT64_MAX / 2) duration = (int64_t)value;
+      }
+      for (int t = 0; !error && cluster >= 0 && t < title->text_count; t++) {
+        if (track >= 0 && title->texts[t].number == track)
+          error = list(&title->texts[t], (Listed){time, duration, title->segment + cluster, 0});
+      }
+    }
+  }
+  av_free(data);
+  if (error < 0) {
+    for (int t = 0; t < title->text_count; t++) title->texts[t].listed_count = 0;
+    return error;
+  }
+  for (int t = 0; t < title->text_count; t++) {
+    Text *text = &title->texts[t];
+    if (text->listed_count) qsort(text->listed, text->listed_count, sizeof(*text->listed), by_time);
+    int kept = 0;
+    for (int i = 0; i < text->listed_count; i++) {
+      if (!kept || by_time(&text->listed[kept - 1], &text->listed[i]))
+        text->listed[kept++] = text->listed[i];
+    }
+    text->listed_count = kept;
+    if (!indexes(title->input->streams[text->stream], text->listed, text->listed_count))
+      text->listed_count = 0;
+  }
+  title->listing = 1;
+  return 0;
+}
+
+/** Whether a line beginning at `time` of the track is kept: the index lists it once it is. */
+static int kept_at(const Text *text, int64_t time) {
+  int at = first_from(text, time);
+  return at < text->count && text->cues[at].from == time;
+}
+
+/** A time of the track in milliseconds of the title. */
+static int64_t title_ms(const TitleHls *title, int64_t ts, AVRational base) {
+  return av_rescale_q(ts, base, (AVRational){1, 1000}) -
+         av_rescale_q(title->cuts[0], title->video_base, (AVRational){1, 1000});
+}
+
+/**
+ * Reads listed line `listed` of track `text` from its cluster: from the picture's index entry at
+ * or before it, the packets up to the line and any others of its time stored with it. Every line
+ * read on the way is kept. The read leaves the input elsewhere.
+ */
+static int recall(TitleHls *title, Text *text, Listed *listed) {
+  listed->tried = 1;
+  AVStream *video = title->input->streams[title->video];
+  const AVIndexEntry *from = NULL;
+  for (int i = 0, entries = avformat_index_get_entries_count(video); i < entries; i++) {
+    const AVIndexEntry *entry = avformat_index_get_entry(video, i);
+    if (entry->pos <= listed->cluster && (!from || entry->pos > from->pos)) from = entry;
+  }
+  if (!from) return 0;
+  title->next = -1;
+  clear(&title->ahead);
+  title->budget = listed->cluster - from->pos + RECALL_BYTES_MOST;
+  int error = av_seek_frame(title->input, title->video, from->timestamp, AVSEEK_FLAG_BACKWARD);
+  int found = 0;
+  for (int i = 0; error >= 0 && i < AHEAD_PACKETS_MOST; i++) {
+    AVPacket *packet = av_packet_alloc();
+    if (!packet) {
+      error = AVERROR(ENOMEM);
+      break;
+    }
+    if ((error = read_frame(title, packet)) >= 0) {
+      int line = packet->stream_index == text->stream && packet->pts != AV_NOPTS_VALUE;
+      // Lines of one time are stored together: the first packet after them ends the read.
+      if (line && packet->pts == listed->time) found = 1;
+      else if (found || (line && packet->pts > listed->time)) error = AVERROR_EOF;
+    }
+    av_packet_free(&packet);
+  }
+  int over = title->budget == 0;
+  title->budget = -1;
+  // What reading past the budget left behind doesn't hold up the next read.
+  title->io->error = 0;
+  title->io->eof_reached = 0;
+  if (atomic_load(&title->interrupted)) return AVERROR_EXIT;
+  // A line not found within reach is left out, as a read that doesn't reach it would.
+  if (over || error >= 0 || error == AVERROR_EOF || error == AVERROR_INVALIDDATA) return 0;
+  // A read the source failed is made again when the segment is asked again.
+  if (error == AVERROR(EIO)) listed->tried = 0;
+  return error;
+}
+
+/**
+ * Reads the lines segment `index` of rendition `track` holds that the index lists, that no read
+ * kept and whose cluster lies before `before`, RECALLS_MOST at most, as `*budget` counts them:
+ * those on screen as it begins, which began before, and those a muxer stored ahead of their
+ * time. A listed line without a length counts when it is the last to begin before the segment.
+ */
+static int recall_for(TitleHls *title, int track, int index, int64_t before, int *budget) {
+  if (title->listing == 0) {
+    int error = list_cues(title);
+    if (error < 0) return error;
+  }
+  int64_t a = title_ms(title, title->cuts[index], title->video_base);
+  int64_t b = title_ms(title, title->cuts[index + 1], title->video_base);
+  for (int t = 0; t < title->text_count; t++) {
+    if (!folds(title, track, t)) continue;
+    Text *text = &title->texts[t];
+    int last = -1;
+    for (int i = 0; i < text->listed_count; i++) {
+      if (title_ms(title, text->listed[i].time, text->base) < a) last = i;
+    }
+    for (int i = 0; i < text->listed_count && *budget > 0; i++) {
+      Listed *listed = &text->listed[i];
+      int64_t from = title_ms(title, listed->time, text->base);
+      int64_t to = listed->duration < 0 ? -1
+                                        : title_ms(title, listed->time + listed->duration, text->base);
+      int needed = from < b && (listed->duration < 0 ? from >= a || i == last : to > a);
+      if (!needed || listed->tried || listed->cluster >= before || kept_at(text, listed->time))
+        continue;
+      (*budget)--;
+      int error = recall(title, text, listed);
+      if (error < 0) return error;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Before a pass from a seek to segment `index`, reads the lines of every chosen rendition it
+ * holds that are stored before the cluster the pass starts at, which it wouldn't read.
+ */
+static int recall_before(TitleHls *title, int index) {
+  AVStream *video = title->input->streams[title->video];
+  int at = av_index_search_timestamp(video, title->cuts[index], AVSEEK_FLAG_BACKWARD);
+  const AVIndexEntry *entry = at >= 0 ? avformat_index_get_entry(video, at) : NULL;
+  int budget = RECALLS_MOST;
+  for (int t = 0; entry && t < title->text_count; t++) {
+    if (!title->texts[t].wanted) continue;
+    int error = recall_for(title, t, index, entry->pos, &budget);
+    if (error < 0) return error;
+  }
+  return 0;
+}
+
+static int passed(const TitleHls *title, int index) {
+  return title->passed[index / 8] >> (index % 8) & 1;
+}
+
+/** A WebVTT time, from milliseconds. */
+static void vtt_time(AVBPrint *out, int64_t ms) {
+  av_bprintf(out, "%02lld:%02d:%02d.%03d", (long long)(ms / 3600000), (int)(ms / 60000 % 60),
+             (int)(ms / 1000 % 60), (int)(ms % 1000));
+}
+
+typedef struct Placed {
+  int64_t from, to;
+  const Cue *cue;
+} Placed;
+
+static int by_placed(const void *a, const void *b) {
+  const Placed *x = a, *y = b;
+  if (x->from != y->from) return x->from < y->from ? -1 : 1;
+  if (x->to != y->to) return x->to < y->to ? -1 : 1;
+  return strcmp(x->cue->text, y->cue->text);
+}
+
+/**
+ * Segment `index` of subtitle rendition `track`: every kept line it carries on screen during the
+ * segment, from title time 0, which the picture's time 0 is too. A line both a forced track and
+ * its regular one hold is written once.
+ */
+static int write_vtt(const TitleHls *title, int track, int index, AVBPrint *out) {
+  int64_t a = title_ms(title, title->cuts[index], title->video_base);
+  int64_t b = title_ms(title, title->cuts[index + 1], title->video_base);
+  int count = 0;
+  for (int t = 0; t < title->text_count; t++) {
+    if (folds(title, track, t)) count += title->texts[t].count;
+  }
+  Placed *placed = av_malloc_array(count ? count : 1, sizeof(*placed));
+  if (!placed) return AVERROR(ENOMEM);
+  count = 0;
+  for (int t = 0; t < title->text_count; t++) {
+    if (!folds(title, track, t)) continue;
+    const Text *text = &title->texts[t];
+    for (int i = 0; i < text->count; i++) {
+      const Cue *cue = &text->cues[i];
+      int64_t from = title_ms(title, cue->from, text->base), to = title_ms(title, cue->to, text->base);
+      if (from < b && to > a && to > 0) placed[count++] = (Placed){from > 0 ? from : 0, to, cue};
+    }
+  }
+  qsort(placed, count, sizeof(*placed), by_placed);
+  av_bprintf(out, "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n");
+  for (int i = 0; i < count; i++) {
+    if (i > 0 && by_placed(&placed[i - 1], &placed[i]) == 0) continue;
+    av_bprintf(out, "\n");
+    vtt_time(out, placed[i].from);
+    av_bprintf(out, " --> ");
+    vtt_time(out, placed[i].to);
+    if (placed[i].cue->settings) av_bprintf(out, " %s", placed[i].cue->settings);
+    av_bprintf(out, "\n%s\n", placed[i].cue->text);
+  }
+  av_free(placed);
+  return 0;
+}
+
 /** Reads the next packet of the offered tracks, taking any read ahead first. */
 static int next_packet(TitleHls *title, Packets *ahead, int *at, AVPacket **out) {
   if (*at < ahead->count) {
@@ -838,7 +1641,7 @@ static int next_packet(TitleHls *title, Packets *ahead, int *at, AVPacket **out)
   }
   AVPacket *packet = av_packet_alloc();
   if (!packet) return AVERROR(ENOMEM);
-  int error = av_read_frame(title->input, packet);
+  int error = read_frame(title, packet);
   if (error < 0) {
     av_packet_free(&packet);
     return error;
@@ -871,7 +1674,7 @@ static int reach(TitleHls *title, int index, Packets *ahead) {
       AVPacket *packet = i < ahead->count ? ahead->items[i] : av_packet_alloc();
       if (!packet) return AVERROR(ENOMEM);
       if (i == ahead->count) {
-        if ((error = av_read_frame(title->input, packet)) < 0) {
+        if ((error = read_frame(title, packet)) < 0) {
           av_packet_free(&packet);
           if (error == AVERROR_EOF) break;
           return error;
@@ -909,7 +1712,7 @@ static int read_lead(TitleHls *title) {
   for (int read = 0; read < LEAD_PACKETS_MOST && title->lead.bytes < LEAD_BYTES_MOST; read++) {
     AVPacket *packet = av_packet_alloc();
     if (!packet) return AVERROR(ENOMEM);
-    int error = av_read_frame(title->input, packet);
+    int error = read_frame(title, packet);
     if (error < 0) {
       av_packet_free(&packet);
       return error == AVERROR_EOF ? 0 : error;
@@ -999,7 +1802,10 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
   int error = 0;
   if (title->next != index) {
     title->next = -1;
-    if ((error = reach(title, index, &title->ahead)) < 0) {
+    // A read that failed before, such as the provider's, doesn't hold up this one.
+    title->io->error = 0;
+    title->io->eof_reached = 0;
+    if ((error = recall_before(title, index)) < 0 || (error = reach(title, index, &title->ahead)) < 0) {
       say(detail, detail_size, "The file couldn't be read at this point.");
       return failure(title, error);
     }
@@ -1141,6 +1947,7 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
     }
   }
   slot->index = index;
+  title->passed[index / 8] |= (uint8_t)(1 << (index % 8));
   *out = slot;
   title->ahead = later;
   later = (Packets){0};
@@ -1172,7 +1979,7 @@ static int sample(TitleHls *title, int index) {
       // Read on only for the picture, which the sound may have come well before.
       if (title->video_sample || title->ahead.count >= AHEAD_PACKETS_MOST) break;
       if (!(packet = av_packet_alloc())) return AVERROR(ENOMEM);
-      if ((error = av_read_frame(title->input, packet)) < 0 ||
+      if ((error = read_frame(title, packet)) < 0 ||
           (error = push(&title->ahead, packet)) < 0) {
         av_packet_free(&packet);
         if (error == AVERROR_EOF) break;
@@ -1215,6 +2022,17 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
     return TITLE_HLS_UNSUPPORTED;
   }
   title->video_base = video->time_base;
+  int64_t *numbers = av_malloc_array(title->input->nb_streams + 1, sizeof(*numbers));
+  int *encoded = av_calloc(title->input->nb_streams + 1, sizeof(*encoded));
+  if (!numbers || !encoded) {
+    av_free(numbers);
+    av_free(encoded);
+    return TITLE_HLS_NO_MEMORY;
+  }
+  // Without the Tracks, a text track's encoding isn't known: it isn't served.
+  if (!read_head(title, numbers, encoded)) {
+    for (unsigned i = 0; i < title->input->nb_streams; i++) encoded[i] = 2;
+  }
   int any = 0;
   for (unsigned i = 0; i < title->input->nb_streams; i++) {
     AVStream *st = title->input->streams[i];
@@ -1230,9 +2048,26 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
         sound->frame = sample_frame(st->codecpar, NULL);
         offered = 1;
       }
+    } else if (st->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) {
+      if (text_codec(st->codecpar->codec_id) && !encoded[i] && title->text_count < TEXTS_MOST) {
+        Text *text = &title->texts[title->text_count++];
+        text->stream = (int)i;
+        text->number = numbers[i];
+        text->base = st->time_base;
+        text->forced = !!(st->disposition & AV_DISPOSITION_FORCED);
+        offered = 1;
+      } else if (title->unshown_count < UNSHOWN_MOST) {
+        title->unshown_encoded[title->unshown_count] = text_codec(st->codecpar->codec_id) ? encoded[i] : 0;
+        title->unshown[title->unshown_count++] = (int)i;
+      } else {
+        title->unshown_more++;
+      }
     }
     if ((int)i != title->video && !offered) st->discard = AVDISCARD_ALL;
   }
+  av_free(numbers);
+  av_free(encoded);
+  av_freep(&title->head);
   if (any && title->sound_count == 0) {
     say(detail, detail_size, "Its sound isn't AAC-LC, HE-AAC, AC-3, E-AC-3 or MP3.");
     return TITLE_HLS_UNSUPPORTED;
@@ -1248,13 +2083,15 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
   title->source = *source;
   title->next = -1;
   title->budget = -1;
+  title->cues = -1;
   for (int i = 0; i < KEPT; i++) title->kept[i].index = -1;
   atomic_init(&title->interrupted, 0);
   TitleHlsResult result = TITLE_HLS_NO_MEMORY;
   int error = 0;
   uint8_t *buffer = av_malloc(IO_BUFFER);
   title->input = avformat_alloc_context();
-  if (!buffer || !title->input) goto fail;
+  title->head = av_malloc(HEAD_BYTES);
+  if (!buffer || !title->input || !title->head) goto fail;
   title->input->pb = avio_alloc_context(buffer, IO_BUFFER, 0, title, read_packet, NULL, seek);
   if (!title->input->pb) goto fail;
   title->io = title->input->pb;
@@ -1397,6 +2234,24 @@ static void master(TitleHls *title, AVBPrint *text) {
     av_bprintf(text, ",DEFAULT=%s,AUTOSELECT=YES,CHANNELS=\"%d\",URI=\"a%d.m3u8\"\n",
                t == chosen ? "YES" : "NO", st->codecpar->ch_layout.nb_channels, t);
   }
+  // The app chooses subtitles itself; none is the default, and forced lines may be autoselected.
+  for (int t = 0; t < title->text_count; t++) {
+    const AVStream *st = title->input->streams[title->texts[t].stream];
+    const char *language = language_of(st);
+    const AVDictionaryEntry *name = av_dict_get(st->metadata, "title", NULL, 0);
+    av_bprintf(text, "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"");
+    if (name && *name->value) quoted(text, name->value);
+    else if (language) quoted(text, language);
+    else av_bprintf(text, "Subtitles");
+    av_bprintf(text, " %d\"", t + 1);
+    if (language) {
+      av_bprintf(text, ",LANGUAGE=\"");
+      quoted(text, language);
+      av_bprintf(text, "\"");
+    }
+    av_bprintf(text, ",DEFAULT=NO,AUTOSELECT=YES,FORCED=%s,URI=\"s%d.m3u8\"\n",
+               title->texts[t].forced ? "YES" : "NO", t);
+  }
   const AVStream *video = title->input->streams[title->video];
   double length = seconds(title->cuts[title->count] - title->cuts[0], title->video_base);
   int64_t bandwidth = title->input->bit_rate;
@@ -1420,16 +2275,19 @@ static void master(TitleHls *title, AVBPrint *text) {
   if (video->codecpar->width > 0)
     av_bprintf(text, ",RESOLUTION=%dx%d", video->codecpar->width, video->codecpar->height);
   if (title->sound_count) av_bprintf(text, ",AUDIO=\"audio\"");
+  if (title->text_count) av_bprintf(text, ",SUBTITLES=\"subs\"");
   av_bprintf(text, "\nv.m3u8\n");
 }
 
 /**
- * A rendition's media playlist: "v" for the picture, "a<n>" for a sound track. Packed audio has
- * no initialization segment, and its segments are .mp3.
+ * A rendition's media playlist: "v" for the picture, "a<n>" for a sound track, "s<n>" for a
+ * subtitle track. Packed audio and WebVTT have no initialization segment; their segments are
+ * .mp3 and .vtt.
  */
 static void media(TitleHls *title, const char *rendition, AVBPrint *text) {
-  int track = rendition[0] == 'a' ? atoi(rendition + 1) : -1;
-  int raw = track >= 0 && packed(title, &title->sounds[track]);
+  int track = rendition[0] != 'v' ? atoi(rendition + 1) : -1;
+  int vtt = rendition[0] == 's';
+  int raw = vtt || (track >= 0 && packed(title, &title->sounds[track]));
   double target = 0;
   for (int i = 0; i < title->count; i++) {
     double length = seconds(title->cuts[i + 1] - title->cuts[i], title->video_base);
@@ -1445,7 +2303,7 @@ static void media(TitleHls *title, const char *rendition, AVBPrint *text) {
   for (int i = 0; i < title->count; i++) {
     av_bprintf(text, "#EXTINF:%.6f,\n%s%s%d.%s\n",
                seconds(title->cuts[i + 1] - title->cuts[i], title->video_base), rendition,
-               track >= 0 ? "-" : "", i, raw ? "mp3" : "m4s");
+               track >= 0 ? "-" : "", i, vtt ? "vtt" : raw ? "mp3" : "m4s");
   }
   av_bprintf(text, "#EXT-X-ENDLIST\n");
 }
@@ -1465,14 +2323,60 @@ static int numbered(const char *name, const char *prefix, const char *suffix, co
   return strcmp(after, suffix) == 0 ? (int)value : -1;
 }
 
+/**
+ * Segment `index` of subtitle rendition `track`: the segment's pass is made first unless it was,
+ * as for its other renditions, then the lines the index lists for it that no read found are read.
+ */
+static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, const uint8_t **data,
+                                       size_t *size, const char **type, char *detail,
+                                       size_t detail_size) {
+  title->texts[track].wanted = 1;
+  if (!passed(title, index)) {
+    Made *made = NULL;
+    TitleHlsResult result = make(title, index, &made, detail, detail_size);
+    if (result != TITLE_HLS_OK) return result;
+  }
+  int budget = RECALLS_MOST;
+  int error = recall_for(title, track, index, INT64_MAX, &budget);
+  // A line the reads couldn't keep would be missing: each segment says so instead, over the
+  // picture, which plays on.
+  int overflow = 0;
+  for (int t = 0; t < title->text_count; t++) overflow |= folds(title, track, t) && title->texts[t].overflow;
+  AVBPrint text;
+  av_bprint_init(&text, 0, AV_BPRINT_SIZE_UNLIMITED);
+  if (error >= 0 && overflow) {
+    av_bprintf(&text, "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n\n");
+    vtt_time(&text, title_ms(title, title->cuts[index], title->video_base));
+    av_bprintf(&text, " --> ");
+    vtt_time(&text, title_ms(title, title->cuts[index + 1], title->video_base));
+    av_bprintf(&text, "\nThese subtitles are too large to show.\n");
+  } else if (error >= 0) {
+    error = write_vtt(title, track, index, &text);
+  }
+  if (error >= 0 && !av_bprint_is_complete(&text)) error = AVERROR(ENOMEM);
+  av_freep(&title->text);
+  if (error >= 0) error = av_bprint_finalize(&text, &title->text);
+  else av_bprint_finalize(&text, NULL);
+  if (error < 0) {
+    say(detail, detail_size, "The file couldn't be read at this point.");
+    return failure(title, error);
+  }
+  *data = (const uint8_t *)title->text;
+  *size = strlen(title->text);
+  *type = VTT;
+  return TITLE_HLS_OK;
+}
+
 TitleHlsResult title_hls_get(TitleHls *title, const char *name, const uint8_t **data,
                              size_t *size, const char **type, char *detail, size_t detail_size) {
   *data = NULL;
   *size = 0;
   *type = MP4;
   int track = numbered(name, "a", ".m3u8", NULL);
+  int subtitle = numbered(name, "s", ".m3u8", NULL);
+  if (subtitle >= title->text_count) subtitle = -1;
   if (strcmp(name, "main.m3u8") == 0 || strcmp(name, "v.m3u8") == 0 ||
-      (track >= 0 && track < title->sound_count)) {
+      (track >= 0 && track < title->sound_count) || subtitle >= 0) {
     // A playlist: written now, kept until the next request.
     AVBPrint text;
     av_bprint_init(&text, 0, AV_BPRINT_SIZE_UNLIMITED);
@@ -1480,7 +2384,9 @@ TitleHlsResult title_hls_get(TitleHls *title, const char *name, const uint8_t **
     else if (name[0] == 'v') media(title, "v", &text);
     else {
       char rendition[16];
-      snprintf(rendition, sizeof(rendition), "a%d", track);
+      snprintf(rendition, sizeof(rendition), "%c%d", name[0], subtitle >= 0 ? subtitle : track);
+      // A chosen subtitle rendition has its lines that a seek wouldn't read found from now on.
+      if (subtitle >= 0) title->texts[subtitle].wanted = 1;
       media(title, rendition, &text);
     }
     av_freep(&title->text);
@@ -1502,9 +2408,15 @@ TitleHlsResult title_hls_get(TitleHls *title, const char *name, const uint8_t **
     *size = title->sounds[track].init.size;
     return TITLE_HLS_OK;
   }
+  const char *rest = NULL;
+  subtitle = numbered(name, "s", NULL, &rest);
+  if (subtitle >= 0 && subtitle < title->text_count && *rest == '-') {
+    int index = numbered(rest, "-", ".vtt", NULL);
+    if (index < 0 || index >= title->count) return TITLE_HLS_MISSING;
+    return subtitle_segment(title, subtitle, index, data, size, type, detail, detail_size);
+  }
   int rendition = -1, index = numbered(name, "v", ".m4s", NULL);
   if (index >= 0) rendition = 0;
-  const char *rest = NULL;
   track = numbered(name, "a", NULL, &rest);
   if (track >= 0 && track < title->sound_count && *rest == '-') {
     int raw = packed(title, &title->sounds[track]);
@@ -1540,6 +2452,62 @@ int title_hls_sound_stream(const TitleHls *title, int track) {
   return track >= 0 && track < title->sound_count ? title->sounds[track].stream : -1;
 }
 
+int title_hls_subtitle_streams(const TitleHls *title, int track, int *streams, int most) {
+  if (track < 0 || track >= title->text_count || most < 1) return 0;
+  int count = 0;
+  streams[count++] = title->texts[track].stream;
+  for (int t = 0; t < title->text_count && count < most; t++) {
+    if (t != track && folds(title, track, t)) streams[count++] = title->texts[t].stream;
+  }
+  return count;
+}
+
+int title_hls_subtitle_listed(const TitleHls *title, int track) {
+  if (track < 0 || track >= title->text_count || title->listing == 0) return -1;
+  return title->texts[track].listed_count;
+}
+
+/** A subtitle format's short name, as viewers know it, or NULL. */
+static const char *format_name(enum AVCodecID codec) {
+  switch (codec) {
+    case AV_CODEC_ID_HDMV_PGS_SUBTITLE:
+      return "PGS";
+    case AV_CODEC_ID_DVD_SUBTITLE:
+      return "DVD";
+    case AV_CODEC_ID_DVB_SUBTITLE:
+      return "DVB";
+    case AV_CODEC_ID_DVB_TELETEXT:
+      return "teletext";
+    case AV_CODEC_ID_XSUB:
+      return "XSUB";
+    case AV_CODEC_ID_HDMV_TEXT_SUBTITLE:
+      return "HDMV text";
+    case AV_CODEC_ID_ARIB_CAPTION:
+      return "ARIB";
+    case AV_CODEC_ID_NONE:
+      return NULL;
+    default: {
+      const AVCodecDescriptor *descriptor = avcodec_descriptor_get(codec);
+      return descriptor ? descriptor->name : NULL;
+    }
+  }
+}
+
+int title_hls_unshown(const TitleHls *title, int index, TitleHlsUnshown *out) {
+  if (index < 0 || index >= title->unshown_count) return 0;
+  const AVStream *st = title->input->streams[title->unshown[index]];
+  out->language = language_of(st);
+  int encoded = title->unshown_encoded[index];
+  out->format = encoded == 1   ? "compressed text"
+                : encoded == 2 ? "text of unknown encoding"
+                : encoded == 3 ? "encrypted text"
+                               : format_name(st->codecpar->codec_id);
+  out->forced = !!(st->disposition & AV_DISPOSITION_FORCED);
+  return 1;
+}
+
+int title_hls_unshown_more(const TitleHls *title) { return title->unshown_more; }
+
 void title_hls_interrupt(TitleHls *title) { atomic_store(&title->interrupted, 1); }
 
 void title_hls_close(TitleHls *title) {
@@ -1552,6 +2520,16 @@ void title_hls_close(TitleHls *title) {
     av_free(title->sounds[t].init.data);
     av_packet_free(&title->sounds[t].silence);
   }
+  for (int t = 0; t < TEXTS_MOST; t++) {
+    for (int i = 0; i < title->texts[t].count; i++) {
+      av_free(title->texts[t].cues[i].text);
+      av_free(title->texts[t].cues[i].settings);
+    }
+    av_free(title->texts[t].cues);
+    av_free(title->texts[t].listed);
+  }
+  av_free(title->passed);
+  av_free(title->head);
   av_packet_free(&title->video_sample);
   av_free(title->video_init.data);
   av_free(title->text);

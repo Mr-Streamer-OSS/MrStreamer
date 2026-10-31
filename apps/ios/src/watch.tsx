@@ -1,6 +1,8 @@
 import { router, usePathname } from "expo-router";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { Quality } from "@mrstreamer/contracts/library";
+import { formatLanguageName } from "@mrstreamer/core/i18n";
+import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -56,10 +58,12 @@ import {
   togglePause,
   trackChoices,
   unsetAside,
+  unshownSubtitles,
   usePlayback,
   usePlaybackClock,
   usePlaybackLength,
 } from "./playback.ts";
+import type { UnshownSubtitles } from "./title-formats.ts";
 import { colors } from "./ui.tsx";
 import { currentSource } from "./sources.ts";
 import { store, useStore } from "./store.ts";
@@ -672,6 +676,7 @@ function TextButtons({ item }: { item: Playing }) {
       asked.stands() &&
       playbackState.get().watch &&
       playingItem(playbackState.get().phase) === playing;
+    const unshown = of === "subtitles" ? unshownSubtitles() : null;
     const known = await trackChoices(of);
     if (!stands()) return;
     const choices = known ?? [];
@@ -686,9 +691,11 @@ function TextButtons({ item }: { item: Playing }) {
         cancelButtonIndex: choices.length,
         ...(known === null
           ? { message: "Not known yet. Try again in a moment." }
-          : none
-            ? { message: item.live ? "No choices on this channel." : "No choices in this file." }
-            : {}),
+          : unshown && unshown.named.length > 0
+            ? { message: cantShow(unshown) }
+            : none
+              ? { message: item.live ? "No choices on this channel." : "No choices in this file." }
+              : {}),
       },
       (index) => {
         if (stands()) void choices[index]?.choose();
@@ -710,6 +717,24 @@ function TextButtons({ item }: { item: Playing }) {
       ) : null}
     </View>
   );
+}
+
+/** A language's name in the app's language, like the rest of its copy; null when unknown. */
+function spoken(code: string | null) {
+  const canonical = languageCode(code);
+  return (canonical && formatLanguageName(canonical)) || code;
+}
+
+/**
+ * The Subtitles sheet's message for tracks the file has that Watch can't show, by language and
+ * format, then how many more: "Can't show here: English (PGS), Dutch (DVD, forced) and 2 more."
+ */
+function cantShow({ named, more }: UnshownSubtitles) {
+  const tracks = named.map(({ language, format, forced }) => {
+    const details = [format ?? "unknown format", ...(forced ? ["forced"] : [])].join(", ");
+    return `${spoken(language) ?? "Unknown language"} (${details})`;
+  });
+  return `Can't show here: ${tracks.join(", ")}${more > 0 ? ` and ${more} more` : ""}.`;
 }
 
 function TextControl({

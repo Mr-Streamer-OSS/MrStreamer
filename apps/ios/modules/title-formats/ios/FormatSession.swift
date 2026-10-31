@@ -7,7 +7,9 @@ import Foundation
 /// a queue of its own.
 final class FormatSession {
   enum Opened {
-    case session(playlist: String)
+    /// `unshown` names the file's subtitle tracks the playlist doesn't carry, such as pictures,
+    /// and counts those past the ones it names.
+    case session(playlist: String, unshown: [String: Any])
     case direct
     case failed(SessionFailure)
     case closed
@@ -94,7 +96,9 @@ final class FormatSession {
             guard let self else { return respond(.missing) }
             self.work.async { respond(self.answer(name)) }
           }
-          return done(.session(playlist: "http://127.0.0.1:\(port)/\(token)/main.m3u8"))
+          return done(
+            .session(
+              playlist: "http://127.0.0.1:\(port)/\(token)/main.m3u8", unshown: unshown(made)))
         } catch {
           return done(.failed(.unsupported("The player's local server didn't start.")))
         }
@@ -106,6 +110,21 @@ final class FormatSession {
       default: done(.failed(.unsupported(String(cString: detail))))
       }
     }
+  }
+
+  /// The file's subtitle tracks the stream doesn't carry: language and format when known, and
+  /// how many more the core doesn't name.
+  private func unshown(_ title: OpaquePointer?) -> [String: Any] {
+    var tracks: [[String: Any]] = []
+    var track = TitleHlsUnshown()
+    while title_hls_unshown(title, Int32(tracks.count), &track) != 0 {
+      tracks.append([
+        "language": track.language.map { String(cString: $0) as Any } ?? NSNull(),
+        "format": track.format.map { String(cString: $0) as Any } ?? NSNull(),
+        "forced": track.forced != 0,
+      ])
+    }
+    return ["named": tracks, "more": Int(title_hls_unshown_more(title))]
   }
 
   private var isClosed: Bool {
