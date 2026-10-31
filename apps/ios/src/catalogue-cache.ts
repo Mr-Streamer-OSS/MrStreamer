@@ -220,8 +220,8 @@ function discard(file: File) {
 
 /**
  * The file's list if it reads whole and checks out as `id`'s `kind` under `mapping`; "none" when
- * there is none or it doesn't, which deletes it. "stopped" when `wanted` failed while its rows were checked: the
- * file is left as it is, for the deletion queued behind.
+ * there is none or it doesn't, which deletes it. "stopped" when `wanted` failed while its rows
+ * were checked: the file is left as it is, for the deletion queued behind.
  */
 async function load(
   file: File,
@@ -433,7 +433,7 @@ function* textOf(
     version: VERSION,
     subscriptionId: id,
     fetchedAt: saved.fetchedAt,
-    ...(mapping === null ? {} : { mapping }),
+    mapping: mapping ?? undefined,
     kind: saved.kind,
     catalogue,
   });

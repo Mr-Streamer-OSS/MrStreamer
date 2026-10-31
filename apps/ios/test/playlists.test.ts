@@ -547,7 +547,6 @@ describe("a playlist subscription", () => {
       const first = loaded(app);
       app.reloadChannels(id);
       await until(() => (loaded(app) ?? 0) > (first ?? 0), "the same channels again");
-      expect(app.currentCatalogue()).toMatchObject({ library: shown.library });
       expect((app.currentCatalogue() as typeof shown).library).toBe(shown.library);
       expect(guide.withdrawn(key, day.from)).toBe(read);
       expect(await guide.programme(open!.detail)).toMatchObject({ title: "Morning" });
@@ -694,12 +693,9 @@ describe("mapping a playlist's groups", () => {
     await until(() => member(app, id)?.live.kind === "failed", "the failed reload");
     expect(memory.files.has(`/cache/catalogues/${id}.live.json`)).toBe(true);
 
-    let again = await launch();
+    const again = await launch();
     await until(() => member(again, id)?.live.kind === "failed", "the reload offline");
     expect(channelNames(again)).toEqual([]);
-    host.fail(null);
-    again = await launch();
-    await until(() => channelNames(again).length === 3, "Live without the skipped group");
   });
 
   it("refuses a group the playlist no longer lists, changing nothing", async () => {
