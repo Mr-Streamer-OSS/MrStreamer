@@ -50,6 +50,11 @@ export interface FoundProgramme {
   readonly key: string;
   readonly programme: ScheduleItem;
 }
+/** What `search` found, and whether a guide could not be searched. */
+export interface ProgrammeSearch {
+  readonly found: readonly FoundProgramme[];
+  readonly unsearched: boolean;
+}
 interface Entry {
   activation: Activation;
   /** Cached reads may stand while attach is pending, but its old lease cannot refresh. */
@@ -671,15 +676,16 @@ export function createGuide(
      * on now first, then by start. Each is on the first of `keys` (`Channel.key`, in the order
      * Search lists channels) whose programmes are read from the guide and id it was found by, as
      * `listings` reads them, and its `detail` reads it with `programme`. Nothing is found once guides,
-     * sources, catalogues or mappings change during it; it fails where a standing guide could not
-     * be read.
+     * sources, catalogues or mappings change during it. `unsearched` where a standing guide could
+     * not be read in the foreground: its channels find nothing, and the rest find what they do.
      */
     async search(
       text: string,
       keys: readonly string[],
       options?: { readonly signal?: AbortSignal },
-    ): Promise<readonly FoundProgramme[]> {
+    ): Promise<ProgrammeSearch> {
       const signal = options?.signal;
+      const none = { found: [], unsearched: false };
       const words = [...new Set(searchWords(text))];
       // Past what the native reader takes, as no title of its 300 characters folds to more.
       if (
@@ -687,7 +693,7 @@ export function createGuide(
         words.length > 160 ||
         words.some((word) => new TextEncoder().encode(word).length > 32768)
       )
-        return [];
+        return none;
       // What every answer stands on, which a change during the search leaves it none of.
       const footing = () => [
         layout,
@@ -696,25 +702,32 @@ export function createGuide(
       ];
       const before = footing();
       const at = now();
-      /** Runs `read` on `value`'s guide, failing where that guide stands but could not answer. */
+      let unsearched = false;
+      /** Runs `read` on `value`'s guide; `unsearched` where that guide stands but didn't answer. */
       const asked = async <T>(
         value: Token,
         read: (native: GuideNative, lease: string, job: string) => Promise<Result<T>>,
       ) => {
         const answer = await ask(value, signal, read);
-        if (!answer && !signal?.aborted && validToken(value)) throw new GuideFault("unavailable");
+        if (!answer && !signal?.aborted && foreground && validToken(value)) unsearched = true;
         return answer;
       };
-      // The guide ids each guide has programmes for now, which tell which guide answers a channel.
-      const current = new Map<string, ReadonlySet<string>>();
-      for (const key of keys)
+      // The guide ids each guide has programmes for now, which tell which guide answers a channel,
+      // or null for one that didn't say.
+      const current = new Map<string, ReadonlySet<string> | null>();
+      const standing = [...entries].filter(
+        ([owner, entry]) => stands(owner, entry) && usable(entry.generation),
+      ).length;
+      for (const key of keys) {
+        if (current.size >= standing || signal?.aborted) break;
         for (const value of candidates(key))
           if (!current.has(value.owner)) {
             const answer = await asked(value, (native, lease, job) =>
               native.current(lease, value.generation.id, job, at),
             );
-            current.set(value.owner, new Set(answer?.ids));
+            current.set(value.owner, answer && new Set(answer.ids));
           }
+      }
       // By guide, the first of `keys` that reads each of its guide ids.
       const guides = new Map<
         string,
@@ -723,7 +736,10 @@ export function createGuide(
       const places = new Map<string, number>();
       for (const [place, key] of keys.entries())
         for (const value of candidates(key)) {
-          const guideId = value.ids.find((id) => current.get(value.owner)?.has(id));
+          const ids = current.get(value.owner);
+          // Which guide answers it is unknown past one that didn't say.
+          if (ids === null || signal?.aborted) break;
+          const guideId = value.ids.find((id) => ids?.has(id));
           if (!guideId) continue;
           if (places.has(value.key)) break;
           places.set(value.key, place);
@@ -748,9 +764,9 @@ export function createGuide(
         after.length !== before.length ||
         after.some((v, n) => v !== before[n])
       )
-        return [];
+        return none;
       const rank = ({ match }: (typeof found)[number]) => (match.start <= at ? 0 : 1);
-      return found
+      const programmes = found
         .filter(({ captured }) => validToken(captured))
         .sort(
           (a, b) =>
@@ -768,6 +784,7 @@ export function createGuide(
             detail: token({ ...captured, ids: [guideId], start, on: dayOf(start) }),
           },
         }));
+      return { found: programmes, unsearched };
     },
     async forget(key: string): Promise<boolean> {
       withdrawChannels(key);
