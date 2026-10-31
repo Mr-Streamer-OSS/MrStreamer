@@ -33,7 +33,7 @@ publishes: each of those is a maintainer action that needs its own approval.
   so a reverted database sharing one folder with a newer revision would delete the newer copies.
   The cost: each kept revision holds its own copies (snapd keeps 2 on classic systems by
   default), and `snap remove` keeps a 31-day snapshot of the current revision's data, copies
-  and recordings included. `snap/local/snapshots.yaml` leaves Chromium's caches out of it.
+  and recordings included. `snap/local/snapshots.yaml` excludes the listed Chromium cache folders.
 - **Chosen recording folders are shared, safely.** A recording folder the viewer chooses
   outside the profile is the same for every revision. Each recording in it is marked with the
   profile that made it, which includes the revision, and startup only removes stray recordings
@@ -54,8 +54,8 @@ publishes: each of those is a maintainer action that needs its own approval.
   allow only the locks. So under the Snap a recording isn't paused before the computer sleeps,
   and waking runs no checks at once: the reminder and recording loops check at most a minute
   apart anyway, which catches up a reminder or schedule that fell due meanwhile.
-- **Shutdown still arrives.** A session that ends sends SIGTERM, which the app treats as the
-  system ending it: what records goes on when the app runs again.
+- **Shutdown still arrives.** SIGTERM stops capture and records the interruption. On the next
+  launch, an interrupted recording resumes if its stop time has not passed.
 
 ## Build
 

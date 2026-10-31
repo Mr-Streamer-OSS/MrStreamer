@@ -151,8 +151,8 @@ export const fr: Translation = {
   "Updates come from the AUR. Use an AUR helper or makepkg.":
     "Les mises à jour viennent de l’AUR. Utilisez un assistant AUR ou makepkg.",
   "settings.search.pacman": "AUR pacman paquet makepkg assistant installation mise à jour version",
-  "Snap updates Mr. Streamer on its own. To update now, quit it and run: sudo snap refresh mr-streamer":
-    "Snap met Mr. Streamer à jour tout seul. Pour le mettre à jour maintenant, quittez-le et lancez : sudo snap refresh mr-streamer",
+  "Quit Mr. Streamer first. Snap Store: sudo snap refresh mr-streamer. Local install: install a newer Snap file.":
+    "Quittez d’abord Mr. Streamer. Snap Store : sudo snap refresh mr-streamer. Installation locale : installez un fichier Snap plus récent.",
   "settings.search.snap": "Snap snapd snapcraft refresh revert installation mise à jour version",
   "Open Store": "Ouvrir le Store",
   Channel: "Canal",

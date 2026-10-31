@@ -66,7 +66,7 @@ export function UpdatesSection() {
       status.distribution === "pacman"
         ? t("Updates come from the AUR. Use an AUR helper or makepkg.")
         : t(
-            "Snap updates Mr. Streamer on its own. To update now, quit it and run: sudo snap refresh mr-streamer",
+            "Quit Mr. Streamer first. Snap Store: sudo snap refresh mr-streamer. Local install: install a newer Snap file.",
           );
     return (
       <Section title={t("Updates")}>
