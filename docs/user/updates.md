@@ -78,7 +78,7 @@ Your login is kept in your desktop's keyring: GNOME Keyring, or KWallet on KDE. 
 sudo snap connect mr-streamer:password-manager-service
 ```
 
-Check that your keyring is running and unlocked too. On a desktop without one, such as a plain Openbox session, start GNOME Keyring first. If a saved subscription says it needs its password again because Mr. Streamer lost that connection, connect it and reopen Mr. Streamer: the saved password comes back.
+Check that your keyring is running and unlocked too: on KDE it has to be KWallet. On a desktop without one, such as a plain Openbox session, start GNOME Keyring first. If a saved subscription says it needs its password again because Mr. Streamer lost that connection, connect it and reopen Mr. Streamer: the saved password comes back.
 
 The Snap keeps its data with each version snapd keeps, in `~/snap/mr-streamer/`, downloaded copies and recordings included:
 
