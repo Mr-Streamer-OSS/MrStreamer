@@ -129,6 +129,14 @@ async function connect(days: readonly (number | null)[]) {
   preferences.updateMediaPreferences("liveQuality", "fhd");
   preferences.updateChannelPick(channel, null);
 }
+/** Recordings that start `seconds` before the programme asked for, as on the minute before. */
+function earlier(seconds: number) {
+  archiveStream.mockImplementation(async (id, window) => ({
+    url: `archive:${id}:${window.start}`,
+    format: "hls",
+    start: window.start - seconds * 1000,
+  }));
+}
 /** A programme that started `ago` and lasts an hour. */
 const aired = (ago: number) => ({
   title: "Morning Tide",
@@ -227,12 +235,8 @@ describe("a programme from catch-up", () => {
 
   it("counts from the programme's start and stops at its end, where the recording runs wider", async () => {
     await connect([3, 3, 3]);
-    // A recording that starts on the minute, 30 seconds before the programme, and sends on.
-    archiveStream.mockImplementation(async (id, window) => ({
-      url: `archive:${id}:${window.start}`,
-      format: "hls",
-      start: window.start - 30_000,
-    }));
+    // A recording that starts on the minute, 30 seconds before the programme.
+    earlier(30);
     await play(aired(2 * HOUR));
     await React.act(async () => {
       port.duration = 2 * 3600;
@@ -266,11 +270,8 @@ describe("a programme from catch-up", () => {
 
   it("starts the next stream at the programme's start when one fails before it plays", async () => {
     await connect([3, 3, 3]);
-    archiveStream.mockImplementation(async (id, window) => ({
-      url: `archive:${id}:${window.start}`,
-      format: "hls",
-      start: window.start - 30_000,
-    }));
+    // A recording that starts on the minute, 30 seconds before the programme.
+    earlier(30);
     await play(aired(2 * HOUR));
     await React.act(async () => {
       port.ready();
@@ -284,6 +285,17 @@ describe("a programme from catch-up", () => {
       await tick();
     });
     expect(port.currentTime).toBe(30);
+  });
+
+  it("plays Automatic's pick among the streams that keep it where the accepted one doesn't", async () => {
+    await connect([null, 3, 3]);
+    preferences.updateChannelPick(channel, "10");
+    await play(aired(2 * HOUR));
+    expect(archiveStream).toHaveBeenCalledExactlyOnceWith(
+      "11",
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it("plays the accepted stream where it keeps the programme", async () => {
@@ -312,13 +324,14 @@ describe("a programme from catch-up", () => {
     },
   );
 
-  it("reconnects where it got to rather than from its start", async () => {
+  it("reconnects where it got to in the programme, rather than from its start", async () => {
     await connect([3, 3, 3]);
+    earlier(30);
     await play(aired(2 * HOUR));
     await React.act(async () => {
       port.ready();
       port.state(true);
-      port.currentTime = 900;
+      port.currentTime = 30 + 900;
       port.state(true);
       port.failure({ kind: "network", evidence: null });
       await tick();
@@ -329,7 +342,55 @@ describe("a programme from catch-up", () => {
       port.ready();
       await tick();
     });
-    expect(port.currentTime).toBe(900);
+    expect(port.currentTime).toBe(30 + 900);
+  });
+
+  it("stays the programme from catch-up across closing and returning to Watch", async () => {
+    await connect([3, 3, 3]);
+    const programme = aired(2 * HOUR);
+    await play(programme);
+    await React.act(async () => {
+      port.ready();
+      port.currentTime = 600;
+      port.state(true);
+      await tick();
+    });
+    await React.act(async () => {
+      void playback.closeWatch();
+      port.state(false);
+      await tick();
+    });
+    await React.act(async () => {
+      playback.openWatch();
+      port.state(true);
+      await tick();
+    });
+    expect(playback.playingItem(phase())).toMatchObject({
+      live: false,
+      past: { start: programme.start, stop: programme.stop },
+    });
+    expect(port.currentTime).toBe(600);
+    expect(opened).toHaveLength(1);
+    expect(liveStream).not.toHaveBeenCalled();
+  });
+
+  it("pauses nothing played after a programme whose end was near", async () => {
+    await connect([3, 3, 3]);
+    await play(aired(2 * HOUR));
+    await React.act(async () => {
+      port.ready();
+      port.currentTime = 3600 - 0.2;
+      port.state(true);
+      await tick();
+    });
+    await React.act(async () => {
+      account.playChannel(channel, "News", { watch: true });
+      await tick();
+    });
+    port.pause.mockClear();
+    await new Promise((done) => setTimeout(done, 400));
+    expect(port.pause).not.toHaveBeenCalled();
+    expect(playback.playingItem(phase())?.live).toBe(true);
   });
 
   it("starts the programme on now over from a live channel whose catch-up keeps it", async () => {

@@ -1017,6 +1017,8 @@ describe("a programme's catch-up", () => {
       programme: { ...ended, start: at - 2 * 86400_000, stop: at - 2 * 86400_000 + 3600_000 },
       says: "Catch-up on this channel goes back 1 day.",
     },
+    { days: 3, programme: { ...ended, stop: ended.start }, says: null },
+    { days: 3, programme: { ...ended, stop: ended.start - 3600_000 }, says: null },
   ])("watches live only, saying why: $says", async ({ days, programme, says }) => {
     expect(await actions(programme, days)).toEqual(["Watch live"]);
     expect(container.textContent).not.toContain("↺");
