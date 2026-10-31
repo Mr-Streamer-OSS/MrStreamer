@@ -17,7 +17,8 @@
 // request ended and its file closed: the list never claims more than the file holds. A record still
 // recording as the app starts is one the app didn't see end, as after a crash: it goes on, from a
 // gap since its file was last written, or, its time over, counts as cut short by the quit. A
-// recording's folder left without its record, as a crash leaves one as its start fails, goes
+// recording's folder left without its record, as a crash leaves one as its start fails, or a
+// failed start whose folder couldn't be removed, or an older version's crash as it started, goes
 // then.
 //
 // Capture takes one of its subscription's connections through PlaybackCoordination, which
@@ -115,7 +116,7 @@ const ROOM_MS = 5000;
  */
 const QUICK_MS = 30_000;
 const QUICK_ENDS = 3;
-/** A recording's own folder, by its id: one a crash left before its record goes. */
+/** A recording's own folder, by its id: one left without its record goes. */
 const RECORDING_FOLDER = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /**
  * Marks a recording's folder in a folder the viewer chose as this profile's, holding the path of
@@ -413,7 +414,7 @@ function make(deps: RecordingsDeps) {
             ...(!open && { gaps: [...(record.gaps ?? []), { from: last, to: null, why: "away" }] }),
           });
       }
-      // A recording's folder without its record, as a crash leaves one as its start fails:
+      // A recording's folder without its record, as a failed start leaves one (see the header):
       // only once recordings.json is there to say so, and in a chosen folder only one it marked.
       const listed = yield* Effect.promise(() =>
         stat(path).then(
@@ -446,7 +447,7 @@ function make(deps: RecordingsDeps) {
     const stopping = new Set<string>();
     /**
      * Of `unsavedEnds`, those the viewer stopped, also one that had ended by itself and so reads as
-     * it ended: an update's restart waits for them (see keepStops).
+     * it ended: an update's install is refused while one isn't kept (see keepStops).
      */
     const unsavedStops = new Set<string>();
     /** How many times in a row each recording's capture ended quickly, by id. */
@@ -814,8 +815,8 @@ function make(deps: RecordingsDeps) {
             bytes: 0,
             status: { kind: "recording" },
           };
-        // Stopped while it waited for a connection: it lets it go.
-        if (stopped()) {
+        // Stopped while it waited for a connection: it lets it go, keeping no record.
+        if (stopped() || controller.signal.aborted) {
           held.release();
           return yield* stoppedFailure;
         }
