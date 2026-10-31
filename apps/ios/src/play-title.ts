@@ -20,6 +20,7 @@ import {
 import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { members } from "./account.ts";
 import { DEMO_ID } from "./demo.ts";
+import { subtitleTitle } from "./online-subtitles.ts";
 import { play, progressSettled, request, type Playing, type Request } from "./playback.ts";
 import { currentSource, loginOf } from "./sources.ts";
 import { store, useStore } from "./store.ts";
@@ -86,6 +87,12 @@ export function playMovie(title: Title, version: OwnedId, from: number, versions
     live: false,
     next: false,
     versions: title.versions.length > 1,
+    subtitles: subtitleTitle({
+      ...ownedId(version),
+      tmdbId: title.tmdbId,
+      title: title.title,
+      year: title.year,
+    }),
   };
   void play(
     item,
@@ -135,6 +142,14 @@ export function playEpisode(
     live: false,
     next: after !== null,
     versions: details.title.versions.length > 1,
+    subtitles: subtitleTitle({
+      subscriptionId: episode.subscriptionId,
+      id: episode.id,
+      tmdbId: details.title.tmdbId,
+      title: details.title.title,
+      year: null,
+      episode,
+    }),
   };
   void play(
     item,

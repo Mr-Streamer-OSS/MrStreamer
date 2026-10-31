@@ -98,6 +98,7 @@ import {
   type PlaylistEntry,
   type SubscriptionEntry,
 } from "./subscriptions.ts";
+import { eraseSubtitles } from "./online-subtitles.ts";
 import { noteAction } from "./telemetry/index.ts";
 import {
   eraseViewing,
@@ -1074,6 +1075,7 @@ async function eraseDemo(): Promise<DemoErase> {
         writeState((state) => forgotten(state, DEMO_ID, true));
         eraseWatchlist(DEMO_ID);
         eraseListMembers(DEMO_ID);
+        eraseSubtitles(DEMO_ID);
         if (viewingHolds(DEMO_ID)) await eraseViewing(DEMO_ID);
       } catch {
         pending.push("history");
@@ -1458,8 +1460,8 @@ function forgotten(state: SavedState, id: string, erase: boolean): SavedState {
 
 /**
  * Deletes the history of a subscription removed with it: its recent channels, watchlist, channels
- * of custom lists, guide mappings, viewing record and quality picks, each whatever another fails,
- * then clears `erasing`.
+ * of custom lists, downloaded subtitles, guide mappings, viewing record and quality picks, each
+ * whatever another fails, then clears `erasing`.
  * Rejects when one isn't deleted, leaving it there for the next launch to try again.
  */
 async function eraseHistory(id: string): Promise<void> {
@@ -1467,6 +1469,7 @@ async function eraseHistory(id: string): Promise<void> {
     Promise.resolve().then(() => writeState((state) => forgotten(state, id, true))),
     Promise.resolve().then(() => eraseWatchlist(id)),
     Promise.resolve().then(() => eraseListMembers(id)),
+    Promise.resolve().then(() => eraseSubtitles(id)),
     guides.erase(id),
     eraseViewing(id),
     Promise.resolve().then(() => {

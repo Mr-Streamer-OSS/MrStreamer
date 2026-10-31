@@ -32,6 +32,13 @@ import {
   getMediaPreferences,
   updateMediaPreferences,
 } from "./media-preferences.ts";
+import {
+  hideSubtitle,
+  onShownSubtitle,
+  playSubtitles,
+  shownSubtitle,
+  type SubtitleTitle,
+} from "./online-subtitles.ts";
 import { currentSource, onSignedIn, type Source as SignedInSource } from "./sources.ts";
 import { store, useStore, type Store } from "./store.ts";
 import { openFormat, type FormatSession, type UnshownSubtitles } from "./title-formats.ts";
@@ -87,6 +94,11 @@ export interface Playing {
   readonly next: boolean;
   /** A title with other versions to try when this one fails. */
   readonly versions: boolean;
+  /**
+   * A movie's or an episode's version, for online subtitles, made for this play. While one of
+   * its downloaded subtitles shows, the file's own are off, and that is never remembered.
+   */
+  readonly subtitles?: SubtitleTitle;
 }
 
 export type Phase =
@@ -966,6 +978,27 @@ async function readbackAfterRequest(resource: Resource) {
   await refreshTracks(resource);
 }
 
+/** `choice`'s version while one of its downloaded subtitles shows: the file's own stay off. */
+function downloadedOver(choice: Choice): SubtitleTitle | undefined {
+  const title = choice.item.subtitles;
+  return title && shownSubtitle()?.title === title ? title : undefined;
+}
+
+/** The version a downloaded subtitle showed over when the current file's subtitles were decided. */
+let decidedOver: SubtitleTitle | undefined;
+// A downloaded subtitle shown or taken away decides the current file's own subtitles anew: off
+// while one shows, else as the policy and any confirmed hold say.
+onShownSubtitle(() => {
+  const over = current ? downloadedOver(current.choice) : undefined;
+  if (over === decidedOver) return;
+  decidedOver = over;
+  const resource = current?.resource;
+  if (!current || !resource || !stands(resource)) return;
+  const hold = current.choice.holds.subtitles;
+  Object.assign(resource.subtitles, groupState(hold), { op: resource.subtitles.op + 1 });
+  schedule(resource, "subtitles");
+});
+
 /** One pending evaluate-now token per group, deciding from current facts only at dequeue. */
 function schedule(resource: Resource, group: Group) {
   const state = resource[group];
@@ -983,7 +1016,8 @@ function schedule(resource: Resource, group: Group) {
       state.evaluated = tracks.revision;
       const sound = soundOf(resource);
       if (group === "subtitles") resource.subtitleSound = sound;
-      const hold = choice.holds[group];
+      const downloaded = group === "subtitles" && downloadedOver(choice) !== undefined;
+      const hold = downloaded ? undefined : choice.holds[group];
       const held = state.authority === "hold" && hold ? rematch(hold, tracks) : null;
       if (held && confirms(held, tracks.revision, tracks)) {
         state.authority = "manual";
@@ -994,7 +1028,12 @@ function schedule(resource: Resource, group: Group) {
         ? { kind: "select" as const, selection: held }
         : group === "audio"
           ? decideAudio(tracks, choice.policy, choice.context)
-          : decideSubtitles(tracks, choice.policy, choice.context, sound);
+          : decideSubtitles(
+              tracks,
+              downloaded ? { ...choice.policy, subtitles: { kind: "off" } } : choice.policy,
+              choice.context,
+              sound,
+            );
       if (decision.kind !== "select" || state.stale >= 3) return;
       const op = ++state.op;
       state.pending = null;
@@ -1040,6 +1079,9 @@ function chooseManually(resource: Resource, revision: number, selection: Observe
   if (!stands(resource)) return Promise.resolve();
   const choice = current!.choice;
   const group = selection.kind;
+  // A pick over a downloaded subtitle turns it off for this version, and isn't remembered.
+  const downloaded = group === "subtitles" ? downloadedOver(choice) : undefined;
+  if (downloaded) hideSubtitle(downloaded);
   const state = resource[group];
   const op = ++state.op;
   state.pending = null;
@@ -1065,7 +1107,7 @@ function chooseManually(resource: Resource, revision: number, selection: Observe
         selection,
         revision,
         op,
-        changed: before !== (selection.track?.id ?? null),
+        changed: !downloaded && before !== (selection.track?.id ?? null),
         choice,
       };
       tryConfirm(resource, group);
@@ -1266,7 +1308,10 @@ export function play(item: Playing, plan: Plan, options: PlayOptions) {
     }),
     holds: item.live && before?.item.live && before.item.id === item.id ? { ...before.holds } : {},
   };
-  return start(choice, choice.options);
+  const started = start(choice, choice.options);
+  // Once it is the current play, so the listener below reconsiders its tracks, not the last's.
+  playSubtitles(item.subtitles ?? null);
+  return started;
 }
 
 /** A new budget on the same frozen Choice, including explicit Try again. */
@@ -1569,6 +1614,7 @@ export async function stop(): Promise<Saved> {
   const saved = release();
   const readers = current?.resource.settlement;
   current = null;
+  playSubtitles(null);
   endPictureInPicture?.();
   player().muted = true;
   resumeOnReturn = false;

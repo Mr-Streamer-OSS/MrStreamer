@@ -14,6 +14,10 @@ type Subtitles =
   | { readonly kind: "off" }
   | { readonly kind: "language"; readonly language: TitleLanguage };
 
+/** How large downloaded subtitles show, from the app's text size. */
+export const SUBTITLE_SIZES = ["small", "medium", "large"] as const;
+export type SubtitleSize = (typeof SUBTITLE_SIZES)[number];
+
 /** Global media policies. Native track and Live variant consumers apply these on a later item. */
 interface MediaPreferences {
   /** null keeps the device's language, including languages outside the offered choices. */
@@ -26,6 +30,8 @@ interface MediaPreferences {
   /** Forced-only needs actual native track facts, never provider name hints. */
   readonly subtitles: Subtitles;
   readonly liveQuality: Quality;
+  /** Downloaded subtitles only: the file's own follow the system's caption style. */
+  readonly subtitleSize: SubtitleSize;
 }
 
 const FILE = "media-preferences.json";
@@ -105,6 +111,7 @@ function saved(): Store<MediaPreferences> {
       subtitles: subtitlesOf(contents["subtitles"]),
       liveQuality:
         QUALITIES.find((quality) => quality === contents["liveQuality"]) ?? DEFAULT_LIVE_QUALITY,
+      subtitleSize: SUBTITLE_SIZES.find((size) => size === contents["subtitleSize"]) ?? "medium",
     }),
   );
   return cached;

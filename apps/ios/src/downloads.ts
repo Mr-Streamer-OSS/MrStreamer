@@ -43,6 +43,7 @@ import {
   stop,
   type Playing,
 } from "./playback.ts";
+import { subtitleTitle } from "./online-subtitles.ts";
 import { fetchPicture } from "./picture-transfer.ts";
 import { keychainSecrets } from "./secrets.ts";
 import { currentSource, onSignedIn, sourceOf, type Source } from "./sources.ts";
@@ -2066,6 +2067,17 @@ function playCopy(id: string, record: Stored) {
     live: false,
     next: nextCopy(record) !== undefined,
     versions: false,
+    // The version it is a copy of: what was kept for it shows here too, offline as well.
+    subtitles: subtitleTitle({
+      subscriptionId: record.subscriptionId,
+      id: title.id,
+      tmdbId: null,
+      title: about.name,
+      year: about.year,
+      ...(title.kind === "episode"
+        ? { episode: { season: title.season, number: title.episode } }
+        : {}),
+    }),
   };
   const from =
     progress && !isFinished(progress.position, progress.duration)
