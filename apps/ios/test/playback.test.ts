@@ -427,6 +427,55 @@ describe("a programme from catch-up", () => {
     expect(opened.at(-1)).toBe(`archive:10:${onNow.start}`);
   });
 
+  it("reads Watch's guide only while the app is in the foreground", async () => {
+    await connect([3, 3, 3]);
+    onNow = { ...aired(HOUR / 4), description: null, title: "Before background" };
+    await React.act(async () => {
+      account.playChannel(channel, "News", { watch: true });
+      await tick();
+    });
+    await until(() => fromStart() !== null);
+    const { guide } = await import("../src/guide.ts");
+    const held = Promise.withResolvers<void>();
+    listingGate = held.promise;
+    const before = listingReads;
+    try {
+      await React.act(async () => {
+        guide.background();
+        await tick();
+      });
+      expect(listingReads).toBe(before);
+      expect(fromStart()).toBeNull();
+      onNow = { ...aired(HOUR / 60), description: null, title: "After foreground" };
+      await React.act(async () => {
+        guide.configure(new Map(), new Map());
+        await tick();
+      });
+      expect(listingReads).toBe(before);
+      await React.act(async () => {
+        guide.foreground();
+        await tick();
+      });
+      await until(() => listingReads > before);
+      expect(fromStart()).toBeNull();
+      await React.act(async () => {
+        listingGate = null;
+        held.resolve();
+        await tick();
+      });
+      await until(
+        () => fromStart()?.getAttribute("aria-label") === "Play After foreground from start",
+      );
+    } finally {
+      await React.act(async () => {
+        listingGate = null;
+        held.resolve();
+        guide.foreground();
+        await tick();
+      });
+    }
+  });
+
   it("keeps an unchanged start-over action mounted while guide status is read again", async () => {
     await connect([3, 3, 3]);
     onNow = { ...aired(HOUR / 4), description: null };
