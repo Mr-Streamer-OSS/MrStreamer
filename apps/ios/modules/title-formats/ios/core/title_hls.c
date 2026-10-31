@@ -52,7 +52,7 @@
 //   FFmpeg and mkvmerge write for every subtitle packet, says when each line begins, how long it
 //   lasts and in which cluster it is: those lines of a chosen rendition's segment that no read
 //   found are read from their clusters, RECALLS_MOST a segment and RECALL_BYTES_MOST past the
-//   picture's index entry before each. FFmpeg keeps neither an index entry's length nor which
+//   start of each cluster. FFmpeg keeps neither an index entry's length nor which
 //   track number is whose stream, so opening keeps the file's start, whose SeekHead says where
 //   the Cues are and whose Tracks number the streams, and the Cues are read again once a
 //   rendition is chosen. A line the index leaves out shows only where a pass reads it.
@@ -125,7 +125,7 @@
 #define UNTIMED_S 5.0
 /**
  * Lines the index lists that one segment reads from their clusters at most, and how far past
- * the picture's index entry before a line's cluster reading it may go.
+ * the start of a line's cluster reading it may go.
  */
 #define RECALLS_MOST 8
 #define RECALL_BYTES_MOST (8 * 1024 * 1024)
@@ -978,7 +978,12 @@ static void from_subrip(const uint8_t *x, int size, AVBPrint *out) {
   for (int i = 0; i < size && x[i]; i++) {
     const uint8_t *end = NULL;
     if (x[i] == '{' && i + 1 < size && x[i + 1] == '\\') end = memchr(x + i, '}', size - i);
-    if (x[i] == '<') end = memchr(x + i, '>', size - i);
+    // A tag's name begins with a letter or "/" and runs to its ">", without another "<".
+    if (x[i] == '<' && i + 1 < size && (isalpha(x[i + 1]) || x[i + 1] == '/')) {
+      end = memchr(x + i, '>', size - i);
+      const uint8_t *other = memchr(x + i + 1, '<', size - i - 1);
+      if (other && end && other < end) end = NULL;
+    }
     if (end) {
       const uint8_t *tag = x + i + 1;
       int length = (int)(end - tag), closing = length > 0 && tag[0] == '/';
@@ -1143,10 +1148,26 @@ end:
   return error;
 }
 
+/**
+ * Marks the listed lines of the track beginning at `time` as read: a line read and not kept,
+ * such as an ASS drawing, isn't read again for the index.
+ */
+static void mark_read(Text *text, int64_t time) {
+  int low = 0, high = text->listed_count;
+  while (low < high) {
+    int middle = (low + high) / 2;
+    if (text->listed[middle].time < time) low = middle + 1;
+    else high = middle;
+  }
+  for (; low < text->listed_count && text->listed[low].time == time; low++)
+    text->listed[low].tried = 1;
+}
+
 /** Reads the next packet of the file, keeping a text track's line as it goes. */
 static int read_frame(TitleHls *title, AVPacket *packet) {
   int error = av_read_frame(title->input, packet);
   Text *text = error < 0 ? NULL : text_of(title, packet);
+  if (text && packet->pts != AV_NOPTS_VALUE) mark_read(text, packet->pts);
   if (text && (error = keep_cue(title, text, packet)) < 0) av_packet_unref(packet);
   return error;
 }

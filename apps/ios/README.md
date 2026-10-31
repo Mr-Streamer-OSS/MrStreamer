@@ -609,12 +609,13 @@ five seconds after where playing starts, isn't offered. It needs the file's keyf
 
 A session serves each SubRip, ASS (or SSA) and WebVTT subtitle track as a WebVTT rendition, cut
 at the picture's segments, which Watch's Subtitles lists like any other. ASS keeps italics, bold
-and underline and loses positions, styles and drawings. A forced track is listed as forced, and
-its lines also show in the regular track of its language. A line that spans segments is in each,
-so one already on screen where playing starts, or after a seek, shows there: the session reads it
-from its cluster, which the file's index names with its length (FFmpeg and mkvmerge list every
-subtitle line there). A file whose index leaves a line out shows it only once playing passes where
-it begins. The other subtitle tracks, pictures such as PGS, DVD and DVB, teletext, formats the session
+and underline and loses positions, styles and drawings. A forced track is marked FORCED in the playlist,
+which AVPlayer reads as forced-only, and its lines also show in the regular track of its language.
+A line that spans segments is in each, so one already on screen where playing starts, or after a
+seek, shows there: the session reads it from its cluster, which the file's index names with its
+length (FFmpeg and mkvmerge list every subtitle line there). A listed line without a length is
+read only when it is the last to begin before the segment. A file whose index leaves a line out
+shows it only once playing passes where it begins. The other subtitle tracks, pictures such as PGS, DVD and DVB, teletext, formats the session
 doesn't know, and text tracks compressed with zlib or bzip2 or encrypted, which its FFmpeg can't
 read, aren't served, and Watch's Subtitles names them, with their format, as ones that can't show
 here. Track numbers and encodings come from the Tracks within the file's first 256 KB, as opening

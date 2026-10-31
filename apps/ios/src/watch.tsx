@@ -1,7 +1,7 @@
 import { router, usePathname } from "expo-router";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { Quality } from "@mrstreamer/contracts/library";
-import { languageName } from "@mrstreamer/core/ondemand/tracks";
+import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -718,14 +718,26 @@ function TextButtons({ item }: { item: Playing }) {
   );
 }
 
+/** A language's name in the phone's language, as AVPlayer names the tracks it lists. */
+function spoken(code: string | null) {
+  const canonical = languageCode(code);
+  try {
+    return (
+      (canonical && new Intl.DisplayNames(undefined, { type: "language" }).of(canonical)) || code
+    );
+  } catch {
+    return code;
+  }
+}
+
 /**
  * The Subtitles sheet's message for tracks the file has that Watch can't show, by language and
- * format: "Can't show here: English (PGS), Nederlands (DVD, forced)."
+ * format: "Can't show here: English (PGS), Dutch (DVD, forced)."
  */
 function cantShow(tracks: readonly UnshownSubtitle[]) {
   const named = tracks.map(({ language, format, forced }) => {
     const details = [format ?? "unknown format", ...(forced ? ["forced"] : [])].join(", ");
-    return `${languageName(language) ?? language ?? "Unknown language"} (${details})`;
+    return `${spoken(language) ?? "Unknown language"} (${details})`;
   });
   return `Can't show here: ${named.join(", ")}.`;
 }

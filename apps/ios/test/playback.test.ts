@@ -892,7 +892,7 @@ describe("sound and subtitles in Watch", () => {
     await until(() => opened.length === 1);
     offer();
     const cantShow =
-      "Can't show here: English (PGS), Nederlands (DVD, forced), Unknown language (unknown format).";
+      "Can't show here: English (PGS), Dutch (DVD, forced), Unknown language (unknown format).";
     const subtitles = await open("watch-subtitles");
     expect(subtitles.options).toEqual(["✓ Off", "Dutch", "Cancel"]);
     expect(subtitles.message).toBe(cantShow);

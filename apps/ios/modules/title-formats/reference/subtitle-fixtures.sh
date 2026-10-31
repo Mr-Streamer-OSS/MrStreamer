@@ -4,10 +4,10 @@
 #   modules/title-formats/reference/subtitle-fixtures.sh <out-folder>
 #
 # - subs.mkv: a minute of H.264 (a keyframe every 2 s) with AAC, and text subtitles whose lines
-#   outlast several segments: English SubRip with a 35-second line and lines over it and tags,
-#   forced English SubRip, French ASS with italics, overrides and a drawing, and German WebVTT.
-#   ffmpeg stores each subtitle up to 10 s ahead of its time, and its index
-#   lists every subtitle line with its length.
+#   outlast several segments: English SubRip with a 35-second line, lines over it, tags and a "<"
+#   that opens none, forced English SubRip, French ASS with italics, overrides, a drawing in a
+#   line and lines that are only drawings, and German WebVTT. ffmpeg stores each subtitle up to
+#   10 s ahead of its time, and its index lists every subtitle line with its length.
 # - subs-uncued.mkv: the same file with every subtitle line left out of its index, each entry
 #   overwritten by a Void element of its size, so nothing else moves.
 # - subs-reordered.mkv: the same with the regular and forced English tracks' entries in the other
@@ -40,6 +40,10 @@ Over the <i>long</i> line
 00:00:50,000 --> 00:00:52,000
 <b>Bold</b> & <u>under</u> <font color="red">red</font>
 second row
+
+5
+00:00:55,000 --> 00:00:57,000
+I <3 you > them
 SRT
 cat >"$work/forced.srt" <<'SRT'
 1
@@ -65,6 +69,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 0,0:00:05.00,0:00:40.00,Default,,0,0,0,,{\pos(160,20)}Panneau long
 Dialogue: 0,0:00:08.00,0:00:11.00,Default,,0,0,0,,{\i1}En italique{\i0}\Ndeuxième ligne
 Dialogue: 0,0:00:24.00,0:00:26.00,Default,,0,0,0,,{\p1}m 0 0 l 10 0 10 10{\p0}Après un dessin\hici
+Dialogue: 0,0:00:44.00,0:00:46.00,Default,,0,0,0,,{\p1}m 0 0 l 20 0 20 20{\p0}
+Dialogue: 0,0:00:52.00,0:00:54.00,Default,,0,0,0,,{\p1}m 0 0 l 20 0 20 20{\p0}
 ASS
 cat >"$work/german.vtt" <<'VTT'
 WEBVTT
