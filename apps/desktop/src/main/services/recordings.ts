@@ -970,7 +970,10 @@ function make(deps: RecordingsDeps) {
 
     const checkOnce = scheduling(checkNow).pipe(
       Effect.catchDefect((defect) =>
-        Effect.as(Effect.logWarning("[recordings] checking schedules failed", defect), null),
+        Effect.andThen(
+          Effect.logWarning("[recordings] checking schedules failed", defect),
+          Effect.sync(() => Date.now() + CHECK_MS),
+        ),
       ),
     );
     yield* Effect.forkScoped(

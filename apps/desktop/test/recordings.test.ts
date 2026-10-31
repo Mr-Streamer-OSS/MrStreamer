@@ -12,6 +12,8 @@ import { ownedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { Deferred, Effect, Layer } from "effect";
+import * as TestClock from "effect/testing/TestClock";
 import { occurrences } from "../src/main/recordings/schedules.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Downloads } from "../src/main/services/downloads.ts";
@@ -769,6 +771,70 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     };
     return { ...started, listing, programmePlan, clockTo };
   }
+
+  it("continues checking schedules after one lookup defect without another wake", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TEN_PAST);
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const provider = await fakeProvider({ live: true, maxConnections: 1, slotReleaseMs: 0 });
+    const dataDir = await tempDir();
+    const clock = Layer.effectDiscard(TestClock.setTime(TEN_PAST)).pipe(
+      Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
+    );
+    const runtime = runtimeFor(
+      mainLayer({ ...testConfig(dataDir), ffmpeg: "ffmpeg", ffprobe: "ffprobe" }).pipe(
+        Layer.provideMerge(clock),
+      ),
+    );
+    const subscriptions = await promised(runtime, Subscriptions);
+    const library = await runtime.runPromise(Library);
+    const guide = await promised(runtime, Guide);
+    const recordings = await promised(runtime, Recordings);
+    const { id } = await subscriptions.add(demoLogin(provider));
+    await runtime.runPromise(library.refresh(id));
+    await guide.refresh(id);
+    const listed = provider.catalogue.channels.find((each) => each.name === GUIDED)!;
+    const at = new Date(TEN_PAST + 2 * MINUTE);
+    await recordings.schedule({
+      kind: "slot",
+      channel: { subscriptionId: id, id: String(listed.streamId) },
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 5,
+      title: "News",
+      padding: { before: 0, after: 0 },
+    });
+    // Let the initial guide/catalogue notifications settle before the one failed lookup.
+    await runtime.runPromise(TestClock.adjust(MINUTE));
+    const release = await runtime.runPromise(Deferred.make<void>());
+    const lookup = vi
+      .spyOn(library, "lookup")
+      .mockImplementationOnce(() =>
+        Effect.andThen(
+          Deferred.await(release),
+          Effect.die(new Error("One scheduled lookup failed")),
+        ),
+      );
+    onTestFinished(() => lookup.mockRestore());
+    vi.setSystemTime(at.getTime());
+    await runtime.runPromise(TestClock.adjust(MINUTE));
+    expect(lookup).toHaveBeenCalled();
+    expect(provider.streamRequests()).toBe(0);
+    // Fail only after the clock is at the start, so the timed retry cannot run in the same jump.
+    await runtime.runPromise(Deferred.succeed(release, undefined));
+    await runtime.runPromise(TestClock.adjust(0));
+    vi.setSystemTime(at.getTime() + MINUTE);
+    await runtime.runPromise(TestClock.adjust(MINUTE));
+    const [recording] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    expect(recording?.status.kind).toBe("recording");
+    expect(provider.streamRequests()).toBe(1);
+    await recordings.stop(recording!.id);
+  }, 10_000);
 
   it("records a programme from its padded start to its end, and lets it go once recorded", async () => {
     const { provider, recordings, listing, programmePlan, clockTo } = await scheduling();
