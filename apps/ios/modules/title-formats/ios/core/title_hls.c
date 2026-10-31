@@ -1445,7 +1445,7 @@ static int list_cues(TitleHls *title) {
   }
   for (int t = 0; t < title->text_count; t++) {
     Text *text = &title->texts[t];
-    qsort(text->listed, text->listed_count, sizeof(*text->listed), by_time);
+    if (text->listed_count) qsort(text->listed, text->listed_count, sizeof(*text->listed), by_time);
     int kept = 0;
     for (int i = 0; i < text->listed_count; i++) {
       if (!kept || by_time(&text->listed[kept - 1], &text->listed[i]))

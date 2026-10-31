@@ -23,6 +23,11 @@ check() {
     fail "$(basename "$file"): run.sh, see $log"
     return 1
   }
+  # UndefinedBehaviorSanitizer reports and goes on.
+  if grep -q "runtime error" "$log"; then
+    fail "$(basename "$file"): a sanitizer report, see $log"
+    return 1
+  fi
 }
 verify() {
   python3 -I "$here/verify.py" "$1" "$out/runs/$(basename "$1")" >>"$log" 2>&1 ||
