@@ -821,6 +821,38 @@ describe("downloads", { timeout: 30_000 }, () => {
     });
   });
 
+  it("asks subtitles for an episode copy by its series' TMDB id, season and number, after a relaunch", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    const { series, first } = episode();
+    const copy = await app.addDownload({
+      kind: "episode",
+      subscriptionId: a,
+      id: String(first.id),
+      seriesId: String(series.id),
+      season: 1,
+      episode: first.number ?? 1,
+    });
+    await until(() => isComplete(app, copy.id), "the saved episode");
+    // Read back after a relaunch. The play carries its identity whether or not this build's player
+    // opens the MKV file.
+    const relaunched = await launch();
+    relaunched.playDownload(copy.id);
+    await until(() => relaunched.playbackState.get().phase.kind !== "idle", "the copy to play");
+    const { phase } = relaunched.playbackState.get();
+    expect(phase.kind !== "idle" && phase.item.subtitles).toEqual({
+      subscriptionId: a,
+      version: `episode|${first.id}`,
+      // The fake lists a series' TMDB id as 10,000 more than its id.
+      query: {
+        kind: "episode",
+        tmdbId: Number(series.tmdb ?? series.id + 10_000),
+        season: 1,
+        episode: first.number ?? 1,
+      },
+    });
+  });
+
   it("applies a saved copy's original language through the real play action without establishing provider-file facts", async () => {
     let app = await installedApp();
     const { a } = await withProviders(app);
