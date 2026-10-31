@@ -1,15 +1,22 @@
 // Recordings: local copies of a live channel, captured by this app while it runs. The viewer
-// starts one on the channel they see, until a stop time; it ends there, when the viewer stops it,
-// when the stream or the disk fails, or when the app quits, and what it captured stays until the
-// viewer deletes it. An ended recording plays from this computer as a downloaded copy does.
+// starts one on the channel they see, until a stop time; it ends there, or when the viewer stops
+// it or quits, and what it captured stays until the viewer deletes it, whatever room it takes. An
+// ended recording plays from this computer as a downloaded copy does, kept where it got to.
+//
+// Its time is what it owes: when capture stops early for the stream, the disk, the room the viewer
+// gave recordings, the computer's sleep, a crash or the system shutting down, the recording pauses
+// with a gap from then, and goes on with the rest of its time, appended to its file, once the app
+// runs, the computer is awake, a connection is free and there is room. Nothing fills a gap: what
+// passed while it paused is missed. Stop, and Quit once the viewer confirmed it, end it for good.
 //
 // This service is the one owner of recordings. Their records are in recordings.json
-// (../recordings/store.ts), each file in a folder of its own beside it, named for its programme
-// (`recordingFileName`). A record is written once capture has the stream's program table on disk,
-// and again with how it ended, only after its provider request ended and its file closed: the
-// list never claims more than the file holds. A record still recording as the app starts is one
-// the app didn't see end, as after a crash: it counts as cut short by the quit, with what its
-// file holds.
+// (../recordings/store.ts), each file in a folder of its own, named for its programme
+// (`recordingFileName`), beside it or in the folder the viewer chose (storage.json). A record is
+// written once capture has the stream's program table on disk, and again with how it ended, only
+// after its provider request ended and its file closed: the list never claims more than the file
+// holds. A record still recording as the app starts is one the app didn't see end, as after a
+// crash: it goes on, from a gap since its file was last written, or, its time over, counts as cut
+// short by the quit. A recording's folder a crash left before its record was written goes then.
 //
 // Capture takes one of its subscription's connections through PlaybackCoordination, which
 // admits it only while fewer than the account's limit are held here, and keeps it until it ends:
@@ -27,15 +34,19 @@
 // another show by its title or time. Each start reads its subscription's login as it is then, so
 // a replaced login is the one used, and a removed subscription takes its schedules with it.
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type {
   ConnectionHolder,
   Recording,
   RecordingConnections,
+  RecordingGap,
+  RecordingGapReason,
+  RecordingLimits,
   RecordingPlan,
   RecordingStart,
+  RecordingStorage,
   ScheduledRecording,
   ScheduleMiss,
   ScheduleStatus,
@@ -53,6 +64,7 @@ import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import { SavedSubtitles, subtitlesOfCopy } from "../platform/saved-subtitles.ts";
 import { CaptureFailure, startCapture, type CaptureEnd } from "../recordings/capture.ts";
 import {
   conflictOf,
@@ -64,10 +76,13 @@ import {
 import {
   readRecordings,
   readSchedules,
+  readStorage,
   recordingFileName,
   writeRecordings,
   writeSchedules,
+  writeStorage,
   type KeptSchedule,
+  type KeptStorage,
   type StoredRecording,
 } from "../recordings/store.ts";
 import { Library } from "./library.ts";
@@ -88,6 +103,10 @@ const MISSED_KEPT_MS = 7 * 24 * 60 * 60_000;
 const ON_TIME_MS = 60_000;
 /** How long the guide settles after a change before the schedules follow it. */
 const GUIDE_SETTLE = "2 seconds";
+/** How long the free space of a recording's disk is taken as measured, while it records. */
+const ROOM_MS = 5000;
+/** A recording's own folder, by its id: one a crash left before its record goes. */
+const RECORDING_FOLDER = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** How `Recordings.start` records, beside its stop time. */
 export interface StartOptions {
@@ -122,17 +141,42 @@ export class Recordings extends Context.Service<
       stop: number,
       options?: StartOptions,
     ): Effect.Effect<RecordingStart, Failed>;
-    /** Stops a recording, answering once its request ended and how it ended is written down. */
+    /**
+     * Stops a recording, capturing or paused, for good, answering once its request ended and how
+     * it ended is written down.
+     */
     stop(id: string): Effect.Effect<void, Failed>;
-    /** Deletes an ended recording and its file, closing what plays it first. */
+    /**
+     * Deletes an ended recording, its file and the subtitles kept for it, closing what plays it
+     * first.
+     */
     remove(id: string): Effect.Effect<void, Failed>;
     /**
      * A subscription is going: its recordings stop as the viewer stops one, their requests over
      * before this answers. What they captured stays.
      */
     subscriptionGone(subscriptionId: string): Effect.Effect<void>;
-    /** An ended recording's file for playback to open; null when no recording has that id. */
+    /**
+     * An ended recording's file for playback to open, with where it got to; null when no recording
+     * has that id. Fails, listing it as missing, when its file went.
+     */
     copy(id: string): Effect.Effect<LocalCopy | null, Failed>;
+    /** Keeps how far an ended recording played. */
+    recordProgress(id: string, position: number, duration: number): Effect.Effect<void, Failed>;
+    /** Where new recordings go, the room they may take, and how much they take. */
+    readonly storage: Effect.Effect<RecordingStorage, Failed>;
+    setLimits(limits: RecordingLimits): Effect.Effect<RecordingStorage, Failed>;
+    /** Sends new recordings to `folder`, once it can be written to. */
+    setFolder(folder: string): Effect.Effect<RecordingStorage, Failed>;
+    /** The computer is going to sleep: what records pauses, to go on after it wakes. */
+    readonly suspend: Effect.Effect<void>;
+    /**
+     * How the app's close ends what records: `quit`, as the viewer confirmed, for good; `away`,
+     * as the system shuts down, to go on when the app runs again. Quit unless told.
+     */
+    leave(how: "quit" | "away"): Effect.Effect<void>;
+    /** Whether a recording's time goes on, capturing or paused, and whether a schedule is kept. */
+    readonly live: Effect.Effect<{ readonly recording: boolean; readonly scheduled: boolean }>;
     /** The list after each change, and as recordings grow, about once a second. */
     readonly changes: Stream.Stream<readonly Recording[]>;
     /** Every schedule, by when it records next. Fails while schedules.json can't be read. */
@@ -166,10 +210,46 @@ const gone: Hold = { kind: "gone" };
 interface Active {
   readonly controller: AbortController;
   readonly bytes: () => number;
-  /** Why it was asked to end before its stop time. */
-  asked: "stopped" | "quit" | null;
+  /**
+   * Why it was asked to end before its stop time: for good, as stopped or quit, or `away`, as the
+   * computer sleeps or shuts down, to go on later.
+   */
+  asked: "stopped" | "quit" | "away" | null;
   /** Settles once how it ended is written down, with why that couldn't be, if it couldn't. */
   readonly settled: Promise<Failed | null>;
+}
+
+/** A recording's gap that goes on now, while it pauses. */
+const openGap = (record: StoredRecording): RecordingGap | undefined => {
+  const last = record.gaps?.at(-1);
+  return last?.to === null ? last : undefined;
+};
+
+/** How an interruption names a recording's early end. */
+const cutOf = (why: RecordingGapReason) =>
+  why === "away" ? "quit" : why === "stream" || why === "busy" ? "stream" : "disk";
+
+/**
+ * `record` ended for good at `at`, stopped by the viewer or not: a gap it is in ends it where its
+ * capture last stopped, and what it missed before stays among its gaps.
+ */
+function finalOf(record: StoredRecording, at: number, stopped: boolean): StoredRecording {
+  const open = openGap(record);
+  const { gaps: all, ...rest } = record;
+  const gaps = open ? all?.slice(0, -1) : all;
+  const last = gaps?.at(-1);
+  return {
+    ...rest,
+    ...(gaps?.length && { gaps }),
+    ended: open ? open.from : at,
+    status: stopped
+      ? { kind: "stopped" }
+      : open
+        ? { kind: "partial", cut: cutOf(open.why) }
+        : last
+          ? { kind: "partial", cut: cutOf(last.why) }
+          : { kind: "complete" },
+  };
 }
 
 function make(deps: RecordingsDeps) {
@@ -180,8 +260,10 @@ function make(deps: RecordingsDeps) {
     const playback = yield* Playback;
     const coordination = yield* PlaybackCoordination;
     const settings = yield* Settings;
+    const savedSubtitles = yield* SavedSubtitles;
     const root = join(deps.dataDir, "recordings");
     const path = join(root, "recordings.json");
+    const storagePath = join(root, "storage.json");
     const changes = yield* PubSub.sliding<readonly Recording[]>(4);
     /** Asks the schedules to be checked: a recording started or ended, or the lists changed. */
     const wakes = yield* Queue.sliding<void>(1);
@@ -190,40 +272,74 @@ function make(deps: RecordingsDeps) {
     const writing = (yield* Semaphore.make(1)).withPermits(1);
 
     const read = yield* Effect.promise(() => readRecordings(path));
+    let storage: KeptStorage = yield* Effect.promise(() => readStorage(storagePath));
     const records = new Map<string, StoredRecording>();
     const active = new Map<string, Active>();
     /**
-     * Captures still starting, by subscription, which the app's close and a removal stop too.
-     * `done` settles once one is active, or has ended and let its connection go.
+     * Captures still starting, by subscription, which the app's close and a removal stop too, and
+     * by recording for one going on after a gap, which its Stop stops. `done` settles once one is
+     * active, or has ended and let its connection go.
      */
     const starting = new Map<
       AbortController,
-      { readonly subscriptionId: string; readonly done: Promise<void> }
+      {
+        readonly subscriptionId: string;
+        readonly resumes?: string;
+        readonly done: Promise<void>;
+      }
     >();
     /** Set as the app closes: a start asked for meanwhile would outlive its close. */
     let closing = false;
-    const fileOf = (record: StoredRecording) => join(root, record.id, record.file);
+    /** How the app's close ends what records. */
+    let leaving: "quit" | "away" = "quit";
+    const folderOf = (record: StoredRecording) => join(record.folder ?? root, record.id);
+    const fileOf = (record: StoredRecording) => join(folderOf(record), record.file);
+    const isLive = (record: StoredRecording) => record.status.kind === "recording";
 
     const unreadable = () =>
       new Failed({ error: { kind: "unexpected", detail: t("Recordings could not be read.") } });
     const usable = read.kind === "read" ? Effect.void : Effect.fail(unreadable());
     if (read.kind === "read") {
-      // Never seen to end: cut short by the quit, with what its file holds.
+      const now = Date.now();
+      // Never seen to end: its time over, cut short by the quit, with what its file holds; else
+      // it goes on, missing the time since its file was last written, or since it paused.
       for (const record of read.items) {
-        if (record.status.kind !== "recording") {
+        if (!isLive(record)) {
           records.set(record.id, record);
           continue;
         }
         const file = yield* Effect.promise(() => stat(fileOf(record)).catch(() => null));
-        records.set(record.id, {
-          ...record,
-          bytes: file?.size ?? record.bytes,
-          ended: file ? Math.min(file.mtimeMs, record.stop) : record.start,
-          status: { kind: "partial", cut: "quit" },
-        });
+        const last = file ? Math.min(file.mtimeMs, record.stop) : record.start;
+        const seen = { ...record, bytes: file?.size ?? record.bytes };
+        const open = openGap(record);
+        if (record.stop <= now)
+          records.set(record.id, {
+            ...finalOf(seen, last, false),
+            ...(!open && { status: { kind: "partial", cut: "quit" } }),
+          });
+        else
+          records.set(record.id, {
+            ...seen,
+            ...(!open && { gaps: [...(record.gaps ?? []), { from: last, to: null, why: "away" }] }),
+          });
+      }
+      // A recording's folder whose record was never written, as a crash leaves one as it starts.
+      for (const folder of new Set([root, storage.folder ?? root])) {
+        const entries = yield* Effect.promise(() =>
+          readdir(folder, { withFileTypes: true }).catch(() => []),
+        );
+        for (const entry of entries)
+          if (entry.isDirectory() && RECORDING_FOLDER.test(entry.name) && !records.has(entry.name))
+            yield* Effect.promise(() =>
+              rm(join(folder, entry.name), { recursive: true, force: true }).catch(() => {}),
+            );
       }
     }
 
+    /** What a check, or a recording's end, couldn't write, for the next check to write again. */
+    const unsaved = { recordings: false, schedules: false };
+    /** Recordings whose end the last write of recordings.json couldn't keep. */
+    const unsavedEnds = new Set<string>();
     const save = writing(
       Effect.tryPromise({
         try: () => writeRecordings(path, [...records.values()]),
@@ -232,17 +348,22 @@ function make(deps: RecordingsDeps) {
             error: { kind: "unexpected", detail: t("Recordings could not be saved.") },
           }),
       }),
+    ).pipe(
+      // Every record is written each time: what couldn't be kept before is now.
+      Effect.tap(() =>
+        Effect.sync(() => {
+          unsaved.recordings = false;
+          unsavedEnds.clear();
+        }),
+      ),
     );
-
-    /** What a check, or a recording's end, couldn't write, for the next check to write again. */
-    const unsaved = { recordings: false, schedules: false };
 
     /** Ended recordings whose file was gone when last looked for: on each read of the list. */
     const missing = new Set<string>();
     const look = Effect.promise(() =>
       Promise.all(
         [...records.values()].map(async (record) => {
-          if (active.has(record.id) || record.status.kind === "missed") return;
+          if (isLive(record) || record.status.kind === "missed") return;
           const there = await stat(fileOf(record)).then(
             () => true,
             () => false,
@@ -255,10 +376,19 @@ function make(deps: RecordingsDeps) {
     const shown = Effect.sync(() =>
       [...records.values()]
         .map((record): Recording => {
-          const { file: _file, ...rest } = record;
-          const live = active.get(record.id);
-          if (live) return { ...rest, bytes: live.bytes() };
-          return missing.has(record.id) ? { ...rest, status: { kind: "missing" } } : rest;
+          const {
+            file: _file,
+            folder: _folder,
+            variants: _variants,
+            progress: _progress,
+            ...rest
+          } = record;
+          const marked = unsavedEnds.has(record.id) ? { ...rest, unsaved: true } : rest;
+          const capturing = active.get(record.id);
+          if (capturing) return { ...marked, bytes: capturing.bytes() };
+          if (isLive(record))
+            return { ...marked, status: { kind: "paused", why: openGap(record)?.why ?? "away" } };
+          return missing.has(record.id) ? { ...marked, status: { kind: "missing" } } : marked;
         })
         .toSorted((a, b) => b.start - a.start),
     );
@@ -271,52 +401,116 @@ function make(deps: RecordingsDeps) {
       }, CHANGES_MS);
     };
 
+    // The room recordings may take: what their files take against `storage.space`, and what the
+    // disk of each folder they write to keeps free against `storage.keepFree`.
+    const capturing = () => [...active.values()].reduce((sum, each) => sum + each.bytes(), 0);
+    const used = () =>
+      [...records.values()].reduce(
+        (sum, record) => sum + (active.get(record.id)?.bytes() ?? record.bytes),
+        0,
+      );
+    const freeIn = (folder: string) =>
+      statfs(folder).then(
+        ({ bavail, bsize }) => bavail * bsize,
+        () => null,
+      );
+    /** Each folder's free bytes as last measured, and what capture had written by then. */
+    const measured = new Map<string, { free: number | null; at: number; written: number }>();
+    const measure = async (folder: string) => {
+      const written = capturing();
+      measured.set(folder, { free: await freeIn(folder), at: Date.now(), written });
+    };
+    const roomWith = (folder: string, known: { free: number | null; written: number }) =>
+      (storage.space === null || used() < storage.space) &&
+      (known.free === null || known.free - (capturing() - known.written) >= storage.keepFree);
+    /** Whether capture into `folder` may write on, as last measured, measuring again now and then. */
+    const roomOf = (folder: string) => () => {
+      const known = measured.get(folder);
+      if (!known || Date.now() - known.at > ROOM_MS) {
+        // Taken as measured meanwhile, so one measure runs at a time.
+        if (known) measured.set(folder, { ...known, at: Date.now() });
+        void measure(folder);
+      }
+      return known ? roomWith(folder, known) : true;
+    };
+    /** Whether a recording may start or go on in `folder`, as measured now. */
+    const roomIn = (folder: string) =>
+      Effect.promise(async () => {
+        await measure(folder);
+        return roomWith(folder, measured.get(folder)!);
+      });
+
     const limitOf = (subscriptionId: string) =>
       Effect.map(subscriptions.list, (list) => {
         const allowed = list.find((each) => each.id === subscriptionId)?.account.maxConnections;
         return allowed && allowed > 0 ? allowed : 1;
       });
 
-    /** Writes down how `id` ended, once its request ended and its file closed. */
-    const ended = (id: string, end: CaptureEnd, live: Active) =>
+    /**
+     * Writes down how `id`'s capture ended, once its request ended and its file closed: for good,
+     * or, with time left and nobody asking it to end, paused from now, to go on.
+     */
+    const ended = (id: string, end: CaptureEnd, capture: Active) =>
       Effect.gen(function* () {
         const record = records.get(id);
         if (!record) return null;
-        const status: StoredRecording["status"] =
-          end === "until"
-            ? { kind: "complete" }
-            : end === "aborted"
-              ? live.asked === "stopped"
-                ? { kind: "stopped" }
-                : { kind: "partial", cut: "quit" }
-              : { kind: "partial", cut: end };
-        records.set(id, { ...record, status, bytes: live.bytes(), ended: Date.now() });
+        const now = Date.now();
+        const seen = { ...record, bytes: capture.bytes() };
         active.delete(id);
+        const why: RecordingGapReason | null =
+          end === "aborted"
+            ? capture.asked === "away"
+              ? "away"
+              : null
+            : end === "until" || now >= record.stop
+              ? null
+              : end;
+        records.set(
+          id,
+          why
+            ? { ...seen, gaps: [...(seen.gaps ?? []), { from: now, to: null, why }] }
+            : end === "aborted"
+              ? capture.asked === "stopped"
+                ? finalOf(seen, now, true)
+                : { ...finalOf(seen, now, false), status: { kind: "partial", cut: "quit" } }
+              : end === "until"
+                ? finalOf(seen, now, false)
+                : { ...finalOf(seen, now, false), status: { kind: "partial", cut: cutOf(end) } },
+        );
         // Any later write takes it down too, the next check's at the latest; until then a restart
-        // reads it as cut by the quit, and its schedule's time stays unsettled.
+        // reads it as one the app didn't see end, and its schedule's time stays unsettled.
         const written = yield* Effect.result(save);
-        if (written._tag === "Failure") unsaved.recordings = true;
+        if (written._tag === "Failure") {
+          unsaved.recordings = true;
+          unsavedEnds.add(id);
+        }
         yield* publish;
-        // Its connection is free for a schedule that waits.
+        // Its connection is free for a schedule that waits, and one paused goes on.
         yield* wake;
         return written._tag === "Failure" ? written.failure : null;
       });
 
     /**
-     * Starts as `start` does, for a schedule as `scheduled` says, named `title`; `controller` stops
-     * it at any step, `settle` once it's active.
+     * Starts as `start` does, for a schedule as `scheduled` says, named `title`, or goes on with
+     * `resumes` after its gap, appending to its file; `controller` stops it at any step, `settle`
+     * once it's active.
      */
     const begin = (
       channel: OwnedId,
       stop: number,
-      options: StartOptions & Pick<StoredRecording, "scheduled"> & { readonly title?: string },
+      options: StartOptions &
+        Pick<StoredRecording, "scheduled"> & {
+          readonly title?: string;
+          readonly resumes?: StoredRecording;
+        },
       controller: AbortController,
       settle: () => void,
     ) =>
       Effect.gen(function* () {
         yield* usable;
         const now = Date.now();
-        if (stop <= now || stop > now + RECORDING_MAX_MS)
+        const { resumes } = options;
+        if (stop <= now || (!resumes && stop > now + RECORDING_MAX_MS))
           return yield* new Failed({
             error: { kind: "invalid-input", detail: t("Choose a stop time within 12 hours.") },
           });
@@ -347,8 +541,9 @@ function make(deps: RecordingsDeps) {
         // Streams asked for are each needed. Auto's are tried in its order, so one the provider
         // can't name, as a playlist that dropped it, leaves the others; the first failure says
         // why when none is left.
-        const streams = options.variants?.length
-          ? yield* Effect.forEach(options.variants, ask)
+        const variants = options.variants ?? resumes?.variants;
+        const streams = variants?.length
+          ? yield* Effect.forEach(variants, ask)
           : yield* Effect.flatMap(
               Effect.forEach(streamsToPlay(listed, preferences, undefined), ({ id }) =>
                 Effect.result(ask(id)),
@@ -363,9 +558,19 @@ function make(deps: RecordingsDeps) {
                   : Effect.succeed(found);
               },
             );
-        const programme = options.title
-          ? { title: options.title }
-          : (yield* guide.listings([ownedId(listed)]))[ownedKey(listed)]?.now;
+        const programme =
+          options.title || resumes
+            ? { title: options.title ?? resumes?.title ?? listed.title }
+            : (yield* guide.listings([ownedId(listed)]))[ownedKey(listed)]?.now;
+        // A disk without room records nothing, and holds no connection for it.
+        const folder = resumes?.folder ?? storage.folder ?? root;
+        if (!(yield* roomIn(folder)))
+          return yield* new Failed({
+            error: {
+              kind: "unexpected",
+              detail: t("There isn't enough free space to record."),
+            },
+          });
         if (options.stopPlaying) yield* playback.closeOf(subscriptionId);
         const admitted = yield* coordination.hold(
           subscriptionId,
@@ -380,21 +585,27 @@ function make(deps: RecordingsDeps) {
         const { held } = admitted;
 
         const title = programme?.title ?? listed.title;
-        const id = randomUUID();
-        const record: StoredRecording = {
-          id,
-          file: recordingFileName(title, listed.title, now),
-          channel: ownedId(listed),
-          channelName: listed.title,
-          title,
-          start: now,
-          stop,
-          ...(options.scheduled && { scheduled: options.scheduled }),
-          ended: null,
-          bytes: 0,
-          status: { kind: "recording" },
-        };
-        const opening = mkdir(join(root, id), { recursive: true }).then(() =>
+        const id = resumes?.id ?? randomUUID();
+        // As it is now: a change since it was asked for, as its gap's, counts.
+        const record: StoredRecording = (resumes && records.get(resumes.id)) ||
+          resumes || {
+            id,
+            file: recordingFileName(title, listed.title, now),
+            ...(folder !== root && { folder }),
+            ...(options.variants?.length && { variants: options.variants }),
+            channel: ownedId(listed),
+            channelName: listed.title,
+            title,
+            start: now,
+            stop,
+            ...(options.scheduled && { scheduled: options.scheduled }),
+            ended: null,
+            bytes: 0,
+            status: { kind: "recording" },
+          };
+        const opening = (
+          resumes ? Promise.resolve() : mkdir(folderOf(record), { recursive: true })
+        ).then(() =>
           startCapture(
             streams.map(({ url, format, headers }) => ({ url, format, headers: headers ?? {} })),
             fileOf(record),
@@ -404,6 +615,8 @@ function make(deps: RecordingsDeps) {
               until: stop,
               signal: controller.signal,
               changed: grew,
+              room: roomOf(folder),
+              append: Boolean(resumes),
             },
           ),
         );
@@ -421,7 +634,8 @@ function make(deps: RecordingsDeps) {
                   },
                 }),
         }).pipe(
-          // Also when the app closes meanwhile: whatever started ends before its folder goes.
+          // Also when the app closes meanwhile: whatever started ends before its folder goes. One
+          // going on keeps its folder, its file as it was.
           Effect.onError(() =>
             Effect.promise(async () => {
               controller.abort();
@@ -430,15 +644,27 @@ function make(deps: RecordingsDeps) {
                 () => {},
               );
               held.release();
-              await rm(join(root, id), { recursive: true, force: true });
+              if (!resumes) await rm(folderOf(record), { recursive: true, force: true });
             }),
           ),
         );
         const { promise: settled, resolve } = Promise.withResolvers<Failed | null>();
-        // Stopped by its subscription going as it started: it ends as one the viewer stopped.
+        // Stopped by its subscription going, or its Stop, as it started: it ends as one the
+        // viewer stopped.
         const asked = controller.signal.reason === "stopped" ? "stopped" : null;
         const live: Active = { controller, bytes: capture.bytes, asked, settled };
-        records.set(id, record);
+        // Going on, its gap ends now.
+        const started: StoredRecording = resumes
+          ? {
+              ...record,
+              ...(record.gaps && {
+                gaps: record.gaps.map((gap) =>
+                  gap.to === null ? { ...gap, to: Date.now() } : gap,
+                ),
+              }),
+            }
+          : record;
+        records.set(id, started);
         active.set(id, live);
         settle();
         void capture.ended
@@ -448,7 +674,8 @@ function make(deps: RecordingsDeps) {
           })
           .then(resolve, () => resolve(null));
         const written = yield* Effect.result(save);
-        if (written._tag === "Failure") {
+        if (written._tag === "Failure" && resumes) unsaved.recordings = true;
+        else if (written._tag === "Failure") {
           // Without its record nothing would say it exists: it stops, and its file goes.
           live.asked = "stopped";
           controller.abort();
@@ -456,14 +683,14 @@ function make(deps: RecordingsDeps) {
           records.delete(id);
           // How it ended may have been written down meanwhile.
           yield* Effect.ignore(save);
-          yield* Effect.promise(() => rm(join(root, id), { recursive: true, force: true }));
+          yield* Effect.promise(() => rm(folderOf(record), { recursive: true, force: true }));
           yield* publish;
           return yield* written.failure;
         }
         yield* publish;
         // What the schedules say of the connections changed.
         yield* wake;
-        const { file: _file, ...recording } = record;
+        const { file: _file, folder: _folder, variants: _variants, ...recording } = started;
         return {
           kind: "started",
           recording: { ...recording, bytes: capture.bytes() },
@@ -473,7 +700,11 @@ function make(deps: RecordingsDeps) {
     const start = (
       channel: OwnedId,
       stop: number,
-      options: StartOptions & Pick<StoredRecording, "scheduled"> & { readonly title?: string } = {},
+      options: StartOptions &
+        Pick<StoredRecording, "scheduled"> & {
+          readonly title?: string;
+          readonly resumes?: StoredRecording;
+        } = {},
     ) =>
       Effect.suspend(() => {
         if (closing)
@@ -482,10 +713,15 @@ function make(deps: RecordingsDeps) {
               error: { kind: "stream", failure: { kind: "network", detail: t("Stopped.") } },
             }),
           );
-        // Starting from before its first wait, so a removal or the app's close stops it at any step.
+        // Starting from before its first wait, so a removal, its Stop or the app's close stops it
+        // at any step.
         const controller = new AbortController();
         const { promise: done, resolve } = Promise.withResolvers<void>();
-        starting.set(controller, { subscriptionId: channel.subscriptionId, done });
+        starting.set(controller, {
+          subscriptionId: channel.subscriptionId,
+          ...(options.resumes && { resumes: options.resumes.id }),
+          done,
+        });
         const settle = () => {
           starting.delete(controller);
           resolve();
@@ -500,7 +736,7 @@ function make(deps: RecordingsDeps) {
      * Ends what records now, as asked, once each has written down how it ended; fails when that
      * couldn't be written down.
      */
-    const end = (ids: readonly string[], asked: "stopped" | "quit") =>
+    const end = (ids: readonly string[], asked: NonNullable<Active["asked"]>) =>
       Effect.flatMap(
         Effect.promise(() =>
           Promise.all(
@@ -530,9 +766,37 @@ function make(deps: RecordingsDeps) {
           );
         }),
         // Read once they settled: one may have become active meanwhile.
-        Effect.suspend(() => Effect.ignore(end([...active.keys()], "quit"))),
+        Effect.suspend(() =>
+          Effect.andThen(
+            Effect.ignore(end([...active.keys()], leaving)),
+            // Quit ends those paused too: none goes on when the app runs again.
+            Effect.suspend(() => {
+              const paused = [...records.values()].filter(isLive);
+              if (leaving === "away" || paused.length === 0) return Effect.void;
+              const now = Date.now();
+              for (const record of paused)
+                records.set(record.id, {
+                  ...finalOf(record, now, false),
+                  status: { kind: "partial", cut: "quit" },
+                });
+              return Effect.ignore(save);
+            }),
+          ),
+        ),
       ),
     );
+
+    /** Ends a start under way that would go on with `id`, once it answered. */
+    const stopResuming = (id: string) =>
+      Effect.promise(() =>
+        Promise.all(
+          [...starting].flatMap(([controller, each]) => {
+            if (each.resumes !== id) return [];
+            controller.abort("stopped");
+            return [each.done];
+          }),
+        ),
+      );
 
     // Schedules.
     const schedulesPath = join(root, "schedules.json");
@@ -581,9 +845,9 @@ function make(deps: RecordingsDeps) {
       [...records.values()].find(
         (each) => each.scheduled?.schedule === id && each.scheduled.from === occurrence.start,
       );
-    /** The recording a schedule records now, if one does. */
+    /** The recording a schedule records now, capturing or paused, if one does. */
     const recordingOf = (id: string) =>
-      [...active.keys()].find((each) => records.get(each)?.scheduled?.schedule === id);
+      [...records.values()].find((each) => isLive(each) && each.scheduled?.schedule === id)?.id;
 
     /**
      * Writes schedules.json, after what a check couldn't write of recordings.json: a time it
@@ -749,10 +1013,15 @@ function make(deps: RecordingsDeps) {
 
     /**
      * When a recording of `schedule`'s `occurrence` is owed from: its start, or when the schedule
-     * was first saved, when that was later. The time before there was a schedule is nobody's fault.
+     * was first saved, or changed onto that time while it was under way, when that was later. The
+     * time before anyone asked for it is nobody's fault.
      */
     const owedOf = (schedule: KeptSchedule, occurrence: Occurrence) =>
-      Math.max(occurrence.start, schedule.created);
+      Math.max(
+        occurrence.start,
+        schedule.created,
+        schedule.owed?.from === occurrence.start ? schedule.owed.at : -Infinity,
+      );
 
     /**
      * What a recording or missed result of `schedule`'s `occurrence` says of it: when it was owed
@@ -831,14 +1100,73 @@ function make(deps: RecordingsDeps) {
       );
     };
 
+    /** Goes on with a paused recording in the background; a check follows its answer. */
+    const resumeRecording = (record: StoredRecording) => {
+      const { subscriptionId } = record.channel;
+      startingOn.add(subscriptionId);
+      Effect.runFork(
+        start(record.channel, record.stop, { resumes: record }).pipe(
+          // Refused, busy or failed, it stays paused, and is asked again.
+          Effect.ignore,
+          Effect.catchDefect(() => Effect.void),
+          Effect.ensuring(Effect.sync(() => startingOn.delete(subscriptionId))),
+          Effect.andThen(wake),
+        ),
+      );
+    };
+    /** When each paused recording last asked to go on, by id. */
+    const resumeTried = new Map<string, number>();
+    /** Something changed that may let paused recordings go on: they ask again at the next check. */
+    const retryPaused = Effect.andThen(
+      Effect.sync(() => resumeTried.clear()),
+      wake,
+    );
     /**
-     * Brings every schedule up to date at the time now: drops those of a subscription that
-     * went, follows the lists and the guide, starts what is due, writes what was missed, and
-     * tells the window what changed. Answers when the next check is due, or null while none is
-     * kept. Only runs in a turn.
+     * Goes on with each paused recording whose time remains, asking at most every RETRY_MS and
+     * one start at a time on its subscription, and ends for good one whose time passed meanwhile.
+     * Answers whether one still pauses. Only runs in a turn.
+     */
+    const resumeDue = (now: number) =>
+      Effect.gen(function* () {
+        let paused = false;
+        let over = false;
+        for (const record of records.values()) {
+          if (!isLive(record) || active.has(record.id)) continue;
+          if ([...starting.values()].some((each) => each.resumes === record.id)) {
+            paused = true;
+            continue;
+          }
+          if (record.stop <= now) {
+            records.set(record.id, finalOf(record, now, false));
+            resumeTried.delete(record.id);
+            over = true;
+            continue;
+          }
+          paused = true;
+          const { subscriptionId } = record.channel;
+          if (startingOn.has(subscriptionId)) continue;
+          if ((resumeTried.get(record.id) ?? -Infinity) + RETRY_MS > now) continue;
+          resumeTried.set(record.id, now);
+          resumeRecording(record);
+        }
+        if (over) {
+          if ((yield* Effect.result(save))._tag === "Failure") unsaved.recordings = true;
+          yield* publish;
+        }
+        return paused;
+      });
+
+    /**
+     * Goes on with paused recordings, and brings every schedule up to date at the time now: drops
+     * those of a subscription that went, follows the lists and the guide, starts what is due,
+     * writes what was missed, and tells the window what changed. Answers when the next check is
+     * due, or null while nothing pauses and no schedule is kept. Only runs in a turn.
      */
     const checkNow = Effect.gen(function* () {
-      if (readKept.kind !== "read" || read.kind !== "read" || closing) return null;
+      if (read.kind !== "read" || closing) return null;
+      const paused = yield* resumeDue(Date.now());
+      const resumeAt = paused ? Date.now() + RETRY_MS : null;
+      if (readKept.kind !== "read") return resumeAt;
       // With none kept, nothing is asked of the lists, the guide or the clock: a schedule saved
       // wakes the next check.
       if (schedules.size === 0 && !unsaved.recordings && !unsaved.schedules) {
@@ -846,7 +1174,7 @@ function make(deps: RecordingsDeps) {
           shownSchedules = [];
           yield* PubSub.publish(scheduleChanges, shownSchedules);
         }
-        return null;
+        return resumeAt;
       }
       const now = Date.now();
       const saved = new Set((yield* subscriptions.saved).map((each) => each.id));
@@ -885,7 +1213,7 @@ function make(deps: RecordingsDeps) {
           const made = recordOf(kept.id, occurrence);
           const reason = why.get(key);
           if (occurrence.stop <= now) {
-            if (reason === "starting" || (made && active.has(made.id))) {
+            if (reason === "starting" || (made && isLive(made))) {
               settling = false;
               continue;
             }
@@ -914,7 +1242,7 @@ function make(deps: RecordingsDeps) {
           }
           // Recorded, and stopped or cut short already: the rest of its time is done with too.
           // Not while its start is still answering: one whose record couldn't be kept goes.
-          if (made && !active.has(made.id) && reason !== "starting") {
+          if (made && !isLive(made) && reason !== "starting") {
             why.delete(key);
             tried.delete(key);
             if (settling) through = occurrence.stop;
@@ -965,7 +1293,7 @@ function make(deps: RecordingsDeps) {
       const starts = list.flatMap((each) =>
         each.next && each.next.start > now ? [each.next.start] : [],
       );
-      return Math.min(now + (retry ? RETRY_MS : CHECK_MS), ...starts);
+      return Math.min(now + (retry || paused ? RETRY_MS : CHECK_MS), ...starts);
     });
 
     const checkOnce = scheduling(checkNow).pipe(
@@ -1063,6 +1391,21 @@ function make(deps: RecordingsDeps) {
                 ...(was.through > now ? [was.through] : []),
               ];
         const heldTo = Math.max(now + 1, ...held);
+        // A change onto a time already under way asks for it from now: what passed of it before
+        // was asked of nobody. One that keeps the time it was on keeps what it owed.
+        const onNow = occurrences(found.plan, now, now + 1).find((each) => each.start < now);
+        const same =
+          was &&
+          onNow &&
+          occurrences(was.plan, now, now + 1).some((each) => each.start === onNow.start);
+        const owed =
+          was === undefined || onNow === undefined
+            ? undefined
+            : same
+              ? was.owed?.from === onNow.start
+                ? was.owed
+                : undefined
+              : { from: onNow.start, at: now };
         const schedule: KeptSchedule = {
           id: id ?? randomUUID(),
           plan: found.plan,
@@ -1078,6 +1421,7 @@ function make(deps: RecordingsDeps) {
               ? occurrences(found.plan, now, heldTo).map((each) => each.stop)
               : []),
           ),
+          ...(owed && { owed }),
         };
         const standing = yield* standingOf(
           schedule,
@@ -1088,6 +1432,39 @@ function make(deps: RecordingsDeps) {
         return { schedule, standing };
       });
 
+    const storageNow = Effect.andThen(
+      usable,
+      Effect.promise(async (): Promise<RecordingStorage> => {
+        const folder = storage.folder ?? root;
+        return {
+          folder,
+          keepFree: storage.keepFree,
+          space: storage.space,
+          used: used(),
+          free: await freeIn(folder),
+        };
+      }),
+    );
+    /** Keeps `next` as storage.json, the settings as they were when that fails. */
+    const changeStorage = (next: KeptStorage) =>
+      Effect.andThen(
+        usable,
+        Effect.tryPromise({
+          try: () => writeStorage(storagePath, next),
+          catch: () =>
+            new Failed({
+              error: { kind: "unexpected", detail: t("Recording settings could not be saved.") },
+            }),
+        }).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              storage = next;
+              measured.clear();
+            }),
+          ),
+        ),
+      );
+
     return {
       list: usable.pipe(Effect.andThen(look), Effect.andThen(shown)),
       connections: (subscriptionId: string) =>
@@ -1097,11 +1474,20 @@ function make(deps: RecordingsDeps) {
         }),
       start,
       stop: (id: string) =>
-        Effect.andThen(
-          end([id], "stopped"),
+        Effect.gen(function* () {
+          // A start going on with it ends first: it ends as stopped, or never begins.
+          yield* stopResuming(id);
+          yield* end([id], "stopped");
+          // Paused, it ends where its capture last stopped.
+          const record = records.get(id);
+          if (record && isLive(record) && !active.has(id)) {
+            records.set(id, finalOf(record, Date.now(), true));
+            yield* publish;
+          }
           // Capture may have ended before Stop arrived. Retry its terminal record too.
-          Effect.suspend(() => (records.has(id) ? save : Effect.void)),
-        ),
+          if (records.has(id)) yield* save;
+          yield* publish;
+        }),
       subscriptionGone: (subscriptionId: string) =>
         Effect.andThen(
           // Its schedules go first, so none starts meanwhile.
@@ -1132,13 +1518,33 @@ function make(deps: RecordingsDeps) {
               ),
             ),
             Effect.suspend(() =>
-              Effect.ignore(
-                end(
-                  [...active.keys()].filter(
-                    (id) => records.get(id)?.channel.subscriptionId === subscriptionId,
+              Effect.andThen(
+                Effect.ignore(
+                  end(
+                    [...active.keys()].filter(
+                      (id) => records.get(id)?.channel.subscriptionId === subscriptionId,
+                    ),
+                    "stopped",
                   ),
-                  "stopped",
                 ),
+                // Those paused stop too: nothing of it goes on.
+                Effect.suspend(() => {
+                  const paused = [...records.values()].filter(
+                    (each) =>
+                      isLive(each) &&
+                      !active.has(each.id) &&
+                      each.channel.subscriptionId === subscriptionId,
+                  );
+                  if (paused.length === 0) return Effect.void;
+                  const now = Date.now();
+                  for (const record of paused) records.set(record.id, finalOf(record, now, true));
+                  return Effect.andThen(
+                    Effect.map(Effect.result(save), (written) => {
+                      if (written._tag === "Failure") unsaved.recordings = true;
+                    }),
+                    publish,
+                  );
+                }),
               ),
             ),
           ),
@@ -1148,7 +1554,7 @@ function make(deps: RecordingsDeps) {
           yield* usable;
           const record = records.get(id);
           if (!record) return;
-          if (active.has(id))
+          if (isLive(record))
             return yield* new Failed({
               error: { kind: "unexpected", detail: t("Stop the recording before deleting it.") },
             });
@@ -1175,7 +1581,7 @@ function make(deps: RecordingsDeps) {
           // The file goes first: one that stays, as one Windows holds open, keeps its record to
           // delete again, and a record whose file went lists it as missing until it is deleted.
           yield* Effect.tryPromise({
-            try: () => rm(join(root, id), { recursive: true, force: true }),
+            try: () => rm(folderOf(record), { recursive: true, force: true }),
             catch: () =>
               new Failed({
                 error: {
@@ -1194,22 +1600,91 @@ function make(deps: RecordingsDeps) {
           }
           missing.delete(id);
           yield* publish;
+          // What was saved for its subtitles goes with it, as a copy's does.
+          yield* Effect.ignore(savedSubtitles.forget(subtitlesOfCopy(id, { kind: "movie", id })));
+          // Room it took may let a paused one go on.
+          yield* retryPaused;
         }),
       copy: (id: string) =>
         Effect.gen(function* () {
           const record = records.get(id);
           if (!record || record.status.kind === "missed") return null;
-          if (active.has(id))
+          if (isLive(record))
             return yield* new Failed({
               error: { kind: "unexpected", detail: t("It is still recording.") },
             });
+          // Its file may have gone since the list was read: the list says so at once.
+          const there = yield* Effect.promise(() =>
+            stat(fileOf(record)).then(
+              () => true,
+              () => false,
+            ),
+          );
+          if (!there) {
+            if (!missing.has(id)) {
+              missing.add(id);
+              yield* publish;
+            }
+            return yield* new Failed({
+              error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
+            });
+          }
+          if (missing.delete(id)) yield* publish;
           return {
             id,
             path: fileOf(record),
             container: "ts",
             title: { kind: "movie", id },
-            progress: null,
+            progress: record.progress ?? null,
           } satisfies LocalCopy;
+        }),
+      recordProgress: (id: string, position: number, duration: number) =>
+        Effect.gen(function* () {
+          yield* usable;
+          const record = records.get(id);
+          if (!record || record.status.kind === "missed" || isLive(record))
+            return yield* new Failed({
+              error: { kind: "unexpected", detail: t("This recording is no longer there.") },
+            });
+          records.set(id, {
+            ...record,
+            progress: { position: Math.min(position, duration), duration },
+          });
+          yield* save;
+        }),
+      storage: storageNow,
+      setLimits: (limits: RecordingLimits) =>
+        Effect.andThen(
+          changeStorage({ ...storage, ...limits }),
+          Effect.andThen(retryPaused, storageNow),
+        ),
+      setFolder: (folder: string) =>
+        Effect.gen(function* () {
+          // Written to once, as a recording would be, before anything goes there.
+          yield* Effect.tryPromise({
+            try: async () => {
+              await mkdir(folder, { recursive: true });
+              const probe = join(folder, `.mrstreamer-${randomUUID()}`);
+              await writeFile(probe, "");
+              await rm(probe, { force: true });
+            },
+            catch: () =>
+              new Failed({
+                error: {
+                  kind: "invalid-input",
+                  detail: t("Recordings can't be written to that folder."),
+                },
+              }),
+          });
+          const { folder: _was, ...rest } = storage;
+          yield* changeStorage(folder === root ? rest : { ...rest, folder });
+          yield* retryPaused;
+          return yield* storageNow;
+        }),
+      suspend: Effect.suspend(() => Effect.ignore(end([...active.keys()], "away"))),
+      leave: (how: "quit" | "away") =>
+        Effect.sync(() => {
+          leaving = how;
         }),
       changes: Stream.fromPubSub(changes),
       schedules: scheduling(
@@ -1246,7 +1721,15 @@ function make(deps: RecordingsDeps) {
           wake,
         ),
       // Checked now, and the loop then waits for the next time from there.
-      check: Effect.andThen(checkOnce, wake),
+      // As when the computer wakes: paused recordings ask again at once.
+      check: Effect.andThen(
+        Effect.sync(() => resumeTried.clear()),
+        Effect.andThen(checkOnce, wake),
+      ),
+      live: Effect.sync(() => ({
+        recording: [...records.values()].some(isLive),
+        scheduled: schedules.size > 0,
+      })),
       scheduleChanges: Stream.fromPubSub(scheduleChanges),
     };
   });

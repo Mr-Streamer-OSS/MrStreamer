@@ -1400,6 +1400,27 @@ export const es: Translation = {
   "{episode} didn't download": "{episode} no se descargó",
   "Recordings could not be read.": "No se pudieron leer las grabaciones.",
   "Recordings could not be saved.": "No se pudieron guardar las grabaciones.",
+  "There isn't enough free space to record.": "No hay suficiente espacio libre para grabar.",
+  "Recording settings could not be saved.": "No se pudieron guardar los ajustes de grabación.",
+  "This recording is no longer there.": "Esta grabación ya no está.",
+  "Recordings can't be written to that folder.": "No se pueden guardar grabaciones en esa carpeta.",
+  "Choose a folder for recordings": "Elige una carpeta para las grabaciones",
+  "Open {app}": "Abrir {app}",
+  "The stream stopped.": "La emisión se detuvo.",
+  "There wasn't enough free space.": "No había suficiente espacio libre.",
+  "{from} to {to} missed.": "De {from} a {to} perdido.",
+  "{minutes} min missed in between.": "{minutes} min perdidos entremedias.",
+  "Paused at {time} while Mr. Streamer was closed or the computer slept.":
+    "En pausa desde las {time}: Mr. Streamer estaba cerrado o el ordenador en reposo.",
+  "Paused at {time}. Every connection is in use.":
+    "En pausa desde las {time}. Todas las conexiones están en uso.",
+  "Paused at {time}. The stream stopped. Trying again.":
+    "En pausa desde las {time}. La emisión se detuvo. Reintentando.",
+  "Paused at {time}. It couldn't be written. Trying again.":
+    "En pausa desde las {time}. No se pudo guardar. Reintentando.",
+  "Paused at {time}. Not enough free space; it goes on once there is room.":
+    "En pausa desde las {time}. Falta espacio libre; seguirá cuando haya sitio.",
+  "Not saved yet. Trying again.": "Aún no se ha guardado. Reintentando.",
   "Choose a stop time within 12 hours.": "Elige una hora de fin dentro de 12 horas.",
   "Stop the recording before deleting it.": "Detén la grabación antes de eliminarla.",
   "It is still recording.": "Todavía se está grabando.",

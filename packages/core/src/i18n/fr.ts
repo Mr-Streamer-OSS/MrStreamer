@@ -1392,6 +1392,29 @@ export const fr: Translation = {
   "{episode} didn't download": "{episode} n'a pas été téléchargé",
   "Recordings could not be read.": "Impossible de lire les enregistrements.",
   "Recordings could not be saved.": "Impossible d’enregistrer la liste des enregistrements.",
+  "There isn't enough free space to record.": "Il n’y a pas assez d’espace libre pour enregistrer.",
+  "Recording settings could not be saved.":
+    "Impossible d’enregistrer les réglages d’enregistrement.",
+  "This recording is no longer there.": "Cet enregistrement n’est plus là.",
+  "Recordings can't be written to that folder.":
+    "Impossible d’écrire des enregistrements dans ce dossier.",
+  "Choose a folder for recordings": "Choisir un dossier pour les enregistrements",
+  "Open {app}": "Ouvrir {app}",
+  "The stream stopped.": "Le flux s’est arrêté.",
+  "There wasn't enough free space.": "Il n’y avait pas assez d’espace libre.",
+  "{from} to {to} missed.": "De {from} à {to} manqué.",
+  "{minutes} min missed in between.": "{minutes} min manquées entre-temps.",
+  "Paused at {time} while Mr. Streamer was closed or the computer slept.":
+    "En pause depuis {time} : Mr. Streamer était fermé ou l’ordinateur en veille.",
+  "Paused at {time}. Every connection is in use.":
+    "En pause depuis {time}. Toutes les connexions sont utilisées.",
+  "Paused at {time}. The stream stopped. Trying again.":
+    "En pause depuis {time}. Le flux s’est arrêté. Nouvel essai en cours.",
+  "Paused at {time}. It couldn't be written. Trying again.":
+    "En pause depuis {time}. Écriture impossible. Nouvel essai en cours.",
+  "Paused at {time}. Not enough free space; it goes on once there is room.":
+    "En pause depuis {time}. Pas assez d’espace libre ; reprise dès qu’il y a de la place.",
+  "Not saved yet. Trying again.": "Pas encore enregistré. Nouvel essai en cours.",
   "Choose a stop time within 12 hours.": "Choisissez une heure de fin dans les 12 heures.",
   "Stop the recording before deleting it.": "Arrêtez l’enregistrement avant de le supprimer.",
   "It is still recording.": "L’enregistrement est toujours en cours.",

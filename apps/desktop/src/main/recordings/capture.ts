@@ -3,7 +3,8 @@
 // channel's segments go into the file one after another, read through the same clear muxed MPEG-TS
 // subset playback reads (../playback/hls-ts-input.ts); a discontinuity stays in the file as the
 // provider sent it. Each read waits for the write before it, so no more than one piece of the
-// stream is ever held in memory.
+// stream is ever held in memory. Capture that goes on after a gap appends to the file it wrote
+// before, starting again from a program table, as a discontinuity does.
 import { open, rm } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { StreamFailure, StreamFormat } from "@mrstreamer/contracts/playback";
@@ -43,8 +44,11 @@ export class CaptureFailure extends Error {
 /** Why capture couldn't write its file: the system's own words, which say why. */
 class DiskFailure extends Error {}
 
-/** Why a capture under way ended: at its stop time, as asked, or cut short. */
-export type CaptureEnd = "until" | "aborted" | Exclude<RecordingCut, "quit">;
+/**
+ * Why a capture under way ended: at its stop time, as asked, cut short, or out of the room
+ * `room` allows.
+ */
+export type CaptureEnd = "until" | "aborted" | "space" | Exclude<RecordingCut, "quit">;
 
 export interface Capture {
   /** Bytes on disk so far. */
@@ -55,9 +59,10 @@ export interface Capture {
 
 /**
  * Starts capturing the first of `sources` that sends a program table, from now until `until` or
- * `signal`. Answers once the table is in a new file at `path`. Throws `CaptureFailure` when no
- * source does, or `DiskFailure` when the file can't be written, with no file left either way and
- * every source's request ended.
+ * `signal`, while `room` allows another write. Answers once the table is in a new file at `path`,
+ * or with `append`, after what that file holds. Throws `CaptureFailure` when no source does, or
+ * `DiskFailure` when the file can't be written, with the file left as it was before (none, when
+ * it was new) and every source's request ended.
  */
 export async function startCapture(
   sources: readonly CaptureSource[],
@@ -68,14 +73,23 @@ export async function startCapture(
     readonly until: number;
     readonly signal: AbortSignal;
     readonly changed: () => void;
+    readonly room?: () => boolean;
+    readonly append?: boolean;
   },
 ): Promise<Capture> {
-  const file = await open(path, "wx").catch((cause: unknown) => {
+  // Appending takes the file as it is, or makes it when it went.
+  const file = await open(path, options.append ? "a+" : "wx").catch((cause: unknown) => {
     throw new DiskFailure(cause instanceof Error ? cause.message : String(cause));
   });
+  const before = options.append
+    ? await file.stat().then(
+        ({ size }) => size,
+        () => 0,
+      )
+    : 0;
   // The stop time also ends a start that takes that long.
   const deadline = AbortSignal.timeout(Math.max(0, options.until - Date.now()));
-  let written = 0;
+  let written = before;
   // Every byte, at its offset: a source that failed before leaves the file emptied, but not its
   // position.
   const write = async (chunk: Uint8Array) => {
@@ -100,18 +114,22 @@ export async function startCapture(
     try {
       opened = await openSource(source, options, signal);
       await startTable(opened.chunks, write, signal);
-      return { bytes: () => written, ended: run(opened, write, file, stop, deadline, options) };
+      return {
+        bytes: () => written,
+        ended: run(opened, write, file, stop, deadline, { room: () => true, ...options }),
+      };
     } catch (cause) {
       stop.abort();
       await opened?.close();
       last = cause;
       if (cause instanceof DiskFailure || options.signal.aborted || deadline.aborted) break;
-      await file.truncate(0).catch(() => {});
-      written = 0;
+      await file.truncate(before).catch(() => {});
+      written = before;
     }
   }
+  if (options.append) await file.truncate(before).catch(() => {});
   await file.close().catch(() => {});
-  await rm(path, { force: true });
+  if (!options.append) await rm(path, { force: true });
   if (last instanceof DiskFailure) throw last;
   if (deadline.aborted && !options.signal.aborted)
     throw new CaptureFailure({
@@ -230,7 +248,7 @@ async function run(
   file: Awaited<ReturnType<typeof open>>,
   stop: AbortController,
   deadline: AbortSignal,
-  options: { readonly signal: AbortSignal; readonly until: number },
+  options: { readonly signal: AbortSignal; readonly until: number; readonly room: () => boolean },
 ): Promise<CaptureEnd> {
   let end: CaptureEnd = "stream";
   // Its timer waits out a computer's sleep: the clock says when the stop time passed meanwhile.
@@ -240,6 +258,10 @@ async function run(
     if (!next || next.done) break;
     if (Date.now() >= options.until) {
       late = true;
+      break;
+    }
+    if (!options.room()) {
+      end = "space";
       break;
     }
     const wrote = await write(next.value).then(
@@ -253,8 +275,8 @@ async function run(
   }
   stop.abort();
   await opened.close();
-  if (end !== "disk" && options.signal.aborted) end = "aborted";
-  else if (end !== "disk" && (deadline.aborted || late)) end = "until";
+  if (end === "stream" && options.signal.aborted) end = "aborted";
+  else if (end === "stream" && (deadline.aborted || late)) end = "until";
   const flushed = await file.sync().then(
     () => true,
     () => false,

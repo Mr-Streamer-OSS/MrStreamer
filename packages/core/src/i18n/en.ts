@@ -1300,6 +1300,26 @@ export const en = {
   "{episode} didn't download": "{episode} didn't download",
   "Recordings could not be read.": "Recordings could not be read.",
   "Recordings could not be saved.": "Recordings could not be saved.",
+  "There isn't enough free space to record.": "There isn't enough free space to record.",
+  "Recording settings could not be saved.": "Recording settings could not be saved.",
+  "This recording is no longer there.": "This recording is no longer there.",
+  "Recordings can't be written to that folder.": "Recordings can't be written to that folder.",
+  "Choose a folder for recordings": "Choose a folder for recordings",
+  "Open {app}": "Open {app}",
+  "The stream stopped.": "The stream stopped.",
+  "There wasn't enough free space.": "There wasn't enough free space.",
+  "{from} to {to} missed.": "{from} to {to} missed.",
+  "{minutes} min missed in between.": "{minutes} min missed in between.",
+  "Paused at {time} while Mr. Streamer was closed or the computer slept.":
+    "Paused at {time} while Mr. Streamer was closed or the computer slept.",
+  "Paused at {time}. Every connection is in use.": "Paused at {time}. Every connection is in use.",
+  "Paused at {time}. The stream stopped. Trying again.":
+    "Paused at {time}. The stream stopped. Trying again.",
+  "Paused at {time}. It couldn't be written. Trying again.":
+    "Paused at {time}. It couldn't be written. Trying again.",
+  "Paused at {time}. Not enough free space; it goes on once there is room.":
+    "Paused at {time}. Not enough free space; it goes on once there is room.",
+  "Not saved yet. Trying again.": "Not saved yet. Trying again.",
   "Choose a stop time within 12 hours.": "Choose a stop time within 12 hours.",
   "Stop the recording before deleting it.": "Stop the recording before deleting it.",
   "It is still recording.": "It is still recording.",

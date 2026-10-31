@@ -96,3 +96,13 @@ it("adds a complete late recording's missed and captured minutes up to those pla
   const row = await rowOf(late, { ...times, ended: times.stop });
   expect(row).toMatchObject({ captured: "8", planned: "10" });
 });
+
+it("counts the minutes a gap missed out of what was captured, and says when and why", async () => {
+  const row = await rowOf(undefined, {
+    start: at("12:00"),
+    status: { kind: "partial", cut: "stream" },
+    gaps: [{ from: at("12:20"), to: at("12:35"), why: "stream" }],
+  });
+  expect(row.text).toMatch(/12:20\D* to 12:35\D* missed\. The stream stopped\./);
+  expect(row).toMatchObject({ captured: "45", planned: "60" });
+});

@@ -1325,6 +1325,28 @@ export const nl: Translation = {
   "{episode} didn't download": "{episode} is niet gedownload",
   "Recordings could not be read.": "Opnames konden niet worden gelezen.",
   "Recordings could not be saved.": "Opnames konden niet worden bewaard.",
+  "There isn't enough free space to record.": "Er is niet genoeg vrije ruimte om op te nemen.",
+  "Recording settings could not be saved.": "Opname-instellingen konden niet worden bewaard.",
+  "This recording is no longer there.": "Deze opname is er niet meer.",
+  "Recordings can't be written to that folder.":
+    "Opnames kunnen niet in die map worden geschreven.",
+  "Choose a folder for recordings": "Kies een map voor opnames",
+  "Open {app}": "{app} openen",
+  "The stream stopped.": "De stream stopte.",
+  "There wasn't enough free space.": "Er was niet genoeg vrije ruimte.",
+  "{from} to {to} missed.": "{from} tot {to} gemist.",
+  "{minutes} min missed in between.": "{minutes} min tussendoor gemist.",
+  "Paused at {time} while Mr. Streamer was closed or the computer slept.":
+    "Gepauzeerd om {time} terwijl Mr. Streamer dicht was of de computer sliep.",
+  "Paused at {time}. Every connection is in use.":
+    "Gepauzeerd om {time}. Elke verbinding is in gebruik.",
+  "Paused at {time}. The stream stopped. Trying again.":
+    "Gepauzeerd om {time}. De stream stopte. Opnieuw proberen.",
+  "Paused at {time}. It couldn't be written. Trying again.":
+    "Gepauzeerd om {time}. Kon niet worden geschreven. Opnieuw proberen.",
+  "Paused at {time}. Not enough free space; it goes on once there is room.":
+    "Gepauzeerd om {time}. Niet genoeg vrije ruimte; gaat verder zodra er plek is.",
+  "Not saved yet. Trying again.": "Nog niet bewaard. Opnieuw proberen.",
   "Choose a stop time within 12 hours.": "Kies een eindtijd binnen 12 uur.",
   "Stop the recording before deleting it.": "Stop de opname voordat je hem verwijdert.",
   "It is still recording.": "De opname loopt nog.",

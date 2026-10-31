@@ -1335,6 +1335,30 @@ export const de: Translation = {
   "{episode} didn't download": "{episode} wurde nicht heruntergeladen",
   "Recordings could not be read.": "Aufnahmen konnten nicht gelesen werden.",
   "Recordings could not be saved.": "Aufnahmen konnten nicht gespeichert werden.",
+  "There isn't enough free space to record.":
+    "Es ist nicht genug freier Speicher für die Aufnahme da.",
+  "Recording settings could not be saved.":
+    "Aufnahme-Einstellungen konnten nicht gespeichert werden.",
+  "This recording is no longer there.": "Diese Aufnahme ist nicht mehr da.",
+  "Recordings can't be written to that folder.":
+    "In diesen Ordner können keine Aufnahmen geschrieben werden.",
+  "Choose a folder for recordings": "Ordner für Aufnahmen wählen",
+  "Open {app}": "{app} öffnen",
+  "The stream stopped.": "Der Stream brach ab.",
+  "There wasn't enough free space.": "Es war nicht genug freier Speicher da.",
+  "{from} to {to} missed.": "{from} bis {to} verpasst.",
+  "{minutes} min missed in between.": "{minutes} Min. zwischendurch verpasst.",
+  "Paused at {time} while Mr. Streamer was closed or the computer slept.":
+    "Um {time} pausiert, während Mr. Streamer geschlossen war oder der Computer schlief.",
+  "Paused at {time}. Every connection is in use.":
+    "Um {time} pausiert. Alle Verbindungen sind belegt.",
+  "Paused at {time}. The stream stopped. Trying again.":
+    "Um {time} pausiert. Der Stream brach ab. Wird erneut versucht.",
+  "Paused at {time}. It couldn't be written. Trying again.":
+    "Um {time} pausiert. Sie konnte nicht geschrieben werden. Wird erneut versucht.",
+  "Paused at {time}. Not enough free space; it goes on once there is room.":
+    "Um {time} pausiert. Nicht genug freier Speicher; es geht weiter, sobald Platz ist.",
+  "Not saved yet. Trying again.": "Noch nicht gespeichert. Wird erneut versucht.",
   "Choose a stop time within 12 hours.": "Wähle ein Ende innerhalb von 12 Stunden.",
   "Stop the recording before deleting it.": "Beende die Aufnahme, bevor du sie löschst.",
   "It is still recording.": "Die Aufnahme läuft noch.",
