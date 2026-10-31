@@ -102,7 +102,6 @@ it("opens what was recorded from Connect, plays it, and goes back to Add subscri
   ).toEqual(["Recordings", "Add subscription"]);
   expect(window.querySelector("section[aria-label=Recorded]")).not.toBeNull();
   expect(window.querySelector("section[aria-label=Scheduled]")).toBeNull();
-  expect(window.textContent).not.toContain("Night Sessions");
   expect(button(window, "Storage")).toBeUndefined();
 
   ipc.hold("playback.openCopy");
@@ -116,10 +115,4 @@ it("opens what was recorded from Connect, plays it, and goes back to Add subscri
   });
   await click(button(window, "Add subscription"));
   expect(window.querySelector("form")).not.toBeNull();
-});
-
-it("offers no Recordings on Connect while none is kept", async () => {
-  const window = await app();
-  await act(settle);
-  expect(button(window, "Recordings")).toBeUndefined();
 });

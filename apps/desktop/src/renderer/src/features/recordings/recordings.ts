@@ -280,14 +280,11 @@ function missText(why: ScheduleMiss): string {
  * started late says so first.
  */
 export function outcome(recording: Recording, now: number): { word: string; reason: string } {
-  const told = ending(recording, now);
-  const { word } = told;
+  const { word, reason: why } = ending(recording, now);
   // Gaps in between say what they missed; an end the app couldn't write down yet says so.
-  const missedBetween =
-    recording.status.kind === "paused" ? null : gapsText(recording.gaps ?? [], now);
   const reason = [
-    told.reason,
-    missedBetween,
+    why,
+    recording.status.kind === "paused" ? null : gapsText(recording.gaps ?? [], now),
     recording.unsaved ? t("Not saved yet. Trying again.") : null,
   ]
     .filter(Boolean)

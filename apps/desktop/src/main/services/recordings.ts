@@ -41,6 +41,7 @@ import type {
   ConnectionHolder,
   Recording,
   RecordingConnections,
+  RecordingCut,
   RecordingGap,
   RecordingGapReason,
   RecordingLimits,
@@ -230,24 +231,29 @@ const cutOf = (why: RecordingGapReason) =>
   why === "away" ? "quit" : why === "stream" || why === "busy" ? "stream" : "disk";
 
 /**
- * `record` ended for good at `at`, stopped by the viewer or not: a gap it is in ends it where its
- * capture last stopped, and what it missed before stays among its gaps.
+ * `record` ended for good at `at`, `as` the viewer stopped it or as cut short, else as its gaps
+ * say: a gap it is in ends it where its capture last stopped, and what it missed before stays
+ * among its gaps.
  */
-function finalOf(record: StoredRecording, at: number, stopped: boolean): StoredRecording {
+function finalOf(
+  record: StoredRecording,
+  at: number,
+  as?: "stopped" | RecordingCut,
+): StoredRecording {
   const open = openGap(record);
   const { gaps: all, ...rest } = record;
   const gaps = open ? all?.slice(0, -1) : all;
-  const last = gaps?.at(-1);
+  const last = open ?? gaps?.at(-1);
+  const cut = as ?? (last && cutOf(last.why));
   return {
     ...rest,
     ...(gaps?.length && { gaps }),
     ended: open ? open.from : at,
-    status: stopped
-      ? { kind: "stopped" }
-      : open
-        ? { kind: "partial", cut: cutOf(open.why) }
-        : last
-          ? { kind: "partial", cut: cutOf(last.why) }
+    status:
+      cut === "stopped"
+        ? { kind: "stopped" }
+        : cut
+          ? { kind: "partial", cut }
           : { kind: "complete" },
   };
 }
@@ -313,10 +319,7 @@ function make(deps: RecordingsDeps) {
         const seen = { ...record, bytes: file?.size ?? record.bytes };
         const open = openGap(record);
         if (record.stop <= now)
-          records.set(record.id, {
-            ...finalOf(seen, last, false),
-            ...(!open && { status: { kind: "partial", cut: "quit" } }),
-          });
+          records.set(record.id, finalOf(seen, last, open ? undefined : "quit"));
         else
           records.set(record.id, {
             ...seen,
@@ -354,6 +357,14 @@ function make(deps: RecordingsDeps) {
         Effect.sync(() => {
           unsaved.recordings = false;
           unsavedEnds.clear();
+        }),
+      ),
+    );
+    /** Saves, leaving what couldn't be written for the next check to write again. */
+    const saveOrLater = save.pipe(
+      Effect.catch(() =>
+        Effect.sync(() => {
+          unsaved.recordings = true;
         }),
       ),
     );
@@ -418,9 +429,11 @@ function make(deps: RecordingsDeps) {
     const measured = new Map<string, { free: number | null; at: number; written: number }>();
     const measure = async (folder: string) => {
       const written = capturing();
-      measured.set(folder, { free: await freeIn(folder), at: Date.now(), written });
+      const known = { free: await freeIn(folder), at: Date.now(), written };
+      measured.set(folder, known);
+      return known;
     };
-    const roomWith = (folder: string, known: { free: number | null; written: number }) =>
+    const roomWith = (known: { free: number | null; written: number }) =>
       (storage.space === null || used() < storage.space) &&
       (known.free === null || known.free - (capturing() - known.written) >= storage.keepFree);
     /** Whether capture into `folder` may write on, as last measured, measuring again now and then. */
@@ -431,14 +444,10 @@ function make(deps: RecordingsDeps) {
         if (known) measured.set(folder, { ...known, at: Date.now() });
         void measure(folder);
       }
-      return known ? roomWith(folder, known) : true;
+      return known ? roomWith(known) : true;
     };
     /** Whether a recording may start or go on in `folder`, as measured now. */
-    const roomIn = (folder: string) =>
-      Effect.promise(async () => {
-        await measure(folder);
-        return roomWith(folder, measured.get(folder)!);
-      });
+    const roomIn = (folder: string) => Effect.promise(() => measure(folder).then(roomWith));
 
     const limitOf = (subscriptionId: string) =>
       Effect.map(subscriptions.list, (list) => {
@@ -469,13 +478,11 @@ function make(deps: RecordingsDeps) {
           id,
           why
             ? { ...seen, gaps: [...(seen.gaps ?? []), { from: now, to: null, why }] }
-            : end === "aborted"
-              ? capture.asked === "stopped"
-                ? finalOf(seen, now, true)
-                : { ...finalOf(seen, now, false), status: { kind: "partial", cut: "quit" } }
-              : end === "until"
-                ? finalOf(seen, now, false)
-                : { ...finalOf(seen, now, false), status: { kind: "partial", cut: cutOf(end) } },
+            : end === "until"
+              ? finalOf(seen, now)
+              : end === "aborted"
+                ? finalOf(seen, now, capture.asked === "stopped" ? "stopped" : "quit")
+                : finalOf(seen, now, cutOf(end)),
         );
         // Any later write takes it down too, the next check's at the latest; until then a restart
         // reads it as one the app didn't see end, and its schedule's time stays unsettled.
@@ -754,6 +761,17 @@ function make(deps: RecordingsDeps) {
           return failure ? Effect.fail(failure) : Effect.void;
         },
       );
+    /** Ends for good, `as` asked, each recording that pauses and `which` names. */
+    const endPaused = (which: (record: StoredRecording) => boolean, as: "stopped" | "quit") =>
+      Effect.suspend(() => {
+        const paused = [...records.values()].filter(
+          (each) => isLive(each) && !active.has(each.id) && which(each),
+        );
+        if (paused.length === 0) return Effect.void;
+        const now = Date.now();
+        for (const record of paused) records.set(record.id, finalOf(record, now, as));
+        return Effect.andThen(saveOrLater, publish);
+      });
     yield* Effect.addFinalizer(() =>
       Effect.andThen(
         Effect.promise(() => {
@@ -770,17 +788,9 @@ function make(deps: RecordingsDeps) {
           Effect.andThen(
             Effect.ignore(end([...active.keys()], leaving)),
             // Quit ends those paused too: none goes on when the app runs again.
-            Effect.suspend(() => {
-              const paused = [...records.values()].filter(isLive);
-              if (leaving === "away" || paused.length === 0) return Effect.void;
-              const now = Date.now();
-              for (const record of paused)
-                records.set(record.id, {
-                  ...finalOf(record, now, false),
-                  status: { kind: "partial", cut: "quit" },
-                });
-              return Effect.ignore(save);
-            }),
+            Effect.suspend(() =>
+              leaving === "quit" ? endPaused(() => true, "quit") : Effect.void,
+            ),
           ),
         ),
       ),
@@ -1137,7 +1147,7 @@ function make(deps: RecordingsDeps) {
             continue;
           }
           if (record.stop <= now) {
-            records.set(record.id, finalOf(record, now, false));
+            records.set(record.id, finalOf(record, now));
             resumeTried.delete(record.id);
             over = true;
             continue;
@@ -1150,7 +1160,7 @@ function make(deps: RecordingsDeps) {
           resumeRecording(record);
         }
         if (over) {
-          if ((yield* Effect.result(save))._tag === "Failure") unsaved.recordings = true;
+          yield* saveOrLater;
           yield* publish;
         }
         return paused;
@@ -1481,7 +1491,7 @@ function make(deps: RecordingsDeps) {
           // Paused, it ends where its capture last stopped.
           const record = records.get(id);
           if (record && isLive(record) && !active.has(id)) {
-            records.set(id, finalOf(record, Date.now(), true));
+            records.set(id, finalOf(record, Date.now(), "stopped"));
             yield* publish;
           }
           // Capture may have ended before Stop arrived. Retry its terminal record too.
@@ -1528,23 +1538,7 @@ function make(deps: RecordingsDeps) {
                   ),
                 ),
                 // Those paused stop too: nothing of it goes on.
-                Effect.suspend(() => {
-                  const paused = [...records.values()].filter(
-                    (each) =>
-                      isLive(each) &&
-                      !active.has(each.id) &&
-                      each.channel.subscriptionId === subscriptionId,
-                  );
-                  if (paused.length === 0) return Effect.void;
-                  const now = Date.now();
-                  for (const record of paused) records.set(record.id, finalOf(record, now, true));
-                  return Effect.andThen(
-                    Effect.map(Effect.result(save), (written) => {
-                      if (written._tag === "Failure") unsaved.recordings = true;
-                    }),
-                    publish,
-                  );
-                }),
+                endPaused((each) => each.channel.subscriptionId === subscriptionId, "stopped"),
               ),
             ),
           ),

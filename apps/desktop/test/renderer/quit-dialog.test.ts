@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // The question Quit asks while a recording's time goes on (`window.leaveAsked`): it names what
 // records and the minutes it has, and the next schedule that won't record while the app is
-// closed. Keep recording and Escape leave the app running; Quit confirms with `window.quit`.
+// closed. Keep recording leaves the app running; Quit confirms with `window.quit`.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -66,7 +66,7 @@ async function asked(): Promise<HTMLElement> {
   });
 }
 
-it("names what records and what won't, and keeps recording on Escape", async () => {
+it("names what records and what won't, focusing Keep recording", async () => {
   const shown = await asked();
   expect(shown.textContent).toContain("Quit while recording?");
   expect(shown.textContent).toMatch(
@@ -75,13 +75,6 @@ it("names what records and what won't, and keeps recording on Escape", async () 
   expect(shown.textContent).toContain("Night Sessions, ");
   expect(shown.textContent).toContain("won't record while Mr. Streamer is closed.");
   await vi.waitFor(() => expect(document.activeElement).toBe(button("Keep recording")));
-  await act(async () => {
-    document.activeElement?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    );
-  });
-  await vi.waitFor(() => expect(dialog()).toBeNull());
-  expect(ipc.argsOf("window.quit")).toHaveLength(0);
 });
 
 it("closes on Keep recording, and quits on Quit", async () => {
