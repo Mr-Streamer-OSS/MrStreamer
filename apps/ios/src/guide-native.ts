@@ -39,6 +39,13 @@ export interface Query {
   readonly rows: readonly Programme[];
   readonly more: boolean;
 }
+/** A programme `search` found, by the guide id of the channel it is on. */
+export interface Match {
+  readonly guideId: string;
+  readonly start: number;
+  readonly stop: number;
+  readonly title: string;
+}
 type Prepared =
   | { readonly kind: "redirect"; readonly location: string }
   | { readonly kind: "candidate"; readonly id: string };
@@ -81,6 +88,19 @@ export interface GuideNative {
     until: number,
     after: number,
   ): Promise<Result<Query>>;
+  /**
+   * The first `limit` programmes on `ids`, not ended at `at`, whose title folded as core text.ts
+   * `normalize` folds holds each of `words`: on now first, then by start.
+   */
+  search(
+    lease: string,
+    generation: string,
+    job: string,
+    ids: readonly string[],
+    words: readonly string[],
+    at: number,
+    limit: number,
+  ): Promise<Result<{ readonly rows: readonly Match[] }>>;
   addListener?(event: "foreground" | "background", listener: () => void): { remove(): void };
 }
 
