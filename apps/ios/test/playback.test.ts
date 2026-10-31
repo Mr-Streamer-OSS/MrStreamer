@@ -89,6 +89,29 @@ vi.mock("../src/glass.tsx", async () => {
   };
 });
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
+// The native format module: each session serves its playlist at once, naming `unshown` as the
+// subtitle tracks it can't carry, and closes when asked.
+let unshown: Array<{ language: string | null; format: string | null; forced: boolean }> = [];
+const closeSession = new Map<string, () => void>();
+Object.assign(globalThis, {
+  expo: {
+    modules: {
+      TitleFormats: {
+        create: () => undefined,
+        open: async (id: string) => ({
+          kind: "session",
+          playlist: `http://127.0.0.1:1/${id}/main.m3u8`,
+          unshown,
+        }),
+        close: (id: string) => closeSession.get(id)?.(),
+        closed: (id: string) => new Promise<void>((done) => closeSession.set(id, done)),
+        failure: () => null,
+        trace: () => [],
+        addListener: () => ({ remove: () => undefined }),
+      },
+    },
+  },
+});
 
 const { native } = await import("./native-files.ts");
 const account = await import("../src/account.ts");
@@ -205,6 +228,7 @@ beforeEach(() => {
   }));
   opened.length = 0;
   sheets.length = 0;
+  unshown = [];
   port.tracks = null;
   onNow = null;
   listingGate = null;
@@ -624,7 +648,7 @@ describe("a programme from catch-up", () => {
   });
 });
 
-describe("a live channel's sound and subtitles in Watch", () => {
+describe("sound and subtitles in Watch", () => {
   const button = (id: string) =>
     [...container.querySelectorAll("button")].find(
       (each) => each.getAttribute("data-testid") === id,
@@ -838,6 +862,45 @@ describe("a live channel's sound and subtitles in Watch", () => {
     const subtitles = await open("watch-subtitles");
     expect(subtitles.options).toEqual(["Cancel"]);
     expect(subtitles.message).toBe("No choices on this channel.");
+  });
+
+  it("names a file's subtitles it can't show, by language and format, beside those it can", async () => {
+    await connect([null, null, null]);
+    unshown = [
+      { language: "eng", format: "PGS", forced: false },
+      { language: "nld", format: "DVD", forced: true },
+      { language: null, format: null, forced: false },
+    ];
+    const film = {
+      id: "film",
+      subscriptionId: null,
+      title: "Film",
+      place: "",
+      live: false,
+      next: false,
+      versions: false,
+    };
+    const file = { url: "http://panel/film.mkv", container: "mkv" as const };
+    await React.act(async () => {
+      playback.play(
+        film,
+        { kind: "file", originalLanguage: null, open: async () => file },
+        { watch: true, login: [] },
+      );
+      await tick();
+    });
+    await until(() => opened.length === 1);
+    expect(opened[0]).toMatch(/^http:\/\/127\.0\.0\.1:1\/.+\/main\.m3u8$/);
+    offer();
+    const cantShow =
+      "Can't show here: English (PGS), Nederlands (DVD, forced), Unknown language (unknown format).";
+    const subtitles = await open("watch-subtitles");
+    expect(subtitles.options).toEqual(["✓ Off", "Dutch", "Cancel"]);
+    expect(subtitles.message).toBe(cantShow);
+    offer({ subtitles: { state: "absent", options: [] } });
+    const none = await open("watch-subtitles");
+    expect(none.options).toEqual(["Cancel"]);
+    expect(none.message).toBe(cantShow);
   });
 
   it("says tracks aren't known yet when their read fails or the group is unavailable", async () => {
