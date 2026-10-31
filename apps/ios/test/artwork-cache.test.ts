@@ -491,7 +491,7 @@ describe("pictures whose address carries a login", () => {
     await vi.advanceTimersByTimeAsync(5_500);
     const index = readFileSync(join(kept, "index.json"), "utf8");
     expect(index).toContain("/logo/public.png");
-    expect(index).not.toMatch(/k7!|%6B7%21/);
+    expect(index).not.toMatch(/k7!|k7%21|%6B7%21/);
     for (const { path } of stored()) expect(path).not.toContain("k7!");
   });
 

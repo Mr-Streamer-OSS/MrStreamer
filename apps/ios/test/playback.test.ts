@@ -324,14 +324,15 @@ describe("a programme from catch-up", () => {
     },
   );
 
-  it("reconnects where it got to in the programme, rather than from its start", async () => {
+  it.each([900, 3605])("reconnects within the programme after reaching %i seconds", async (at) => {
     await connect([3, 3, 3]);
     earlier(30);
-    await play(aired(2 * HOUR));
+    const programme = aired(2 * HOUR);
+    await play(programme);
     await React.act(async () => {
       port.ready();
       port.state(true);
-      port.currentTime = 30 + 900;
+      port.currentTime = 30 + at;
       port.state(true);
       port.failure({ kind: "network", evidence: null });
       await tick();
@@ -342,7 +343,7 @@ describe("a programme from catch-up", () => {
       port.ready();
       await tick();
     });
-    expect(port.currentTime).toBe(30 + 900);
+    expect(port.currentTime).toBe(30 + Math.min(at, (programme.stop - programme.start) / 1000));
   });
 
   it("stays the programme from catch-up across closing and returning to Watch", async () => {

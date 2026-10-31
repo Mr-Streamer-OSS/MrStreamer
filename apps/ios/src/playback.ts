@@ -639,8 +639,10 @@ function release(): Promise<Saved> {
     clearWatchdog(current.epoch);
     playingTime(current.epoch, false);
   }
-  if (current?.loaded && !current.item.live)
-    current.stoppedAt = Math.max(0, player().currentTime - current.offset);
+  if (current?.loaded && !current.item.live) {
+    const at = Math.max(0, player().currentTime - current.offset);
+    current.stoppedAt = current.item.past ? Math.min(at, lengthOf(current.item, null)) : at;
+  }
   if (checkpoint) clearInterval(checkpoint);
   checkpoint = null;
   if (current) void retire(current.resource);
