@@ -427,19 +427,26 @@ function make(deps: RecordingsDeps) {
     const unreadable = () =>
       new Failed({ error: { kind: "unexpected", detail: t("Recordings could not be read.") } });
     const usable = read.kind === "read" ? Effect.void : Effect.fail(unreadable());
-    if (read.kind === "read") {
-      const now = Date.now();
-      // Never seen to end: its time over, cut short by the quit, with what its file holds; else
-      // it goes on, missing the time since its file was last written, or since it paused.
-      for (const record of read.items) {
-        if (!isLive(record)) {
-          records.set(record.id, record);
-          continue;
-        }
+    /**
+     * Records the app didn't see end, as recordings.json kept them, whose chosen folder wasn't
+     * there as the app started, by id: read again as then once it is (see reckon).
+     */
+    const unseen = new Map<string, StoredRecording>();
+    /**
+     * Reads `record`, which the app didn't see end, as of `now`: a failed start goes (see FAILED);
+     * its time over, it was cut short by the quit, with what its file holds; else it goes on,
+     * missing the time since its file was last written, or since it paused. While its chosen folder
+     * isn't there, nor are its marks and file: it is read again once that folder is (see unseen).
+     */
+    const reckon = (record: StoredRecording, now: number) =>
+      Effect.gen(function* () {
         const failed = yield* failedStart(record);
+        if (failed === null) unseen.set(record.id, record);
+        else unseen.delete(record.id);
         if (failed) {
+          records.delete(record.id);
           failedFolders.set(record.id, folderOf(record));
-          continue;
+          return;
         }
         const file = yield* Effect.promise(() => stat(fileOf(record)).catch(() => null));
         const last = file ? Math.min(file.mtimeMs, record.stop) : record.start;
@@ -459,6 +466,12 @@ function make(deps: RecordingsDeps) {
             ...seen,
             ...(!open && { gaps: [...(record.gaps ?? []), { from: last, to: null, why: "away" }] }),
           });
+      });
+    if (read.kind === "read") {
+      const now = Date.now();
+      for (const record of read.items) {
+        if (isLive(record)) yield* reckon(record, now);
+        else records.set(record.id, record);
       }
       // A recording's folder without its record, as a failed start leaves one (see the header):
       // only once recordings.json is there to say so, and in a chosen folder only one it marked.
@@ -1532,7 +1545,7 @@ function make(deps: RecordingsDeps) {
       Effect.gen(function* () {
         let paused = false;
         const over: string[] = [];
-        for (const record of records.values()) {
+        for (let record of records.values()) {
           if (!isLive(record) || active.has(record.id)) continue;
           if (
             stopping.has(record.id) ||
@@ -1540,6 +1553,23 @@ function make(deps: RecordingsDeps) {
           ) {
             paused = true;
             continue;
+          }
+          // Read as the app started once its folder is back, where a Stop or Quit may have marked
+          // it ended: nothing goes on until then.
+          const kept = unseen.get(record.id);
+          if (kept) {
+            if (!(yield* Effect.promise(() => isThere(placeOf(kept))))) {
+              paused = true;
+              continue;
+            }
+            yield* reckon(kept, now);
+            const again = records.get(record.id);
+            if (!again || !isLive(again)) {
+              resumeTried.delete(record.id);
+              over.push(record.id);
+              continue;
+            }
+            record = again;
           }
           if (record.stop <= now) {
             const failed = yield* failedStart(record);

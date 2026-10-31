@@ -861,6 +861,44 @@ describe.skipIf(!hasTools)("recordings", () => {
     }
   });
 
+  it("never goes on with one the viewer stopped, its end unwritten, once its chosen folder is back after a relaunch without it", async () => {
+    const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected();
+    const chosen = join(await tempDir(), "Mr. Streamer");
+    await recordings.setFolder(chosen);
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
+    // Storage refuses the end, so only the mark in its folder says it was stopped.
+    const manifest = join(dataDir, "recordings", "recordings.json");
+    await rename(manifest, `${manifest}.saved`);
+    await mkdir(manifest);
+    await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
+      error: { detail: "Recordings could not be saved." },
+    });
+    await quit();
+    await rm(manifest, { recursive: true });
+    await rename(`${manifest}.saved`, manifest);
+    // Relaunched while the drive is away, its mount point's empty folder in its place.
+    await rename(chosen, `${chosen}.away`);
+    await mkdir(chosen);
+
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    await again.library.refresh(subscriptionId);
+    const asked = provider.streamRequests();
+    await again.recordings.check();
+    expect((await again.recordings.list())[0]?.status).toMatchObject({ kind: "paused" });
+    await rm(chosen, { recursive: true });
+    await rename(`${chosen}.away`, chosen);
+    await again.recordings.check();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(provider.streamRequests()).toBe(asked);
+    expect((await again.recordings.list())[0]).toMatchObject({
+      id: answer.recording.id,
+      status: { kind: "stopped" },
+    });
+  });
+
   it("refuses an update's install while a Stop is neither written nor marked, then keeps it ended after a relaunch", async () => {
     // Stopped while it captures, and stopped once it had ended by itself, its end unwritten.
     for (const how of ["capturing", "ended"] as const) {
@@ -1022,8 +1060,10 @@ describe.skipIf(!hasTools)("recordings", () => {
     "chosen late",
     "chosen expired",
     "chosen absent",
+    "chosen replaced",
   ] as const) {
-    const permissions = where !== "data" && where !== "chosen absent";
+    const away = where === "chosen absent" || where === "chosen replaced";
+    const permissions = where !== "data" && !away;
     it.skipIf(permissions && (process.getuid?.() === 0 || process.platform === "win32"))(
       `never records a failed start after a Quit and relaunch, though recordings.json kept its record (${where})`,
       async () => {
@@ -1035,9 +1075,7 @@ describe.skipIf(!hasTools)("recordings", () => {
         if (where !== "data") await recordings.setFolder(chosen);
         const stop =
           Date.now() +
-          (where === "chosen late" || where === "chosen expired" || where === "chosen absent"
-            ? 5000
-            : 60_000);
+          (where === "chosen late" || where === "chosen expired" || away ? 5000 : 60_000);
         const starting = recordings.start(channel(TRACKS), stop, {});
         starting.catch(() => {});
         const out = await asked.promise;
@@ -1060,8 +1098,10 @@ describe.skipIf(!hasTools)("recordings", () => {
         const before = provider.streamRequests();
         let again: Awaited<ReturnType<typeof app>>;
         try {
-          if (where === "chosen absent") {
+          if (away) {
             await rename(chosen, `${chosen}.away`);
+            // A drive's mount point keeps an empty folder in its place.
+            if (where === "chosen replaced") await mkdir(chosen);
             await new Promise((resolve) => setTimeout(resolve, stop - Date.now() + 100));
           } else if (permissions) {
             await chmod(chosen, 0);
@@ -1085,8 +1125,10 @@ describe.skipIf(!hasTools)("recordings", () => {
             expect(provider.streamRequests()).toBe(before);
           }
         } finally {
-          if (where === "chosen absent") await rename(`${chosen}.away`, chosen);
-          else if (permissions) await chmod(chosen, 0o700);
+          if (away) {
+            await rm(chosen, { recursive: true, force: true });
+            await rename(`${chosen}.away`, chosen);
+          } else if (permissions) await chmod(chosen, 0o700);
         }
         await again.recordings.check();
         await new Promise((resolve) => setTimeout(resolve, 500));
