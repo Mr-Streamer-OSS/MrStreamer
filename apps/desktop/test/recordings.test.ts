@@ -1029,6 +1029,10 @@ describe.skipIf(!hasTools)("recordings", () => {
         error: { kind: "stream", failure: { kind: "unsupported" } },
       });
       await quit();
+      // The quit couldn't write it either: its folder stays, marked.
+      const place = where === "data" ? join(dataDir, "recordings") : chosen;
+      const [folder] = (await readdir(place)).filter((name) => !name.includes("."));
+      expect(existsSync(join(place, folder!, ".mrstreamer-failed"))).toBe(true);
       await rm(manifest, { recursive: true });
       await rename(`${manifest}.saved`, manifest);
 
