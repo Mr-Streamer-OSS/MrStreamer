@@ -1,7 +1,10 @@
 import { router, usePathname } from "expo-router";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { Quality } from "@mrstreamer/contracts/library";
-import { DEFAULT_SUBTITLE_TIMING } from "@mrstreamer/contracts/online-subtitles";
+import {
+  DEFAULT_SUBTITLE_TIMING,
+  type SubtitleTiming,
+} from "@mrstreamer/contracts/online-subtitles";
 import { formatLanguageName } from "@mrstreamer/core/i18n";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
@@ -716,11 +719,12 @@ function TextButtons({ item }: { item: Playing }) {
     const mine = ++menu.current;
     const asked = request();
     const playing = playingItem(playbackState.get().phase);
-    const stands = () =>
-      menu.current === mine &&
+    // The same play still showing on Watch, though the controls may have hidden since.
+    const plays = () =>
       asked.stands() &&
       playbackState.get().watch &&
       playingItem(playbackState.get().phase) === playing;
+    const stands = () => menu.current === mine && plays();
     const unshown = of === "subtitles" ? unshownSubtitles() : null;
     const known = await trackChoices(of);
     if (!stands()) return;
@@ -728,23 +732,33 @@ function TextButtons({ item }: { item: Playing }) {
     const none = choices.length === 0 || (choices.length === 1 && choices[0]?.kind === "off");
     const title = of === "subtitles" ? item.subtitles : undefined;
     const rows = title
-      ? subtitleRows(title, choices, stands)
+      ? subtitleRows(title, choices, stands, plays)
       : choices.map((choice) => ({
           label: choice.selected ? `✓ ${choice.label}` : choice.label,
           run: () => void choice.choose(),
         }));
+    const message = [
+      known === null
+        ? "Not known yet. Try again in a moment."
+        : unshown && unshown.named.length > 0
+          ? cantShow(unshown)
+          : none
+            ? item.live
+              ? "No choices on this channel."
+              : title
+                ? "No subtitles in this file."
+                : "No choices in this file."
+            : null,
+      title && keptSubtitle(title) ? IN_PLAYER_ONLY : null,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     showSheet(
       {
         title: of === "audio" ? "Audio" : "Subtitles",
         options: [...rows.map((row) => row.label), "Cancel"],
         cancelButtonIndex: rows.length,
-        ...(known === null
-          ? { message: "Not known yet. Try again in a moment." }
-          : unshown && unshown.named.length > 0
-            ? { message: cantShow(unshown) }
-            : none
-              ? { message: item.live ? "No choices on this channel." : "No choices in this file." }
-              : {}),
+        ...(message ? { message } : {}),
       },
       (index) => {
         if (stands()) rows[index]?.run();
@@ -774,15 +788,24 @@ interface Row {
 }
 
 /**
+ * Where a downloaded subtitle can be chosen or shown again: it is drawn over Watch's picture, and
+ * the file's own are off meanwhile, so Picture in Picture and AirPlay show none.
+ */
+const IN_PLAYER_ONLY =
+  "Downloaded subtitles show in this player only. While one is on, Picture in Picture and AirPlay show no subtitles.";
+
+/**
  * The Subtitles sheet's rows for a movie or an episode: the file's own tracks and Off, the
  * subtitle downloaded for its version, checked while it shows, Find online, and Adjust timing
  * while one shows. While it shows, the file's own are off, so none of theirs is checked; a file
- * without Off of its own gets one that hides it.
+ * without Off of its own gets one that hides it. Find online acts while `plays`, the same play on
+ * Watch, as its search can outlast the controls showing; the rest while `stands`.
  */
 function subtitleRows(
   title: SubtitleTitle,
   choices: readonly TrackChoice[],
   stands: () => boolean,
+  plays: () => boolean,
 ): readonly Row[] {
   const kept = keptSubtitle(title);
   const showing = shownSubtitle()?.title === title;
@@ -808,18 +831,19 @@ function subtitleRows(
           },
         ]
       : []),
-    { label: "Find online", run: () => void findOnline(title, stands) },
+    { label: "Find online", run: () => void findOnline(title, plays) },
     ...(showing ? [{ label: "Adjust timing", run: () => adjustTiming(title, stands) }] : []),
   ];
 }
 
 /**
- * Searches SubDL for what plays and offers its results, each by language, HI for the hearing
- * impaired, and release; the one picked is downloaded, kept for the version and shown.
+ * Searches SubDL for what plays and offers its results, each by language, Hearing impaired when
+ * it is, and release; the one picked is downloaded, kept for the version and shown. Its sheet and
+ * alerts show while `plays`.
  */
-async function findOnline(title: SubtitleTitle, stands: () => boolean) {
+async function findOnline(title: SubtitleTitle, plays: () => boolean) {
   const found = await findSubtitles(title);
-  if (!found || !stands()) return;
+  if (!found || !plays()) return;
   if (found.kind === "failed") return serviceFailed(found.reason);
   const { results } = found;
   if (results.length === 0) {
@@ -828,22 +852,27 @@ async function findOnline(title: SubtitleTitle, stands: () => boolean) {
   showSheet(
     {
       title: "Online subtitles",
+      message: IN_PLAYER_ONLY,
       options: [...results.map(resultName), "Cancel"],
       cancelButtonIndex: results.length,
     },
     (index) => {
       const picked = results[index];
-      if (!picked || !stands()) return;
+      if (!picked || !plays()) return;
       void chooseSubtitle(title, picked.id).then((chosen) => {
-        if (chosen?.kind === "failed" && stands()) serviceFailed(chosen.reason);
+        if (chosen?.kind === "failed" && plays()) serviceFailed(chosen.reason);
       });
     },
   );
 }
 
-/** "English · HI · Movie.2024.1080p.WEB". */
+/** "English · Hearing impaired · Movie.2024.1080p.WEB". */
 const resultName = ({ language, hearingImpaired, release }: FoundSubtitle) =>
-  [spoken(language) || "Unknown language", ...(hearingImpaired ? ["HI"] : []), release]
+  [
+    spoken(language) || "Unknown language",
+    ...(hearingImpaired ? ["Hearing impaired"] : []),
+    release,
+  ]
     .filter(Boolean)
     .join(" · ");
 
@@ -855,45 +884,102 @@ const STEPS = [
   { by: 1, label: "1 s later" },
 ] as const;
 
+const FPS = [
+  { fps: 24000 / 1001, name: "23.976" },
+  { fps: 24, name: "24" },
+  { fps: 25, name: "25" },
+] as const;
+
 /**
- * Moves the downloaded subtitle showing over what plays a step earlier or later, or back with
- * Reset, opening again after each step until Done.
+ * A subtitle timed for one frame rate over a video at another, "25 → 23.976 fps": its clock runs
+ * at subtitle fps over video fps.
+ */
+const FRAME_RATES = FPS.flatMap((from) =>
+  FPS.filter((to) => to !== from).map((to) => ({
+    label: `${from.name} → ${to.name} fps`,
+    speed: from.fps / to.fps,
+  })),
+);
+
+/**
+ * Moves the downloaded subtitle showing over what plays a step earlier or later, converts its
+ * frame rate, or puts it back with Reset, opening again after each change until Done.
  */
 function adjustTiming(title: SubtitleTitle, stands: () => boolean) {
   const showing = shownSubtitle();
   if (showing?.title !== title || !stands()) return;
   const { timing } = showing;
+  const retime = (next: SubtitleTiming) => retimed(title, next) && adjustTiming(title, stands);
   const changed =
     timing.offset !== DEFAULT_SUBTITLE_TIMING.offset ||
     timing.speed !== DEFAULT_SUBTITLE_TIMING.speed;
-  const steps = [
+  const rows: readonly Row[] = [
     ...STEPS.map(({ by, label }) => ({
       label,
       // In tenths, so steps add up without float drift.
-      timing: { ...timing, offset: Math.round((timing.offset + by) * 10) / 10 },
+      run: () => retime({ ...timing, offset: Math.round((timing.offset + by) * 10) / 10 }),
     })),
-    ...(changed ? [{ label: "Reset", timing: DEFAULT_SUBTITLE_TIMING }] : []),
+    { label: "Frame rate", run: () => frameRate(title, stands) },
+    ...(changed ? [{ label: "Reset", run: () => retime(DEFAULT_SUBTITLE_TIMING) }] : []),
   ];
   const offset = Math.abs(timing.offset).toFixed(1);
+  const rate = FRAME_RATES.find(({ speed }) => speed === timing.speed);
+  const message = [
+    ...(timing.offset === 0
+      ? []
+      : [`Shown ${offset} s ${timing.offset > 0 ? "later" : "earlier"}`]),
+    ...(rate ? [`Frame rate ${rate.label}`] : []),
+  ].join(" · ");
   showSheet(
     {
       title: "Adjust timing",
-      message:
-        timing.offset === 0
-          ? "Original timing"
-          : `Shown ${offset} s ${timing.offset > 0 ? "later" : "earlier"}`,
-      options: [...steps.map((step) => step.label), "Done"],
-      cancelButtonIndex: steps.length,
+      message: message || "Original timing",
+      options: [...rows.map((row) => row.label), "Done"],
+      cancelButtonIndex: rows.length,
     },
     (index) => {
-      const step = steps[index];
-      if (!step || !stands()) return;
-      if (!retimeSubtitle(title, step.timing)) {
-        return Alert.alert("Couldn't change timing", "The previous timing is kept.");
-      }
+      if (stands()) rows[index]?.run();
+    },
+  );
+}
+
+/**
+ * Adjust timing's frame rate: Original or a conversion, the current one checked. Picking one or
+ * Cancel goes back to Adjust timing.
+ */
+function frameRate(title: SubtitleTitle, stands: () => boolean) {
+  const showing = shownSubtitle();
+  if (showing?.title !== title || !stands()) return;
+  const { timing } = showing;
+  const choices = [{ label: "Original", speed: DEFAULT_SUBTITLE_TIMING.speed }, ...FRAME_RATES];
+  showSheet(
+    {
+      title: "Frame rate",
+      options: [
+        ...choices.map(({ label, speed }) => `${speed === timing.speed ? "✓ " : ""}${label}`),
+        "Cancel",
+      ],
+      cancelButtonIndex: choices.length,
+    },
+    (index) => {
+      const picked = choices[index];
+      if (!stands()) return;
+      if (
+        picked &&
+        picked.speed !== timing.speed &&
+        !retimed(title, { ...timing, speed: picked.speed })
+      )
+        return;
       adjustTiming(title, stands);
     },
   );
+}
+
+/** Retimes the subtitle showing, or tells the viewer it kept the previous timing. */
+function retimed(title: SubtitleTitle, timing: SubtitleTiming): boolean {
+  if (retimeSubtitle(title, timing)) return true;
+  Alert.alert("Couldn't change timing", "The previous timing is kept.");
+  return false;
 }
 
 const failures: Readonly<
