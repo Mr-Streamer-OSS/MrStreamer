@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import {
+  chmod,
   cp,
   mkdir,
   readFile,
@@ -1006,36 +1007,50 @@ describe.skipIf(!hasTools)("recordings", () => {
   }, 20_000);
 
   it("never records a failed start after a Quit and relaunch, though recordings.json kept its record", async () => {
-    const asked = Promise.withResolvers<Writable>();
-    const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
-      streams: (_source, out) => asked.resolve(out),
-    });
-    const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
-    starting.catch(() => {});
-    const out = await asked.promise;
-    // Only recordings.json is refused from here: the recording's folder can still be written.
-    const manifest = join(dataDir, "recordings", "recordings.json");
-    await rename(manifest, `${manifest}.saved`);
-    await mkdir(manifest);
-    out.end(Buffer.alloc(64 * 1024, 0x20));
-    await expect(starting).rejects.toMatchObject({
-      error: { kind: "stream", failure: { kind: "unsupported" } },
-    });
-    await quit();
-    await rm(manifest, { recursive: true });
-    await rename(`${manifest}.saved`, manifest);
+    // In the data folder, and in a chosen folder that can't be read as the app starts again.
+    for (const where of ["data", "chosen"] as const) {
+      const asked = Promise.withResolvers<Writable>();
+      const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
+        streams: (_source, out) => asked.resolve(out),
+      });
+      const chosen = join(await tempDir(), "Mr. Streamer");
+      if (where === "chosen") await recordings.setFolder(chosen);
+      const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+      starting.catch(() => {});
+      const out = await asked.promise;
+      // Only recordings.json is refused from here: the recording's folder can still be written.
+      const manifest = join(dataDir, "recordings", "recordings.json");
+      await rename(manifest, `${manifest}.saved`);
+      await mkdir(manifest);
+      out.end(Buffer.alloc(64 * 1024, 0x20));
+      await expect(starting).rejects.toMatchObject({
+        error: { kind: "stream", failure: { kind: "unsupported" } },
+      });
+      await quit();
+      await rm(manifest, { recursive: true });
+      await rename(`${manifest}.saved`, manifest);
 
-    const before = provider.streamRequests();
-    const again = await app(dataDir);
-    onTestFinished(again.quit);
-    await again.library.refresh(subscriptionId);
-    await again.recordings.check();
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(provider.streamRequests()).toBe(before);
-    expect(await again.recordings.list()).toEqual([]);
-    // The check wrote recordings.json without its record, and its folder went.
-    expect(await leftBehind(dataDir)).toEqual([]);
-  }, 20_000);
+      const before = provider.streamRequests();
+      if (where === "chosen") await chmod(chosen, 0);
+      const again = await app(dataDir);
+      onTestFinished(again.quit);
+      await again.library.refresh(subscriptionId);
+      if (where === "chosen") {
+        await again.recordings.check();
+        await chmod(chosen, 0o700);
+      }
+      await again.recordings.check();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(provider.streamRequests()).toBe(before);
+      expect(await again.recordings.list()).toEqual([]);
+      // recordings.json is written without its record, and its folder goes.
+      const left = async () => [
+        ...(await leftBehind(dataDir)).filter((name) => name !== "storage.json"),
+        ...(await readdir(chosen).catch(() => [])),
+      ];
+      expect(await until(left, (names) => names.length === 0)).toEqual([]);
+    }
+  }, 30_000);
 
   it("keeps raw transport messages out of a recording's start failure", async () => {
     const { channel, recordings } = await connected({

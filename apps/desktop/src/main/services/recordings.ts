@@ -395,6 +395,14 @@ function make(deps: RecordingsDeps) {
      * written without them, as the next check does.
      */
     const failedFolders = new Map<string, string>();
+    /** Whether `record` is a failed start (see FAILED). */
+    const failedStart = (record: StoredRecording) =>
+      Effect.promise(() =>
+        stat(join(folderOf(record), FAILED)).then(
+          () => true,
+          () => false,
+        ),
+      );
 
     const unreadable = () =>
       new Failed({ error: { kind: "unexpected", detail: t("Recordings could not be read.") } });
@@ -408,13 +416,7 @@ function make(deps: RecordingsDeps) {
           records.set(record.id, record);
           continue;
         }
-        const failed = yield* Effect.promise(() =>
-          stat(join(folderOf(record), FAILED)).then(
-            () => true,
-            () => false,
-          ),
-        );
-        if (failed) {
+        if (yield* failedStart(record)) {
           failedFolders.set(record.id, folderOf(record));
           continue;
         }
@@ -477,7 +479,17 @@ function make(deps: RecordingsDeps) {
     const quickEnds = new Map<string, number>();
     const save = writing(
       Effect.tryPromise({
-        try: () => writeRecordings(path, [...records.values(), ...beginning.values()]),
+        try: async () => {
+          const kept = [...records.values(), ...beginning.values()];
+          await writeRecordings(path, kept);
+          // Failed starts it no longer lists lose their marked folders.
+          const listed = new Set(kept.map(({ id }) => id));
+          for (const [id, folder] of failedFolders) {
+            if (listed.has(id)) continue;
+            failedFolders.delete(id);
+            void rm(folder, { recursive: true, force: true }).catch(() => {});
+          }
+        },
         catch: () =>
           new Failed({
             error: { kind: "unexpected", detail: t("Recordings could not be saved.") },
@@ -486,15 +498,10 @@ function make(deps: RecordingsDeps) {
     ).pipe(
       // Every record is written each time: what couldn't be kept before is now.
       Effect.tap(() =>
-        Effect.promise(async () => {
+        Effect.sync(() => {
           unsaved.recordings = false;
           unsavedEnds.clear();
           unsavedStops.clear();
-          const folders = [...failedFolders.values()];
-          failedFolders.clear();
-          await Promise.all(
-            folders.map((folder) => rm(folder, { recursive: true, force: true }).catch(() => {})),
-          );
         }),
       ),
     );
@@ -513,12 +520,16 @@ function make(deps: RecordingsDeps) {
       );
 
     /**
-     * Takes a start's record out of recordings.json, now or at the next check, which it wakes.
-     * Answers whether it is out now.
+     * Takes a failed start's record out of recordings.json and removes its folder. While it can't
+     * be taken out, its folder is marked instead (see FAILED), for the next check, which it wakes,
+     * to remove; one that can't be marked is removed all the same.
      */
-    const unpend = (id: string) =>
+    const dropStart = (record: StoredRecording) =>
       Effect.suspend(() => {
-        beginning.delete(id);
+        const folder = folderOf(record);
+        beginning.delete(record.id);
+        // Before the check it wakes can write, so that write removes the folder too.
+        failedFolders.set(record.id, folder);
         return save.pipe(
           Effect.as(true),
           Effect.catch(() =>
@@ -526,6 +537,26 @@ function make(deps: RecordingsDeps) {
               Effect.sync(() => (unsaved.recordings = true)),
               Effect.as(wake, false),
             ),
+          ),
+          Effect.flatMap((out) =>
+            Effect.promise(async () => {
+              // Never made anew where its parent went, as a chosen folder on a drive away.
+              const marked =
+                !out &&
+                (await mkdir(folder)
+                  .catch((cause: NodeJS.ErrnoException) => {
+                    if (cause.code !== "EEXIST") throw cause;
+                  })
+                  .then(() => (record.folder ? writeFile(join(folder, OURS), root) : undefined))
+                  .then(() => writeFile(join(folder, FAILED), ""))
+                  .then(
+                    () => true,
+                    () => false,
+                  ));
+              if (marked) return;
+              failedFolders.delete(record.id);
+              await rm(folder, { recursive: true, force: true }).catch(() => {});
+            }),
           ),
         );
       });
@@ -860,9 +891,19 @@ function make(deps: RecordingsDeps) {
           const kept = yield* Effect.result(save);
           if (kept._tag === "Failure") {
             held.release();
-            yield* unpend(id);
+            yield* dropStart(record);
             return yield* kept.failure;
           }
+        }
+        // A failed start whose mark couldn't be read as the app started, as on a drive away then.
+        if (resumes && (yield* failedStart(record))) {
+          held.release();
+          records.delete(id);
+          failedFolders.set(id, folderOf(record));
+          unsaved.recordings = true;
+          yield* publish;
+          yield* wake;
+          return yield* stoppedFailure;
         }
         // Its own folder is made, or made again when it went while the recording paused.
         const opening = mkdir(folderOf(record), { recursive: true })
@@ -914,30 +955,7 @@ function make(deps: RecordingsDeps) {
                 () => {},
               );
               held.release();
-            }).pipe(
-              Effect.andThen(
-                resumes
-                  ? Effect.void
-                  : Effect.flatMap(unpend(id), (out) =>
-                      Effect.promise(async () => {
-                        // Still listed: its marked folder stays, so a relaunch never goes on.
-                        if (
-                          !out &&
-                          (await writeFile(join(folderOf(record), FAILED), "").then(
-                            () => true,
-                            () => false,
-                          ))
-                        ) {
-                          failedFolders.set(id, folderOf(record));
-                          return;
-                        }
-                        await rm(folderOf(record), { recursive: true, force: true }).catch(
-                          () => {},
-                        );
-                      }),
-                    ),
-              ),
-            ),
+            }).pipe(Effect.andThen(resumes ? Effect.void : dropStart(record))),
           ),
         );
         const { promise: settled, resolve } = Promise.withResolvers<Failed | null>();
