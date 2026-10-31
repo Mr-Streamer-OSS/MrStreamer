@@ -22,6 +22,7 @@ import { transfers } from "./download-task.ts";
 import type { Erased } from "./downloads.ts";
 import { appError, hostOf } from "./errors.ts";
 import { guide } from "./guide.ts";
+import { guides } from "./guide-sources.ts";
 import {
   combine,
   combineSteps,
@@ -838,10 +839,13 @@ export function restore(): Promise<void> {
     } catch {
       // Shown from memory for now.
     }
+    // Before erasing histories, which take their channels' guide mappings.
+    const external = guides.load();
     for (const id of registry.pendingSecrets) await settleSecret(id).catch(() => undefined);
     for (const id of registry.erasing) await eraseHistory(id).catch(() => undefined);
     const ids = entriesOf().map((entry) => entry.id);
-    await guide.restore(ids);
+    await guide.restore([...ids, ...external.ids], external.kept);
+    void guides.restore();
     pruneLists(ids);
     pruneDetails(ids);
     if (entriesOf().some((entry) => entry.kind === "demo")) signInDemo(null);
@@ -1419,8 +1423,8 @@ function forgotten(state: SavedState, id: string, erase: boolean): SavedState {
 
 /**
  * Deletes the history of a subscription removed with it: its recent channels, watchlist, channels
- * of custom lists, viewing record and quality picks, each whatever another fails, then clears
- * `erasing`.
+ * of custom lists, guide mappings, viewing record and quality picks, each whatever another fails,
+ * then clears `erasing`.
  * Rejects when one isn't deleted, leaving it there for the next launch to try again.
  */
 async function eraseHistory(id: string): Promise<void> {
@@ -1428,6 +1432,7 @@ async function eraseHistory(id: string): Promise<void> {
     Promise.resolve().then(() => writeState((state) => forgotten(state, id, true))),
     Promise.resolve().then(() => eraseWatchlist(id)),
     Promise.resolve().then(() => eraseListMembers(id)),
+    guides.erase(id),
     eraseViewing(id),
     Promise.resolve().then(() => {
       if (!forgetChannelPicks(id)) throw new Error("Channel picks kept.");

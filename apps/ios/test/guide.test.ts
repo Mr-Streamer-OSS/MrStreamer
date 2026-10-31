@@ -286,6 +286,223 @@ describe("guide public owner", () => {
   });
 });
 
+describe("external guides and mappings", () => {
+  const external = { revision: 1, login: [], provider: {} };
+  /** The ids each native read asked for. */
+  const asked: (readonly string[])[] = [];
+  /** Answers each lease's guide ids: what the native reader would find in its generation. */
+  function guides(native: GuideNative, control: ReturnType<typeof guideFixture>["control"]) {
+    const has = new Map<string, readonly string[]>();
+    asked.length = 0;
+    native.query = async (lease, _generation, _job, ids) => {
+      asked.push(ids);
+      const owner = [...control.activations].find(([, value]) => value.lease === lease)?.[0];
+      const guideId = ids.find((id) => has.get(owner ?? "")?.includes(id)) ?? null;
+      return {
+        kind: "ok",
+        value: { guideId, rows: guideId ? [{ ...programme, title: owner! }] : [], more: false },
+      };
+    };
+    return has;
+  }
+  async function twoGuides() {
+    const { owner, native, control, sources } = setup();
+    control.activations.set("xmltv-1", {
+      lease: "external",
+      generation: { id: "db-x", fetchedAt: at, until: at + 86400_000 },
+    });
+    const has = guides(native, control);
+    await owner.restore(["a", "xmltv-1"]);
+    owner.setPart(part());
+    owner.configure(new Map([["xmltv-1", external]]), new Map());
+    await owner.attach("xmltv-1");
+    return { owner, has, control, native, sources };
+  }
+  const titleOf = async (owner: ReturnType<typeof createGuide>, key: string) =>
+    (await owner.listings([key])).get(key)?.now?.title ?? null;
+
+  it("reads a channel its provider's guide lacks from an external guide, the provider's first", async () => {
+    const { owner, has } = await twoGuides();
+    has.set("xmltv-1", ["trusted.tv"]);
+    expect(await titleOf(owner, "a:1")).toBe("xmltv-1");
+    has.set("a", ["trusted TV"]);
+    expect(await titleOf(owner, "a:1")).toBe("a");
+  });
+
+  it("reads a mapped channel by its mapped id in any guide first, then by its own ids", async () => {
+    const { owner, has } = await twoGuides();
+    has.set("a", ["trusted.tv"]);
+    has.set("xmltv-1", ["bbc-one"]);
+    owner.configure(new Map([["xmltv-1", external]]), new Map([["a:1", "bbc-one"]]));
+    expect(await titleOf(owner, "a:1")).toBe("xmltv-1");
+    expect(await owner.preview("a:1", "bbc-one")).toMatchObject({ guide: "xmltv-1" });
+    expect(await owner.preview("a:1", "missing")).toBeNull();
+    has.set("xmltv-1", []);
+    expect(await titleOf(owner, "a:1")).toBe("a");
+    expect(owner.guideIdsOf("a:2")).toEqual(["trusted.tv", "trusted TV"]);
+    // A mapped id that is also its own is asked for once in each guide.
+    owner.configure(new Map([["xmltv-1", external]]), new Map([["a:1", "trusted.tv"]]));
+    has.set("a", []);
+    asked.length = 0;
+    await titleOf(owner, "a:1");
+    expect(asked).toEqual([["trusted.tv"], ["trusted.tv"], ["trusted TV"], ["trusted TV"]]);
+  });
+
+  it("reads the saved guide of an external guide whose link the Keychain lost", async () => {
+    const { owner, native, control } = setup();
+    control.activations.set("xmltv-1", {
+      lease: "external",
+      generation: { id: "db-x", fetchedAt: at, until: at + 86400_000 },
+    });
+    const has = guides(native, control);
+    has.set("xmltv-1", ["trusted.tv"]);
+    await owner.restore(["a", "xmltv-1"]);
+    owner.setPart(part());
+    owner.configure(new Map([["xmltv-1", undefined]]), new Map());
+    expect(await titleOf(owner, "a:1")).toBe("xmltv-1");
+    await owner.refresh("xmltv-1");
+    expect(control.calls.filter((call) => call.startsWith("attach:"))).toEqual([]);
+  });
+
+  it.each(["reload", "removal"] as const)(
+    "withdraws a channel's reads from external guides on %s",
+    async (change) => {
+      const { owner, has } = await twoGuides();
+      has.set("xmltv-1", ["trusted.tv"]);
+      const from = new Date(at);
+      from.setHours(0, 0, 0, 0);
+      const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
+      expect((await owner.schedule("a:1", day)).programmes).toHaveLength(1);
+      if (change === "reload") owner.setPart(part());
+      else await owner.forget("a");
+      expect(owner.withdrawn("a:1", day.from)).toBe(1);
+    },
+  );
+
+  it("withdraws what was read under guides or mappings that changed", async () => {
+    const { owner, has } = await twoGuides();
+    has.set("xmltv-1", ["trusted.tv"]);
+    const from = new Date(at);
+    from.setHours(0, 0, 0, 0);
+    const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
+    const { programmes } = await owner.schedule("a:1", day);
+    expect(programmes).toHaveLength(1);
+    const notified = vi.fn();
+    owner.subscribe(notified);
+    owner.configure(new Map(), new Map());
+    expect(notified).toHaveBeenCalled();
+    expect(await owner.programme(programmes[0]!.detail)).toBeNull();
+    expect(owner.withdrawn("a:1", day.from)).toBe(1);
+    expect(await titleOf(owner, "a:1")).toBeNull();
+  });
+
+  it("withdraws what another guide answered once an external guide publishes", async () => {
+    const { owner, has, control, native } = await twoGuides();
+    has.set("a", ["trusted.tv"]);
+    const from = new Date(at);
+    from.setHours(0, 0, 0, 0);
+    const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
+    const { programmes } = await owner.schedule("a:1", day);
+    expect(programmes).toHaveLength(1);
+    control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "next" } });
+    owner.configure(
+      new Map([
+        [
+          "xmltv-1",
+          {
+            ...external,
+            revision: 2,
+            provider: {
+              liveGuideRequest: async () => ({
+                kind: "request",
+                url: "https://guide.test/x.xml",
+                headers: {},
+              }),
+            },
+          },
+        ],
+      ]),
+      new Map(),
+    );
+    await owner.attach("xmltv-1");
+    const { programmes: again } = await owner.schedule("a:1", day);
+    // A read under way as it publishes answers nothing: what it chose may no longer come first.
+    const query = native.query;
+    const held = deferred<void>();
+    native.query = async (...args) => {
+      await held.promise;
+      return query(...args);
+    };
+    const reading = owner.schedule("a:1", day);
+    await owner.refresh("xmltv-1");
+    held.resolve();
+    expect(await reading).toEqual(empty);
+    expect(owner.withdrawn("a:1", day.from)).toBe(2);
+    expect(await owner.programme(again[0]!.detail)).toBeNull();
+  });
+
+  it("withdraws what an external guide answered once the provider's own guide publishes", async () => {
+    const { owner, has, control, sources } = await twoGuides();
+    has.set("xmltv-1", ["trusted.tv"]);
+    const from = new Date(at);
+    from.setHours(0, 0, 0, 0);
+    const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
+    const { programmes } = await owner.schedule("a:1", day);
+    expect(programmes[0]?.title).toBe("xmltv-1");
+    sources.set("a", source);
+    await owner.attach("a");
+    control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "next" } });
+    await owner.refresh("a");
+    expect(owner.withdrawn("a:1", day.from)).toBe(1);
+    expect(await owner.programme(programmes[0]!.detail)).toBeNull();
+  });
+
+  it("downloads an external guide by its own link and keeps its last good guide on failure", async () => {
+    const { owner, native, control } = setup();
+    control.activations.set("xmltv-1", {
+      lease: "external",
+      generation: { id: "db-x", fetchedAt: at - 7 * 3600_000, until: at + 86400_000 },
+    });
+    await owner.restore(["a", "xmltv-1"]);
+    const asked: unknown[][] = [];
+    native.prepare = async (...args) => {
+      asked.push(args);
+      return { kind: "failed", error: "xml" };
+    };
+    owner.configure(
+      new Map([
+        [
+          "xmltv-1",
+          {
+            revision: 2,
+            login: ["key-123", "https://guide.test/x.xml?key=key-123"],
+            provider: {
+              liveGuideRequest: async () => ({
+                kind: "request",
+                url: "https://guide.test/x.xml?key=key-123",
+                headers: {},
+              }),
+            },
+          },
+        ],
+      ]),
+      new Map(),
+    );
+    await owner.attach("xmltv-1");
+    await owner.refresh("xmltv-1");
+    expect(asked[0]?.slice(2, 5)).toEqual([
+      "https://guide.test/x.xml?key=key-123",
+      {},
+      ["key-123", "https://guide.test/x.xml?key=key-123"],
+    ]);
+    expect(owner.status("xmltv-1")).toMatchObject({
+      availability: "available",
+      error: "xml",
+      stale: true,
+    });
+  });
+});
+
 describe("native transport adapter", () => {
   it("keeps yesterday's full calendar day when today's midnight is skipped", async () => {
     const previous = process.env.TZ;

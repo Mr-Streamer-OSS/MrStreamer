@@ -73,12 +73,18 @@ final class GuideOwner {
       try? FileManager.default.removeItem(at: path)
     }
   }
-  func restore(_ active: [String]) -> [[String: Any]] {
+  /**
+   * Activates `active` and erases the rest, but ids starting with one of `kept`: they stay on disk,
+   * and unread only while JS attaches none of them (guide-sources.ts names none it can't read).
+   */
+  func restore(_ active: [String], keeping kept: [String] = []) -> [[String: Any]] {
     lock.lock(); defer { lock.unlock() }
     for job in jobs.values { job.cancel() }; sources.removeAll(); candidates.removeAll()
     let allowed = Set(active.filter(guideOpaque))
+    let prefixes = kept.filter { !$0.isEmpty }
     if let files = try? guideFiles(root) {
       for path in files where path.pathExtension != "revoked" && !allowed.contains(path.lastPathComponent) {
+        if prefixes.contains(where: { path.lastPathComponent.hasPrefix($0) }) { continue }
         do {
           try FileManager.default.removeItem(at: path)
           try? FileManager.default.removeItem(at: root.appendingPathComponent(path.lastPathComponent + ".revoked"))
@@ -223,12 +229,12 @@ final class GuideOwner {
     drained.notify(queue: control) { completion(self.forget(id)) }
     lock.unlock()
   }
-  func restoreAsync(_ ids: [String], completion: @escaping ([[String: Any]]) -> Void) {
+  func restoreAsync(_ ids: [String], keeping kept: [String], completion: @escaping ([[String: Any]]) -> Void) {
     lock.lock(); restoring = true
     let drained = DispatchGroup()
     for key in Array(jobs.keys) { drained.enter(); cancelAsync(key) { drained.leave() } }
     drained.notify(queue: control) {
-      let restored = self.restore(ids)
+      let restored = self.restore(ids, keeping: kept)
       self.lock.lock(); self.restoring = false; self.lock.unlock()
       completion(restored)
     }

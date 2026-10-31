@@ -45,8 +45,13 @@ type Prepared =
 
 /** Private Expo port. Ingest bytes and rows never cross this boundary. */
 export interface GuideNative {
+  /**
+   * Activates `ids` and erases every other saved guide, but those whose id starts with one of
+   * `kept`: they stay on disk, unread, for a later restore to name or erase.
+   */
   restore(
     ids: readonly string[],
+    kept: readonly string[],
   ): Promise<readonly { readonly subscriptionId: string; readonly activation: Activation }[]>;
   attach(id: string, revision: number): Promise<Activation>;
   revoke(id: string): void;

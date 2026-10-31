@@ -192,6 +192,16 @@ import SQLite3
     let restoredActivation = restored[0]["activation"] as! [String: Any]
     let restoredGeneration = restoredActivation["generation"] as! [String: Any]
     try require(restoredGeneration["id"] as? String == db, "last-good")
+    // A launch that can't read its guide registry keeps the guides it may name, unread, for the next.
+    let external = root.appendingPathComponent("xmltv-kept")
+    try fm.copyItem(at: root.appendingPathComponent("provider-a"), to: external)
+    let blind = try GuideOwner(root: root).restore(["provider-a"], keeping: ["xmltv-"])
+    try require(blind.count == 1 && fm.fileExists(atPath: external.path), "unknown-registry-kept")
+    let named = try GuideOwner(root: root).restore(["provider-a", "xmltv-kept"])
+    let namedActivation = named.first { $0["subscriptionId"] as? String == "xmltv-kept" }?["activation"] as? [String: Any]
+    try require((namedActivation?["generation"] as? [String: Any])?["id"] as? String == db, "unknown-registry-last-good")
+    _ = try GuideOwner(root: root).restore(["provider-a"])
+    try require(!fm.fileExists(atPath: external.path), "known-registry-erases")
     let other = try restart.attach("provider-b", 1)
     restart.begin(other["lease"] as! String, "collision")
     try require(restart.query(other["lease"] as! String, db, "collision", ["trusted"], now, "listing", 0, 0, -1)["kind"] as? String == "changed", "source-collision")
@@ -214,6 +224,6 @@ import SQLite3
     try require(new["generation"] is NSNull, "revision-process-only")
     let denied = restart.restore([])
     try require(denied.isEmpty && !fm.fileExists(atPath: root.appendingPathComponent("provider-b").path), "allowlist")
-    print("PASS production-core fixtures: plain chunks gzip members CRC truncation XML DTD attributes depth empty ended login text redirects timeline restart last-good source collisions revoke forget allowlist")
+    print("PASS production-core fixtures: plain chunks gzip members CRC truncation XML DTD attributes depth empty ended login text redirects timeline restart last-good unknown-registry source collisions revoke forget allowlist")
   }
 }
