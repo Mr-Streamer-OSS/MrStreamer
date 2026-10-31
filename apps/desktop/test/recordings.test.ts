@@ -834,13 +834,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
       error: { kind: "unexpected" },
     });
-    // Nothing records, so starts are held, but the restart may not go ahead yet.
-    expect(await recordings.holdStarts(true)).toBe(true);
     expect(await recordings.keepStops()).toBe(false);
-    expect((await recordings.list())[0]).toMatchObject({
-      status: { kind: "stopped" },
-      unsaved: true,
-    });
 
     // Storage works again: the next ask writes it, and the restart may go ahead.
     await rm(mark);

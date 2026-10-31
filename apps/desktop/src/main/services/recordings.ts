@@ -1970,10 +1970,9 @@ function make(deps: RecordingsDeps) {
       keepStops: Effect.gen(function* () {
         const unkept = Effect.promise(async () => {
           const now = Date.now();
-          const stopped = [...unsavedEnds].flatMap((id) => {
-            const record = records.get(id);
-            return record?.status.kind === "stopped" && record.stop > now ? [record] : [];
-          });
+          const stopped = [...unsavedEnds]
+            .flatMap((id) => records.get(id) ?? [])
+            .filter((record) => record.status.kind === "stopped" && record.stop > now);
           const marked = await Promise.all(stopped.map(endedAs));
           return stopped.filter((_, index) => !marked[index]);
         });
