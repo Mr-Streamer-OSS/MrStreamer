@@ -826,15 +826,15 @@ function make(deps: RecordingsDeps) {
         // plugged in, is never made anew, or written into on another disk in its place (see
         // CHOSEN).
         const folder = resumes ? placeOf(resumes) : (storage.folder ?? root);
-        if (!(yield* Effect.promise(() => isThere(folder))))
-          return yield* new Failed({
-            error: {
-              kind: "unexpected",
-              detail: t(
-                "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
-              ),
-            },
-          });
+        const notThere = new Failed({
+          error: {
+            kind: "unexpected",
+            detail: t(
+              "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
+            ),
+          },
+        });
+        if (!(yield* Effect.promise(() => isThere(folder)))) return yield* notThere;
         // A disk without room records nothing, asks the provider nothing and holds no connection
         // for it.
         if (!(yield* roomIn(folder)))
@@ -942,8 +942,13 @@ function make(deps: RecordingsDeps) {
             return yield* kept.failure;
           }
         }
-        // Its own folder is made, or made again when it went while the recording paused.
-        const opening = mkdir(folderOf(record), { recursive: true })
+        // Its own folder is made, or made again when it went while the recording paused, in the
+        // chosen folder as it is now, its drive maybe gone while the provider answered.
+        const opening = isThere(folder)
+          .then((there) => {
+            if (!there) throw notThere;
+          })
+          .then(() => mkdir(folderOf(record), { recursive: true }))
           .then(() =>
             resumes || folder === root ? undefined : writeFile(join(folderOf(record), OURS), root),
           )
@@ -970,15 +975,17 @@ function make(deps: RecordingsDeps) {
         const capture = yield* Effect.tryPromise({
           try: () => opening,
           catch: (cause) =>
-            cause instanceof CaptureFailure
-              ? new Failed({ error: { kind: "stream", failure: cause.failure } })
-              : new Failed({
-                  error: {
-                    kind: "unexpected",
-                    // The system's own words name paths and codes, not what to do.
-                    detail: t("The recording couldn't be written to this computer."),
-                  },
-                }),
+            cause instanceof Failed
+              ? cause
+              : cause instanceof CaptureFailure
+                ? new Failed({ error: { kind: "stream", failure: cause.failure } })
+                : new Failed({
+                    error: {
+                      kind: "unexpected",
+                      // The system's own words name paths and codes, not what to do.
+                      detail: t("The recording couldn't be written to this computer."),
+                    },
+                  }),
         }).pipe(
           // Also when the app closes meanwhile: whatever started ends before its folder goes, and
           // its record before that, so a crash between leaves a folder the next start cleans up,

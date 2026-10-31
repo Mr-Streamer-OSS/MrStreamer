@@ -1657,6 +1657,63 @@ describe.skipIf(!hasTools)("recordings", () => {
       await again.recordings.stop(going!.id);
     });
 
+  it("records nothing into an empty folder put at the chosen folder's place while its playlist is read again", async () => {
+    // An M3U subscription reads its playlist again for a channel's stream after a restart.
+    const provider = await fakeProvider({ live: true, slotReleaseMs: 0 });
+    const tracks = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+    const playlist = `#EXTM3U\n#EXTINF:-1,${TRACKS}\n${provider.url}/live/demo/demo/${tracks.streamId}.ts\n`;
+    let held: Promise<void> | null = null;
+    const asked = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+    const host = createServer(async (_request, response) => {
+      if (held) {
+        asked.resolve();
+        await held;
+      }
+      response.writeHead(200, { "Content-Type": "audio/x-mpegurl" }).end(playlist);
+    });
+    await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
+    onTestFinished(() => {
+      answer.resolve();
+      host.closeAllConnections();
+      host.close();
+    });
+    const address = host.address();
+    if (!address || typeof address === "string") throw new Error("No address");
+    const dataDir = await tempDir();
+    const before = await app(dataDir);
+    const { id: subscriptionId } = await before.subscriptions.add({
+      server: `http://127.0.0.1:${address.port}/playlist.m3u`,
+      username: "",
+      password: "",
+    });
+    await before.library.refresh(subscriptionId);
+    const channel = (await before.library.channels({})).find((each) => each.title === TRACKS)!;
+    const chosen = join(await tempDir(), "Mr. Streamer");
+    await before.recordings.setFolder(chosen);
+    await before.quit();
+
+    const { recordings, quit } = await app(dataDir);
+    onTestFinished(quit);
+    held = answer.promise;
+    const starting = recordings.start({ subscriptionId, id: channel.id }, Date.now() + 60_000, {});
+    starting.catch(() => {});
+    await asked.promise;
+    // The drive goes while the playlist is read, leaving its mount point's empty folder.
+    await rename(chosen, `${chosen}.away`);
+    await mkdir(chosen);
+    answer.resolve();
+    await expect(starting).rejects.toMatchObject({
+      error: {
+        detail:
+          "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
+      },
+    });
+    expect(readdirSync(chosen)).toEqual([]);
+    expect(await recordings.list()).toEqual([]);
+    expect(await allClosed(provider)).toBe(true);
+  });
+
   it("leaves a storage file it can't read as it is, and starts or changes nothing meanwhile", async () => {
     const { dataDir, channel, provider, quit } = await connected();
     await quit();
