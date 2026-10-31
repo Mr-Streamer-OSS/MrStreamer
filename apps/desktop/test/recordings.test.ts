@@ -537,14 +537,23 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("never goes on after a relaunch with one that ended by itself, unwritten, then was stopped or quit", async () => {
     for (const how of ["stopped", "quit"] as const) {
+      const first = Promise.withResolvers<Writable>();
+      let answers = 0;
       const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
-        streams: (_source, out) => out.end(fixture("h264-aac.mpegts")),
+        streams: (_source, out) => {
+          if (++answers === 1) {
+            out.write(fixture("h264-aac.mpegts"));
+            first.resolve(out);
+          } else out.end(fixture("h264-aac.mpegts"));
+        },
       });
       const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
       if (answer.kind !== "started") throw new Error("Not started");
       const manifest = join(dataDir, "recordings", "recordings.json");
       await rename(manifest, `${manifest}.saved`);
       await mkdir(manifest);
+      // It can only end after the manifest write is refused, even if setup was delayed.
+      (await first.promise).end();
       const [ended] = await until(
         async () => {
           await recordings.check();
