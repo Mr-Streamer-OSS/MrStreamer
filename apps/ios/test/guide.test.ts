@@ -405,7 +405,8 @@ describe("external guides and mappings", () => {
       const from = new Date(at);
       from.setHours(0, 0, 0, 0);
       from.setDate(from.getDate() - days);
-      return { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
+      const until = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1);
+      return { from: from.getTime(), until: until.getTime() };
     };
     const today = dayBefore(0);
     const read = owner.withdrawn("a:1", today.from);
