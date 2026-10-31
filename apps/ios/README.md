@@ -651,30 +651,42 @@ Matroska title's picture included, is still to be seen on the simulator and a ph
 ### Online subtitles
 
 Settings > Subtitles keeps the viewer's own SubDL API key in the Keychain, shown only as Saved or
-Not set, and the text size downloaded subtitles show at (`src/app/(tabs)/(home)/settings.tsx`). Saving or
-opening either asks SubDL nothing. OpenSubtitles, which needs an account login as well as a key,
-stays on the desktop. For a movie or an episode, Watch's Subtitles lists the file's own tracks and
-Off as before, then the subtitle downloaded for that version, Find online and, while one shows,
-Adjust timing. Find online searches SubDL (`src/online-subtitles.ts`) with the title's TMDB id, or
-its name and year without one, an episode's season and number, and the viewer's subtitle language,
-title language and English; never a provider's name, login or address. A result is one SRT or
-WebVTT file, alone or the only one in a ZIP file, under 10 MiB. Picking it downloads it, keeps it
-for that exact version (`src/downloaded-subtitles.ts`, one file per version under
+Not set, and the text size downloaded subtitles show at (`src/app/(tabs)/(home)/settings.tsx`).
+Saving or opening either asks SubDL nothing. OpenSubtitles, which needs an account login as well as
+a key, stays on the desktop. For a movie or an episode, Watch's Subtitles lists the file's own
+tracks and Off as before, then the subtitle downloaded for that version, Find online and, while one
+shows, Adjust timing. Find online searches SubDL (`src/online-subtitles.ts`) with the title's TMDB
+id, or its name and year without one, an episode's season and number, and the viewer's subtitle
+language, title language and English; never a provider's name, login or address. A result is one
+SRT or WebVTT file, alone or the only one in a ZIP file, under 10 MiB. Picking it downloads it,
+keeps it for that exact version (`src/downloaded-subtitles.ts`, one file per version under
 `online-subtitles/`, the 100 changed last) and shows it over the picture. A missing or refused key,
-a used-up allowance, no connection and an unreadable file each say so. Searches, downloads and
-sheets are for the play they were opened for: another play, Stop or a newer search ends them.
+a Keychain that won't give it, a used-up allowance, no connection and an unreadable file each say
+so. An answer a redirect brought from another host is refused. Searches and downloads are for the
+play they were asked for: another play, Stop, a newer search, a file track or Off picked meanwhile,
+or erasing the provider's history ends them, and nothing they bring is kept.
 
 While a downloaded subtitle shows, the playback owner turns the file's own off without changing the
 subtitle preference. Picking a file track or Off hides it for that version: it stays listed and no
-longer shows by itself, and that pick isn't remembered as the preference either. The next play of
-the version, or of a downloaded copy of it, shows it again, offline too, with its timing. Adjust
-timing moves it 0.1 or 1 second earlier or later, or back with Reset. Watch draws the lines from the
-player's time, redrawing only when they change, at Small, Medium or Large, which Dynamic Type
-scales. Removing a provider with its history deletes its versions' subtitles; a reinstall clears
-the key with the app's other Keychain items. `test/online-subtitles.test.ts` covers the requests,
-failures, ZIP and host checks, keeping, timing, the file's own tracks around a download, and
-erasure against a SubDL stand-in. Picture in Picture and AirPlay don't show downloaded subtitles.
-Drawing, timing against the picture, VoiceOver and large text in Watch still need a native run.
+longer shows by itself, and that pick isn't remembered as the preference either. While it is on,
+the next play of the version, or of a downloaded copy of it, shows it again, offline too, with its
+timing. Adjust timing moves it 0.1 or 1 second earlier or later, converts its frame rate between
+23.976, 24 and 25 fps, or goes back with Reset. Watch draws the lines from the player's time,
+redrawing only when they change, at Small, Medium or Large, which Dynamic Type scales. Removing a
+provider with its history deletes its versions' subtitles; a reinstall clears the key with the
+app's other Keychain items.
+
+| Output             | While a downloaded subtitle is on                         |
+| ------------------ | --------------------------------------------------------- |
+| Watch on the phone | Drawn over the picture                                    |
+| Picture in Picture | No subtitles: neither the download nor the file's own     |
+| AirPlay            | No subtitles on the receiver; Watch on the phone draws it |
+
+The sheets where a downloaded subtitle is chosen or shown again say that Picture in Picture and
+AirPlay then show none. `test/online-subtitles.test.ts` covers the requests, failures, ZIP, host
+and redirect checks, keeping, a refused save, timing, the file's own tracks around a download, work
+a newer choice or an erasure outlives, and erasure, against a SubDL stand-in. Drawing, timing
+against the picture, VoiceOver and large text in Watch still need a native run.
 
 `scripts/build-ffmpeg.sh ios` builds the FFmpeg libraries a session links, before
 `expo prebuild`; `modules/title-formats/reference` checks its segments on Linux. On the simulator
