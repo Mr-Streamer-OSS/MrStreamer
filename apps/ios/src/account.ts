@@ -129,6 +129,9 @@ import { eraseWatchlist, setWatchlistOwners } from "./watchlist.ts";
 // that deletion, as when the Keychain refuses the password, the subscription signs in again with
 // whichever password the Keychain holds then, or asks for one (`recoverLogin`). The details of titles
 // opened from it (details-cache.ts, which titles.ts saves while `savable` holds) go with its lists.
+// A playlist's copies name the mapping of groups they were made under, and a launch reads only
+// those of its mapping now, so a new mapping is saved before its copies go. A provider's answer
+// the same as the copy a launch shows keeps that copy, so nothing is worked out of it again.
 // Which saved lists a launch is still reading is kept apart from the lists (`readingSaved`): a list
 // stays idle while its copy is read, and after it when there is none, until its provider is asked.
 //

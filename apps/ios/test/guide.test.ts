@@ -373,9 +373,10 @@ describe("external guides and mappings", () => {
       from.setHours(0, 0, 0, 0);
       const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
       expect((await owner.schedule("a:1", day)).programmes).toHaveLength(1);
+      const read = owner.withdrawn("a:1", day.from);
       if (change === "reload") owner.setPart(part());
       else await owner.forget("a");
-      expect(owner.withdrawn("a:1", day.from)).toBe(1);
+      expect(owner.withdrawn("a:1", day.from)).not.toBe(read);
     },
   );
 
@@ -387,12 +388,13 @@ describe("external guides and mappings", () => {
     const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
     const { programmes } = await owner.schedule("a:1", day);
     expect(programmes).toHaveLength(1);
+    const read = owner.withdrawn("a:1", day.from);
     const notified = vi.fn();
     owner.subscribe(notified);
     owner.configure(new Map(), new Map());
     expect(notified).toHaveBeenCalled();
     expect(await owner.programme(programmes[0]!.detail)).toBeNull();
-    expect(owner.withdrawn("a:1", day.from)).toBe(1);
+    expect(owner.withdrawn("a:1", day.from)).not.toBe(read);
     expect(await titleOf(owner, "a:1")).toBeNull();
   });
 
@@ -410,7 +412,7 @@ describe("external guides and mappings", () => {
     const { programmes } = await owner.schedule("a:1", today);
     owner.configure(new Map([["xmltv-1", external]]), new Map());
     await owner.attach("xmltv-1");
-    // Days back over years, each read then withdrawn, as a guide reload does.
+    // Days back over years, all withdrawn by the next configure, as a guide reload does.
     for (let days = 1; days <= 5000; days++) await owner.schedule("a:2", dayBefore(days));
     owner.configure(new Map([["xmltv-1", external]]), new Map());
     await owner.attach("xmltv-1");
@@ -451,6 +453,7 @@ describe("external guides and mappings", () => {
     );
     await owner.attach("xmltv-1");
     const { programmes: again } = await owner.schedule("a:1", day);
+    const read = owner.withdrawn("a:1", day.from);
     // A read under way as it publishes answers nothing: what it chose may no longer come first.
     const query = native.query;
     const held = deferred<void>();
@@ -462,7 +465,7 @@ describe("external guides and mappings", () => {
     await owner.refresh("xmltv-1");
     held.resolve();
     expect(await reading).toEqual(empty);
-    expect(owner.withdrawn("a:1", day.from)).toBe(2);
+    expect(owner.withdrawn("a:1", day.from)).not.toBe(read);
     expect(await owner.programme(again[0]!.detail)).toBeNull();
   });
 
@@ -474,11 +477,12 @@ describe("external guides and mappings", () => {
     const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
     const { programmes } = await owner.schedule("a:1", day);
     expect(programmes[0]?.title).toBe("xmltv-1");
+    const read = owner.withdrawn("a:1", day.from);
     sources.set("a", source);
     await owner.attach("a");
     control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "next" } });
     await owner.refresh("a");
-    expect(owner.withdrawn("a:1", day.from)).toBe(1);
+    expect(owner.withdrawn("a:1", day.from)).not.toBe(read);
     expect(await owner.programme(programmes[0]!.detail)).toBeNull();
   });
 

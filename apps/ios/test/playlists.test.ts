@@ -661,6 +661,16 @@ describe("mapping a playlist's groups", () => {
         expect(text, path).not.toContain(secret);
   });
 
+  it("shows the lists saved under its mapping at a launch offline", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Films"), "movie");
+    await until(() => memory.files.has(`/cache/catalogues/${id}.titles.json`), "the saved films");
+    host.fail(503);
+    const again = await launch();
+    await until(() => titleNames(again, "movie").length === 1, "the saved films offline");
+  });
+
   it("keeps its saved lists for a launch offline when the mapping can't be written", async () => {
     const app = await launch();
     const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
