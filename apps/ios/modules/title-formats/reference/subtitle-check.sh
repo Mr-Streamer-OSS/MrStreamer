@@ -9,6 +9,7 @@ out=${1:?usage: subtitle-check.sh <out-folder>}
 fixtures=$out/fixtures
 "$here/subtitle-fixtures.sh" "$fixtures"
 status=0
+check_run=0
 fail() {
   echo "FAIL $1"
   status=1
@@ -18,7 +19,8 @@ fail() {
 check() {
   local file=$1
   shift
-  log=$out/$(basename "$file").log
+  check_run=$((check_run + 1))
+  log=$out/$(basename "$file").$check_run.log
   "$here/run.sh" "$out/runs" "$@" "$file" >"$log" 2>&1 || {
     fail "$(basename "$file"): run.sh, see $log"
     return 1

@@ -612,9 +612,11 @@ at the picture's segments, which Watch's Subtitles lists like any other. ASS kee
 and underline and loses positions, styles and drawings. A forced track is marked FORCED in the
 playlist, which AVPlayer reads as forced-only, and its lines also show in the regular track of its
 language.
-A line that spans segments is in each, so one already on screen where playing starts, or after a
-seek, shows there: the session reads it from its cluster, which the file's index names with its
-length (FFmpeg and mkvmerge list every subtitle line there). A listed line without a length is
+A line that spans segments is in each. To recover one already on screen where playing starts
+or after a seek, the session reads it from its cluster using the file's index and cue length
+(FFmpeg and mkvmerge list subtitle lines there by default). Recall is bounded to eight lines per
+pass and 8 MiB beyond each cluster; Cues tables larger than 16 MiB are not read. A line outside
+those bounds can remain absent after a seek. A listed line without a length is
 read only when it is the last to begin before the segment. A file whose index leaves a line out
 shows it only once playing passes where it begins. The other subtitle tracks, pictures such as
 PGS, DVD and DVB, teletext, formats the session doesn't know, and text tracks compressed with zlib

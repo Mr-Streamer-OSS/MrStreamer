@@ -84,7 +84,11 @@ static int fresh(TitleHlsSource *source, int track, int index, int chosen, const
                  size_t made_size, int *listed) {
   TitleHls *title = NULL;
   char detail[256] = "", name[64], playlist[64];
-  if (title_hls_open(source, 0, &title, detail, sizeof(detail)) != TITLE_HLS_OK) return -1;
+  TitleHlsResult opened = title_hls_open(source, 0, &title, detail, sizeof(detail));
+  if (opened != TITLE_HLS_OK) {
+    printf("fresh s%d-%d.vtt open result=%d detail=%s\n", track, index, opened, detail);
+    return -1;
+  }
   uint8_t *data = NULL;
   size_t size = 0;
   int status = -1;
