@@ -423,13 +423,14 @@ async function start(): Promise<void> {
   const dataDir = app.getPath("userData");
   // Installation validation can fail before the runtime loads Settings.
   applyLanguage(languageFor(await Settings.readInterfaceLanguage(dataDir).catch(() => undefined)));
-  const distribution = await installedDistribution({
-    platform: process.platform,
-    packaged: app.isPackaged,
-    store: storeCopy,
-    snap: snap !== null,
-    resources: process.resourcesPath,
-  });
+  const distribution = snap
+    ? "snap"
+    : await installedDistribution({
+        platform: process.platform,
+        packaged: app.isPackaged,
+        store: storeCopy,
+        resources: process.resourcesPath,
+      });
   const appUpdates = updatesInApp(distribution);
   await removeUnfinishedWrites(dataDir);
   // And in the folder of the guides of Settings > Guides.

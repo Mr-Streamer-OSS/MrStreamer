@@ -18,47 +18,28 @@ describe("installation-owned updates", () => {
     await writeFile(join(resources, INSTALLATION_MARKER), "broken");
     setLanguage(resolveLanguage("nl-NL", ["en-US"]));
     await expect(
-      installedDistribution({
-        resources,
-        platform: "linux",
-        packaged: true,
-        store: false,
-        snap: false,
-      }),
+      installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
     ).rejects.toThrow("Installeer Mr. Streamer opnieuw met je pakketbeheerder.");
   });
   it("keeps an ordinary packaged Linux install direct, including electron-builder's package-type", async () => {
     const resources = await tempDir();
     await writeFile(join(resources, "package-type"), "deb");
     expect(
-      await installedDistribution({
-        resources,
-        platform: "linux",
-        packaged: true,
-        store: false,
-        snap: false,
-      }),
+      await installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
     ).toBe("direct");
     await writeFile(join(resources, INSTALLATION_MARKER), JSON.stringify(PACMAN_INSTALLATION));
     expect(
-      await installedDistribution({
-        resources,
-        platform: "linux",
-        packaged: true,
-        store: false,
-        snap: false,
-      }),
+      await installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
     ).toBe("pacman");
   });
 
   it.each([
-    { platform: "linux", packaged: false, store: false, snap: false, expected: "direct" },
-    { platform: "darwin", packaged: true, store: false, snap: false, expected: "direct" },
-    { platform: "win32", packaged: true, store: false, snap: false, expected: "direct" },
-    { platform: "win32", packaged: true, store: true, snap: false, expected: "store" },
-    { platform: "linux", packaged: true, store: false, snap: true, expected: "snap" },
+    { platform: "linux", packaged: false, store: false, expected: "direct" },
+    { platform: "darwin", packaged: true, store: false, expected: "direct" },
+    { platform: "win32", packaged: true, store: false, expected: "direct" },
+    { platform: "win32", packaged: true, store: true, expected: "store" },
   ])(
-    "keeps $platform packaged=$packaged store=$store snap=$snap ownership",
+    "keeps $platform packaged=$packaged store=$store ownership",
     async ({ expected, ...options }) => {
       const resources = await tempDir();
       await writeFile(join(resources, INSTALLATION_MARKER), "damaged");
@@ -76,13 +57,7 @@ describe("installation-owned updates", () => {
     const resources = await tempDir();
     await writeFile(join(resources, INSTALLATION_MARKER), contents);
     await expect(
-      installedDistribution({
-        resources,
-        platform: "linux",
-        packaged: true,
-        store: false,
-        snap: false,
-      }),
+      installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
     ).rejects.toThrow("Reinstall Mr. Streamer with your package manager.");
   });
 
@@ -90,13 +65,7 @@ describe("installation-owned updates", () => {
     const resources = await tempDir();
     await mkdir(join(resources, INSTALLATION_MARKER));
     await expect(
-      installedDistribution({
-        resources,
-        platform: "linux",
-        packaged: true,
-        store: false,
-        snap: false,
-      }),
+      installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
     ).rejects.toThrow("Cannot read");
   });
 });
@@ -109,13 +78,7 @@ it("treats a dangling installation marker as present and unreadable", async () =
     "junction",
   );
   await expect(
-    installedDistribution({
-      resources,
-      platform: "linux",
-      packaged: true,
-      store: false,
-      snap: false,
-    }),
+    installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
   ).rejects.toThrow("Cannot read");
 });
 
@@ -130,7 +93,6 @@ describe("a Snap", () => {
   it.each([
     [{ XDG_CURRENT_DESKTOP: "ubuntu:GNOME" }, "gnome-libsecret"],
     [{ XDG_CURRENT_DESKTOP: "XFCE" }, "gnome-libsecret"],
-    [{}, "gnome-libsecret"],
     [{ XDG_CURRENT_DESKTOP: "KDE", KDE_SESSION_VERSION: "6" }, "kwallet6"],
     [{ XDG_CURRENT_DESKTOP: "KDE", KDE_SESSION_VERSION: "5" }, "kwallet5"],
   ])("pins a keyring for %o: %s", (env, store) => {

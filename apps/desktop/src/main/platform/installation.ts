@@ -35,11 +35,9 @@ export async function installedDistribution(options: {
   readonly platform: string;
   readonly packaged: boolean;
   readonly store: boolean;
-  readonly snap: boolean;
   readonly resources: string;
 }): Promise<Distribution> {
   if (options.store) return "store";
-  if (options.snap) return "snap";
   if (options.platform !== "linux" || !options.packaged) return "direct";
   const path = join(options.resources, INSTALLATION_MARKER);
   try {

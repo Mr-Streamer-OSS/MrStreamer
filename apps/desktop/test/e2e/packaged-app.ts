@@ -1,8 +1,8 @@
 // Smoke test for a built app: connects it to the fake provider through the login form and checks
 // who updates the build: the Microsoft Store for an installed MSIX package, which runs from
 // WindowsApps, snapd for a Snap, run as /snap/bin/mr-streamer, and the app itself for everything
-// else. Then it plays a stream the player decodes
-// directly and one the bundled ffmpeg has to convert. Then it leaves Watch for Home and comes
+// else. Then it plays a stream the player decodes directly and one the bundled ffmpeg has to
+// convert. Then it leaves Watch for Home and comes
 // back, which must keep the one stream rather than open another. Then it plays a movie from
 // Movies, which the bundled ffprobe reads and ffmpeg repackages, skips ahead and leaves it. Then
 // it shows a movie's PGS subtitles and its DVD subtitles, which the bundled ffmpeg sends beside the

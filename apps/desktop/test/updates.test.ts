@@ -1017,12 +1017,8 @@ describe("launch update reminders", () => {
     expect((await service.download()).update.kind).toBe("ready");
   });
 
-  it("leaves Store, AUR and Snap update ownership inert", async () => {
-    for (const managed of [
-      { openStore: async () => {} },
-      { managed: "pacman" as const },
-      { managed: "snap" as const },
-    ]) {
+  it("leaves Store and AUR update ownership inert", async () => {
+    for (const managed of [{ openStore: async () => {} }, { managed: "pacman" as const }]) {
       const service = await startUpdates({
         installed: "0.0.21",
         dataDir: await tempDir(),

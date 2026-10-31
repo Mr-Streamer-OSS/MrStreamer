@@ -1,5 +1,5 @@
 import { safeStorage } from "electron";
-import { AppFailure } from "@mrstreamer/contracts/errors";
+import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 
 /** Encrypts subscription and subtitle-service secrets before they are written to disk. */
 export interface Secrets {
@@ -13,15 +13,10 @@ export interface Secrets {
  * the keyring through a connection the viewer may still have to make, so its refusal says how.
  */
 export function keychainSecrets(snap: string | null): Secrets {
-  const refused = () =>
-    new AppFailure(
-      snap
-        ? {
-            kind: "keychain-refused",
-            connect: `sudo snap connect ${snap}:password-manager-service`,
-          }
-        : { kind: "keychain-refused" },
-    );
+  const error: AppError = snap
+    ? { kind: "keychain-refused", connect: `sudo snap connect ${snap}:password-manager-service` }
+    : { kind: "keychain-refused" };
+  const refused = () => new AppFailure(error);
   return {
     seal(plain) {
       if (!safeStorage.isEncryptionAvailable()) throw refused();
