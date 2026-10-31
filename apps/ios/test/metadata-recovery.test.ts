@@ -21,6 +21,8 @@ const memory = vi.hoisted(() => ({
   offline: false,
   /** TMDB doesn't know these ids. */
   unknown: new Set<string>(),
+  /** No provider request reaches its panel. */
+  panelDown: false,
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -42,7 +44,10 @@ vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 const REFUSED_KEY = "refused-key";
 const passThrough = globalThis.fetch;
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
-  if (!memory.tmdb || !input.startsWith(memory.tmdb)) return passThrough(input, init);
+  if (!memory.tmdb || !input.startsWith(memory.tmdb)) {
+    if (memory.panelDown) throw new TypeError(`Network request to ${input} failed`);
+    return passThrough(input, init);
+  }
   const url = new URL(input);
   const key = url.searchParams.get("api_key") ?? "";
   memory.keys.push(key);
@@ -100,6 +105,7 @@ beforeEach(async () => {
   memory.keys.length = 0;
   memory.offline = false;
   memory.unknown.clear();
+  memory.panelDown = false;
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -231,25 +237,28 @@ it("shares diagnostics of kinds and counts alone: no address, login, name or fai
   const app = await launch({ appKey: REFUSED_KEY });
   await added(app);
   await settled(app, "refused");
-  // A second provider that can't be reached: its failure's own words carry its address.
-  const unreachable = "http://private-panel.example.invalid:8080";
-  await app
-    .add({ server: unreachable, username: "seconduser", password: "second-Pw@2" })
-    .catch(() => undefined);
+  // Its panel stops answering: the failure's own words carry its address and login.
+  memory.panelDown = true;
+  const [member] = app.members();
+  if (!member) throw new Error("No provider");
+  app.reloadChannels(member.entry.id);
+  await until(() => app.members()[0]?.live.kind === "failed", "the failed reload");
   const text = app.diagnosticsText();
 
   expect(text).toContain("Mr. Streamer 0.2.0 (21) · iOS 26.1");
-  expect(text).toContain("Provider 1: Xtream · account active · channels loaded");
+  expect(text).toContain(
+    "Provider 1: Xtream · account active · channels failed (unreachable), saved copy shown",
+  );
   expect(text).toContain("TMDB: the app's key, refused by TMDB");
+  expect(text).toContain(
+    "Addresses, logins, provider and title names, viewing history and file paths are left out.",
+  );
   for (const secret of [
     panel.url,
     new URL(panel.url).host,
     LOGIN.username,
     LOGIN.password,
     encodeURIComponent(LOGIN.password),
-    "private-panel",
-    "seconduser",
-    "second-Pw@2",
     REFUSED_KEY,
     native.root,
     "file://",

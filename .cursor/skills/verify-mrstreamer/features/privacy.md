@@ -115,3 +115,7 @@ or relaunch. Failed storage leaves collection off. These source tests do not pro
 alerts, keyboard, VoiceOver or hardware acceptance. Use the Mac mini/device workflow with an
 isolated simulator for native controls and screenshots; physical-iPhone candidate acceptance
 remains a separate release gate.
+
+## iOS diagnostics
+
+`diagnosticsText()` in `apps/ios/src/diagnostics.ts` is the text the viewer previews and shares themselves; nothing is sent. It is written from known kinds and counts only: app version and build, iOS version, the number of providers, each numbered with its kind, account state and list states (error kinds, never their words), and the TMDB standing with whose key. Provider addresses, logins, provider and title names, viewing history, file paths and the TMDB key are left out. `apps/ios/test/metadata-recovery.test.ts` builds it with a signed-in fake panel whose channel reload then fails unreachable, and checks none of their addresses, logins or labels appear.
