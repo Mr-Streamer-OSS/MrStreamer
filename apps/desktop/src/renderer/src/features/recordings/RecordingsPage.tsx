@@ -216,7 +216,12 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
       call(kind === "stop" ? "recordings.stop" : "recordings.remove", { id: recording.id }),
   });
   const last = useMutationState({ filters: { mutationKey }, select: (each) => each.state }).at(-1);
-  const failure = last?.status === "error" ? describeError(appError(last.error)) : null;
+  // A Stop that failed only to write down its end was still taken: once the recording is no longer
+  // live, its outcome says so, and that its end isn't saved yet, until the retry saves it.
+  const failure =
+    last?.status === "error" && (active || last.variables !== "stop")
+      ? describeError(appError(last.error))
+      : null;
   const size = missing ? null : formatBytes(recording.bytes);
   const when = t("{start} to {end}", {
     // From where its coverage bar starts.
