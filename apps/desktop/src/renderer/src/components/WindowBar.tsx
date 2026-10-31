@@ -22,7 +22,7 @@ import {
   type View,
 } from "../app/ui-store.ts";
 import { DownloadsNotice, useDownloadsStatus } from "../features/downloads/DownloadsNotice.tsx";
-import { useAnyRecording } from "../features/recordings/recordings.ts";
+import { useAnyRecording, useLiveRecordings } from "../features/recordings/recordings.ts";
 import {
   UpdateNotice,
   updateNoticeLabel,
@@ -81,7 +81,9 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   const locale = useLocale();
   const update = useQuery(queries.updates()).data;
   const updateOpen = useUi((state) => state.updateDialog === "panel");
-  const updateWords = updateNoticeLabel(update, updateOpen, useKeptUpdate());
+  // Measured with the words the notice shows, which a live recording lengthens.
+  const recordingNow = useLiveRecordings().length > 0;
+  const updateWords = updateNoticeLabel(update, updateOpen, useKeptUpdate(), recordingNow);
   const filled: Partial<Record<View, boolean>> = {
     // The owner counts visible saves, including unavailable titles and the adult setting.
     watchlist: useQuery(queries.watchlistAvailability()).data ?? true,
