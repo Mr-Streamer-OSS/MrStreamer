@@ -460,6 +460,8 @@ describe.skipIf(!hasTools)("recordings", () => {
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
     await recordings.suspend();
+    // Nothing goes on while the computer sleeps, until it wakes and checks.
+    await new Promise((resolve) => setTimeout(resolve, 300));
     const [paused] = await recordings.list();
     expect(paused?.status).toEqual({ kind: "paused", why: "away" });
     expect(await allClosed(provider)).toBe(true);
@@ -892,7 +894,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await recordings.list()).toEqual([]);
   });
 
-  it("records into the folder the viewer chose, and deletes from there", async () => {
+  it("records into the folder the viewer chose, deletes from there, and leaves folders it didn't make", async () => {
     const { dataDir, channel, recordings, quit } = await connected();
     const folder = join(await tempDir(), "Mr. Streamer");
     expect((await recordings.setFolder(folder)).folder).toBe(folder);
@@ -900,12 +902,21 @@ describe.skipIf(!hasTools)("recordings", () => {
     if (answer.kind !== "started") throw new Error("Not started");
     const { id } = answer.recording;
     await until(recordings.list, ([first]) => first?.status.kind === "complete");
-    expect(readdirSync(join(folder, id))).toHaveLength(1);
+    expect(readdirSync(join(folder, id)).filter((name) => name.endsWith(".ts"))).toHaveLength(1);
     expect(existsSync(join(dataDir, "recordings", id))).toBe(false);
     await quit();
 
+    // Beside it, a folder of another app's named like a recording's, and one this app made and a
+    // crash left without its record.
+    const theirs = join(folder, "00000000-0000-4000-8000-0000000000aa");
+    const stray = join(folder, "00000000-0000-4000-8000-0000000000bb");
+    await mkdir(theirs);
+    await mkdir(stray);
+    await writeFile(join(stray, ".mrstreamer-recording"), "");
     const again = await app(dataDir);
     onTestFinished(again.quit);
+    expect(existsSync(theirs)).toBe(true);
+    expect(existsSync(stray)).toBe(false);
     expect((await again.recordings.storage()).folder).toBe(folder);
     expect((await again.recordings.list())[0]?.status).toEqual({ kind: "complete" });
     await again.recordings.remove(id);

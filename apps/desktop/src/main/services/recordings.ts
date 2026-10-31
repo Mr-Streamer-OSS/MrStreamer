@@ -108,6 +108,11 @@ const GUIDE_SETTLE = "2 seconds";
 const ROOM_MS = 5000;
 /** A recording's own folder, by its id: one a crash left before its record goes. */
 const RECORDING_FOLDER = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/**
+ * Marks a recording's folder in a folder the viewer chose as this app's, so only those it made go
+ * with a crash; the app's own folder holds nothing else.
+ */
+const OURS = ".mrstreamer-recording";
 
 /** How `Recordings.start` records, beside its stop time. */
 export interface StartOptions {
@@ -326,16 +331,27 @@ function make(deps: RecordingsDeps) {
             ...(!open && { gaps: [...(record.gaps ?? []), { from: last, to: null, why: "away" }] }),
           });
       }
-      // A recording's folder whose record was never written, as a crash leaves one as it starts.
-      for (const folder of new Set([root, storage.folder ?? root])) {
+      // A recording's folder whose record was never written, as a crash leaves one as it starts:
+      // only once recordings.json is there to say so, and in a chosen folder only one it marked.
+      const listed = yield* Effect.promise(() =>
+        stat(path).then(
+          () => true,
+          () => false,
+        ),
+      );
+      for (const folder of listed ? new Set([root, storage.folder ?? root]) : []) {
         const entries = yield* Effect.promise(() =>
           readdir(folder, { withFileTypes: true }).catch(() => []),
         );
-        for (const entry of entries)
-          if (entry.isDirectory() && RECORDING_FOLDER.test(entry.name) && !records.has(entry.name))
-            yield* Effect.promise(() =>
-              rm(join(folder, entry.name), { recursive: true, force: true }).catch(() => {}),
-            );
+        for (const entry of entries) {
+          if (!entry.isDirectory() || !RECORDING_FOLDER.test(entry.name)) continue;
+          if (records.has(entry.name)) continue;
+          const stray = join(folder, entry.name);
+          yield* Effect.promise(async () => {
+            if (folder !== root && !(await stat(join(stray, OURS)).catch(() => null))) return;
+            await rm(stray, { recursive: true, force: true }).catch(() => {});
+          });
+        }
       }
     }
 
@@ -611,7 +627,11 @@ function make(deps: RecordingsDeps) {
             status: { kind: "recording" },
           };
         const opening = (
-          resumes ? Promise.resolve() : mkdir(folderOf(record), { recursive: true })
+          resumes
+            ? Promise.resolve()
+            : mkdir(folderOf(record), { recursive: true }).then(() =>
+                folder === root ? undefined : writeFile(join(folderOf(record), OURS), ""),
+              )
         ).then(() =>
           startCapture(
             streams.map(({ url, format, headers }) => ({ url, format, headers: headers ?? {} })),
@@ -1110,20 +1130,41 @@ function make(deps: RecordingsDeps) {
       );
     };
 
-    /** Goes on with a paused recording in the background; a check follows its answer. */
+    /**
+     * Goes on with a paused recording in the background; a check follows its answer. Refused, it
+     * stays paused, saying why it couldn't go on this time, and is asked again.
+     */
     const resumeRecording = (record: StoredRecording) => {
       const { subscriptionId } = record.channel;
       startingOn.add(subscriptionId);
       Effect.runFork(
-        start(record.channel, record.stop, { resumes: record }).pipe(
-          // Refused, busy or failed, it stays paused, and is asked again.
-          Effect.ignore,
-          Effect.catchDefect(() => Effect.void),
+        Effect.gen(function* () {
+          if (!(yield* roomIn(record.folder ?? root))) return "space" as const;
+          const answer = yield* start(record.channel, record.stop, { resumes: record });
+          return answer.kind === "busy" ? ("busy" as const) : null;
+        }).pipe(
+          Effect.match({
+            onSuccess: (why): RecordingGapReason | null => why,
+            onFailure: ({ error }) => (error.kind === "unexpected" ? "disk" : "stream"),
+          }),
+          Effect.catchDefect(() => Effect.succeed<RecordingGapReason>("disk")),
+          Effect.flatMap((why) => {
+            const now = why && records.get(record.id);
+            const open = now && isLive(now) && !active.has(now.id) && openGap(now);
+            if (!now || !open || open.why === why) return Effect.void;
+            records.set(now.id, {
+              ...now,
+              gaps: [...(now.gaps ?? []).slice(0, -1), { ...open, why }],
+            });
+            return publish;
+          }),
           Effect.ensuring(Effect.sync(() => startingOn.delete(subscriptionId))),
           Effect.andThen(wake),
         ),
       );
     };
+    /** Set as the computer goes to sleep: nothing goes on until it wakes and checks. */
+    let asleep = false;
     /** When each paused recording last asked to go on, by id. */
     const resumeTried = new Map<string, number>();
     /** Something changed that may let paused recordings go on: they ask again at the next check. */
@@ -1154,7 +1195,7 @@ function make(deps: RecordingsDeps) {
           }
           paused = true;
           const { subscriptionId } = record.channel;
-          if (startingOn.has(subscriptionId)) continue;
+          if (asleep || startingOn.has(subscriptionId)) continue;
           if ((resumeTried.get(record.id) ?? -Infinity) + RETRY_MS > now) continue;
           resumeTried.set(record.id, now);
           resumeRecording(record);
@@ -1675,7 +1716,10 @@ function make(deps: RecordingsDeps) {
           yield* retryPaused;
           return yield* storageNow;
         }),
-      suspend: Effect.suspend(() => Effect.ignore(end([...active.keys()], "away"))),
+      suspend: Effect.suspend(() => {
+        asleep = true;
+        return Effect.ignore(end([...active.keys()], "away"));
+      }),
       leave: (how: "quit" | "away") =>
         Effect.sync(() => {
           leaving = how;
@@ -1717,7 +1761,10 @@ function make(deps: RecordingsDeps) {
       // Checked now, and the loop then waits for the next time from there.
       // As when the computer wakes: paused recordings ask again at once.
       check: Effect.andThen(
-        Effect.sync(() => resumeTried.clear()),
+        Effect.sync(() => {
+          asleep = false;
+          resumeTried.clear();
+        }),
         Effect.andThen(checkOnce, wake),
       ),
       live: Effect.sync(() => ({

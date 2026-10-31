@@ -206,19 +206,25 @@ const RECORDING_WAIT_MS = 5000;
 
 /**
  * `installer`, waiting while `recording` says a recording's time goes on: the update restarts the
- * app once it has ended. `confirm` lets that restart quit without asking.
+ * app once it has ended. `confirm` lets that restart quit without asking, and takes that back
+ * when the system refuses the release and the app goes on.
  */
 function afterRecording(
   installer: Installer,
   recording: () => boolean,
-  confirm: () => void,
+  confirm: (confirmed: boolean) => void,
 ): Installer {
   return {
     ...installer,
     install: async () => {
       while (recording()) await sleep(RECORDING_WAIT_MS);
-      confirm();
-      return installer.install();
+      confirm(true);
+      try {
+        return await installer.install();
+      } catch (cause) {
+        confirm(false);
+        throw cause;
+      }
     },
   };
 }
@@ -523,7 +529,7 @@ async function start(): Promise<void> {
           installer: afterRecording(
             electronInstaller(),
             () => recordingNow(),
-            () => (quitConfirmed = true),
+            (confirmed) => (quitConfirmed = confirmed),
           ),
           schedule: process.env["MR_STREAMER_UPDATE_CHECKS"] === "off" ? null : DEFAULT_SCHEDULE,
         };
@@ -536,6 +542,15 @@ async function start(): Promise<void> {
   let recordingNow = () => false;
   /** The viewer confirmed Quit while recording, or an update restarts: the quit asks no more. */
   let quitConfirmed = false;
+  /**
+   * The viewer chose Quit on Windows or Linux, from the tray or with Ctrl+Q. Any other quit there
+   * comes from the system, as a session that ends, which a window-less app may not hear of.
+   */
+  let quitChosen = false;
+  const quit = () => {
+    quitChosen = true;
+    app.quit();
+  };
   /** The system shuts down or ends the session: what records goes on when the app runs again. */
   let shuttingDown = false;
   const runtime = ManagedRuntime.make(
@@ -959,7 +974,7 @@ async function start(): Promise<void> {
       if (isMac || input.type !== "keyDown" || !input.control || input.alt || input.shift) return;
       if (input.key.toLowerCase() !== "q") return;
       event.preventDefault();
-      app.quit();
+      quit();
     });
     window.on("session-end", shutsDown);
   };
@@ -1008,7 +1023,7 @@ async function start(): Promise<void> {
       tray.setContextMenu(
         Menu.buildFromTemplate([
           { label: t("Open {app}", { app: name }), click: showWindow },
-          { label: t("Quit {app}", { app: name }), click: () => app.quit() },
+          { label: t("Quit {app}", { app: name }), click: quit },
         ]),
       );
       tray.on("click", showWindow);
@@ -1036,12 +1051,16 @@ async function start(): Promise<void> {
   };
   // First, so the profile is handed on only by a quit that goes ahead.
   app.prependListener("before-quit", (event) => {
-    if (!quitConfirmed && !shuttingDown && !closing && recordingNow()) {
+    // On macOS every Quit is the viewer's; a shutdown says so first.
+    const chosen = isMac || quitChosen;
+    quitChosen = false;
+    if (chosen && !quitConfirmed && !shuttingDown && !closing && recordingNow()) {
       event.preventDefault();
       askToQuit();
       return;
     }
-    runtime.runSync(recordings.leave(shuttingDown ? "away" : "quit"));
+    const away = shuttingDown || (!chosen && !quitConfirmed);
+    runtime.runSync(recordings.leave(away ? "away" : "quit"));
     leave();
   });
   app.on("will-quit", (event) => {
