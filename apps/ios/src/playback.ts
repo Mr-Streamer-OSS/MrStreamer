@@ -1245,9 +1245,15 @@ async function attach(
   }
 }
 
-/** A new viewer choice freezes the accepted policies and the caller's actual language context. */
+/**
+ * A new viewer choice freezes the accepted policies and the caller's actual language context.
+ * Playing the live channel already chosen again, as a Quality pick does, keeps its confirmed
+ * track picks: each holds by what describes it until the new stream offers one alike.
+ */
 export function play(item: Playing, plan: Plan, options: PlayOptions) {
   const { audio, subtitles } = getMediaPreferences();
+  const before = current?.choice.item;
+  const sameChannel = item.live && before?.live === true && before.id === item.id;
   const choice: Choice = {
     item,
     plan,
@@ -1258,7 +1264,7 @@ export function play(item: Playing, plan: Plan, options: PlayOptions) {
       titleLanguage: languageCode(effectiveTitleLanguage()),
       originalLanguage: plan.kind === "file" ? languageCode(plan.originalLanguage) : null,
     }),
-    holds: {},
+    holds: sameChannel ? { ...current!.choice.holds } : {},
   };
   return start(choice, choice.options);
 }
@@ -1675,16 +1681,24 @@ function labelled<T extends Track>(tracks: readonly T[], fallback: string) {
   });
 }
 
-/** Query actual groups when the menu opens. A retained row cannot select on a newer item/revision. */
-export async function trackChoices(of: "audio" | "subtitles"): Promise<readonly TrackChoice[]> {
+/**
+ * Query actual groups when the menu opens. A retained row cannot select on a newer item/revision.
+ * Null while the group isn't known: nothing plays yet, it is loading or its read failed. An empty
+ * list is a known group with nothing playable, or none at all.
+ */
+export async function trackChoices(
+  of: "audio" | "subtitles",
+): Promise<readonly TrackChoice[] | null> {
   const resource = current?.resource;
-  if (!resource) return [];
+  if (!resource) return null;
   const tracks = await refreshTracks(resource);
-  if (!tracks || !stands(resource)) return [];
+  if (!tracks || !stands(resource)) return null;
+  const group = of === "audio" ? tracks.audio : tracks.subtitles;
+  if (group.state === "absent") return [];
+  if (group.state !== "ready") return null;
   const choose = (selection: ObservedTrackSelection) =>
     chooseManually(resource, tracks.revision, selection);
   if (of === "audio") {
-    if (tracks.audio.state !== "ready") return [];
     return labelled(
       tracks.audio.options.filter((track) => track.isPlayable),
       "Sound",
@@ -1695,7 +1709,6 @@ export async function trackChoices(of: "audio" | "subtitles"): Promise<readonly 
       choose: () => choose({ kind: "audio", track }),
     }));
   }
-  if (tracks.subtitles.state !== "ready") return [];
   return [
     ...(tracks.subtitleOffAllowed
       ? [

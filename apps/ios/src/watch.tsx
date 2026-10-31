@@ -671,8 +671,10 @@ function TitleButtons({ next }: { next: boolean }) {
       asked.stands() &&
       playbackState.get().watch &&
       playingItem(playbackState.get().phase) === item;
-    const choices = await trackChoices(of);
+    const known = await trackChoices(of);
     if (!stands()) return;
+    const choices = known ?? [];
+    const none = choices.length === 0 || (choices.length === 1 && choices[0]?.kind === "off");
     showSheet(
       {
         title: of === "audio" ? "Audio" : "Subtitles",
@@ -681,9 +683,11 @@ function TitleButtons({ next }: { next: boolean }) {
           "Cancel",
         ],
         cancelButtonIndex: choices.length,
-        ...(choices.length === 0 || (choices.length === 1 && choices[0]?.kind === "off")
-          ? { message: "None in this file." }
-          : {}),
+        ...(known === null
+          ? { message: "Not known yet. Try again in a moment." }
+          : none
+            ? { message: "None in this file." }
+            : {}),
       },
       (index) => {
         if (stands()) void choices[index]?.choose();

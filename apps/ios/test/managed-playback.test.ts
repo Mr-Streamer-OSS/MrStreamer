@@ -1295,7 +1295,7 @@ it("a source replacement retires a manual audio request before its late acknowle
     },
   };
   port.getObservedTracksAsync.mockResolvedValue(tracks);
-  const row = (await owner.trackChoices("audio")).find((each) => each.label === "German");
+  const row = (await owner.trackChoices("audio"))?.find((each) => each.label === "German");
   if (!row) throw new Error("No German row");
   const ack = deferred<{ kind: "requested" }>();
   stop = () => ack.resolve({ kind: "requested" });

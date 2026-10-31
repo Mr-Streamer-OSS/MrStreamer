@@ -31,9 +31,9 @@ const open = () =>
     { watch: true, login: [] },
   );
 const sheet = async (of: "audio" | "subtitles") =>
-  (await trackChoices(of)).map((choice) => `${choice.selected ? "✓ " : ""}${choice.label}`);
+  ((await trackChoices(of)) ?? []).map((choice) => `${choice.selected ? "✓ " : ""}${choice.label}`);
 const choose = async (of: "audio" | "subtitles", label: string) =>
-  (await trackChoices(of)).find((choice) => choice.label === label)?.choose();
+  ((await trackChoices(of)) ?? []).find((choice) => choice.label === label)?.choose();
 let tracks: ObservedTrackSnapshot;
 
 beforeEach(async () => {
@@ -108,7 +108,7 @@ describe("actual native track choices", () => {
       ["Dutch", 2],
     ] as const) {
       await choose("audio", label);
-      expect((await trackChoices("audio"))[checked]?.selected).toBe(true);
+      expect(((await trackChoices("audio")) ?? [])[checked]?.selected).toBe(true);
     }
     expect(
       port.selectObservedTrackAsync.mock.calls
@@ -161,12 +161,12 @@ describe("actual native track choices", () => {
   });
 
   it("held choices cannot write after replacement or a revision change", async () => {
-    const first = (await trackChoices("audio"))[0]!;
+    const first = ((await trackChoices("audio")) ?? [])[0]!;
     port.tracks = { ...tracks, revision: 2 };
     await trackChoices("audio");
     await first.choose();
     expect(port.selectObservedTrackAsync).not.toHaveBeenCalled();
-    const second = (await trackChoices("audio"))[0]!;
+    const second = ((await trackChoices("audio")) ?? [])[0]!;
     await open();
     await second.choose();
     expect(port.selectObservedTrackAsync).not.toHaveBeenCalled();
@@ -425,7 +425,7 @@ describe("automatic policy in the one playback owner", () => {
     };
     publish(snapshot(1, { subtitles, selectedSubtitleId: "en" }));
     await tick();
-    const rows = await trackChoices("audio");
+    const rows = (await trackChoices("audio")) ?? [];
     const german = rows.find((row) => row.label === "de");
     const dutch = rows.find((row) => row.label === "nl");
     if (!german || !dutch) throw new Error("Missing native rows");
@@ -820,7 +820,7 @@ describe("confirmed manual choices and Retry holds", () => {
     await choosing({ kind: "follow-title" }, { kind: "forced-only" });
     publish(snapshot(1, { selectedSubtitleId: "en" }));
     await tick();
-    const stale = (await trackChoices("audio")).find((row) => row.label === "de");
+    const stale = ((await trackChoices("audio")) ?? []).find((row) => row.label === "de");
     if (!stale) throw new Error("No German row");
     publish(snapshot(2, { selectedAudioId: "nl", selectedSubtitleId: "nl" }));
     await stale.choose();
@@ -951,9 +951,11 @@ describe("confirmed manual choices and Retry holds", () => {
     await choosing({ kind: "follow-title" });
     publish(snapshot(1));
     await tick();
-    const german = (await trackChoices("audio")).find((row) => row.label === "de");
-    const dutch = (await trackChoices("audio")).find((row) => row.label === "nl");
-    const subtitles = (await trackChoices("subtitles")).find((row) => row.label === "nl · 2");
+    const german = ((await trackChoices("audio")) ?? []).find((row) => row.label === "de");
+    const dutch = ((await trackChoices("audio")) ?? []).find((row) => row.label === "nl");
+    const subtitles = ((await trackChoices("subtitles")) ?? []).find(
+      (row) => row.label === "nl · 2",
+    );
     if (!german || !dutch || !subtitles) throw new Error("Missing native rows");
     const ack = deferred<{ kind: "requested" }>();
     onTestFinished(() => ack.resolve({ kind: "requested" }));
@@ -982,7 +984,9 @@ describe("confirmed manual choices and Retry holds", () => {
     port.selectObservedTrackAsync.mockImplementationOnce(async () => ack.promise);
     tracks = snapshot(1);
     port.tracks = tracks;
-    const subtitles = (await trackChoices("subtitles")).find((row) => row.label === "nl · 2");
+    const subtitles = ((await trackChoices("subtitles")) ?? []).find(
+      (row) => row.label === "nl · 2",
+    );
     if (!subtitles) throw new Error("No Dutch subtitle row");
     const picking = subtitles.choose();
     await tick();
