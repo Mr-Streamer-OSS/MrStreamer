@@ -39,11 +39,14 @@ import { tabHref, useTabs, type Tab } from "../../../header.tsx";
 import { licences } from "../../../licences.ts";
 import {
   getMediaPreferences,
+  SUBTITLE_SIZES,
   updateMediaPreferences,
   useMediaPreferences,
+  type SubtitleSize,
 } from "../../../media-preferences.ts";
 import { openLink } from "../../../open-link.ts";
 import { playlistHref, useUnmapped } from "../../../playlist-groups.tsx";
+import { removeSubtitleKey, saveSubtitleKey, useSubtitleKey } from "../../../online-subtitles.ts";
 import { setStatistics, useStatistics } from "../../../telemetry/index.ts";
 import { hasTmdb, useMetadataStatus, useTitleTimings } from "../../../titles.ts";
 import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
@@ -53,15 +56,15 @@ const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
 /**
  * Settings as one list: the providers first, each a row with Add provider and Guides, the XMLTV
  * guides added apart from theirs, under them, then Downloads, a row with what they take that
- * opens them, Media policies, Privacy with its policy in the browser, and About with Licences.
- * TMDB's terms ask for its logo and notice, as
- * the desktop's Settings show them. It opens on whichever tab's top bar asked for it, and what it
- * opens goes on that tab too.
+ * opens them, Media policies, Subtitles, Privacy with its policy in the browser, and About with
+ * Licences. TMDB's terms ask for its logo and notice, as the desktop's Settings show them. It
+ * opens on whichever tab's top bar asked for it, and what it opens goes on that tab too.
  */
 export default function Settings() {
   const roster = useRoster();
   const statistics = useStatistics();
   const media = useMediaPreferences();
+  const subtitleKey = useSubtitleKey();
   const tab = useTabs()?.tab ?? "(home)";
   if (roster.kind !== "ready") return null;
   return (
@@ -159,6 +162,35 @@ export default function Settings() {
         testID="settings-live-quality"
       />
 
+      <Section name="Subtitles" />
+      <Opens
+        label="SubDL API key"
+        value={subtitleKey === null ? undefined : subtitleKey ? "Saved" : "Not set"}
+        role="button"
+        // Until the Keychain answers, whether there is one to replace isn't known.
+        onPress={
+          subtitleKey === null ? undefined : subtitleKey ? manageSubtitleKey : enterSubtitleKey
+        }
+        testID="settings-subdl-key"
+      />
+      <Opens
+        label="Text size"
+        value={sizeNames[media.subtitleSize]}
+        role="button"
+        onPress={() =>
+          chooseMedia(
+            "subtitleSize",
+            "Text size",
+            SUBTITLE_SIZES.map((size) => ({ label: sizeNames[size], value: size })),
+          )
+        }
+        testID="settings-subtitle-size"
+      />
+      <Text style={styles.paragraph}>
+        Find online in Watch searches SubDL with your own key. Text size is for downloaded
+        subtitles.
+      </Text>
+
       <Section name="Privacy" />
       <View style={styles.toggle}>
         <Text style={styles.label} importantForAccessibility="no" accessibilityElementsHidden>
@@ -232,6 +264,11 @@ const systemLanguage = `System default (${mediaLanguageName(deviceLanguage)})`;
 const audioNames = { "follow-title": "Follow title language", original: "Original language" };
 const subtitleNames = { "forced-only": "Only when forced", off: "Off" };
 const qualityNames: Record<Quality, string> = { uhd: "4K", fhd: "Full HD", hd: "HD", sd: "SD" };
+const sizeNames: Record<SubtitleSize, string> = {
+  small: "Small",
+  medium: "Medium",
+  large: "Large",
+};
 
 /** A system sheet commits only a picked value; Cancel has no action. */
 function chooseMedia<K extends keyof ReturnType<typeof getMediaPreferences>>(
@@ -254,6 +291,47 @@ function chooseMedia<K extends keyof ReturnType<typeof getMediaPreferences>>(
         Alert.alert(
           "Couldn't save media preference",
           "Your previous choice is still saved. Try again.",
+        );
+      }
+    },
+  );
+}
+
+/** Asks for a SubDL key, the one Watch's Find online searches with, never showing one saved. */
+function enterSubtitleKey() {
+  Alert.prompt(
+    "SubDL API key",
+    "From your account on subdl.com.",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Save",
+        onPress: (typed = "") => {
+          if (!typed.trim()) return;
+          saveSubtitleKey(typed).catch(() =>
+            Alert.alert("Couldn't save the key", "The Keychain refused it. Try again."),
+          );
+        },
+      },
+    ],
+    "secure-text",
+  );
+}
+
+/** A saved key can be replaced, typed again in full, or removed. */
+function manageSubtitleKey() {
+  ActionSheetIOS.showActionSheetWithOptions(
+    {
+      title: "SubDL API key",
+      options: ["Replace", "Remove", "Cancel"],
+      destructiveButtonIndex: 1,
+      cancelButtonIndex: 2,
+    },
+    (index) => {
+      if (index === 0) enterSubtitleKey();
+      else if (index === 1) {
+        removeSubtitleKey().catch(() =>
+          Alert.alert("Couldn't remove the key", "It's still saved. Try again."),
         );
       }
     },
@@ -521,15 +599,18 @@ function Opens({
   testID,
 }: {
   label: string;
-  value?: string;
+  value?: string | undefined;
   role: "button" | "link";
-  onPress: () => void;
+  /** Undefined while it can't open yet. */
+  onPress: (() => void) | undefined;
   testID: string;
 }) {
   return (
     <Pressable
       accessibilityRole={role}
       accessibilityLabel={value ? `${label}, ${value}` : label}
+      accessibilityState={{ disabled: !onPress }}
+      disabled={!onPress}
       onPress={onPress}
       style={({ pressed }) => [styles.line, pressed && styles.pressed]}
       testID={testID}

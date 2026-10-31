@@ -3,6 +3,7 @@ import * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Member, DemoErase, DemoStart } from "../src/account.ts";
 import { demoEntry } from "../src/demo.ts";
+import { keychain } from "./keychain.ts";
 
 // Removing a provider from Settings when the removal doesn't all go through: a removal the
 // registry refused leaves the provider saved, and Settings says so; a removal that went through
@@ -34,6 +35,7 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+vi.mock("expo-secure-store", () => keychain(() => new Map()));
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   ActionSheetIOS: {

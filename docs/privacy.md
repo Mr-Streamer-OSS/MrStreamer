@@ -1,6 +1,6 @@
 # Privacy policy
 
-Last updated 30 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
+Last updated 31 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
 
 Mr. Streamer is a free, open-source IPTV player for your computer and iPhone. It has no Mr. Streamer account or in-app purchases, shows no ads and doesn't sell data. When you connect your own provider, its streams and requests go directly between your device and the services you connect. We also operate a restricted sample provider for app review, described below.
 
@@ -66,7 +66,7 @@ Each event body carries a random installation identifier, an event identifier, t
 
 ### Local data on iPhone
 
-The iPhone app keeps provider details, preferences, catalogue and guide caches, title details and pictures, favourites, watchlist, history, progress, downloads, and its statistics choice, installation identifier and unsent statistics on the device. Passwords use the iOS Keychain. Local app files can still contain provider addresses and usernames.
+The iPhone app keeps provider details, preferences, catalogue and guide caches, title details and pictures, favourites, watchlist, history, progress, downloads, the subtitles you downloaded for each movie or episode version with their timing, and its statistics choice, installation identifier and unsent statistics on the device. Passwords and your SubDL API key use the iOS Keychain. **Remove and delete history** on a provider also deletes the subtitles downloaded for its movies and episodes. Local app files can still contain provider addresses and usernames.
 
 Removing a provider clears its own catalogue, guide and title-detail caches. Shared TMDB details and pictures can remain. Keeping its history can retain its server address and username. Remove downloads separately to delete their saved copies. Turning statistics off retains the local installation identifier and clears unsent statistics when the changed choice is saved successfully. These actions do not promise erasure from the Keychain, backups or services that already received data.
 
@@ -133,8 +133,9 @@ Your network operator and DNS provider can see which servers your device contact
 - **[TMDB's metadata API](https://www.themoviedb.org/privacy-policy)** receives the movie, series or season identifiers requested, language and region where used, our application's API key or read token, and your connecting IP address and network metadata. The iPhone client does not add your provider login or address, typed searches or statistics installation identifier to these calls. Metadata can be fetched while building the library, not only when you play something.
 - **Image servers** named by your provider and TMDB's separate image service receive the requested picture address, your connecting IP address and network metadata that iOS supplies. The app builds TMDB image addresses separately, without adding its TMDB API key or statistics installation identifier.
 - **An AirPlay receiver you choose** is used through iOS's system playback controls. This is separate from the desktop Google Cast and local-stream route described above.
+- **[SubDL](https://subdl.com/privacy)**, only after you save your own API key in Settings > Subtitles and choose **Find online** in the player: the title's TMDB id, or its name without one, a movie's year, an episode's season and number, your subtitle and title languages with English, your API key and your IP address. Downloading a result asks SubDL for that file. Provider logins and stream addresses are never sent.
 
-The iPhone app uses the TMDB key supplied with the app. It does not offer the desktop custom-key, subtitle-service, Google Cast or desktop update-check controls.
+The iPhone app uses the TMDB key supplied with the app. It does not offer the desktop custom-key, OpenSubtitles, Google Cast or desktop update-check controls.
 
 #### Restricted review provider and earlier private-beta samples
 
@@ -153,7 +154,7 @@ An earlier private-beta installation can still retain a demo subscription or dow
 - **Statistics on desktop.** Turn off **Share basic usage statistics** in Settings > Privacy. Sending stops at once, events waiting to be sent are cleared, and it stays off after a restart. Turning it back on keeps the same identifier and sends nothing about the time it was off, including playback that continued meanwhile.
 - **Statistics on iPhone.** Statistics stay off until you choose to share them, except when an upgrade retains an earlier deliberate choice. Change **Share basic usage statistics** in Settings > Privacy. Turning it off stops sending at once. When the changed choice is saved successfully, waiting events are cleared and it stays off after the app restarts. If saving fails, a later launch can restore the earlier choice and queued statistics.
 - **Website analytics.** Turn off **Site analytics** at the foot of any page of mrstreamer.app. The choice applies to that browser only, and clearing the site's data from your browser turns them back on.
-- **Subtitle search on desktop** is off until you turn it on.
+- **Subtitle search on desktop** is off until you turn it on. On iPhone, nothing is asked of SubDL until you save your own key and choose **Find online**; **Remove** in Settings > Subtitles deletes the key.
 - **Casting on desktop** happens only after you open the receiver list and pick a device. On iPhone, AirPlay uses the system controls for the receiver you choose.
 - **TMDB** requests have no separate off switch in either app. Only desktop Settings lets you choose whose TMDB key the app uses. **Update checks** described here are desktop-only; iPhone app updates use Apple's distribution services.
 

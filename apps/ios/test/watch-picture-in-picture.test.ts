@@ -5,6 +5,7 @@ import type { DownloadList } from "@mrstreamer/contracts/downloads";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue } from "../src/account.ts";
 import type { Playing } from "../src/playback.ts";
+import { keychain } from "./keychain.ts";
 
 // Returns from Picture in Picture as Watch answers them, and Watch's Downloads and Settings, which
 // keep what plays going. The real Watch layer, top bar routes and playback run with React DOM on
@@ -182,6 +183,7 @@ vi.mock("../src/glass.tsx", async () => {
 });
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+vi.mock("expo-secure-store", () => keychain(() => new Map()));
 vi.mock("../src/account.ts", () => ({
   useCatalogue: () => native.catalogue,
   currentCatalogue: () => native.catalogue,

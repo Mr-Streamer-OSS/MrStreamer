@@ -43,6 +43,7 @@ import {
   stop,
   type Playing,
 } from "./playback.ts";
+import { subtitleTitle } from "./downloaded-subtitles.ts";
 import { fetchPicture } from "./picture-transfer.ts";
 import { keychainSecrets } from "./secrets.ts";
 import { currentSource, onSignedIn, sourceOf, type Source } from "./sources.ts";
@@ -129,6 +130,8 @@ const About = lazy(() =>
     name: "string",
     episodeName: "string | null",
     year: "number | null",
+    /** The movie's or the series' TMDB id, for subtitle searches; absent in older records. */
+    "tmdbId?": "string | null",
     /** Seconds, as the details said. */
     duration: "number | null",
     originalLanguage: "string | null",
@@ -2066,6 +2069,17 @@ function playCopy(id: string, record: Stored) {
     live: false,
     next: nextCopy(record) !== undefined,
     versions: false,
+    // The version it is a copy of: what was kept for it shows here too, offline as well.
+    subtitles: subtitleTitle({
+      subscriptionId: record.subscriptionId,
+      id: title.id,
+      tmdbId: about.tmdbId ?? null,
+      title: about.name,
+      year: about.year,
+      ...(title.kind === "episode"
+        ? { episode: { season: title.season, number: title.episode } }
+        : {}),
+    }),
   };
   const from =
     progress && !isFinished(progress.position, progress.duration)
@@ -2156,6 +2170,7 @@ async function aboutOf(ref: TitleRef, signal: AbortSignal) {
         name: title.title,
         episodeName: null,
         year: title.year,
+        tmdbId: title.tmdbId,
         duration: details.duration,
         originalLanguage: title.originalLanguage,
       },
@@ -2193,6 +2208,7 @@ async function aboutOf(ref: TitleRef, signal: AbortSignal) {
       name: series.title,
       episodeName: episode?.title ?? null,
       year: series.year,
+      tmdbId: series.tmdbId,
       duration: episode?.duration ?? details.duration,
       originalLanguage: series.originalLanguage,
     },
