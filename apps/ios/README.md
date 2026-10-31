@@ -655,9 +655,11 @@ Not set, and the text size downloaded subtitles show at (`src/app/(tabs)/(home)/
 Saving or opening either asks SubDL nothing. OpenSubtitles, which needs an account login as well as
 a key, stays on the desktop. For a movie or an episode, Watch's Subtitles lists the file's own
 tracks and Off as before, then the subtitle downloaded for that version, Find online and, while one
-shows, Adjust timing. Find online searches SubDL (`src/online-subtitles.ts`) with the title's TMDB
-id, or its name and year without one, an episode's season and number, and the viewer's subtitle
-language, title language and English; never a provider's name, login or address. A result is one
+shows, Adjust timing. Find online searches SubDL (`src/online-subtitles.ts`) with the TMDB id when
+known. Without one, a movie uses its name and available year; an episode uses its series name,
+season and episode number, without the series' year. Movie searches include the available year
+with a TMDB id too. The languages are the viewer's subtitle language, title language and English;
+no provider name, login or address is sent. A result is one
 SRT or WebVTT file, alone or the only one in a ZIP file, under 10 MiB. Picking it downloads it,
 keeps it for that exact version (`src/downloaded-subtitles.ts`, one file per version under
 `online-subtitles/`, the 100 changed last) and shows it over the picture. A missing or refused key,

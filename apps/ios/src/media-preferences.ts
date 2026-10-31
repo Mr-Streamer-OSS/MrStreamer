@@ -30,7 +30,7 @@ interface MediaPreferences {
   /** Forced-only needs actual native track facts, never provider name hints. */
   readonly subtitles: Subtitles;
   readonly liveQuality: Quality;
-  /** Downloaded subtitles only: the file's own follow the system's caption style. */
+  /** App text size for downloaded subtitle cues. */
   readonly subtitleSize: SubtitleSize;
 }
 

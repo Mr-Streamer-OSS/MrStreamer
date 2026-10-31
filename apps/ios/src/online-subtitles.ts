@@ -14,8 +14,9 @@ import { store, useStore } from "./store.ts";
 
 // Online subtitles: SubDL searched with the viewer's own API key for the movie or episode playing,
 // and the result chosen downloaded, for `downloaded-subtitles.ts` to keep and show. The key stays
-// in the Keychain. A search sends only the title's TMDB identity, or its title and year, an
-// episode's season and number and the languages; never a provider's name, login or address.
+// in the Keychain. A search sends its TMDB identity when known; otherwise a movie's name and
+// available year, or an episode's series name, season and number without the series' year.
+// Movie searches include the year with a TMDB id too. No provider name, login or address is sent.
 // Official API: subdl.com/api-doc. Searches and downloads are for the play they were asked for:
 // another play ends them.
 

@@ -1,6 +1,6 @@
 # Privacy policy
 
-Last updated 30 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
+Last updated 31 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
 
 Mr. Streamer is a free, open-source IPTV player for your computer and iPhone. It has no Mr. Streamer account or in-app purchases, shows no ads and doesn't sell data. When you connect your own provider, its streams and requests go directly between your device and the services you connect. We also operate a restricted sample provider for app review, described below.
 
