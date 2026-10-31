@@ -56,8 +56,29 @@ import SQLite3
     let narrow = try value(owner.search(lease, db, "search", ["alternate"], ["weather"], now, 3))["rows"] as! [[String: Any]]
     try require(narrow.isEmpty, "search-channels")
     owner.finish("search")
-    try require(guideFold(" Één, HD!") == "een hd" && guideFold("News & Weather") == "news weather" && guideFold("ΕΙΔΗΣΕΙΣ") == guideFold("ειδήσεις"), "search-fold")
+    try require(guideFold(" Één, HD!") == "een hd" && guideFold("News & Weather") == "news weather" && guideFold("ΕΙΔΗΣΕΙΣ") == "ειδησεις" && guideFold("ειδήσεις") == "ειδησεις", "search-fold")
     try require(guideHolds(Array(guideFold("한국").unicodeScalars), Array(guideFold("하").unicodeScalars)), "search-syllable")
+    // A bounded channel count can still exceed the bridge's serialized reply budget.
+    do {
+      let bounds = root.appendingPathComponent("search-bounds", isDirectory: true)
+      try fm.createDirectory(at: bounds, withIntermediateDirectories: true)
+      defer { try? fm.removeItem(at: bounds) }
+      let disk = try GuideDisk(root: bounds)
+      let job = GuideJob("search-bounds", "fixture")
+      let file = bounds.appendingPathComponent("guide.sqlite")
+      let candidate = try GuideIndex(file, job: job, disk: disk, create: true)
+      for n in 0..<2048 {
+        try candidate.insert(String(repeating: "x", count: 508) + String(format: "%04d", n), now, now + 60000, "News", nil)
+      }
+      try candidate.insert("greek", now, now + 60000, "ΟΣ", nil)
+      _ = try candidate.finish(now: now, from: now - 86400000, until: now + 86400000)
+      let index = try GuideIndex(file, job: job, disk: disk, create: false)
+      let tooLarge = guideResult { try index.current(at: now) }
+      try require(tooLarge["error"] as? String == "reply", "search-current-reply-bound")
+      let sigma = try index.search(ids: ["greek"], words: ["σ"], at: now, limit: 20)["rows"] as! [[String: Any]]
+      let finalSigma = try index.search(ids: ["greek"], words: ["ς"], at: now, limit: 20)["rows"] as! [[String: Any]]
+      try require(sigma.isEmpty && finalSigma.count == 1, "search-final-sigma")
+    }
     let pageActivation = try owner.attach("pages-provider", 1)
     let pageLease = pageActivation["lease"] as! String
     owner.begin(pageLease, "pages")

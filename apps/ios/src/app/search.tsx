@@ -637,6 +637,7 @@ export default function Search() {
               channel={shownDetail.key}
               detail={shownDetail.programme.detail}
               origin="live"
+              onSettings={settings}
               onBack={() => setDetail(null)}
               back="Back to Search"
             />

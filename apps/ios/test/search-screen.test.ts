@@ -21,6 +21,7 @@ import { buildLibrary, type Channel, type Library } from "../src/library.ts";
 
 const scenario = vi.hoisted(() => ({
   dismissed: 0,
+  tab: "live" as "(home)" | "live" | "films" | "series",
   downloads: { items: [], series: {}, bytes: 0, free: null, ended: 0 } as DownloadList,
   opened: [] as Title[],
   presses: new Map<string, () => void>(),
@@ -127,11 +128,17 @@ vi.mock("expo-router", () => ({
     push: (href: string) => scenario.did.push(`push ${href}`),
   },
   useIsFocused: () => true,
-  // Live is the tab under Search.
+  // The originating tab stays under Search.
   useRootNavigationState: () => ({
     index: 1,
     routes: [
-      { name: "(tabs)", state: { index: 1, routes: [{ name: "(home)" }, { name: "live" }] } },
+      {
+        name: "(tabs)",
+        state: {
+          index: ["(home)", "live", "films", "series"].indexOf(scenario.tab),
+          routes: ["(home)", "live", "films", "series"].map((name) => ({ name })),
+        },
+      },
       { name: "search" },
     ],
   }),
@@ -445,6 +452,8 @@ beforeEach(async () => {
     said: [],
     fontScale: 1,
     dismissed: 0,
+    tab: "live",
+    guideSnapshot: new Map(),
     downloads: { items: [], series: {}, bytes: 0, free: null, ended: 0 },
   });
   scenario.presses.clear();
@@ -1534,6 +1543,23 @@ describe("Programmes in Search", () => {
     expect(container.querySelector('[data-testid="search-list"]')).toBe(list);
     expect(scenario.did).toEqual([]);
   });
+
+  it.each(["(home)", "live", "films", "series"] as const)(
+    "opens a programme's provider settings on its originating %s tab",
+    async (tab) => {
+      scenario.tab = tab;
+      scenario.guideSnapshot = new Map([["b", { availability: "none", error: "network" }]]);
+      scenario.search = async () => [programme("News at Six", "six")];
+      await open();
+      await type("news");
+      await press(`search-programme-b:7-${at}`);
+      await press("text-Provider settings");
+      expect(scenario.did).toEqual([
+        "dismiss 1",
+        `push ${tab === "(home)" ? "" : `/${tab}`}/settings`,
+      ]);
+    },
+  );
 
   /** The guide's minute tick, or a guide's new status: Search reads again. */
   const reread = () =>
