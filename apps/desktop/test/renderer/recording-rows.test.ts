@@ -149,7 +149,7 @@ it("says a late schedule's recording isn't saved yet, as well as how late it sta
   expect(row.text).toContain("Not saved yet. Trying again.");
 });
 
-/** The page following main's events, first over `list`; its first row in a section, once there. */
+/** The page over `list`, following main's events, once its rows are there. */
 async function pageOf(list: Recording[]) {
   ipc.reset();
   ipc.always("recordings.list", list);
@@ -158,13 +158,17 @@ async function pageOf(list: Recording[]) {
   onTestFinished(syncRecordings(client));
   onTestFinished(() => view.unmount());
   await view.render(createElement(RecordingsPage));
-  return (section: "Now" | "Recorded") =>
-    vi.waitFor(() => {
-      const found = document.querySelector(`section[aria-label=${section}] li`);
-      if (!found) throw new Error(`No row in ${section}`);
-      return found;
-    });
+  await vi.waitFor(() => {
+    if (!document.querySelector("section li")) throw new Error("No row");
+  });
 }
+
+/** The text of the first row in `section`. */
+const rowText = (section: "Now" | "Recorded") =>
+  document.querySelector(`section[aria-label=${section}] li`)?.textContent ?? "";
+
+const click = (label: string) =>
+  act(async () => document.querySelector<HTMLElement>(`[aria-label='${label}']`)!.click());
 
 const live: Recording = {
   id: "r1",
@@ -180,50 +184,31 @@ const live: Recording = {
 const refused = { kind: "unexpected", detail: "Recordings could not be saved." } as const;
 
 it("says a Stop it couldn't write down yet is stopped and retried, until it is saved", async () => {
-  const rowIn = await pageOf([live]);
+  await pageOf([live]);
   const stop = ipc.hold("recordings.stop");
-  await act(async () =>
-    (await rowIn("Now"))
-      .querySelector<HTMLElement>("[aria-label='Stop recording Noon News']")!
-      .click(),
-  );
+  await click("Stop recording Noon News");
   // Main keeps the Stop, lists its end as not saved, then answers that it couldn't save it.
   const stopped = { ...live, ended: Date.now(), status: { kind: "stopped" } } as const;
   await act(async () => ipc.emit("recordings.changed", [{ ...stopped, unsaved: true }]));
   await act(async () => stop.reject(refused));
-  await vi.waitFor(async () =>
-    expect((await rowIn("Recorded")).textContent).toContain("Not saved yet. Trying again."),
-  );
-  expect((await rowIn("Recorded")).textContent).not.toContain("could not be saved");
+  await vi.waitFor(() => expect(rowText("Recorded")).toContain("Not saved yet. Trying again."));
+  expect(rowText("Recorded")).not.toContain("could not be saved");
   // Its next check saves it.
   await act(async () => ipc.emit("recordings.changed", [stopped]));
-  await vi.waitFor(async () =>
-    expect((await rowIn("Recorded")).textContent).not.toContain("Not saved yet"),
-  );
-  expect((await rowIn("Recorded")).textContent).not.toContain("could not be saved");
+  await vi.waitFor(() => expect(rowText("Recorded")).not.toContain("Not saved yet"));
 });
 
 it("keeps saying why a Stop was refused while the recording goes on", async () => {
-  const rowIn = await pageOf([live]);
+  await pageOf([live]);
   ipc.refuse("recordings.stop", refused);
-  await act(async () =>
-    (await rowIn("Now"))
-      .querySelector<HTMLElement>("[aria-label='Stop recording Noon News']")!
-      .click(),
-  );
-  await vi.waitFor(async () =>
-    expect((await rowIn("Now")).textContent).toContain("Recordings could not be saved."),
-  );
+  await click("Stop recording Noon News");
+  await vi.waitFor(() => expect(rowText("Now")).toContain("Recordings could not be saved."));
 });
 
 it("keeps saying why a Delete was refused", async () => {
-  const rowIn = await pageOf([{ ...live, ended: Date.now(), status: { kind: "complete" } }]);
+  await pageOf([{ ...live, ended: Date.now(), status: { kind: "complete" } }]);
   ipc.refuse("recordings.remove", refused);
-  await act(async () =>
-    (await rowIn("Recorded"))
-      .querySelector<HTMLElement>("[aria-label='More for Noon News']")!
-      .click(),
-  );
+  await click("More for Noon News");
   const remove = await vi.waitFor(() => {
     const found = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find(
       (item) => item.textContent === "Delete",
@@ -232,7 +217,5 @@ it("keeps saying why a Delete was refused", async () => {
     return found;
   });
   await act(async () => remove.click());
-  await vi.waitFor(async () =>
-    expect((await rowIn("Recorded")).textContent).toContain("Recordings could not be saved."),
-  );
+  await vi.waitFor(() => expect(rowText("Recorded")).toContain("Recordings could not be saved."));
 });
