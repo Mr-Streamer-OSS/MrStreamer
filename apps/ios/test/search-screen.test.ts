@@ -1,11 +1,14 @@
 import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
+import type { Programme } from "@mrstreamer/contracts/guide";
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { LiveCatalogue, OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider";
 import type { HTMLInputElement } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue, Member } from "../src/account.ts";
+import type { FoundProgramme } from "../src/guide.ts";
+import { programmeRange } from "../src/guide-ui.tsx";
 import { buildLibrary, type Channel, type Library } from "../src/library.ts";
 
 // Search over the tabs: what it finds opens where it belongs and closes Search first, the query
@@ -37,6 +40,13 @@ const scenario = vi.hoisted(() => ({
   fontScale: 1,
   /** The keyboard's listeners, by event. */
   keyboard: new Map<string, (event: { endCoordinates: { screenY: number } }) => void>(),
+  /** Each signed-in provider's login revision, which a replaced login changes. */
+  sources: new Map<string, number>(),
+  /** Who listens to providers signing in. */
+  signedIn: new Set<() => void>(),
+  /** The guide owner's programme search, and each programme's detail by its token. */
+  search: (async () => []) as (text: string, keys: readonly string[]) => Promise<FoundProgramme[]>,
+  details: new Map<string, Programme>(),
 }));
 
 vi.mock("react-native", async () => {
@@ -82,6 +92,7 @@ vi.mock("react-native", async () => {
     AccessibilityInfo: {
       ...reactNative.AccessibilityInfo,
       announceForAccessibilityWithOptions: (text: string) => scenario.said.push(text),
+      sendAccessibilityEvent: () => undefined,
     },
     Keyboard: {
       dismiss: () => {
@@ -147,12 +158,29 @@ vi.mock("expo-file-system", () => ({
   Paths: { cache: "/c" },
 }));
 vi.mock("../src/sources.ts", () => ({
-  currentSource: (id: string) => void scenario.did.push(`provider ${id}`),
+  currentSource: (id: string) =>
+    scenario.sources.has(id) ? { revision: scenario.sources.get(id) } : undefined,
+  onSignedIn: (listener: () => void) => {
+    scenario.signedIn.add(listener);
+    return () => scenario.signedIn.delete(listener);
+  },
   sourceOf: (id: string) => {
     scenario.did.push(`provider ${id}`);
     throw new Error(`${id} isn't signed in`);
   },
 }));
+// The guide owner's public reads; guide.test.ts proves them against the native guide.
+vi.mock("../src/guide.ts", () => {
+  const snapshot = new Map();
+  return {
+    guide: {
+      subscribe: () => () => undefined,
+      getSnapshot: () => snapshot,
+      search: (text: string, keys: readonly string[]) => scenario.search(text, keys),
+      programme: async (detail: string) => scenario.details.get(detail) ?? null,
+    },
+  };
+});
 vi.mock("../src/viewing.ts", () => ({ serveViewing: () => undefined }));
 vi.mock("../src/watchlist.ts", () => ({
   alignWatchlist: () => undefined,
@@ -215,6 +243,9 @@ vi.mock("../src/ui.tsx", async () => {
   return {
     colors: { text: "#FFFFFF", dim: "#A1A1A6", fill: "#1C1C1E", line: "#2C2C2E" },
     useRowHeight: () => 60,
+    useListWidth: () => ({ split: false, width: 390, gutter: 16 }),
+    ChannelLogo: () => null,
+    Message: ({ text }: { text: string }) => createElement("p", null, text),
     ChannelRow: ({ channel, onPress }: { channel: Channel; onPress: (c: Channel) => void }) => {
       scenario.presses.set(`channel-${channel.key}`, () => onPress(channel));
       return createElement(
@@ -392,6 +423,9 @@ beforeEach(async () => {
   scenario.presses.clear();
   scenario.keyboard.clear();
   scenario.tmdbNames.clear();
+  scenario.sources.clear();
+  scenario.details.clear();
+  scenario.search = async () => [];
   await subscriptions([]);
   await subscriptions([member("a", "Northwind", {}, duneOnly())]);
 });
@@ -1372,5 +1406,100 @@ describe("Same-query Search continuity", () => {
     expect(text()).not.toContain("Dune");
     expect(scenario.did).toEqual(["back"]);
     expect(scenario.dismissed).toBe(1);
+  });
+});
+
+describe("Programmes in Search", () => {
+  const guideChannels = [
+    { key: "a:1", title: "NPO 1", subscriptionId: "a", tags: [], logoUrl: null },
+    { key: "b:7", title: "BBC One", subscriptionId: "b", tags: [], logoUrl: null },
+  ] as unknown as Channel[];
+  const twoProviders = {
+    regions: [],
+    channels: guideChannels,
+    byKey: new Map(guideChannels.map((channel) => [channel.key, channel])),
+    placeOf: new Map(),
+    labels: new Map([
+      ["a", "Northwind"],
+      ["b", "Southwind"],
+    ]),
+  } as unknown as Library;
+  const at = Date.UTC(2026, 9, 31, 18);
+  const programme = (title: string, detail: string): FoundProgramme => ({
+    key: "b:7",
+    programme: { start: at, stop: at + 1_800_000, title, detail },
+  });
+  /** A search answer held until `release`. */
+  const held = () => {
+    let release = (_found: FoundProgramme[]) => {};
+    const answer = new Promise<FoundProgramme[]>((resolve) => (release = resolve));
+    return { answer, release };
+  };
+
+  beforeEach(() => {
+    scenario.catalogue = { kind: "ready", library: twoProviders, failing: [] };
+    scenario.sources = new Map([
+      ["a", 1],
+      ["b", 1],
+    ]);
+  });
+
+  it("finds a programme on its channel, naming its time, channel and provider", async () => {
+    const searched: (readonly string[])[] = [];
+    scenario.search = async (text, keys) => {
+      searched.push(keys);
+      return text === "news" ? [programme("News at Six", "six")] : [];
+    };
+    await open();
+    await type("news");
+    expect(searched.at(-1)).toEqual(["a:1", "b:7"]);
+    expect(text()).toContain("Programmes · 1");
+    expect(text()).toContain("News at Six");
+    expect(text()).toContain(
+      `${programmeRange({ start: at, stop: at + 1_800_000 })} · BBC One · Southwind`,
+    );
+  });
+
+  it("opens a programme inside Search and goes Back to the same query and results, never playing", async () => {
+    scenario.search = async () => [programme("News at Six", "six")];
+    scenario.details.set("six", {
+      start: at,
+      stop: at + 1_800_000,
+      title: "News at Six",
+      description: "The day's headlines.",
+    });
+    await open();
+    await type("news");
+    const list = container.querySelector('[data-testid="search-list"]');
+    await press(`search-programme-b:7-${at}`);
+    expect(container.querySelector('[data-testid="guide-programme"]')?.textContent).toContain(
+      "The day's headlines.",
+    );
+    await press("text-Back to Search");
+    expect(container.querySelector('[data-testid="guide-programme"]')).toBeNull();
+    expect(field().value).toBe("news");
+    expect(text()).toContain("News at Six");
+    // The same list, never remounted, so it is still scrolled where it was.
+    expect(container.querySelector('[data-testid="search-list"]')).toBe(list);
+    expect(scenario.did).toEqual([]);
+  });
+
+  it("never shows an answer held across a provider's replaced login", async () => {
+    await open();
+    await type("");
+    const old = held();
+    const current = held();
+    const answers = [old.answer, current.answer];
+    scenario.search = () => answers.shift() ?? Promise.resolve([]);
+    startType("news");
+    scenario.sources.set("b", 2);
+    React.act(() => scenario.signedIn.forEach((listener) => listener()));
+    await React.act(async () => old.release([programme("Old News", "old")]));
+    expect(text()).toContain("Searching.");
+    expect(text()).not.toContain("Old News");
+    await React.act(async () => current.release([programme("Late News", "late")]));
+    await settled();
+    expect(text()).toContain("Late News");
+    expect(text()).not.toContain("Old News");
   });
 });
