@@ -253,7 +253,7 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
         <span className="hidden text-xs text-muted-foreground tabular-nums xl:block">
           {minutes}
         </span>
-        <p className="text-xs text-muted-foreground xl:hidden">
+        <p className="text-xs break-words text-muted-foreground xl:hidden">
           {active && <LiveDot paused={paused} className="mr-1.5 size-1.5" />}
           <span className="mr-1.5 font-semibold text-foreground">{word}</span>
           <span className={cn(failure && "text-destructive")}>
@@ -261,7 +261,7 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
           </span>
         </p>
       </div>
-      <p className="hidden min-w-0 flex-1 text-[0.8125rem] text-muted-foreground xl:block">
+      <p className="hidden min-w-0 flex-1 text-[0.8125rem] break-words text-muted-foreground xl:block">
         {active && <LiveDot paused={paused} className="mr-2 size-2" />}
         <span className="mr-2 font-semibold text-foreground">{word}</span>
         <span className={cn(failure && "text-destructive")}>{failure ?? reason}</span>

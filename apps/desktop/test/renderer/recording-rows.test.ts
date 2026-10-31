@@ -196,6 +196,24 @@ it("says a Stop it couldn't write down yet is stopped and retried, until it is s
   // Its next check saves it.
   await act(async () => ipc.emit("recordings.changed", [stopped]));
   await vi.waitFor(() => expect(rowText("Recorded")).not.toContain("Not saved yet"));
+  expect(rowText("Recorded")).toContain("You stopped it");
+  expect(rowText("Recorded")).not.toContain("could not be saved");
+});
+
+it("drops a Stop's save error once the list shows the Stop taken, if the error came first", async () => {
+  await pageOf([live]);
+  ipc.refuse("recordings.stop", refused);
+  await click("Stop recording Noon News");
+  await vi.waitFor(() => expect(rowText("Now")).toContain("Recordings could not be saved."));
+  const stopped = {
+    ...live,
+    ended: Date.now(),
+    status: { kind: "stopped" },
+    unsaved: true,
+  } as const;
+  await act(async () => ipc.emit("recordings.changed", [stopped]));
+  await vi.waitFor(() => expect(rowText("Recorded")).toContain("Not saved yet. Trying again."));
+  expect(rowText("Recorded")).not.toContain("could not be saved");
 });
 
 it("keeps saying why a Stop was refused while the recording goes on", async () => {
