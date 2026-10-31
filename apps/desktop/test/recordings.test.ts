@@ -454,6 +454,33 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect((await recordings.connections(subscriptionId)).uses).toEqual([]);
   });
 
+  it("lists a paused recording whose time ran out as not saved while its end can't be written", async () => {
+    let asked = 0;
+    const { dataDir, channel, recordings } = await connected({
+      streams: (_source, out) => {
+        asked++;
+        // The first answer breaks off; every later one is refused, so it stays paused.
+        if (asked === 1) out.end(fixture("h264-aac.mpegts"));
+        else out.destroy();
+      },
+    });
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 2000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    await until(recordings.list, ([first]) => first?.status.kind === "paused");
+    const manifest = join(dataDir, "recordings", "recordings.json");
+    await rename(manifest, `${manifest}.saved`);
+    await mkdir(manifest);
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+    await recordings.check();
+    const [ended] = await recordings.list();
+    expect(ended).toMatchObject({ status: { kind: "partial", cut: "stream" }, unsaved: true });
+
+    await rm(manifest, { recursive: true });
+    await rename(`${manifest}.saved`, manifest);
+    await recordings.check();
+    expect((await recordings.list())[0]?.unsaved).toBeUndefined();
+  });
+
   it("pauses as the computer sleeps and records the rest after it wakes", async () => {
     const { dataDir, channel, recordings, provider } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});

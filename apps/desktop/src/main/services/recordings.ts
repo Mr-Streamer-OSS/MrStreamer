@@ -404,14 +404,19 @@ function make(deps: RecordingsDeps) {
         }),
       ),
     );
-    /** Saves, leaving what couldn't be written for the next check to write again. */
-    const saveOrLater = save.pipe(
-      Effect.catch(() =>
-        Effect.sync(() => {
-          unsaved.recordings = true;
-        }),
-      ),
-    );
+    /**
+     * Saves how the recordings `ended` ended, leaving what couldn't be written for the next check
+     * to write again, and listed as not saved yet meanwhile.
+     */
+    const saveEnds = (ended: readonly string[]) =>
+      save.pipe(
+        Effect.catch(() =>
+          Effect.sync(() => {
+            unsaved.recordings = true;
+            for (const id of ended) unsavedEnds.add(id);
+          }),
+        ),
+      );
 
     /** Ended recordings whose file was gone when last looked for: on each read of the list. */
     const missing = new Set<string>();
@@ -448,6 +453,13 @@ function make(deps: RecordingsDeps) {
         .toSorted((a, b) => b.start - a.start),
     );
     const publish = Effect.flatMap(shown, (list) => PubSub.publish(changes, list));
+    /** Looks for gone files again, telling the window when that changed what it lists. */
+    const lookAgain = Effect.gen(function* () {
+      const gone = () => [...missing].toSorted().join();
+      const before = gone();
+      yield* look;
+      if (gone() !== before) yield* publish;
+    });
     let pending: NodeJS.Timeout | null = null;
     const grew = () => {
       pending ??= setTimeout(() => {
@@ -510,7 +522,11 @@ function make(deps: RecordingsDeps) {
     const remeasure = (record: StoredRecording) => measured.delete(placeOf(record));
     /** Whether a recording may start or go on in `folder`, as measured now. */
     const roomIn = (folder: string) =>
-      Effect.promise(() => measure(folder).then((known) => roomWith(folder, known)));
+      Effect.andThen(
+        // Files gone since the list was read take no space; the list says so too.
+        storage.space === null ? Effect.void : lookAgain,
+        Effect.promise(() => measure(folder).then((known) => roomWith(folder, known))),
+      );
 
     const limitOf = (subscriptionId: string) =>
       Effect.map(subscriptions.list, (list) => {
@@ -690,11 +706,13 @@ function make(deps: RecordingsDeps) {
             bytes: 0,
             status: { kind: "recording" },
           };
-        // Stopped since it was asked to go on: it doesn't.
-        if (resumes && (stopping.has(id) || !isLive(record)))
+        // Stopped since it was asked to go on: it doesn't, and lets its connection go.
+        if (resumes && (stopping.has(id) || !isLive(record))) {
+          held.release();
           return yield* new Failed({
             error: { kind: "stream", failure: { kind: "network", detail: t("Stopped.") } },
           });
+        }
         const opening = (
           resumes
             ? Promise.resolve()
@@ -815,7 +833,8 @@ function make(deps: RecordingsDeps) {
         } = {},
     ) =>
       Effect.suspend(() => {
-        if (closing)
+        // Nothing starts by itself as the computer sleeps, or as the app closes.
+        if (closing || (asleep !== null && (options.resumes || options.scheduled)))
           return Effect.fail(
             new Failed({
               error: { kind: "stream", failure: { kind: "network", detail: t("Stopped.") } },
@@ -871,7 +890,7 @@ function make(deps: RecordingsDeps) {
         if (paused.length === 0) return Effect.void;
         const now = Date.now();
         for (const record of paused) records.set(record.id, finalOf(record, now, as));
-        return Effect.andThen(saveOrLater, publish);
+        return Effect.andThen(saveEnds(paused.map((each) => each.id)), publish);
       });
     yield* Effect.addFinalizer(() =>
       Effect.andThen(
@@ -1182,16 +1201,22 @@ function make(deps: RecordingsDeps) {
                   (each) => each.start <= at && at < each.stop,
                 )
               : undefined;
-          // Taken out meanwhile, as with its subscription, it starts nothing.
+          // Taken out meanwhile, as with its subscription, it starts nothing; asleep meanwhile, it
+          // starts once the computer wakes.
           if (!schedules.has(schedule.id)) return null;
+          if (asleep !== null) return "asleep" as const;
           return yield* start(plan.channel, occurrence.stop, {
             scheduled: scheduledOf(schedule, occurrence, late),
             title: listed?.title ?? plan.title,
           });
         }).pipe(
           Effect.match({
-            onSuccess: (answer) =>
-              answer === null || answer.kind === "started" ? why.delete(key) : why.set(key, "busy"),
+            onSuccess: (answer) => {
+              if (answer === "asleep") tried.delete(key);
+              if (answer === null || answer === "asleep" || answer.kind === "started")
+                why.delete(key);
+              else why.set(key, "busy");
+            },
             // This computer's when unexpected, as a file it couldn't write; else the stream's,
             // a lost login included.
             onFailure: ({ error }) => why.set(key, error.kind === "unexpected" ? "disk" : "stream"),
@@ -1264,7 +1289,7 @@ function make(deps: RecordingsDeps) {
     const resumeDue = (now: number) =>
       Effect.gen(function* () {
         let paused = false;
-        let over = false;
+        const over: string[] = [];
         for (const record of records.values()) {
           if (!isLive(record) || active.has(record.id)) continue;
           if (
@@ -1277,7 +1302,7 @@ function make(deps: RecordingsDeps) {
           if (record.stop <= now) {
             records.set(record.id, finalOf(record, now));
             resumeTried.delete(record.id);
-            over = true;
+            over.push(record.id);
             continue;
           }
           paused = true;
@@ -1287,8 +1312,8 @@ function make(deps: RecordingsDeps) {
           resumeTried.set(record.id, now);
           resumeRecording(record);
         }
-        if (over) {
-          yield* saveOrLater;
+        if (over.length > 0) {
+          yield* saveEnds(over);
           yield* publish;
         }
         return paused;
