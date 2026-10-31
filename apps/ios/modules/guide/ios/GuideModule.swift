@@ -45,5 +45,13 @@ public final class GuideModule: Module {
       guard let owner = self.owner else { promise.resolve(["kind": "failed", "error": "unavailable"]); return }
       owner.queryAsync(lease, generation, job, ids, at, mode, from, until, after) { promise.resolve($0) }
     }
+    AsyncFunction("current") { (lease: String, generation: String, job: String, at: Double, promise: Promise) in
+      guard let owner = self.owner else { promise.resolve(["kind": "failed", "error": "unavailable"]); return }
+      owner.currentAsync(lease, generation, job, at) { promise.resolve($0) }
+    }
+    AsyncFunction("search") { (lease: String, generation: String, job: String, ids: [String], words: [String], at: Double, limit: Int, promise: Promise) in
+      guard let owner = self.owner else { promise.resolve(["kind": "failed", "error": "unavailable"]); return }
+      owner.searchAsync(lease, generation, job, ids, words, at, limit) { promise.resolve($0) }
+    }
   }
 }
