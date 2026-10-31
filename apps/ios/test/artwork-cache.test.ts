@@ -478,20 +478,21 @@ describe("pictures whose address carries a login", () => {
   });
 
   it("keep a playlist link's short uncertain value out of the index, however an address spells it", async () => {
-    app.signIn("a", 1, ["", ""], ["k7"]);
+    // Punctuation keeps this short canary out of random artwork filenames.
+    app.signIn("a", 1, ["", ""], ["k7!"]);
     const carrying = [
-      at("/logo/signed.png", "?sig=k7"),
-      at("/k7/logo.png"),
-      at("/logo/encoded.png", "?s=%6B7"),
-      at("/logo/joined.png", "?s=guest%7Ck7"),
+      at("/logo/signed.png", "?sig=k7!"),
+      at("/k7!/logo.png"),
+      at("/logo/encoded.png", "?s=%6B7%21"),
+      at("/logo/joined.png", "?s=guest%7Ck7%21"),
     ];
     app.logos([...carrying, at("/logo/public.png")]);
     await settled(() => expect(app.shown().filter(isFile)).toHaveLength(5));
     await vi.advanceTimersByTimeAsync(5_500);
     const index = readFileSync(join(kept, "index.json"), "utf8");
     expect(index).toContain("/logo/public.png");
-    expect(index).not.toMatch(/k7|%6B7/);
-    for (const { path } of stored()) expect(path).not.toContain("k7");
+    expect(index).not.toMatch(/k7!|%6B7%21/);
+    for (const { path } of stored()) expect(path).not.toContain("k7!");
   });
 
   it("go as soon as their login is replaced, and aren't asked for again", async () => {
