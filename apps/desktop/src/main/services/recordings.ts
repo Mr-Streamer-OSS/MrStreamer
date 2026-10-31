@@ -814,20 +814,20 @@ function make(deps: RecordingsDeps) {
         const stoppedFailure = new Failed({
           error: { kind: "stream", failure: { kind: "network", detail: t("Stopped.") } },
         });
+        const notThere = new Failed({
+          error: {
+            kind: "unexpected",
+            detail: t(
+              "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
+            ),
+          },
+        });
         // Stopped since it was asked to go on: it asks the provider nothing.
         if (stopped()) return yield* stoppedFailure;
         // A failed start whose mark couldn't be read as the app started, as on a drive away then.
         if (resumes) {
           const failed = yield* failedStart(resumes);
-          if (failed === null)
-            return yield* new Failed({
-              error: {
-                kind: "unexpected",
-                detail: t(
-                  "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
-                ),
-              },
-            });
+          if (failed === null) return yield* notThere;
           if (failed) {
             forgetStart(resumes);
             yield* publish;
@@ -839,14 +839,6 @@ function make(deps: RecordingsDeps) {
         // plugged in, is never made anew, or written into on another disk in its place (see
         // CHOSEN).
         const folder = resumes ? placeOf(resumes) : (storage.folder ?? root);
-        const notThere = new Failed({
-          error: {
-            kind: "unexpected",
-            detail: t(
-              "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
-            ),
-          },
-        });
         if (!(yield* Effect.promise(() => isThere(folder)))) return yield* notThere;
         // A disk without room records nothing, asks the provider nothing and holds no connection
         // for it.
