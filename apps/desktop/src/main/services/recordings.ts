@@ -12,11 +12,13 @@
 // This service is the one owner of recordings. Their records are in recordings.json
 // (../recordings/store.ts), each file in a folder of its own, named for its programme
 // (`recordingFileName`), beside it or in the folder the viewer chose (storage.json). A record is
-// written once capture has the stream's program table on disk, and again with how it ended, only
-// after its provider request ended and its file closed: the list never claims more than the file
-// holds. A record still recording as the app starts is one the app didn't see end, as after a
-// crash: it goes on, from a gap since its file was last written, or, its time over, counts as cut
-// short by the quit. A recording's folder a crash left before its record was written goes then.
+// written once its connection is held, before its folder is made, and listed once capture has the
+// stream's program table on disk; it is written again with how it ended, only after its provider
+// request ended and its file closed: the list never claims more than the file holds. A record still
+// recording as the app starts is one the app didn't see end, as after a crash: it goes on, from a
+// gap since its file was last written, or, its time over, counts as cut short by the quit. A
+// recording's folder left without its record, as an older version's crash could leave one as it
+// started, goes then.
 //
 // Capture takes one of its subscription's connections through PlaybackCoordination, which
 // admits it only while fewer than the account's limit are held here, and keeps it until it ends:
@@ -333,6 +335,12 @@ function make(deps: RecordingsDeps) {
           }),
         );
     const records = new Map<string, StoredRecording>();
+    /**
+     * New recordings still starting, written to recordings.json from before they capture, so a
+     * crash meanwhile leaves one that goes on when the app runs again. Nothing else here sees them
+     * until they capture; a start that doesn't takes its own out again.
+     */
+    const beginning = new Map<string, StoredRecording>();
     const active = new Map<string, Active>();
     /**
      * Captures still starting, by subscription, which the app's close and a removal stop too, and
@@ -405,7 +413,7 @@ function make(deps: RecordingsDeps) {
             ...(!open && { gaps: [...(record.gaps ?? []), { from: last, to: null, why: "away" }] }),
           });
       }
-      // A recording's folder whose record was never written, as a crash leaves one as it starts:
+      // A recording's folder whose record was never written, as an older version's crash left one:
       // only once recordings.json is there to say so, and in a chosen folder only one it marked.
       const listed = yield* Effect.promise(() =>
         stat(path).then(
@@ -445,7 +453,7 @@ function make(deps: RecordingsDeps) {
     const quickEnds = new Map<string, number>();
     const save = writing(
       Effect.tryPromise({
-        try: () => writeRecordings(path, [...records.values()]),
+        try: () => writeRecordings(path, [...records.values(), ...beginning.values()]),
         catch: () =>
           new Failed({
             error: { kind: "unexpected", detail: t("Recordings could not be saved.") },
@@ -474,6 +482,13 @@ function make(deps: RecordingsDeps) {
           }),
         ),
       );
+
+    /** Takes a start's record out of recordings.json, now or at the next check. */
+    const unpend = (id: string) =>
+      Effect.suspend(() => {
+        beginning.delete(id);
+        return save.pipe(Effect.catch(() => Effect.sync(() => (unsaved.recordings = true))));
+      });
 
     /** Ended recordings whose file was gone when last looked for: on each read of the list. */
     const missing = new Set<string>();
@@ -797,6 +812,18 @@ function make(deps: RecordingsDeps) {
           held.release();
           return yield* stoppedFailure;
         }
+        if (!resumes) {
+          beginning.set(id, {
+            ...record,
+            ...(options.variants?.length && { variants: options.variants }),
+          });
+          const kept = yield* Effect.result(save);
+          if (kept._tag === "Failure") {
+            held.release();
+            yield* unpend(id);
+            return yield* kept.failure;
+          }
+        }
         // Its own folder is made, or made again when it went while the recording paused.
         const opening = mkdir(folderOf(record), { recursive: true })
           .then(() =>
@@ -846,7 +873,7 @@ function make(deps: RecordingsDeps) {
               );
               held.release();
               if (!resumes) await rm(folderOf(record), { recursive: true, force: true });
-            }),
+            }).pipe(Effect.andThen(resumes ? Effect.void : unpend(id))),
           ),
         );
         const { promise: settled, resolve } = Promise.withResolvers<Failed | null>();
@@ -873,6 +900,7 @@ function make(deps: RecordingsDeps) {
             }
           : { ...record, variants: [streams[capture.source]!.id] };
         records.set(id, started);
+        beginning.delete(id);
         active.set(id, live);
         remeasure(started);
         settle();
@@ -883,19 +911,8 @@ function make(deps: RecordingsDeps) {
           })
           .then(resolve, () => resolve(null));
         const written = yield* Effect.result(save);
-        if (written._tag === "Failure" && resumes) unsaved.recordings = true;
-        else if (written._tag === "Failure") {
-          // Without its record nothing would say it exists: it stops, and its file goes.
-          live.asked = "stopped";
-          controller.abort();
-          yield* Effect.promise(() => settled);
-          records.delete(id);
-          // How it ended may have been written down meanwhile.
-          yield* Effect.ignore(save);
-          yield* Effect.promise(() => rm(folderOf(record), { recursive: true, force: true }));
-          yield* publish;
-          return yield* written.failure;
-        }
+        // Its record as it was kept before it captured says it records meanwhile.
+        if (written._tag === "Failure") unsaved.recordings = true;
         yield* publish;
         // What the schedules say of the connections changed.
         yield* wake;

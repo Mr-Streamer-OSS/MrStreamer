@@ -4,7 +4,17 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import type { Recording, RecordingPlan } from "@mrstreamer/contracts/recordings";
@@ -116,6 +126,17 @@ async function fileOf(dataDir: string, recording: Recording) {
   const name = (await readdir(folder)).find((each) => each.endsWith(".ts"));
   if (!name) throw new Error("No file");
   return { name, path: join(folder, name), size: (await stat(join(folder, name))).size };
+}
+
+/** Recording folders, and records in recordings.json, a failed start would leave behind. */
+async function leftBehind(dataDir: string) {
+  const root = join(dataDir, "recordings");
+  const folders = (await readdir(root).catch(() => [])).filter(
+    (name) => name !== "recordings.json",
+  );
+  const kept = await readFile(join(root, "recordings.json"), "utf8").catch(() => null);
+  const records = kept ? (JSON.parse(kept) as { recordings: unknown[] }).recordings : [];
+  return [...folders, ...records];
 }
 
 /** The codecs of the file's tracks, in its order. */
@@ -903,7 +924,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     });
     expect(await recordings.list()).toEqual([]);
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: [] });
-    expect(await readdir(join(dataDir, "recordings")).catch(() => [])).toEqual([]);
+    expect(await leftBehind(dataDir)).toEqual([]);
   });
 
   it("keeps raw transport messages out of a recording's start failure", async () => {
@@ -930,7 +951,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await allClosed(provider)).toBe(true);
     expect((await recordings.connections(subscriptionId)).uses).toEqual([]);
     expect(await recordings.list()).toEqual([]);
-    expect(await readdir(join(dataDir, "recordings")).catch(() => [])).toEqual([]);
+    expect(await leftBehind(dataDir)).toEqual([]);
   }, 20_000);
 
   it("goes on to the channel's next stream when one has no program, from the file's start", async () => {
@@ -1094,6 +1115,46 @@ describe.skipIf(!hasTools)("recordings", () => {
       });
     }
     expect(provider.streamRequests()).toBe(0);
+  });
+
+  it("goes on after a crash that came as it started, before it captured anything", async () => {
+    // The first request answers nothing, so the start waits for its program table; later ones
+    // send the stream and stay open.
+    let asked = 0;
+    const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
+      streams: (_source, out) => {
+        asked++;
+        if (asked > 1) out.write(fixture("h264-aac.mpegts"));
+      },
+    });
+    const stop = Date.now() + 60_000;
+    recordings.start(channel(TRACKS), stop, {}).catch(() => {});
+    await until(
+      async () => provider.streamRequests(),
+      (requests) => requests > 0,
+    );
+    // What a crash would leave on disk now, while the start still waits.
+    const crashed = await tempDir();
+    await cp(dataDir, crashed, { recursive: true });
+    await quit();
+
+    const again = await app(crashed);
+    onTestFinished(again.quit);
+    await again.library.refresh(subscriptionId);
+    const requests = provider.streamRequests();
+    await again.recordings.check();
+    const [going] = await until(
+      again.recordings.list,
+      ([first]) => first?.status.kind === "recording" && first.bytes > 0,
+    );
+    expect(provider.streamRequests()).toBeGreaterThan(requests);
+    // Owed from the start it was asked for: what it missed is a gap, not a new recording.
+    expect(going).toMatchObject({
+      stop,
+      status: { kind: "recording" },
+      gaps: [{ from: expect.any(Number), to: expect.any(Number), why: "away" }],
+    });
+    await again.recordings.stop(going!.id);
   });
 
   it("reads one it never saw end as cut by the quit once its time is over, else as paused since its file was written", async () => {
