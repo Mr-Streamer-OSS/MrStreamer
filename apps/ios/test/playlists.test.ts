@@ -17,11 +17,23 @@ const memory = vi.hoisted(() => ({
   files: new Map<string, string>(),
   keychain: new Map<string, string>(),
   full: new Set<string>(),
+  /** Paths whose deletion the disk refuses while they start with this. */
+  undeletable: null as string | null,
 }));
 
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.2.0" } } }));
 vi.mock("expo-video", () => ({ createVideoPlayer: () => nativePlayer(() => {}) }));
-vi.mock("expo-file-system", () => memoryFiles(memory));
+vi.mock("expo-file-system", () => {
+  const files = memoryFiles(memory);
+  class File extends files.File {
+    override delete() {
+      if (memory.undeletable && this.path.startsWith(memory.undeletable))
+        throw new Error("The disk refused");
+      super.delete();
+    }
+  }
+  return { ...files, File };
+});
 vi.mock("expo-secure-store", () => keychain(() => memory.keychain));
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => {} }));
 
@@ -112,6 +124,7 @@ beforeEach(() => {
   memory.files.clear();
   memory.keychain.clear();
   memory.full.clear();
+  memory.undeletable = null;
   host.fail(null);
   host.serve(MIXED(host.origin));
 });
@@ -585,6 +598,46 @@ describe("mapping a playlist's groups", () => {
     for (const [path, text] of memory.files)
       for (const secret of [TOKEN, "second-0ne", "viewer-7"])
         expect(text, path).not.toContain(secret);
+  });
+
+  it("keeps its saved lists for a launch offline when the mapping can't be written", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    await until(() => memory.files.has(`/cache/catalogues/${id}.live.json`), "the saved channels");
+    const link = memory.keychain.get(`s.${id}`)!;
+    memory.keychain.delete(`s.${id}`);
+    memory.full.add("subscriptions.json");
+    await expect(
+      app.mapPlaylist(id, groupId(await app.playlistReport(id), "Shows"), "skip"),
+    ).rejects.toThrow();
+    memory.full.clear();
+    expect(registry().playlists[0].mapping).toBeUndefined();
+    expect(member(app, id)).toMatchObject({ needsSecret: false });
+    expect(channelNames(app)).toHaveLength(6);
+
+    memory.keychain.set(`s.${id}`, link);
+    host.fail(503);
+    const again = await launch();
+    await until(() => channelNames(again).length === 6, "the saved channels offline");
+  });
+
+  it("never shows lists saved under the mapping before, though the disk refused their deletion", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    await until(() => memory.files.has(`/cache/catalogues/${id}.live.json`), "the saved channels");
+    memory.undeletable = "/cache/";
+    host.fail(503);
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Shows"), "skip");
+    expect(registry().playlists[0].mapping).toBeDefined();
+    await until(() => member(app, id)?.live.kind === "failed", "the failed reload");
+    expect(memory.files.has(`/cache/catalogues/${id}.live.json`)).toBe(true);
+
+    let again = await launch();
+    await until(() => member(again, id)?.live.kind === "failed", "the reload offline");
+    expect(channelNames(again)).toEqual([]);
+    host.fail(null);
+    again = await launch();
+    await until(() => channelNames(again).length === 3, "Live without the skipped group");
   });
 
   it("refuses a group the playlist no longer lists, changing nothing", async () => {

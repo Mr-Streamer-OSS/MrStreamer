@@ -39,6 +39,10 @@ import {
 // shows and writes nothing, and leaves the file to the deletion that follows it in the queue.
 // A write goes to a file beside the copy, then takes its place; on iOS that move deletes the copy
 // first, so an app stopped in between leaves only the new file, which a read takes once it checks.
+// A playlist's lists depend on its mapping of groups: each copy names the mapping it was made
+// under (`mapping`), and a read under another doesn't check out, so a copy from before a change
+// never shows after it, wherever the change stopped. A copy made under none names none, as copies
+// before playlists did.
 
 /** One subscription's list, with when its provider gave it, epoch milliseconds. */
 export type Saved =
@@ -112,6 +116,7 @@ const Head = {
   version: `${VERSION}`,
   subscriptionId: "string",
   fetchedAt: "number",
+  "mapping?": "string",
 } as const;
 /** A list as the envelope checks it: an array within the row bound. `rows` checks each row. */
 const List = lazy(() => type("unknown[]").atMostLength(ROWS));
@@ -152,19 +157,27 @@ function* rows<R>(
 }
 
 /**
- * `json` as `id`'s saved `kind`, or "invalid": its envelope, its age, then every row of every list.
- * Nothing of it is answered until all have checked.
+ * `json` as `id`'s saved `kind` made under `mapping`, or "invalid": its envelope, its age, then
+ * every row of every list. Nothing of it is answered until all have checked.
  */
-function* checked(json: unknown, id: string, kind: SavedKind): Steps<Saved | "invalid"> {
-  const fresh = (fetchedAt: number) => {
-    const age = Date.now() - fetchedAt;
-    return age <= MAX_AGE && age >= -MAX_AHEAD;
+function* checked(
+  json: unknown,
+  id: string,
+  kind: SavedKind,
+  mapping: string | null,
+): Steps<Saved | "invalid"> {
+  const stands = (head: { subscriptionId: string; fetchedAt: number; mapping?: string }) => {
+    const age = Date.now() - head.fetchedAt;
+    return (
+      head.subscriptionId === id &&
+      (head.mapping ?? null) === mapping &&
+      age <= MAX_AGE &&
+      age >= -MAX_AHEAD
+    );
   };
   if (kind === "live") {
     const head = Envelopes().live(json);
-    if (head instanceof type.errors || head.subscriptionId !== id || !fresh(head.fetchedAt)) {
-      return "invalid";
-    }
+    if (head instanceof type.errors || !stands(head)) return "invalid";
     const categories = yield* rows(head.catalogue.categories, Category());
     if (!categories) return "invalid";
     const channels = yield* rows(head.catalogue.channels, Channel());
@@ -172,9 +185,7 @@ function* checked(json: unknown, id: string, kind: SavedKind): Steps<Saved | "in
     return { kind, catalogue: { categories, channels }, fetchedAt: head.fetchedAt };
   }
   const head = Envelopes().titles(json);
-  if (head instanceof type.errors || head.subscriptionId !== id || !fresh(head.fetchedAt)) {
-    return "invalid";
-  }
+  if (head instanceof type.errors || !stands(head)) return "invalid";
   const movieCategories = yield* rows(head.catalogue.movieCategories, Category());
   if (!movieCategories) return "invalid";
   const movies = yield* rows(head.catalogue.movies, Title());
@@ -208,14 +219,15 @@ function discard(file: File) {
 }
 
 /**
- * The file's list if it reads whole and checks out as `id`'s `kind`; "none" when there is none or
- * it doesn't, which deletes it. "stopped" when `wanted` failed while its rows were checked: the
+ * The file's list if it reads whole and checks out as `id`'s `kind` under `mapping`; "none" when
+ * there is none or it doesn't, which deletes it. "stopped" when `wanted` failed while its rows were checked: the
  * file is left as it is, for the deletion queued behind.
  */
 async function load(
   file: File,
   id: string,
   kind: SavedKind,
+  mapping: string | null,
   wanted: () => boolean,
 ): Promise<Saved | "none" | "stopped"> {
   if (!file.exists) return "none";
@@ -225,7 +237,7 @@ async function load(
     // the rows were checked at once; the text; one parse; then the envelope and the rows.
     for (const schema of [Envelopes, Category, Channel, Title]) schema();
     const json: unknown = JSON.parse(await file.text());
-    const saved = await inTasks(checked(json, id, kind), wanted);
+    const saved = await inTasks(checked(json, id, kind, mapping), wanted);
     if (saved === null) return "stopped";
     if (saved === "invalid") throw new TypeError();
     return saved;
@@ -236,21 +248,26 @@ async function load(
 }
 
 /**
- * `id`'s saved `kind`, or null when there is none that checks out. A write left halfway takes the
- * copy's place while `stands` holds, as the app was stopped before it could; every other file of
- * the list that doesn't check out is deleted. Null too, leaving the files, once `stands` fails
- * while the rows are checked.
+ * `id`'s saved `kind` made under `mapping`, or null when there is none that checks out. A write
+ * left halfway takes the copy's place while `stands` holds, as the app was stopped before it could;
+ * every other file of the list that doesn't check out is deleted. Null too, leaving the files, once
+ * `stands` fails while the rows are checked.
  */
-export function readList(id: string, kind: SavedKind, stands: () => boolean) {
+export function readList(
+  id: string,
+  kind: SavedKind,
+  mapping: string | null,
+  stands: () => boolean,
+) {
   return queued(id, kind, null, async () => {
     const pending = pendingOf(id, kind);
-    const kept = await load(fileOf(id, kind), id, kind, stands);
+    const kept = await load(fileOf(id, kind), id, kind, mapping, stands);
     if (kept === "stopped") return null;
     if (kept !== "none") {
       discard(pending);
       return kept;
     }
-    const left = await load(pending, id, kind, stands);
+    const left = await load(pending, id, kind, mapping, stands);
     if (left === "stopped") return null;
     if (left === "none" || !stands()) {
       discard(pending);
@@ -264,22 +281,23 @@ export function readList(id: string, kind: SavedKind, stands: () => boolean) {
 }
 
 /**
- * Saves `saved` as `id`'s copy of its list, while `stands` holds: checked between the slices that
- * copy its rows, before the write, while it waits on the disk, and once the copy is in place,
- * which goes again when it no longer holds.
+ * Saves `saved` as `id`'s copy of its list made under `mapping`, while `stands` holds: checked
+ * between the slices that copy its rows, before the write, while it waits on the disk, and once the
+ * copy is in place, which goes again when it no longer holds.
  * `login` is what signs the subscription in, kept out of the copy. Never rejects.
  */
 export function writeList(
   id: string,
   saved: Saved,
   login: SourceLogin,
+  mapping: string | null,
   stands: () => boolean,
 ): Promise<void> {
   const { kind } = saved;
   return queued(id, kind, undefined, async () => {
     if (!stands()) return;
     // Stopped once `stands` fails, or not kept when the password is in the provider's text.
-    const text = await inTasks(textOf(id, saved, login), stands);
+    const text = await inTasks(textOf(id, saved, login, mapping), stands);
     if (text === null || text === false) return;
     folder().create({ intermediates: true, idempotent: true });
     const pending = pendingOf(id, kind);
@@ -374,7 +392,12 @@ function shed(keep: string | null, pending: boolean) {
  * the password or an uncertain value whole, as nothing then says what else of the login a row
  * carries; their numbers and field names aren't text.
  */
-function* textOf(id: string, saved: Saved, login: SourceLogin): Steps<string | false> {
+function* textOf(
+  id: string,
+  saved: Saved,
+  login: SourceLogin,
+  mapping: string | null,
+): Steps<string | false> {
   const known = loginFrom(login);
   const art = (url: string | null) => safeUrl(url, known);
   let catalogue: LiveCatalogue | OnDemandCatalogue;
@@ -410,6 +433,7 @@ function* textOf(id: string, saved: Saved, login: SourceLogin): Steps<string | f
     version: VERSION,
     subscriptionId: id,
     fetchedAt: saved.fetchedAt,
+    ...(mapping === null ? {} : { mapping }),
     kind: saved.kind,
     catalogue,
   });

@@ -12,6 +12,7 @@ import { chosenVariant, streamsToPlay } from "@mrstreamer/core/catalogue/variant
 import { adultIn } from "@mrstreamer/core/adult";
 import { mapPlaylistGroup, playlistGroupId, safeName } from "@mrstreamer/core/playlist/import";
 import type { LiveCatalogue, OnDemandCatalogue, Provider } from "@mrstreamer/core/provider";
+import { sha256Hex } from "@mrstreamer/core/sha256";
 import { parseLogin, xtreamProvider, type ParsedLogin } from "@mrstreamer/core/xtream";
 import Constants from "expo-constants";
 import { dropLists, pruneLists, readList, writeList, type Saved } from "./catalogue-cache.ts";
@@ -478,7 +479,10 @@ const savableChanged = () => {
 
 /** Saves a list `source` gave, in a later task: a write that fails leaves the list as it shows. */
 function save(id: string, source: Source, saved: Saved) {
-  setTimeout(() => void writeList(id, saved, source, () => savable(id, source)), 0);
+  setTimeout(
+    () => void writeList(id, saved, source, mappingOf(source), () => savable(id, source)),
+    0,
+  );
 }
 
 /**
@@ -544,7 +548,7 @@ async function recoverLogin(id: string, before: Source | undefined): Promise<voi
  * The read ends (`readingSaved`) once the list shows, or once there is none to show.
  */
 async function fromSaved(id: string, kind: Kind, source: Source): Promise<boolean> {
-  const saved = await readList(id, kind, () => savable(id, source));
+  const saved = await readList(id, kind, mappingOf(source), () => savable(id, source));
   try {
     const member = members().find((each) => each.entry.id === id);
     if (currentSource(id) !== source || member?.[kind].kind !== "idle") return false;
@@ -681,11 +685,16 @@ function signIn(entry: SubscriptionEntry, secret: string, checked: AccountStatus
     uncertain: entry.kind === "xtream" ? [] : playlistUncertain(secret),
   };
   secrets.set(source, secret);
+  if (entry.kind === "m3u" && entry.mapping)
+    mappings.set(source, sha256Hex(JSON.stringify(entry.mapping)));
   signedSource(entry, source, checked);
 }
 
 /** Each signed-in Source's password or link, for a playlist's mapping to sign it in again. */
 const secrets = new WeakMap<Source, string>();
+/** What a mapped playlist's Source makes its lists under, as its saved copies name it. */
+const mappings = new WeakMap<Source, string>();
+const mappingOf = (source: Source) => mappings.get(source) ?? null;
 
 /** Every demo incarnation has its own Source, with no Keychain item or login values. */
 function signInDemo(checked: null | "again") {
@@ -1118,10 +1127,10 @@ export async function playlistReport(id: string, signal?: AbortSignal): Promise<
  * Imports one of a playlist's groups as `mode` from now on. The first pick keeps every other
  * group the playlist has now as Live; a group added later waits for a pick of its own. Saved, the
  * playlist signs in again and both its lists are read afresh, those shown before staying until
- * they land; its saved copies, made under the mapping before, go first. Rejects with nothing
- * changed when the group is gone, the playlist changed meanwhile, or the copies stay; when the
- * mapping can't be written after that, the copies are gone and the playlist signs in again as it
- * was.
+ * they land; its saved lists and details, made under the mapping before, then go. Rejects with
+ * nothing changed when the group is gone, the playlist changed meanwhile, or the mapping can't be
+ * written, its saved copies kept for a launch offline. Saved copies name their mapping
+ * (catalogue-cache.ts), so one whose deletion the disk refuses never shows under the new one.
  */
 export async function mapPlaylist(id: string, group: string, mode: PlaylistMode): Promise<void> {
   const { source, inspect } = signedPlaylist(id);
@@ -1141,18 +1150,21 @@ export async function mapPlaylist(id: string, group: string, mode: PlaylistMode)
         detail: "This playlist has more than 10,000 groups to map.",
       });
     const next: PlaylistEntry = { ...now.entry, mapping };
-    // The guide stays: it names channels, which a mapping doesn't rename.
-    await clearSaved(id, Promise.resolve(true));
+    commit({
+      ...registry,
+      subscriptions: registry.subscriptions.map((each) => (each === now.entry ? next : each)),
+    });
+    // Before the new login, which its own lists may then be saved under. The guide stays: it
+    // names channels, which a mapping doesn't rename.
+    const gone = dropSaved(id, Promise.resolve(true));
     try {
-      commit({
-        ...registry,
-        subscriptions: registry.subscriptions.map((each) => (each === now.entry ? next : each)),
-      });
       syncRoster();
       signIn(next, now.link, "again");
     } catch (cause) {
       await recoverLogin(id, source).catch(() => undefined);
       throw cause;
+    } finally {
+      await gone;
     }
   });
 }
