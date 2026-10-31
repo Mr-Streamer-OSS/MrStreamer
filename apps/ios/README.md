@@ -685,7 +685,9 @@ app's other Keychain items.
 The sheets where a downloaded subtitle is chosen or shown again say that Picture in Picture and
 AirPlay then show none. `test/online-subtitles.test.ts` covers the requests, failures, ZIP, host
 and redirect checks, keeping, a refused save, timing, the file's own tracks around a download, work
-a newer choice or an erasure outlives, and erasure, against a SubDL stand-in. Drawing, timing
+a newer choice or an erasure outlives, and erasure, against a SubDL stand-in;
+`test/online-subtitles-erasure.test.ts` erases through the account, `test/watch-subtitles.test.ts`
+drives Watch's sheets and cues, and `test/media-settings.test.ts` the Settings rows. Drawing, timing
 against the picture, VoiceOver and large text in Watch still need a native run.
 
 `scripts/build-ffmpeg.sh ios` builds the FFmpeg libraries a session links, before
