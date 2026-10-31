@@ -24,7 +24,7 @@ const preferences = await import("../src/media-preferences.ts");
 const SRT =
   "1\n00:00:01,000 --> 00:00:04,000\nHello there\n\n2\n00:00:05,000 --> 00:00:07,000\nGoodbye\n";
 const requests: URL[] = [];
-let answer: (url: URL) => Response;
+let answer: (url: URL) => Response | Promise<Response>;
 
 const searchReply = (tmdbId: number, kind: "movie" | "tv", subtitles: unknown[]) =>
   Response.json({ status: true, results: [{ tmdb_id: tmdbId, type: kind }], subtitles });
@@ -104,7 +104,14 @@ describe("searching SubDL", () => {
     const results = await online.findSubtitles(playing);
     expect(results).toEqual({
       kind: "found",
-      results: [{ id: "0", language: "en", release: "Movie.2001.1080p", hearingImpaired: true }],
+      results: [
+        {
+          id: expect.any(String),
+          language: "en",
+          release: "Movie.2001.1080p",
+          hearingImpaired: true,
+        },
+      ],
     });
     const search = requests.at(-1)!;
     expect(search.origin + search.pathname).toBe("https://api.subdl.com/api/v1/subtitles");
@@ -115,7 +122,6 @@ describe("searching SubDL", () => {
       type: "movie",
       languages: "NL,EN",
       subs_per_page: "30",
-      hi: "1",
       unpack: "1",
       client: "custom_integration",
     });
@@ -204,7 +210,16 @@ describe("searching SubDL", () => {
     const second = await openTitle();
     release();
     expect(await searching).toBeNull();
-    expect(await online.chooseSubtitle(second, "0")).toBeNull();
+    expect(await online.chooseSubtitle(second, "1.0")).toBeNull();
+    expect(online.shownSubtitle()).toBeNull();
+  });
+
+  it("chooses only from the latest search, whatever an older one numbered", async () => {
+    const playing = await openTitle();
+    const older = await online.findSubtitles(playing);
+    await online.findSubtitles(playing);
+    const id = older?.kind === "found" ? older.results[0]!.id : "";
+    expect(await online.chooseSubtitle(playing, id)).toBeNull();
     expect(online.shownSubtitle()).toBeNull();
   });
 });
@@ -329,6 +344,24 @@ describe("the file's own subtitles", () => {
     expect(online.showKeptSubtitle(again)).toBe(true);
     expect(online.shownSubtitle()?.title).toBe(again);
   });
+
+  it("chosen while a download runs end it, so it neither shows nor keeps", async () => {
+    const playing = await withTracks();
+    const found = await online.findSubtitles(playing);
+    const release = holdDownloads();
+    const choosing = online.chooseSubtitle(
+      playing,
+      found?.kind === "found" ? found.results[0]!.id : "",
+    );
+    await ((await trackChoices("subtitles")) ?? [])
+      .find((each) => each.label === "German")
+      ?.choose();
+    await vi.waitFor(async () => expect(await checked()).toEqual(["German"]));
+    release();
+    expect(await choosing).toBeNull();
+    expect(online.shownSubtitle()).toBeNull();
+    expect(online.keptSubtitle(playing)).toBeNull();
+  });
 });
 
 describe("privacy", () => {
@@ -346,8 +379,47 @@ describe("privacy", () => {
     online.eraseSubtitles("sub-1");
     expect(folder.list()).toHaveLength(0);
     expect(online.shownSubtitle()).toBeNull();
+
+    // A download under way, as for a copy that plays on without its provider, keeps nothing.
+    const found = await online.findSubtitles(playing);
+    const release = holdDownloads();
+    const choosing = online.chooseSubtitle(
+      playing,
+      found?.kind === "found" ? found.results[0]!.id : "",
+    );
+    online.eraseSubtitles("sub-1");
+    release();
+    expect(await choosing).toBeNull();
+    expect(folder.list()).toHaveLength(0);
   });
 });
+
+describe("a refused save", () => {
+  it("never comes back as accepted at the next play", async () => {
+    const playing = await openTitle();
+    await chooseFirst(playing);
+    // The disk takes the new file, deletes the old one, then refuses the move.
+    native.sync = (operation, path) => {
+      if (operation === "move-after-delete" && path.includes("online-subtitles"))
+        throw new Error("Disk full");
+    };
+    expect(online.retimeSubtitle(playing, { offset: 5, speed: 1 })).toBe(false);
+    expect(online.shownSubtitle()?.timing.offset).toBe(0);
+    native.sync = null;
+    await openTitle();
+    expect(online.shownSubtitle()?.timing.offset).not.toBe(5);
+  });
+});
+
+/** Holds SubDL's file answers until the returned function is called. */
+function holdDownloads() {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const answering = answer;
+  answer = (url) =>
+    url.hostname === "dl.subdl.com" ? held.then(() => answering(url)) : answering(url);
+  return release;
+}
 
 /** Plays the movie anew, as each tap of Play does: a play of its own. */
 async function openTitle() {

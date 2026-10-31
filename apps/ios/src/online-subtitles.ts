@@ -36,17 +36,19 @@ export type Found = { readonly kind: "found"; readonly results: readonly FoundSu
  * titles and English. Null when another play, search or download began meanwhile.
  */
 export function findSubtitles(title: SubtitleTitle): Promise<Found | null> {
+  found = null;
+  const search = ++searches;
   return forPlay<Found>(title, async (signal) => {
     const key = await subdlKey();
     if (signal.aborted) return null;
     if (!key) return { kind: "failed", reason: "not-configured" };
     const candidates = await subdlSearch(key, { ...title.query, languages: languages() }, signal);
     if (signal.aborted) return null;
-    found = { title, candidates };
+    found = { title, search, candidates };
     return {
       kind: "found",
       results: candidates.map(({ language, release, hearingImpaired }, i) => ({
-        id: String(i),
+        id: `${search}.${i}`,
         language,
         release,
         hearingImpaired,
@@ -64,7 +66,9 @@ export type Chosen =
  * change and shows it. Null when another play, search or download began meanwhile.
  */
 export async function chooseSubtitle(title: SubtitleTitle, id: string): Promise<Chosen | null> {
-  const candidate = found?.title === title ? found.candidates[Number(id)] : undefined;
+  const [search, index] = id.split(".").map(Number);
+  const candidate =
+    found?.title === title && found.search === search ? found.candidates[index ?? -1] : undefined;
   if (!candidate) return null;
   return forPlay<Chosen>(title, async (signal) => {
     const subtitle = await subdlDownload(candidate, signal);
@@ -77,9 +81,14 @@ export async function chooseSubtitle(title: SubtitleTitle, id: string): Promise<
 
 /** The search or download under way, which a newer one, or another play, ends. */
 let work: AbortController | null = null;
-/** The latest search's results, by their position, the id the sheet shows them under. */
-let found: { readonly title: SubtitleTitle; readonly candidates: readonly Candidate[] } | null =
-  null;
+/** Searches begun, which number their results' ids so one search's can't pick another's. */
+let searches = 0;
+/** The latest search's results, for its play: "<search>.<position>" is the id the sheet shows. */
+let found: {
+  readonly title: SubtitleTitle;
+  readonly search: number;
+  readonly candidates: readonly Candidate[];
+} | null = null;
 
 /**
  * Runs `task` for `title`'s play, ending the search or download under way. Null when it isn't
@@ -223,7 +232,6 @@ async function subdlSearch(
     type: kind,
     languages: query.languages.join(",").toUpperCase(),
     subs_per_page: "30",
-    hi: "1",
     unpack: "1",
     client: "custom_integration",
     ...(query.kind === "episode"
@@ -232,6 +240,9 @@ async function subdlSearch(
   }).toString();
   const timeout = AbortSignal.any([signal, AbortSignal.timeout(15_000)]);
   const response = await request(url, { headers: { Accept: "application/json" } }, timeout);
+  // An answer from where a redirect led, not SubDL's own API, isn't taken.
+  if (response.url && new URL(response.url).origin !== url.origin)
+    throw new SubtitleFailure("unavailable");
   const text = new TextDecoder("utf-8", { fatal: true }).decode(
     await body(response, JSON_LIMIT, timeout),
   );

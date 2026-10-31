@@ -97,8 +97,17 @@ export const onShownSubtitle = (listener: () => void): (() => void) => shown.sub
 
 /** The play subtitles are asked for now; null while no movie or episode plays. */
 let playing: SubtitleTitle | null = null;
-/** Aborted once another play begins, ending what was asked for this one. */
+/**
+ * Aborted once another play begins, or the viewer chose subtitles anew for this one, ending a
+ * search or download asked before.
+ */
 let play = new AbortController();
+
+/** Ends what was asked of the current play so far: a newer choice or an erasure stands. */
+function renew() {
+  play.abort();
+  play = new AbortController();
+}
 
 /**
  * A play begins, of `title` or of something without one, or nothing plays any more. What its
@@ -107,13 +116,15 @@ let play = new AbortController();
 export function playSubtitles(title: SubtitleTitle | null) {
   if (title === playing) return;
   playing = title;
-  play.abort();
-  play = new AbortController();
+  renew();
   const kept = title ? keptOf(title) : null;
   shown.set(title && kept?.shown ? shownOf(title, kept) : null);
 }
 
-/** The play `title` is of, while it stands: aborted once another begins. Null for another play. */
+/**
+ * The play `title` is of, while it stands: aborted once another begins or the viewer chooses its
+ * subtitles anew. Null for another play.
+ */
 export function playOf(title: SubtitleTitle): AbortSignal | null {
   return title === playing ? play.signal : null;
 }
@@ -133,16 +144,19 @@ export function showKeptSubtitle(title: SubtitleTitle): boolean {
   const kept = keptOf(title);
   if (!kept) return false;
   if (!kept.shown && !keep(title, { ...kept, shown: true })) return false;
+  renew();
   shown.set(shownOf(title, kept));
   return true;
 }
 
 /**
- * The viewer chose one of the file's own tracks, or Off, over the downloaded subtitle: it stays
- * kept, with its timing, but no longer shows by itself when the version plays again. Shown no more
- * now, also when the disk refuses to note that.
+ * The viewer chose one of the file's own tracks, or Off, for `title`'s play: a download under way
+ * ends, and the downloaded subtitle showing stays kept, with its timing, but no longer shows by
+ * itself when the version plays again. Shown no more now, also when the disk refuses to note that.
  */
 export function hideSubtitle(title: SubtitleTitle) {
+  if (title !== playing) return;
+  renew();
   if (shown.get()?.title !== title) return;
   const kept = keptOf(title);
   if (kept?.shown) keep(title, { ...kept, shown: false });
@@ -224,6 +238,13 @@ function keep(title: SubtitleTitle, kept: Kept): boolean {
     if (!folder.exists) folder.create();
     writeJson(nameOf(title), kept);
   } catch {
+    // A refused write can leave its proposal beside the file, which a read would take instead.
+    try {
+      const pending = new File(Paths.document, `${nameOf(title)}.next`);
+      if (pending.exists) pending.delete();
+    } catch {
+      // The disk refused that too.
+    }
     return false;
   }
   try {
@@ -243,6 +264,8 @@ function keep(title: SubtitleTitle, kept: Kept): boolean {
  * one stays, for the next launch to try again.
  */
 export function eraseSubtitles(id: string) {
+  // A download under way for a copy of it, which plays on without its provider, can't keep it again.
+  if (playing?.subscriptionId === id) renew();
   const folder = new Directory(Paths.document, FOLDER);
   if (!folder.exists) return;
   const prefix = `${encoded(id)}.`;

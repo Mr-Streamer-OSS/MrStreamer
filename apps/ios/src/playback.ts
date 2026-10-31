@@ -1079,9 +1079,8 @@ function chooseManually(resource: Resource, revision: number, selection: Observe
   if (!stands(resource)) return Promise.resolve();
   const choice = current!.choice;
   const group = selection.kind;
-  // A pick over a downloaded subtitle turns it off for this version, and isn't remembered.
+  // A pick over a downloaded subtitle isn't remembered.
   const downloaded = group === "subtitles" ? downloadedOver(choice) : undefined;
-  if (downloaded) hideSubtitle(downloaded);
   const state = resource[group];
   const op = ++state.op;
   state.pending = null;
@@ -1096,6 +1095,12 @@ function chooseManually(resource: Resource, revision: number, selection: Observe
       const result = await player().selectObservedTrackAsync(tracks, revision, selection);
       if (!stands(resource) || state.op !== op || result.kind !== "requested") return;
       dropped = false;
+      // The file's own subtitles, once requested, take the downloaded one's place for this
+      // version and end a download under way. Decided here, so the change isn't decided again.
+      if (group === "subtitles" && choice.item.subtitles) {
+        decidedOver = undefined;
+        hideSubtitle(choice.item.subtitles);
+      }
       state.authority = "manual";
       state.stale = 0;
       if (group === "audio") {
