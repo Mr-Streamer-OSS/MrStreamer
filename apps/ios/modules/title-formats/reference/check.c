@@ -6,9 +6,9 @@
 // refused again after the seek. streams.txt says which streams of the file each sound and
 // subtitle rendition carries. Each subtitle segment is then asked of a title just opened, as
 // after a seek: once with the rendition chosen before the seek, once after, and must hold the
-// same lines where the file's index lists its lines. It counts the separate runs of reading the
-// file asks for, which is how many requests a provider would see, and the bytes read before the
-// first segment is ready.
+// same lines, unless CHECK_UNCUED says the file's index leaves lines out. It counts the separate
+// runs of reading the file asks for, which is how many requests a provider would see, and the
+// bytes read before the first segment is ready.
 //
 //   check <file> <folder> [start-seconds [interrupt-after-reads]]
 #define _FILE_OFFSET_BITS 64
@@ -123,6 +123,10 @@ int main(int argc, char **argv) {
          (long long)file.bytes, detail);
   if (result != TITLE_HLS_OK) return result == TITLE_HLS_DIRECT ? 3 : 1;
   file.title = title;
+  TitleHlsUnshown unshown;
+  for (int i = 0; title_hls_unshown(title, i, &unshown); i++)
+    printf("unshown: %s %s%s\n", unshown.language ? unshown.language : "-",
+           unshown.format ? unshown.format : "-", unshown.forced ? " forced" : "");
   if (argc > 4) file.interrupt_after = file.reads + atoi(argv[4]);
   uint8_t *data, **made = NULL;
   size_t size, *sizes = NULL;
@@ -237,7 +241,9 @@ int main(int argc, char **argv) {
     }
   }
   printf("shuffled: %d differ, %d new runs for %d seeks\n", differ, file.runs - runs, segments);
-  int unlisted = 0;
+  // A file made with subtitle lines left out of its index, CHECK_UNCUED set, may show them only
+  // where a pass reads them: its fresh seeks are counted, not failed.
+  int uncued = getenv("CHECK_UNCUED") != NULL, unlisted = 0;
   for (int r = 1; r < count; r++) {
     if (renditions[r][0] != 's') continue;
     int track = atoi(renditions[r] + 1), listed = -1, apart[2] = {0}, many[2] = {0};
@@ -257,10 +263,10 @@ int main(int argc, char **argv) {
            "title, %d; index lists %d lines\n",
            renditions[r], apart[1], apart[0], segments, many[1] / segments, many[0] / segments,
            listed);
-    if (listed > 0) differ += apart[0] + apart[1];
-    else unlisted += apart[0] + apart[1];
+    if (uncued) unlisted += apart[0] + apart[1];
+    else differ += apart[0] + apart[1];
   }
-  if (unlisted) printf("%d fresh seeks differ where the index lists no lines\n", unlisted);
+  if (uncued) printf("%d fresh seeks differ in a file whose index leaves lines out\n", unlisted);
   status = differ ? 1 : 0;
 done:
   for (int i = 0; made && i < segments * count; i++) free(made[i]);

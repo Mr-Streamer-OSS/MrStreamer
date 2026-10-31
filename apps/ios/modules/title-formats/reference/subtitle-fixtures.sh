@@ -10,6 +10,12 @@
 #   lists every subtitle line with its length.
 # - subs-uncued.mkv: the same file with every subtitle line left out of its index, each entry
 #   overwritten by a Void element of its size, so nothing else moves.
+# - subs-reordered.mkv: the same with the regular and forced English tracks' entries in the other
+#   order, so streams aren't in the order of their track numbers.
+# - subs-zlib.mkv: the same with the forced English track marked as zlib-compressed, its lines
+#   left as they are. An ffmpeg with zlib can't read them, so verify.py doesn't check this one;
+#   its picture and sound are those of subs.mkv.
+# - subs-badcues.mkv: the same with the index's last field running past the end of the index.
 # Needs an ffmpeg with libx264 and its AAC encoder on PATH, as Ubuntu's and Homebrew's builds have.
 set -euo pipefail
 out=${1:?usage: subtitle-fixtures.sh <out-folder>}
@@ -82,34 +88,107 @@ ffmpeg -v error -y \
   -disposition:s:2 0 -disposition:s:3 0 -fflags +bitexact "$out/subs.mkv"
 
 # The subtitle tracks are the file's third to sixth.
-python3 -I - "$out/subs.mkv" "$out/subs-uncued.mkv" 3 4 5 6 <<'PY'
+python3 -I - "$out" <<'PY'
 import sys
-source, target, *tracks = sys.argv[1:]
-tracks = {int(t) for t in tracks}
-b = bytearray(open(source, "rb").read())
-def vint(o, keep=False):
+out = sys.argv[1]
+source = bytearray(open(f"{out}/subs.mkv", "rb").read())
+
+def vint(b, o, keep=False):
     n = 1
     while not b[o] & (0x80 >> (n - 1)): n += 1
     v = b[o] if keep else b[o] & (0xFF >> n)
     for i in range(1, n): v = v << 8 | b[o + i]
     return v, n
-def elements(o, e):
+
+def elements(b, o, e):
+    """(id, start, header length, data start, end) of each element from o to e."""
     while o < e:
-        i, n = vint(o, True); s, m = vint(o + n)
-        yield i, o, n, o + n + m, o + n + m + s; o = o + n + m + s
+        i, n = vint(b, o, True); s, m = vint(b, o + n)
+        yield i, o, n + m, o + n + m, o + n + m + s; o = o + n + m + s
+
+def segment(b):
+    return next(e for e in elements(b, 0, len(b)) if e[0] == 0x18538067)
+
+def top(b, wanted):
+    _, _, _, s, e = segment(b)
+    return next(x for x in elements(b, s, e) if x[0] == wanted)
+
+def entries(b):
+    _, _, _, s, e = top(b, 0x1654AE6B)
+    return [x for x in elements(b, s, e) if x[0] == 0xAE]
+
+def number(b, entry):
+    _, _, _, s, e = entry
+    return next(int.from_bytes(b[s2:e2], "big") for i, _, _, s2, e2 in elements(b, s, e) if i == 0xD7)
+
+# subs-uncued.mkv: every subtitle entry of the index overwritten by a Void element of its size.
+b = bytearray(source)
+_, _, _, s, e = top(b, 0x1C53BB6B)
 voided = 0
-for i, _, _, s, e in elements(0, len(b)):
-    if i != 0x18538067: continue
-    for i2, _, _, s2, e2 in elements(s, e):
-        if i2 != 0x1C53BB6B: continue
-        for i3, _, _, s3, e3 in elements(s2, e2):
-            for i4, at, n, s4, e4 in elements(s3, e3):
-                if i4 != 0xB7: continue
-                track = next(int.from_bytes(b[s5:e5], "big") for i5, _, _, s5, e5 in elements(s4, e4) if i5 == 0xF7)
-                if track in tracks:
-                    b[at] = 0xEC  # a Void element, its size as it was
-                    b[s4:e4] = bytes(e4 - s4)
-                    voided += 1
-open(target, "wb").write(b)
-print(f"{target}: {voided} subtitle index entries left out")
+for _, _, _, s3, e3 in elements(b, s, e):
+    for i4, at, _, s4, e4 in elements(b, s3, e3):
+        if i4 != 0xB7: continue
+        track = next(int.from_bytes(b[s5:e5], "big") for i5, _, _, s5, e5 in elements(b, s4, e4) if i5 == 0xF7)
+        if track in (3, 4, 5, 6):
+            b[at] = 0xEC  # a Void element, its size as it was
+            b[s4:e4] = bytes(e4 - s4)
+            voided += 1
+open(f"{out}/subs-uncued.mkv", "wb").write(b)
+print(f"subs-uncued.mkv: {voided} subtitle index entries left out")
+
+# subs-reordered.mkv: the regular and forced English tracks' entries swapped, numbers kept, so
+# the file's streams are no longer in the order of their track numbers.
+b = bytearray(source)
+three, four = (x for x in entries(b) if number(b, x) in (3, 4))
+b[three[1]:four[4]] = b[four[1]:four[4]] + b[three[1]:three[4]]
+open(f"{out}/subs-reordered.mkv", "wb").write(b)
+print("subs-reordered.mkv: tracks 4 and 3 in that order")
+
+# subs-zlib.mkv: the forced English track marked as zlib-compressed, which FFmpeg here passes on
+# as it is. The Void before the Tracks gives up the room, so nothing after them moves.
+b = bytearray(source)
+added = bytes.fromhex("6d808a" "624087" "503484" "42548100")
+four = next(x for x in entries(b) if number(b, x) == 4)
+_, at, header, s, e = four
+assert header == 9
+entry = b[at:at + 1] + (0x01 << 56 | (e - s + len(added))).to_bytes(8, "big") + b[s:e] + added
+_, tat, theader, ts, te = top(b, 0x1654AE6B)
+assert theader in (6, 12)
+size_length = theader - 4
+tracks_size = te - ts + len(added)
+tracks = b[tat:tat + 4] + ((1 << (7 * size_length)) | tracks_size).to_bytes(size_length, "big")
+tracks += b[ts:at] + entry + b[e:te]
+void = top(b, 0xEC)
+_, vat, vheader, vs, ve = void
+assert vheader == 9 and ve - vs >= len(added)
+shrunk = b"\xec" + (0x01 << 56 | (ve - vs - len(added))).to_bytes(8, "big") + bytes(ve - vs - len(added))
+assert ve <= tat
+b[vat:te] = shrunk + b[ve:tat] + tracks
+# The SeekHead's positions of what moved.
+_, _, _, ss, se = top(b, 0x114D9B74)
+seg = segment(b)[3]
+for i, _, _, s2, e2 in elements(b, ss, se):
+    if i != 0x4DBB: continue
+    fields = {k: (s3, e3) for k, _, _, s3, e3 in elements(b, s2, e2)}
+    s3, e3 = fields[0x53AC]
+    position = int.from_bytes(b[s3:e3], "big")
+    if vat - seg < position < te - seg:
+        b[s3:e3] = (position - len(added)).to_bytes(e3 - s3, "big")
+open(f"{out}/subs-zlib.mkv", "wb").write(b)
+print("subs-zlib.mkv: track 4 marked zlib-compressed")
+
+# subs-badcues.mkv: the index's last field says it is eight bytes long, past the end of the
+# Cues, as a damaged file might.
+b = bytearray(source)
+_, _, _, s, e = top(b, 0x1C53BB6B)
+last = None
+for _, _, _, s3, e3 in elements(b, s, e):
+    for i4, _, _, s4, e4 in elements(b, s3, e3):
+        if i4 == 0xB7:
+            last = list(elements(b, s4, e4))[-1]
+_, at, header, s5, e5 = last
+assert header == 2 and b[at + 1] == 0x80 | (e5 - s5)
+b[at + 1] = 0x88
+open(f"{out}/subs-badcues.mkv", "wb").write(b)
+print("subs-badcues.mkv: the index's last field runs past its end")
 PY

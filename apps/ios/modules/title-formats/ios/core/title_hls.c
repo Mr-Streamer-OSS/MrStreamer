@@ -44,7 +44,7 @@
 //   few frames may not decode fully.
 // - A text subtitle track is a WebVTT rendition cut at the picture's cuts. Every line read of it,
 //   in any segment's pass, after a seek too, is kept as cue text for the title's life (within
-//   CUE_BYTES_MOST); a segment holds each kept line on screen during it, so a line spanning
+//   TEXT_BYTES_MOST a track); a segment holds each kept line on screen during it, so a line spanning
 //   segments is in each, as HLS has it. The forced lines of a language are in its regular track's
 //   rendition too, which AVPlayer shows in place of the forced one once chosen.
 // - A file holds a line only where it begins, so a pass from a seek doesn't read the line on
@@ -52,9 +52,12 @@
 //   FFmpeg and mkvmerge write for every subtitle packet, says when each line begins, how long it
 //   lasts and in which cluster it is: those lines of a chosen rendition's segment that no read
 //   found are read from their clusters, RECALLS_MOST a segment and RECALL_BYTES_MOST past the
-//   picture's index entry before each. FFmpeg doesn't keep an index entry's length, so the index
-//   is read again here, from the file's SeekHead, once a rendition is chosen. A line the index
-//   leaves out shows only where a pass reads it.
+//   picture's index entry before each. FFmpeg keeps neither an index entry's length nor which
+//   track number is whose stream, so opening keeps the file's start, whose SeekHead says where
+//   the Cues are and whose Tracks number the streams, and the Cues are read again once a
+//   rendition is chosen. A line the index leaves out shows only where a pass reads it.
+// - A text track whose frames this FFmpeg can't decode, zlib or bzip2 compressed or encrypted, is
+//   named with the picture subtitles as one the stream doesn't carry.
 #include "title_hls.h"
 
 #include <libavcodec/avcodec.h>
@@ -112,8 +115,12 @@
 /** Text subtitle tracks served at most, and other subtitle tracks named as unshown at most. */
 #define TEXTS_MOST 16
 #define UNSHOWN_MOST 16
-/** Bytes of cue text a title keeps at most, every track together. */
-#define CUE_BYTES_MOST (16 * 1024 * 1024)
+/**
+ * Bytes of cue text a track keeps at most, and the largest packet read as a line. A track with
+ * more can't be shown: its segments are refused once chosen.
+ */
+#define TEXT_BYTES_MOST (4 * 1024 * 1024)
+#define LINE_BYTES_MOST (64 * 1024)
 /** How long a line shows whose packet doesn't say. Seconds. */
 #define UNTIMED_S 5.0
 /**
@@ -122,8 +129,8 @@
  */
 #define RECALLS_MOST 8
 #define RECALL_BYTES_MOST (8 * 1024 * 1024)
-/** How much of the file's start is read for its SeekHead. */
-#define HEAD_BYTES 65536
+/** How much of the file's start opening keeps, for its SeekHead and Tracks. */
+#define HEAD_BYTES (256 * 1024)
 /** Segments kept after they were made, every rendition of each. */
 #define KEPT 2
 #define IO_BUFFER 65536
@@ -176,8 +183,13 @@ typedef struct Listed {
 /** A text subtitle track served as a WebVTT rendition. */
 typedef struct Text {
   int stream;
+  /** Its track's number in the file, which the index names it by; -1 when not known. */
+  int64_t number;
   AVRational base;
   int forced;
+  /** Bytes of its kept lines; and whether a line went unkept for TEXT_BYTES_MOST. */
+  size_t bytes;
+  int overflow;
   /** Its rendition was asked for: AVPlayer shows it, or may. */
   int wanted;
   /** Kept lines, by `from`. */
@@ -185,7 +197,7 @@ typedef struct Text {
   int count, capacity;
   /** The lines the index lists, by `time`. */
   Listed *listed;
-  int listed_count;
+  int listed_count, listed_capacity;
 } Text;
 
 /** Every rendition of one segment; a sound rendition without data was refused for a gap. */
@@ -224,11 +236,14 @@ struct TitleHls {
   char *text;
   Text texts[TEXTS_MOST];
   int text_count;
-  /** The file's subtitle streams the stream doesn't carry. */
-  int unshown[UNSHOWN_MOST];
+  /** The file's subtitle streams the stream doesn't carry, and which of them are encoded. */
+  int unshown[UNSHOWN_MOST], unshown_encoded[UNSHOWN_MOST];
   int unshown_count;
-  /** Bytes of cue text kept, every track together. */
-  size_t cue_bytes;
+  /** The file's first HEAD_BYTES, as opening read them, until the tracks are chosen. */
+  uint8_t *head;
+  int64_t head_size;
+  /** Where the Segment's data starts, and where its Cues are, -1 when not known. */
+  int64_t segment, cues;
   /** A bit for each segment whose pass was made: every line stored from its cut on was read. */
   uint8_t *passed;
   /** Whether the index's lines were read: 0 not yet, 1 read, -1 there are none to read. */
@@ -252,6 +267,11 @@ static int read_packet(void *opaque, uint8_t *buffer, int size) {
   int read = title->source.read_at(title->source.opaque, title->position, buffer, size);
   if (read < 0) return atomic_load(&title->interrupted) ? AVERROR_EXIT : AVERROR(EIO);
   if (read == 0) return AVERROR_EOF;
+  if (title->head && title->position <= title->head_size && title->position < HEAD_BYTES) {
+    int64_t kept = FFMIN(read, HEAD_BYTES - title->position);
+    memcpy(title->head + title->position, buffer, (size_t)kept);
+    title->head_size = FFMAX(title->head_size, title->position + kept);
+  }
   title->position += read;
   if (title->budget > 0) title->budget -= read;
   return read;
@@ -1058,10 +1078,15 @@ static int by_cue(const Cue *a, int64_t from, int64_t to, const char *text) {
 
 /**
  * Keeps the line of a text track's packet, once: a line read again, after a seek or for the
- * index, is the same line. Lines past CUE_BYTES_MOST aren't kept.
+ * index, is the same line. A line past LINE_BYTES_MOST or the track's TEXT_BYTES_MOST isn't kept,
+ * and the track is marked as one that can't be shown.
  */
 static int keep_cue(TitleHls *title, Text *text, const AVPacket *packet) {
   if (packet->pts == AV_NOPTS_VALUE || !packet->data) return 0;
+  if (packet->size > LINE_BYTES_MOST) {
+    text->overflow = 1;
+    return 0;
+  }
   enum AVCodecID codec = title->input->streams[text->stream]->codecpar->codec_id;
   AVBPrint line, settings;
   av_bprint_init(&line, 0, AV_BPRINT_SIZE_UNLIMITED);
@@ -1081,13 +1106,17 @@ static int keep_cue(TitleHls *title, Text *text, const AVPacket *packet) {
     error = AVERROR(ENOMEM);
     goto end;
   }
-  if (!line.len || title->cue_bytes + line.len + settings.len > CUE_BYTES_MOST) goto end;
+  if (!line.len) goto end;
   int64_t from = packet->pts;
   int64_t to = from + (packet->duration > 0 ? packet->duration
                                             : llrint(UNTIMED_S / av_q2d(text->base)));
   int at = first_from(text, from);
   while (at < text->count && by_cue(&text->cues[at], from, to, line.str) < 0) at++;
   if (at < text->count && by_cue(&text->cues[at], from, to, line.str) == 0) goto end;
+  if (text->bytes + line.len + settings.len > TEXT_BYTES_MOST) {
+    text->overflow = 1;
+    goto end;
+  }
   if (text->count == text->capacity) {
     int capacity = text->capacity ? text->capacity * 2 : 64;
     Cue *cues = av_realloc_array(text->cues, capacity, sizeof(*cues));
@@ -1104,7 +1133,7 @@ static int keep_cue(TitleHls *title, Text *text, const AVPacket *packet) {
   memmove(&text->cues[at + 1], &text->cues[at], (size_t)(text->count - at) * sizeof(Cue));
   text->cues[at] = (Cue){from, to, kept, placed};
   text->count++;
-  title->cue_bytes += strlen(kept) + (placed ? strlen(placed) : 0);
+  text->bytes += strlen(kept) + (placed ? strlen(placed) : 0);
   kept = placed = NULL;
 end:
   av_free(kept);
@@ -1142,10 +1171,10 @@ static int64_t read_whole(TitleHls *title, int64_t offset, uint8_t *buffer, int6
  * INT64_MAX.
  */
 static int64_t ebml(const uint8_t *data, int64_t size, int64_t *at, int id) {
-  if (*at >= size || !data[*at]) return -1;
+  if (*at < 0 || *at >= size || !data[*at]) return -1;
   int length = 1;
   while (!(data[*at] & (0x80 >> (length - 1)))) length++;
-  if (*at + length > size) return -1;
+  if (length > size - *at) return -1;
   int64_t value = id ? data[*at] : data[*at] & (0xFF >> length);
   int ones = value == (0xFF >> length);
   for (int i = 1; i < length; i++) {
@@ -1156,11 +1185,23 @@ static int64_t ebml(const uint8_t *data, int64_t size, int64_t *at, int id) {
   return !id && ones ? INT64_MAX : value;
 }
 
-/** An element's header at `*at`: its ID and size, and `*at` moved to its data. 0 when it can't be read. */
-static int element(const uint8_t *data, int64_t size, int64_t *at, int64_t *id, int64_t *length) {
-  return (*id = ebml(data, size, at, 1)) >= 0 && (*length = ebml(data, size, at, 0)) >= 0;
+/**
+ * The element at `*at`, inside `end`: its ID, where its data starts and how long it is, and `*at`
+ * moved past it. 0 when there is none, or its data doesn't fit inside `end`, an unknown size
+ * included: nothing past that is read.
+ */
+static int child(const uint8_t *data, int64_t end, int64_t *at, int64_t *id, int64_t *from,
+                 int64_t *length) {
+  int64_t here = *at;
+  if ((*id = ebml(data, end, &here, 1)) < 0 || (*length = ebml(data, end, &here, 0)) < 0 ||
+      *length > end - here)
+    return 0;
+  *from = here;
+  *at = here + *length;
+  return 1;
 }
 
+/** An unsigned integer element's value, of its first eight bytes at most. */
 static uint64_t ebml_uint(const uint8_t *data, int64_t length) {
   uint64_t value = 0;
   for (int64_t i = 0; i < length && i < 8; i++) value = value << 8 | data[i];
@@ -1168,47 +1209,101 @@ static uint64_t ebml_uint(const uint8_t *data, int64_t length) {
 }
 
 /**
- * Where the file's Cues are, from the SeekHead at the start of its Segment, and where the
- * Segment's data starts, which the index's positions count from. 0 when it doesn't say.
+ * Whether a track's ContentEncodings leave its frames as FFmpeg can't read them here: encrypted,
+ * or compressed with zlib or bzip2, which this build of FFmpeg passes on still compressed.
+ * Header stripping and LZO it undoes, and encodings of the codec's private data only don't count.
  */
-static int find_cues(TitleHls *title, int64_t *segment, int64_t *cues) {
-  uint8_t *head = av_malloc(HEAD_BYTES);
-  if (!head) return AVERROR(ENOMEM);
-  int64_t size = read_whole(title, 0, head, HEAD_BYTES), at = 0, id, length;
-  int found = 0;
-  // The EBML header, then the Segment, whose first elements include its SeekHead.
-  if (size < 0 || !element(head, size, &at, &id, &length) || id != 0x1A45DFA3) goto end;
-  at += length;
-  if (!element(head, size, &at, &id, &length) || id != 0x18538067) goto end;
-  *segment = at;
-  while (!found && element(head, size, &at, &id, &length)) {
-    if (id == 0x1F43B675) break; /* a Cluster: no SeekHead before it */
-    int64_t end = length == INT64_MAX ? size : at + length;
-    if (id != 0x114D9B74) {
-      at = end;
-      continue;
+static int encoded(const uint8_t *data, int64_t from, int64_t end) {
+  int count = 0, unreadable = 0;
+  for (int64_t at = from, id, start, length; child(data, end, &at, &id, &start, &length);) {
+    if (id != 0x6240) continue;
+    count++;
+    uint64_t scope = 1, type = 0, algo = 0;
+    int compression = 0, encryption = 0;
+    for (int64_t in = start, kind, s, l; child(data, start + length, &in, &kind, &s, &l);) {
+      if (kind == 0x5032) scope = ebml_uint(data + s, l);
+      if (kind == 0x5033) type = ebml_uint(data + s, l);
+      if (kind == 0x5035) encryption = 1;
+      if (kind != 0x5034) continue;
+      compression = 1;
+      for (int64_t c = s, k, s2, l2; child(data, s + l, &c, &k, &s2, &l2);) {
+        if (k == 0x4254) algo = ebml_uint(data + s2, l2);
+      }
     }
-    if (end > size) break;
-    for (int64_t seek, size2; !found && at < end && element(head, end, &at, &id, &size2); at = seek) {
-      seek = at + size2;
-      if (id != 0x4DBB || seek > end) continue;
-      int cues_id = 0;
-      int64_t position = -1;
-      for (int64_t inner = at, kind, part; inner < seek && element(head, seek, &inner, &kind, &part);
-           inner += part) {
-        if (inner + part > seek) break;
-        if (kind == 0x53AB) cues_id = part == 4 && ebml_uint(head + inner, 4) == 0x1C53BB6B;
-        if (kind == 0x53AC) position = (int64_t)ebml_uint(head + inner, part);
+    // Without a ContentCompression, compression is zlib's, the default.
+    if ((scope & 1) && (type != 0 || encryption || !compression || algo < 2)) unreadable = 1;
+  }
+  // FFmpeg reads one encoding at most; with more it reads none.
+  return unreadable || count > 1;
+}
+
+/**
+ * Reads what opening read of the file's start, `title->head`: where its Segment's data starts,
+ * which the index's positions count from, where its SeekHead says its Cues are, and from its
+ * Tracks each stream's track number and whether its frames are encoded in a way this can't read.
+ * FFmpeg makes a stream of each track it accepts, in their order; a stream whose kind isn't its
+ * track's leaves every number unknown. Anything the start doesn't hold stays unknown.
+ */
+static void read_head(TitleHls *title, int64_t *numbers, int *unreadable) {
+  const uint8_t *head = title->head;
+  int64_t size = title->head_size, at = 0, id, from, length;
+  unsigned streams = title->input->nb_streams, made = 0;
+  for (unsigned i = 0; i < streams; i++) numbers[i] = -1;
+  if (!child(head, size, &at, &id, &from, &length) || id != 0x1A45DFA3) return;
+  // The Segment holds the rest of the file, beyond what the start holds.
+  if (ebml(head, size, &at, 1) != 0x18538067 || ebml(head, size, &at, 0) < 0) return;
+  title->segment = at;
+  int64_t found[TEXTS_MOST + UNSHOWN_MOST + SOUNDS_MOST + 64];
+  int encodings[sizeof(found) / sizeof(*found)] = {0};
+  int ok = 1;
+  while (child(head, size, &at, &id, &from, &length)) {
+    if (id == 0x114D9B74) {
+      for (int64_t seek = from, kind, s, l; child(head, from + length, &seek, &kind, &s, &l);) {
+        if (kind != 0x4DBB) continue;
+        int cues = 0;
+        int64_t position = -1;
+        for (int64_t in = s, k, s2, l2; child(head, s + l, &in, &k, &s2, &l2);) {
+          if (k == 0x53AB) cues = l2 == 4 && ebml_uint(head + s2, 4) == 0x1C53BB6B;
+          if (k == 0x53AC) position = (int64_t)ebml_uint(head + s2, l2);
+        }
+        if (cues && position >= 0 && position <= INT64_MAX - title->segment)
+          title->cues = title->segment + position;
       }
-      if (cues_id && position >= 0) {
-        *cues = *segment + position;
-        found = 1;
+    }
+    if (id != 0x1654AE6B) continue;
+    for (int64_t entry = from, kind, s, l; child(head, from + length, &entry, &kind, &s, &l);) {
+      if (kind != 0xAE) continue;
+      int64_t number = -1;
+      uint64_t type = 0;
+      char letter = 0;
+      int unread = 0;
+      for (int64_t in = s, k, s2, l2; child(head, s + l, &in, &k, &s2, &l2);) {
+        if (k == 0xD7) number = (int64_t)ebml_uint(head + s2, l2);
+        if (k == 0x83) type = ebml_uint(head + s2, l2);
+        if (k == 0x86 && l2 > 0) letter = (char)head[s2];
+        if (k == 0x6D80) unread = encoded(head, s2, s2 + l2);
       }
+      // The tracks FFmpeg makes no stream of: of no kind it plays, or a codec of another kind.
+      int video = type == 1, audio = type == 2, text = type == 0x11 || type == 0x21;
+      if (!(video || audio || text) || !letter || (video && letter != 'V') ||
+          (audio && letter != 'A') || (text && letter != 'D' && letter != 'S'))
+        continue;
+      if (made >= streams || made >= sizeof(found) / sizeof(*found)) {
+        ok = 0;
+        break;
+      }
+      enum AVMediaType kind2 = title->input->streams[made]->codecpar->codec_type;
+      if ((video && kind2 != AVMEDIA_TYPE_VIDEO) || (audio && kind2 != AVMEDIA_TYPE_AUDIO) ||
+          (type == 0x11 && kind2 != AVMEDIA_TYPE_SUBTITLE))
+        ok = 0;
+      encodings[made] = unread;
+      found[made++] = number;
     }
   }
-end:
-  av_free(head);
-  return found;
+  for (unsigned i = 0; ok && i < made; i++) {
+    numbers[i] = found[i];
+    unreadable[i] = encodings[i];
+  }
 }
 
 static int by_time(const void *a, const void *b) {
@@ -1217,122 +1312,91 @@ static int by_time(const void *a, const void *b) {
   return (x->cluster > y->cluster) - (x->cluster < y->cluster);
 }
 
-/** A line the index lists, with the number of the track it is of. */
-typedef struct Entry {
-  int64_t track;
-  Listed listed;
-} Entry;
-
-static int by_entry(const void *a, const void *b) {
-  const Entry *x = a, *y = b;
-  if (x->track != y->track) return x->track < y->track ? -1 : 1;
-  return by_time(&x->listed, &y->listed);
-}
-
-/** Whether FFmpeg's index of stream `st` has every entry of `entries`: they are of its track. */
-static int indexes(AVStream *st, const Entry *entries, int count) {
+/** Whether FFmpeg's index of stream `st` has every line listed: the same index, the same track. */
+static int indexes(AVStream *st, const Listed *listed, int count) {
   for (int i = 0; i < count; i++) {
-    int at = av_index_search_timestamp(st, entries[i].listed.time, AVSEEK_FLAG_ANY);
+    int at = av_index_search_timestamp(st, listed[i].time, AVSEEK_FLAG_ANY);
     const AVIndexEntry *entry = at >= 0 ? avformat_index_get_entry(st, at) : NULL;
-    if (!entry || entry->timestamp != entries[i].listed.time ||
-        entry->pos != entries[i].listed.cluster)
-      return 0;
+    if (!entry || entry->timestamp != listed[i].time || entry->pos != listed[i].cluster) return 0;
   }
   return 1;
 }
 
-/**
- * Gives each text track the lines the file's index lists of it. FFmpeg read the same index into
- * each stream's index entries, without their lengths and without saying which track number
- * is whose: a track's lines are those of the lowest numbered track not yet taken whose every
- * entry is in the stream's. FFmpeg makes streams in the order of their tracks, so tracks whose
- * entries are the same go to their streams in order.
- */
-static int give_listed(TitleHls *title, Entry *entries, int count) {
-  qsort(entries, count, sizeof(*entries), by_entry);
-  int64_t taken = INT64_MIN;
-  for (int t = 0; t < title->text_count; t++) {
-    Text *text = &title->texts[t];
-    AVStream *st = title->input->streams[text->stream];
-    for (int i = 0; i < count;) {
-      int group = i;
-      while (group < count && entries[group].track == entries[i].track) group++;
-      if (entries[i].track > taken && indexes(st, entries + i, group - i)) {
-        if (!(text->listed = av_malloc_array(group - i, sizeof(*text->listed))))
-          return AVERROR(ENOMEM);
-        // The same entry listed twice is one line.
-        for (int k = i; k < group; k++) {
-          if (text->listed_count && !by_time(&text->listed[text->listed_count - 1], &entries[k].listed))
-            continue;
-          text->listed[text->listed_count++] = entries[k].listed;
-        }
-        taken = entries[i].track;
-        break;
-      }
-      i = group;
-    }
+/** Lists line `listed` for `text`. */
+static int list(Text *text, Listed listed) {
+  if (text->listed_count == text->listed_capacity) {
+    int capacity = text->listed_capacity ? text->listed_capacity * 2 : 64;
+    Listed *more = av_realloc_array(text->listed, capacity, sizeof(*more));
+    if (!more) return AVERROR(ENOMEM);
+    text->listed = more;
+    text->listed_capacity = capacity;
   }
+  text->listed[text->listed_count++] = listed;
   return 0;
 }
 
 /**
- * Reads the lines of each text track the file's index lists, within INDEX_BYTES_MOST. Read once;
- * none when the file's SeekHead names no Cues.
+ * Reads the lines of each text track whose number is known that the file's index lists, within
+ * INDEX_BYTES_MOST, once. A track's lines are kept only where FFmpeg's index of its stream, read
+ * from the same Cues, has them all, and the same entry listed twice is one line. None when the
+ * SeekHead names no Cues or they aren't Cues; a read that fails is tried again next time.
  */
 static int list_cues(TitleHls *title) {
-  title->listing = -1;
-  int64_t segment = 0, cues = 0, at = 0, id, length;
-  int error = find_cues(title, &segment, &cues);
-  if (error <= 0) return error;
+  int64_t at = 0, length;
   uint8_t header[16];
-  int64_t got = read_whole(title, cues, header, sizeof(header));
-  if (got < 0) return AVERROR(EIO);
-  if (!element(header, got, &at, &id, &length) || id != 0x1C53BB6B || length > INDEX_BYTES_MOST)
+  if (title->cues < 0) {
+    title->listing = -1;
     return 0;
-  uint8_t *data = av_malloc(length ? (size_t)length : 1);
-  Entry *entries = NULL;
-  int count = 0, capacity = 0;
-  if (!data) return AVERROR(ENOMEM);
-  int64_t size = read_whole(title, cues + at, data, length);
-  if (size < 0) {
-    error = AVERROR(EIO);
-    goto end;
   }
-  for (int64_t point = 0, kind, part; element(data, size, &point, &kind, &part); point += part) {
-    if (point + part > size) break;
+  int64_t got = read_whole(title, title->cues, header, sizeof(header));
+  if (got < 0) return AVERROR(EIO);
+  if (ebml(header, got, &at, 1) != 0x1C53BB6B || (length = ebml(header, got, &at, 0)) < 0 ||
+      length > INDEX_BYTES_MOST) {
+    title->listing = -1;
+    return 0;
+  }
+  uint8_t *data = av_malloc(length ? (size_t)length : 1);
+  if (!data) return AVERROR(ENOMEM);
+  int64_t size = read_whole(title, title->cues + at, data, length);
+  int error = size < 0 ? AVERROR(EIO) : 0;
+  for (int64_t point = 0, kind, p0, part; !error && child(data, size, &point, &kind, &p0, &part);) {
     if (kind != 0xBB) continue;
     int64_t time = -1;
-    for (int64_t inner = point, k, p; inner < point + part &&
-                                      element(data, point + part, &inner, &k, &p);
-         inner += p) {
-      if (k == 0xB3) time = (int64_t)ebml_uint(data + inner, p);
+    for (int64_t in = p0, k, s, l; !error && child(data, p0 + part, &in, &k, &s, &l);) {
+      if (k == 0xB3) time = (int64_t)ebml_uint(data + s, l);
       if (k != 0xB7 || time < 0) continue;
       int64_t track = -1, cluster = -1, duration = -1;
-      for (int64_t field = inner, f, q; field < inner + p && element(data, inner + p, &field, &f, &q);
-           field += q) {
-        uint64_t value = ebml_uint(data + field, q);
+      for (int64_t field = s, f, s2, l2; child(data, s + l, &field, &f, &s2, &l2);) {
+        uint64_t value = ebml_uint(data + s2, l2);
         if (f == 0xF7) track = (int64_t)value;
-        if (f == 0xF1) cluster = (int64_t)value;
-        if (f == 0xB2) duration = (int64_t)value;
+        if (f == 0xF1 && value <= (uint64_t)(INT64_MAX - title->segment)) cluster = (int64_t)value;
+        if (f == 0xB2 && value <= INT64_MAX / 2) duration = (int64_t)value;
       }
-      if (track < 0 || cluster < 0) continue;
-      if (count == capacity) {
-        capacity = capacity ? capacity * 2 : 256;
-        Entry *more = av_realloc_array(entries, capacity, sizeof(*entries));
-        if (!more) {
-          error = AVERROR(ENOMEM);
-          goto end;
-        }
-        entries = more;
+      for (int t = 0; !error && cluster >= 0 && t < title->text_count; t++) {
+        if (title->texts[t].number == track)
+          error = list(&title->texts[t], (Listed){time, duration, title->segment + cluster, 0});
       }
-      entries[count++] = (Entry){track, {time, duration, segment + cluster, 0}};
     }
   }
-  if ((error = give_listed(title, entries, count)) >= 0) title->listing = 1;
-end:
   av_free(data);
-  av_free(entries);
-  return error;
+  if (error < 0) {
+    for (int t = 0; t < title->text_count; t++) title->texts[t].listed_count = 0;
+    return error;
+  }
+  for (int t = 0; t < title->text_count; t++) {
+    Text *text = &title->texts[t];
+    qsort(text->listed, text->listed_count, sizeof(*text->listed), by_time);
+    int kept = 0;
+    for (int i = 0; i < text->listed_count; i++) {
+      if (!kept || by_time(&text->listed[kept - 1], &text->listed[i]))
+        text->listed[kept++] = text->listed[i];
+    }
+    text->listed_count = kept;
+    if (!indexes(title->input->streams[text->stream], text->listed, text->listed_count))
+      text->listed_count = 0;
+  }
+  title->listing = 1;
+  return 0;
 }
 
 /** Whether a line beginning at `time` of the track is kept: the index lists it once it is. */
@@ -1892,6 +1956,14 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
     return TITLE_HLS_UNSUPPORTED;
   }
   title->video_base = video->time_base;
+  int64_t *numbers = av_malloc_array(title->input->nb_streams + 1, sizeof(*numbers));
+  int *encoded = av_calloc(title->input->nb_streams + 1, sizeof(*encoded));
+  if (!numbers || !encoded) {
+    av_free(numbers);
+    av_free(encoded);
+    return TITLE_HLS_NO_MEMORY;
+  }
+  read_head(title, numbers, encoded);
   int any = 0;
   for (unsigned i = 0; i < title->input->nb_streams; i++) {
     AVStream *st = title->input->streams[i];
@@ -1908,18 +1980,23 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
         offered = 1;
       }
     } else if (st->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) {
-      if (text_codec(st->codecpar->codec_id) && title->text_count < TEXTS_MOST) {
+      if (text_codec(st->codecpar->codec_id) && !encoded[i] && title->text_count < TEXTS_MOST) {
         Text *text = &title->texts[title->text_count++];
         text->stream = (int)i;
+        text->number = numbers[i];
         text->base = st->time_base;
         text->forced = !!(st->disposition & AV_DISPOSITION_FORCED);
         offered = 1;
       } else if (title->unshown_count < UNSHOWN_MOST) {
+        title->unshown_encoded[title->unshown_count] = encoded[i];
         title->unshown[title->unshown_count++] = (int)i;
       }
     }
     if ((int)i != title->video && !offered) st->discard = AVDISCARD_ALL;
   }
+  av_free(numbers);
+  av_free(encoded);
+  av_freep(&title->head);
   if (any && title->sound_count == 0) {
     say(detail, detail_size, "Its sound isn't AAC-LC, HE-AAC, AC-3, E-AC-3 or MP3.");
     return TITLE_HLS_UNSUPPORTED;
@@ -1935,13 +2012,15 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
   title->source = *source;
   title->next = -1;
   title->budget = -1;
+  title->cues = -1;
   for (int i = 0; i < KEPT; i++) title->kept[i].index = -1;
   atomic_init(&title->interrupted, 0);
   TitleHlsResult result = TITLE_HLS_NO_MEMORY;
   int error = 0;
   uint8_t *buffer = av_malloc(IO_BUFFER);
   title->input = avformat_alloc_context();
-  if (!buffer || !title->input) goto fail;
+  title->head = av_malloc(HEAD_BYTES);
+  if (!buffer || !title->input || !title->head) goto fail;
   title->input->pb = avio_alloc_context(buffer, IO_BUFFER, 0, title, read_packet, NULL, seek);
   if (!title->input->pb) goto fail;
   title->io = title->input->pb;
@@ -2181,6 +2260,12 @@ static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, co
                                        size_t *size, const char **type, char *detail,
                                        size_t detail_size) {
   title->texts[track].wanted = 1;
+  for (int t = 0; t < title->text_count; t++) {
+    if (folds(title, track, t) && title->texts[t].overflow) {
+      say(detail, detail_size, "These subtitles are too large to show.");
+      return TITLE_HLS_UNSUPPORTED;
+    }
+  }
   if (!passed(title, index)) {
     Made *made = NULL;
     TitleHlsResult result = make(title, index, &made, detail, detail_size);
@@ -2335,7 +2420,7 @@ int title_hls_unshown(const TitleHls *title, int index, TitleHlsUnshown *out) {
   if (index < 0 || index >= title->unshown_count) return 0;
   const AVStream *st = title->input->streams[title->unshown[index]];
   out->language = language_of(st);
-  out->format = format_name(st->codecpar->codec_id);
+  out->format = title->unshown_encoded[index] ? "compressed text" : format_name(st->codecpar->codec_id);
   out->forced = !!(st->disposition & AV_DISPOSITION_FORCED);
   return 1;
 }
@@ -2361,6 +2446,7 @@ void title_hls_close(TitleHls *title) {
     av_free(title->texts[t].listed);
   }
   av_free(title->passed);
+  av_free(title->head);
   av_packet_free(&title->video_sample);
   av_free(title->video_init.data);
   av_free(title->text);

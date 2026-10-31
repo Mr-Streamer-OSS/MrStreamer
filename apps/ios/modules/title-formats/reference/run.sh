@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds the reference check against vendor/ffmpeg/reference and runs it on each file given:
-#   modules/title-formats/reference/run.sh <out-folder> [--start <seconds>] <file>...
+#   modules/title-formats/reference/run.sh <out-folder> [--start <seconds>] [--uncued] <file>...
+# --uncued says the files' indexes leave subtitle lines out, so lines a seek lands in may be missing.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 ff=$here/../../../vendor/ffmpeg/reference/prefix
@@ -10,6 +11,10 @@ start=0
 if [[ ${1:-} == --start ]]; then
   start=$2
   shift 2
+fi
+if [[ ${1:-} == --uncued ]]; then
+  export CHECK_UNCUED=1
+  shift
 fi
 mkdir -p "$out"
 cc -std=c11 -O1 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined \

@@ -614,19 +614,24 @@ its lines also show in the regular track of its language. A line that spans segm
 so one already on screen where playing starts, or after a seek, shows there: the session reads it
 from its cluster, which the file's index names with its length (FFmpeg and mkvmerge list every
 subtitle line there). A file whose index leaves a line out shows it only once playing passes where
-it begins. The other subtitle tracks, pictures such as PGS, DVD and DVB, teletext and formats the
-session doesn't know, aren't served, and Watch's Subtitles names them, with their format, as ones
-that can't show here.
+it begins. The other subtitle tracks, pictures such as PGS, DVD and DVB, teletext, formats the session
+doesn't know, and text tracks compressed with zlib or bzip2 or encrypted, which its FFmpeg can't
+read, aren't served, and Watch's Subtitles names them, with their format, as ones that can't show
+here. Track numbers and encodings come from the Tracks within the file's first 256 KB, as opening
+read them; a file whose Tracks lie further has no line brought back from its index. A track with
+more than 4 MB of text, or a line over 64 KB, can't be shown: once chosen, its session fails with
+that reason.
 
 | Where it plays                                 | Shows                                                              | Can't show                                                                                |
 | ---------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
 | A title AVPlayer opens (MP4, MOV and the rest) | What AVPlayer reads itself: MP4 text (mov_text), CEA-608 tracks    | Anything AVPlayer doesn't, unnamed                                                        |
-| A Matroska title through a session             | SubRip, ASS, SSA, WebVTT as WebVTT                                 | PGS, DVD, DVB, teletext, XSUB, others: named in Watch                                     |
+| A Matroska title through a session             | SubRip, ASS, SSA, WebVTT as WebVTT                                 | PGS, DVD, DVB, teletext, XSUB, compressed text, others: named in Watch                    |
 | A downloaded copy                              | The same as the file played from the provider, read from the phone | The same                                                                                  |
 | A Live channel (HLS from the panel)            | The stream's WebVTT renditions and captions as AVPlayer reads them | DVB subtitles and teletext in its segments, which AVPlayer can't see and Watch can't name |
 
 `modules/title-formats/reference/subtitle-fixtures.sh` makes synthetic files with a 35-second
-line, forced, ASS and WebVTT tracks, and a copy whose index lists none of them; `check.c` asks
+line, forced, ASS and WebVTT tracks, and copies whose index lists none of them, whose tracks are
+out of number order, with a track marked zlib-compressed, and with a damaged index; `check.c` asks
 each subtitle segment of a title just opened, as after a seek, and `verify.py` checks every
 segment's lines against ffmpeg's own reading of the source. Whether AVPlayer shows, seeks and
 switches these renditions as HLS describes, captions inside a Matroska title's picture included,
