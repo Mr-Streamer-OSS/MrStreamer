@@ -1301,6 +1301,7 @@ export const en = {
   "{episode} didn't download": "{episode} didn't download",
   "Recordings could not be read.": "Recordings could not be read.",
   "Recordings could not be saved.": "Recordings could not be saved.",
+  "The folder for recordings isn't there.": "The folder for recordings isn't there.",
   "The folder couldn't be opened.": "The folder couldn't be opened.",
   "There isn't enough free space to record.": "There isn't enough free space to record.",
   "Recording settings could not be saved.": "Recording settings could not be saved.",

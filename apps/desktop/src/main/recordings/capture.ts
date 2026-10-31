@@ -46,9 +46,11 @@ class DiskFailure extends Error {}
 
 /**
  * Why a capture under way ended: at its stop time, as asked, cut short, out of the room `room`
- * allows, or `ended`, as an HLS playlist says its stream is over.
+ * allows, `ended`, as an HLS playlist says its stream is over, or `closed`, as the provider ended
+ * its answer cleanly, where `stream` is one that broke or fell silent.
  */
-export type CaptureEnd = "until" | "aborted" | "space" | "ended" | Exclude<RecordingCut, "quit">;
+export type CaptureEnd =
+  "until" | "aborted" | "space" | "ended" | "closed" | Exclude<RecordingCut, "quit">;
 
 export interface Capture {
   /** Bytes on disk so far. */
@@ -277,7 +279,7 @@ async function run(
   let late = false;
   for (;;) {
     const next = await opened.chunks.next().catch(() => null);
-    if (next?.done && opened.ends) end = "ended";
+    if (next?.done) end = opened.ends ? "ended" : "closed";
     if (!next || next.done) break;
     if (Date.now() >= options.until) {
       late = true;
@@ -298,8 +300,9 @@ async function run(
   }
   stop.abort();
   await opened.close();
-  if ((end === "stream" || end === "ended") && options.signal.aborted) end = "aborted";
-  else if ((end === "stream" || end === "ended") && (deadline.aborted || late)) end = "until";
+  const cut = end === "stream" || end === "ended" || end === "closed";
+  if (cut && options.signal.aborted) end = "aborted";
+  else if (cut && (deadline.aborted || late)) end = "until";
   const flushed = await file.sync().then(
     () => true,
     () => false,

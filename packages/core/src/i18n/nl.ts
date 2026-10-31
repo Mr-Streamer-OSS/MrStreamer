@@ -1326,6 +1326,7 @@ export const nl: Translation = {
   "{episode} didn't download": "{episode} is niet gedownload",
   "Recordings could not be read.": "Opnames konden niet worden gelezen.",
   "Recordings could not be saved.": "Opnames konden niet worden bewaard.",
+  "The folder for recordings isn't there.": "De map voor opnames is er niet.",
   "The folder couldn't be opened.": "De map kon niet worden geopend.",
   "There isn't enough free space to record.": "Er is niet genoeg vrije ruimte om op te nemen.",
   "Recording settings could not be saved.": "Opname-instellingen konden niet worden bewaard.",

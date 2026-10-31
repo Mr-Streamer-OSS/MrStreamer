@@ -481,14 +481,104 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect((await recordings.list())[0]?.unsaved).toBeUndefined();
   });
 
+  it("ends a recording whose provider keeps answering with a short clip", async () => {
+    let asked = 0;
+    const { channel, recordings } = await connected({
+      streams: (_source, out) => {
+        asked++;
+        out.end(fixture("h264-aac.mpegts"));
+      },
+    });
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    // Each check asks again at once, as a wake does.
+    const [ended] = await until(
+      async () => {
+        await recordings.check();
+        return recordings.list();
+      },
+      ([first]) => first?.status.kind !== "recording" && first?.status.kind !== "paused",
+    );
+    expect(ended?.status).toEqual({ kind: "partial", cut: "stream" });
+    expect(asked).toBe(3);
+  });
+
+  it("pauses from what it last wrote when the stream falls silent, not from when that was noticed", async () => {
+    let wrote = 0;
+    const { channel, recordings } = await connected({
+      streams: (_source, out) => {
+        if (wrote) return out.destroy();
+        out.write(fixture("h264-aac.mpegts"));
+        wrote = Date.now();
+      },
+    });
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    const [paused] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "paused",
+      25_000,
+    );
+    const gap = paused?.gaps?.[0];
+    expect(gap?.why).toBe("stream");
+    // The silence watchdog notices after 15 seconds; the gap begins where the bytes stopped.
+    expect(gap!.from - wrote).toBeLessThan(5000);
+    await recordings.stop(answer.recording.id);
+  }, 30_000);
+
+  it("cancels a start under way as the computer sleeps, keeping nothing", async () => {
+    const { promise: requested, resolve: arrived } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+    const { channel, recordings, provider } = await connected({
+      streams: (source, out, signal) => {
+        arrived();
+        void gate.then(() => liveStreams(source, out, signal));
+      },
+    });
+    onTestFinished(() => open());
+    const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    await requested;
+    await recordings.suspend();
+    open();
+    await expect(starting).rejects.toBeDefined();
+    expect(await recordings.list()).toEqual([]);
+    expect(await allClosed(provider)).toBe(true);
+  });
+
+  it("lists a paused recording's Stop as not saved while it can't be written", async () => {
+    let asked = 0;
+    const { dataDir, channel, recordings } = await connected({
+      streams: (_source, out) => {
+        asked++;
+        if (asked === 1) out.end(fixture("h264-aac.mpegts"));
+        else out.destroy();
+      },
+    });
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    await until(recordings.list, ([first]) => first?.status.kind === "paused");
+    const manifest = join(dataDir, "recordings", "recordings.json");
+    await rename(manifest, `${manifest}.saved`);
+    await mkdir(manifest);
+    await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Recordings could not be saved." },
+    });
+    expect((await recordings.list())[0]).toMatchObject({
+      status: { kind: "stopped" },
+      unsaved: true,
+    });
+  });
+
   it("pauses as the computer sleeps and records the rest after it wakes", async () => {
     const { dataDir, channel, recordings, provider } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
+    const asked = provider.streamRequests();
     await recordings.suspend();
     // Nothing goes on while the computer sleeps, until it wakes and checks.
     await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(provider.streamRequests()).toBe(asked);
     const [paused] = await recordings.list();
     expect(paused?.status).toEqual({ kind: "paused", why: "away" });
     expect(await allClosed(provider)).toBe(true);
@@ -948,6 +1038,13 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect((await again.recordings.list())[0]?.status).toEqual({ kind: "complete" });
     await again.recordings.remove(id);
     expect(existsSync(join(folder, id))).toBe(false);
+
+    // A chosen folder that isn't there, as on a drive not plugged in, isn't made anew.
+    await rm(folder, { recursive: true });
+    await expect(
+      again.recordings.start(channel(TRACKS), Date.now() + 1000, {}),
+    ).rejects.toMatchObject({ error: { detail: "The folder for recordings isn't there." } });
+    expect(existsSync(folder)).toBe(false);
   });
 
   it("leaves a recordings file it can't read as it is, and records or schedules nothing meanwhile", async () => {

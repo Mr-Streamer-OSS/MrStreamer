@@ -1049,7 +1049,8 @@ async function start(): Promise<void> {
   };
   // Kept without a window, the app goes once nothing records and no schedule is kept.
   const settle = Effect.sync(() => {
-    if (tray && !mainWindow && !closing && !live()) app.quit();
+    // Not while an update waits to restart it once the last recording ended.
+    if (tray && !mainWindow && !closing && !restarting && !live()) app.quit();
   });
   void runtime.runFork(Stream.runForEach(recordings.changes, () => settle));
   void runtime.runFork(Stream.runForEach(recordings.scheduleChanges, () => settle));

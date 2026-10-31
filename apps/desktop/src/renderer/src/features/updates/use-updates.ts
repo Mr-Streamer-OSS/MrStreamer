@@ -46,13 +46,18 @@ export function useUpdates() {
   const changingChannel = useRef(false);
   const live = useLiveRecordings();
   /**
-   * Installs and restarts. The call only settles when the app is still running, because the
-   * release was refused or the install couldn't start; Settings then shows why.
+   * Installs and restarts, once no recording's time goes on. The call only settles when the app
+   * is still running: the release was refused or the install couldn't start, which Settings then
+   * shows, or it was put off or replaced while it waited, which needs nothing shown.
    */
   const restart = () => {
     const showSettings = () =>
       useUi.setState({ settings: "updates", settingsTarget: "update-check", updateDialog: null });
-    call("updates.restart").then(showSettings, showSettings);
+    call("updates.restart")
+      .then(() => call("updates.status"))
+      .then((now) => {
+        if (now.update.kind === "failed") showSettings();
+      }, showSettings);
   };
   const setChannel = useMutation({
     mutationFn: (channel: Channel) => call("updates.setChannel", { channel }),

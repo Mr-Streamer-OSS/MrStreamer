@@ -129,8 +129,11 @@ export function useAnyRecording(): boolean {
 export function useRecordingOf(channel: OwnedId): Recording | null {
   const { data } = useRecordings();
   return (
-    data?.find((each) => each.status.kind === "recording" && sameOwned(each.channel, channel)) ??
-    null
+    data?.find(
+      (each) =>
+        (each.status.kind === "recording" || each.status.kind === "paused") &&
+        sameOwned(each.channel, channel),
+    ) ?? null
   );
 }
 

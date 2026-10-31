@@ -107,8 +107,9 @@ const GUIDE_SETTLE = "2 seconds";
 /** How long the free space of a recording's disk is taken as measured, while it records. */
 const ROOM_MS = 5000;
 /**
- * A capture whose stream ended this soon after it began ended quickly: after QUICK_ENDS of them in
- * a row, as from a provider that answers with a short clip, the recording ends there.
+ * A capture whose provider ended its answer cleanly this soon after it began ended quickly: after
+ * QUICK_ENDS of them in a row, as from one that answers with a short clip, the recording ends
+ * there. A stream that breaks or falls silent goes on however often it does.
  */
 const QUICK_MS = 30_000;
 const QUICK_ENDS = 3;
@@ -484,14 +485,17 @@ function make(deps: RecordingsDeps) {
           missing.has(record.id) ? sum : sum + (active.get(record.id)?.bytes() ?? record.bytes),
         0,
       );
-    /** Free bytes of the disk `folder` is on, or will be on once made; null when unknown. */
+    /**
+     * Free bytes of the disk `folder` is on; null when unknown. The profile's own folder may not be
+     * made yet: its disk is the nearest folder there. A chosen one must be there.
+     */
     const freeIn = async (folder: string) => {
       for (let at = folder; ; at = dirname(at)) {
         const free = await statfs(at).then(
           ({ bavail, bsize }) => bavail * bsize,
           () => null,
         );
-        if (free !== null || dirname(at) === at) return free;
+        if (free !== null || folder !== root || dirname(at) === at) return free;
       }
     };
     /** Each folder's free bytes as last measured, and what capture into it had written by then. */
@@ -551,7 +555,7 @@ function make(deps: RecordingsDeps) {
           capture.asked === "stopped" || capture.asked === "quit" ? capture.asked : null;
         // Its stream ending quickly again and again ends it, rather than recording that again.
         const quick =
-          end === "stream" && now - capture.since < QUICK_MS ? (quickEnds.get(id) ?? 0) + 1 : 0;
+          end === "closed" && now - capture.since < QUICK_MS ? (quickEnds.get(id) ?? 0) + 1 : 0;
         if (quick > 0) quickEnds.set(id, quick);
         else quickEnds.delete(id);
         const why: RecordingGapReason | null =
@@ -561,7 +565,9 @@ function make(deps: RecordingsDeps) {
               ? "away"
               : end === "ended"
                 ? null
-                : end;
+                : end === "closed"
+                  ? "stream"
+                  : end;
         if (!why) quickEnds.delete(id);
         // Asleep, the gap begins as the computer sleeps; else from what it last wrote.
         const from = end === "aborted" ? now : Math.min(now, capture.lastWrite());
@@ -575,7 +581,7 @@ function make(deps: RecordingsDeps) {
                 ? finalOf(seen, now, intent)
                 : end === "aborted"
                   ? finalOf(seen, now, "quit")
-                  : finalOf(seen, now, end === "ended" ? "stream" : cutOf(end)),
+                  : finalOf(seen, now, end === "ended" || end === "closed" ? "stream" : cutOf(end)),
         );
         // Any later write takes it down too, the next check's at the latest; until then a restart
         // reads it as one the app didn't see end, and its schedule's time stays unsettled.
@@ -615,12 +621,33 @@ function make(deps: RecordingsDeps) {
           return yield* new Failed({
             error: { kind: "invalid-input", detail: t("Choose a stop time within 12 hours.") },
           });
+        const stopped = () =>
+          resumes && (stopping.has(resumes.id) || !isLive(records.get(resumes.id) ?? resumes));
+        const stoppedFailure = new Failed({
+          error: { kind: "stream", failure: { kind: "network", detail: t("Stopped.") } },
+        });
+        // Stopped since it was asked to go on: it asks the provider nothing.
+        if (stopped()) return yield* stoppedFailure;
         // A disk without room records nothing, asks the provider nothing and holds no connection
         // for it. One going on stays where it began.
         const folder = resumes ? placeOf(resumes) : (storage.folder ?? root);
         if (!(yield* roomIn(folder)))
           return yield* new Failed({
             error: { kind: "unexpected", detail: t("There isn't enough free space to record.") },
+          });
+        // A chosen folder that isn't there, as on a drive not plugged in, is never made anew on
+        // another disk in its place.
+        if (
+          folder !== root &&
+          !(yield* Effect.promise(() =>
+            stat(folder).then(
+              () => true,
+              () => false,
+            ),
+          ))
+        )
+          return yield* new Failed({
+            error: { kind: "unexpected", detail: t("The folder for recordings isn't there.") },
           });
         const { subscriptionId } = channel;
         const source = yield* subscriptions.sourceOf(subscriptionId);
@@ -706,38 +733,35 @@ function make(deps: RecordingsDeps) {
             bytes: 0,
             status: { kind: "recording" },
           };
-        // Stopped since it was asked to go on: it doesn't, and lets its connection go.
-        if (resumes && (stopping.has(id) || !isLive(record))) {
+        // Stopped while it waited for a connection: it lets it go.
+        if (stopped()) {
           held.release();
-          return yield* new Failed({
-            error: { kind: "stream", failure: { kind: "network", detail: t("Stopped.") } },
-          });
+          return yield* stoppedFailure;
         }
-        const opening = (
-          resumes
-            ? Promise.resolve()
-            : mkdir(folderOf(record), { recursive: true }).then(() =>
-                folder === root ? undefined : writeFile(join(folderOf(record), OURS), root),
-              )
-        ).then(() =>
-          startCapture(
-            streams.map(({ stream: { url, format, headers } }) => ({
-              url,
-              format,
-              headers: headers ?? {},
-            })),
-            fileOf(record),
-            {
-              request: source.provider.request,
-              userAgent: deps.userAgent,
-              until: stop,
-              signal: controller.signal,
-              changed: grew,
-              room: roomOf(folder),
-              append: Boolean(resumes),
-            },
-          ),
-        );
+        // Its own folder is made, or made again when it went while the recording paused.
+        const opening = mkdir(folderOf(record), { recursive: true })
+          .then(() =>
+            resumes || folder === root ? undefined : writeFile(join(folderOf(record), OURS), root),
+          )
+          .then(() =>
+            startCapture(
+              streams.map(({ stream: { url, format, headers } }) => ({
+                url,
+                format,
+                headers: headers ?? {},
+              })),
+              fileOf(record),
+              {
+                request: source.provider.request,
+                userAgent: deps.userAgent,
+                until: stop,
+                signal: controller.signal,
+                changed: grew,
+                room: roomOf(folder),
+                append: Boolean(resumes),
+              },
+            ),
+          );
         opening.catch(() => {});
         const capture = yield* Effect.tryPromise({
           try: () => opening,
@@ -1219,7 +1243,13 @@ function make(deps: RecordingsDeps) {
             },
             // This computer's when unexpected, as a file it couldn't write; else the stream's,
             // a lost login included.
-            onFailure: ({ error }) => why.set(key, error.kind === "unexpected" ? "disk" : "stream"),
+            onFailure: ({ error }) => {
+              // Cut short as the computer slept: it starts after the wake, as if never asked.
+              if (asleep !== null) {
+                why.delete(key);
+                tried.delete(key);
+              } else why.set(key, error.kind === "unexpected" ? "disk" : "stream");
+            },
           }),
           // A defect, as a capture folder this computer won't remove, is this computer's too.
           Effect.catchDefect(() => Effect.sync(() => why.set(key, "disk"))),
@@ -1238,7 +1268,8 @@ function make(deps: RecordingsDeps) {
 
     /**
      * Goes on with a paused recording in the background; a check follows its answer. Refused, it
-     * stays paused, saying why it couldn't go on this time, and is asked again.
+     * stays paused and is asked again, saying so when every connection is held or there is no
+     * room, and otherwise keeping the reason it paused for.
      */
     const resumeRecording = (record: StoredRecording) => {
       const { subscriptionId } = record.channel;
@@ -1249,11 +1280,8 @@ function make(deps: RecordingsDeps) {
           const answer = yield* start(record.channel, record.stop, { resumes: record });
           return answer.kind === "busy" ? ("busy" as const) : null;
         }).pipe(
-          Effect.match({
-            onSuccess: (why): RecordingGapReason | null => why,
-            onFailure: ({ error }) => (error.kind === "unexpected" ? "disk" : "stream"),
-          }),
-          Effect.catchDefect(() => Effect.succeed<RecordingGapReason>("disk")),
+          Effect.orElseSucceed((): RecordingGapReason | null => null),
+          Effect.catchDefect(() => Effect.succeed(null)),
           Effect.flatMap((why) => {
             const now = why && records.get(record.id);
             const open = now && isLive(now) && !active.has(now.id) && openGap(now);
