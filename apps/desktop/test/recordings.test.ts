@@ -1006,9 +1006,16 @@ describe.skipIf(!hasTools)("recordings", () => {
     ).toEqual([]);
   }, 20_000);
 
-  // Permission faults need a user whose reads chmod can actually refuse.
-  for (const where of ["data", "chosen", "chosen late", "chosen expired"] as const) {
-    it.skipIf(where !== "data" && (process.getuid?.() === 0 || process.platform === "win32"))(
+  // Only the chmod cases need a user whose reads permissions can actually refuse.
+  for (const where of [
+    "data",
+    "chosen",
+    "chosen late",
+    "chosen expired",
+    "chosen absent",
+  ] as const) {
+    const permissions = where !== "data" && where !== "chosen absent";
+    it.skipIf(permissions && (process.getuid?.() === 0 || process.platform === "win32"))(
       `never records a failed start after a Quit and relaunch, though recordings.json kept its record (${where})`,
       async () => {
         const asked = Promise.withResolvers<Writable>();
@@ -1018,7 +1025,10 @@ describe.skipIf(!hasTools)("recordings", () => {
         const chosen = join(await tempDir(), "Mr. Streamer");
         if (where !== "data") await recordings.setFolder(chosen);
         const stop =
-          Date.now() + (where === "chosen late" || where === "chosen expired" ? 5000 : 60_000);
+          Date.now() +
+          (where === "chosen late" || where === "chosen expired" || where === "chosen absent"
+            ? 5000
+            : 60_000);
         const starting = recordings.start(channel(TRACKS), stop, {});
         starting.catch(() => {});
         const out = await asked.promise;
@@ -1041,7 +1051,10 @@ describe.skipIf(!hasTools)("recordings", () => {
         const before = provider.streamRequests();
         let again: Awaited<ReturnType<typeof app>>;
         try {
-          if (where !== "data") {
+          if (where === "chosen absent") {
+            await rename(chosen, `${chosen}.away`);
+            await new Promise((resolve) => setTimeout(resolve, stop - Date.now() + 100));
+          } else if (permissions) {
             await chmod(chosen, 0);
             await expect(stat(join(place, folder!, ".mrstreamer-failed"))).rejects.toMatchObject({
               code: "EACCES",
@@ -1063,7 +1076,8 @@ describe.skipIf(!hasTools)("recordings", () => {
             expect(provider.streamRequests()).toBe(before);
           }
         } finally {
-          if (where !== "data") await chmod(chosen, 0o700);
+          if (where === "chosen absent") await rename(`${chosen}.away`, chosen);
+          else if (permissions) await chmod(chosen, 0o700);
         }
         await again.recordings.check();
         await new Promise((resolve) => setTimeout(resolve, 500));

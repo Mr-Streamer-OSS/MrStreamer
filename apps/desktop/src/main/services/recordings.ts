@@ -400,8 +400,15 @@ function make(deps: RecordingsDeps) {
       Effect.promise(() =>
         stat(join(folderOf(record), FAILED)).then(
           (): boolean | null => true,
-          (cause: NodeJS.ErrnoException) =>
-            cause.code === "ENOENT" || cause.code === "ENOTDIR" ? false : null,
+          async (cause: NodeJS.ErrnoException): Promise<boolean | null> => {
+            if (cause.code !== "ENOENT" && cause.code !== "ENOTDIR") return null;
+            if (!record.folder) return false;
+            // A chosen folder on an absent drive cannot say whether it holds the mark.
+            return stat(record.folder).then(
+              (folder) => (folder.isDirectory() ? false : null),
+              () => null,
+            );
+          },
         ),
       );
 
