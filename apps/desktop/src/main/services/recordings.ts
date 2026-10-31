@@ -11,7 +11,9 @@
 //
 // This service is the one owner of recordings. Their records are in recordings.json
 // (../recordings/store.ts), each file in a folder of its own, named for its programme
-// (`recordingFileName`), beside it or in the folder the viewer chose (storage.json). A record is
+// (`recordingFileName`), beside it or in the folder the viewer chose (storage.json), which holds a
+// mark from when it was chosen: nothing records into one without it, as a mount point's own empty
+// folder while its drive is away, and a recording there waits until its folder is back. A record is
 // written once its connection is held, before its folder is made, and listed once capture has the
 // stream's program table on disk; it is written again with how it ended, only after its provider
 // request ended and its file closed: the list never claims more than the file holds. A record still
@@ -136,6 +138,12 @@ const ENDED = { stopped: ".mrstreamer-stopped", quit: ".mrstreamer-quit" } as co
  * recordings.json no longer lists it.
  */
 const FAILED = ".mrstreamer-failed";
+/**
+ * Left empty in a folder as the viewer chooses it, and kept there: where it isn't, as in the empty
+ * folder a drive's mount point keeps while the drive is away, nothing records or goes on, and
+ * nothing there reads as unmarked (see FAILED), until the folder with it is back.
+ */
+const CHOSEN = ".mrstreamer-storage";
 
 /** How `Recordings.start` records, beside its stop time. */
 export interface StartOptions {
@@ -369,7 +377,8 @@ function make(deps: RecordingsDeps) {
     let leaving: "quit" | "away" = "quit";
     /** Set while an update's restart goes ahead: nothing new starts meanwhile. */
     let held = false;
-    const folderOf = (record: StoredRecording) => join(record.folder ?? root, record.id);
+    const placeOf = (record: StoredRecording) => record.folder ?? root;
+    const folderOf = (record: StoredRecording) => join(placeOf(record), record.id);
     const fileOf = (record: StoredRecording) => join(folderOf(record), record.file);
     const isLive = (record: StoredRecording) => record.status.kind === "recording";
     /**
@@ -395,6 +404,13 @@ function make(deps: RecordingsDeps) {
      * written without them, as the next check does.
      */
     const failedFolders = new Map<string, string>();
+    /** Whether `folder` is the profile's own, or the one the viewer chose, marked (see CHOSEN). */
+    const isThere = async (folder: string) =>
+      folder === root ||
+      stat(join(folder, CHOSEN)).then(
+        () => true,
+        () => false,
+      );
     /** Whether `record` is a failed start (see FAILED), or null while its mark can't be read. */
     const failedStart = (record: StoredRecording) =>
       Effect.promise(() =>
@@ -402,12 +418,8 @@ function make(deps: RecordingsDeps) {
           (): boolean | null => true,
           async (cause: NodeJS.ErrnoException): Promise<boolean | null> => {
             if (cause.code !== "ENOENT" && cause.code !== "ENOTDIR") return null;
-            if (!record.folder) return false;
-            // A chosen folder on an absent drive cannot say whether it holds the mark.
-            return stat(record.folder).then(
-              (folder) => (folder.isDirectory() ? false : null),
-              () => null,
-            );
+            // A chosen folder on a drive away cannot say whether it holds the mark.
+            return (await isThere(placeOf(record))) ? false : null;
           },
         ),
       );
@@ -633,7 +645,6 @@ function make(deps: RecordingsDeps) {
     // The room recordings may take: what their files on this computer take against
     // `storage.space`, and what the disk of each folder they write to keeps free against
     // `storage.keepFree`.
-    const placeOf = (record: StoredRecording) => record.folder ?? root;
     /** What capture into `folder` has written so far, of those active now. */
     const capturingIn = (folder: string) =>
       [...active].reduce((sum, [id, each]) => {
@@ -806,26 +817,19 @@ function make(deps: RecordingsDeps) {
             return yield* stoppedFailure;
           }
         }
-        // A disk without room records nothing, asks the provider nothing and holds no connection
-        // for it. One going on stays where it began.
+        // One going on stays where it began. A chosen folder that isn't there, as on a drive not
+        // plugged in, is never made anew, or written into on another disk in its place (see
+        // CHOSEN).
         const folder = resumes ? placeOf(resumes) : (storage.folder ?? root);
+        if (!(yield* Effect.promise(() => isThere(folder))))
+          return yield* new Failed({
+            error: { kind: "unexpected", detail: t("The folder for recordings isn't there.") },
+          });
+        // A disk without room records nothing, asks the provider nothing and holds no connection
+        // for it.
         if (!(yield* roomIn(folder)))
           return yield* new Failed({
             error: { kind: "unexpected", detail: t("There isn't enough free space to record.") },
-          });
-        // A chosen folder that isn't there, as on a drive not plugged in, is never made anew on
-        // another disk in its place.
-        if (
-          folder !== root &&
-          !(yield* Effect.promise(() =>
-            stat(folder).then(
-              () => true,
-              () => false,
-            ),
-          ))
-        )
-          return yield* new Failed({
-            error: { kind: "unexpected", detail: t("The folder for recordings isn't there.") },
           });
         const { subscriptionId } = channel;
         const source = yield* subscriptions.sourceOf(subscriptionId);
@@ -2058,13 +2062,11 @@ function make(deps: RecordingsDeps) {
         ),
       setFolder: (folder: string) =>
         Effect.gen(function* () {
-          // Written to once, as a recording would be, before anything goes there.
+          // Written to, as a recording would be, before anything goes there: its mark (see CHOSEN).
           yield* Effect.tryPromise({
             try: async () => {
               await mkdir(folder, { recursive: true });
-              const probe = join(folder, `.mrstreamer-${randomUUID()}`);
-              await writeFile(probe, "");
-              await rm(probe, { force: true });
+              await writeFile(join(folder, CHOSEN), "");
             },
             catch: () =>
               new Failed({

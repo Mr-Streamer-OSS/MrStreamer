@@ -1095,7 +1095,9 @@ describe.skipIf(!hasTools)("recordings", () => {
         // recordings.json is written without its record, and its folder goes.
         const left = async () => [
           ...(await leftBehind(dataDir)).filter((name) => name !== "storage.json"),
-          ...(await readdir(chosen).catch(() => [])),
+          ...(await readdir(chosen).catch(() => [])).filter(
+            (name) => name !== ".mrstreamer-storage",
+          ),
         ];
         expect(await until(left, (names) => names.length === 0)).toEqual([]);
       },
@@ -1573,6 +1575,79 @@ describe.skipIf(!hasTools)("recordings", () => {
     ).rejects.toMatchObject({ error: { detail: "The folder for recordings isn't there." } });
     expect(existsSync(folder)).toBe(false);
   });
+
+  // An empty folder left at the chosen folder's place, as a drive's mount point while it is away.
+  for (const when of ["capturing", "starting"] as const)
+    it(`records nothing into an empty folder at the chosen folder's place, and goes on there once it is back (${when})`, async () => {
+      // Starting, the first request answers nothing, so the start waits for its program table.
+      let asked = 0;
+      const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
+        streams: (_source, out) => {
+          asked++;
+          if (when === "capturing" || asked > 1) out.write(fixture("h264-aac.mpegts"));
+        },
+      });
+      const chosen = join(await tempDir(), "Mr. Streamer");
+      await recordings.setFolder(chosen);
+      recordings.start(channel(TRACKS), Date.now() + 60_000, {}).catch(() => {});
+      let data = dataDir;
+      if (when === "capturing") {
+        await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
+        await recordings.leave("away");
+      } else {
+        await until(
+          async () => provider.streamRequests(),
+          (requests) => requests > 0,
+        );
+        // What a crash would leave on disk now; the quit then takes out the folder the start made,
+        // so its record is all there is, as when the crash came before its folder was made.
+        data = await tempDir();
+        await cp(dataDir, data, { recursive: true });
+      }
+      await quit();
+      const [id] = readdirSync(chosen).filter((name) => !name.startsWith("."));
+      const size = () =>
+        readdirSync(join(chosen, id ?? ""))
+          .filter((name) => name.endsWith(".ts"))
+          .map((name) => statSync(join(chosen, id ?? "", name)).size);
+      const before = when === "capturing" ? size() : [];
+      expect(id === undefined).toBe(when === "starting");
+      await rename(chosen, `${chosen}.away`);
+      await mkdir(chosen);
+
+      const requests = provider.streamRequests();
+      const again = await app(data);
+      onTestFinished(again.quit);
+      try {
+        await again.library.refresh(subscriptionId);
+        await again.recordings.check();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const [paused] = await again.recordings.list();
+        expect(paused?.status).toMatchObject({ kind: "paused" });
+        await expect(
+          again.recordings.start(channel(TRACKS), Date.now() + 60_000, {}),
+        ).rejects.toMatchObject({ error: { detail: "The folder for recordings isn't there." } });
+        expect(provider.streamRequests()).toBe(requests);
+        expect(readdirSync(chosen)).toEqual([]);
+      } finally {
+        await rm(chosen, { recursive: true });
+        await rename(`${chosen}.away`, chosen);
+      }
+
+      // Back, it goes on there: the same recording, appended to its file.
+      await again.recordings.check();
+      const [going] = await until(
+        again.recordings.list,
+        ([first]) => first?.status.kind === "recording" && first.bytes > (before[0] ?? 0),
+      );
+      expect(going?.status.kind).toBe("recording");
+      const [folder] = readdirSync(chosen).filter((name) => !name.startsWith("."));
+      expect(folder).toBe(going?.id);
+      const files = readdirSync(join(chosen, folder!)).filter((name) => name.endsWith(".ts"));
+      expect(files).toHaveLength(1);
+      expect(statSync(join(chosen, folder!, files[0]!)).size).toBeGreaterThan(before[0] ?? 0);
+      await again.recordings.stop(going!.id);
+    });
 
   it("leaves a storage file it can't read as it is, and starts or changes nothing meanwhile", async () => {
     const { dataDir, channel, provider, quit } = await connected();
