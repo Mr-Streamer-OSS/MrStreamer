@@ -641,24 +641,30 @@ async function start(): Promise<void> {
    */
   let restarting: Promise<void> | null = null;
   let restartInto: string | null = null;
+  /** What was put off when the restart was asked for: only putting it off since then counts. */
+  let putOff: string | null = null;
   const restartAfterRecording = Effect.promise(async () => {
-    const asked = (await runtime.runPromise(updates.status)).update;
-    if (asked.kind !== "ready") return;
-    restartInto = asked.version;
+    const asked = await runtime.runPromise(updates.status);
+    if (asked.update.kind !== "ready") return;
+    restartInto = asked.update.version;
+    putOff = asked.dismissed;
     restarting ??= (async () => {
       const wanted = async () => {
         const now = await runtime.runPromise(updates.status);
         return (
           now.update.kind === "ready" &&
           now.update.version === restartInto &&
-          now.dismissed !== restartInto
+          (now.dismissed !== restartInto || putOff === restartInto)
         );
       };
-      // A recording that starts while the release is checked is waited for too.
-      do {
-        while (recordingNow()) await sleep(RECORDING_WAIT_MS);
-        if (!(await wanted())) return;
-      } while (!runtime.runSync(recordings.holdStarts(true)));
+      // A recording that starts, or begins to, while the release is checked is waited for too.
+      for (;;) {
+        if (!recordingNow()) {
+          if (!(await wanted())) return;
+          if (runtime.runSync(recordings.holdStarts(true))) break;
+        }
+        await sleep(RECORDING_WAIT_MS);
+      }
       await runtime.runPromise(updates.restart);
       // Refused or failed, the app goes on: so do recordings.
       if (!(await wanted())) runtime.runSync(recordings.holdStarts(false));
