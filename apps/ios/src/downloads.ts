@@ -130,6 +130,8 @@ const About = lazy(() =>
     name: "string",
     episodeName: "string | null",
     year: "number | null",
+    /** The movie's or the series' TMDB id, for subtitle searches; absent in older records. */
+    "tmdbId?": "string | null",
     /** Seconds, as the details said. */
     duration: "number | null",
     originalLanguage: "string | null",
@@ -2071,7 +2073,7 @@ function playCopy(id: string, record: Stored) {
     subtitles: subtitleTitle({
       subscriptionId: record.subscriptionId,
       id: title.id,
-      tmdbId: null,
+      tmdbId: about.tmdbId ?? null,
       title: about.name,
       year: about.year,
       ...(title.kind === "episode"
@@ -2168,6 +2170,7 @@ async function aboutOf(ref: TitleRef, signal: AbortSignal) {
         name: title.title,
         episodeName: null,
         year: title.year,
+        tmdbId: title.tmdbId,
         duration: details.duration,
         originalLanguage: title.originalLanguage,
       },
@@ -2205,6 +2208,7 @@ async function aboutOf(ref: TitleRef, signal: AbortSignal) {
       name: series.title,
       episodeName: episode?.title ?? null,
       year: series.year,
+      tmdbId: series.tmdbId,
       duration: episode?.duration ?? details.duration,
       originalLanguage: series.originalLanguage,
     },

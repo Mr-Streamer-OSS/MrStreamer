@@ -163,6 +163,7 @@ describe("searching SubDL", () => {
     for (const broadened of [
       titled("Some Other Movie", 1999),
       titled("Some Movie", 2000),
+      titled("Some Movie"),
       titled(),
     ]) {
       answer = broadened;
@@ -232,7 +233,7 @@ describe("searching SubDL", () => {
     answer = () =>
       Response.json({
         status: true,
-        results: [{ type: "tv", name: "Series", year: 2011 }],
+        results: [{ type: "tv", name: "Series", year: 2015 }],
         subtitles: [{ ...movieResult, season: 2, episode: 3 }],
       });
     await open({ ...item(untitled), id: "sub-1:e8" });

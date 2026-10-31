@@ -788,7 +788,12 @@ describe("downloads", { timeout: 30_000 }, () => {
       app.playDownload(copy.id);
       await until(() => memory.played.length > 0, "the copy to open");
       expect(subtitles.shownSubtitle()).toMatchObject({
-        title: { subscriptionId: a, version: `movie|${ref.id}` },
+        // A search from the copy asks by the title's TMDB id, as the fake lists it, not its name.
+        title: {
+          subscriptionId: a,
+          version: `movie|${ref.id}`,
+          query: { kind: "movie", tmdbId: movie().id + 10_000 },
+        },
         subtitle: { release: "Movie.2001" },
       });
       expect(asked.filter((url) => url.includes("subdl"))).toEqual([]);
@@ -796,6 +801,24 @@ describe("downloads", { timeout: 30_000 }, () => {
     } finally {
       vi.stubGlobal("fetch", before);
     }
+    // A copy saved before its TMDB id was kept still plays, and asks by its name.
+    const disk = new DiskFile(native.root, "documents", "downloads.json");
+    disk.writeSync(
+      JSON.stringify(
+        JSON.parse(disk.textSync(), (key, value: unknown) =>
+          key === "tmdbId" ? undefined : value,
+        ),
+      ),
+    );
+    const relaunched = await launch();
+    relaunched.playDownload(copy.id);
+    const kept = await import("../src/downloaded-subtitles.ts");
+    await until(() => kept.shownSubtitle() !== null, "the older copy to open");
+    expect(kept.shownSubtitle()?.title.query).toEqual({
+      kind: "movie",
+      title: copy.name,
+      ...(copy.year === null ? {} : { year: copy.year }),
+    });
   });
 
   it("applies a saved copy's original language through the real play action without establishing provider-file facts", async () => {
