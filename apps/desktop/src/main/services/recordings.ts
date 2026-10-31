@@ -437,10 +437,20 @@ function make(deps: RecordingsDeps) {
      * its time over, it was cut short by the quit, with what its file holds; else it goes on,
      * missing the time since its file was last written, or since it paused. While its chosen folder
      * isn't there, nor are its marks and file: it is read again once that folder is (see unseen).
+     * One changed while it is read, as by a Stop, stays as that left it.
      */
-    const reckon = (record: StoredRecording, now: number) =>
+    const reckon = (
+      record: StoredRecording,
+      now: number,
+      current: StoredRecording | undefined = records.get(record.id),
+    ) =>
       Effect.gen(function* () {
         const failed = yield* failedStart(record);
+        const file = failed
+          ? null
+          : yield* Effect.promise(() => stat(fileOf(record)).catch(() => null));
+        const left = failed ? null : yield* Effect.promise(() => endedAs(record));
+        if (records.get(record.id) !== current) return;
         if (failed === null) unseen.set(record.id, record);
         else unseen.delete(record.id);
         if (failed) {
@@ -448,11 +458,9 @@ function make(deps: RecordingsDeps) {
           failedFolders.set(record.id, folderOf(record));
           return;
         }
-        const file = yield* Effect.promise(() => stat(fileOf(record)).catch(() => null));
         const last = file ? Math.min(file.mtimeMs, record.stop) : record.start;
         const seen = { ...record, bytes: file?.size ?? record.bytes };
         const open = openGap(record);
-        const left = yield* Effect.promise(() => endedAs(record));
         // Paused, its gap lasts until it was ended; else it ended where its file was last written.
         if (left)
           records.set(record.id, finalOf(seen, open ? left.at : Math.min(last, left.at), left.as));
@@ -523,7 +531,13 @@ function make(deps: RecordingsDeps) {
     const save = writing(
       Effect.tryPromise({
         try: async () => {
-          const kept = [...records.values(), ...beginning.values()];
+          // One not read yet (see unseen) is kept as it was, its gap not guessed.
+          const kept = [
+            ...[...records.values()].map((record) =>
+              isLive(record) ? (unseen.get(record.id) ?? record) : record,
+            ),
+            ...beginning.values(),
+          ];
           await writeRecordings(path, kept);
           // Failed starts it no longer lists lose their marked folders.
           const listed = new Set(kept.map(({ id }) => id));
@@ -1556,6 +1570,10 @@ function make(deps: RecordingsDeps) {
             }
             yield* reckon(kept, now);
             const again = records.get(record.id);
+            if (stopping.has(record.id)) {
+              paused = true;
+              continue;
+            }
             if (!again || !isLive(again)) {
               resumeTried.delete(record.id);
               over.push(record.id);

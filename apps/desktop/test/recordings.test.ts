@@ -1699,6 +1699,50 @@ describe.skipIf(!hasTools)("recordings", () => {
       await again.recordings.stop(going!.id);
     });
 
+  it("dates the gap of one a crash left on a drive away from its file's last write, through another relaunch and another recording", async () => {
+    const { dataDir, subscriptionId, channel, recordings, quit } = await connected();
+    const chosen = join(await tempDir(), "Mr. Streamer");
+    await recordings.setFolder(chosen);
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    const { id } = answer.recording;
+    await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
+    // What a crash would leave: recordings.json as it was while it captured.
+    const crashed = await tempDir();
+    await cp(dataDir, crashed, { recursive: true });
+    await recordings.leave("away");
+    await quit();
+    const [name] = readdirSync(join(chosen, id)).filter((each) => each.endsWith(".ts"));
+    const written = statSync(join(chosen, id, name!)).mtimeMs;
+    await rename(chosen, `${chosen}.away`);
+    await mkdir(chosen);
+
+    // Away: another recording, beside recordings.json, writes recordings.json meanwhile.
+    const away = await app(crashed);
+    await away.library.refresh(subscriptionId);
+    await away.recordings.setFolder(join(crashed, "recordings"));
+    const other = await away.recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (other.kind !== "started") throw new Error("Not started");
+    await away.recordings.stop(other.recording.id);
+    await away.recordings.leave("away");
+    await away.quit();
+    await rm(chosen, { recursive: true });
+    await rename(`${chosen}.away`, chosen);
+
+    const again = await app(crashed);
+    onTestFinished(again.quit);
+    await again.library.refresh(subscriptionId);
+    await again.recordings.check();
+    const going = await until(
+      async () => (await again.recordings.list()).find((each) => each.id === id),
+      (found) => found?.status.kind === "recording",
+    );
+    expect(going?.gaps).toEqual([
+      { from: Math.min(written, answer.recording.stop), to: expect.any(Number), why: "away" },
+    ]);
+    await again.recordings.stop(id);
+  });
+
   it("records nothing into an empty folder put at the chosen folder's place while its playlist is read again", async () => {
     // An M3U subscription reads its playlist again for a channel's stream after a restart.
     const provider = await fakeProvider({ live: true, slotReleaseMs: 0 });
