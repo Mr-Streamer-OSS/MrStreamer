@@ -1072,6 +1072,7 @@ describe("programme search", () => {
           channels: [
             channel("1", "News", "news.tv"),
             channel("2", "Sport", "sport.tv"),
+            channel("4", "News 2", "news.tv"),
             { ...channel("3", "Hidden", "late.tv"), adult: true },
           ],
         },
@@ -1258,10 +1259,20 @@ describe("programme search", () => {
     expect((await pending).unsearched).toBe(false);
   });
 
-  it.each(["removal", "replacement", "part", "mappings"] as const)(
+  it("finds a guide id two channels share once, on the first listed, ties in their order", async () => {
+    const { owner, held } = await searching();
+    held.get("a")!.set("news.tv", [show("News", at)]);
+    held.get("xmltv-1")!.set("sport.tv", [show("Sport news", at)]);
+    const keysOf = async (listed: string[]) =>
+      (await owner.search("news", listed)).found.map(({ key }) => key);
+    expect(await keysOf(["a:4", "a:2", "a:1"])).toEqual(["a:4", "a:2"]);
+    expect(await keysOf(["a:2", "a:1", "a:4"])).toEqual(["a:2", "a:1"]);
+  });
+
+  it.each(["removal", "replacement", "part", "mappings", "generation"] as const)(
     "answers nothing for a search held across %s",
     async (change) => {
-      const { owner, native, held, sources } = await searching();
+      const { owner, native, held, sources, control } = await searching();
       held.get("a")!.set("news.tv", [show("News", at)]);
       held.get("xmltv-1")!.set("sport.tv", [show("Sport news", at)]);
       sources.set("a", source);
@@ -1286,6 +1297,10 @@ describe("programme search", () => {
       }
       if (change === "part") owner.setPart(channels());
       if (change === "mappings") owner.configure(new Map([["xmltv-1", external]]), new Map());
+      if (change === "generation") {
+        control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "new" } });
+        await owner.refresh("a");
+      }
       release.resolve();
       expect((await pending).found).toEqual([]);
       if (change !== "removal")

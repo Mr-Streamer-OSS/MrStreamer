@@ -1589,6 +1589,24 @@ describe("Programmes in Search", () => {
     expect(scenario.did).toEqual(["play b:7 in Watch", "back"]);
   });
 
+  it.each(["new text", "Cancel"] as const)(
+    "never shows an answer held across %s",
+    async (change) => {
+      await open();
+      const late = held();
+      scenario.search = (text) => (text === "news" ? late.answer : Promise.resolve([]));
+      startType("news");
+      if (change === "new text") await type("weather");
+      else startPress("text-Cancel");
+      await React.act(async () => {
+        late.release([programme("News at Six", "six")]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(text()).not.toContain("News at Six");
+      expect(scenario.did.filter((done) => done.startsWith("play"))).toEqual([]);
+    },
+  );
+
   it("never shows an answer held across a provider's replaced login", async () => {
     await open();
     await type("");
