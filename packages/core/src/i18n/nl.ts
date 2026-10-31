@@ -1328,7 +1328,8 @@ export const nl: Translation = {
   "Recordings could not be saved.": "Opnames konden niet worden bewaard.",
   "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.":
     "Een opname die je hebt gestopt kon niet als gestopt worden bewaard. Controleer de opslag en probeer het opnieuw.",
-  "The folder for recordings isn't there.": "De map voor opnames is er niet.",
+  "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.":
+    "De map voor opnames is er niet. Sluit de schijf aan of kies de map opnieuw in Instellingen.",
   "The folder couldn't be opened.": "De map kon niet worden geopend.",
   "There isn't enough free space to record.": "Er is niet genoeg vrije ruimte om op te nemen.",
   "Recording settings could not be saved.": "Opname-instellingen konden niet worden bewaard.",

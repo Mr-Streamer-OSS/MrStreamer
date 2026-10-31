@@ -1339,7 +1339,8 @@ export const de: Translation = {
   "Recordings could not be saved.": "Aufnahmen konnten nicht gespeichert werden.",
   "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.":
     "Eine gestoppte Aufnahme konnte nicht als gestoppt gespeichert werden. Prüfe ihren Speicher und versuche es dann erneut.",
-  "The folder for recordings isn't there.": "Der Ordner für Aufnahmen ist nicht da.",
+  "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.":
+    "Der Ordner für Aufnahmen ist nicht da. Schließ sein Laufwerk an oder wähl ihn in den Einstellungen erneut.",
   "The folder couldn't be opened.": "Der Ordner konnte nicht geöffnet werden.",
   "There isn't enough free space to record.":
     "Es ist nicht genug freier Speicher für die Aufnahme da.",

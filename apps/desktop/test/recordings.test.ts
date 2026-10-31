@@ -1572,7 +1572,12 @@ describe.skipIf(!hasTools)("recordings", () => {
     await rm(folder, { recursive: true });
     await expect(
       again.recordings.start(channel(TRACKS), Date.now() + 1000, {}),
-    ).rejects.toMatchObject({ error: { detail: "The folder for recordings isn't there." } });
+    ).rejects.toMatchObject({
+      error: {
+        detail:
+          "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
+      },
+    });
     expect(existsSync(folder)).toBe(false);
   });
 
@@ -1626,7 +1631,12 @@ describe.skipIf(!hasTools)("recordings", () => {
         expect(paused?.status).toMatchObject({ kind: "paused" });
         await expect(
           again.recordings.start(channel(TRACKS), Date.now() + 60_000, {}),
-        ).rejects.toMatchObject({ error: { detail: "The folder for recordings isn't there." } });
+        ).rejects.toMatchObject({
+          error: {
+            detail:
+              "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
+          },
+        });
         expect(provider.streamRequests()).toBe(requests);
         expect(readdirSync(chosen)).toEqual([]);
       } finally {

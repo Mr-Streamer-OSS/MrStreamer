@@ -1303,7 +1303,8 @@ export const en = {
   "Recordings could not be saved.": "Recordings could not be saved.",
   "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.":
     "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.",
-  "The folder for recordings isn't there.": "The folder for recordings isn't there.",
+  "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.":
+    "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
   "The folder couldn't be opened.": "The folder couldn't be opened.",
   "There isn't enough free space to record.": "There isn't enough free space to record.",
   "Recording settings could not be saved.": "Recording settings could not be saved.",

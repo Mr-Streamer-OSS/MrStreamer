@@ -808,7 +808,12 @@ function make(deps: RecordingsDeps) {
           const failed = yield* failedStart(resumes);
           if (failed === null)
             return yield* new Failed({
-              error: { kind: "unexpected", detail: t("The folder for recordings isn't there.") },
+              error: {
+                kind: "unexpected",
+                detail: t(
+                  "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
+                ),
+              },
             });
           if (failed) {
             forgetStart(resumes);
@@ -823,7 +828,12 @@ function make(deps: RecordingsDeps) {
         const folder = resumes ? placeOf(resumes) : (storage.folder ?? root);
         if (!(yield* Effect.promise(() => isThere(folder))))
           return yield* new Failed({
-            error: { kind: "unexpected", detail: t("The folder for recordings isn't there.") },
+            error: {
+              kind: "unexpected",
+              detail: t(
+                "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
+              ),
+            },
           });
         // A disk without room records nothing, asks the provider nothing and holds no connection
         // for it.
@@ -1471,7 +1481,9 @@ function make(deps: RecordingsDeps) {
       startingOn.add(subscriptionId);
       Effect.runFork(
         Effect.gen(function* () {
-          if (!(yield* roomIn(record.folder ?? root))) return "space" as const;
+          // A drive away isn't measured: its mount point's disk says nothing of its room.
+          if (!(yield* Effect.promise(() => isThere(placeOf(record))))) return null;
+          if (!(yield* roomIn(placeOf(record)))) return "space" as const;
           const answer = yield* start(record.channel, record.stop, { resumes: record });
           return answer.kind === "busy" ? ("busy" as const) : null;
         }).pipe(

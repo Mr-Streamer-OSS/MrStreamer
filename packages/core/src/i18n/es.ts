@@ -1404,7 +1404,8 @@ export const es: Translation = {
   "Recordings could not be saved.": "No se pudieron guardar las grabaciones.",
   "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.":
     "No se pudo guardar como detenida una grabación que detuviste. Comprueba su almacenamiento y vuelve a intentarlo.",
-  "The folder for recordings isn't there.": "La carpeta de las grabaciones no está.",
+  "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.":
+    "La carpeta de las grabaciones no está. Conecta su unidad o vuelve a elegirla en Ajustes.",
   "The folder couldn't be opened.": "No se pudo abrir la carpeta.",
   "There isn't enough free space to record.": "No hay suficiente espacio libre para grabar.",
   "Recording settings could not be saved.": "No se pudieron guardar los ajustes de grabación.",

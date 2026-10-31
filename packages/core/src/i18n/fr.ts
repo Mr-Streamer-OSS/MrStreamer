@@ -1396,7 +1396,8 @@ export const fr: Translation = {
   "Recordings could not be saved.": "Impossible d’enregistrer la liste des enregistrements.",
   "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.":
     "Impossible d’enregistrer comme arrêté un enregistrement que vous avez arrêté. Vérifiez son stockage, puis réessayez.",
-  "The folder for recordings isn't there.": "Le dossier des enregistrements est introuvable.",
+  "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.":
+    "Le dossier des enregistrements est introuvable. Branchez son disque ou choisissez-le à nouveau dans Réglages.",
   "The folder couldn't be opened.": "Impossible d’ouvrir le dossier.",
   "There isn't enough free space to record.": "Il n’y a pas assez d’espace libre pour enregistrer.",
   "Recording settings could not be saved.":
