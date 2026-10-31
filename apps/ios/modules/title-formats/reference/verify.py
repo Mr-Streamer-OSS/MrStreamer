@@ -249,7 +249,10 @@ def vtt_ms(t):
     return round(sum(p * 60 ** (len(parts) - 1 - i) for i, p in enumerate(parts)) * 1000)
 
 def plain(text):
-    text = re.sub(r"<[^>]*>", "", text).replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    # Unescaped first, so text that reads as a tag, which ffmpeg's SubRip reading drops, goes
+    # on both sides.
+    text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    text = re.sub(r"<[^>]*>", "", text)
     return " ".join(text.replace("\u00a0", " ").split())
 
 def cues(vtt):

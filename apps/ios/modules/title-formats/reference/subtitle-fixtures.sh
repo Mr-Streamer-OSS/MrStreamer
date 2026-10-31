@@ -6,8 +6,8 @@
 # - subs.mkv: a minute of H.264 (a keyframe every 2 s) with AAC, and text subtitles whose lines
 #   outlast several segments: English SubRip with a 35-second line, lines over it, tags and a "<"
 #   that opens none, forced English SubRip, French ASS with italics, overrides, a drawing in a
-#   line and lines that are only drawings, and German WebVTT. ffmpeg stores each subtitle up to
-#   10 s ahead of its time, and its index lists every subtitle line with its length.
+#   line and lines that are only drawings, and German WebVTT, copied as written. Each line is stored
+#   where its time falls, and the index lists every subtitle line with its length.
 # - subs-uncued.mkv: the same file with every subtitle line left out of its index, each entry
 #   overwritten by a Void element of its size, so nothing else moves.
 # - subs-reordered.mkv: the same with the regular and forced English tracks' entries in the other
@@ -22,8 +22,14 @@
 #   lines, which must still show.
 # - subs-longline.mkv: its picture and sound with French SubRip holding a 70 KB line, too large
 #   to keep, between two lines.
+# - subs-hidden.mkv: subs-far.mkv with no SeekHead entry for its Tracks.
+# - subs-bzip2, -encrypted, -stripped, -private and -twice.mkv: track 4 encoded otherwise.
+# - subs-many.mkv: over 4 MB of French SubRip lines in the first segment; subs-huge.mkv: one in a
+#   packet over 1 MB.
+# - subs-dvb.mkv: English SubRip and Dutch DVB subtitles.
 # Needs an ffmpeg with libx264 and its AAC encoder on PATH, as Ubuntu's and Homebrew's builds have.
 set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
 out=${1:?usage: subtitle-fixtures.sh <out-folder>}
 mkdir -p "$out"
 work=$(mktemp -d)
@@ -94,7 +100,7 @@ ffmpeg -v error -y \
   -i "$work/english.srt" -i "$work/forced.srt" -i "$work/french.ass" -i "$work/german.vtt" \
   -map 0:v -map 1:a -map 2 -map 3 -map 4 -map 5 -t 60 \
   -c:v libx264 -preset veryfast -g 50 -keyint_min 50 -sc_threshold 0 -pix_fmt yuv420p \
-  -c:a aac -b:a 96k -c:s:0 srt -c:s:1 srt -c:s:2 ass -c:s:3 webvtt \
+  -c:a aac -b:a 96k -c:s copy -max_interleave_delta 0 \
   -metadata:s:s:0 language=eng -metadata:s:s:1 language=eng -metadata:s:s:2 language=fra \
   -metadata:s:s:3 language=ger -disposition:s:0 0 -disposition:s:1 forced \
   -disposition:s:2 0 -disposition:s:3 0 -fflags +bitexact "$out/subs.mkv"
@@ -114,6 +120,23 @@ open(f"{work}/long.srt", "w").write("1\n00:00:05,000 --> 00:00:07,000\nBefore\n\
     "2\n00:00:21,000 --> 00:00:23,000\n" + "x" * 70000 + "\n\n"
     "3\n00:00:25,000 --> 00:00:27,000\nAfter\n")
 PY
+# Over 4 MB of lines, all within the first segment, and a line of a packet over 1 MB.
+python3 -I - "$work" <<'PY'
+import sys
+work = sys.argv[1]
+line = "Une ligne parmi beaucoup, assez longue pour peser cent octets avec son numero "
+open(f"{work}/many.srt", "w").write("".join(
+    f"{i + 1}\n00:00:01,{i % 1000:03d} --> 00:00:03,000\n{line}{i:07d}\n\n" for i in range(52000)))
+open(f"{work}/huge.srt", "w").write("1\n00:00:21,000 --> 00:00:23,000\n" + "y" * 1_100_000 + "\n")
+PY
+ffmpeg -v error -y -i "$out/subs.mkv" -i "$work/many.srt" -map 0:0 -map 0:1 -map 1 -c copy \
+  -metadata:s:s:0 language=fra -fflags +bitexact "$out/subs-many.mkv"
+ffmpeg -v error -y -i "$out/subs.mkv" -i "$work/huge.srt" -map 0:0 -map 0:1 -map 1 -c copy \
+  -metadata:s:s:0 language=fra -fflags +bitexact "$out/subs-huge.mkv"
+# DVB subtitles from the desktop's channel clip; Matroska carries them, not teletext.
+ffmpeg -v error -y -i "$out/subs.mkv" -i "$here/../../../../desktop/test/fixtures/h264-subtitles.mpegts" \
+  -map 0:0 -map 0:1 -map 0:2 -map 1:3 -c copy -fflags +bitexact "$out/subs-dvb.mkv"
+
 for kind in drawing:ass longline:srt; do
   name=${kind%:*} codec=${kind#*:}
   input=$work/drawing.ass
@@ -189,10 +212,17 @@ b[three[1]:four[4]] = b[four[1]:four[4]] + b[three[1]:three[4]]
 open(f"{out}/subs-reordered.mkv", "wb").write(b)
 print("subs-reordered.mkv: tracks 4 and 3 in that order")
 
-def zlib(b):
-    """The forced English track, track 4, marked as zlib-compressed, its lines as they are. The
-    Void before the Tracks gives up the room, so nothing after them moves."""
-    added = bytes.fromhex("6d808a" "624087" "503484" "42548100")
+# ContentEncodings for track 4: the ContentEncoding elements given, in hex.
+def encodings(*each):
+    inner = b"".join(bytes([0x62, 0x40, 0x80 | len(bytes.fromhex(e))]) + bytes.fromhex(e) for e in each)
+    return bytes([0x6D, 0x80, 0x80 | len(inner)]) + inner
+
+ZLIB = "503484" "42548100"  # ContentCompression, ContentCompAlgo 0
+
+def zlib(b, added=encodings(ZLIB)):
+    """The forced English track, track 4, given `added` ContentEncodings, zlib's by default, its
+    lines as they are. The Void before the Tracks gives up the room, so nothing after them
+    moves."""
     four = next(x for x in entries(b) if number(b, x) == 4)
     _, at, header, s, e = four
     assert header == 9
@@ -223,9 +253,34 @@ print("subs-zlib.mkv: track 4 marked zlib-compressed")
 
 # subs-far.mkv: the same mark in a file whose ASS header makes its Tracks larger than the start
 # the core keeps, so the core reads them from where the SeekHead says.
-open(f"{out}/subs-far.mkv", "wb").write(zlib(bytearray(open(f"{out}/far.mkv", "rb").read())))
+far = zlib(bytearray(open(f"{out}/far.mkv", "rb").read()))
+open(f"{out}/subs-far.mkv", "wb").write(far)
 os.remove(f"{out}/far.mkv")
 print("subs-far.mkv: track 4 marked zlib-compressed, its Tracks past the first 256 KB")
+
+# subs-hidden.mkv: subs-far.mkv without its SeekHead's entry for the Tracks, so the core can't
+# read them and knows no text track's encoding.
+_, _, _, ss, se = top(far, 0x114D9B74)
+for i, at, header, s2, e2 in elements(far, ss, se):
+    if i == 0x4DBB and any(k == 0x53AB and far[x:y] == bytes.fromhex("1654ae6b") for k, _, _, x, y in elements(far, s2, e2)):
+        # A Void element of the same length: its one-byte ID, then a one-byte size.
+        assert header == 3 and e2 - at - 2 < 0x7F
+        far[at:e2] = bytes([0xEC, 0x80 | (e2 - at - 2)]) + bytes(e2 - at - 2)
+open(f"{out}/subs-hidden.mkv", "wb").write(far)
+print("subs-hidden.mkv: no SeekHead entry for its Tracks")
+
+# Other encodings of track 4: bzip2 and encryption, which can't be read here; header stripping
+# and zlib for the codec's private data only, which can; and two encodings, of which FFmpeg
+# reads none.
+for name, added in [
+    ("bzip2", encodings("503484" "42548101")),
+    ("encrypted", encodings("503381" "01" "503580")),
+    ("stripped", encodings("503484" "42548103")),
+    ("private", encodings("503281" "02" + ZLIB)),
+    ("twice", encodings("503484" "42548103", "503484" "42548103")),
+]:
+    open(f"{out}/subs-{name}.mkv", "wb").write(zlib(bytearray(source), added))
+    print(f"subs-{name}.mkv: track 4 encoded")
 
 # subs-badcues.mkv: the index's last field says it is eight bytes long, past the end of the
 # Cues, as a damaged file might.
