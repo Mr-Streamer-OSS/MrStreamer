@@ -129,24 +129,39 @@ describe("external guides", () => {
     expect(next.guides.links()).toEqual([]);
   });
 
-  it("replaces a guide's link with a new guide in its place, erasing the old one", async () => {
-    const { guides, control, prepared, written } = launch(fresh());
-    guides.load();
-    await guides.add("https://first.test/a.xml", "First");
-    await guides.add(LINK, "Second");
-    const first = guides.links()[0]!;
-    const before = written.length;
-    expect(await guides.replace(first.id, "https://new.test/a.xml")).toBeNull();
-    // No file written meanwhile lists both the old guide and the new one.
-    expect(written.slice(before).every((ids) => ids.length <= 2)).toBe(true);
-    await flush();
-    expect(guides.links().map(({ origin, name }) => [origin, name])).toEqual([
-      ["https://new.test", "First"],
-      ["https://guide.test", "Second"],
-    ]);
-    expect(control.calls).toContain(`forget:${first.id}`);
-    expect(prepared.at(-1)).toBe("https://new.test/a.xml");
-  });
+  it.each(["unlocked", "locked"])(
+    "replaces a %s guide's link, erasing the old one",
+    async (kind) => {
+      const disk = fresh();
+      const initial = launch(disk);
+      initial.guides.load();
+      await initial.guides.add("https://first.test/a.xml", "First");
+      await initial.guides.add(LINK, "Second");
+      const first = initial.guides.links()[0]!;
+      const active = kind === "locked" ? launch(disk) : initial;
+      if (kind === "locked") {
+        disk.items.set(first.id, "https://stale.test/epg.xml");
+        const { ids, kept } = active.guides.load();
+        await active.owner.restore(ids, kept);
+        await active.guides.restore();
+        expect(active.guides.links()[0]!.locked).toBe(true);
+      }
+      const { guides, control, prepared, written } = active;
+      const before = written.length;
+      expect(await guides.replace(first.id, "https://new.test/a.xml")).toBeNull();
+      // No file written meanwhile lists both the old guide and the new one.
+      expect(written.slice(before).every((ids) => ids.length <= 2)).toBe(true);
+      await flush();
+      expect(guides.links().map(({ origin, name }) => [origin, name])).toEqual([
+        ["https://new.test", "First"],
+        ["https://guide.test", "Second"],
+      ]);
+      expect(control.calls).toContain(`forget:${first.id}`);
+      expect(guides.links()[0]!.id).not.toBe(first.id);
+      expect(disk.items.has(first.id)).toBe(false);
+      expect(prepared.at(-1)).toBe("https://new.test/a.xml");
+    },
+  );
 
   it.each(["missing", "mismatched"] as const)(
     "restores saved guides at launch, locked where the Keychain link is %s",
