@@ -29,6 +29,19 @@ vi.mock("expo-video", () => ({
 }));
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
+  // Text keeps its font size, so a test can see the size cues are drawn at.
+  Text: ({ children, style }: { children?: React.ReactNode; style?: unknown }) => {
+    const size = [style]
+      .flat(9)
+      .reduce<number | undefined>(
+        (found, each) =>
+          typeof each === "object" && each !== null && "fontSize" in each
+            ? (each as { fontSize: number }).fontSize
+            : found,
+        undefined,
+      );
+    return React.createElement("span", { "data-size": size }, children);
+  },
   ActionSheetIOS: {
     showActionSheetWithOptions: (
       options: { title: string; message?: string; options: readonly string[] },
@@ -71,6 +84,7 @@ const playback = await import("../src/playback.ts");
 const subtitles = await import("../src/downloaded-subtitles.ts");
 const { saveSubtitleKey } = await import("../src/online-subtitles.ts");
 const { WatchLayer } = await import("../src/watch.tsx");
+const preferences = await import("../src/media-preferences.ts");
 
 const SRT = "1\n00:00:01,000 --> 00:00:04,000\nHello <i>there</i>\n";
 const tick = async () => {
@@ -148,7 +162,8 @@ async function openSubtitles() {
   return sheets.at(-1)!;
 }
 async function pick(sheet: (typeof sheets)[number], label: string) {
-  const index = sheet.options.findIndex((row) => row.includes(label));
+  const exact = sheet.options.indexOf(label);
+  const index = exact >= 0 ? exact : sheet.options.findIndex((row) => row.includes(label));
   expect(index).toBeGreaterThanOrEqual(0);
   await React.act(async () => {
     sheet.pick(index);
@@ -225,6 +240,74 @@ describe("Watch's online subtitles", () => {
       await tick();
     });
     expect(sheets.at(-1)?.title).toBe("Online subtitles");
+  });
+
+  it("moves a shown subtitle earlier or later and back with Reset, drawn at the chosen size", async () => {
+    preferences.updateMediaPreferences("subtitleSize", "large");
+    await saveSubtitleKey("key");
+    await watchMovie();
+    await pick(await openSubtitles(), "Find online");
+    await pick(sheets.at(-1)!, "Movie.2001");
+    await pick(await openSubtitles(), "Adjust timing");
+    await pick(sheets.at(-1)!, "1 s later");
+    expect(subtitles.shownSubtitle()?.timing.offset).toBe(1);
+    expect(sheets.at(-1)?.message).toBe("Shown 1.0 s later");
+    await pick(sheets.at(-1)!, "0.1 s earlier");
+    expect(subtitles.shownSubtitle()?.timing.offset).toBe(0.9);
+    await pick(sheets.at(-1)!, "Reset");
+    expect(subtitles.shownSubtitle()?.timing).toEqual({ offset: 0, speed: 1 });
+    expect(sheets.at(-1)?.message).toBe("Original timing");
+    await React.act(async () => {
+      port.currentTime = 2;
+      port.state(true);
+      await tick();
+    });
+    const cue = [...container.querySelectorAll("span")].find((each) =>
+      each.textContent?.includes("Hello there"),
+    );
+    expect(cue?.getAttribute("data-size")).toBe("26");
+    preferences.updateMediaPreferences("subtitleSize", "medium");
+  });
+
+  it("turns a shown subtitle Off from its own row, and back on from the kept row", async () => {
+    await saveSubtitleKey("key");
+    await watchMovie();
+    // A file whose own subtitles can't be turned off: Off is the download's row alone.
+    const identity = port.identity();
+    port.tracks = {
+      ...identity,
+      revision: 1,
+      audio: { state: "ready", options: [] },
+      subtitles: { state: "ready", options: [] },
+      subtitleOffAllowed: false,
+      selectedAudioId: null,
+      selectedSubtitleId: null,
+    };
+    await pick(await openSubtitles(), "Find online");
+    await pick(sheets.at(-1)!, "Movie.2001");
+    const sheet = await openSubtitles();
+    expect(sheet.options[0]).toBe("Off");
+    await pick(sheet, "Off");
+    expect(subtitles.shownSubtitle()).toBeNull();
+    const again = await openSubtitles();
+    expect(again.options).toContain("English · Movie.2001");
+    await pick(again, "English · Movie.2001");
+    expect(subtitles.shownSubtitle()?.subtitle.release).toBe("Movie.2001");
+  });
+
+  it("says when SubDL finds nothing, or refuses the key", async () => {
+    await saveSubtitleKey("key");
+    await watchMovie();
+    vi.stubGlobal("fetch", async () =>
+      Response.json({ status: true, results: [{ tmdb_id: 550, type: "movie" }], subtitles: [] }),
+    );
+    await pick(await openSubtitles(), "Find online");
+    vi.stubGlobal("fetch", async () => new Response("", { status: 403 }));
+    await pick(await openSubtitles(), "Find online");
+    expect(alerts).toEqual([
+      ["No subtitles found", "SubDL has none for this in your languages."],
+      ["SubDL refused the key", "Check your SubDL API key in Settings > Subtitles."],
+    ]);
   });
 
   it("points to Settings when no SubDL key is saved", async () => {

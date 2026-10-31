@@ -135,6 +135,25 @@ describe("searching SubDL", () => {
     expect(search.href).not.toContain("provider-password");
   });
 
+  it("asks by title and year without a TMDB id, in the viewer's subtitle language first", async () => {
+    preferences.updateMediaPreferences("subtitles", { kind: "language", language: "de" });
+    const untitled = online.subtitleTitle({
+      subscriptionId: "sub-1",
+      id: "m9",
+      tmdbId: null,
+      title: "Some Movie",
+      year: 1999,
+    });
+    answer = () => Response.json({ status: true, results: [{ type: "movie" }], subtitles: [] });
+    await open({ ...item(untitled), id: "sub-1:m9" });
+    expect(await online.findSubtitles(untitled)).toEqual({ kind: "found", results: [] });
+    const search = requests.at(-1)!.searchParams;
+    expect(search.get("film_name")).toBe("Some Movie");
+    expect(search.get("year")).toBe("1999");
+    expect(search.has("tmdb_id")).toBe(false);
+    expect(search.get("languages")).toBe("DE,NL,EN");
+  });
+
   it("asks for an episode by its series, season and number, and keeps only that episode", async () => {
     const episode = online.subtitleTitle({
       subscriptionId: "sub-1",
@@ -313,6 +332,25 @@ describe("a chosen result", () => {
     expect(online.keptSubtitle(other)).toBeNull();
   });
 
+  it("takes WebVTT as it is, and refuses an empty, crowded or oversized download", async () => {
+    const playing = await openTitle();
+    const serving = (file: () => Response) => {
+      answer = (url) =>
+        url.hostname === "api.subdl.com" ? searchReply(550, "movie", [movieResult]) : file();
+    };
+    serving(() => new Response("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n"));
+    expect(await chooseFirst(playing)).toEqual({ kind: "shown" });
+    serving(() => new Response(zipSync({ "readme.txt": strToU8("none") })));
+    expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
+    const crowded = Object.fromEntries(
+      Array.from({ length: 65 }, (_, i) => [`${i}.txt`, strToU8("x")]),
+    );
+    serving(() => new Response(zipSync({ ...crowded, "a.srt": strToU8(SRT) })));
+    expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
+    serving(() => new Response(SRT, { headers: { "content-length": String(11 * 1024 * 1024) } }));
+    expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
+  });
+
   it("refuses a ZIP file with several subtitles and a file from another host", async () => {
     const playing = await openTitle();
     answer = (url) =>
@@ -471,6 +509,37 @@ describe("the file's own subtitles", () => {
   });
 });
 
+describe("keeping", () => {
+  it("keeps the 100 versions changed last", async () => {
+    const { utimesSync } = await import("node:fs");
+    const keep = (id: string) => {
+      const title = online.subtitleTitle({
+        subscriptionId: "sub-1",
+        id,
+        tmdbId: null,
+        title: "M",
+        year: null,
+      });
+      online.playSubtitles(title);
+      online.showDownloaded(title, {
+        service: "subdl",
+        language: "en",
+        release: id,
+        cues: [{ start: 1, end: 2, text: "x" }],
+      });
+      return title;
+    };
+    const first = keep("v0");
+    const folder = new Directory(Paths.document, "online-subtitles");
+    const [oldest] = folder.list();
+    utimesSync(oldest!.uri.replace("file://", ""), new Date(2000, 0, 1), new Date(2000, 0, 1));
+    for (let i = 1; i <= 100; i++) keep(`v${i}`);
+    expect(folder.list()).toHaveLength(100);
+    online.playSubtitles(first);
+    expect(online.keptSubtitle(first)).toBeNull();
+  });
+});
+
 describe("privacy", () => {
   it("keeps the key in the Keychain only, and erases a subscription's results with its history", async () => {
     const playing = await openTitle();
@@ -480,6 +549,10 @@ describe("privacy", () => {
     expect(written).toHaveLength(1);
     expect(written.join()).not.toContain("my-key");
     expect([...keychain.values()]).toContain("my-key");
+    // A reinstall clears every Keychain item the app wrote, this key with them.
+    const { keychainSecrets } = await import("../src/secrets.ts");
+    await keychainSecrets.clear();
+    expect([...keychain.values()]).not.toContain("my-key");
 
     online.eraseSubtitles("sub-2");
     expect(folder.list()).toHaveLength(1);

@@ -96,6 +96,50 @@ beforeEach(async () => {
   native.sync = null;
 });
 
+describe("downloaded subtitles across a launch", () => {
+  it("come back with their timing, and stay off where the viewer turned them off", async () => {
+    let app = await launch();
+    const title = () =>
+      app.subtitleTitle({
+        subscriptionId: "sub-1",
+        id: "7",
+        tmdbId: "550",
+        title: "Movie",
+        year: 2001,
+      });
+    const other = () =>
+      app.subtitleTitle({
+        subscriptionId: "sub-1",
+        id: "8",
+        tmdbId: "550",
+        title: "Movie",
+        year: 2001,
+      });
+    const subtitle = {
+      service: "subdl" as const,
+      language: "en",
+      release: "Movie.2001",
+      cues: [{ start: 1, end: 2, text: "Hello" }],
+    };
+    let playing = title();
+    app.playSubtitles(playing);
+    app.showDownloaded(playing, subtitle);
+    expect(app.retimeSubtitle(playing, { offset: 1.5, speed: 1 })).toBe(true);
+    playing = other();
+    app.playSubtitles(playing);
+    app.showDownloaded(playing, subtitle);
+    app.hideSubtitle(playing);
+
+    app = await launch();
+    app.playSubtitles(title());
+    expect(app.shownSubtitle()?.timing).toEqual({ offset: 1.5, speed: 1 });
+    const hidden = other();
+    app.playSubtitles(hidden);
+    expect(app.shownSubtitle()).toBeNull();
+    expect(app.keptSubtitle(hidden)?.subtitle.release).toBe("Movie.2001");
+  });
+});
+
 describe("downloaded subtitles, as their subscription's history is erased", () => {
   it.each([
     [true, 1],

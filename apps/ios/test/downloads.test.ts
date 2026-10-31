@@ -752,6 +752,34 @@ describe("downloads", { timeout: 30_000 }, () => {
     },
   );
 
+  it("shows the subtitle kept for the version a copy is of, offline", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    const ref = movieRef(a);
+    const copy = await app.addDownload(ref);
+    await until(() => isComplete(app, copy.id), "the saved copy");
+    const subtitles = await import("../src/downloaded-subtitles.ts");
+    // Kept while the version itself played, as choosing a result does.
+    const version = subtitles.subtitleTitle({ ...ref, tmdbId: null, title: "Movie", year: null });
+    subtitles.playSubtitles(version);
+    expect(
+      subtitles.showDownloaded(version, {
+        service: "subdl",
+        language: "en",
+        release: "Movie.2001",
+        cues: [{ start: 1, end: 2, text: "Hello" }],
+      }),
+    ).toBe(true);
+    const requests = one.fileRequests();
+    app.playDownload(copy.id);
+    await until(() => memory.played.length > 0, "the copy to open");
+    expect(subtitles.shownSubtitle()).toMatchObject({
+      title: { subscriptionId: a, version: `movie|${ref.id}` },
+      subtitle: { release: "Movie.2001" },
+    });
+    expect(one.fileRequests()).toBe(requests);
+  });
+
   it("applies a saved copy's original language through the real play action without establishing provider-file facts", async () => {
     let app = await installedApp();
     const { a } = await withProviders(app);

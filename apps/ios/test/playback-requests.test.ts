@@ -73,7 +73,7 @@ vi.mock("../src/viewing.ts", () => ({
 
 const { failureOf, playEpisode, playMovie, resumeEpisode, resumeMovie } =
   await import("../src/play-title.ts");
-const { closeWatch, onScreen, play, playNext, showVersions, stop } =
+const { closeWatch, onScreen, play, playbackState, playingItem, playNext, showVersions, stop } =
   await import("../src/playback.ts");
 const { resume } = await import("../src/resume.ts");
 
@@ -292,6 +292,36 @@ describe("a series' resume", () => {
     await settle();
     // The version that goes on is asked for, over any version picked before for the series.
     expect(pushed).toEqual([`/series/title/${encodeURIComponent(`${SUB}:s1`)}?asked=1`]);
+  });
+});
+
+describe("online subtitles' identity", () => {
+  it("names the exact movie version and the episode played, with what a search may send", async () => {
+    playMovie(
+      { ...title("movie", "m1", ["m1", "m2"]), tmdbId: "550", year: 2001 },
+      { subscriptionId: SUB, id: "m2" },
+      0,
+      () => undefined,
+    );
+    await settle();
+    expect(playingItem(playbackState.get().phase)?.subtitles).toEqual({
+      subscriptionId: SUB,
+      version: "movie|m2",
+      query: { tmdbId: 550, year: 2001, kind: "movie" },
+    });
+    const details = seriesDetails("s1");
+    playEpisode(
+      { ...details, title: { ...details.title, tmdbId: "1399", year: 2011 } },
+      episode("s1", 2),
+      0,
+      () => undefined,
+    );
+    await settle();
+    expect(playingItem(playbackState.get().phase)?.subtitles).toEqual({
+      subscriptionId: SUB,
+      version: "episode|s1e2",
+      query: { tmdbId: 1399, kind: "episode", season: 1, episode: 2 },
+    });
   });
 });
 

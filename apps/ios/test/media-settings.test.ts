@@ -2,7 +2,7 @@ import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import { mkdirSync, readdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import type { Member } from "../src/account.ts";
 import { keychain } from "./keychain.ts";
 
@@ -203,7 +203,11 @@ it("sizes downloaded subtitles through their row, kept for the next launch", asy
 });
 
 it("saves a typed SubDL key to the Keychain only, shows only that one is saved, and removes it", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  onTestFinished(() => vi.unstubAllGlobals());
   render();
+  expect(row("subdl-key").textContent).toContain("SubDL API key");
   await vi.waitFor(() => expect(row("subdl-key").textContent).toContain("Not set"));
   React.act(() => row("subdl-key").dispatchEvent(new Event("click", { bubbles: true })));
   await React.act(async () =>
@@ -224,6 +228,8 @@ it("saves a typed SubDL key to the Keychain only, shows only that one is saved, 
   await React.act(async () => sheet?.pick(1));
   await vi.waitFor(() => expect(row("subdl-key").textContent).toContain("Not set"));
   expect([...scenario.keychain.values()]).not.toContain("k-123");
+  // Opening Settings, saving and removing the key ask SubDL nothing.
+  expect(fetch).not.toHaveBeenCalled();
 });
 
 it("leaves the SubDL key unknown while the Keychain won't answer, never Not set", async () => {
