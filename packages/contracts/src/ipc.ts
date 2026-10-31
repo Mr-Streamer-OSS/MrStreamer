@@ -76,6 +76,7 @@ import {
   type Recording,
   type RecordingConnections,
   type RecordingStart,
+  type RecordingStorage,
   type ScheduledRecording,
 } from "./recordings.ts";
 
@@ -310,6 +311,17 @@ export const ipcInputs = {
   "recordings.schedule": () => type({ plan: RecordingPlanSchema(), "id?": "string > 0" }),
   /** Takes a schedule out. A recording it started goes on until it stops. */
   "recordings.cancel": () => type({ id: "string > 0" }),
+  /** Keeps how far an ended recording played, as `downloads.recordProgress` does for a copy. */
+  "recordings.recordProgress": () =>
+    type({ id: "string > 0", position: "number >= 0", duration: "number > 0" }),
+  "recordings.storage": none,
+  /** Bytes to keep free on the disk, and the space recordings may take, null for no limit. */
+  "recordings.setLimits": () =>
+    type({ keepFree: "number.integer >= 0", space: "number.integer > 0 | null" }),
+  /** Asks the viewer for the folder new recordings go to; cancelled, nothing changes. */
+  "recordings.chooseFolder": none,
+  /** Shows the folder new recordings go to in the system's file manager. */
+  "recordings.openFolder": none,
   "ondemand.status": none,
   "ondemand.refresh": () => type({ subscriptionId: "string > 0" }),
   "ondemand.search": () => type({ query: "string" }),
@@ -614,6 +626,8 @@ export const ipcInputs = {
   "licences.text": () => type({ id: "string" }),
   "window.miniPlayerAvailable": none,
   "window.setMiniPlayer": () => type({ on: "boolean" }),
+  /** The viewer confirmed Quit after `window.leaveAsked`: what records ends, keeping what it got. */
+  "window.quit": none,
 } satisfies Record<keyof IpcOutputs, () => { infer: unknown }>;
 
 /** What each IPC method resolves to when it succeeds. */
@@ -729,6 +743,13 @@ export interface IpcOutputs {
   "recordings.schedule": ScheduledRecording;
   /** Once it is out of the file. One that is gone changes nothing. */
   "recordings.cancel": null;
+  /** Fails for a recording that isn't there, or still records. */
+  "recordings.recordProgress": null;
+  "recordings.storage": RecordingStorage;
+  "recordings.setLimits": RecordingStorage;
+  /** As it is after the viewer chose, or cancelled. */
+  "recordings.chooseFolder": RecordingStorage;
+  "recordings.openFolder": null;
   "ondemand.status": OnDemandStatus;
   /** Fetches one subscription's movie and series lists again. */
   "ondemand.refresh": OnDemandStatus;
@@ -973,6 +994,7 @@ export interface IpcOutputs {
    * where and as it was. Resolves once the window has moved.
    */
   "window.setMiniPlayer": null;
+  "window.quit": null;
 }
 
 export type IpcMethod = keyof IpcOutputs;
@@ -1048,6 +1070,11 @@ export interface IpcEvents {
    * that changes, and once the page loads.
    */
   "window.fullScreen": boolean;
+  /**
+   * The viewer asked to quit while a recording's time goes on: the window asks first, and Quit
+   * there answers with `window.quit`. Closing the window never asks: recordings go on.
+   */
+  "window.leaveAsked": null;
 }
 export type IpcEvent = keyof IpcEvents;
 

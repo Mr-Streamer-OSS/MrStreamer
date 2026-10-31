@@ -25,6 +25,7 @@ export const en = {
   "settings.search.subscriptions":
     "provider account playlist login repair import refresh remove guide mapping",
   "settings.search.guides": "XMLTV EPG programme sources mapping refresh",
+  "settings.search.recordings": "recording recordings storage folder disk space free limit",
   "settings.search.updates":
     "version update channel stable nightly check download restart store release notes",
   "settings.search.privacy": "privacy analytics statistics consent policy tracking",
@@ -1300,6 +1301,76 @@ export const en = {
   "{episode} didn't download": "{episode} didn't download",
   "Recordings could not be read.": "Recordings could not be read.",
   "Recordings could not be saved.": "Recordings could not be saved.",
+  "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.":
+    "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.",
+  "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.":
+    "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.",
+  "The folder couldn't be opened.": "The folder couldn't be opened.",
+  "There isn't enough free space to record.": "There isn't enough free space to record.",
+  "Recording settings could not be saved.": "Recording settings could not be saved.",
+  "Recording settings could not be read.": "Recording settings could not be read.",
+  "This recording is no longer there.": "This recording is no longer there.",
+  "Recordings can't be written to that folder.": "Recordings can't be written to that folder.",
+  "Choose a folder for recordings": "Choose a folder for recordings",
+  "Open {app}": "Open {app}",
+  "The stream stopped.": "The stream stopped.",
+  "There wasn't enough free space.": "There wasn't enough free space.",
+  "{from} to {to} missed.": "{from} to {to} missed.",
+  "{minutes} min missed in between.": "{minutes} min missed in between.",
+  "Paused at {time} while Mr. Streamer was closed or the computer slept.":
+    "Paused at {time} while Mr. Streamer was closed or the computer slept.",
+  "Paused at {time}. Every connection is in use.": "Paused at {time}. Every connection is in use.",
+  "Paused at {time}. The stream stopped. Trying again.":
+    "Paused at {time}. The stream stopped. Trying again.",
+  "Paused at {time}. It couldn't be written. Trying again.":
+    "Paused at {time}. It couldn't be written. Trying again.",
+  "Paused at {time}. Not enough free space; it goes on once there is room.":
+    "Paused at {time}. Not enough free space; it goes on once there is room.",
+  "Not saved yet. Trying again.": "Not saved yet. Trying again.",
+  "Quit while recording?": "Quit while recording?",
+  Quit: "Quit",
+  "Keep recording": "Keep recording",
+  "{title} is recording until {time}. Quitting stops it now and keeps the {minutes} min recorded.":
+    "{title} is recording until {time}. Quitting stops it now and keeps the {minutes} min recorded.",
+  "{count} recordings go on until {time}. Quitting stops them now and keeps what they recorded.":
+    "{count} recordings go on until {time}. Quitting stops them now and keeps what they recorded.",
+  "{title}, {time}, won't record while Mr. Streamer is closed.":
+    "{title}, {time}, won't record while Mr. Streamer is closed.",
+  "Closing the window instead keeps recording.": "Closing the window instead keeps recording.",
+  "{size} used": "{size} used",
+  "{size} of {limit} used": "{size} of {limit} used",
+  "keeps {size} free": "keeps {size} free",
+  Storage: "Storage",
+  Folder: "Folder",
+  Change: "Change",
+  Open: "Open",
+  "Keep free on disk": "Keep free on disk",
+  "Below this, recording pauses and the rest is recorded once space is free.":
+    "Below this, recording pauses and the rest is recorded once space is free.",
+  "Space for recordings": "Space for recordings",
+  "At the limit, recording pauses the same way. Nothing is deleted to make room.":
+    "At the limit, recording pauses the same way. Nothing is deleted to make room.",
+  "No limit": "No limit",
+  "While recording": "While recording",
+  "Close window": "Close window",
+  "Recording goes on. Open Mr. Streamer again to see it.":
+    "Recording goes on. Open Mr. Streamer again to see it.",
+  "Asks first. Quitting stops it and keeps what was recorded.":
+    "Asks first. Quitting stops it and keeps what was recorded.",
+  Sleep: "Sleep",
+  "Leaves a gap. The rest is recorded after waking, until its time ends.":
+    "Leaves a gap. The rest is recorded after waking, until its time ends.",
+  "Wait until recording ends.": "Wait until recording ends.",
+  "It installs when {title} finishes at {time}.": "It installs when {title} finishes at {time}.",
+  "It installs when the last recording finishes at {time}.":
+    "It installs when the last recording finishes at {time}.",
+  "{version} is ready; it installs when recording ends":
+    "{version} is ready; it installs when recording ends",
+  "Restart now": "Restart now",
+  "Update after recording": "Update after recording",
+  OK: "OK",
+  "Restarting now stops recording and keeps what was recorded.":
+    "Restarting now stops recording and keeps what was recorded.",
   "Choose a stop time within 12 hours.": "Choose a stop time within 12 hours.",
   "Stop the recording before deleting it.": "Stop the recording before deleting it.",
   "It is still recording.": "It is still recording.",
@@ -1317,8 +1388,8 @@ export const en = {
   "{captured} of {planned} min": "{captured} of {planned} min",
   "Nothing recorded yet. Record a channel from Live TV.":
     "Nothing recorded yet. Record a channel from Live TV.",
-  "Recordings stay until you delete them. Partial ones still play.":
-    "Recordings stay until you delete them. Partial ones still play.",
+  "Recordings stay until you delete them. Partial ones play, skipping what was missed.":
+    "Recordings stay until you delete them. Partial ones play, skipping what was missed.",
   "Play {title}": "Play {title}",
   "More for {title}": "More for {title}",
   "When it ends": "When it ends",

@@ -134,12 +134,14 @@ export interface ProviderNow extends Shown {
   readonly series?: SeriesDetails;
 }
 
-/** A downloaded copy, from this computer, by its download's id. */
+/** A downloaded copy, or a recording, from this computer, by its download's or recording's id. */
 export interface CopyNow extends Shown {
   readonly kind: "copy";
   readonly copy: string;
   /** The file it was made of, by the provider's ids: an episode's numbers say where it stands. */
   readonly title: RawTitleRef;
+  /** A recording: Recordings keeps where it got to, and nothing comes after it. */
+  readonly recording?: boolean;
 }
 
 export type NowPlaying = ProviderNow | CopyNow;
@@ -434,7 +436,7 @@ listen("viewing.changed", () => {
 // which also looks for files gone, still answers it: what opens is decided on that.
 listen("downloads.changed", (list) => {
   const { now } = store.getState();
-  if (now?.kind === "copy") followCopies(now, list);
+  if (now?.kind === "copy" && !now.recording) followCopies(now, list);
 });
 listen("playback.readingAhead", ({ sessionId }) => {
   if (!session || session.id !== sessionId) return;
@@ -466,7 +468,7 @@ listen("playback.fileReplaced", ({ sessionId }) => {
  */
 function refreshNext(): Promise<boolean> {
   const { now } = store.getState();
-  if (now?.kind === "copy") return refreshCopies(now);
+  if (now?.kind === "copy") return now.recording ? Promise.resolve(false) : refreshCopies(now);
   if (now?.kind !== "provider" || !now.series || now.title.kind !== "episode") {
     return Promise.resolve(false);
   }
@@ -527,7 +529,7 @@ function save(): void {
   if (!now || !duration || position <= 0) return;
   // A copy keeps its own, whatever its subscription's record says.
   if (now.kind === "copy") {
-    void saveCopy(now.copy, position, duration);
+    void saveCopy(now, position, duration);
     return;
   }
   let saved: Promise<unknown> = call("viewing.recordProgress", {
@@ -548,16 +550,17 @@ function save(): void {
 }
 
 /**
- * Saves how far the copy `copy` got with it, as `save` does for one, and answers whether main kept
- * it: a save it refused, as while another copy of the app holds the database, answers false. The
- * next copy goes on only from one it kept.
+ * Saves how far the copy `now` got with it, as `save` does for one, with Downloads or, for a
+ * recording, Recordings, and answers whether main kept it: a save it refused, as while another
+ * copy of the app holds the database, answers false. The next copy goes on only from one it kept.
  */
-function saveCopy(copy: string, position: number, duration: number): Promise<boolean> {
-  const kept = call("downloads.recordProgress", {
-    id: copy,
-    position: Math.min(position, duration),
-    duration,
-  }).then(
+function saveCopy(now: CopyNow, position: number, duration: number): Promise<boolean> {
+  const progress = { id: now.copy, position: Math.min(position, duration), duration };
+  const kept = (
+    now.recording
+      ? call("recordings.recordProgress", progress)
+      : call("downloads.recordProgress", progress)
+  ).then(
     () => true,
     () => false,
   );
@@ -682,7 +685,7 @@ async function playNextCopy(): Promise<void> {
   countdownTimer = null;
   const mine = ++nextRequest;
   // With nothing played yet there is nothing to keep.
-  const kept = !duration || position <= 0 || (await saveCopy(now.copy, position, duration));
+  const kept = !duration || position <= 0 || (await saveCopy(now, position, duration));
   if (mine !== nextRequest) return;
   if (!kept) {
     stopCountdown();

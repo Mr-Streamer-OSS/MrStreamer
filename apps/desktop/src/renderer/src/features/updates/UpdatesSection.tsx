@@ -102,8 +102,21 @@ export function UpdatesSection() {
 
 /** The version, where its update stands, and the one action that needs. */
 function State({ status }: { status: UpdateStatus }) {
-  const { check, download, cancel, restart, actionState } = useUpdates();
+  const {
+    check,
+    download,
+    cancel,
+    restart,
+    restartNow,
+    recording,
+    actionState,
+    stopError,
+    stopPending,
+    retryStop,
+  } = useUpdates();
   const { update, version, checked, nextCheckAt, offer } = status;
+  // A ready update waits for what records, unless Restart now stops it.
+  const waits = update.kind === "ready" && recording.length > 0;
   let note: string;
   switch (update.kind) {
     case "idle":
@@ -129,9 +142,11 @@ function State({ status }: { status: UpdateStatus }) {
       });
       break;
     case "ready":
-      note = t("{version} is ready; playback stops for a moment while it restarts", {
-        version: update.version,
-      });
+      note = waits
+        ? t("{version} is ready; it installs when recording ends", { version: update.version })
+        : t("{version} is ready; playback stops for a moment while it restarts", {
+            version: update.version,
+          });
       break;
     case "failed":
       note =
@@ -183,9 +198,14 @@ function State({ status }: { status: UpdateStatus }) {
             {t("Cancel")}
           </Button>
         )}
+        {waits && (
+          <Button variant="destructive" size="sm" onClick={restartNow} disabled={stopPending}>
+            {t("Restart now")}
+          </Button>
+        )}
         {update.kind === "ready" && (
           <Button variant="primary" size="sm" onClick={restart}>
-            {t("Restart to update")}
+            {waits ? t("Update after recording") : t("Restart to update")}
           </Button>
         )}
         {update.kind === "failed" && update.step !== "check" && (
@@ -215,6 +235,14 @@ function State({ status }: { status: UpdateStatus }) {
         error={actionState.error}
         retry={() => actionState.mutate(actionState.variables!)}
       />
+      {update.kind === "ready" && (
+        <SaveFeedback
+          pending={false}
+          error={stopError}
+          retry={retryStop}
+          retryDisabled={stopPending}
+        />
+      )}
       {failure && <p className="mt-2 text-sm text-destructive">{failure}</p>}
       {quietFailure && (
         <p className="mt-2 text-[0.8125rem] text-muted-foreground">{quietFailure}</p>

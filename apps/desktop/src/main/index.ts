@@ -2,8 +2,9 @@
 // First, so that everything main imports fetches with it.
 import "./fetch.ts";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import {
   app,
   dialog,
@@ -11,11 +12,13 @@ import {
   autoUpdater,
   BrowserWindow,
   Menu,
+  nativeImage,
   powerSaveBlocker,
   protocol,
   safeStorage,
   session,
   shell,
+  Tray,
   type Rectangle,
 } from "electron";
 import { ARTWORK_SCHEME, DOWNLOAD_ARTWORK } from "@mrstreamer/contracts/downloads";
@@ -57,6 +60,8 @@ import { fieldMenu } from "./menu.ts";
 import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
 import { installedDistribution } from "./platform/installation.ts";
 import { electronInstaller } from "./platform/installer.ts";
+import { installingOnceStopsKept } from "./recordings/restart.ts";
+import trayIcon from "../../build/icon.png?asset";
 import { diagnosticsExporter } from "./platform/diagnostics-export.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
 import { electronNotifier } from "./platform/notifier.ts";
@@ -183,6 +188,21 @@ function putAway(window: BrowserWindow): void {
   });
   window.setFullScreen(false);
 }
+
+/**
+ * Brings the window back, or opens it again: a second launch of the app, and the tray, ask for it.
+ * Set once the app started.
+ */
+let reopen = () => {
+  if (mainWindow) bringBack(mainWindow);
+};
+/**
+ * Whether the app stays, without a window, as Windows and Linux close their last: while a
+ * recording's time goes on or a schedule is kept. Set once the app started.
+ */
+let staysWithoutWindow = () => false;
+/** How often an update waiting for recordings to end looks again. */
+const RECORDING_WAIT_MS = 5000;
 
 /** Puts the window on screen and in front, from out of sight or minimised. */
 function bringBack(window: BrowserWindow): void {
@@ -481,7 +501,11 @@ async function start(): Promise<void> {
             // A test feed serves its own files.
             ...(process.env["MR_STREAMER_UPDATE_FEED"] ? { filesFrom: "" } : {}),
           }),
-          installer: electronInstaller(),
+          installer: installingOnceStopsKept(
+            electronInstaller(),
+            () => stopsKept(),
+            (confirmed) => (quitConfirmed = confirmed),
+          ),
           schedule: process.env["MR_STREAMER_UPDATE_CHECKS"] === "off" ? null : DEFAULT_SCHEDULE,
         };
     }
@@ -489,6 +513,23 @@ async function start(): Promise<void> {
 
   /** Brings the window forward, or opens it again, for a reminder's notice that was clicked. */
   let showWindow = () => {};
+  /** Whether a recording's time goes on now. Set once recordings are read. */
+  let recordingNow = () => false;
+  /** Whether every recording the viewer stopped is kept as stopped. Set once recordings are read. */
+  let stopsKept = () => Promise.resolve(true);
+  /** The viewer confirmed Quit while recording, or an update restarts: the quit asks no more. */
+  let quitConfirmed = false;
+  /**
+   * The viewer chose Quit on Windows or Linux, from the tray or with Ctrl+Q. Any other quit there
+   * comes from the system, as a session that ends, which a window-less app may not hear of.
+   */
+  let quitChosen = false;
+  const quit = () => {
+    quitChosen = true;
+    app.quit();
+  };
+  /** The system shuts down or ends the session: what records goes on when the app runs again. */
+  let shuttingDown = false;
   const runtime = ManagedRuntime.make(
     mainLayer({
       dataDir,
@@ -570,6 +611,70 @@ async function start(): Promise<void> {
     void runtime.runFork(recordings.check);
   };
   powerMonitor.on("resume", woke);
+  // A recording pauses as the computer sleeps, and goes on with the rest after it wakes.
+  const sleeps = () => void runtime.runFork(recordings.suspend);
+  powerMonitor.on("suspend", sleeps);
+  // Also without a window, which would otherwise not end the app before the system does.
+  const shutsDown = () => {
+    shuttingDown = true;
+    app.quit();
+  };
+  powerMonitor.on("shutdown", shutsDown);
+  recordingNow = () => runtime.runSync(recordings.live).recording;
+  stopsKept = () => runtime.runPromise(recordings.keepStops);
+  /**
+   * The update's restart, once nothing records: one wait however often it is asked for, and only
+   * for the release last asked for, still ready and not put off meanwhile. From the moment nothing
+   * records, nothing new starts until the app quits, or the restart didn't go ahead.
+   */
+  let restarting: Promise<void> | null = null;
+  let restartInto: string | null = null;
+  /** What was put off when the restart was asked for: only putting it off since then counts. */
+  let putOff: string | null = null;
+  const restartAfterRecording = Effect.promise(async () => {
+    const asked = await runtime.runPromise(updates.status);
+    if (asked.update.kind !== "ready") return;
+    restartInto = asked.update.version;
+    putOff = asked.dismissed;
+    restarting ??= (async () => {
+      const wanted = async () => {
+        const now = await runtime.runPromise(updates.status);
+        return (
+          now.update.kind === "ready" &&
+          now.update.version === restartInto &&
+          (now.dismissed !== restartInto || putOff === restartInto)
+        );
+      };
+      // A recording that starts, or begins to, while the release is checked is waited for too.
+      for (;;) {
+        if (!recordingNow()) {
+          if (!(await wanted())) return;
+          if (runtime.runSync(recordings.holdStarts(true))) break;
+        }
+        await sleep(RECORDING_WAIT_MS);
+      }
+      // Refused or failed, the app goes on: so do recordings.
+      let goes = false;
+      try {
+        await runtime.runPromise(updates.restart);
+        goes = await wanted();
+      } finally {
+        if (!goes) runtime.runSync(recordings.holdStarts(false));
+      }
+    })().finally(() => {
+      restarting = null;
+      restartInto = null;
+      // Kept without a window while this restart waited, the app goes once nothing else keeps it.
+      void runtime.runFork(settle);
+    });
+    return restarting;
+  });
+  // A system that ends the session, as a Linux logout, asks the app to end this way.
+  for (const signal of ["SIGTERM", "SIGHUP"] as const)
+    process.on(signal, () => {
+      shuttingDown = true;
+      app.quit();
+    });
   powerMonitor.on("unlock-screen", woke);
 
   // mrstreamer://download/<id>/<poster|wide>: a download's kept picture, from its own folder.
@@ -761,11 +866,37 @@ async function start(): Promise<void> {
       ...customListHandlers({ customLists }),
       ...downloadHandlers({ downloads }),
       ...reminderHandlers({ reminders }),
-      ...recordingHandlers({ recordings, library, settings }),
+      ...recordingHandlers({
+        recordings,
+        library,
+        settings,
+        chooseFolder: async (current) => {
+          const options: Electron.OpenDialogOptions = {
+            title: t("Choose a folder for recordings"),
+            defaultPath: current,
+            properties: ["openDirectory", "createDirectory"],
+          };
+          const chosen = await (mainWindow
+            ? dialog.showOpenDialog(mainWindow, options)
+            : dialog.showOpenDialog(options));
+          return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
+        },
+        openFolder: async (folder) => {
+          // Only the profile's own folder is made: a chosen one that went, as on a drive not plugged
+          // in, is never made anew on another disk.
+          if (folder === join(dataDir, "recordings"))
+            await mkdir(folder, { recursive: true }).catch(() => {});
+          // Linux's opener says nothing of a folder that isn't there.
+          else await stat(folder);
+          // The system answers with why it couldn't, or nothing.
+          const failed = await shell.openPath(folder);
+          if (failed) throw new Error(failed);
+        },
+      }),
       ...analyticsHandlers({ analytics, playback }),
       ...preferenceHandlers({ preferences }),
       ...updateHandlers({
-        updates,
+        updates: { ...updates, restart: restartAfterRecording },
         storeReview: storeCopy ? () => shell.openExternal(STORE_REVIEW) : null,
       }),
       ...aboutHandlers({ licences, exporter, window: () => mainWindow }),
@@ -782,6 +913,12 @@ async function start(): Promise<void> {
         Effect.promise(async () => {
           const mini = mainWindow && miniPlayers.get(mainWindow);
           await mini?.set(on);
+          return null;
+        }),
+      "window.quit": () =>
+        Effect.sync(() => {
+          quitConfirmed = true;
+          app.quit();
           return null;
         }),
     },
@@ -862,13 +999,36 @@ async function start(): Promise<void> {
     // No list opens from a window on its way out.
     closeList();
   };
-  app.on("before-quit", leave);
   autoUpdater.on("before-quit-for-update", leave);
   // On macOS the app outlives its window. While a receiver has playback, or is gone with what it
   // played still to pick up, closing the window keeps it out of sight. Other systems quit with
   // their window, which ends the receiver's playback.
   const keeps = () => isMac && !leaving && runtime.runSync(output.remote);
-  mainWindow = openWindow(closeStreams, keeps, followList, trackForeground);
+  /**
+   * Each window's watchers: foreground use, Ctrl+Q, which quits on Windows and Linux as the menu's
+   * Quit does on macOS, and the end of a Windows session.
+   */
+  const watch = (window: BrowserWindow) => {
+    trackForeground(window);
+    window.webContents.on("before-input-event", (event, input) => {
+      if (isMac || input.type !== "keyDown" || !input.control || input.alt || input.shift) return;
+      if (input.key.toLowerCase() !== "q") return;
+      event.preventDefault();
+      quit();
+    });
+    window.on("session-end", shutsDown);
+  };
+  /**
+   * While Windows or Linux keep the app without a window, the tray opens it again, or quits; the
+   * app also opens again when launched. Gone once the window is back.
+   */
+  let tray: Tray | null = null;
+  const open = () => {
+    tray?.destroy();
+    tray = null;
+    return openWindow(closeStreams, keeps, followList, watch);
+  };
+  mainWindow = open();
   // How long the app took to show its window, from the start of the process.
   mainWindow.once("ready-to-show", () =>
     diagnostics.record({ op: "start", ms: Math.round(performance.now()), outcome: "ok" }),
@@ -879,7 +1039,7 @@ async function start(): Promise<void> {
     // Nothing opens on a runtime that is closing.
     if (closing) return;
     if (!mainWindow) {
-      mainWindow = openWindow(closeStreams, keeps, followList, trackForeground);
+      mainWindow = open();
     } else if (away) bringBack(mainWindow);
   });
   // A reminder's notice that was clicked brings the window forward, or opens it once more where
@@ -887,8 +1047,65 @@ async function start(): Promise<void> {
   showWindow = () => {
     if (closing) return;
     if (mainWindow) bringBack(mainWindow);
-    else mainWindow = openWindow(closeStreams, keeps, followList, trackForeground);
+    else mainWindow = open();
   };
+  reopen = showWindow;
+  const live = () => {
+    const now = runtime.runSync(recordings.live);
+    return now.recording || now.scheduled || now.unsaved;
+  };
+  staysWithoutWindow = () => {
+    if (closing || leaving || !live()) return false;
+    if (!tray) {
+      const name = app.getName();
+      tray = new Tray(nativeImage.createFromPath(trayIcon).resize({ width: 16, height: 16 }));
+      tray.setToolTip(name);
+      tray.setContextMenu(
+        Menu.buildFromTemplate([
+          { label: t("Open {app}", { app: name }), click: showWindow },
+          { label: t("Quit {app}", { app: name }), click: quit },
+        ]),
+      );
+      tray.on("click", showWindow);
+    }
+    return true;
+  };
+  // Kept without a window, the app goes once nothing records and no schedule is kept.
+  const settle = Effect.sync(() => {
+    // Not while an update waits to restart it once the last recording ended.
+    if (tray && !mainWindow && !closing && !restarting && !live()) app.quit();
+  });
+  void runtime.runFork(Stream.runForEach(recordings.changes, () => settle));
+  void runtime.runFork(Stream.runForEach(recordings.scheduleChanges, () => settle));
+  /**
+   * Quit asks first while a recording's time goes on, in the window, opened again if it was
+   * closed: Quit there confirms, through `window.quit`. A shutdown or an update's restart doesn't
+   * ask, and a shutdown leaves what records to go on when the app runs again.
+   */
+  const askToQuit = () => {
+    showWindow();
+    const window = mainWindow;
+    if (!window) return;
+    const ask = () => emit(window.webContents, "window.leaveAsked", null);
+    if (window.webContents.isLoading()) window.webContents.once("did-finish-load", ask);
+    else ask();
+  };
+  // First, so the profile is handed on only by a quit that goes ahead.
+  app.prependListener("before-quit", (event) => {
+    // Once closing, the runtime is going: nothing more to ask or tell it.
+    if (closing) return;
+    // On macOS every Quit is the viewer's; a shutdown says so first.
+    const chosen = isMac || quitChosen;
+    quitChosen = false;
+    if (chosen && !quitConfirmed && !shuttingDown && recordingNow()) {
+      event.preventDefault();
+      askToQuit();
+      return;
+    }
+    const away = shuttingDown || (!chosen && !quitConfirmed);
+    runtime.runSync(recordings.leave(away ? "away" : "quit"));
+    leave();
+  });
   app.on("will-quit", (event) => {
     // The quit waits for the runtime to close, which stops background work, closes the database
     // and writes the diagnostics still queued. An update's restart comes this way too: its
@@ -897,7 +1114,12 @@ async function start(): Promise<void> {
     event.preventDefault();
     if (closing) return;
     closing = true;
-    powerMonitor.off("resume", woke).off("unlock-screen", woke);
+    powerMonitor
+      .off("resume", woke)
+      .off("unlock-screen", woke)
+      .off("suspend", sleeps)
+      .off("shutdown", shutsDown);
+    tray?.destroy();
     // Streams close right away, so no ffmpeg or provider connection outlives the app.
     runtime.runSyncExit(playback.closeAll);
     // Exits instead of quitting again: with nothing left to write, closing can finish before this
@@ -953,19 +1175,22 @@ function receiverAdapters(): ReceiverAdapter[] {
   return adapters;
 }
 
+// macOS keeps the app without a window. Other systems quit with their last, unless recordings go
+// on (see `staysWithoutWindow`).
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (!isMac && !staysWithoutWindow()) app.quit();
 });
 
 // One copy per profile: a second would keep its own copy of the settings and write over the
 // first's. Opening the app again brings the running copy's window forward instead.
 if (app.requestSingleInstanceLock()) {
-  app.on("second-instance", () => {
-    if (mainWindow) bringBack(mainWindow);
-  });
+  app.on("second-instance", () => reopen());
   // Quitting hands the profile on at once: an update's AppImage starts its new copy just before
   // this one quits.
-  app.on("before-quit", () => app.releaseSingleInstanceLock());
+  app.on("before-quit", (event) => {
+    // Not while Quit asks first.
+    if (!event.defaultPrevented) app.releaseSingleInstanceLock();
+  });
   void start().catch((error: unknown) => {
     console.error("[startup]", error);
     dialog.showErrorBox(

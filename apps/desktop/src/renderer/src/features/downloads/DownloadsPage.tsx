@@ -13,7 +13,7 @@
 // the episodes between them that aren't on this computer (see @mrstreamer/core/downloads/series).
 // Everything here is read from this computer; artwork comes from the copies' own folders.
 //   With no subscription saved the page stands alone, opened from Connect: its bar has only
-//   Downloads, and Add subscription goes back to the form.
+//   Downloads, and Recordings once any is kept, and Add subscription goes back to the form.
 import { useMutation } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, ChevronDown, Pause, Play } from "lucide-react";
 import { Fragment, useLayoutEffect, useMemo, useState } from "react";
@@ -21,12 +21,13 @@ import type { Download } from "@mrstreamer/contracts/downloads";
 import { copyShelf, type ShelfSeries } from "@mrstreamer/core/downloads/series";
 import { formatBytes, formatNumber, t } from "@mrstreamer/core/i18n";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
-import { openView } from "../../app/ui-store.ts";
+import { openView, useUi } from "../../app/ui-store.ts";
 import { Progress } from "../../components/Progress.tsx";
 import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { BarFrame, Brand, PageButton, WindowBar } from "../../components/WindowBar.tsx";
 import { statusLine, transferred, useDownloads, watchOffline } from "../../lib/downloads.ts";
+import { useAnyRecording } from "../recordings/recordings.ts";
 import { appError, describeError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { runtime, timeLeftOf } from "../../lib/titles.ts";
@@ -155,14 +156,28 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
   );
 }
 
-/** The bar of the page standing alone: Downloads, and the way back to adding a subscription. */
-function OfflineBar() {
+/**
+ * The bar of Downloads or Recordings standing alone: each while it keeps anything, or is on screen,
+ * and the way back to adding a subscription.
+ */
+export function OfflineBar() {
+  const view = useUi((state) => state.view);
+  const downloads = (useDownloads().data?.items.length ?? 0) > 0 || view === "downloads";
+  // Also while the list is read, or can't be, so Recordings' Retry stays in reach.
+  const recordings = useAnyRecording() || view === "recordings";
   return (
     <BarFrame className="bg-black">
       <Brand />
-      <PageButton view="downloads" current>
-        {t("Downloads")}
-      </PageButton>
+      {downloads && (
+        <PageButton view="downloads" current={view === "downloads"}>
+          {t("Downloads")}
+        </PageButton>
+      )}
+      {recordings && (
+        <PageButton view="recordings" current={view === "recordings"}>
+          {t("Recordings")}
+        </PageButton>
+      )}
       <div className="ml-auto flex items-center gap-1.5">
         <Button variant="ghost" size="sm" onClick={() => openView("home")}>
           {t("Add subscription")}

@@ -7,7 +7,7 @@ import type { OwnedId } from "./subscription.ts";
 
 /** Why a recording ended before its stop time. */
 export type RecordingCut =
-  /** The app quit, or closed while it recorded. */
+  /** The viewer quit the app while it recorded, or it closed and never came back in time. */
   | "quit"
   /** The provider stopped sending, or the connection broke. */
   | "stream"
@@ -22,8 +22,16 @@ export type RecordingStatus =
   | { readonly kind: "complete" }
   /** The viewer stopped it before its stop time; what was captured stays. */
   | { readonly kind: "stopped" }
-  /** It ended early for `cut`; what was captured stays and plays. */
+  /**
+   * It ended early for `cut`, or reached its stop time with `gaps`; what was captured stays and
+   * plays, skipping what was missed.
+   */
   | { readonly kind: "partial"; readonly cut: RecordingCut }
+  /**
+   * Its time goes on, but capture stopped for `why`: it records the rest once the app runs, the
+   * computer is awake, a connection is free and there is room on the disk.
+   */
+  | { readonly kind: "paused"; readonly why: RecordingGapReason }
   /** Its file is no longer in the app's folder. */
   | { readonly kind: "missing" }
   /** A schedule's time passed with nothing captured, for `why`; it has no file. */
@@ -40,6 +48,24 @@ export type RecordingStatus =
  *   - `unread`: its channel list or guide wasn't read yet.
  */
 export type ScheduleMiss = "away" | "busy" | "stream" | "disk" | "held" | "unread";
+
+/**
+ * Why a recording missed part of its time:
+ *   - `away`: Mr. Streamer wasn't running, or the computer was asleep.
+ *   - `busy`: every connection the account allows was held.
+ *   - `stream`: the channel's stream broke or couldn't be opened.
+ *   - `disk`: its file couldn't be written.
+ *   - `space`: the disk had less free than Keep free on disk, or recordings took the space they
+ *     may have.
+ */
+export type RecordingGapReason = "away" | "busy" | "stream" | "disk" | "space";
+
+/** Time a recording missed, from `from`; `to` is null while it still misses it. */
+export interface RecordingGap {
+  readonly from: number;
+  readonly to: number | null;
+  readonly why: RecordingGapReason;
+}
 
 export interface Recording {
   /** Names it for `recordings.stop`, `recordings.remove` and `playback.openCopy`. */
@@ -70,6 +96,35 @@ export interface Recording {
   /** Bytes in its file. */
   readonly bytes: number;
   readonly status: RecordingStatus;
+  /** Time it missed between its start and its end, in time order; none when it missed none. */
+  readonly gaps?: readonly RecordingGap[];
+  /**
+   * How it ended couldn't be written down yet, as while its disk refuses writes: the app tries
+   * again. Until then a restart reads it as one the app didn't see end: it goes on while its time
+   * remains, else it is cut short by the quit.
+   */
+  readonly unsaved?: boolean;
+}
+
+/** Where recordings go and the room they may take, as Settings shows and changes them. */
+export interface RecordingLimits {
+  /** Bytes a recording leaves free on its disk: below this it pauses. */
+  readonly keepFree: number;
+  /** Bytes recordings may take together; null for no limit. */
+  readonly space: number | null;
+}
+
+/** Bytes kept free to begin with. */
+export const DEFAULT_KEEP_FREE = 5 * 1024 ** 3;
+
+/** The folder new recordings go to, how much they take, and the room left. */
+export interface RecordingStorage extends RecordingLimits {
+  /** The folder new recordings go to. Those made before a change stay where they are. */
+  readonly folder: string;
+  /** Bytes the recordings' files take. */
+  readonly used: number;
+  /** Bytes free on the folder's disk; null when the system can't say. */
+  readonly free: number | null;
 }
 
 /** What holds one of a subscription's connections in this app now. */

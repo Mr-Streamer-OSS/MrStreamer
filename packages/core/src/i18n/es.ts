@@ -24,6 +24,8 @@ export const es: Translation = {
   "settings.search.subscriptions":
     "proveedor cuenta lista reproducción acceso reparar importar actualizar eliminar guía asignación",
   "settings.search.guides": "XMLTV EPG programa fuentes asignación actualizar",
+  "settings.search.recordings":
+    "grabación grabaciones almacenamiento carpeta espacio libre límite disco",
   "settings.search.updates":
     "versión actualización canal estable nightly comprobar descargar reiniciar tienda novedades",
   "settings.search.privacy": "privacidad análisis estadísticas consentimiento política seguimiento",
@@ -1400,6 +1402,77 @@ export const es: Translation = {
   "{episode} didn't download": "{episode} no se descargó",
   "Recordings could not be read.": "No se pudieron leer las grabaciones.",
   "Recordings could not be saved.": "No se pudieron guardar las grabaciones.",
+  "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.":
+    "No se pudo guardar como detenida una grabación que detuviste. Comprueba su almacenamiento y vuelve a intentarlo.",
+  "The folder for recordings isn't there. Connect its drive, or choose it again in Settings.":
+    "La carpeta de las grabaciones no está. Conecta su unidad o vuelve a elegirla en Ajustes.",
+  "The folder couldn't be opened.": "No se pudo abrir la carpeta.",
+  "There isn't enough free space to record.": "No hay suficiente espacio libre para grabar.",
+  "Recording settings could not be saved.": "No se pudieron guardar los ajustes de grabación.",
+  "Recording settings could not be read.": "No se pudieron leer los ajustes de grabación.",
+  "This recording is no longer there.": "Esta grabación ya no está.",
+  "Recordings can't be written to that folder.": "No se pueden guardar grabaciones en esa carpeta.",
+  "Choose a folder for recordings": "Elige una carpeta para las grabaciones",
+  "Open {app}": "Abrir {app}",
+  "The stream stopped.": "La emisión se detuvo.",
+  "There wasn't enough free space.": "No había suficiente espacio libre.",
+  "{from} to {to} missed.": "Se perdió de {from} a {to}.",
+  "{minutes} min missed in between.": "{minutes} min perdidos entremedias.",
+  "Paused at {time} while Mr. Streamer was closed or the computer slept.":
+    "En pausa desde las {time}: Mr. Streamer estaba cerrado o el ordenador en reposo.",
+  "Paused at {time}. Every connection is in use.":
+    "En pausa desde las {time}. Todas las conexiones están en uso.",
+  "Paused at {time}. The stream stopped. Trying again.":
+    "En pausa desde las {time}. La emisión se detuvo. Reintentando.",
+  "Paused at {time}. It couldn't be written. Trying again.":
+    "En pausa desde las {time}. No se pudo guardar. Reintentando.",
+  "Paused at {time}. Not enough free space; it goes on once there is room.":
+    "En pausa desde las {time}. Falta espacio libre; seguirá cuando haya sitio.",
+  "Not saved yet. Trying again.": "Aún no se ha guardado. Reintentando.",
+  "Quit while recording?": "¿Salir mientras graba?",
+  Quit: "Salir",
+  "Keep recording": "Seguir grabando",
+  "{title} is recording until {time}. Quitting stops it now and keeps the {minutes} min recorded.":
+    "{title} se graba hasta las {time}. Salir la detiene ahora y conserva los {minutes} min grabados.",
+  "{count} recordings go on until {time}. Quitting stops them now and keeps what they recorded.":
+    "{count} grabaciones siguen hasta las {time}. Salir las detiene ahora y conserva lo que grabaron.",
+  "{title}, {time}, won't record while Mr. Streamer is closed.":
+    "{title}, {time}, no se grabará mientras Mr. Streamer esté cerrado.",
+  "Closing the window instead keeps recording.": "Si cierras la ventana, se sigue grabando.",
+  "{size} used": "{size} usados",
+  "{size} of {limit} used": "{size} de {limit} usados",
+  "keeps {size} free": "deja {size} libres",
+  Storage: "Almacenamiento",
+  Folder: "Carpeta",
+  Change: "Cambiar",
+  Open: "Abrir",
+  "Keep free on disk": "Dejar libre en el disco",
+  "Below this, recording pauses and the rest is recorded once space is free.":
+    "Por debajo de esto, la grabación se pausa y el resto se graba cuando haya espacio.",
+  "Space for recordings": "Espacio para grabaciones",
+  "At the limit, recording pauses the same way. Nothing is deleted to make room.":
+    "Al llegar al límite, la grabación se pausa igual. No se borra nada para hacer sitio.",
+  "No limit": "Sin límite",
+  "While recording": "Mientras graba",
+  "Close window": "Cerrar ventana",
+  "Recording goes on. Open Mr. Streamer again to see it.":
+    "La grabación sigue. Abre Mr. Streamer de nuevo para verla.",
+  "Asks first. Quitting stops it and keeps what was recorded.":
+    "Pregunta antes. Salir la detiene y conserva lo grabado.",
+  Sleep: "Suspensión",
+  "Leaves a gap. The rest is recorded after waking, until its time ends.":
+    "Deja un hueco. El resto se graba al despertar, hasta que acabe su tiempo.",
+  "Wait until recording ends.": "Esperan a que termine la grabación.",
+  "It installs when {title} finishes at {time}.": "Se instala cuando {title} termine a las {time}.",
+  "It installs when the last recording finishes at {time}.":
+    "Se instala cuando la última grabación termine a las {time}.",
+  "{version} is ready; it installs when recording ends":
+    "{version} está lista; se instala cuando termine la grabación",
+  "Restart now": "Reiniciar ahora",
+  "Update after recording": "Actualizar tras grabar",
+  OK: "Aceptar",
+  "Restarting now stops recording and keeps what was recorded.":
+    "Reiniciar ahora detiene la grabación y conserva lo grabado.",
   "Choose a stop time within 12 hours.": "Elige una hora de fin dentro de 12 horas.",
   "Stop the recording before deleting it.": "Detén la grabación antes de eliminarla.",
   "It is still recording.": "Todavía se está grabando.",
@@ -1417,8 +1490,8 @@ export const es: Translation = {
   "{captured} of {planned} min": "{captured} de {planned} min",
   "Nothing recorded yet. Record a channel from Live TV.":
     "Aún no hay grabaciones. Graba un canal desde TV en directo.",
-  "Recordings stay until you delete them. Partial ones still play.":
-    "Las grabaciones se quedan hasta que las borres. Las parciales también se reproducen.",
+  "Recordings stay until you delete them. Partial ones play, skipping what was missed.":
+    "Las grabaciones se quedan hasta que las borres. Las parciales se reproducen saltando lo que faltó.",
   "Play {title}": "Reproducir {title}",
   "More for {title}": "Más de {title}",
   "When it ends": "Cuando termine",

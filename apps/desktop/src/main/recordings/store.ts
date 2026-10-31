@@ -1,8 +1,17 @@
 // recordings.json in the app's recordings folder: every recording's record, which only
-// services/recordings.ts reads and writes. Each recording's file sits beside it, in a folder named
-// by its id:
+// services/recordings.ts reads and writes. Each recording's file sits in a folder named by its id,
+// beside it or in the folder the viewer chose when it started (`folder`):
 //
 //   { "version": 1, "recordings": [ { "id": …, "file": "….ts", "status": { "kind": … }, … } ] }
+//
+// A recording whose time goes on stays `recording` while capture waits to go on, its open gap
+// saying since when and why. A build from before gaps reads it as one the app didn't see end. A
+// build from before storage.json knows only the folder beside recordings.json: it lists one made
+// in a chosen folder as missing, and its Delete takes the record and leaves the file.
+//
+// storage.json beside them keeps where new recordings go and the room they may take:
+//
+//   { "version": 1, "folder": "/…", "keepFree": …, "space": … | null }
 //
 // schedules.json beside it keeps the schedules, in a file of their own, which a build from before
 // them leaves alone. Such a build can't read a recordings.json that holds a missed result, and
@@ -16,8 +25,10 @@ import { readFile } from "node:fs/promises";
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import {
+  DEFAULT_KEEP_FREE,
   RecordingPlanSchema,
   type Recording,
+  type RecordingLimits,
   type RecordingPlan,
 } from "@mrstreamer/contracts/recordings";
 import { writeJsonFile } from "../platform/json-file.ts";
@@ -25,10 +36,19 @@ import { writeJsonFile } from "../platform/json-file.ts";
 /** The version this build writes, and the newest it reads. */
 const VERSION = 1;
 
-/** A recording as kept: what the window sees, but `missing`, and its file's name in its folder. */
-export interface StoredRecording extends Omit<Recording, "status"> {
+/**
+ * A recording as kept: what the window sees, but `missing`, `paused` and `unsaved`, with its
+ * file's name, the folder its own folder is in when not beside recordings.json, the streams it
+ * asked for, to go on with them, and how far it played.
+ */
+export interface StoredRecording extends Omit<Recording, "status" | "unsaved"> {
   readonly file: string;
-  readonly status: Exclude<Recording["status"], { readonly kind: "missing" }>;
+  readonly folder?: string;
+  /** The id its chosen folder was marked with as it began, where it goes on. */
+  readonly mark?: string;
+  readonly variants?: readonly string[];
+  readonly progress?: { readonly position: number; readonly duration: number };
+  readonly status: Exclude<Recording["status"], { readonly kind: "missing" | "paused" }>;
 }
 
 const Channel = lazy(() => type({ subscriptionId: "string > 0", id: "string" }));
@@ -50,6 +70,15 @@ const Entry = lazy(() =>
     },
     ended: "number | null",
     bytes: "number >= 0",
+    "gaps?": type({
+      from: "number",
+      to: "number | null",
+      why: "'away' | 'busy' | 'stream' | 'disk' | 'space'",
+    }).array(),
+    "folder?": "string > 0",
+    "mark?": "string > 0",
+    "variants?": "string[]",
+    "progress?": { position: "number >= 0", duration: "number > 0" },
     status: type({ kind: "'recording' | 'complete' | 'stopped'" })
       .or({ kind: "'partial'", cut: "'quit' | 'stream' | 'disk'" })
       .or({
@@ -60,6 +89,40 @@ const Entry = lazy(() =>
 );
 
 const File = lazy(() => type({ version: "number.integer", recordings: Entry().array() }));
+
+/** Where new recordings go, and the room they may take, as storage.json keeps it. */
+export interface KeptStorage extends RecordingLimits {
+  /** Absent for the folder beside recordings.json. */
+  readonly folder?: string;
+}
+
+const Storage = lazy(() =>
+  type({
+    version: "number.integer",
+    "folder?": "string > 0",
+    keepFree: "number.integer >= 0",
+    space: "number.integer > 0 | null",
+  }),
+);
+
+/**
+ * storage.json at `path`, or the defaults while it isn't there; null when it is there but can't be
+ * read, as one a newer version wrote.
+ */
+export async function readStorage(path: string): Promise<KeptStorage | null> {
+  const read = await readOurs(path, (data) => {
+    const parsed = Storage()(data);
+    if (parsed instanceof type.errors) return null;
+    const { version, ...kept } = parsed;
+    return { version, items: [kept] };
+  });
+  if (read.kind === "refused") return null;
+  return read.items[0] ?? { keepFree: DEFAULT_KEEP_FREE, space: null };
+}
+
+export function writeStorage(path: string, storage: KeptStorage): Promise<void> {
+  return writeJsonFile(path, { version: VERSION, ...storage });
+}
 
 /** A schedule as kept. */
 export interface KeptSchedule {
@@ -74,6 +137,11 @@ export interface KeptSchedule {
    * later and was never settled was missed while the app was away.
    */
   readonly through: number;
+  /**
+   * A change that moved it onto a time already under way: that occurrence, by its padded start,
+   * is owed from when the change was saved, `at`, not from its start.
+   */
+  readonly owed?: { readonly from: number; readonly at: number };
 }
 
 const Schedule = lazy(() =>
@@ -83,6 +151,7 @@ const Schedule = lazy(() =>
     channelName: "string",
     created: "number",
     through: "number",
+    "owed?": { from: "number", at: "number" },
   }),
 );
 

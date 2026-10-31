@@ -32,6 +32,7 @@ import {
   type SettingsSection,
 } from "./catalogue.ts";
 import { GuidesSection } from "./GuidesSection.tsx";
+import { RecordingsSection } from "./RecordingsSection.tsx";
 import { DiagnosticsExport } from "./DiagnosticsExport.tsx";
 import { Licences } from "./Licences.tsx";
 import { SubscriptionSection } from "./SubscriptionSection.tsx";
@@ -178,6 +179,7 @@ export function SettingsPage() {
         <GuidesSection />
       </div>
     ),
+    recordings: <RecordingsSection />,
     updates: <UpdatesSection />,
     privacy: <PrivacySection />,
     about: <About />,
