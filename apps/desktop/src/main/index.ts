@@ -59,7 +59,6 @@ import { applyLanguage, languageFor } from "./language.ts";
 import { fieldMenu } from "./menu.ts";
 import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
 import { installedDistribution, snapName, snapPasswordStore } from "./platform/installation.ts";
-import { watchForWake } from "./platform/wake.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { installingOnceStopsKept } from "./recordings/restart.ts";
 import trayIcon from "../../build/icon.png?asset";
@@ -628,7 +627,6 @@ async function start(): Promise<void> {
     void runtime.runFork(recordings.check);
   };
   powerMonitor.on("resume", woke);
-  if (snap) watchForWake(woke);
   // A recording pauses as the computer sleeps, and goes on with the rest after it wakes.
   const sleeps = () => void runtime.runFork(recordings.suspend);
   powerMonitor.on("suspend", sleeps);

@@ -8,3 +8,4 @@ exclude:
   - $SNAP_USER_DATA/.config/Mr. Streamer/DawnWebGPUCache
   - $SNAP_USER_DATA/.config/Mr. Streamer/GPUCache
   - $SNAP_USER_DATA/.config/Mr. Streamer/GPUPersistentCache
+  - $SNAP_USER_DATA/.config/Mr. Streamer/Shared Dictionary

@@ -47,10 +47,9 @@ publishes: each of those is a maintainer action that needs its own approval.
   keeping a real GNOME or KDE session awake is untested.
 - **Sleep notices are lost.** Electron hears sleep and wake from logind's `PrepareForSleep` and
   takes logind delay locks. The Snap's AppArmor profile lets it do neither, and `shutdown` would
-  allow only the locks. So under the Snap a recording isn't paused before the computer sleeps.
-  Waking is noticed instead by the wall clock jumping past a 30-second check
-  (`apps/desktop/src/main/platform/wake.ts`), which runs the guide, reminder and recording
-  checks a resume would.
+  allow only the locks. So under the Snap a recording isn't paused before the computer sleeps,
+  and waking runs no checks at once: the reminder and recording loops check at most a minute
+  apart anyway, which catches up a reminder or schedule that fell due meanwhile.
 - **Shutdown still arrives.** A session that ends sends SIGTERM, which the app treats as the
   system ending it: what records goes on when the app runs again.
 
