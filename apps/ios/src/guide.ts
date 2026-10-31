@@ -7,10 +7,12 @@ import {
   type Generation,
   type GuideNative,
   type GuideProblem,
+  type Match,
   type Query,
   type Result,
 } from "./guide-native.ts";
 import type { Provider } from "@mrstreamer/core/provider";
+import { searchWords } from "@mrstreamer/core/text";
 import type { Part } from "./library.ts";
 import type { SourceLogin } from "./login-safety.ts";
 import { currentSource } from "./sources.ts";
@@ -42,6 +44,11 @@ export interface ScheduleItem extends Omit<Programme, "description"> {
 export interface DayPage {
   readonly programmes: readonly ScheduleItem[];
   readonly cursor: string | null;
+}
+/** A programme `search` found, on channel `key` (`Channel.key`). */
+export interface FoundProgramme {
+  readonly key: string;
+  readonly programme: ScheduleItem;
 }
 interface Entry {
   activation: Activation;
@@ -76,6 +83,13 @@ const listingOf = (rows: readonly Programme[], at: number): Listing => ({
   now: rows.find((row) => row.start <= at && row.stop > at) ?? null,
   next: rows.find((row) => row.start > at) ?? null,
 });
+/** The start of the local day `at` is in, as a Schedule's day starts. */
+const dayOf = (at: number) => {
+  const date = new Date(at);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+};
+/** How many programmes `search` finds, and asks each guide for. */
+const SEARCH_LIMIT = 20;
 const FRESH = 6 * 3600_000;
 /**
  * Channel days whose withdrawals `withdrawn` tells apart: a week of the Guide grid's 24 rows
@@ -426,12 +440,35 @@ export function createGuide(
     }
     return null;
   }
-  async function query(
+  function query(
     value: Token,
     mode: "listing" | "day" | "detail",
     day: Day,
     signal?: AbortSignal,
   ): Promise<Query | null> {
+    return ask(value, signal, (native, lease, job) =>
+      native.query(
+        lease,
+        value.generation.id,
+        job,
+        value.ids,
+        now(),
+        mode,
+        day.from,
+        day.until,
+        value.start,
+      ),
+    );
+  }
+  /**
+   * Runs `read` as a job of `value`'s guide within its 2 second budget: its answer, or null where
+   * `value` no longer stands, `signal` aborted, the budget ran out or the native reader refused.
+   */
+  async function ask<T>(
+    value: Token,
+    signal: AbortSignal | undefined,
+    read: (native: GuideNative, lease: string, job: string) => Promise<Result<T>>,
+  ): Promise<T | null> {
     if (signal?.aborted || !validToken(value)) return null;
     const native = port();
     const job = id();
@@ -449,19 +486,9 @@ export function createGuide(
       expired = true;
       cancel();
     }, 2000);
-    let result: Result<Query>;
+    let result: Result<T>;
     try {
-      result = await native.query(
-        value.entry.activation.lease,
-        value.generation.id,
-        job,
-        value.ids,
-        now(),
-        mode,
-        day.from,
-        day.until,
-        value.start,
-      );
+      result = await read(native, value.entry.activation.lease, job);
     } finally {
       try {
         await native.cancel(job);
@@ -640,6 +667,80 @@ export function createGuide(
       const read = await first(key, "listing", { from: 0, until: 0 }, options?.signal, guideId);
       if (!read || options?.signal?.aborted || !validToken(read.captured)) return null;
       return { guide: read.captured.owner, listing: listingOf(read.answer.rows, now()) };
+    },
+    /**
+     * Up to 20 programmes on now or later whose title has every word of `text`, from every guide:
+     * on now first, then by start. Each is on the first of `keys` (`Channel.key`, in the order
+     * Search lists channels) that reads its programmes from where it was found, and its `detail`
+     * reads it with `programme`. A guide whose first 20 partly show on no channel finds fewer.
+     */
+    async search(
+      text: string,
+      keys: readonly string[],
+      options?: { readonly signal?: AbortSignal },
+    ): Promise<readonly FoundProgramme[]> {
+      const signal = options?.signal;
+      const words = searchWords(text);
+      if (words.length === 0) return [];
+      // By guide, the channels that may read each of its guide ids, in the order of `keys`.
+      const guides = new Map<
+        string,
+        { readonly asking: Token; readonly by: Map<string, string[]> }
+      >();
+      const places = new Map<string, number>();
+      for (const [place, key] of keys.entries())
+        for (const value of candidates(key)) {
+          if (!places.has(value.key)) places.set(value.key, place);
+          const read = guides.get(value.owner) ?? { asking: value, by: new Map() };
+          guides.set(value.owner, read);
+          for (const guideId of value.ids) {
+            const shown = read.by.get(guideId);
+            if (!shown) read.by.set(guideId, [value.key]);
+            else if (!shown.includes(value.key)) shown.push(value.key);
+          }
+        }
+      const at = now();
+      const reads = new Map<string, Awaited<ReturnType<typeof first>>>();
+      const found: { key: string; captured: Token; match: Match }[] = [];
+      for (const { asking, by } of guides.values()) {
+        const answer = await ask(asking, signal, (native, lease, job) =>
+          native.search(lease, asking.generation.id, job, [...by.keys()], words, at, SEARCH_LIMIT),
+        );
+        for (const match of answer?.rows ?? [])
+          for (const key of by.get(match.guideId) ?? []) {
+            if (!reads.has(key))
+              reads.set(key, await first(key, "listing", { from: 0, until: 0 }, signal));
+            const read = reads.get(key);
+            // Read from the generation searched, by the id it was found by.
+            if (
+              read?.captured.generation === asking.generation &&
+              read.answer.guideId === match.guideId
+            ) {
+              found.push({ key, captured: read.captured, match });
+              break;
+            }
+          }
+      }
+      if (signal?.aborted) return [];
+      const rank = ({ match }: (typeof found)[number]) => (match.start <= at ? 0 : 1);
+      return found
+        .filter(({ captured }) => validToken(captured))
+        .sort(
+          (a, b) =>
+            rank(a) - rank(b) ||
+            a.match.start - b.match.start ||
+            (places.get(a.key) ?? 0) - (places.get(b.key) ?? 0),
+        )
+        .slice(0, SEARCH_LIMIT)
+        .map(({ key, captured, match: { guideId, start, stop, title } }) => ({
+          key,
+          programme: {
+            start,
+            stop,
+            title,
+            detail: token({ ...captured, ids: [guideId], start, on: dayOf(start) }),
+          },
+        }));
     },
     async forget(key: string): Promise<boolean> {
       withdrawChannels(key);
