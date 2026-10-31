@@ -366,14 +366,14 @@ export default function Search() {
     (signal: AbortSignal) =>
       searched && channelKeys.length > 0
         ? guide.search(query, channelKeys, { signal })
-        : Promise.resolve([]),
+        : Promise.resolve({ found: [], unsearched: false }),
     [query, searched, channelKeys],
   );
   const programmeRead = useGuideRead(loadProgrammes, guideIds);
   const programmes = useMemo(
     () =>
       !session.current.closed && library && programmeRead.value
-        ? foundProgrammes(programmeRead.value, library)
+        ? foundProgrammes(programmeRead.value.found, library)
         : null,
     [programmeRead.value, library, entry.generation],
   );
@@ -387,7 +387,7 @@ export default function Search() {
   // token, so the detail reads on.
   const shownDetail =
     detail?.generation === entry.generation
-      ? (programmeRead.value?.find(
+      ? (programmeRead.value?.found.find(
           ({ key, programme }) =>
             key === detail.found.key && programme.start === detail.found.programme.start,
         ) ?? detail.found)
@@ -469,7 +469,8 @@ export default function Search() {
       programmeRead.pending &&
       programmeRead.value === undefined);
   // A guide that could not be searched is said, and not taken for one without the name.
-  const unsearched = searched !== "" && programmeRead.failed;
+  const unsearched =
+    searched !== "" && (programmeRead.failed || programmeRead.value?.unsearched === true);
   const providers = libraryStatus(members, {
     channels: true,
     titles: true,
@@ -668,7 +669,7 @@ function searchLine(
   const text = providers?.inline ? providers.text : (status?.text ?? "");
   return {
     ...providers,
-    text: [pending ? "Searching." : "", text, unsearched ? "Programmes not searched." : ""]
+    text: [pending ? "Searching." : "", text, unsearched ? "Some programmes not searched." : ""]
       .filter(Boolean)
       .join(" "),
     actions,

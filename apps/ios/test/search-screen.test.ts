@@ -47,6 +47,8 @@ const scenario = vi.hoisted(() => ({
   sources: new Map<string, number>(),
   /** Who listens to providers signing in. */
   signedIn: new Set<() => void>(),
+  /** Whether a guide could not be searched. */
+  unsearched: false,
   /** The guide owner's status snapshot, replaced as it reads again, and who hears it. */
   guideSnapshot: new Map(),
   guideListeners: new Set<() => void>(),
@@ -187,7 +189,10 @@ vi.mock("../src/guide.ts", () => {
         return () => scenario.guideListeners.delete(listener);
       },
       getSnapshot: () => scenario.guideSnapshot,
-      search: (text: string, keys: readonly string[]) => scenario.search(text, keys),
+      search: async (text: string, keys: readonly string[]) => ({
+        found: await scenario.search(text, keys),
+        unsearched: scenario.unsearched,
+      }),
       programme: async (detail: string) => scenario.details.get(detail) ?? null,
     },
   };
@@ -435,6 +440,7 @@ beforeEach(async () => {
     catalogue: ready,
     did: [],
     watching: false,
+    unsearched: false,
     opened: [],
     said: [],
     fontScale: 1,
@@ -1496,8 +1502,13 @@ describe("Programmes in Search", () => {
     await type("late");
     expect(text()).toContain(dayLabel(localDay(tomorrow), Date.now()));
     await type("film");
-    expect(text()).toContain("Programmes not searched.");
+    expect(text()).toContain("Some programmes not searched.");
     expect(text()).not.toContain("Nothing named");
+    // A guide that could not be searched beside one that found it.
+    scenario.unsearched = true;
+    await type("late");
+    expect(text()).toContain("Late Film");
+    expect(text()).toContain("Some programmes not searched.");
   });
 
   it("opens a programme inside Search and goes Back to the same query and results, never playing", async () => {
