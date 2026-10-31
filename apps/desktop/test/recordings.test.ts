@@ -1693,7 +1693,9 @@ describe.skipIf(!hasTools)("recordings", () => {
         await rename(`${chosen}.away`, chosen);
       }
 
-      // Back, it goes on there: the same recording, appended to its file.
+      // Back, and chosen again too, its mark stays: it goes on there, the same recording, appended
+      // to its file.
+      await again.recordings.setFolder(chosen);
       await again.recordings.check();
       const [going] = await until(
         again.recordings.list,
