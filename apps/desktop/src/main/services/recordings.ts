@@ -350,9 +350,15 @@ function make(deps: RecordingsDeps) {
     const folderOf = (record: StoredRecording) => join(record.folder ?? root, record.id);
     const fileOf = (record: StoredRecording) => join(folderOf(record), record.file);
     const isLive = (record: StoredRecording) => record.status.kind === "recording";
-    /** Marks `record` ended for good, as `as` says, in its own folder (see ENDED). */
+    /**
+     * Marks `record` ended for good, as `as` says, in its own folder (see ENDED), while its time
+     * remains: one whose time is over never goes on, and reads as it ended.
+     */
     const markEnded = (record: StoredRecording, as: keyof typeof ENDED) =>
-      Effect.promise(() => writeFile(join(folderOf(record), ENDED[as]), "").catch(() => {}));
+      Effect.promise(async () => {
+        if (record.stop > Date.now())
+          await writeFile(join(folderOf(record), ENDED[as]), "").catch(() => {});
+      });
     /** How `record` was marked ended for good, and when, if it was. */
     const endedAs = async (record: StoredRecording) => {
       for (const as of ["stopped", "quit"] as const) {
