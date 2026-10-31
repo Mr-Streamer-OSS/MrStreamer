@@ -682,8 +682,8 @@ describe("a live channel's sound and subtitles in Watch", () => {
     await until(() => sheets.length > before);
     return sheets.at(-1)!;
   }
-  async function watchLive() {
-    await connect([null, null, null]);
+  async function watchLive(days: number | null = null) {
+    await connect([days, days, days]);
     port.selectObservedTrackAsync.mockImplementation(async (_expected, _revision, choice) => {
       if (port.tracks)
         port.tracks =
@@ -748,6 +748,32 @@ describe("a live channel's sound and subtitles in Watch", () => {
     );
   });
 
+  it("keeps a channel's pick out of its programme from catch-up", async () => {
+    onNow = { ...aired(HOUR / 4), description: null };
+    await watchLive(3);
+    offer();
+    const audio = await open("watch-audio");
+    await React.act(async () => {
+      audio.pick(1);
+      await tick();
+    });
+    expect((await open("watch-audio")).options[1]).toBe("✓ English · Audio description");
+    await until(() => fromStart() !== null);
+    port.selectObservedTrackAsync.mockClear();
+    await React.act(async () => {
+      fromStart()?.click();
+      await tick();
+    });
+    await until(() => opened.length === 2);
+    offer();
+    await React.act(async () => {
+      port.ready();
+      await tick();
+    });
+    expect((await open("watch-audio")).options[0]).toBe("✓ English · Main");
+    expect(port.selectObservedTrackAsync).not.toHaveBeenCalled();
+  });
+
   it("starts a replay with no picks once the channel's login changed", async () => {
     await watchLive();
     offer();
@@ -788,7 +814,7 @@ describe("a live channel's sound and subtitles in Watch", () => {
     expect(port.selectObservedTrackAsync).not.toHaveBeenCalled();
   });
 
-  it("says tracks aren't known yet while loading, and none where the stream has none", async () => {
+  it("says tracks aren't known yet while loading, and no choices where the stream has none", async () => {
     await watchLive();
     offer({
       audio: { state: "loading", options: [] },
@@ -799,7 +825,7 @@ describe("a live channel's sound and subtitles in Watch", () => {
     expect(audio.message).toBe("Not known yet. Try again in a moment.");
     const subtitles = await open("watch-subtitles");
     expect(subtitles.options).toEqual(["Cancel"]);
-    expect(subtitles.message).toBe("None on this channel.");
+    expect(subtitles.message).toBe("No choices on this channel.");
   });
 
   it("asks nothing of a newer attempt for a sheet the stream outlived", async () => {

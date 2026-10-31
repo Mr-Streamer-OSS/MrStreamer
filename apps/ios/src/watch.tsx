@@ -95,7 +95,7 @@ const STILL = STREAMING.filter((shortcut) => shortcut.id === "close" || shortcut
  * Picture in Picture, Downloads and Settings at the top, and everything else in one large glass
  * panel, all showing and hiding together. Both a channel and a title add their sound and subtitle
  * tracks. A channel adds Quality, its star, which stars or unstars it and leaves what plays alone,
- * and Play from start. A movie or an episode adds a scrubber and the next episode. It is the app's
+ * and Play from start while its catch-up keeps the programme on now. A movie or an episode adds a scrubber and the next episode. It is the app's
  * own layer rather than a route, because the view that starts Picture in Picture has to stay while
  * it plays: Watch then hides, and the tabs and accessory take over. Closing it shows the screen
  * under it, a title's details among them. A movie or an episode turns Watch to landscape while it
@@ -687,7 +687,7 @@ function TextButtons({ item }: { item: Playing }) {
         ...(known === null
           ? { message: "Not known yet. Try again in a moment." }
           : none
-            ? { message: item.live ? "None on this channel." : "None in this file." }
+            ? { message: item.live ? "No choices on this channel." : "No choices in this file." }
             : {}),
       },
       (index) => {
