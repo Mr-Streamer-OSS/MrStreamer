@@ -1355,7 +1355,7 @@ export const nl: Translation = {
   Quit: "Afsluiten",
   "Keep recording": "Blijven opnemen",
   "{title} is recording until {time}. Quitting stops it now and keeps the {minutes} min recorded.":
-    "{title} neemt op tot {time}. Afsluiten beëindigt de opname nu en bewaart de {minutes} min die is opgenomen.",
+    "{title} neemt op tot {time}. Afsluiten beëindigt de opname nu en bewaart de opgenomen {minutes} min.",
   "{count} recordings go on until {time}. Quitting stops them now and keeps what they recorded.":
     "{count} opnames lopen tot {time}. Afsluiten beëindigt ze nu en bewaart wat ze hebben opgenomen.",
   "{title}, {time}, won't record while Mr. Streamer is closed.":

@@ -16,6 +16,7 @@ import { menuSurface } from "../../components/ui/menu.ts";
 import { cn } from "../../lib/utils.ts";
 import { noteItems } from "./notes.ts";
 import { useUpdates, waitText } from "./use-updates.ts";
+import { SaveFeedback } from "../settings/SaveFeedback.tsx";
 
 /** How many lines of the notes the panel and the reminder show before pointing to Settings. */
 export const NOTE_LINES = 4;
@@ -128,7 +129,7 @@ export function UpdateNotice({ compact = false }: { compact?: boolean }) {
 }
 
 function UpdatePanel({ status }: { status: UpdateStatus }) {
-  const { download, cancel, restart, restartNow, recording, dismiss } = useUpdates();
+  const { download, cancel, restart, restartNow, recording, dismiss, stopState } = useUpdates();
   const { update, offer, channel } = status;
   // When a ready update installs while something records.
   const waiting = update.kind === "ready" ? waitText(recording) : null;
@@ -156,6 +157,14 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
         </ul>
       )}
       {waiting && <p className="mt-3 text-[0.875rem]">{waiting}</p>}
+      {update.kind === "ready" && (
+        <SaveFeedback
+          pending={false}
+          error={stopState.error}
+          retry={() => stopState.mutate(stopState.variables!)}
+          retryDisabled={stopState.isPending}
+        />
+      )}
       {update.kind === "downloading" && (
         <div className="mt-4">
           <div className="h-1 overflow-hidden rounded-full bg-white/12">
@@ -199,7 +208,12 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
               >
                 {t("OK")}
               </Button>
-              <Button variant="destructive" size="sm" onClick={restartNow}>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={restartNow}
+                disabled={stopState.isPending}
+              >
                 {t("Restart now")}
               </Button>
             </>

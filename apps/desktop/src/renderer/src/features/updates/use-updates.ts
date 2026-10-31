@@ -59,6 +59,14 @@ export function useUpdates() {
         if (now.update.kind === "failed") showSettings();
       }, showSettings);
   };
+  const stopping = useMutation({
+    mutationFn: async (ids: readonly string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => call("recordings.stop", { id })));
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed) throw failed.reason;
+    },
+    onSuccess: restart,
+  });
   const setChannel = useMutation({
     mutationFn: (channel: Channel) => call("updates.setChannel", { channel }),
     onSuccess: store,
@@ -87,8 +95,10 @@ export function useUpdates() {
     /** The recordings whose time goes on, which a ready update waits for. */
     recording: live,
     restart,
+    stopState: stopping,
     /** Stops what records, keeping what it captured, then installs and restarts. */
-    restartNow: () =>
-      void Promise.allSettled(live.map(({ id }) => call("recordings.stop", { id }))).then(restart),
+    restartNow: () => {
+      if (!stopping.isPending) stopping.mutate(live.map(({ id }) => id));
+    },
   };
 }

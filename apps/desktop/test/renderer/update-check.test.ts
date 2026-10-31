@@ -2,13 +2,15 @@
 // Settings > Updates: a newer release can come out after the one on offer, so Check now
 // stays beside Download. While an update downloads or waits for its restart, there is nothing to
 // check. A copy the Microsoft Store installed leaves updates to the Store.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { queryView } from "./mount.ts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Distribution, UpdatePhase, UpdateStatus } from "@mrstreamer/contracts/updates";
+import type { Recording } from "@mrstreamer/contracts/recordings";
 import { UpdatesSection } from "../../src/renderer/src/features/updates/UpdatesSection.tsx";
+import { syncRecordings } from "../../src/renderer/src/features/recordings/recordings.ts";
 
 let unmount = () => {};
 afterEach(() => unmount());
@@ -17,8 +19,10 @@ afterEach(() => unmount());
 async function buttonsFor(
   update: UpdatePhase,
   distribution: Distribution = "direct",
+  recordings: readonly Recording[] = [],
 ): Promise<HTMLElement> {
   ipc.reset();
+  ipc.always("recordings.list", recordings);
   const status: UpdateStatus = {
     version: "0.0.3-nightly.20261001.46",
     distribution,
@@ -31,9 +35,13 @@ async function buttonsFor(
   };
   const client = new QueryClient();
   client.setQueryData(["updates"], status);
+  const stop = syncRecordings(client);
   const mounted = queryView(client);
   await mounted.render(createElement(UpdatesSection));
-  unmount = mounted.unmount;
+  unmount = () => {
+    stop();
+    mounted.unmount();
+  };
   return mounted.container;
 }
 
@@ -102,4 +110,34 @@ it("shows the AUR update route without direct actions, even with stale direct of
   expect(rows.textContent).toContain("Updates come from the AUR. Use an AUR helper or makepkg.");
   expect(rows.querySelector("select")).toBeNull();
   expect(rows.querySelector("button")).toBeNull();
+});
+
+it("keeps an update pending when Stop fails, and retries that recording before restarting", async () => {
+  const recording: Recording = {
+    id: "r1",
+    channel: { subscriptionId: SUBSCRIPTION, id: "11" },
+    channelName: "Meridian",
+    title: "Studio Sessions",
+    start: Date.now() - 60_000,
+    stop: Date.now() + 60_000,
+    ended: null,
+    bytes: 1000,
+    status: { kind: "recording" },
+  };
+  const rows = await buttonsFor({ kind: "ready", version: "0.0.18" }, "direct", [recording]);
+  await vi.waitFor(() => expect(named(rows, "Restart now")).toBeDefined());
+  const stop = ipc.hold("recordings.stop");
+  await act(async () => named(rows, "Restart now")!.click());
+  expect(ipc.argsOf("updates.restart")).toHaveLength(0);
+  await act(async () => {
+    ipc.emit("recordings.changed", [{ ...recording, status: { kind: "stopped" }, unsaved: true }]);
+    stop.reject({ kind: "unexpected", detail: "Recordings could not be saved." });
+  });
+  expect(ipc.argsOf("updates.restart")).toHaveLength(0);
+  await vi.waitFor(() => expect(rows.textContent).toContain("Recordings could not be saved."));
+  ipc.always("recordings.stop", null);
+  ipc.always("updates.restart", null);
+  await act(async () => named(rows, "Try again")!.click());
+  await vi.waitFor(() => expect(ipc.argsOf("updates.restart")).toHaveLength(1));
+  expect(ipc.argsOf("recordings.stop")).toEqual([{ id: "r1" }, { id: "r1" }]);
 });
