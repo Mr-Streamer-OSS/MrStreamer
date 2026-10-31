@@ -18,6 +18,10 @@
 # - subs-far.mkv: the same mark, in a copy whose 300 KB ASS header puts its Tracks past the first
 #   256 KB.
 # - subs-badcues.mkv: the same with the index's last field running past the end of the index.
+# - subs-drawing.mkv: its picture and sound with French ASS holding a 111 KB drawing between two
+#   lines, which must still show.
+# - subs-longline.mkv: its picture and sound with French SubRip holding a 70 KB line, too large
+#   to keep, between two lines.
 # Needs an ffmpeg with libx264 and its AAC encoder on PATH, as Ubuntu's and Homebrew's builds have.
 set -euo pipefail
 out=${1:?usage: subtitle-fixtures.sh <out-folder>}
@@ -94,6 +98,29 @@ ffmpeg -v error -y \
   -metadata:s:s:0 language=eng -metadata:s:s:1 language=eng -metadata:s:s:2 language=fra \
   -metadata:s:s:3 language=ger -disposition:s:0 0 -disposition:s:1 forced \
   -disposition:s:2 0 -disposition:s:3 0 -fflags +bitexact "$out/subs.mkv"
+
+# A 111 KB ASS drawing between two lines, which shows nothing and so is kept as nothing, and a
+# 70 KB SubRip line, too large to keep, each in a copy of its own.
+python3 -I - "$work" <<'PY'
+import sys
+work = sys.argv[1]
+ass = open(f"{work}/french.ass").read().split("[Events]")[0]
+drawing = "{\\p1}m 0 0 " + "l 1 1 " * 18500 + "{\\p0}"
+open(f"{work}/drawing.ass", "w").write(ass + "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    "Dialogue: 0,0:00:05.00,0:00:07.00,Default,,0,0,0,,Avant\n"
+    f"Dialogue: 0,0:00:21.00,0:00:23.00,Default,,0,0,0,,{drawing}\n"
+    "Dialogue: 0,0:00:25.00,0:00:27.00,Default,,0,0,0,,Après\n")
+open(f"{work}/long.srt", "w").write("1\n00:00:05,000 --> 00:00:07,000\nBefore\n\n"
+    "2\n00:00:21,000 --> 00:00:23,000\n" + "x" * 70000 + "\n\n"
+    "3\n00:00:25,000 --> 00:00:27,000\nAfter\n")
+PY
+for kind in drawing:ass longline:srt; do
+  name=${kind%:*} codec=${kind#*:}
+  input=$work/drawing.ass
+  [[ $name == longline ]] && input=$work/long.srt
+  ffmpeg -v error -y -i "$out/subs.mkv" -i "$input" -map 0:0 -map 0:1 -map 1 -c copy -c:s "$codec" \
+    -metadata:s:s:0 language=fra -fflags +bitexact "$out/subs-$name.mkv"
+done
 
 # The same with an ASS header of 300 KB of comments, for subs-far.mkv.
 {

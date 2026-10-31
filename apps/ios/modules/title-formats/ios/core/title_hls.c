@@ -43,9 +43,9 @@
 //   frames before it (the bit reservoir), so playing from a segment reached by a seek, its first
 //   few frames may not decode fully.
 // - A text subtitle track is a WebVTT rendition cut at the picture's cuts. Every line read of it,
-//   in any segment's pass, after a seek too, is kept as cue text for the title's life (within
-//   TEXT_BYTES_MOST a track); a segment holds each kept line on screen during it, so a line spanning
-//   segments is in each, as HLS has it. The forced lines of a language are in its regular track's
+//   in any segment's pass, after a seek too, is kept as cue text for the title's life; a segment
+//   holds each kept line on screen during it, so a line spanning segments is in each, as HLS has
+//   it. A track that outgrows what a title keeps (see keep_cue) says so in each segment instead. The forced lines of a language are in its regular track's
 //   rendition too, which AVPlayer shows in place of the forced one once chosen.
 // - A file holds a line only where it begins, so a pass from a seek doesn't read the line on
 //   screen there, nor one a muxer stored ahead of its time. The file's index (Cues), which
@@ -121,6 +121,9 @@
  */
 #define TEXT_BYTES_MOST (4 * 1024 * 1024)
 #define LINE_BYTES_MOST (64 * 1024)
+/** Bytes of cue text a title keeps at most, every track together, and the largest packet read. */
+#define CUE_BYTES_MOST (16 * 1024 * 1024)
+#define PACKET_BYTES_MOST (1024 * 1024)
 /** How long a line shows whose packet doesn't say. Seconds. */
 #define UNTIMED_S 5.0
 /**
@@ -191,7 +194,7 @@ typedef struct Text {
   int64_t number;
   AVRational base;
   int forced;
-  /** Bytes of its kept lines; and whether a line went unkept for TEXT_BYTES_MOST. */
+  /** What its kept lines take; and whether a line went unkept for the bounds keep_cue keeps. */
   size_t bytes;
   int overflow;
   /** Its rendition was asked for: AVPlayer shows it, or may. */
@@ -243,10 +246,12 @@ struct TitleHls {
   /** The file's subtitle streams the stream doesn't carry, and which of them are encoded. */
   int unshown[UNSHOWN_MOST], unshown_encoded[UNSHOWN_MOST];
   int unshown_count;
+  /** Bytes every track's kept lines take together. */
+  size_t cue_bytes;
   /** The file's first HEAD_BYTES, as opening read them, until the tracks are chosen. */
   uint8_t *head;
   int64_t head_size;
-  /** Where the Segment's data starts, and where its Cues are, -1 when not known. */
+  /** Where the Segment's data starts, 0 when not known, and where its Cues are, -1 when not. */
   int64_t segment, cues;
   /** A bit for each segment whose pass was made: every line stored from its cut on was read. */
   uint8_t *passed;
@@ -1087,27 +1092,32 @@ static int by_cue(const Cue *a, int64_t from, int64_t to, const char *text) {
 
 /**
  * Keeps the line of a text track's packet, once: a line read again, after a seek or for the
- * index, is the same line. A line past LINE_BYTES_MOST or the track's TEXT_BYTES_MOST isn't kept,
- * and the track is marked as one that can't be shown.
+ * index, is the same line. A packet past PACKET_BYTES_MOST or a line past LINE_BYTES_MOST is kept
+ * as a line saying it is too large to show; one past the track's TEXT_BYTES_MOST or the title's
+ * CUE_BYTES_MOST isn't kept, and the track is marked as one that can't be shown.
  */
 static int keep_cue(TitleHls *title, Text *text, const AVPacket *packet) {
   if (packet->pts == AV_NOPTS_VALUE || !packet->data) return 0;
-  if (packet->size > LINE_BYTES_MOST) {
-    text->overflow = 1;
-    return 0;
-  }
   enum AVCodecID codec = title->input->streams[text->stream]->codecpar->codec_id;
   AVBPrint line, settings;
   av_bprint_init(&line, 0, AV_BPRINT_SIZE_UNLIMITED);
   av_bprint_init(&settings, 0, AV_BPRINT_SIZE_UNLIMITED);
-  if (codec == AV_CODEC_ID_ASS || codec == AV_CODEC_ID_SSA) from_ass(packet->data, packet->size, &line);
-  else if (codec == AV_CODEC_ID_WEBVTT) from_vtt(packet->data, packet->size, &line);
-  else from_subrip(packet->data, packet->size, &line);
+  int large = packet->size > PACKET_BYTES_MOST;
+  if (!large && (codec == AV_CODEC_ID_ASS || codec == AV_CODEC_ID_SSA))
+    from_ass(packet->data, packet->size, &line);
+  else if (!large && codec == AV_CODEC_ID_WEBVTT) from_vtt(packet->data, packet->size, &line);
+  else if (!large) from_subrip(packet->data, packet->size, &line);
   while (line.len && line.str[line.len - 1] == '\n') line.str[--line.len] = 0;
   size_t given = 0;
   const uint8_t *cue = av_packet_get_side_data(packet, AV_PKT_DATA_WEBVTT_SETTINGS, &given);
   for (size_t i = 0; cue && i < given && cue[i]; i++) {
     av_bprint_chars(&settings, cue[i] == '\n' || cue[i] == '\r' ? ' ' : (char)cue[i], 1);
+  }
+  // A line too large to keep shows, at its time, that it is.
+  if (large || line.len + settings.len > LINE_BYTES_MOST) {
+    av_bprint_clear(&line);
+    av_bprint_clear(&settings);
+    av_bprintf(&line, "This line is too large to show.");
   }
   int error = 0;
   char *kept = NULL, *placed = NULL;
@@ -1122,7 +1132,9 @@ static int keep_cue(TitleHls *title, Text *text, const AVPacket *packet) {
   int at = first_from(text, from);
   while (at < text->count && by_cue(&text->cues[at], from, to, line.str) < 0) at++;
   if (at < text->count && by_cue(&text->cues[at], from, to, line.str) == 0) goto end;
-  if (text->bytes + line.len + settings.len > TEXT_BYTES_MOST) {
+  // What a line takes, its own allocations too.
+  size_t cost = line.len + settings.len + sizeof(Cue) + 64;
+  if (text->bytes + cost > TEXT_BYTES_MOST || title->cue_bytes + cost > CUE_BYTES_MOST) {
     text->overflow = 1;
     goto end;
   }
@@ -1142,7 +1154,8 @@ static int keep_cue(TitleHls *title, Text *text, const AVPacket *packet) {
   memmove(&text->cues[at + 1], &text->cues[at], (size_t)(text->count - at) * sizeof(Cue));
   text->cues[at] = (Cue){from, to, kept, placed};
   text->count++;
-  text->bytes += strlen(kept) + (placed ? strlen(placed) : 0);
+  text->bytes += cost;
+  title->cue_bytes += cost;
   kept = placed = NULL;
 end:
   av_free(kept);
@@ -1242,6 +1255,7 @@ static int encoded(const uint8_t *data, int64_t from, int64_t end) {
   int count = 0, unreadable = 0;
   for (int64_t at = from, id, start, length; child(data, end, &at, &id, &start, &length);) {
     if (id != 0x6240) continue;
+    // ContentEncodingType 1, or a ContentEncryption, is encryption.
     count++;
     uint64_t scope = 1, type = 0, algo = 0;
     int compression = 0, encryption = 0;
@@ -1256,10 +1270,12 @@ static int encoded(const uint8_t *data, int64_t from, int64_t end) {
       }
     }
     // Without a ContentCompression, compression is zlib's, the default.
-    if ((scope & 1) && (type != 0 || encryption || !compression || algo < 2)) unreadable = 1;
+    if (!(scope & 1)) continue;
+    if (type != 0 || encryption) unreadable = 3;
+    else if ((!compression || algo < 2) && !unreadable) unreadable = 1;
   }
   // FFmpeg reads one encoding at most; with more it reads none.
-  return unreadable || count > 1;
+  return unreadable ? unreadable : count > 1;
 }
 
 /**
@@ -1382,7 +1398,8 @@ static int list(Text *text, Listed listed) {
  * Reads the lines of each text track whose number is known that the file's index lists, within
  * INDEX_BYTES_MOST, once. A track's lines are kept only where FFmpeg's index of its stream, read
  * from the same Cues, has them all, and the same entry listed twice is one line. None when the
- * SeekHead names no Cues or they aren't Cues; a read that fails is tried again next time.
+ * SeekHead names no Cues or they aren't Cues; a read that fails leaves them unread, failing the
+ * request as any failed read does.
  */
 static int list_cues(TitleHls *title) {
   int64_t at = 0, length;
@@ -1416,7 +1433,7 @@ static int list_cues(TitleHls *title) {
         if (f == 0xB2 && value <= INT64_MAX / 2) duration = (int64_t)value;
       }
       for (int t = 0; !error && cluster >= 0 && t < title->text_count; t++) {
-        if (title->texts[t].number == track)
+        if (track >= 0 && title->texts[t].number == track)
           error = list(&title->texts[t], (Listed){time, duration, title->segment + cluster, 0});
       }
     }
@@ -2313,16 +2330,21 @@ static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, co
   }
   int budget = RECALLS_MOST;
   int error = recall_for(title, track, index, INT64_MAX, &budget);
-  // A line the reads couldn't keep would be missing here: the rendition is refused instead.
-  for (int t = 0; error >= 0 && t < title->text_count; t++) {
-    if (folds(title, track, t) && title->texts[t].overflow) {
-      say(detail, detail_size, "These subtitles are too large to show.");
-      return TITLE_HLS_UNSUPPORTED;
-    }
-  }
+  // A line the reads couldn't keep would be missing: each segment says so instead, over the
+  // picture, which plays on.
+  int overflow = 0;
+  for (int t = 0; t < title->text_count; t++) overflow |= folds(title, track, t) && title->texts[t].overflow;
   AVBPrint text;
   av_bprint_init(&text, 0, AV_BPRINT_SIZE_UNLIMITED);
-  if (error >= 0) error = write_vtt(title, track, index, &text);
+  if (error >= 0 && overflow) {
+    av_bprintf(&text, "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n\n");
+    vtt_time(&text, title_ms(title, title->cuts[index], title->video_base));
+    av_bprintf(&text, " --> ");
+    vtt_time(&text, title_ms(title, title->cuts[index + 1], title->video_base));
+    av_bprintf(&text, "\nThese subtitles are too large to show.\n");
+  } else if (error >= 0) {
+    error = write_vtt(title, track, index, &text);
+  }
   if (error >= 0 && !av_bprint_is_complete(&text)) error = AVERROR(ENOMEM);
   av_freep(&title->text);
   if (error >= 0) error = av_bprint_finalize(&text, &title->text);
@@ -2470,6 +2492,7 @@ int title_hls_unshown(const TitleHls *title, int index, TitleHlsUnshown *out) {
   int encoded = title->unshown_encoded[index];
   out->format = encoded == 1   ? "compressed text"
                 : encoded == 2 ? "text of unknown encoding"
+                : encoded == 3 ? "encrypted text"
                                : format_name(st->codecpar->codec_id);
   out->forced = !!(st->disposition & AV_DISPOSITION_FORCED);
   return 1;

@@ -1,6 +1,7 @@
 import { router, usePathname } from "expo-router";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { Quality } from "@mrstreamer/contracts/library";
+import { formatLanguageName } from "@mrstreamer/core/i18n";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
@@ -718,16 +719,10 @@ function TextButtons({ item }: { item: Playing }) {
   );
 }
 
-/** A language's name in the phone's language, as AVPlayer names the tracks it lists. */
+/** A language's name in the app's language, like the rest of its copy; null when unknown. */
 function spoken(code: string | null) {
   const canonical = languageCode(code);
-  try {
-    return (
-      (canonical && new Intl.DisplayNames(undefined, { type: "language" }).of(canonical)) || code
-    );
-  } catch {
-    return code;
-  }
+  return (canonical && formatLanguageName(canonical)) || code;
 }
 
 /**
