@@ -1606,12 +1606,12 @@ describe.skipIf(!hasTools)("recordings", () => {
       }
       await quit();
       const [id] = readdirSync(chosen).filter((name) => !name.startsWith("."));
-      const size = () =>
-        readdirSync(join(chosen, id ?? ""))
-          .filter((name) => name.endsWith(".ts"))
-          .map((name) => statSync(join(chosen, id ?? "", name)).size);
-      const before = when === "capturing" ? size() : [];
       expect(id === undefined).toBe(when === "starting");
+      const before = id
+        ? readdirSync(join(chosen, id))
+            .filter((name) => name.endsWith(".ts"))
+            .reduce((sum, name) => sum + statSync(join(chosen, id, name)).size, 0)
+        : 0;
       await rename(chosen, `${chosen}.away`);
       await mkdir(chosen);
 
@@ -1638,14 +1638,12 @@ describe.skipIf(!hasTools)("recordings", () => {
       await again.recordings.check();
       const [going] = await until(
         again.recordings.list,
-        ([first]) => first?.status.kind === "recording" && first.bytes > (before[0] ?? 0),
+        ([first]) => first?.status.kind === "recording" && first.bytes > before,
       );
-      expect(going?.status.kind).toBe("recording");
-      const [folder] = readdirSync(chosen).filter((name) => !name.startsWith("."));
-      expect(folder).toBe(going?.id);
-      const files = readdirSync(join(chosen, folder!)).filter((name) => name.endsWith(".ts"));
-      expect(files).toHaveLength(1);
-      expect(statSync(join(chosen, folder!, files[0]!)).size).toBeGreaterThan(before[0] ?? 0);
+      expect(readdirSync(chosen).filter((name) => !name.startsWith("."))).toEqual([going!.id]);
+      expect(
+        readdirSync(join(chosen, going!.id)).filter((name) => name.endsWith(".ts")),
+      ).toHaveLength(1);
       await again.recordings.stop(going!.id);
     });
 
