@@ -892,11 +892,17 @@ describe("a live channel's sound and subtitles in Watch", () => {
     });
     await until(() => opened.length === 2);
     offer();
+    await React.act(async () => {
+      port.ready();
+      await tick();
+    });
     port.selectObservedTrackAsync.mockClear();
+    port.getObservedTracksAsync.mockClear();
     await React.act(async () => {
       audio.pick(1);
       await tick();
     });
+    expect(port.getObservedTracksAsync).not.toHaveBeenCalled();
     expect(port.selectObservedTrackAsync).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
