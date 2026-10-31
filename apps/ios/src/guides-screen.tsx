@@ -16,7 +16,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { retryChannels, useCatalogue } from "./account.ts";
+import { retryChannels, useCatalogue, useRoster } from "./account.ts";
 import { hostOf } from "./errors.ts";
 import type { GuideProblem } from "./guide-native.ts";
 import {
@@ -27,7 +27,7 @@ import {
   type GuideRefusal,
 } from "./guide-sources.ts";
 import { guide, type GuideStatus } from "./guide.ts";
-import { useTabs, type Tab } from "./header.tsx";
+import { tabHref, useTabs, type Tab } from "./header.tsx";
 import type { Library } from "./library.ts";
 import { colors, largeText, Notice, TextButton } from "./ui.tsx";
 
@@ -330,6 +330,13 @@ function describe(key: string, library: Library | null): Omit<Mappable, "mapped"
  */
 export function GuideMapScreen() {
   const catalogue = useCatalogue();
+  const roster = useRoster();
+  const providers =
+    roster.kind === "ready"
+      ? roster.members
+      : catalogue.kind === "failed"
+        ? [catalogue.member]
+        : [];
   const mappings = guides.useMappings();
   const tab = useTabs()?.tab ?? "(home)";
   const large = largeText(useWindowDimensions().fontScale);
@@ -364,7 +371,21 @@ export function GuideMapScreen() {
           {catalogue.kind === "failed" ? (
             <Notice
               failure={{ headline: "Couldn't load channels", advice: null }}
-              actions={[{ label: "Try again", onPress: retryChannels }]}
+              actions={[
+                ...providers
+                  .filter((member) => member.needsSecret)
+                  .map((member) => ({
+                    label: `${member.entry.kind === "m3u" ? "Enter playlist link" : "Enter password"} for ${member.label}`,
+                    onPress: () =>
+                      router.push({
+                        pathname: tabHref(tab, "provider"),
+                        params: { id: member.entry.id },
+                      }),
+                  })),
+                ...(providers.some((member) => !member.needsSecret && member.live.kind === "failed")
+                  ? [{ label: "Try again", onPress: retryChannels }]
+                  : []),
+              ]}
             />
           ) : null}
           <View style={styles.search}>

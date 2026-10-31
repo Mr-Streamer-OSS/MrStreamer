@@ -22,6 +22,8 @@ const scenario = vi.hoisted(() => ({
   ownIds: [] as string[],
   previews: new Map<string, unknown>(),
   channel: undefined as string | string[] | undefined,
+  secrets: [] as { id: string; kind: "xtream" | "m3u"; label: string }[],
+  retryable: true,
 }));
 
 const stores = await vi.hoisted(async () => {
@@ -59,17 +61,39 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
-vi.mock("../src/header.tsx", () => ({ useTabs: () => null }));
+vi.mock("../src/header.tsx", () => ({
+  useTabs: () => null,
+  tabHref: (tab: string, screen: string) => (tab === "(home)" ? `/${screen}` : `/${tab}/${screen}`),
+}));
 vi.mock("../src/account.ts", async () => {
   const { useStore } = await import("../src/store.ts");
+  const members = () => [
+    ...scenario.secrets.map(({ id, kind, label }) => ({
+      entry: { id, kind },
+      label,
+      needsSecret: true,
+      live: { kind: "idle" },
+    })),
+    ...(scenario.retryable
+      ? [
+          {
+            entry: { id: "home", kind: "xtream" },
+            label: "Home",
+            needsSecret: false,
+            live: { kind: "failed" },
+          },
+        ]
+      : []),
+  ];
   return {
+    useRoster: () => ({ kind: "ready", members: members() }),
     retryChannels: () => {
       scenario.calls.push("retry channels");
       stores.failed.set(false);
     },
     useCatalogue: () =>
       useStore(stores.failed)
-        ? { kind: "failed" }
+        ? { kind: "failed", member: members()[0] }
         : {
             kind: "ready",
             failing: [],
@@ -163,6 +187,8 @@ afterEach(() => {
   scenario.ownIds = [];
   scenario.previews.clear();
   scenario.channel = undefined;
+  scenario.secrets = [];
+  scenario.retryable = true;
 });
 
 async function render(element: React.ReactElement) {
@@ -332,6 +358,36 @@ it("shows a failed catalogue beside saved mappings and retries its channels", as
   expect(scenario.calls).toEqual(["retry channels"]);
   expect(screen.label("guide-map-home:7")).toContain("BBC Two HD");
   expect(screen.container.textContent).not.toContain("Couldn't load channels");
+});
+
+it.each([
+  { kind: "xtream" as const, label: "Enter password for Living room" },
+  { kind: "m3u" as const, label: "Enter playlist link for Living room" },
+])(
+  "opens the provider form for a missing $kind secret instead of retrying",
+  async ({ kind, label }) => {
+    stores.failed.set(true);
+    scenario.secrets = [{ id: "locked", kind, label: "Living room" }];
+    scenario.retryable = false;
+    const screen = await render(React.createElement(GuideMapScreen));
+    const buttons = [...screen.container.querySelectorAll("button")];
+    expect(buttons.some((button) => button.textContent === "Try again")).toBe(false);
+    const enter = buttons.find((button) => button.textContent === label);
+    expect(enter).toBeDefined();
+    await React.act(async () => enter!.dispatchEvent(new Event("click", { bubbles: true })));
+    expect(scenario.calls).toEqual(['push {"pathname":"/provider","params":{"id":"locked"}}']);
+  },
+);
+
+it("offers both secret entry and retry when different providers need them", async () => {
+  stores.failed.set(true);
+  scenario.secrets = [{ id: "locked", kind: "xtream", label: "Living room" }];
+  const screen = await render(React.createElement(GuideMapScreen));
+  const labels = [...screen.container.querySelectorAll("button")].map(
+    (button) => button.textContent,
+  );
+  expect(labels).toContain("Enter password for Living room");
+  expect(labels).toContain("Try again");
 });
 
 it("lists mapped channels first, those no longer listed too, then Automatic ones", async () => {
