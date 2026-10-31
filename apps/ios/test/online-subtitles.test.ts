@@ -290,6 +290,28 @@ describe("a chosen result", () => {
     expect(online.shownSubtitle()?.title).toBe(copy);
   });
 
+  it("belongs to its exact version only, and converts its frame rate as timed", async () => {
+    const playing = await openTitle();
+    await chooseFirst(playing);
+    const ratio = 25 / 23.976;
+    expect(online.retimeSubtitle(playing, { offset: 0, speed: ratio })).toBe(true);
+    const converted = online.shownSubtitle()!;
+    expect(online.cuesAt(converted, 1.03)).toEqual([]);
+    expect(online.cuesAt(converted, 1.05)).toEqual(["Hello there"]);
+    expect(online.nextCueChange(converted, 0)).toBeCloseTo(ratio);
+
+    const other = online.subtitleTitle({
+      subscriptionId: "sub-1",
+      id: "m2",
+      tmdbId: "550",
+      title: "Movie",
+      year: 2001,
+    });
+    await open({ ...item(other), id: "sub-1:m2" });
+    expect(online.shownSubtitle()).toBeNull();
+    expect(online.keptSubtitle(other)).toBeNull();
+  });
+
   it("refuses a ZIP file with several subtitles and a file from another host", async () => {
     const playing = await openTitle();
     answer = (url) =>
