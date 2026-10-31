@@ -608,6 +608,80 @@ describe.skipIf(!hasTools)("recordings", () => {
     });
   });
 
+  it("ends a paused recording the viewer stopped or quit as of then after a relaunch, its end unwritten", async () => {
+    for (const how of ["stopped", "quit"] as const) {
+      let asked = 0;
+      const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
+        streams: (_source, out) => {
+          asked++;
+          if (asked === 1) out.end(fixture("h264-aac.mpegts"));
+          else out.destroy();
+        },
+      });
+      const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+      if (answer.kind !== "started") throw new Error("Not started");
+      const manifest = join(dataDir, "recordings", "recordings.json");
+      // Its pause is written down; only its end can't be.
+      await until(
+        async () => (await readFile(manifest, "utf8").catch(() => "")).includes('"to":null'),
+        Boolean,
+      );
+      await rename(manifest, `${manifest}.saved`);
+      await mkdir(manifest);
+      // Some time passes paused, which its gap keeps until it was ended.
+      const waited = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      if (how === "stopped")
+        await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
+      await quit();
+      const gone = Date.now();
+      await rm(manifest, { recursive: true });
+      await rename(`${manifest}.saved`, manifest);
+
+      const again = await app(dataDir);
+      onTestFinished(again.quit);
+      await again.library.refresh(subscriptionId);
+      const requests = provider.streamRequests();
+      await again.recordings.check();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(provider.streamRequests()).toBe(requests);
+      const [kept] = await again.recordings.list();
+      expect(kept?.status).toEqual(
+        how === "stopped" ? { kind: "stopped" } : { kind: "partial", cut: "quit" },
+      );
+      const gap = kept?.gaps?.at(-1);
+      // Closed as it was ended, not as the app ran again.
+      expect(gap?.to).toBeGreaterThanOrEqual(waited + 250);
+      expect(gap?.to).toBeLessThanOrEqual(gone);
+      expect(kept?.ended).toBe(gap?.to);
+    }
+  });
+
+  it("reads one whose time was over when it was stopped as ended by the quit, not stopped", async () => {
+    const { dataDir, channel, recordings, quit } = await connected();
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    const manifest = join(dataDir, "recordings", "recordings.json");
+    await rename(manifest, `${manifest}.saved`);
+    await mkdir(manifest);
+    await until(recordings.list, ([first]) => first?.status.kind === "complete");
+    await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    await quit();
+    await rm(manifest, { recursive: true });
+    await rename(`${manifest}.saved`, manifest);
+    const left = readdirSync(join(dataDir, "recordings", answer.recording.id));
+    expect(left).not.toContain(".mrstreamer-stopped");
+    expect(left).not.toContain(".mrstreamer-quit");
+
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    expect((await again.recordings.list())[0]?.status).toEqual({ kind: "partial", cut: "quit" });
+  });
+
   it("pauses as the computer sleeps and records the rest after it wakes", async () => {
     const { dataDir, channel, recordings, provider } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
@@ -1129,6 +1203,21 @@ describe.skipIf(!hasTools)("recordings", () => {
     });
     expect(asked()).toEqual(before);
     expect(await recordings.list()).toEqual([]);
+  });
+
+  it("keeps both of a folder and a limit changed at once, also after a relaunch", async () => {
+    const { dataDir, recordings, quit } = await connected();
+    const folder = join(await tempDir(), "Mr. Streamer");
+    await Promise.all([
+      recordings.setFolder(folder),
+      recordings.setLimits({ keepFree: 1024 ** 3, space: 2 * 1024 ** 3 }),
+    ]);
+    const kept = { folder, keepFree: 1024 ** 3, space: 2 * 1024 ** 3 };
+    expect(await recordings.storage()).toMatchObject(kept);
+    await quit();
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    expect(await again.recordings.storage()).toMatchObject(kept);
   });
 
   it("records into the folder the viewer chose, deletes from there, and leaves folders it didn't make", async () => {
