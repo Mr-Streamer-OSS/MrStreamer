@@ -510,8 +510,9 @@ Each responsibility has one owner, a plain module with a store the screens read:
   A title or copy in a file AVPlayer can't open, such as Matroska, plays through a format
   session (`src/title-formats.ts`, `modules/title-formats`): native code reads the file, from the
   provider over one request at a time or from the phone, and serves it to this player as HLS on
-  127.0.0.1, its picture and each sound track copied as they are. Nothing of a new play reaches
-  the provider until earlier native and format readers positively close. A local closure receipt
+  127.0.0.1, its picture and each sound track copied as they are and its text subtitles as
+  WebVTT. Nothing of a new play reaches the provider until earlier native and format readers
+  positively close. A local closure receipt
   cannot acknowledge server connection accounting.
 - `src/storage.ts`: what the app keeps between launches, apart from secrets and the registry, in
   `state.json` in Documents: recent channels by subscription, the country last chosen in Live for Home, the
@@ -604,8 +605,34 @@ ends early, pauses or starts late is silent there. One whose frames this can't m
 HE-AAC or E-AC-3 over 5.1, stops there with a message when chosen, and Try again goes on with the
 main sound. A track AVPlayer doesn't play in HLS, such as AAC Main, or one that starts more than
 five seconds after where playing starts, isn't offered. It needs the file's keyframe index
-(Matroska's Cues) and doesn't serve subtitles; other Matroska files fail as files Mr. Streamer
-can't play. `scripts/build-ffmpeg.sh ios` builds the FFmpeg libraries it links, before
+(Matroska's Cues); other Matroska files fail as files Mr. Streamer can't play.
+
+A session serves each SubRip, ASS (or SSA) and WebVTT subtitle track as a WebVTT rendition, cut
+at the picture's segments, which Watch's Subtitles lists like any other. ASS keeps italics, bold
+and underline and loses positions, styles and drawings. A forced track is listed as forced, and
+its lines also show in the regular track of its language. A line that spans segments is in each,
+so one already on screen where playing starts, or after a seek, shows there: the session reads it
+from its cluster, which the file's index names with its length (FFmpeg and mkvmerge list every
+subtitle line there). A file whose index leaves a line out shows it only once playing passes where
+it begins. The other subtitle tracks, pictures such as PGS, DVD and DVB, teletext and formats the
+session doesn't know, aren't served, and Watch's Subtitles names them, with their format, as ones
+that can't show here.
+
+| Where it plays                                 | Shows                                                              | Can't show                                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| A title AVPlayer opens (MP4, MOV and the rest) | What AVPlayer reads itself: MP4 text (mov_text), CEA-608 tracks    | Anything AVPlayer doesn't, unnamed                                                        |
+| A Matroska title through a session             | SubRip, ASS, SSA, WebVTT as WebVTT                                 | PGS, DVD, DVB, teletext, XSUB, others: named in Watch                                     |
+| A downloaded copy                              | The same as the file played from the provider, read from the phone | The same                                                                                  |
+| A Live channel (HLS from the panel)            | The stream's WebVTT renditions and captions as AVPlayer reads them | DVB subtitles and teletext in its segments, which AVPlayer can't see and Watch can't name |
+
+`modules/title-formats/reference/subtitle-fixtures.sh` makes synthetic files with a 35-second
+line, forced, ASS and WebVTT tracks, and a copy whose index lists none of them; `check.c` asks
+each subtitle segment of a title just opened, as after a seek, and `verify.py` checks every
+segment's lines against ffmpeg's own reading of the source. Whether AVPlayer shows, seeks and
+switches these renditions as HLS describes, captions inside a Matroska title's picture included,
+is still to be seen on the simulator and a phone.
+
+`scripts/build-ffmpeg.sh ios` builds the FFmpeg libraries a session links, before
 `expo prebuild`; `modules/title-formats/reference` checks its segments on Linux. On the simulator
 a Matroska file with H.264 and AAC played, over the network and as a copy, from where it stopped
 and after seeks; the test AVI (MPEG-4 Part 2, MP3) ran to its end without a picture.
