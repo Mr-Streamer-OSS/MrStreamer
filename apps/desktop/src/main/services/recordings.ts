@@ -1402,7 +1402,13 @@ function make(deps: RecordingsDeps) {
       asleep = null;
       const paused = yield* resumeDue(Date.now());
       const resumeAt = paused ? Date.now() + RETRY_MS : null;
-      if (readKept.kind !== "read") return resumeAt;
+      if (readKept.kind !== "read") {
+        // What recordings.json couldn't keep is written again whatever schedules.json holds.
+        if (!unsaved.recordings) return resumeAt;
+        unsaved.recordings = (yield* Effect.result(save))._tag === "Failure";
+        yield* publish;
+        return unsaved.recordings ? Date.now() + RETRY_MS : resumeAt;
+      }
       // With none kept, nothing is asked of the lists, the guide or the clock: a schedule saved
       // wakes the next check.
       if (schedules.size === 0 && !unsaved.recordings && !unsaved.schedules) {
@@ -1722,6 +1728,9 @@ function make(deps: RecordingsDeps) {
           if (!record) return;
           if (isLive(record) && !active.has(id)) {
             records.set(id, finalOf(record, Date.now(), "stopped"));
+            yield* markEnded(record, "stopped");
+          } else if (unsavedEnds.has(id)) {
+            // Ended by itself, unwritten: as stopped, it never goes on after a relaunch either.
             yield* markEnded(record, "stopped");
           }
           // Capture may have ended before Stop arrived. Retry its terminal record too; until it is
