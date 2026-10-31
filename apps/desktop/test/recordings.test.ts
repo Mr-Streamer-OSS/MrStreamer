@@ -1199,7 +1199,8 @@ describe.skipIf(!hasTools)("recordings", () => {
     const [paused] = await until(recordings.list, ([first]) => first?.status.kind === "paused");
     expect(paused?.status).toEqual({ kind: "paused", why: "space" });
     expect(await allClosed(provider)).toBe(true);
-    expect((await fileOf(dataDir, paused!)).size).toBe(paused?.bytes);
+    const beforeResume = await readFile((await fileOf(dataDir, paused!)).path);
+    expect(beforeResume.length).toBe(paused?.bytes);
 
     await recordings.setLimits({ keepFree: 0, space: null });
     const [going] = await until(
@@ -1209,6 +1210,8 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(going?.gaps).toEqual([
       { from: expect.any(Number), to: expect.any(Number), why: "space" },
     ]);
+    const afterResume = await readFile((await fileOf(dataDir, going!)).path);
+    expect(afterResume.subarray(0, beforeResume.length)).toEqual(beforeResume);
     await recordings.stop(answer.recording.id);
   });
 
