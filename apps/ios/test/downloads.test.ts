@@ -760,7 +760,13 @@ describe("downloads", { timeout: 30_000 }, () => {
     await until(() => isComplete(app, copy.id), "the saved copy");
     const subtitles = await import("../src/downloaded-subtitles.ts");
     // Kept while the version itself played, as choosing a result does.
-    const version = subtitles.subtitleTitle({ ...ref, tmdbId: null, title: "Movie", year: null });
+    const version = subtitles.subtitleTitle({
+      subscriptionId: a,
+      id: ref.id,
+      tmdbId: null,
+      title: "Movie",
+      year: null,
+    });
     subtitles.playSubtitles(version);
     expect(
       subtitles.showDownloaded(version, {

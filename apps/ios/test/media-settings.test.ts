@@ -205,7 +205,9 @@ it("sizes downloaded subtitles through their row, kept for the next launch", asy
 it("saves a typed SubDL key to the Keychain only, shows only that one is saved, and removes it", async () => {
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
-  onTestFinished(() => vi.unstubAllGlobals());
+  onTestFinished(() => {
+    vi.unstubAllGlobals();
+  });
   render();
   expect(row("subdl-key").textContent).toContain("SubDL API key");
   await vi.waitFor(() => expect(row("subdl-key").textContent).toContain("Not set"));
