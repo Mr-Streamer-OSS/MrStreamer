@@ -1415,7 +1415,7 @@ export const nl: Translation = {
   "Nothing recorded yet. Record a channel from Live TV.":
     "Nog niets opgenomen. Neem een zender op vanuit Live-tv.",
   "Recordings stay until you delete them. Partial ones play, skipping what was missed.":
-    "Opnames blijven tot je ze verwijdert. Gedeeltelijke spelen af en slaan over wat ontbrak.",
+    "Opnames blijven tot je ze verwijdert. Gedeeltelijke opnames worden afgespeeld en slaan de gemiste delen over.",
   "Play {title}": "{title} afspelen",
   "More for {title}": "Meer voor {title}",
   "When it ends": "Als het afloopt",
