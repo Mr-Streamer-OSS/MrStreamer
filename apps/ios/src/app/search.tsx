@@ -292,7 +292,7 @@ export default function Search() {
   const lists = useTitleLists();
   const hasTitles = useHasTitles("movie", "series");
   const metadata = useMetadataVersion();
-  const { phase } = usePlayback();
+  const { phase, watch: watching } = usePlayback();
   const height = useRowHeight();
   const [entry, setEntry] = useState(() => ({ text: kept, generation: 0 }));
   const query = entry.text;
@@ -428,6 +428,11 @@ export default function Search() {
   const close = () => {
     if (dismiss()) back();
   };
+  // Watch live in a programme's detail closes Search under Watch, as a channel row does, so Watch
+  // closes onto the screen Search opened over.
+  useEffect(() => {
+    if (watching && shownDetail) close();
+  });
   const watch = (channel: Channel) => {
     if (!library || !channels.current()) return;
     close();
