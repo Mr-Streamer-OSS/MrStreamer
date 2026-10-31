@@ -114,6 +114,7 @@ export function createGuide(
   /** Guide ids by `Channel.key`, which a channel's programmes are read by before its own. */
   let mappings: ReadonlyMap<string, string> = new Map();
   let layout = 0;
+  const revision = store(0);
   const originOf = (key: string) => sourceOf(key) ?? externals.get(key);
   const id = () => `g${++sequence}`;
   const cancel = async (job: string) => {
@@ -177,6 +178,7 @@ export function createGuide(
     });
   };
   const invalidate = (entry: Entry) => {
+    revision.set((value) => value + 1);
     for (const [key, value] of tokens)
       if (value.entry === entry) {
         withdraw(value);
@@ -218,6 +220,7 @@ export function createGuide(
     usable(value.generation);
   /** Withdraws the reads of a subscription's channels, from external guides too. */
   const withdrawChannels = (subscriptionId: string) => {
+    revision.set((value) => value + 1);
     for (const [key, value] of tokens)
       if (value.part.subscriptionId === subscriptionId) {
         withdraw(value);
@@ -226,6 +229,7 @@ export function createGuide(
   };
   /** Withdraws every read handed out, and refuses those under way. */
   const withdrawAll = () => {
+    revision.set((value) => value + 1);
     layout++;
     for (const value of tokens.values()) withdraw(value);
     tokens.clear();
@@ -464,6 +468,8 @@ export function createGuide(
     status,
     /** Immutable owner snapshot for React; notifications also carry the foreground minute tick. */
     getSnapshot: state.get,
+    /** Changes when guide contents, channel ids or mappings invalidate listing answers, not status. */
+    listingRevision: { get: revision.get, subscribe: revision.subscribe },
     /**
      * Changes as the detail tokens schedule() handed out for a channel's own key (`Channel.key`)
      * on the day from `on` are withdrawn, as by background() or eviction.

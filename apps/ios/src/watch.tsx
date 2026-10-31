@@ -449,20 +449,26 @@ function StartOver({ item }: { item: Playing }) {
 function useOnNow(channel: Channel | undefined) {
   const snapshot = useSyncExternalStore(guide.subscribe, guide.getSnapshot);
   const [ended, setEnded] = useState(0);
-  const [read, setRead] = useState<{ channel: Channel; programme: Programme | null } | null>(null);
+  const revision = useSyncExternalStore(guide.listingRevision.subscribe, guide.listingRevision.get);
+  const [read, setRead] = useState<{
+    channel: Channel;
+    revision: number;
+    programme: Programme | null;
+  } | null>(null);
   useEffect(() => {
     if (!channel) return;
     const controller = new AbortController();
     guide.listings([channel.key], { signal: controller.signal }).then(
       (listings) => {
         if (!controller.signal.aborted)
-          setRead({ channel, programme: listings.get(channel.key)?.now ?? null });
+          setRead({ channel, revision, programme: listings.get(channel.key)?.now ?? null });
       },
       () => undefined,
     );
     return () => controller.abort();
-  }, [channel, snapshot, ended]);
-  const programme = read && read.channel === channel ? read.programme : null;
+  }, [channel, snapshot, ended, revision]);
+  const programme =
+    read && read.channel === channel && read.revision === revision ? read.programme : null;
   useEffect(() => {
     if (!programme) return;
     const timer = setTimeout(

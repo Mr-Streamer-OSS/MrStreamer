@@ -6,6 +6,8 @@ import { join } from "node:path";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { ArchiveWindow } from "@mrstreamer/contracts/playback";
 import type { Provider } from "@mrstreamer/core/provider";
+import { finish } from "@mrstreamer/core/steps";
+import { partSteps } from "../src/library.ts";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { nativePlayer } from "./native-player.ts";
 
@@ -20,10 +22,15 @@ let provider: Provider;
 const keychain = new Map<string, string>();
 // What the guide says is on now on any channel: the native guide is a port too.
 let onNow: Programme | null = null;
+let listingGate: Promise<void> | null = null;
+let listingReads = 0;
 vi.mock("../src/guide.ts", async (original) => {
   const actual = await original<typeof import("../src/guide.ts")>();
-  const listings = async (keys: readonly string[]) =>
-    new Map(keys.map((key) => [key, { now: onNow, next: null }]));
+  const listings = async (keys: readonly string[]) => {
+    listingReads++;
+    if (listingGate) await listingGate;
+    return new Map(keys.map((key) => [key, { now: onNow, next: null }]));
+  };
   return { ...actual, guide: { ...actual.guide, listings } };
 });
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -84,7 +91,10 @@ const tick = async () => {
   for (let i = 0; i < 40; i++) await Promise.resolve();
 };
 async function until(ready: () => boolean) {
-  for (let i = 0; i < 500 && !ready(); i++) await new Promise((done) => setTimeout(done, 10));
+  for (let i = 0; i < 500 && !ready(); i++) {
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(10);
+    else await new Promise((done) => setTimeout(done, 10));
+  }
   expect(ready()).toBe(true);
 }
 const phase = () => playback.playbackState.get().phase;
@@ -164,6 +174,8 @@ beforeEach(() => {
   }));
   opened.length = 0;
   onNow = null;
+  listingGate = null;
+  listingReads = 0;
   port.currentTime = 0;
   port.duration = 600;
   container = document.createElement("div");
@@ -172,6 +184,7 @@ beforeEach(() => {
   React.act(() => root.render(React.createElement(WatchLayer)));
 });
 afterEach(async () => {
+  vi.useRealTimers();
   unmount();
   await playback.stop();
   await tick();
@@ -413,6 +426,108 @@ describe("a programme from catch-up", () => {
     });
     expect(opened.at(-1)).toBe(`archive:10:${onNow.start}`);
   });
+
+  it("keeps an unchanged start-over action mounted while guide status is read again", async () => {
+    await connect([3, 3, 3]);
+    onNow = { ...aired(HOUR / 4), description: null };
+    await React.act(async () => {
+      account.playChannel(channel, "News", { watch: true });
+      await tick();
+    });
+    await until(() => fromStart() !== null);
+    const button = fromStart();
+    const { guide } = await import("../src/guide.ts");
+    const held = Promise.withResolvers<void>();
+    listingGate = held.promise;
+    const before = listingReads;
+    const refreshing = Promise.withResolvers<void>();
+    const request = vi.spyOn(provider, "liveGuideRequest").mockImplementation(async () => {
+      await refreshing.promise;
+      return { kind: "none" };
+    });
+    try {
+      await React.act(async () => {
+        // Foreground repeats the status/minute read without changing the guide contents.
+        guide.foreground();
+        await tick();
+      });
+      await until(() => listingReads > before);
+      expect(fromStart()).toBe(button);
+    } finally {
+      await React.act(async () => {
+        listingGate = null;
+        held.resolve();
+        refreshing.resolve();
+        await guide.refresh(channel.subscriptionId);
+        await tick();
+      });
+      request.mockRestore();
+    }
+  });
+
+  it.each(["guide change", "catalogue change", "programme end"])(
+    "hides the old start-over action after a %s",
+    async (change) => {
+      await connect([3, 3, 3]);
+      if (change === "programme end")
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      onNow = { ...aired(HOUR / 4), description: null, title: "Previous bulletin" };
+      if (change === "programme end") onNow = { ...onNow, stop: Date.now() + 1000 };
+      await React.act(async () => {
+        account.playChannel(channel, "News", { watch: true });
+        await tick();
+      });
+      await until(() => fromStart() !== null);
+      expect(fromStart()?.getAttribute("aria-label")).toBe("Play Previous bulletin from start");
+      const { guide } = await import("../src/guide.ts");
+      const held = Promise.withResolvers<void>();
+      listingGate = held.promise;
+      const before = listingReads;
+      const next = { ...aired(HOUR / 60), description: null, title: "Updated bulletin" };
+      onNow = next;
+      try {
+        await React.act(async () => {
+          if (change === "guide change") guide.configure(new Map(), new Map());
+          else if (change === "catalogue change")
+            guide.setPart(
+              finish(
+                partSteps({
+                  subscriptionId: channel.subscriptionId,
+                  catalogue: await provider.liveCatalogue(),
+                }),
+              ),
+            );
+          else await vi.advanceTimersByTimeAsync(1000);
+          await tick();
+        });
+        expect(fromStart()).toBeNull();
+        await until(() => listingReads > before);
+        await React.act(async () => {
+          listingGate = null;
+          held.resolve();
+          await tick();
+        });
+        await until(() => fromStart() !== null);
+        expect(fromStart()?.getAttribute("aria-label")).toBe("Play Updated bulletin from start");
+        await React.act(async () => {
+          fromStart()?.click();
+          await tick();
+        });
+        expect(archiveStream).toHaveBeenCalledWith(
+          "10",
+          { start: next.start, end: next.stop },
+          expect.anything(),
+        );
+      } finally {
+        await React.act(async () => {
+          listingGate = null;
+          held.resolve();
+          await tick();
+        });
+        if (change === "programme end") vi.useRealTimers();
+      }
+    },
+  );
 
   it("offers no start over on a live channel without catch-up", async () => {
     await connect([null, null, null]);
