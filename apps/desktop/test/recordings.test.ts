@@ -1701,6 +1701,8 @@ describe.skipIf(!hasTools)("recordings", () => {
         again.recordings.list,
         ([first]) => first?.status.kind === "recording" && first.bytes > before,
       );
+      expect(going?.status.kind).toBe("recording");
+      expect(going?.bytes).toBeGreaterThan(before);
       expect(readdirSync(chosen).filter((name) => !name.startsWith("."))).toEqual([going!.id]);
       expect(
         readdirSync(join(chosen, going!.id)).filter((name) => name.endsWith(".ts")),
