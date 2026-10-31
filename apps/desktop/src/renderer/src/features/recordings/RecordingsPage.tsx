@@ -8,7 +8,8 @@
 // often it records, how its next time stands, and offers Edit, the schedule's controls in a
 // popover, and Cancel schedule in its menu. An action that fails says so in place of the reason.
 // Narrower windows put the size, or a schedule's repeat, in the row's second line and the outcome
-// under the bar, and the heading keeps only the room left.
+// under the bar, and the heading keeps only the room left. A recording's outcome and why wrap
+// rather than cut off: two lines fit its row, and a longer one makes the row taller.
 //   With no subscription saved the page stands alone, opened from Connect: what was recorded,
 // with nothing scheduled and no way to record, in the bar Downloads shares (DownloadsPage.tsx).
 import { Menu } from "@base-ui/react/menu";
@@ -229,11 +230,11 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
     end: formatDate(recording.stop, "time"),
   });
   return (
-    <li className="flex h-[3.875rem] items-center gap-3.5 border-b border-border lg:h-[3.75rem] lg:gap-4">
-      <span className="flex h-8 w-12 flex-none lg:w-[3.3rem]">
+    <li className="flex min-h-[3.875rem] items-center gap-3.5 border-b border-border py-2 xl:min-h-[3.75rem] xl:gap-4">
+      <span className="flex h-8 w-12 flex-none xl:w-[3.3rem]">
         {channel && <ChannelLogo channel={channel} />}
       </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5 lg:w-80 lg:flex-none">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 xl:w-80 xl:flex-none">
         <span
           className={cn(
             "truncate text-[0.9375rem] font-medium",
@@ -244,39 +245,31 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
         </span>
         <span className="truncate text-xs text-muted-foreground">
           {[recording.channelName, when].join(" · ")}
-          {size && <span className="lg:hidden"> · {size}</span>}
+          {size && <span className="xl:hidden"> · {size}</span>}
         </span>
       </div>
-      <div className="flex w-[23.5rem] flex-none flex-col gap-1.5 lg:w-[10.75rem]">
+      <div className="flex w-[23.5rem] flex-none flex-col gap-1.5 xl:w-[10.75rem]">
         <Coverage captured={captured} planned={planned} missed={late} gaps={gaps} faint={missing} />
-        <span className="hidden text-xs text-muted-foreground tabular-nums lg:block">
+        <span className="hidden text-xs text-muted-foreground tabular-nums xl:block">
           {minutes}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 text-xs lg:hidden">
-          {active && <LiveDot paused={paused} className="size-1.5" />}
-          <span className="flex-none font-semibold text-foreground">{word}</span>
-          <span
-            title={failure ?? undefined}
-            className={cn("truncate", failure ? "text-destructive" : "text-muted-foreground")}
-          >
+        <p className="text-xs text-muted-foreground xl:hidden">
+          {active && <LiveDot paused={paused} className="mr-1.5 size-1.5" />}
+          <span className="mr-1.5 font-semibold text-foreground">{word}</span>
+          <span className={cn(failure && "text-destructive")}>
             {failure ?? `${minutes}. ${reason}`}
           </span>
-        </span>
+        </p>
       </div>
-      <span className="hidden min-w-0 flex-1 items-center gap-2 text-[0.8125rem] lg:flex">
-        {active && <LiveDot paused={paused} className="size-2" />}
-        <span className="flex-none font-semibold text-foreground">{word}</span>
-        <span
-          title={failure ?? undefined}
-          className={cn("truncate", failure ? "text-destructive" : "text-muted-foreground")}
-        >
-          {failure ?? reason}
-        </span>
-      </span>
-      <span className="hidden w-16 flex-none text-right text-xs text-muted-foreground tabular-nums lg:block">
+      <p className="hidden min-w-0 flex-1 text-[0.8125rem] text-muted-foreground xl:block">
+        {active && <LiveDot paused={paused} className="mr-2 size-2" />}
+        <span className="mr-2 font-semibold text-foreground">{word}</span>
+        <span className={cn(failure && "text-destructive")}>{failure ?? reason}</span>
+      </p>
+      <span className="hidden w-16 flex-none text-right text-xs text-muted-foreground tabular-nums xl:block">
         {size}
       </span>
-      <div className="flex w-[7.5rem] flex-none justify-end gap-1.5 lg:w-[9.15rem]">
+      <div className="flex w-[7.5rem] flex-none justify-end gap-1.5 xl:w-[9.15rem]">
         {active ? (
           <Button
             size="sm"
@@ -347,7 +340,7 @@ function LiveDot({ paused, className }: { paused: boolean; className: string }) 
     <span
       aria-hidden
       className={cn(
-        "flex-none rounded-full",
+        "inline-block rounded-full align-middle",
         paused ? "ring-[1.5px] ring-destructive ring-inset" : "bg-destructive",
         className,
       )}
@@ -442,7 +435,7 @@ function ScheduleRow({
       <span
         aria-hidden
         className={cn(
-          "size-1.5 flex-none rounded-full lg:size-2",
+          "size-1.5 flex-none rounded-full xl:size-2",
           recording ? "bg-destructive" : "ring-[1.5px] ring-destructive ring-inset",
         )}
       />
@@ -456,30 +449,30 @@ function ScheduleRow({
     </>
   );
   return (
-    <li className="flex h-[3.875rem] items-center gap-3.5 border-b border-border lg:h-[3.75rem] lg:gap-4">
-      <span className="flex h-8 w-12 flex-none lg:w-[3.3rem]">
+    <li className="flex h-[3.875rem] items-center gap-3.5 border-b border-border xl:h-[3.75rem] xl:gap-4">
+      <span className="flex h-8 w-12 flex-none xl:w-[3.3rem]">
         {channel && <ChannelLogo channel={channel} />}
       </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5 lg:w-80 lg:flex-none">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 xl:w-80 xl:flex-none">
         <span className="truncate text-[0.9375rem] font-medium">{plan.title}</span>
         <span className="truncate text-xs text-muted-foreground">
           {schedule.channelName}
-          <span className="lg:hidden"> · {repeat}</span>
+          <span className="xl:hidden"> · {repeat}</span>
           {times && ` · ${times}`}
         </span>
       </div>
-      <div className="flex w-[23.5rem] flex-none flex-col gap-1.5 lg:w-[10.75rem]">
-        <span className="hidden items-center gap-1.5 text-xs text-muted-foreground lg:flex">
+      <div className="flex w-[23.5rem] flex-none flex-col gap-1.5 xl:w-[10.75rem]">
+        <span className="hidden items-center gap-1.5 text-xs text-muted-foreground xl:flex">
           {plan.kind === "slot" && <Repeat2 aria-hidden className="size-3.5 flex-none" />}
           {repeat}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 text-xs lg:hidden">{line}</span>
+        <span className="flex min-w-0 items-center gap-1.5 text-xs xl:hidden">{line}</span>
       </div>
-      <span className="hidden min-w-0 flex-1 items-center gap-2 text-[0.8125rem] lg:flex">
+      <span className="hidden min-w-0 flex-1 items-center gap-2 text-[0.8125rem] xl:flex">
         {line}
       </span>
-      <span className="hidden w-16 flex-none lg:block" />
-      <div className="flex w-[7.5rem] flex-none justify-end gap-1.5 lg:w-[9.15rem]">
+      <span className="hidden w-16 flex-none xl:block" />
+      <div className="flex w-[7.5rem] flex-none justify-end gap-1.5 xl:w-[9.15rem]">
         <Popover.Root open={editing} onOpenChange={setEditing}>
           <Popover.Trigger
             render={
