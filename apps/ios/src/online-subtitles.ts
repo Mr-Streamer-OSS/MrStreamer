@@ -9,7 +9,6 @@ import {
 } from "@mrstreamer/contracts/online-subtitles";
 import { SUBTITLE_TEXT_LIMIT, subtitleTextFile } from "@mrstreamer/core/subtitles/text-file";
 import { type } from "arktype";
-import Constants from "expo-constants";
 import { Directory, File, Paths } from "expo-file-system";
 import { unzipSync } from "fflate";
 import { readJson, writeJson } from "./files.ts";
@@ -59,7 +58,8 @@ export function subtitleTitle(version: {
   readonly year: number | null;
   readonly episode?: { readonly season: number; readonly number: number };
 }): SubtitleTitle {
-  const tmdbId = version.tmdbId && /^[1-9]\d{0,9}$/.test(version.tmdbId) ? Number(version.tmdbId) : null;
+  const tmdbId =
+    version.tmdbId && /^[1-9]\d{0,9}$/.test(version.tmdbId) ? Number(version.tmdbId) : null;
   const known = {
     ...(tmdbId !== null ? { tmdbId } : { title: version.title }),
     // A series' year is when it began, which no episode search needs.
@@ -153,7 +153,11 @@ export async function findSubtitles(title: SubtitleTitle): Promise<Found | null>
     const key = await subdlKey();
     if (controller.signal.aborted) return null;
     if (!key) return { kind: "failed", reason: "not-configured" };
-    const candidates = await subdlSearch(key, { ...title.query, languages: languages() }, controller.signal);
+    const candidates = await subdlSearch(
+      key,
+      { ...title.query, languages: languages() },
+      controller.signal,
+    );
     if (controller.signal.aborted) return null;
     found = new Map(candidates.map((candidate, i) => [String(i), candidate]));
     return {
@@ -274,9 +278,7 @@ function languages(): string[] {
     effectiveTitleLanguage(),
     "en",
   ];
-  return [
-    ...new Set(wanted.filter((code): code is string => !!code && /^[a-z]{2,3}$/.test(code))),
-  ];
+  return [...new Set(wanted.filter((code): code is string => !!code && /^[a-z]{2,3}$/.test(code)))];
 }
 
 const reasonOf = (cause: unknown): SubtitleServiceFailure =>
@@ -314,9 +316,7 @@ function keep(title: SubtitleTitle, kept: Kept): boolean {
     const files = new Directory(Paths.document, FOLDER)
       .list()
       .filter((each): each is File => each instanceof File && each.name.endsWith(".json"));
-    const oldest = files.toSorted(
-      (a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0),
-    );
+    const oldest = files.toSorted((a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0));
     for (const file of oldest.slice(0, Math.max(0, files.length - KEPT_FILES))) file.delete();
   } catch {
     // Kept anyway; the next write tries again.
@@ -427,7 +427,6 @@ const SubDLReply = lazy(() =>
   }),
 );
 
-const USER_AGENT = `MrStreamer/${Constants.expoConfig?.version ?? "0.0.0"} (iOS)`;
 const JSON_LIMIT = 2 * 1024 * 1024;
 
 async function subdlSearch(
@@ -528,7 +527,7 @@ async function request(url: URL, init: RequestInit, signal: AbortSignal): Promis
     response = await fetch(url, {
       ...init,
       signal,
-      headers: { "User-Agent": USER_AGENT, "Cache-Control": "no-store", ...init.headers },
+      headers: { "Cache-Control": "no-store", ...init.headers },
     });
   } catch {
     throw new SubtitleFailure("unavailable");

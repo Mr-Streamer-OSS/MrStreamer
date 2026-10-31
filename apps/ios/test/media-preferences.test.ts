@@ -33,6 +33,7 @@ describe("accepted media preferences", () => {
       audio: { kind: "follow-title" },
       subtitles: { kind: "forced-only" },
       liveQuality: "fhd",
+      subtitleSize: "medium",
     });
     expect(app.updateMediaPreferences("titleLanguage", "nl")).toBe(true);
     expect(app.updateMediaPreferences("audio", { kind: "original" })).toBe(true);
@@ -44,6 +45,7 @@ describe("accepted media preferences", () => {
       audio: { kind: "original" },
       subtitles: { kind: "off" },
       liveQuality: "uhd",
+      subtitleSize: "medium",
     });
     app.updateMediaPreferences("audio", { kind: "language", language: "fr" });
     app.updateMediaPreferences("subtitles", { kind: "language", language: "de" });
@@ -73,6 +75,7 @@ describe("accepted media preferences", () => {
       audio: { kind: "follow-title" },
       subtitles: { kind: "off" },
       liveQuality: "hd",
+      subtitleSize: "medium",
     });
     app.updateMediaPreferences("liveQuality", "sd");
     const disk: unknown = JSON.parse(bytes());
@@ -82,6 +85,7 @@ describe("accepted media preferences", () => {
       titleLanguage: "fr",
       subtitles: { kind: "off" },
       liveQuality: "sd",
+      subtitleSize: "medium",
     });
   });
 
@@ -506,6 +510,7 @@ describe("per-channel quality picks", () => {
       audio: { kind: "language", language: "de" },
       subtitles: { kind: "off" },
       liveQuality: "fhd",
+      subtitleSize: "medium",
     });
     expect(app.channelPicks("s1")).toEqual({ "10": "11", "20": "20" });
   });
