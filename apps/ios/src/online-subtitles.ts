@@ -5,6 +5,7 @@ import type {
   SubtitleServiceFailure,
 } from "@mrstreamer/contracts/online-subtitles";
 import { SUBTITLE_TEXT_LIMIT, subtitleTextFile } from "@mrstreamer/core/subtitles/text-file";
+import { normalize } from "@mrstreamer/core/text";
 import { type } from "arktype";
 import { unzipSync } from "fflate";
 import { playOf, showDownloaded, type SubtitleTitle } from "./downloaded-subtitles.ts";
@@ -193,7 +194,12 @@ interface Candidate extends Omit<FoundSubtitle, "id"> {
 const SubDLReply = lazy(() =>
   type({
     status: "boolean",
-    "results?": type({ "tmdb_id?": "number | null", type: "'movie' | 'tv'" })
+    "results?": type({
+      "tmdb_id?": "number | null",
+      type: "'movie' | 'tv'",
+      "name?": "string <= 1024",
+      "year?": "number | null",
+    })
       .array()
       .atMostLength(100),
     "subtitles?": type({
@@ -258,10 +264,17 @@ async function subdlSearch(
   );
   const reply = SubDLReply()(JSON.parse(text));
   if (reply instanceof type.errors || !reply.status) throw new SubtitleFailure("unavailable");
-  // SubDL may broaden an unsuccessful match. Do not import another title's results.
+  // SubDL may broaden an unsuccessful match, and its subtitles are for its first result. Without
+  // a TMDB id, that result must name the title asked for, and the year when one was asked.
+  const first = reply.results?.[0];
+  const asked = normalize(query.title ?? "");
   if (
-    (query.tmdbId !== undefined && reply.results?.[0]?.tmdb_id !== query.tmdbId) ||
-    reply.results?.[0]?.type !== kind
+    first?.type !== kind ||
+    (query.tmdbId !== undefined
+      ? first.tmdb_id !== query.tmdbId
+      : !asked ||
+        normalize(first.name ?? "") !== asked ||
+        (query.year !== undefined && first.year !== query.year))
   )
     return [];
   const results: Candidate[] = [];
@@ -276,7 +289,7 @@ async function subdlSearch(
     if (files?.length) {
       for (const file of files)
         results.push({
-          url: downloadURL(file.url).href,
+          url: file.url,
           language: requestedLanguage(file.language, query.languages),
           release: file.release_name ?? file.name,
           hearingImpaired: file.hi ?? false,
@@ -287,14 +300,29 @@ async function subdlSearch(
       (query.kind === "movie" || (sub.season === query.season && sub.episode === query.episode))
     ) {
       results.push({
-        url: downloadURL(sub.url).href,
+        url: sub.url,
         language: requestedLanguage(sub.language ?? sub.lang ?? "", query.languages),
         release: sub.release_name ?? sub.name ?? "",
         hearingImpaired: sub.hi ?? false,
       });
     }
   }
-  return results.filter((sub) => query.languages.includes(sub.language)).slice(0, 100);
+  // A file anywhere but SubDL's download host isn't listed; the other results still are.
+  return results
+    .flatMap((sub) => {
+      const url = query.languages.includes(sub.language) && listedURL(sub.url);
+      return url ? [{ ...sub, url }] : [];
+    })
+    .slice(0, 100);
+}
+
+/** `value` as a SubDL file address, or null when `downloadURL` refuses it. */
+function listedURL(value: string): string | null {
+  try {
+    return downloadURL(value).href;
+  } catch {
+    return null;
+  }
 }
 
 async function subdlDownload(

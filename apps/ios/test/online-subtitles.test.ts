@@ -144,14 +144,30 @@ describe("searching SubDL", () => {
       title: "Some Movie",
       year: 1999,
     });
-    answer = () => Response.json({ status: true, results: [{ type: "movie" }], subtitles: [] });
+    const titled = (name?: string, year?: number) => () =>
+      Response.json({
+        status: true,
+        results: [{ type: "movie", name, year }],
+        subtitles: [{ ...movieResult, language: "DE" }],
+      });
+    answer = titled("Some movie", 1999);
     await open({ ...item(untitled), id: "sub-1:m9" });
-    expect(await online.findSubtitles(untitled)).toEqual({ kind: "found", results: [] });
+    const found = await online.findSubtitles(untitled);
+    expect(found?.kind === "found" && found.results.map((each) => each.language)).toEqual(["de"]);
     const search = requests.at(-1)!.searchParams;
     expect(search.get("film_name")).toBe("Some Movie");
     expect(search.get("year")).toBe("1999");
     expect(search.has("tmdb_id")).toBe(false);
     expect(search.get("languages")).toBe("DE,NL,EN");
+    // SubDL broadens a title it can't match: another title, year or none is another movie's.
+    for (const broadened of [
+      titled("Some Other Movie", 1999),
+      titled("Some Movie", 2000),
+      titled(),
+    ]) {
+      answer = broadened;
+      expect(await online.findSubtitles(untitled)).toEqual({ kind: "found", results: [] });
+    }
   });
 
   it("asks for an episode by its series, season and number, and keeps only that episode", async () => {
@@ -180,6 +196,14 @@ describe("searching SubDL", () => {
             },
             {
               language: "EN",
+              name: "S02E03.elsewhere.srt",
+              season: 2,
+              episode: 3,
+              format: "srt",
+              url: "https://elsewhere.example/s/23.srt",
+            },
+            {
+              language: "EN",
               name: "S02E04.srt",
               season: 2,
               episode: 4,
@@ -196,6 +220,25 @@ describe("searching SubDL", () => {
     ]);
     expect(requests.at(-1)!.searchParams.get("season_number")).toBe("2");
     expect(requests.at(-1)!.searchParams.get("episode_number")).toBe("3");
+    // Without a TMDB id the series is known by its name alone, whatever year SubDL gives it.
+    const untitled = online.subtitleTitle({
+      subscriptionId: "sub-1",
+      id: "e8",
+      tmdbId: null,
+      title: "Series",
+      year: 2011,
+      episode: { season: 2, number: 3 },
+    });
+    answer = () =>
+      Response.json({
+        status: true,
+        results: [{ type: "tv", name: "Series", year: 2011 }],
+        subtitles: [{ ...movieResult, season: 2, episode: 3 }],
+      });
+    await open({ ...item(untitled), id: "sub-1:e8" });
+    const named = await online.findSubtitles(untitled);
+    expect(named?.kind === "found" && named.results.length).toBe(1);
+    expect(requests.at(-1)!.searchParams.has("year")).toBe(false);
   });
 
   it("names each service failure without its message, and asks for nothing without a key", async () => {
@@ -367,9 +410,18 @@ describe("a chosen result", () => {
         ? searchReply(550, "movie", [movieResult])
         : new Response(zipSync({ "a.srt": strToU8(SRT), "b.srt": strToU8(SRT) }));
     expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
+    // A file elsewhere, or with no address at all, isn't listed; the search keeps the rest.
     answer = () =>
-      searchReply(550, "movie", [{ ...movieResult, url: "https://elsewhere.example/1.zip" }]);
-    expect(await online.findSubtitles(playing)).toEqual({ kind: "failed", reason: "unsupported" });
+      searchReply(550, "movie", [
+        { ...movieResult, url: "https://elsewhere.example/1.zip" },
+        { ...movieResult, url: "https://dl.subdl.com:8443/1.zip" },
+        { ...movieResult, url: "http://[" },
+        { ...movieResult, release_name: "Movie.2001.720p", url: "/subtitle/3-4.zip" },
+      ]);
+    const found = await online.findSubtitles(playing);
+    expect(found?.kind === "found" && found.results.map((each) => each.release)).toEqual([
+      "Movie.2001.720p",
+    ]);
     expect(online.shownSubtitle()).toBeNull();
   });
 });
