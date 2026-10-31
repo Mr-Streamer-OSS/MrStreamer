@@ -1,10 +1,7 @@
 import { router, usePathname } from "expo-router";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { Quality } from "@mrstreamer/contracts/library";
-import {
-  DEFAULT_SUBTITLE_TIMING,
-  type SubtitleServiceFailure,
-} from "@mrstreamer/contracts/online-subtitles";
+import { DEFAULT_SUBTITLE_TIMING } from "@mrstreamer/contracts/online-subtitles";
 import { formatLanguageName } from "@mrstreamer/core/i18n";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
@@ -54,7 +51,12 @@ import {
   type ShownSubtitle,
   type SubtitleTitle,
 } from "./downloaded-subtitles.ts";
-import { chooseSubtitle, findSubtitles, type FoundSubtitle } from "./online-subtitles.ts";
+import {
+  chooseSubtitle,
+  findSubtitles,
+  type FoundSubtitle,
+  type SubtitleFailureReason,
+} from "./online-subtitles.ts";
 import {
   closeWatch,
   playbackState,
@@ -895,17 +897,18 @@ function adjustTiming(title: SubtitleTitle, stands: () => boolean) {
 }
 
 const failures: Readonly<
-  Record<SubtitleServiceFailure | "not-saved", readonly [title: string, message: string]>
+  Record<SubtitleFailureReason | "not-saved", readonly [title: string, message: string]>
 > = {
   "not-configured": ["SubDL key needed", "Add your SubDL API key in Settings > Subtitles."],
   credentials: ["SubDL refused the key", "Check your SubDL API key in Settings > Subtitles."],
   quota: ["SubDL limit reached", "Your SubDL key has no requests left for now. Try again later."],
   unavailable: ["SubDL isn't available", "Check your connection and try again."],
   unsupported: ["Can't use this subtitle", "It isn't text the app can read. Try another."],
+  keychain: ["Couldn't read your SubDL key", "This iPhone didn't give it. Try again."],
   "not-saved": ["Couldn't keep this subtitle", "This iPhone refused to save it. Try again."],
 };
 
-const serviceFailed = (reason: SubtitleServiceFailure | "not-saved") =>
+const serviceFailed = (reason: SubtitleFailureReason | "not-saved") =>
   Alert.alert(...failures[reason]);
 
 /**

@@ -9,9 +9,15 @@ import type { SubtitleTitle } from "../src/downloaded-subtitles.ts";
 // a chosen result keeps and shows, which play it belongs to, and the file's own tracks around it.
 const port = nativePlayer();
 const keychain = new Map<string, string>();
+let locked = false;
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("expo-video", () => ({ createVideoPlayer: () => port }));
-vi.mock("expo-secure-store", () => keychainStore(() => keychain));
+vi.mock("expo-secure-store", () =>
+  keychainStore(() => {
+    if (locked) throw new Error("The Keychain is locked");
+    return keychain;
+  }),
+);
 const { native } = await import("./native-files.ts");
 const { File, Directory, Paths } = await import("expo-file-system");
 const online = {
@@ -196,6 +202,23 @@ describe("searching SubDL", () => {
       reason: "not-configured",
     });
     expect(requests.length).toBe(before);
+  });
+
+  it("says when the Keychain won't give the key, and takes nothing a redirect led elsewhere", async () => {
+    const playing = await openTitle();
+    locked = true;
+    expect(await online.findSubtitles(playing)).toEqual({ kind: "failed", reason: "keychain" });
+    locked = false;
+    const from = (where: string, response: Response) =>
+      Object.defineProperty(response, "url", { value: where });
+    answer = () => from("https://elsewhere.example/api", searchReply(550, "movie", [movieResult]));
+    expect(await online.findSubtitles(playing)).toEqual({ kind: "failed", reason: "unavailable" });
+    answer = (url) =>
+      url.hostname === "api.subdl.com"
+        ? searchReply(550, "movie", [movieResult])
+        : from("https://elsewhere.example/1.srt", new Response(SRT));
+    expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
+    expect(online.shownSubtitle()).toBeNull();
   });
 
   it("ends a search when another play begins, and its results can't be chosen for the next", async () => {

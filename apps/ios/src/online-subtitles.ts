@@ -27,7 +27,10 @@ export interface FoundSubtitle {
   readonly hearingImpaired: boolean;
 }
 
-type Failed = { readonly kind: "failed"; readonly reason: SubtitleServiceFailure };
+/** A service's failure, or the Keychain's when it wouldn't give the key. */
+export type SubtitleFailureReason = SubtitleServiceFailure | "keychain";
+
+type Failed = { readonly kind: "failed"; readonly reason: SubtitleFailureReason };
 
 export type Found = { readonly kind: "found"; readonly results: readonly FoundSubtitle[] } | Failed;
 
@@ -59,7 +62,7 @@ export function findSubtitles(title: SubtitleTitle): Promise<Found | null> {
 
 export type Chosen =
   | { readonly kind: "shown" }
-  | { readonly kind: "failed"; readonly reason: SubtitleServiceFailure | "not-saved" };
+  | { readonly kind: "failed"; readonly reason: SubtitleFailureReason | "not-saved" };
 
 /**
  * Downloads result `id` of the latest search for `title`, keeps it for the version with no timing
@@ -102,7 +105,8 @@ async function forPlay<T>(
   if (!play) return null;
   work?.abort();
   const controller = new AbortController();
-  play.addEventListener("abort", () => controller.abort(), { once: true });
+  const end = () => controller.abort();
+  play.addEventListener("abort", end, { once: true });
   work = controller;
   try {
     return await task(controller.signal);
@@ -113,6 +117,7 @@ async function forPlay<T>(
       reason: cause instanceof SubtitleFailure ? cause.reason : "unavailable",
     };
   } finally {
+    play.removeEventListener("abort", end);
     if (work === controller) work = null;
   }
 }
@@ -146,7 +151,7 @@ export function useSubtitleKey(): boolean | null {
 
 const subdlKey = () =>
   keychainSecrets.read(KEY).catch(() => {
-    throw new SubtitleFailure("credentials");
+    throw new SubtitleFailure("keychain");
   });
 
 /** Saves `key` as the SubDL key. Throws `keychain-refused` when the Keychain won't keep it. */
@@ -167,8 +172,8 @@ export async function removeSubtitleKey() {
 // are only a reason: a fetch error's message can hold the address with the key.
 
 class SubtitleFailure extends Error {
-  readonly reason: SubtitleServiceFailure;
-  constructor(reason: SubtitleServiceFailure) {
+  readonly reason: SubtitleFailureReason;
+  constructor(reason: SubtitleFailureReason) {
     super(`Subtitle service: ${reason}.`);
     this.reason = reason;
   }
@@ -241,8 +246,7 @@ async function subdlSearch(
   const timeout = AbortSignal.any([signal, AbortSignal.timeout(15_000)]);
   const response = await request(url, { headers: { Accept: "application/json" } }, timeout);
   // An answer from where a redirect led, not SubDL's own API, isn't taken.
-  if (response.url && new URL(response.url).origin !== url.origin)
-    throw new SubtitleFailure("unavailable");
+  if (response.url && new URL(response.url).origin !== url.origin) refuse(response, "unavailable");
   const text = new TextDecoder("utf-8", { fatal: true }).decode(
     await body(response, JSON_LIMIT, timeout),
   );
@@ -294,7 +298,11 @@ async function subdlDownload(
   const timeout = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
   const response = await request(downloadURL(candidate.url), {}, timeout);
   // A redirect followed elsewhere ends on a file SubDL didn't serve.
-  if (response.url) downloadURL(response.url);
+  try {
+    if (response.url) downloadURL(response.url);
+  } catch {
+    refuse(response, "unsupported");
+  }
   const text = textOf(await body(response, SUBTITLE_TEXT_LIMIT, timeout));
   try {
     return {
@@ -306,6 +314,12 @@ async function subdlDownload(
   } catch {
     throw new SubtitleFailure("unsupported");
   }
+}
+
+/** Leaves `response` unread and fails with `reason`. */
+function refuse(response: Response, reason: SubtitleFailureReason): never {
+  void response.body?.cancel().catch(() => {});
+  throw new SubtitleFailure(reason);
 }
 
 async function request(url: URL, init: RequestInit, signal: AbortSignal): Promise<Response> {
