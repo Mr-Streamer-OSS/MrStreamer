@@ -559,7 +559,7 @@ describe.skipIf(!hasTools)("recordings", () => {
           await recordings.check();
           return recordings.list();
         },
-        ([first]) => first?.status.kind === "partial",
+        ([first]) => first?.status.kind === "partial" && first.unsaved === true,
       );
       expect(ended).toMatchObject({ status: { kind: "partial", cut: "stream" }, unsaved: true });
       if (how === "stopped")
