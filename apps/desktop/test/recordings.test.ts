@@ -820,46 +820,59 @@ describe.skipIf(!hasTools)("recordings", () => {
     }
   });
 
-  it("keeps an update's restart back while a Stop is neither written nor marked, then keeps it stopped after a relaunch", async () => {
-    const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected();
-    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
-    if (answer.kind !== "started") throw new Error("Not started");
-    await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
-    // Storage refuses both the end in recordings.json and the mark in the recording's folder.
-    const manifest = join(dataDir, "recordings", "recordings.json");
-    const mark = join(dataDir, "recordings", answer.recording.id, ".mrstreamer-stopped");
-    await rename(manifest, `${manifest}.saved`);
-    await mkdir(manifest);
-    await symlink(join(dataDir, "gone", "mark"), mark);
-    await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
-      error: { kind: "unexpected" },
-    });
-    expect(await recordings.keepStops()).toBe(false);
+  it("keeps an update's restart back while a Stop is neither written nor marked, then keeps it ended after a relaunch", async () => {
+    // Stopped while it captures, and stopped once it had ended by itself, its end unwritten.
+    for (const how of ["capturing", "ended"] as const) {
+      const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected(
+        how === "ended" ? { streams: (_source, out) => out.end(fixture("h264-aac.mpegts")) } : {},
+      );
+      const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+      if (answer.kind !== "started") throw new Error("Not started");
+      // Storage refuses both the end in recordings.json and the mark in the recording's folder.
+      const manifest = join(dataDir, "recordings", "recordings.json");
+      const mark = join(dataDir, "recordings", answer.recording.id, ".mrstreamer-stopped");
+      if (how === "capturing") await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
+      await rename(manifest, `${manifest}.saved`);
+      await mkdir(manifest);
+      await symlink(join(dataDir, "gone", "mark"), mark);
+      if (how === "ended")
+        await until(
+          async () => {
+            await recordings.check();
+            return recordings.list();
+          },
+          ([first]) => first?.status.kind === "partial",
+        );
+      await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      expect(await recordings.keepStops()).toBe(false);
 
-    // Storage works again: the next ask writes it, and the restart may go ahead.
-    await rm(mark);
-    await rm(manifest, { recursive: true });
-    await rename(`${manifest}.saved`, manifest);
-    expect(await recordings.keepStops()).toBe(true);
-    expect((await recordings.list())[0]?.unsaved).toBeUndefined();
-    // The quit then writes nothing more, so only what that ask kept can end it after a relaunch.
-    await rename(manifest, `${manifest}.kept`);
-    await mkdir(manifest);
-    await quit();
-    await rm(manifest, { recursive: true });
-    await rename(`${manifest}.kept`, manifest);
+      // Storage works again: the next ask writes it, and the restart may go ahead.
+      await rm(mark);
+      await rm(manifest, { recursive: true });
+      await rename(`${manifest}.saved`, manifest);
+      expect(await recordings.keepStops()).toBe(true);
+      expect((await recordings.list())[0]?.unsaved).toBeUndefined();
+      // The quit then writes nothing more, so only what that ask kept can end it after a relaunch.
+      await rename(manifest, `${manifest}.kept`);
+      await mkdir(manifest);
+      await quit();
+      await rm(manifest, { recursive: true });
+      await rename(`${manifest}.kept`, manifest);
 
-    const again = await app(dataDir);
-    onTestFinished(again.quit);
-    await again.library.refresh(subscriptionId);
-    const asked = provider.streamRequests();
-    await again.recordings.check();
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(provider.streamRequests()).toBe(asked);
-    expect((await again.recordings.list())[0]).toMatchObject({
-      id: answer.recording.id,
-      status: { kind: "stopped" },
-    });
+      const again = await app(dataDir);
+      onTestFinished(again.quit);
+      await again.library.refresh(subscriptionId);
+      const asked = provider.streamRequests();
+      await again.recordings.check();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(provider.streamRequests()).toBe(asked);
+      expect((await again.recordings.list())[0]).toMatchObject({
+        id: answer.recording.id,
+        status: how === "capturing" ? { kind: "stopped" } : { kind: "partial", cut: "stream" },
+      });
+    }
   });
 
   it("holds new recordings back for an update's restart only once nothing records", async () => {

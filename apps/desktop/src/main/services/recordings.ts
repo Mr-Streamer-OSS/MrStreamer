@@ -436,6 +436,11 @@ function make(deps: RecordingsDeps) {
     const unsavedEnds = new Set<string>();
     /** Recordings the viewer is stopping: none of them goes on meanwhile. */
     const stopping = new Set<string>();
+    /**
+     * Of `unsavedEnds`, those the viewer stopped, also one that had ended by itself and so reads as
+     * it ended: an update's restart waits for them (see keepStops).
+     */
+    const unsavedStops = new Set<string>();
     /** How many times in a row each recording's capture ended quickly, by id. */
     const quickEnds = new Map<string, number>();
     const save = writing(
@@ -452,6 +457,7 @@ function make(deps: RecordingsDeps) {
         Effect.sync(() => {
           unsaved.recordings = false;
           unsavedEnds.clear();
+          unsavedStops.clear();
         }),
       ),
     );
@@ -1757,6 +1763,7 @@ function make(deps: RecordingsDeps) {
           if (written._tag === "Failure") {
             unsaved.recordings = true;
             unsavedEnds.add(id);
+            unsavedStops.add(id);
           }
           yield* publish;
           if (written._tag === "Failure") return yield* written.failure;
@@ -1972,7 +1979,11 @@ function make(deps: RecordingsDeps) {
           const now = Date.now();
           const stopped = [...unsavedEnds]
             .flatMap((id) => records.get(id) ?? [])
-            .filter((record) => record.status.kind === "stopped" && record.stop > now);
+            .filter(
+              (record) =>
+                (record.status.kind === "stopped" || unsavedStops.has(record.id)) &&
+                record.stop > now,
+            );
           const marked = await Promise.all(stopped.map(endedAs));
           return stopped.filter((_, index) => !marked[index]);
         });
