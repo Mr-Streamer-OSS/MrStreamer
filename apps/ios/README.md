@@ -622,8 +622,8 @@ shows it only once playing passes where it begins. The other subtitle tracks, pi
 PGS, DVD and DVB, teletext, formats the session doesn't know, and text tracks compressed with zlib
 or bzip2 or encrypted, which its FFmpeg can't read, aren't served, and Watch's Subtitles names
 them, with their format, as ones that can't show here: the first 16, then how many more. A read
-that fails while recalling a line fails that segment's request, and the line is read again when
-the segment is asked again. Track numbers and encodings come from the
+that fails, such as the provider's, fails only that segment's request: asked again, the segment
+holds every line it would have. Track numbers and encodings come from the
 file's Tracks: from its first 256 KB, as opening read them, else from where its SeekHead says, 1 MB
 at most. A file whose Tracks can't be read that way
 has its text tracks named as ones that can't show, their encoding unknown. A line whose text is

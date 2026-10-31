@@ -105,8 +105,12 @@ static int fresh(TitleHlsSource *source, int track, int index, int chosen, const
   free(data);
   if (get(title, chosen ? playlist : name, &data, &size) < 0) goto done;
   free(data);
-  if (get(title, chosen ? name : playlist, &data, &size) < 0) goto done;
-  free(data);
+  // Faulted, a rendition chosen before the seek is asked before the picture, so the reads that
+  // fail are those of the pass its segment makes.
+  if (!(fault && chosen)) {
+    if (get(title, chosen ? name : playlist, &data, &size) < 0) goto done;
+    free(data);
+  }
   snprintf(name, sizeof(name), "s%d-%d.vtt", track, index);
   if (fault) {
     file->fail_at = file->reads + fault;

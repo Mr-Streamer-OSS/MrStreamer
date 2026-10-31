@@ -1802,6 +1802,9 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
   int error = 0;
   if (title->next != index) {
     title->next = -1;
+    // A read that failed before, such as the provider's, doesn't hold up this one.
+    title->io->error = 0;
+    title->io->eof_reached = 0;
     if ((error = recall_before(title, index)) < 0 || (error = reach(title, index, &title->ahead)) < 0) {
       say(detail, detail_size, "The file couldn't be read at this point.");
       return failure(title, error);
