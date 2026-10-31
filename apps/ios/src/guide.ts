@@ -685,7 +685,7 @@ export function createGuide(
       // By guide, the channels that may read each of its guide ids, in the order of `keys`.
       const guides = new Map<
         string,
-        { readonly asking: Token; readonly by: Map<string, string[]> }
+        { readonly asking: Token; readonly by: Map<string, Set<string>> }
       >();
       const places = new Map<string, number>();
       for (const [place, key] of keys.entries())
@@ -693,11 +693,8 @@ export function createGuide(
           if (!places.has(value.key)) places.set(value.key, place);
           const read = guides.get(value.owner) ?? { asking: value, by: new Map() };
           guides.set(value.owner, read);
-          for (const guideId of value.ids) {
-            const shown = read.by.get(guideId);
-            if (!shown) read.by.set(guideId, [value.key]);
-            else if (!shown.includes(value.key)) shown.push(value.key);
-          }
+          for (const guideId of value.ids)
+            read.by.set(guideId, (read.by.get(guideId) ?? new Set()).add(value.key));
         }
       const at = now();
       const reads = new Map<string, Awaited<ReturnType<typeof first>>>();
@@ -729,7 +726,7 @@ export function createGuide(
           (a, b) =>
             rank(a) - rank(b) ||
             a.match.start - b.match.start ||
-            (places.get(a.key) ?? 0) - (places.get(b.key) ?? 0),
+            places.get(a.key)! - places.get(b.key)!,
         )
         .slice(0, SEARCH_LIMIT)
         .map(({ key, captured, match: { guideId, start, stop, title } }) => ({

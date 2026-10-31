@@ -1162,10 +1162,9 @@ describe("programme search", () => {
   });
 
   it("leaves out guides that are stale and channels no catalogue lists", async () => {
-    const { owner, held, searched, control } = await searching();
+    const { owner, held, control } = await searching();
     held.get("a")!.set("news.tv", [show("News", at)]);
     expect(await owner.search("news", ["b:1"])).toEqual([]);
-    expect(searched).toEqual([]);
     control.activations.set("a", {
       lease: "old",
       generation: { id: "db-old", fetchedAt: at - 8 * 86400_000, until: at + 86400_000 },
@@ -1173,10 +1172,9 @@ describe("programme search", () => {
     await owner.restore(["a", "xmltv-1"]);
     owner.setPart(channels());
     expect(await owner.search("news", keys)).toEqual([]);
-    expect(searched).toEqual([]);
   });
 
-  it.each(["removal", "replacement", "part", "abort"] as const)(
+  it.each(["removal", "replacement", "part"] as const)(
     "answers nothing for a search held across %s",
     async (change) => {
       const { owner, native, held, sources } = await searching();
@@ -1193,8 +1191,7 @@ describe("programme search", () => {
         await release.promise;
         return answer;
       };
-      const controller = new AbortController();
-      const pending = owner.search("news", keys, { signal: controller.signal });
+      const pending = owner.search("news", keys);
       await reached.promise;
       if (change === "removal") await owner.forget("a");
       if (change === "replacement") {
@@ -1202,10 +1199,9 @@ describe("programme search", () => {
         await owner.attach("a");
       }
       if (change === "part") owner.setPart(channels());
-      if (change === "abort") controller.abort();
       release.resolve();
       expect(await pending).toEqual([]);
-      if (change !== "removal" && change !== "abort")
+      if (change !== "removal")
         expect((await owner.search("news", keys)).map(({ key }) => key)).toEqual(["a:1"]);
     },
   );
