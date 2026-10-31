@@ -82,3 +82,11 @@ parts:
       - -app/resources/app-update.yml
       - -app/resources/package-type
       - -usr/share/doc
+  # Snapd reads meta/snapshots.yaml, which snapcraft has no key for.
+  snapshots:
+    plugin: dump
+    source: snap/local
+    organize:
+      snapshots.yaml: meta/snapshots.yaml
+    prime:
+      - meta/snapshots.yaml

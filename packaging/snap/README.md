@@ -30,10 +30,26 @@ publishes: each of those is a maintainer action that needs its own approval.
   `$SNAP_USER_COMMON`: on start the app deletes download folders its database doesn't name,
   so a reverted database sharing one folder with a newer revision would delete the newer copies.
   The cost: each kept revision holds its own copies (snapd keeps 2 on classic systems by
-  default), and `snap remove` keeps a snapshot of all of them for 31 days.
+  default), and `snap remove` keeps a 31-day snapshot of the current revision's data, copies
+  and recordings included. `snap/local/snapshots.yaml` leaves Chromium's caches out of it.
 - **No import.** The Snap cannot read a deb or AppImage profile, and doesn't try. A viewer adds
   their subscription again. Both installs can run side by side.
 - **Media keys.** The `mpris` slot named `chromium` lets Chromium own its MPRIS bus name.
+
+## Sleep and shutdown
+
+- **Keeping awake.** Chromium keeps the computer awake for a playing receiver through
+  `org.gnome.SessionManager` or `org.freedesktop.PowerManagement` Inhibit, which
+  `screen-inhibit-control` allows. Electron has no desktop-portal Inhibit, so there is nothing
+  to try there, and no `shutdown` connection is needed for it.
+- **Sleep notices are lost.** Electron hears sleep and wake from logind's `PrepareForSleep` and
+  takes logind delay locks. The Snap's AppArmor profile lets it do neither, and `shutdown` would
+  allow only the locks. So under the Snap a recording isn't paused before the computer sleeps.
+  Waking is noticed instead by the wall clock jumping past a 30-second check
+  (`apps/desktop/src/main/platform/wake.ts`), which runs the guide, reminder and recording
+  checks a resume would.
+- **Shutdown still arrives.** A session that ends sends SIGTERM, which the app treats as the
+  system ending it: what records goes on when the app runs again.
 
 ## Build
 
@@ -81,10 +97,12 @@ snap connections mr-streamer
 2. Disconnect `password-manager-service`, or run without a Secret Service: adding a subscription
    must fail with the `snap connect` command and leave no login in the profile.
 3. Install a second artifact over the first, then `sudo snap revert mr-streamer` and
-   `sudo snap refresh mr-streamer --revision=<newer>`: settings, the login and copies stay with
-   each revision, as above.
-4. `sudo snap remove mr-streamer` keeps a snapshot (`snap saved`); `snap forget <set>` or
-   `snap remove --purge` drops it.
+   `sudo snap revert mr-streamer --revision=<newer x revision>`: local installs have no Store
+   revision to refresh to. Settings, the login, copies and recordings stay with each revision.
+4. `sudo snap remove mr-streamer` keeps a snapshot of the current revision (`snap saved`),
+   without the excluded caches; reinstall, then `sudo snap restore <set>` brings it back and
+   `sudo snap forget <set>` deletes it. `snap remove --purge` makes none, and deletes no older
+   snapshot. Neither removes the keyring's Chromium Safe Storage item.
 
 ## Owner actions, none taken
 
@@ -101,8 +119,8 @@ In this order, each with its own approval:
 3. **Strongly preferred: auto-connection of `password-manager-service`**, saying plainly that it
    reaches the user's whole keyring, and that the app uses it only for its own Chromium Safe
    Storage key. Without it, every viewer runs the `snap connect` command once.
-4. **Optional:** `shutdown`, only if the desktop portal's Inhibit cannot keep a playing receiver
-   awake; `personal-files` to read an old deb profile, for a later import; the `mpris` name.
+4. **Optional:** `personal-files` to read an old deb profile, for a later import; the `mpris`
+   name. Not `shutdown`: see [Sleep and shutdown](#sleep-and-shutdown).
 5. **Upload** the pinned artifact to `edge` (`snapcraft upload --release=edge <file>`), install it
    from the Store on a clean machine, repeat the checks above against Store assertions and
    auto-connections, and only then promote. Publication to `stable` needs a maintainer's approval,

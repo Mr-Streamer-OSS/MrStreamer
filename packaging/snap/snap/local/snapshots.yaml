@@ -1,0 +1,10 @@
+# What `snap save` and `snap remove` leave out of the profile's snapshot: Chromium's caches, which
+# it builds again. Copies, recordings, the database and settings stay in.
+exclude:
+  - $SNAP_USER_DATA/.config/Mr. Streamer/Cache
+  - $SNAP_USER_DATA/.config/Mr. Streamer/Code Cache
+  - $SNAP_USER_DATA/.config/Mr. Streamer/Crashpad
+  - $SNAP_USER_DATA/.config/Mr. Streamer/DawnGraphiteCache
+  - $SNAP_USER_DATA/.config/Mr. Streamer/DawnWebGPUCache
+  - $SNAP_USER_DATA/.config/Mr. Streamer/GPUCache
+  - $SNAP_USER_DATA/.config/Mr. Streamer/GPUPersistentCache

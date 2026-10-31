@@ -68,9 +68,9 @@ To uninstall, run `sudo pacman -R mrstreamer-bin`. This removes the app and keep
 
 ## Installed as a Snap
 
-The Snap is built and tested from each release, but it is not in the Snap Store yet: the Store still has to allow the connection Chromium's sandbox needs. Until it's published there, install a Snap only from a build the project gives you. These notes describe how it works.
+The Snap is built and tested with each stable release, but it is not in the Snap Store yet: the Store still has to allow the connection Chromium's sandbox needs. These notes describe how it works.
 
-Snapd updates the Snap on its own, so Mr. Streamer never looks for updates, downloads them or offers a channel. Settings > **Updates** shows your version and the command that updates it now: `sudo snap refresh mr-streamer`. Snapd waits to update while Mr. Streamer is open, and tells you when it needs you to close it.
+Snapd updates a Snap installed from the Store, so Mr. Streamer never looks for updates, downloads them or offers a channel. Settings > **Updates** shows your version and the command that updates it now: `sudo snap refresh mr-streamer`. Snapd holds back its automatic updates while Mr. Streamer is open, for up to 14 days, and asks you to close it.
 
 Your login is kept in your desktop's keyring: GNOME Keyring, or KWallet on KDE. The Snap never falls back to saving it in plain text. If the keyring can't be reached, adding a subscription fails and names the command that connects Mr. Streamer to it, which you run once:
 
@@ -78,13 +78,13 @@ Your login is kept in your desktop's keyring: GNOME Keyring, or KWallet on KDE. 
 sudo snap connect mr-streamer:password-manager-service
 ```
 
-Check that your keyring is running and unlocked too. On a desktop without one, such as a plain Openbox session, start GNOME Keyring first.
+Check that your keyring is running and unlocked too. On a desktop without one, such as a plain Openbox session, start GNOME Keyring first. If a saved subscription says it needs its password again because Mr. Streamer lost that connection, connect it and reopen Mr. Streamer: the saved password comes back.
 
-The Snap keeps its data with each version snapd keeps, in `~/snap/mr-streamer/`, downloaded copies included:
+The Snap keeps its data with each version snapd keeps, in `~/snap/mr-streamer/`, downloaded copies and recordings included:
 
-- **Updates** copy everything to the new version, so your login, preferences, favourites, watchlist, progress, copies and saved subtitles carry over. Until snapd drops the older version, the copies take their space twice; `du -sh ~/snap/mr-streamer/*` shows how much.
-- **Going back** with `sudo snap revert mr-streamer` returns the data as it was before the update. What you changed or downloaded after it comes back when you update again.
-- **Uninstalling** with `sudo snap remove mr-streamer` keeps a snapshot of your data for 31 days, which `snap saved` lists and `sudo snap restore` brings back. `sudo snap remove --purge mr-streamer` removes everything at once.
+- **Updates** copy everything to the new version, so your login, preferences, favourites, watchlist, progress, copies, recordings and saved subtitles carry over. Snapd keeps the previous version too, so copies take their space twice until it drops that one; `du -sh ~/snap/mr-streamer/*` shows how much.
+- **Going back** with `sudo snap revert mr-streamer` returns the data as it was before the update. What you changed or downloaded after it comes back when you return to the newer version.
+- **Uninstalling** with `sudo snap remove mr-streamer` keeps a snapshot of the current version's data for 31 days, without Chromium's caches. `snap saved` lists it; after installing again, `sudo snap restore <set>` brings it back, and `sudo snap forget <set>` deletes it. `sudo snap remove --purge mr-streamer` makes no snapshot. Neither touches your login in the desktop keyring.
 
 The Snap is separate from the deb, the AppImage and the AUR copy. It can't read their data, and doesn't import it: add your subscription again, and your favourites, history and copies stay with the other install. Both can be installed and open at the same time. Copies save to the Snap's own folder; to save or open files on a USB drive or under `/media`, connect `removable-media` once: `sudo snap connect mr-streamer:removable-media`.
 
