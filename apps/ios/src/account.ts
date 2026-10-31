@@ -1486,8 +1486,8 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
   }
   // The accepted pick is kept under the channel's id, so it is found among all its streams, and
   // plays where it keeps the window too.
-  const chosen = chosenVariant(channel, picks);
-  const pick = asked ?? (chosen && kept.variants.includes(chosen) ? chosen.id : undefined);
+  const accepted = chosenVariant(channel, picks);
+  const pick = asked ?? (accepted && kept.variants.includes(accepted) ? accepted.id : undefined);
   const [first, ...rest] = streamsToPlay(kept, { liveQuality, channelVariants: picks }, pick).map(
     (variant) => ({
       variantId: variant.id,

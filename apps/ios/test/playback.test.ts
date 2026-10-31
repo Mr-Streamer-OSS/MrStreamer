@@ -212,7 +212,13 @@ describe("a programme from catch-up", () => {
       expect.anything(),
     );
     await React.act(async () => {
+      // A recording still being made opens where it is now, 15 minutes in.
+      port.currentTime = 900;
       port.observation({ kind: "ready", durationSeconds: null });
+      await tick();
+    });
+    expect(port.currentTime).toBe(0);
+    await React.act(async () => {
       port.state(true);
       await tick();
     });

@@ -640,7 +640,7 @@ function release(): Promise<Saved> {
     playingTime(current.epoch, false);
   }
   if (current?.loaded && !current.item.live)
-    current.stoppedAt = player().currentTime - current.offset;
+    current.stoppedAt = Math.max(0, player().currentTime - current.offset);
   if (checkpoint) clearInterval(checkpoint);
   checkpoint = null;
   if (current) void retire(current.resource);
@@ -1141,7 +1141,8 @@ function observe(event: PlaybackObservation) {
       if (current.seek !== null) {
         const from = current.seek + current.offset;
         current.seek = null;
-        if (from > 0) player().currentTime = from;
+        // A recording still being made would start where it is now, so a programme always seeks.
+        if (from > 0 || current.item.past) player().currentTime = from;
       }
       void refreshTracks(resource);
       return;
