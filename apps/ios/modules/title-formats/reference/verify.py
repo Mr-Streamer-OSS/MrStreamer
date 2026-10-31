@@ -1,6 +1,6 @@
 # Checks a reference run's renditions against the source with system ffprobe and ffmpeg. What
-# each rendition must hold is worked out from the source and the stream the core says it carries,
-# never from what was served:
+# each rendition must hold is worked out from the source and the streams the core says it
+# carries, never from what was served:
 #   - the picture: every source picture packet, in order, at exactly its time from the first cut;
 #   - a sound rendition is checked against the source stream check.c recorded for it in
 #     streams.txt, as the core reported it; a rendition with none fails. It must hold
@@ -12,7 +12,9 @@
 #     past the picture's end. One without added silence may instead start or end up to 0.1 s
 #     inside, and lack a segment the core refused, but only one where the source track, all of
 #     its packets each sounding a frame, has a hole more than 0.1 s inside the title;
-#   - each rendition decodes cleanly, AC-3 and E-AC-3 with their CRCs checked.
+#   - each rendition decodes cleanly, AC-3 and E-AC-3 with their CRCs checked;
+#   - each subtitle segment holds the lines of its streams on screen during it, as ffmpeg's own
+#     WebVTT conversion of the source has them, at their times and with their text.
 # A packed MP3 rendition's segments are read as an ID3 transport stream time and raw frames.
 #   python3 -I verify.py <source.mkv> <out-folder>
 import bisect, glob, hashlib, json, os, re, struct, subprocess, sys
@@ -144,9 +146,10 @@ print(f"v {video['codec_name']}: {len(mine)} of {len(theirs)} packets, times wit
       f"decode {'clean' if not errors else 'ERRORS ' + errors[:200]} -> {'ok' if good else 'FAIL'}")
 
 # Which stream of the file each sound rendition carries, as the core reported it to check.c.
-carries = {}
+carries, carries_all = {}, {}
 if os.path.exists(f"{folder}/streams.txt"):
-    carries = {name: int(index) for name, index in (line.split() for line in open(f"{folder}/streams.txt") if line.strip())}
+    carries_all = {name: rest for name, *rest in (line.split() for line in open(f"{folder}/streams.txt") if line.strip())}
+    carries = {name: int(rest[0]) for name, rest in carries_all.items() if name.startswith("a")}
 for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     playlist = open(f"{folder}/{rendition}.m3u8").read()
     raw = "#EXT-X-MAP" not in playlist
@@ -238,4 +241,73 @@ for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
           f" (time within {drift * 1000:.2f} ms), {len(added)} silent frames ({checked} decode to zero), "
           f"{'continuous' if runs else 'with gaps'} {mine[0][0]:.3f}-{end:.3f} s{refused}"
           f" -> {'ok' if not problems else 'FAIL: ' + '; '.join(problems)}")
+# Subtitles: each segment of a subtitle rendition holds every line of the streams streams.txt
+# says it carries that is on screen during it, at its time from title time 0, and nothing else.
+# The lines are read from the source by system ffmpeg's own WebVTT conversion, and compared as
+# plain text, without tags.
+def vtt_ms(t):
+    parts = [float(x) for x in t.split(":")]
+    return round(sum(p * 60 ** (len(parts) - 1 - i) for i, p in enumerate(parts)) * 1000)
+
+def plain(text):
+    text = re.sub(r"<[^>]*>", "", text).replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+    return " ".join(text.replace("\u00a0", " ").split())
+
+def cues(vtt):
+    out = []
+    for block in re.split(r"\n\s*\n", vtt.replace("\r", "")):
+        lines = block.strip("\n").split("\n")
+        timing = next((i for i, line in enumerate(lines) if "-->" in line), None)
+        if timing is None: continue
+        a, b = (x.split()[0] for x in lines[timing].split("-->"))
+        out.append((vtt_ms(a), vtt_ms(b), plain("\n".join(lines[timing + 1:]))))
+    return out
+
+def dialogues(ass):
+    """The lines of an ASS file as plain text: overrides out, and what a drawing draws."""
+    out = []
+    for line in ass.splitlines():
+        if not line.startswith("Dialogue:"): continue
+        fields = line[len("Dialogue:"):].split(",", 9)
+        text, drawing, kept = fields[9], False, ""
+        for part in re.split(r"(\{[^}]*\})", text):
+            if part.startswith("{"):
+                found = re.findall(r"\\p(\d+)", part)
+                if found: drawing = int(found[-1]) > 0
+            elif not drawing:
+                kept += part
+        ms = lambda t: round(sum(float(x) * 60 ** (2 - i) for i, x in enumerate(t.strip().split(":"))) * 1000)
+        out.append((ms(fields[1]), ms(fields[2]), plain(re.sub(r"\\[Nnh]", " ", kept))))
+    return out
+
+base = round(origin * 1000)
+for rendition in re.findall(r'TYPE=SUBTITLES[^\n]*URI="(s\d+)\.m3u8"', master):
+    sources = [int(x) for x in carries_all.get(rendition, [])]
+    if not sources:
+        print(f"{rendition}: no source track known for it -> FAIL"); ok = False; continue
+    lines = set()
+    for index in sources:
+        ass = next(s["codec_name"] for s in streams if s["index"] == index) in ("ass", "ssa")
+        # ffmpeg's WebVTT keeps an ASS drawing's commands and \h as text: ASS lines are read as
+        # ffmpeg copies them out instead.
+        text = subprocess.run(["ffmpeg", "-v", "error", "-copyts", "-i", sys.argv[1], "-map", f"0:{index}",
+                               *(["-c:s", "copy", "-f", "ass"] if ass else ["-f", "webvtt"]), "-"],
+                              capture_output=True, text=True, check=True).stdout
+        lines |= {(a - base, b - base, t) for a, b, t in (dialogues(text) if ass else cues(text)) if t}
+    names = segments(rendition, "vtt")
+    problems, pairs = [], 0
+    if len(names) != len(lengths): problems.append(f"{len(names)} segments for {len(lengths)}")
+    for k, name in enumerate(names):
+        text = open(name).read()
+        if not text.startswith("WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n"):
+            problems.append(f"{name} has no timestamp map")
+        a, b = round(cuts[k] * 1000), round(cuts[k + 1] * 1000)
+        want = sorted((max(x, 0), y, t) for x, y, t in lines if x < b and y > a and y > 0)
+        mine = sorted(cues(text))
+        pairs += len(want)
+        if mine != want:
+            problems.append(f"segment {k} holds {mine} for {want}")
+    ok &= not problems
+    print(f"{rendition} from {'+'.join(str(x) for x in sources)}: {len(lines)} lines, {pairs} line-segment pairs in "
+          f"{len(names)} segments -> {'ok' if not problems else 'FAIL: ' + '; '.join(problems[:3])}")
 sys.exit(0 if ok else 1)

@@ -20,8 +20,9 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+type Unshown = { language: string | null; format: string | null; forced: boolean };
 type Opened =
-  | { kind: "session"; playlist: string }
+  | { kind: "session"; playlist: string; unshown?: Unshown[] }
   | { kind: "direct" }
   | { kind: "closed" }
   | { kind: "failed"; failure: { kind: "status"; status: number } };
@@ -76,7 +77,7 @@ Object.assign(globalThis, {
   },
 });
 
-const { onPlaybackFailure, play, playbackState, recheckPlayback, retry, stop } =
+const { onPlaybackFailure, play, playbackState, recheckPlayback, retry, stop, unshownSubtitles } =
   await import("../src/playback.ts");
 
 const movie = (id: string, subscriptionId: string | null = "sub") => ({
@@ -163,6 +164,45 @@ describe("a file AVPlayer can't open", () => {
     expect(given.at(-1)).toEqual({ uri: "http://127.0.0.1:1/t/main.m3u8", contentType: "hls" });
     fakePlayer.ready();
     expect(fakePlayer.currentTime).toBe(0);
+  });
+
+  it("names the file's subtitle tracks the session can't carry, for the file playing only", async () => {
+    const pictures = [
+      { language: "eng", format: "PGS", forced: false },
+      { language: "nld", format: "DVD", forced: true },
+    ];
+    void play(
+      movie("a"),
+      {
+        kind: "file",
+        originalLanguage: null,
+        open: async () => ({ url: "http://panel/a.mkv", container: "mkv" }),
+      },
+      options,
+    );
+    await settle();
+    expect(unshownSubtitles()).toEqual([]);
+    sessions[0]!.opened.resolve({
+      kind: "session",
+      playlist: "http://127.0.0.1:1/t/main.m3u8",
+      unshown: pictures,
+    });
+    await settle();
+    expect(unshownSubtitles()).toEqual(pictures);
+
+    void play(
+      movie("b"),
+      {
+        kind: "file",
+        originalLanguage: null,
+        open: async () => ({ url: "http://panel/b.mp4", container: "mp4" }),
+      },
+      options,
+    );
+    sessions[0]!.closed.resolve();
+    await settle();
+    expect(given.at(-1)).toEqual({ uri: "http://panel/b.mp4", contentType: "auto" });
+    expect(unshownSubtitles()).toEqual([]);
   });
 
   it("asks the provider nothing more until the session it let go of has closed", async () => {

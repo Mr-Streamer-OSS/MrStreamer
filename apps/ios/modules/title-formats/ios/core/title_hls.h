@@ -4,7 +4,9 @@
 // Nothing is decoded; where a sound track has no packets, frames of silence fill in.
 //
 // The picture is one rendition and each sound track AVPlayer plays (AAC-LC, HE-AAC, AC-3,
-// E-AC-3, MP3) another, listed as the stream's audio choices. Subtitles aren't served.
+// E-AC-3, MP3) another, listed as the stream's audio choices. Each text subtitle track (SubRip,
+// ASS or SSA, WebVTT) is a WebVTT rendition, listed as its subtitle choices; the other subtitle
+// tracks, such as PGS or DVD pictures, aren't served, and `title_hls_unshown` names them.
 //
 // The file is read through `TitleHlsSource`, which the app answers from the provider or from a
 // downloaded copy. One title is used from one thread at a time; `title_hls_interrupt` may be
@@ -67,6 +69,31 @@ TitleHlsResult title_hls_get(TitleHls *title, const char *name, const uint8_t **
 
 /** The file's stream index of sound rendition `track` ("a<track>"), or -1: for checks. */
 int title_hls_sound_stream(const TitleHls *title, int track);
+
+/**
+ * The file's stream indexes whose lines subtitle rendition `track` ("s<track>") carries, its own
+ * first, into `streams`; how many, at most `most`. For checks.
+ */
+int title_hls_subtitle_streams(const TitleHls *title, int track, int *streams, int most);
+
+/**
+ * How many lines of subtitle rendition `track`'s own stream the file's index lists, 0 for none,
+ * or -1 when the index hasn't been read yet: for checks.
+ */
+int title_hls_subtitle_listed(const TitleHls *title, int track);
+
+/** A subtitle track of the file the stream doesn't carry. */
+typedef struct TitleHlsUnshown {
+  /** Its language as the file names it, or NULL. */
+  const char *language;
+  /** What it is, such as "PGS" or "DVD", or NULL when the file's format isn't known here. */
+  const char *format;
+  /** It holds forced lines only. */
+  int forced;
+} TitleHlsUnshown;
+
+/** Subtitle track `index` of those the stream doesn't carry, valid while the title is: 0 past the last. */
+int title_hls_unshown(const TitleHls *title, int index, TitleHlsUnshown *out);
 
 void title_hls_interrupt(TitleHls *title);
 void title_hls_close(TitleHls *title);

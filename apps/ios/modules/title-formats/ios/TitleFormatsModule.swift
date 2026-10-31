@@ -37,15 +37,15 @@ public class TitleFormatsModule: Module {
       }
     }
 
-    /// Reads the file's header and index. Answers the playlist to give AVPlayer, `direct` for a
-    /// file AVPlayer opens itself, or why it failed; the session is closing already unless it
-    /// answered a playlist.
+    /// Reads the file's header and index. Answers the playlist to give AVPlayer, with the file's
+    /// subtitle tracks it doesn't carry, `direct` for a file AVPlayer opens itself, or why it
+    /// failed; the session is closing already unless it answered a playlist.
     AsyncFunction("open") { (id: String, promise: Promise) in
       guard let made = self.session(id) else { return promise.resolve(["kind": "closed"]) }
       made.open { opened in
         switch opened {
-        case .session(let playlist):
-          promise.resolve(["kind": "session", "playlist": playlist])
+        case .session(let playlist, let unshown):
+          promise.resolve(["kind": "session", "playlist": playlist, "unshown": unshown])
         case .direct:
           made.close()
           promise.resolve(["kind": "direct"])

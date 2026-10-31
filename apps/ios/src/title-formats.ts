@@ -4,7 +4,8 @@ import { statusFailure } from "./errors.ts";
 
 // Files AVPlayer can't open, such as Matroska, played through `modules/title-formats`: the
 // native side reads the file, from the provider or from the phone, and serves it to AVPlayer as
-// HLS on 127.0.0.1. For playback.ts, which owns the one session that may be open.
+// HLS on 127.0.0.1, with its text subtitles as WebVTT. For playback.ts, which owns the one
+// session that may be open.
 //
 // A session reads the provider's file over one request at a time and holds the provider's
 // connection until `closed` resolves, after `close` or a failure, whether or not it opened. One
@@ -15,8 +16,21 @@ type NativeFailure =
   | { readonly kind: "network"; readonly detail: string }
   | { readonly kind: "unsupported"; readonly detail: string };
 
+/** A subtitle track of the file a session doesn't carry, such as PGS or DVD pictures. */
+export interface UnshownSubtitle {
+  /** As the file names it, such as "eng"; null when it doesn't. */
+  readonly language: string | null;
+  /** Such as "PGS" or "DVD"; null when the format isn't known here. */
+  readonly format: string | null;
+  readonly forced: boolean;
+}
+
 type NativeOpened =
-  | { readonly kind: "session"; readonly playlist: string }
+  | {
+      readonly kind: "session";
+      readonly playlist: string;
+      readonly unshown: readonly UnshownSubtitle[];
+    }
   | { readonly kind: "direct" }
   | { readonly kind: "closed" }
   | { readonly kind: "failed"; readonly failure: NativeFailure };
@@ -60,6 +74,8 @@ function streamFailure(failure: NativeFailure): StreamFailure {
 export interface FormatSession {
   /** The loopback playlist to give AVPlayer. It carries no login. */
   readonly playlist: string;
+  /** The file's subtitle tracks the playlist doesn't carry; AVPlayer never sees them. */
+  readonly unshown: readonly UnshownSubtitle[];
   /** Why it stopped serving, if it did. */
   failure(): StreamFailure | null;
   /**
@@ -116,7 +132,8 @@ export function openFormat(
       const found = native().failure(id);
       return found ? streamFailure(found) : null;
     };
-    return { kind: "session", session: { playlist: result.playlist, failure, failed } };
+    const { playlist, unshown } = result;
+    return { kind: "session", session: { playlist, unshown, failure, failed } };
   });
   return { opened, close, closed };
 }
