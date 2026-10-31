@@ -417,6 +417,18 @@ describe("the file's own subtitles", () => {
     expect(online.shownSubtitle()).toBeNull();
   });
 
+  it("refused by the native player leave the downloaded one showing", async () => {
+    const playing = await withTracks();
+    await chooseFirst(playing);
+    await vi.waitFor(async () => expect(await checked()).toEqual(["Off"]));
+    port.selectObservedTrackAsync.mockImplementationOnce(async () => ({ kind: "stale" }));
+    await ((await trackChoices("subtitles")) ?? [])
+      .find((each) => each.label === "German")
+      ?.choose();
+    expect(online.shownSubtitle()?.title).toBe(playing);
+    expect(online.keptSubtitle(playing)).not.toBeNull();
+  });
+
   it("shown again from what was kept end a download under way", async () => {
     const playing = await withTracks();
     await chooseFirst(playing);

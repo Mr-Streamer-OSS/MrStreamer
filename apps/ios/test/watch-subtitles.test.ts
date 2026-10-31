@@ -186,6 +186,21 @@ describe("Watch's online subtitles", () => {
     expect(again.message).toContain("Picture in Picture and AirPlay show no subtitles");
   });
 
+  it("converts a shown subtitle's frame rate from Adjust timing", async () => {
+    await saveSubtitleKey("key");
+    await watchMovie();
+    await pick(await openSubtitles(), "Find online");
+    await pick(sheets.at(-1)!, "Movie.2001");
+    await pick(await openSubtitles(), "Adjust timing");
+    await pick(sheets.at(-1)!, "Frame rate");
+    const rates = sheets.at(-1)!;
+    expect(rates.message).toBe("Subtitle fps → video fps");
+    expect(rates.options[0]).toBe("✓ Original");
+    await pick(rates, "25 → 23.976 fps");
+    expect(subtitles.shownSubtitle()?.timing.speed).toBeCloseTo(25 / (24000 / 1001));
+    expect(sheets.at(-1)?.message).toBe("Frame rate 25 → 23.976 fps");
+  });
+
   it("offers what a search found after the controls hid while it ran", async () => {
     await saveSubtitleKey("key");
     await watchMovie();
