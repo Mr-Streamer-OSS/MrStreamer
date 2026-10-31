@@ -17,11 +17,23 @@ const memory = vi.hoisted(() => ({
   files: new Map<string, string>(),
   keychain: new Map<string, string>(),
   full: new Set<string>(),
+  /** Paths whose deletion the disk refuses while they start with this. */
+  undeletable: null as string | null,
 }));
 
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.2.0" } } }));
 vi.mock("expo-video", () => ({ createVideoPlayer: () => nativePlayer(() => {}) }));
-vi.mock("expo-file-system", () => memoryFiles(memory));
+vi.mock("expo-file-system", () => {
+  const files = memoryFiles(memory);
+  class File extends files.File {
+    override delete() {
+      if (memory.undeletable && this.path.startsWith(memory.undeletable))
+        throw new Error("The disk refused");
+      super.delete();
+    }
+  }
+  return { ...files, File };
+});
 vi.mock("expo-secure-store", () => keychain(() => memory.keychain));
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => {} }));
 
@@ -112,6 +124,7 @@ beforeEach(() => {
   memory.files.clear();
   memory.keychain.clear();
   memory.full.clear();
+  memory.undeletable = null;
   host.fail(null);
   host.serve(MIXED(host.origin));
 });
@@ -490,6 +503,67 @@ describe("a playlist subscription", () => {
     app.retryChannels();
     await until(() => member(app, id!)?.live.kind === "ready", "the channels again");
   });
+
+  it("keeps its channels and their open guide programmes through a reload that lists the same", async () => {
+    const host$ = globalThis as { expo?: { modules?: { Guide?: unknown } } };
+    const before = host$.expo!.modules!.Guide;
+    const { native, control } = guideFixture();
+    host$.expo!.modules!.Guide = native;
+    try {
+      const id = (await (await launch()).add({ server: host.link(), ...PLAYLIST }))!;
+      await until(
+        () => memory.files.has(`/cache/catalogues/${id}.live.json`),
+        "the saved channels",
+      );
+      // A guide saved before this launch, which then shows the saved channels.
+      const now = Date.now();
+      control.activations.set(id, {
+        lease: "saved",
+        generation: { id: "db", fetchedAt: now, until: now + 86400_000 },
+      });
+      const app = await launch();
+      const { guide } = await import("../src/guide.ts");
+      await until(() => channelNames(app).length === 6, "the saved channels");
+      control.query = async () => ({
+        kind: "ok",
+        value: {
+          guideId: "one.news",
+          rows: [{ start: now - 60_000, stop: now + 60_000, title: "Morning", description: "" }],
+          more: false,
+        },
+      });
+      const shown = app.currentCatalogue();
+      if (shown.kind !== "ready") throw new Error("No channels");
+      const key = shown.library.channels.find((each) => each.title === "News One")!.key;
+      const from = new Date(now).setHours(0, 0, 0, 0);
+      const day = { from, until: new Date(from).setDate(new Date(from).getDate() + 1) };
+      const [open] = (await guide.schedule(key, day)).programmes;
+      const read = guide.withdrawn(key, day.from);
+      const loaded = (app: App) => {
+        const live = member(app, id)?.live;
+        return live?.kind === "ready" ? live.fetchedAt : null;
+      };
+
+      const first = loaded(app);
+      app.reloadChannels(id);
+      await until(() => (loaded(app) ?? 0) > (first ?? 0), "the same channels again");
+      expect((app.currentCatalogue() as typeof shown).library).toBe(shown.library);
+      expect(guide.withdrawn(key, day.from)).toBe(read);
+      expect(await guide.programme(open!.detail)).toMatchObject({ title: "Morning" });
+
+      host.serve([
+        ...MIXED(host.origin),
+        '#EXTINF:-1 group-title="News",News Three',
+        `${host.origin}/live/three.ts`,
+      ]);
+      app.reloadChannels(id);
+      await until(() => channelNames(app).length === 7, "the changed channels");
+      expect(guide.withdrawn(key, day.from)).not.toBe(read);
+      expect(await guide.programme(open!.detail)).toBeNull();
+    } finally {
+      host$.expo!.modules!.Guide = before;
+    }
+  });
 });
 
 describe("mapping a playlist's groups", () => {
@@ -585,6 +659,53 @@ describe("mapping a playlist's groups", () => {
     for (const [path, text] of memory.files)
       for (const secret of [TOKEN, "second-0ne", "viewer-7"])
         expect(text, path).not.toContain(secret);
+  });
+
+  it("shows the lists saved under its mapping at a launch offline", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Films"), "movie");
+    await until(() => memory.files.has(`/cache/catalogues/${id}.titles.json`), "the saved films");
+    host.fail(503);
+    const again = await launch();
+    await until(() => titleNames(again, "movie").length === 1, "the saved films offline");
+  });
+
+  it("keeps its saved lists for a launch offline when the mapping can't be written", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    await until(() => memory.files.has(`/cache/catalogues/${id}.live.json`), "the saved channels");
+    const link = memory.keychain.get(`s.${id}`)!;
+    memory.keychain.delete(`s.${id}`);
+    memory.full.add("subscriptions.json");
+    await expect(
+      app.mapPlaylist(id, groupId(await app.playlistReport(id), "Shows"), "skip"),
+    ).rejects.toThrow();
+    memory.full.clear();
+    expect(registry().playlists[0].mapping).toBeUndefined();
+    expect(member(app, id)).toMatchObject({ needsSecret: false });
+    expect(channelNames(app)).toHaveLength(6);
+
+    memory.keychain.set(`s.${id}`, link);
+    host.fail(503);
+    const again = await launch();
+    await until(() => channelNames(again).length === 6, "the saved channels offline");
+  });
+
+  it("never shows lists saved under the mapping before, though the disk refused their deletion", async () => {
+    const app = await launch();
+    const id = (await app.add({ server: host.link(), ...PLAYLIST }))!;
+    await until(() => memory.files.has(`/cache/catalogues/${id}.live.json`), "the saved channels");
+    memory.undeletable = "/cache/";
+    host.fail(503);
+    await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Shows"), "skip");
+    expect(registry().playlists[0].mapping).toBeDefined();
+    await until(() => member(app, id)?.live.kind === "failed", "the failed reload");
+    expect(memory.files.has(`/cache/catalogues/${id}.live.json`)).toBe(true);
+
+    const again = await launch();
+    await until(() => member(again, id)?.live.kind === "failed", "the reload offline");
+    expect(channelNames(again)).toEqual([]);
   });
 
   it("refuses a group the playlist no longer lists, changing nothing", async () => {

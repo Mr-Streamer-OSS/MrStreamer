@@ -77,6 +77,11 @@ const listingOf = (rows: readonly Programme[], at: number): Listing => ({
   next: rows.find((row) => row.start > at) ?? null,
 });
 const FRESH = 6 * 3600_000;
+/**
+ * Channel days whose withdrawals `withdrawn` tells apart: a week of the Guide grid's 24 rows
+ * several times over. Past it, a screen's rows of the rest read again once.
+ */
+const WITHDRAWALS = 2048;
 const MAX_AGE = 7 * 86400_000;
 const EMPTY: GuideStatus = {
   availability: "unknown",
@@ -158,8 +163,14 @@ export function createGuide(
     if (value && minted.get(named(value)) === key) minted.delete(named(value));
     tokens.delete(key);
   };
-  /** Counts, by channel and day read, each withdrawal of its tokens, so a screen reads again. */
+  /**
+   * By channel and day read, the last withdrawal of its tokens, numbered across all of them, so a
+   * screen reads again. The least recently withdrawn half goes past WITHDRAWALS; one gone answers
+   * `floor`, the last number it held or later, so it never answers what a screen read before.
+   */
   const withdrawals = new Map<string, number>();
+  let withdrawn = 0;
+  let floor = 0;
   /** Changes once after a run of withdrawals, which evictions make without another notification. */
   const withdrawing = store(0);
   /** Whether the app is in the foreground, as foreground() and background() last said. */
@@ -168,7 +179,14 @@ export function createGuide(
   const read = (key: string, on: number) => JSON.stringify([key, on]);
   const withdraw = (value: Minted) => {
     const at = read(value.key, value.on);
-    withdrawals.set(at, (withdrawals.get(at) ?? 0) + 1);
+    withdrawals.delete(at);
+    withdrawals.set(at, ++withdrawn);
+    if (withdrawals.size > WITHDRAWALS)
+      for (const [each, number] of withdrawals) {
+        if (withdrawals.size <= WITHDRAWALS / 2) break;
+        withdrawals.delete(each);
+        floor = number;
+      }
     if (announced) return;
     announced = true;
     queueMicrotask(() => {
@@ -466,9 +484,10 @@ export function createGuide(
     getSnapshot: state.get,
     /**
      * Changes as the detail tokens schedule() handed out for a channel's own key (`Channel.key`)
-     * on the day from `on` are withdrawn, as by background() or eviction.
+     * on the day from `on` are withdrawn, as by background() or eviction, and may change as other
+     * channel days are; it never changes back.
      */
-    withdrawn: (key: string, on: number) => withdrawals.get(read(key, on)) ?? 0,
+    withdrawn: (key: string, on: number) => withdrawals.get(read(key, on)) ?? floor,
     /** Notifies, once a run of them is over, that `withdrawn` changed. */
     withdrawals: { get: withdrawing.get, subscribe: withdrawing.subscribe },
     /** Whether the app is in the foreground; the Guide grid reads only then. */
