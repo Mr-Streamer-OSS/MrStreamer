@@ -7,7 +7,8 @@ import { GuideMapEditor, GuideMapScreen } from "../../../guides-screen.tsx";
  * when `channel` names its key. Pushed on the stack Settings is on.
  */
 export default function GuideMap() {
-  const { channel } = useLocalSearchParams<{ channel?: string }>();
+  const params = useLocalSearchParams<{ channel?: string | string[] }>();
+  const channel = Array.isArray(params.channel) ? params.channel[0] : params.channel;
   const navigation = useNavigation();
   useLayoutEffect(() => {
     // A channel's mapping carries its own large title.

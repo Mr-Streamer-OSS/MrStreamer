@@ -617,6 +617,7 @@ export function createGuide(
       return { guide: read.captured.owner, listing: listingOf(read.answer.rows, now()) };
     },
     async forget(key: string): Promise<boolean> {
+      withdrawChannels(key);
       versions.set(key, (versions.get(key) ?? 0) + 1);
       const entry = entries.get(key);
       entries.delete(key);

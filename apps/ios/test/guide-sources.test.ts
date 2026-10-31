@@ -148,32 +148,36 @@ describe("external guides", () => {
     expect(prepared.at(-1)).toBe("https://new.test/a.xml");
   });
 
-  it("restores saved guides at launch, readable but locked where the Keychain lost a link", async () => {
-    const disk = fresh();
-    const before = launch(disk);
-    before.guides.load();
-    await before.guides.add(LINK);
-    await before.guides.add("https://other.test/epg.xml");
-    const lost = before.guides.links()[0]!;
-    disk.items.delete(lost.id);
-    const after = launch(disk);
-    const { ids, kept } = after.guides.load();
-    expect(ids).toHaveLength(2);
-    await after.owner.restore(ids, kept);
-    await after.guides.restore();
-    await flush();
-    expect(after.guides.links().map((each) => each.locked)).toEqual([true, false]);
-    expect(after.prepared).toEqual(["https://other.test/epg.xml"]);
-    // Its own link again unlocks it, under its id, so its saved guide stays.
-    expect(await after.guides.replace(lost.id, LINK)).toBeNull();
-    await flush();
-    expect(after.guides.links().map((each) => [each.id, each.locked])).toEqual([
-      [lost.id, false],
-      [before.guides.links()[1]!.id, false],
-    ]);
-    expect(after.control.calls).not.toContain(`forget:${lost.id}`);
-    expect(after.prepared.at(-1)).toBe(LINK);
-  });
+  it.each(["missing", "mismatched"] as const)(
+    "restores saved guides at launch, locked where the Keychain link is %s",
+    async (kind) => {
+      const disk = fresh();
+      const before = launch(disk);
+      before.guides.load();
+      await before.guides.add(LINK);
+      await before.guides.add("https://other.test/epg.xml");
+      const lost = before.guides.links()[0]!;
+      if (kind === "missing") disk.items.delete(lost.id);
+      else disk.items.set(lost.id, "https://stale.test/epg.xml?token=wrong-guide");
+      const after = launch(disk);
+      const { ids, kept } = after.guides.load();
+      expect(ids).toHaveLength(2);
+      await after.owner.restore(ids, kept);
+      await after.guides.restore();
+      await flush();
+      expect(after.guides.links().map((each) => each.locked)).toEqual([true, false]);
+      expect(after.prepared).toEqual(["https://other.test/epg.xml"]);
+      // Its own link again unlocks it, under its id, so its saved guide stays.
+      expect(await after.guides.replace(lost.id, LINK)).toBeNull();
+      await flush();
+      expect(after.guides.links().map((each) => [each.id, each.locked])).toEqual([
+        [lost.id, false],
+        [before.guides.links()[1]!.id, false],
+      ]);
+      expect(after.control.calls).not.toContain(`forget:${lost.id}`);
+      expect(after.prepared.at(-1)).toBe(LINK);
+    },
+  );
 
   it("shows no guides from a file another build wrote or it can't read, writing over neither", async () => {
     const { guides } = launch({ file: { version: 2 }, items: new Map() });

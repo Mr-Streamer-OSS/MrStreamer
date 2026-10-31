@@ -16,7 +16,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { useCatalogue } from "./account.ts";
+import { retryChannels, useCatalogue } from "./account.ts";
 import { hostOf } from "./errors.ts";
 import type { GuideProblem } from "./guide-native.ts";
 import {
@@ -29,7 +29,7 @@ import {
 import { guide, type GuideStatus } from "./guide.ts";
 import { useTabs, type Tab } from "./header.tsx";
 import type { Library } from "./library.ts";
-import { colors, largeText, TextButton } from "./ui.tsx";
+import { colors, largeText, Notice, TextButton } from "./ui.tsx";
 
 // Settings > Guides: the XMLTV guides added apart from every provider's own (guide-sources.ts),
 // each with how its download stands, an add form, and Map channels, which reads a channel's
@@ -360,29 +360,39 @@ export function GuideMapScreen() {
       keyExtractor={(row) => row.key}
       stickySectionHeadersEnabled={false}
       ListHeaderComponent={
-        <View style={styles.search}>
-          <SymbolView name="magnifyingglass" size={15} tintColor={colors.dim} />
-          <TextInput
-            accessibilityLabel="Search channels"
-            value={query}
-            onChangeText={setQuery}
-            placeholder={`Search ${formatNumber(library?.channels.length ?? 0)} channels`}
-            placeholderTextColor={colors.dim}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            clearButtonMode="while-editing"
-            keyboardAppearance="dark"
-            selectionColor="#FFFFFF"
-            style={styles.searchInput}
-            testID="guide-map-search"
-          />
-        </View>
+        <>
+          {catalogue.kind === "failed" ? (
+            <Notice
+              failure={{ headline: "Couldn't load channels", advice: null }}
+              actions={[{ label: "Try again", onPress: retryChannels }]}
+            />
+          ) : null}
+          <View style={styles.search}>
+            <SymbolView name="magnifyingglass" size={15} tintColor={colors.dim} />
+            <TextInput
+              accessibilityLabel="Search channels"
+              value={query}
+              onChangeText={setQuery}
+              placeholder={`Search ${formatNumber(library?.channels.length ?? 0)} channels`}
+              placeholderTextColor={colors.dim}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+              keyboardAppearance="dark"
+              selectionColor="#FFFFFF"
+              style={styles.searchInput}
+              testID="guide-map-search"
+            />
+          </View>
+        </>
       }
       ListEmptyComponent={
-        <Text style={styles.none}>
-          {words ? "No channel by that name" : library ? "No channels" : "Loading channels"}
-        </Text>
+        catalogue.kind === "failed" ? undefined : (
+          <Text style={styles.none}>
+            {words ? "No channel by that name" : library ? "No channels" : "Loading channels"}
+          </Text>
+        )
       }
       renderSectionHeader={({ section }) => (
         <Text style={styles.section} accessibilityRole="header">

@@ -21,6 +21,7 @@ const scenario = vi.hoisted(() => ({
   statuses: new Map<string, Partial<GuideStatus>>(),
   ownIds: [] as string[],
   previews: new Map<string, unknown>(),
+  channel: undefined as string | string[] | undefined,
 }));
 
 const stores = await vi.hoisted(async () => {
@@ -28,12 +29,15 @@ const stores = await vi.hoisted(async () => {
   return {
     links: store<readonly GuideLink[]>([]),
     mappings: store<ReadonlyMap<string, string>>(new Map()),
+    failed: store(false),
   };
 });
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-router", () => ({
+  useLocalSearchParams: () => ({ channel: scenario.channel }),
+  useNavigation: () => ({ setOptions: () => undefined }),
   router: {
     push: (to: unknown) => scenario.calls.push(`push ${JSON.stringify(to)}`),
     back: () => scenario.calls.push("back"),
@@ -56,22 +60,32 @@ vi.mock("react-native", async () => ({
   },
 }));
 vi.mock("../src/header.tsx", () => ({ useTabs: () => null }));
-vi.mock("../src/account.ts", () => ({
-  useCatalogue: () => ({
-    kind: "ready",
-    failing: [],
-    library: {
-      channels: [{ key: "home:7", title: "BBC Two HD" }],
-      byKey: new Map([
-        ["home:7", { key: "home:7", title: "BBC Two HD" }],
-        ["home:1", { key: "home:1", title: "BBC One HD" }],
-      ]),
-      placeOf: new Map([["home:7", "United Kingdom · Entertainment"]]),
-      labels: new Map([["home", "Living room"]]),
-      regions: [],
+vi.mock("../src/account.ts", async () => {
+  const { useStore } = await import("../src/store.ts");
+  return {
+    retryChannels: () => {
+      scenario.calls.push("retry channels");
+      stores.failed.set(false);
     },
-  }),
-}));
+    useCatalogue: () =>
+      useStore(stores.failed)
+        ? { kind: "failed" }
+        : {
+            kind: "ready",
+            failing: [],
+            library: {
+              channels: [{ key: "home:7", title: "BBC Two HD" }],
+              byKey: new Map([
+                ["home:7", { key: "home:7", title: "BBC Two HD" }],
+                ["home:1", { key: "home:1", title: "BBC One HD" }],
+              ]),
+              placeOf: new Map([["home:7", "United Kingdom · Entertainment"]]),
+              labels: new Map([["home", "Living room"]]),
+              regions: [],
+            },
+          },
+  };
+});
 vi.mock("../src/guide-sources.ts", async () => {
   const { useStore } = await import("../src/store.ts");
   const { links, mappings } = stores;
@@ -128,6 +142,7 @@ vi.mock("../src/guide.ts", () => ({
 }));
 
 const { GuidesScreen, GuideMapEditor, GuideMapScreen } = await import("../src/guides-screen.tsx");
+const { default: GuideMapRoute } = await import("../src/app/(tabs)/(home)/guide-map.tsx");
 
 const SECRET = "https://epg.example.com/guide.xml?token=s3cret";
 const AT = new Date(2026, 9, 29, 10, 12).getTime();
@@ -136,6 +151,7 @@ let unmount = () => {};
 beforeEach(() => {
   stores.links.set([]);
   stores.mappings.set(new Map());
+  stores.failed.set(false);
 });
 afterEach(() => {
   unmount();
@@ -146,6 +162,7 @@ afterEach(() => {
   scenario.statuses.clear();
   scenario.ownIds = [];
   scenario.previews.clear();
+  scenario.channel = undefined;
 });
 
 async function render(element: React.ReactElement) {
@@ -287,6 +304,34 @@ it("keeps the editor open with the refusal when a mapping isn't saved", async ()
   scenario.refusal = null;
   await screen.press("guide-map-save");
   expect(scenario.calls).toEqual(["map home:7 bbc2.uk", "map home:7 bbc2.uk", "back"]);
+});
+
+it("maps the first channel in a repeated channel route query", async () => {
+  scenario.channel = ["home:7", "home:1"];
+  const screen = await render(React.createElement(GuideMapRoute));
+  await screen.type("guide-map-id", "bbc2.uk");
+  await screen.press("guide-map-save");
+  expect(scenario.calls).toEqual(["map home:7 bbc2.uk", "back"]);
+});
+
+it("shows a failed catalogue beside saved mappings and retries its channels", async () => {
+  stores.failed.set(true);
+  stores.mappings.set(new Map([["home:1", "BBC1.uk"]]));
+  const screen = await render(React.createElement(GuideMapScreen));
+  expect(screen.container.textContent).toContain("Couldn't load channels");
+  expect(screen.container.textContent).not.toContain("Loading channels");
+  expect(screen.label("guide-map-home:1")).not.toBeNull();
+  expect(screen.label("guide-map-home:7")).toBeNull();
+  const again = [...screen.container.querySelectorAll("button")].find(
+    (button) => button.textContent === "Try again",
+  );
+  expect(again).toBeDefined();
+  await React.act(async () => {
+    again!.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  expect(scenario.calls).toEqual(["retry channels"]);
+  expect(screen.label("guide-map-home:7")).toContain("BBC Two HD");
+  expect(screen.container.textContent).not.toContain("Couldn't load channels");
 });
 
 it("lists mapped channels first, those no longer listed too, then Automatic ones", async () => {

@@ -364,16 +364,20 @@ describe("external guides and mappings", () => {
     expect(control.calls.filter((call) => call.startsWith("attach:"))).toEqual([]);
   });
 
-  it("withdraws a channel's reads from external guides as its channels reload", async () => {
-    const { owner, has } = await twoGuides();
-    has.set("xmltv-1", ["trusted.tv"]);
-    const from = new Date(at);
-    from.setHours(0, 0, 0, 0);
-    const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
-    expect((await owner.schedule("a:1", day)).programmes).toHaveLength(1);
-    owner.setPart(part());
-    expect(owner.withdrawn("a:1", day.from)).toBe(1);
-  });
+  it.each(["reload", "removal"] as const)(
+    "withdraws a channel's reads from external guides on %s",
+    async (change) => {
+      const { owner, has } = await twoGuides();
+      has.set("xmltv-1", ["trusted.tv"]);
+      const from = new Date(at);
+      from.setHours(0, 0, 0, 0);
+      const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
+      expect((await owner.schedule("a:1", day)).programmes).toHaveLength(1);
+      if (change === "reload") owner.setPart(part());
+      else await owner.forget("a");
+      expect(owner.withdrawn("a:1", day.from)).toBe(1);
+    },
+  );
 
   it("withdraws what was read under guides or mappings that changed", async () => {
     const { owner, has } = await twoGuides();

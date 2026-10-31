@@ -236,9 +236,9 @@ export function createGuides(
       serially(async () => {
         for (const id of saved.pendingSecrets)
           if (!saved.guides.some((each) => each.id === id)) await dropSecret(id);
-        for (const { id } of saved.guides) {
+        for (const { id, key } of saved.guides) {
           const link = await secrets.read(id).catch(() => null);
-          if (link) origins.set(id, originFor(link));
+          if (link && sha256Hex(link) === key) origins.set(id, originFor(link));
         }
         publish();
         for (const id of origins.keys()) void owner.attach(id);
