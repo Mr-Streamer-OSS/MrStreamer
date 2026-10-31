@@ -44,6 +44,8 @@ const VERSION = 1;
 export interface StoredRecording extends Omit<Recording, "status" | "unsaved"> {
   readonly file: string;
   readonly folder?: string;
+  /** The id its chosen folder was marked with as it began, where it goes on. */
+  readonly mark?: string;
   readonly variants?: readonly string[];
   readonly progress?: { readonly position: number; readonly duration: number };
   readonly status: Exclude<Recording["status"], { readonly kind: "missing" | "paused" }>;
@@ -74,6 +76,7 @@ const Entry = lazy(() =>
       why: "'away' | 'busy' | 'stream' | 'disk' | 'space'",
     }).array(),
     "folder?": "string > 0",
+    "mark?": "string > 0",
     "variants?": "string[]",
     "progress?": { position: "number >= 0", duration: "number > 0" },
     status: type({ kind: "'recording' | 'complete' | 'stopped'" })

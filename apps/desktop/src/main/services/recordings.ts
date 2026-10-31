@@ -12,8 +12,8 @@
 // This service is the one owner of recordings. Their records are in recordings.json
 // (../recordings/store.ts), each file in a folder of its own, named for its programme
 // (`recordingFileName`), beside it or in the folder the viewer chose (storage.json), which holds a
-// mark from when it was chosen: nothing records into one without it, as a mount point's own empty
-// folder while its drive is away, and a recording there waits until its folder is back. A record is
+// mark from when it was first chosen: nothing records into one without it, as a mount point's own
+// empty folder while its drive is away, and a recording there waits until its own is back. A record is
 // written once its connection is held, before its folder is made, and listed once capture has the
 // stream's program table on disk; it is written again with how it ended, only after its provider
 // request ended and its file closed: the list never claims more than the file holds. A record still
@@ -139,9 +139,11 @@ const ENDED = { stopped: ".mrstreamer-stopped", quit: ".mrstreamer-quit" } as co
  */
 const FAILED = ".mrstreamer-failed";
 /**
- * Left empty in a folder as the viewer chooses it, and kept there: where it isn't, as in the empty
- * folder a drive's mount point keeps while the drive is away, nothing records or goes on, and
- * nothing there reads as unmarked (see FAILED), until the folder with it is back.
+ * Left in a folder as the viewer first chooses it, holding a random id, and kept there: where it
+ * isn't, as in the empty folder a drive's mount point keeps while the drive is away, nothing
+ * records, and nothing there reads as unmarked (see FAILED). A recording keeps the id of its
+ * folder's (`mark`), and goes on only where that is, as when its drive is back: another folder
+ * chosen at that path meanwhile, as that empty one, has its own.
  */
 const CHOSEN = ".mrstreamer-storage";
 
@@ -404,13 +406,17 @@ function make(deps: RecordingsDeps) {
      * written without them, as the next check does.
      */
     const failedFolders = new Map<string, string>();
-    /** Whether `folder` is the profile's own, or the one the viewer chose, marked (see CHOSEN). */
-    const isThere = async (folder: string) =>
-      folder === root ||
-      stat(join(folder, CHOSEN)).then(
-        () => true,
-        () => false,
-      );
+    /** The id `folder` is marked with (see CHOSEN), null when none; "" for the profile's own. */
+    const markOf = async (folder: string) =>
+      folder === root ? "" : readFile(join(folder, CHOSEN), "utf8").catch(() => null);
+    /**
+     * Whether `folder` is the profile's own, or one the viewer chose, marked, with `mark` when it is
+     * given: as a recording that began there has it, unless it began before marks held an id.
+     */
+    const isThere = async (folder: string, mark?: string) => {
+      const now = await markOf(folder);
+      return now !== null && (mark === undefined || now === mark);
+    };
     /** Whether `record` is a failed start (see FAILED), or null while its mark can't be read. */
     const failedStart = (record: StoredRecording) =>
       Effect.promise(() =>
@@ -419,7 +425,7 @@ function make(deps: RecordingsDeps) {
           async (cause: NodeJS.ErrnoException): Promise<boolean | null> => {
             if (cause.code !== "ENOENT" && cause.code !== "ENOTDIR") return null;
             // A chosen folder on a drive away cannot say whether it holds the mark.
-            return (await isThere(placeOf(record))) ? false : null;
+            return (await isThere(placeOf(record), record.mark)) ? false : null;
           },
         ),
       );
@@ -597,9 +603,11 @@ function make(deps: RecordingsDeps) {
           ),
           Effect.flatMap((out) =>
             Effect.promise(async () => {
-              // Never made anew where its parent went, as a chosen folder on a drive away.
+              // Never made anew where its parent went, or in another folder in its place, as on a
+              // drive away.
               const marked =
                 !out &&
+                (await isThere(placeOf(record), record.mark)) &&
                 (await mkdir(folder)
                   .catch((cause: NodeJS.ErrnoException) => {
                     if (cause.code !== "EEXIST") throw cause;
@@ -640,6 +648,7 @@ function make(deps: RecordingsDeps) {
           const {
             file: _file,
             folder: _folder,
+            mark: _mark,
             variants: _variants,
             progress: _progress,
             ...rest
@@ -853,7 +862,10 @@ function make(deps: RecordingsDeps) {
         // plugged in, is never made anew, or written into on another disk in its place (see
         // CHOSEN).
         const folder = resumes ? placeOf(resumes) : (storage.folder ?? root);
-        if (!(yield* Effect.promise(() => isThere(folder)))) return yield* notThere;
+        // A new one keeps its folder's mark, to go on only there.
+        const mark = resumes ? resumes.mark : yield* Effect.promise(() => markOf(folder));
+        if (mark === null || !(yield* Effect.promise(() => isThere(folder, mark))))
+          return yield* notThere;
         // A disk without room records nothing, asks the provider nothing and holds no connection
         // for it.
         if (!(yield* roomIn(folder)))
@@ -933,7 +945,7 @@ function make(deps: RecordingsDeps) {
           resumes || {
             id,
             file: recordingFileName(title, listed.title, now),
-            ...(folder !== root && { folder }),
+            ...(folder !== root && { folder, ...(mark && { mark }) }),
             channel: ownedId(listed),
             channelName: listed.title,
             title,
@@ -963,7 +975,7 @@ function make(deps: RecordingsDeps) {
         }
         // Its own folder is made, or made again when it went while the recording paused, in the
         // chosen folder as it is now, its drive maybe gone while the provider answered.
-        const opening = isThere(folder)
+        const opening = isThere(folder, record.mark)
           .then((there) => {
             if (!there) throw notThere;
           })
@@ -1061,7 +1073,13 @@ function make(deps: RecordingsDeps) {
         yield* publish;
         // What the schedules say of the connections changed.
         yield* wake;
-        const { file: _file, folder: _folder, variants: _variants, ...recording } = started;
+        const {
+          file: _file,
+          folder: _folder,
+          mark: _mark,
+          variants: _variants,
+          ...recording
+        } = started;
         return {
           kind: "started",
           recording: { ...recording, bytes: capture.bytes() },
@@ -1508,7 +1526,7 @@ function make(deps: RecordingsDeps) {
       Effect.runFork(
         Effect.gen(function* () {
           // A drive away isn't measured: its mount point's disk says nothing of its room.
-          if (!(yield* Effect.promise(() => isThere(placeOf(record))))) return null;
+          if (!(yield* Effect.promise(() => isThere(placeOf(record), record.mark)))) return null;
           if (!(yield* roomIn(placeOf(record)))) return "space" as const;
           const answer = yield* start(record.channel, record.stop, { resumes: record });
           return answer.kind === "busy" ? ("busy" as const) : null;
@@ -1564,7 +1582,7 @@ function make(deps: RecordingsDeps) {
           // it ended: nothing goes on until then.
           const kept = unseen.get(record.id);
           if (kept) {
-            if (!(yield* Effect.promise(() => isThere(placeOf(kept))))) {
+            if (!(yield* Effect.promise(() => isThere(placeOf(kept), kept.mark)))) {
               paused = true;
               continue;
             }
@@ -2121,11 +2139,18 @@ function make(deps: RecordingsDeps) {
         ),
       setFolder: (folder: string) =>
         Effect.gen(function* () {
-          // Written to, as a recording would be, before anything goes there: its mark (see CHOSEN).
+          // Written to, as a recording would be, before anything goes there: its mark, once, kept
+          // as it is after that (see CHOSEN).
           yield* Effect.tryPromise({
             try: async () => {
               await mkdir(folder, { recursive: true });
-              await writeFile(join(folder, CHOSEN), "");
+              if (folder !== root && !(await markOf(folder)))
+                await writeFile(join(folder, CHOSEN), randomUUID());
+              else {
+                const probe = join(folder, `.mrstreamer-${randomUUID()}`);
+                await writeFile(probe, "");
+                await rm(probe, { force: true });
+              }
             },
             catch: () =>
               new Failed({

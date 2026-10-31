@@ -1681,6 +1681,13 @@ describe.skipIf(!hasTools)("recordings", () => {
         });
         expect(provider.streamRequests()).toBe(requests);
         expect(readdirSync(chosen)).toEqual([]);
+        // Chosen again, as the refusal says, that empty folder takes new recordings, but this one
+        // goes on only in the folder it began in.
+        await again.recordings.setFolder(chosen);
+        await again.recordings.check();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(provider.streamRequests()).toBe(requests);
+        expect(readdirSync(chosen)).toEqual([".mrstreamer-storage"]);
       } finally {
         await rm(chosen, { recursive: true });
         await rename(`${chosen}.away`, chosen);
