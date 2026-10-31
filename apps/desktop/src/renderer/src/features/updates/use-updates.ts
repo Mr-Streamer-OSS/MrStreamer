@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import type { Recording } from "@mrstreamer/contracts/recordings";
 import type { UpdateStatus } from "@mrstreamer/contracts/updates";
@@ -12,6 +12,8 @@ import { useLiveRecordings } from "../recordings/recordings.ts";
 type StatusAction =
   | { method: "updates.check" | "updates.download" }
   | { method: "updates.downloadVersion"; version: string };
+
+const STOP_RECORDINGS = ["updates", "stop-recordings"] as const;
 
 /**
  * When a ready update installs while `live` recordings' time goes on: once the one that stops last
@@ -60,6 +62,7 @@ export function useUpdates() {
       }, showSettings);
   };
   const stopping = useMutation({
+    mutationKey: STOP_RECORDINGS,
     mutationFn: async (ids: readonly string[]) => {
       const results = await Promise.allSettled(ids.map((id) => call("recordings.stop", { id })));
       const failed = results.find((result) => result.status === "rejected");
@@ -67,6 +70,12 @@ export function useUpdates() {
     },
     onSuccess: restart,
   });
+  const stopPending = useIsMutating({ mutationKey: STOP_RECORDINGS, exact: true }) > 0;
+  // All update surfaces share the client: admit once, even before another hook re-renders.
+  const stop = (ids: readonly string[]) => {
+    if (client.isMutating({ mutationKey: STOP_RECORDINGS, exact: true }) === 0)
+      stopping.mutate(ids);
+  };
   const setChannel = useMutation({
     mutationFn: (channel: Channel) => call("updates.setChannel", { channel }),
     onSuccess: store,
@@ -95,10 +104,12 @@ export function useUpdates() {
     /** The recordings whose time goes on, which a ready update waits for. */
     recording: live,
     restart,
-    stopState: stopping,
-    /** Stops what records, keeping what it captured, then installs and restarts. */
-    restartNow: () => {
-      if (!stopping.isPending) stopping.mutate(live.map(({ id }) => id));
+    stopError: stopping.error,
+    stopPending,
+    retryStop: () => {
+      if (stopping.variables) stop(stopping.variables);
     },
+    /** Stops what records, keeping what it captured, then installs and restarts. */
+    restartNow: () => stop(live.map(({ id }) => id)),
   };
 }

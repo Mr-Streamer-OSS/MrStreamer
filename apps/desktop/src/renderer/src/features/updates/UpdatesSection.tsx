@@ -102,8 +102,18 @@ export function UpdatesSection() {
 
 /** The version, where its update stands, and the one action that needs. */
 function State({ status }: { status: UpdateStatus }) {
-  const { check, download, cancel, restart, restartNow, recording, actionState, stopState } =
-    useUpdates();
+  const {
+    check,
+    download,
+    cancel,
+    restart,
+    restartNow,
+    recording,
+    actionState,
+    stopError,
+    stopPending,
+    retryStop,
+  } = useUpdates();
   const { update, version, checked, nextCheckAt, offer } = status;
   // A ready update waits for what records, unless Restart now stops it.
   const waits = update.kind === "ready" && recording.length > 0;
@@ -189,12 +199,7 @@ function State({ status }: { status: UpdateStatus }) {
           </Button>
         )}
         {waits && (
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={restartNow}
-            disabled={stopState.isPending}
-          >
+          <Button variant="destructive" size="sm" onClick={restartNow} disabled={stopPending}>
             {t("Restart now")}
           </Button>
         )}
@@ -233,9 +238,9 @@ function State({ status }: { status: UpdateStatus }) {
       {update.kind === "ready" && (
         <SaveFeedback
           pending={false}
-          error={stopState.error}
-          retry={() => stopState.mutate(stopState.variables!)}
-          retryDisabled={stopState.isPending}
+          error={stopError}
+          retry={retryStop}
+          retryDisabled={stopPending}
         />
       )}
       {failure && <p className="mt-2 text-sm text-destructive">{failure}</p>}
