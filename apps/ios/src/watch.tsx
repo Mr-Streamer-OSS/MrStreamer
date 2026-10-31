@@ -93,14 +93,15 @@ const STILL = STREAMING.filter((shortcut) => shortcut.id === "close" || shortcut
 /**
  * Watch: the player full screen, over the tabs, with A3's controls: a close button, AirPlay,
  * Picture in Picture, Downloads and Settings at the top, and everything else in one large glass
- * panel, all showing and hiding together. A channel adds Quality and its star, which stars or
- * unstars it and leaves what plays alone. A movie or an episode adds a scrubber, its sound and subtitle tracks
- * and the next episode. It is the app's own layer rather than a route, because
- * the view that starts Picture in Picture has to stay while it plays: Watch then hides, and the
- * tabs and accessory take over. Closing it shows the screen under it, a title's details among
- * them. A movie or an episode turns Watch to landscape while it shows in a window under 700 points
- * on its short side, as on a phone; the screens under it turn as the phone does again once it
- * closes. A larger window, as an iPad's, shows the picture as the window stands.
+ * panel, all showing and hiding together. Both a channel and a title add their sound and subtitle
+ * tracks. A channel adds Quality, its star, which stars or unstars it and leaves what plays alone,
+ * and Play from start while its catch-up keeps the programme on now.
+ * A movie or an episode adds a scrubber and the next episode. It is the app's own layer rather
+ * than a route, because the view that starts Picture in Picture has to stay while it plays: Watch
+ * then hides, and the tabs and accessory take over. Closing it shows the screen under it, a
+ * title's details among them. A movie or an episode turns Watch to landscape while it shows in a
+ * window under 700 points on its short side, as on a phone; the screens under it turn as the phone
+ * does again once it closes. A larger window, as an iPad's, shows the picture as the window stands.
  *
  * Downloads and Settings open on the tab under Watch without stopping what plays: where Picture in
  * Picture can, it takes the picture over, as its own button does; otherwise Watch is set aside,
@@ -403,8 +404,7 @@ function Controls({
           </View>
         </View>
         {streaming ? phase.item.live ? <Clock /> : <Scrubber /> : null}
-        {streaming && phase.item.live ? <StartOver item={phase.item} /> : null}
-        {streaming && !phase.item.live ? <TitleButtons next={phase.item.next} /> : null}
+        {streaming ? <TextButtons item={phase.item} /> : null}
       </Glass>
     </>
   );
@@ -431,14 +431,12 @@ function StartOver({ item }: { item: Playing }) {
   if (!channel || !programme || catchUpOf(channel, programme, Date.now()).kind !== "on")
     return null;
   return (
-    <View style={styles.titleButtons}>
-      <TextControl
-        label="Play from start"
-        accessibilityLabel={`Play ${programme.title} from start`}
-        onPress={() => playChannel(channel, channel.title, { watch: true, programme })}
-        testID="watch-from-start"
-      />
-    </View>
+    <TextControl
+      label="Play from start"
+      accessibilityLabel={`Play ${programme.title} from start`}
+      onPress={() => playChannel(channel, channel.title, { watch: true, programme })}
+      testID="watch-from-start"
+    />
   );
 }
 
@@ -653,8 +651,11 @@ function Scrubber() {
   );
 }
 
-/** Audio, Subtitles and Next episode: what a title adds to the panel. */
-function TitleButtons({ next }: { next: boolean }) {
+/**
+ * Audio and Subtitles, then Play from start for a live channel or Next episode for a title: one
+ * row of text controls that wraps when it runs out of width.
+ */
+function TextButtons({ item }: { item: Playing }) {
   const menu = useRef(0);
   useEffect(
     () => () => {
@@ -665,14 +666,16 @@ function TitleButtons({ next }: { next: boolean }) {
   const choose = async (of: "audio" | "subtitles") => {
     const mine = ++menu.current;
     const asked = request();
-    const item = playingItem(playbackState.get().phase);
+    const playing = playingItem(playbackState.get().phase);
     const stands = () =>
       menu.current === mine &&
       asked.stands() &&
       playbackState.get().watch &&
-      playingItem(playbackState.get().phase) === item;
-    const choices = await trackChoices(of);
+      playingItem(playbackState.get().phase) === playing;
+    const known = await trackChoices(of);
     if (!stands()) return;
+    const choices = known ?? [];
+    const none = choices.length === 0 || (choices.length === 1 && choices[0]?.kind === "off");
     showSheet(
       {
         title: of === "audio" ? "Audio" : "Subtitles",
@@ -681,9 +684,11 @@ function TitleButtons({ next }: { next: boolean }) {
           "Cancel",
         ],
         cancelButtonIndex: choices.length,
-        ...(choices.length === 0 || (choices.length === 1 && choices[0]?.kind === "off")
-          ? { message: "None in this file." }
-          : {}),
+        ...(known === null
+          ? { message: "Not known yet. Try again in a moment." }
+          : none
+            ? { message: item.live ? "No choices on this channel." : "No choices in this file." }
+            : {}),
       },
       (index) => {
         if (stands()) void choices[index]?.choose();
@@ -691,14 +696,18 @@ function TitleButtons({ next }: { next: boolean }) {
     );
   };
   return (
-    <View style={styles.titleButtons}>
+    <View style={styles.textButtons}>
       <TextControl label="Audio" onPress={() => void choose("audio")} testID="watch-audio" />
       <TextControl
         label="Subtitles"
         onPress={() => void choose("subtitles")}
         testID="watch-subtitles"
       />
-      {next ? <TextControl label="Next episode" onPress={playNext} testID="watch-next" /> : null}
+      {item.live ? (
+        <StartOver item={item} />
+      ) : item.next ? (
+        <TextControl label="Next episode" onPress={playNext} testID="watch-next" />
+      ) : null}
     </View>
   );
 }
@@ -753,7 +762,7 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     backgroundColor: "#FFFFFF",
   },
-  titleButtons: { flexDirection: "row", flexWrap: "wrap", gap: 18, marginTop: 4 },
+  textButtons: { flexDirection: "row", flexWrap: "wrap", gap: 18, marginTop: 4 },
   textControl: { minHeight: 44, justifyContent: "center" },
   textControlLabel: { color: colors.text, fontSize: 15, fontWeight: "600" },
   pressed: { opacity: 0.5 },
