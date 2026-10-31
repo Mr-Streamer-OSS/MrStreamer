@@ -88,6 +88,13 @@ export interface GuideNative {
     until: number,
     after: number,
   ): Promise<Result<Query>>;
+  /** The guide ids with a programme not ended at `at`. */
+  current(
+    lease: string,
+    generation: string,
+    job: string,
+    at: number,
+  ): Promise<Result<{ readonly ids: readonly string[] }>>;
   /**
    * The first `limit` programmes on `ids`, not ended at `at`, whose title folded as core text.ts
    * `normalize` folds holds each of `words`: on now first, then by start.

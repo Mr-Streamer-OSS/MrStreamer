@@ -21,6 +21,10 @@ export function guideFixture() {
       kind: "ok",
       value: { guideId: null, rows: [], more: false },
     }),
+    current: async (): Promise<Result<{ readonly ids: readonly string[] }>> => ({
+      kind: "ok",
+      value: { ids: [] },
+    }),
     search: async (): Promise<Result<{ readonly rows: readonly Match[] }>> => ({
       kind: "ok",
       value: { rows: [] },
@@ -88,6 +92,9 @@ export function guideFixture() {
     },
     async query() {
       return control.query();
+    },
+    async current() {
+      return control.current();
     },
     async search() {
       return control.search();

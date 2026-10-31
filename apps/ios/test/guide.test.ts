@@ -1114,6 +1114,12 @@ describe("programme search", () => {
         .map(({ guideId, start, stop, title }) => ({ guideId, start, stop, title }));
       return { kind: "ok", value: { rows } };
     };
+    native.current = async (lease, _generation, _job, now) => {
+      const guide = held.get(ownerOf(lease));
+      if (!guide) return { kind: "changed" };
+      const ids = [...guide].filter(([, rows]) => rows.some((row) => row.stop > now));
+      return { kind: "ok", value: { ids: ids.map(([id]) => id) } };
+    };
     native.query = async (lease, _generation, _job, ids, now, mode, _from, _until, after) => {
       const guide = held.get(ownerOf(lease))!;
       const guideId = ids.find((id) => guide.get(id)?.some((row) => row.stop > now)) ?? null;
@@ -1148,12 +1154,37 @@ describe("programme search", () => {
     ]);
     expect(await owner.programme(found[1]!.programme.detail)).toEqual(match);
     expect(await owner.search("  ", keys)).toEqual([]);
-    // Past the native reader's eight words, the first eight count.
-    const long = await owner.search(
-      "morning news morning news morning news morning news more",
-      keys,
-    );
-    expect(long.map(({ programme }) => programme.title)).toEqual(["Morning News"]);
+  });
+
+  it("asks a guide only for the ids channels read from it", async () => {
+    const { owner, held } = await searching();
+    held.get("a")!.set("news.tv", [show("Headlines", at)]);
+    const shadowed = Array.from({ length: 20 }, (_, n) => show(`Early news ${n}`, at + n * 60_000));
+    held.get("xmltv-1")!.set("news.tv", shadowed);
+    held.get("xmltv-1")!.set("sport.tv", [show("Sport news", at + 7200_000)]);
+    const found = await owner.search("news", keys);
+    expect(found.map(({ key, programme }) => [key, programme.title])).toEqual([
+      ["a:2", "Sport news"],
+    ]);
+  });
+
+  it("finds a mapped channel's programmes by its mapped id first", async () => {
+    const { owner, held } = await searching();
+    held.get("xmltv-1")!.set("bbc-one", [show("Sport news", at)]);
+    held.get("xmltv-1")!.set("sport.tv", [show("Other news", at)]);
+    owner.configure(new Map([["xmltv-1", external]]), new Map([["a:2", "bbc-one"]]));
+    const found = await owner.search("news", keys);
+    expect(found.map(({ key, programme }) => [key, programme.title])).toEqual([
+      ["a:2", "Sport news"],
+    ]);
+  });
+
+  it("finds by every word of a query longer than the native reader's eight", async () => {
+    const { owner, held } = await searching();
+    const words = "one two three four five six seven eight nine";
+    held.get("a")!.set("news.tv", [show(words, at), show(words.replace("nine", "ten"), at)]);
+    const found = await owner.search(words, keys);
+    expect(found.map(({ programme }) => programme.title)).toEqual([words]);
   });
 
   it("fails where a guide could not be searched", async () => {
@@ -1163,7 +1194,7 @@ describe("programme search", () => {
     await expect(owner.search("news", keys)).rejects.toMatchObject({ problem: "unavailable" });
   });
 
-  it("finds at most 20, asking each guide for at most 50", async () => {
+  it("finds at most 20, asking each guide for no more", async () => {
     const { owner, held, searched } = await searching();
     const many = (title: string, from: number) =>
       Array.from({ length: 20 }, (_, n) => show(`${title} ${n}`, from + n * 60_000));
@@ -1172,12 +1203,13 @@ describe("programme search", () => {
     const found = await owner.search("weather", keys);
     expect(found).toHaveLength(20);
     expect(found[0]).toMatchObject({ key: "a:2", programme: { title: "Weather 0" } });
-    expect(searched.map(({ limit }) => limit)).toEqual([50, 50]);
+    expect(searched.map(({ limit }) => limit)).toEqual([20, 20]);
   });
 
   it("leaves out guides that are stale and channels no catalogue lists", async () => {
     const { owner, held, control } = await searching();
     held.get("a")!.set("news.tv", [show("News", at)]);
+    expect(await owner.search("news", keys)).toHaveLength(1);
     expect(await owner.search("news", ["b:1"])).toEqual([]);
     control.activations.set("a", {
       lease: "old",
