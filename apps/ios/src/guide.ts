@@ -88,8 +88,10 @@ const dayOf = (at: number) => {
   const date = new Date(at);
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 };
-/** How many programmes `search` finds, and asks each guide for. */
+/** How many programmes `search` finds. */
 const SEARCH_LIMIT = 20;
+/** How many `search` asks each guide for: more, as some show on no channel. */
+const SEARCH_ASKED = 50;
 const FRESH = 6 * 3600_000;
 /**
  * Channel days whose withdrawals `withdrawn` tells apart: a week of the Guide grid's 24 rows
@@ -672,7 +674,9 @@ export function createGuide(
      * Up to 20 programmes on now or later whose title has every word of `text`, from every guide:
      * on now first, then by start. Each is on the first of `keys` (`Channel.key`, in the order
      * Search lists channels) that reads its programmes from where it was found, and its `detail`
-     * reads it with `programme`. A guide whose first 20 partly show on no channel finds fewer.
+     * reads it with `programme`. A guide whose first 50 mostly show on no channel finds fewer, and
+     * only the first 8 words count. Nothing is found once guides, sources, catalogues or mappings
+     * change during it; it fails where a standing guide could not be searched.
      */
     async search(
       text: string,
@@ -680,8 +684,17 @@ export function createGuide(
       options?: { readonly signal?: AbortSignal },
     ): Promise<readonly FoundProgramme[]> {
       const signal = options?.signal;
-      const words = searchWords(text);
-      if (words.length === 0) return [];
+      const words = searchWords(text).slice(0, 8);
+      // No title holds a word longer than the native reader takes.
+      if (words.length === 0 || words.some((word) => new TextEncoder().encode(word).length > 128))
+        return [];
+      // What every answer stands on, which a change during the search leaves it none of.
+      const footing = () => [
+        layout,
+        ...[...entries].flatMap(([key, entry]) => [key, entry, entry.generation, originOf(key)]),
+        ...parts.values(),
+      ];
+      const before = footing();
       // By guide, the channels that may read each of its guide ids, in the order of `keys`.
       const guides = new Map<
         string,
@@ -701,8 +714,9 @@ export function createGuide(
       const found: { key: string; captured: Token; match: Match }[] = [];
       for (const { asking, by } of guides.values()) {
         const answer = await ask(asking, signal, (native, lease, job) =>
-          native.search(lease, asking.generation.id, job, [...by.keys()], words, at, SEARCH_LIMIT),
+          native.search(lease, asking.generation.id, job, [...by.keys()], words, at, SEARCH_ASKED),
         );
+        if (!answer && !signal?.aborted && validToken(asking)) throw new GuideFault("unavailable");
         for (const match of answer?.rows ?? [])
           for (const key of by.get(match.guideId) ?? []) {
             if (!reads.has(key))
@@ -718,7 +732,13 @@ export function createGuide(
             }
           }
       }
-      if (signal?.aborted) return [];
+      const after = footing();
+      if (
+        signal?.aborted ||
+        after.length !== before.length ||
+        after.some((v, n) => v !== before[n])
+      )
+        return [];
       const rank = ({ match }: (typeof found)[number]) => (match.start <= at ? 0 : 1);
       return found
         .filter(({ captured }) => validToken(captured))

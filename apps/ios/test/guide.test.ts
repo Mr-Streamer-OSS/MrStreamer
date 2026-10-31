@@ -1103,6 +1103,7 @@ describe("programme search", () => {
     native.search = async (lease, _generation, _job, ids, words, now, limit) => {
       const guide = held.get(ownerOf(lease))!;
       searched.push({ owner: ownerOf(lease), ids, limit });
+      if (words.length > 8) return { kind: "failed", error: "reply" };
       const rows = ids
         .flatMap((guideId) => (guide.get(guideId) ?? []).map((row) => ({ ...row, guideId })))
         .filter(
@@ -1147,9 +1148,22 @@ describe("programme search", () => {
     ]);
     expect(await owner.programme(found[1]!.programme.detail)).toEqual(match);
     expect(await owner.search("  ", keys)).toEqual([]);
+    // Past the native reader's eight words, the first eight count.
+    const long = await owner.search(
+      "morning news morning news morning news morning news more",
+      keys,
+    );
+    expect(long.map(({ programme }) => programme.title)).toEqual(["Morning News"]);
   });
 
-  it("finds at most 20, asking each guide for no more", async () => {
+  it("fails where a guide could not be searched", async () => {
+    const { owner, native, held } = await searching();
+    held.get("a")!.set("news.tv", [show("News", at)]);
+    native.search = async () => ({ kind: "failed", error: "time" });
+    await expect(owner.search("news", keys)).rejects.toMatchObject({ problem: "unavailable" });
+  });
+
+  it("finds at most 20, asking each guide for at most 50", async () => {
     const { owner, held, searched } = await searching();
     const many = (title: string, from: number) =>
       Array.from({ length: 20 }, (_, n) => show(`${title} ${n}`, from + n * 60_000));
@@ -1158,7 +1172,7 @@ describe("programme search", () => {
     const found = await owner.search("weather", keys);
     expect(found).toHaveLength(20);
     expect(found[0]).toMatchObject({ key: "a:2", programme: { title: "Weather 0" } });
-    expect(searched.map(({ limit }) => limit)).toEqual([20, 20]);
+    expect(searched.map(({ limit }) => limit)).toEqual([50, 50]);
   });
 
   it("leaves out guides that are stale and channels no catalogue lists", async () => {
@@ -1174,19 +1188,21 @@ describe("programme search", () => {
     expect(await owner.search("news", keys)).toEqual([]);
   });
 
-  it.each(["removal", "replacement", "part"] as const)(
+  it.each(["removal", "replacement", "part", "mappings"] as const)(
     "answers nothing for a search held across %s",
     async (change) => {
       const { owner, native, held, sources } = await searching();
       held.get("a")!.set("news.tv", [show("News", at)]);
+      held.get("xmltv-1")!.set("sport.tv", [show("Sport news", at)]);
       sources.set("a", source);
       await owner.attach("a");
       const answered = native.search;
       const release = deferred<void>(),
         reached = deferred<void>();
-      // Answered under the old source, but late.
+      // The external guide, searched last, answers under the old provider, but late.
       native.search = async (...args) => {
         const answer = await answered(...args);
+        if (args[1] !== "db-x") return answer;
         reached.resolve();
         await release.promise;
         return answer;
@@ -1199,10 +1215,11 @@ describe("programme search", () => {
         await owner.attach("a");
       }
       if (change === "part") owner.setPart(channels());
+      if (change === "mappings") owner.configure(new Map([["xmltv-1", external]]), new Map());
       release.resolve();
       expect(await pending).toEqual([]);
       if (change !== "removal")
-        expect((await owner.search("news", keys)).map(({ key }) => key)).toEqual(["a:1"]);
+        expect((await owner.search("news", keys)).map(({ key }) => key)).toEqual(["a:1", "a:2"]);
     },
   );
 });

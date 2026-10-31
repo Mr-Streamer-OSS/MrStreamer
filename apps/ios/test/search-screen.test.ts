@@ -8,7 +8,7 @@ import type { HTMLInputElement } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue, Member } from "../src/account.ts";
 import type { FoundProgramme } from "../src/guide.ts";
-import { programmeRange } from "../src/guide-ui.tsx";
+import { dayLabel, localDay, programmeRange } from "../src/guide-ui.tsx";
 import { buildLibrary, type Channel, type Library } from "../src/library.ts";
 
 // Search over the tabs: what it finds opens where it belongs and closes Search first, the query
@@ -1458,6 +1458,25 @@ describe("Programmes in Search", () => {
     expect(text()).toContain(
       `${programmeRange({ start: at, stop: at + 1_800_000 })} · BBC One · Southwind`,
     );
+  });
+
+  it("dates a programme on another day, and says when the guide could not be searched", async () => {
+    const tomorrow = Date.now() + 86_400_000;
+    scenario.search = async (text) => {
+      if (text === "film") throw new Error("unavailable");
+      return [
+        {
+          key: "b:7",
+          programme: { start: tomorrow, stop: tomorrow + 60_000, title: "Late Film", detail: "f" },
+        },
+      ];
+    };
+    await open();
+    await type("late");
+    expect(text()).toContain(dayLabel(localDay(tomorrow), Date.now()));
+    await type("film");
+    expect(text()).toContain("Programmes not searched.");
+    expect(text()).not.toContain("Nothing named");
   });
 
   it("opens a programme inside Search and goes Back to the same query and results, never playing", async () => {

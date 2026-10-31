@@ -37,7 +37,7 @@ import { openOnTabs, useTabs } from "../header.tsx";
 import { DownloadStatusButton } from "../download-status.tsx";
 import { guide, type FoundProgramme } from "../guide.ts";
 import { Programme } from "../guide-screen.tsx";
-import { programmeRange, useGuideRead } from "../guide-ui.tsx";
+import { dayLabel, localDay, programmeRange, useGuideRead } from "../guide-ui.tsx";
 import { inTasks, searchChannelsSteps, type Channel, type Library } from "../library.ts";
 import {
   libraryStatus,
@@ -450,7 +450,13 @@ export default function Search() {
     movies.pending ||
     series.pending ||
     channels.pending ||
-    (searched !== "" && channelKeys.length > 0 && programmeRead.pending);
+    // Only until the text's first answer: the guide reads again each minute, as programmes end.
+    (searched !== "" &&
+      channelKeys.length > 0 &&
+      programmeRead.pending &&
+      programmeRead.value === undefined);
+  // A guide that could not be searched is said, and not taken for one without the name.
+  const unsearched = searched !== "" && programmeRead.failed;
   const providers = libraryStatus(members, {
     channels: true,
     titles: true,
@@ -460,7 +466,12 @@ export default function Search() {
     settings,
   });
   const line = useProviderStatus(
-    searchLine(searching ? status : null, searching ? providers : null, pending),
+    searchLine(
+      searching ? status : null,
+      searching ? providers : null,
+      pending,
+      searching && unsearched,
+    ),
   );
   const keyboard = useKeyboardHeight();
   // The height under the search field, for results and the status line together; measured as
@@ -583,7 +594,7 @@ export default function Search() {
           ListEmptyComponent={
             // Nothing has the name only once the latest text was searched in every list. While one
             // loads or failed, the status line says what was searched instead.
-            searching && !pending && !status && !providers ? (
+            searching && !pending && !status && !providers && !unsearched ? (
               <Nothing query={searched} library={library} lists={lists} />
             ) : undefined
           }
@@ -621,15 +632,17 @@ export default function Search() {
 
 /**
  * Search's status line: Searching while the latest text waits to be searched, then what hasn't
- * loaded or failed, with the shared provider notice or persistent recovery. The provider count
+ * loaded or failed, and programmes when a guide could not be searched (`unsearched`), with the
+ * shared provider notice or persistent recovery. The provider count
  * shows as a bar with two or more providers. Null with nothing to say.
  */
 function searchLine(
   status: SearchStatus | null,
   providers: Status | null,
   pending: boolean,
+  unsearched: boolean,
 ): Status | null {
-  if (!status && !providers && !pending) return null;
+  if (!status && !providers && !pending && !unsearched) return null;
   const actions = [...(providers?.actions ?? [])];
   if (status?.retry.length && !actions.some((action) => action.label === "Retry")) {
     actions.push({ label: "Retry", onPress: () => status.retry.forEach(retry) });
@@ -639,7 +652,9 @@ function searchLine(
   const text = providers?.inline ? providers.text : (status?.text ?? "");
   return {
     ...providers,
-    text: [pending ? "Searching." : "", text].filter(Boolean).join(" "),
+    text: [pending ? "Searching." : "", text, unsearched ? "Programmes not searched." : ""]
+      .filter(Boolean)
+      .join(" "),
     actions,
     ...(status?.loading && status.loading.of > 1
       ? { progress: status.loading.settled / status.loading.of }
@@ -742,7 +757,10 @@ function TitleRow({
   );
 }
 
-/** A programme found: its title, then its time, channel and, with several providers, provider. */
+/**
+ * A programme found: its title, then its day when not today, its time, channel and, with several
+ * providers, provider.
+ */
 function ProgrammeRow({
   row: { found, channel, provider },
   height,
@@ -752,7 +770,14 @@ function ProgrammeRow({
   height: number;
   onPress: (found: FoundProgramme) => void;
 }) {
-  const line = [programmeRange(found.programme), channel.title, provider]
+  const now = Date.now();
+  const day = localDay(found.programme.start);
+  const line = [
+    day.from === localDay(now).from ? null : dayLabel(day, now),
+    programmeRange(found.programme),
+    channel.title,
+    provider,
+  ]
     .filter(Boolean)
     .join(" · ");
   return (
