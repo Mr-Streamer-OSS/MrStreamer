@@ -230,7 +230,7 @@ export const nl: Translation = {
   "Hide {app}": "{app} verbergen",
   "Hide Others": "Andere verbergen",
   "Show All": "Alles tonen",
-  "Quit {app}": "{app} stoppen",
+  "Quit {app}": "{app} afsluiten",
   File: "Bestand",
   "Close Window": "Venster sluiten",
   Edit: "Bewerken",

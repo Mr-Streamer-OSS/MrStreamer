@@ -665,9 +665,14 @@ async function start(): Promise<void> {
         }
         await sleep(RECORDING_WAIT_MS);
       }
-      await runtime.runPromise(updates.restart);
       // Refused or failed, the app goes on: so do recordings.
-      if (!(await wanted())) runtime.runSync(recordings.holdStarts(false));
+      let goes = false;
+      try {
+        await runtime.runPromise(updates.restart);
+        goes = await wanted();
+      } finally {
+        if (!goes) runtime.runSync(recordings.holdStarts(false));
+      }
     })().finally(() => {
       restarting = null;
       restartInto = null;
