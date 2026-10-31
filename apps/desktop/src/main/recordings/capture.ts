@@ -43,6 +43,8 @@ export class CaptureFailure extends Error {
 
 /** Why capture couldn't write its file: the system's own words, which say why. */
 class DiskFailure extends Error {}
+const diskFailure = (cause: unknown) =>
+  new DiskFailure(cause instanceof Error ? cause.message : String(cause));
 
 /**
  * Why a capture under way ended: at its stop time, as asked, cut short, out of the room `room`
@@ -94,12 +96,16 @@ export async function startCapture(
         )
       : open(path, "wx")
   ).catch((cause: unknown) => {
-    throw new DiskFailure(cause instanceof Error ? cause.message : String(cause));
+    throw diskFailure(cause);
   });
+  // Where an append begins, and where a failed one cuts back to: unknown, nothing is written.
   const before = options.append
     ? await file.stat().then(
         ({ size }) => size,
-        () => 0,
+        async (cause: unknown) => {
+          await file.close().catch(() => {});
+          throw diskFailure(cause);
+        },
       )
     : 0;
   // The stop time also ends a start that takes that long.
@@ -114,7 +120,7 @@ export async function startCapture(
       const { bytesWritten } = await file
         .write(chunk, offset, chunk.length - offset, written)
         .catch((cause: unknown) => {
-          throw new DiskFailure(cause instanceof Error ? cause.message : String(cause));
+          throw diskFailure(cause);
         });
       if (bytesWritten === 0) throw new DiskFailure("Nothing could be written.");
       offset += bytesWritten;
@@ -123,6 +129,8 @@ export async function startCapture(
     wroteAt = Date.now();
     options.changed();
   };
+  /** Cuts the file back to `before`: one that can't be would keep what a failed source wrote. */
+  const cutBack = () => file.truncate(before).then(() => null, diskFailure);
   let last: unknown = new CaptureFailure({ kind: "unavailable", status: 404 });
   for (const [index, source] of sources.entries()) {
     const stop = new AbortController();
@@ -142,11 +150,15 @@ export async function startCapture(
       await opened?.close();
       last = cause;
       if (cause instanceof DiskFailure || options.signal.aborted || deadline.aborted) break;
-      await file.truncate(before).catch(() => {});
+      const cut = await cutBack();
+      if (cut) {
+        last = cut;
+        break;
+      }
       written = before;
     }
   }
-  if (options.append) await file.truncate(before).catch(() => {});
+  if (options.append) last = (await cutBack()) ?? last;
   await file.close().catch(() => {});
   if (!options.append) await rm(path, { force: true });
   if (last instanceof DiskFailure) throw last;

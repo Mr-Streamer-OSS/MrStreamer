@@ -1305,6 +1305,7 @@ export const en = {
   "The folder couldn't be opened.": "The folder couldn't be opened.",
   "There isn't enough free space to record.": "There isn't enough free space to record.",
   "Recording settings could not be saved.": "Recording settings could not be saved.",
+  "Recording settings could not be read.": "Recording settings could not be read.",
   "This recording is no longer there.": "This recording is no longer there.",
   "Recordings can't be written to that folder.": "Recordings can't be written to that folder.",
   "Choose a folder for recordings": "Choose a folder for recordings",

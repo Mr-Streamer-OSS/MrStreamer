@@ -627,27 +627,46 @@ async function start(): Promise<void> {
   // A recording pauses as the computer sleeps, and goes on with the rest after it wakes.
   const sleeps = () => void runtime.runFork(recordings.suspend);
   powerMonitor.on("suspend", sleeps);
+  // Also without a window, which would otherwise not end the app before the system does.
   const shutsDown = () => {
     shuttingDown = true;
+    app.quit();
   };
   powerMonitor.on("shutdown", shutsDown);
   recordingNow = () => runtime.runSync(recordings.live).recording;
   /**
    * The update's restart, once nothing records: one wait however often it is asked for, and only
-   * for the release that was ready, still ready and not put off meanwhile.
+   * for the release last asked for, still ready and not put off meanwhile. From the moment nothing
+   * records, nothing new starts until the app quits, or the restart didn't go ahead.
    */
   let restarting: Promise<void> | null = null;
-  const restartAfterRecording = Effect.promise(() => {
+  let restartInto: string | null = null;
+  const restartAfterRecording = Effect.promise(async () => {
+    const asked = (await runtime.runPromise(updates.status)).update;
+    if (asked.kind !== "ready") return;
+    restartInto = asked.version;
     restarting ??= (async () => {
-      const asked = (await runtime.runPromise(updates.status)).update;
-      if (asked.kind !== "ready") return;
-      while (recordingNow()) await sleep(RECORDING_WAIT_MS);
-      const now = await runtime.runPromise(updates.status);
-      if (now.update.kind !== "ready" || now.update.version !== asked.version) return;
-      if (now.dismissed === asked.version) return;
+      const wanted = async () => {
+        const now = await runtime.runPromise(updates.status);
+        return (
+          now.update.kind === "ready" &&
+          now.update.version === restartInto &&
+          now.dismissed !== restartInto
+        );
+      };
+      // A recording that starts while the release is checked is waited for too.
+      do {
+        while (recordingNow()) await sleep(RECORDING_WAIT_MS);
+        if (!(await wanted())) return;
+      } while (!runtime.runSync(recordings.holdStarts(true)));
       await runtime.runPromise(updates.restart);
+      // Refused or failed, the app goes on: so do recordings.
+      if (!(await wanted())) runtime.runSync(recordings.holdStarts(false));
     })().finally(() => {
       restarting = null;
+      restartInto = null;
+      // Kept without a window while this restart waited, the app goes once nothing else keeps it.
+      void runtime.runFork(settle);
     });
     return restarting;
   });

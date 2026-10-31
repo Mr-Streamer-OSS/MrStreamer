@@ -116,3 +116,16 @@ it("opens what was recorded from Connect, plays it, and goes back to Add subscri
   await click(button(window, "Add subscription"));
   expect(window.querySelector("form")).not.toBeNull();
 });
+
+it("keeps Recordings in Downloads' bar while the list can't be read, to try again from there", async () => {
+  ipc.refuse("recordings.list", { kind: "unexpected", detail: "Recordings could not be read." });
+  ipc.always("recordings.schedules", []);
+  const window = await app();
+  await act(async () => {
+    useUi.setState({ view: "downloads" });
+    await settle();
+  });
+  await until(() => window.querySelector("header") !== null);
+  await click(button(window, "Recordings"));
+  await until(() => button(window, "Retry") !== undefined);
+});

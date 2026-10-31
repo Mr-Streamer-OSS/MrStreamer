@@ -113,7 +113,7 @@ async function allClosed(provider: { activeStreams(): number }) {
 /** The one recording's file in its folder. */
 async function fileOf(dataDir: string, recording: Recording) {
   const folder = join(dataDir, "recordings", recording.id);
-  const [name] = await readdir(folder);
+  const name = (await readdir(folder)).find((each) => each.endsWith(".ts"));
   if (!name) throw new Error("No file");
   return { name, path: join(folder, name), size: (await stat(join(folder, name))).size };
 }
@@ -675,6 +675,57 @@ describe.skipIf(!hasTools)("recordings", () => {
     await expect(readdir(join(dataDir, "recordings", kept!.id))).rejects.toThrow();
   });
 
+  it("never goes on after a relaunch with one the viewer stopped or quit, though its end couldn't be written", async () => {
+    for (const how of ["stopped", "quit"] as const) {
+      const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected();
+      const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+      if (answer.kind !== "started") throw new Error("Not started");
+      await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
+      // Storage refuses the end, so recordings.json still says it records.
+      const manifest = join(dataDir, "recordings", "recordings.json");
+      await rename(manifest, `${manifest}.saved`);
+      await mkdir(manifest);
+      if (how === "stopped")
+        await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
+          error: { kind: "unexpected", detail: "Recordings could not be saved." },
+        });
+      await quit();
+      await rm(manifest, { recursive: true });
+      await rename(`${manifest}.saved`, manifest);
+
+      const again = await app(dataDir);
+      onTestFinished(again.quit);
+      await again.library.refresh(subscriptionId);
+      const asked = provider.streamRequests();
+      await again.recordings.check();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(provider.streamRequests()).toBe(asked);
+      expect((await again.recordings.list())[0]).toMatchObject({
+        id: answer.recording.id,
+        status: how === "stopped" ? { kind: "stopped" } : { kind: "partial", cut: "quit" },
+      });
+    }
+  });
+
+  it("holds new recordings back for an update's restart only once nothing records", async () => {
+    const { channel, recordings, provider } = await connected();
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    expect(await recordings.holdStarts(true)).toBe(false);
+    await recordings.stop(answer.recording.id);
+    expect(await recordings.holdStarts(true)).toBe(true);
+    const asked = provider.streamRequests();
+    await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject({
+      error: { kind: "stream" },
+    });
+    expect(provider.streamRequests()).toBe(asked);
+    // The restart didn't go ahead: recordings start again.
+    await recordings.holdStarts(false);
+    const again = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (again.kind !== "started") throw new Error("Not started");
+    await recordings.stop(again.recording.id);
+  });
+
   it("refuses a channel whose stream holds no MPEG-TS program, leaving nothing behind", async () => {
     const { dataDir, channel, subscriptionId, recordings } = await connected({
       streams: (_source, out) => out.end(Buffer.alloc(64 * 1024, 0x20)),
@@ -929,14 +980,23 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(existsSync(join(dataDir, "recordings", "mine"))).toBe(true);
   });
 
-  it("keeps where an ended recording played, and lists one whose file went as missing before it plays", async () => {
+  it("keeps where an ended recording played, written once storage works, and lists one whose file went as missing before it plays", async () => {
     const { dataDir, channel, recordings, quit } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
     if (answer.kind !== "started") throw new Error("Not started");
     const { id } = answer.recording;
     await until(recordings.list, ([first]) => first?.status.kind === "complete");
-    await recordings.recordProgress(id, 42, 90);
+    const manifest = join(dataDir, "recordings", "recordings.json");
+    await rename(manifest, `${manifest}.saved`);
+    await mkdir(manifest);
+    await expect(recordings.recordProgress(id, 42, 90)).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Recordings could not be saved." },
+    });
     expect((await recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
+    // The next check writes it.
+    await rm(manifest, { recursive: true });
+    await rename(`${manifest}.saved`, manifest);
+    await recordings.check();
     await quit();
 
     const again = await app(dataDir);
@@ -1045,6 +1105,27 @@ describe.skipIf(!hasTools)("recordings", () => {
       again.recordings.start(channel(TRACKS), Date.now() + 1000, {}),
     ).rejects.toMatchObject({ error: { detail: "The folder for recordings isn't there." } });
     expect(existsSync(folder)).toBe(false);
+  });
+
+  it("leaves a storage file it can't read as it is, and starts or changes nothing meanwhile", async () => {
+    const { dataDir, channel, provider, quit } = await connected();
+    await quit();
+    const path = join(dataDir, "recordings", "storage.json");
+    await mkdir(join(dataDir, "recordings"), { recursive: true });
+    const unreadable = JSON.stringify({ version: 2, keepFree: 0, space: null });
+    await writeFile(path, unreadable);
+    const { recordings, quit: quitAgain } = await app(dataDir);
+    onTestFinished(quitAgain);
+    const unread = {
+      error: { kind: "unexpected", detail: "Recording settings could not be read." },
+    };
+    await expect(recordings.storage()).rejects.toMatchObject(unread);
+    await expect(recordings.setLimits({ keepFree: 0, space: null })).rejects.toMatchObject(unread);
+    await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject(
+      unread,
+    );
+    expect(await readFile(path, "utf8")).toBe(unreadable);
+    expect(provider.streamRequests()).toBe(0);
   });
 
   it("leaves a recordings file it can't read as it is, and records or schedules nothing meanwhile", async () => {

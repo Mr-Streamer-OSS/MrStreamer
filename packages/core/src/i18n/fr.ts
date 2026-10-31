@@ -1399,6 +1399,7 @@ export const fr: Translation = {
   "There isn't enough free space to record.": "Il n’y a pas assez d’espace libre pour enregistrer.",
   "Recording settings could not be saved.":
     "Impossible d’enregistrer les réglages d’enregistrement.",
+  "Recording settings could not be read.": "Impossible de lire les réglages d’enregistrement.",
   "This recording is no longer there.": "Cet enregistrement n’est plus là.",
   "Recordings can't be written to that folder.":
     "Impossible d’écrire des enregistrements dans ce dossier.",
@@ -1406,7 +1407,7 @@ export const fr: Translation = {
   "Open {app}": "Ouvrir {app}",
   "The stream stopped.": "Le flux s’est arrêté.",
   "There wasn't enough free space.": "Il n’y avait pas assez d’espace libre.",
-  "{from} to {to} missed.": "De {from} à {to} manqué.",
+  "{from} to {to} missed.": "Période manquée : de {from} à {to}.",
   "{minutes} min missed in between.": "{minutes} min manquées entre-temps.",
   "Paused at {time} while Mr. Streamer was closed or the computer slept.":
     "En pause depuis {time} : Mr. Streamer était fermé ou l’ordinateur en veille.",
@@ -1453,7 +1454,7 @@ export const fr: Translation = {
   Sleep: "Veille",
   "Leaves a gap. The rest is recorded after waking, until its time ends.":
     "Laisse un trou. Le reste est enregistré au réveil, jusqu'à la fin de son horaire.",
-  "Wait until recording ends.": "Attendent la fin de l'enregistrement.",
+  "Wait until recording ends.": "Attendre la fin de l'enregistrement.",
   "It installs when {title} finishes at {time}.":
     "Elle s'installe quand {title} se termine à {time}.",
   "It installs when the last recording finishes at {time}.":

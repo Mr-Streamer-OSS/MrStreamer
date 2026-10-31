@@ -1330,6 +1330,7 @@ export const nl: Translation = {
   "The folder couldn't be opened.": "De map kon niet worden geopend.",
   "There isn't enough free space to record.": "Er is niet genoeg vrije ruimte om op te nemen.",
   "Recording settings could not be saved.": "Opname-instellingen konden niet worden bewaard.",
+  "Recording settings could not be read.": "Opname-instellingen konden niet worden gelezen.",
   "This recording is no longer there.": "Deze opname is er niet meer.",
   "Recordings can't be written to that folder.":
     "Opnames kunnen niet in die map worden geschreven.",
@@ -1350,13 +1351,13 @@ export const nl: Translation = {
   "Paused at {time}. Not enough free space; it goes on once there is room.":
     "Gepauzeerd om {time}. Niet genoeg vrije ruimte; gaat verder zodra er plek is.",
   "Not saved yet. Trying again.": "Nog niet bewaard. Opnieuw proberen.",
-  "Quit while recording?": "Stoppen tijdens opname?",
-  Quit: "Stoppen",
+  "Quit while recording?": "Afsluiten tijdens opname?",
+  Quit: "Afsluiten",
   "Keep recording": "Blijven opnemen",
   "{title} is recording until {time}. Quitting stops it now and keeps the {minutes} min recorded.":
-    "{title} neemt op tot {time}. Stoppen beëindigt de opname nu en bewaart de {minutes} min die is opgenomen.",
+    "{title} neemt op tot {time}. Afsluiten beëindigt de opname nu en bewaart de {minutes} min die is opgenomen.",
   "{count} recordings go on until {time}. Quitting stops them now and keeps what they recorded.":
-    "{count} opnames lopen tot {time}. Stoppen beëindigt ze nu en bewaart wat ze hebben opgenomen.",
+    "{count} opnames lopen tot {time}. Afsluiten beëindigt ze nu en bewaart wat ze hebben opgenomen.",
   "{title}, {time}, won't record while Mr. Streamer is closed.":
     "{title}, {time}, wordt niet opgenomen zolang Mr. Streamer gesloten is.",
   "Closing the window instead keeps recording.":
@@ -1380,7 +1381,7 @@ export const nl: Translation = {
   "Recording goes on. Open Mr. Streamer again to see it.":
     "De opname gaat door. Open Mr. Streamer opnieuw om hem te zien.",
   "Asks first. Quitting stops it and keeps what was recorded.":
-    "Vraagt eerst. Stoppen beëindigt hem en bewaart wat is opgenomen.",
+    "Vraagt eerst. Afsluiten beëindigt hem en bewaart wat is opgenomen.",
   Sleep: "Slaapstand",
   "Leaves a gap. The rest is recorded after waking, until its time ends.":
     "Laat een gat. De rest wordt na het ontwaken opgenomen, tot zijn tijd voorbij is.",

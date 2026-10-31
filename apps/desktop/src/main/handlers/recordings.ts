@@ -65,7 +65,13 @@ export function recordingHandlers({
     "recordings.chooseFolder": () =>
       Effect.gen(function* () {
         const { folder } = yield* recordings.storage;
-        const chosen = yield* Effect.promise(() => chooseFolder(folder));
+        const chosen = yield* Effect.tryPromise({
+          try: () => chooseFolder(folder),
+          catch: () =>
+            new Failed({
+              error: { kind: "unexpected", detail: t("The folder couldn't be opened.") },
+            }),
+        });
         return chosen ? yield* recordings.setFolder(chosen) : yield* recordings.storage;
       }),
     "recordings.openFolder": () =>

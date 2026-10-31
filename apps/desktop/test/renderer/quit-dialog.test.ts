@@ -39,6 +39,14 @@ const schedule: ScheduledRecording = {
   next: { start: start + 3 * 60 * 60_000, stop: start + 4 * 60 * 60_000 },
   status: { kind: "planned" },
 };
+// Sooner, but held back: it wouldn't record with the app open either.
+const held: ScheduledRecording = {
+  ...schedule,
+  id: "s2",
+  plan: { ...schedule.plan, title: "Late Show" },
+  next: { start: start + 2 * 60 * 60_000, stop: start + 3 * 60 * 60_000 },
+  status: { kind: "changed", title: "Film" },
+};
 
 const dialog = () => document.querySelector<HTMLElement>("[role=dialog]");
 const button = (text: string) =>
@@ -49,7 +57,7 @@ const button = (text: string) =>
 beforeEach(async () => {
   ipc.reset();
   ipc.always("recordings.list", [recording]);
-  ipc.always("recordings.schedules", [schedule]);
+  ipc.always("recordings.schedules", [held, schedule]);
   ipc.always("window.quit", null);
   const view = queryView(new QueryClient());
   onTestFinished(() => view.unmount());
@@ -73,6 +81,7 @@ it("names what records and what won't, focusing Keep recording", async () => {
     /Studio Sessions is recording until [^.]+\. Quitting stops it now and keeps the 9 min recorded\./,
   );
   expect(shown.textContent).toContain("Night Sessions, ");
+  expect(shown.textContent).not.toContain("Late Show");
   expect(shown.textContent).toContain("won't record while Mr. Streamer is closed.");
   await vi.waitFor(() => expect(document.activeElement).toBe(button("Keep recording")));
 });

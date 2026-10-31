@@ -56,9 +56,10 @@ function QuitDetails() {
   const live = useLiveRecordings();
   const schedules = useSchedules().data ?? [];
   const [last] = live;
+  // Not one recording now, nor one held back that wouldn't record with the app open either.
   const next = schedules
     .flatMap((each) =>
-      each.next && each.status.kind !== "recording"
+      each.next && !["recording", "changed", "gone"].includes(each.status.kind)
         ? [{ title: each.plan.title, start: each.next.start }]
         : [],
     )

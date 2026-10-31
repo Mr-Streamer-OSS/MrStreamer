@@ -102,17 +102,19 @@ const Storage = lazy(() =>
   }),
 );
 
-/** storage.json at `path`, or the defaults while it isn't there or can't be read. */
-export async function readStorage(path: string): Promise<KeptStorage> {
-  const fallback: KeptStorage = { keepFree: DEFAULT_KEEP_FREE, space: null };
-  try {
-    const parsed = Storage()(JSON.parse(await readFile(path, "utf8")));
-    if (parsed instanceof type.errors || parsed.version !== VERSION) return fallback;
-    const { version: _version, ...kept } = parsed;
-    return kept;
-  } catch {
-    return fallback;
-  }
+/**
+ * storage.json at `path`, or the defaults while it isn't there; null when it is there but can't be
+ * read, as one a newer version wrote.
+ */
+export async function readStorage(path: string): Promise<KeptStorage | null> {
+  const read = await readOurs(path, (data) => {
+    const parsed = Storage()(data);
+    if (parsed instanceof type.errors) return null;
+    const { version, ...kept } = parsed;
+    return { version, items: [kept] };
+  });
+  if (read.kind === "refused") return null;
+  return read.items[0] ?? { keepFree: DEFAULT_KEEP_FREE, space: null };
 }
 
 export function writeStorage(path: string, storage: KeptStorage): Promise<void> {

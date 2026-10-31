@@ -27,7 +27,7 @@ import { Artwork } from "../../components/TitleArt.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { BarFrame, Brand, PageButton, WindowBar } from "../../components/WindowBar.tsx";
 import { statusLine, transferred, useDownloads, watchOffline } from "../../lib/downloads.ts";
-import { useRecordings } from "../recordings/recordings.ts";
+import { useAnyRecording } from "../recordings/recordings.ts";
 import { appError, describeError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { runtime, timeLeftOf } from "../../lib/titles.ts";
@@ -163,7 +163,8 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
 export function OfflineBar() {
   const view = useUi((state) => state.view);
   const downloads = (useDownloads().data?.items.length ?? 0) > 0 || view === "downloads";
-  const recordings = (useRecordings().data?.length ?? 0) > 0 || view === "recordings";
+  // Also while the list is read, or can't be, so Recordings' Retry stays in reach.
+  const recordings = useAnyRecording() || view === "recordings";
   return (
     <BarFrame className="bg-black">
       <Brand />

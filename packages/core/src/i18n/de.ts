@@ -1343,6 +1343,7 @@ export const de: Translation = {
     "Es ist nicht genug freier Speicher für die Aufnahme da.",
   "Recording settings could not be saved.":
     "Aufnahme-Einstellungen konnten nicht gespeichert werden.",
+  "Recording settings could not be read.": "Aufnahme-Einstellungen konnten nicht gelesen werden.",
   "This recording is no longer there.": "Diese Aufnahme ist nicht mehr da.",
   "Recordings can't be written to that folder.":
     "In diesen Ordner können keine Aufnahmen geschrieben werden.",
@@ -1402,7 +1403,7 @@ export const de: Translation = {
   "It installs when the last recording finishes at {time}.":
     "Wird installiert, wenn die letzte Aufnahme um {time} endet.",
   "{version} is ready; it installs when recording ends":
-    "{version} ist bereit; wird installiert, wenn die Aufnahme endet",
+    "{version} ist bereit und wird installiert, wenn die Aufnahme endet",
   "Restart now": "Jetzt neu starten",
   "Update after recording": "Nach der Aufnahme aktualisieren",
   OK: "OK",
