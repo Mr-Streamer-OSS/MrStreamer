@@ -25,6 +25,7 @@ import { Guide } from "@mrstreamer/core/guide/service";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { Deferred, Effect, Layer } from "effect";
 import * as TestClock from "effect/testing/TestClock";
+import { installingOnceStopsKept } from "../src/main/recordings/restart.ts";
 import { occurrences } from "../src/main/recordings/schedules.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Downloads } from "../src/main/services/downloads.ts";
@@ -34,6 +35,7 @@ import { Playback } from "../src/main/services/playback.ts";
 import { Recordings } from "../src/main/services/recordings.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
+import { Updates } from "../src/main/services/updates.ts";
 import { startFakeHls } from "./fake-hls.ts";
 import { fakeGuide, fixture, liveStreams, type FakeProviderOptions } from "./fake-provider.ts";
 import { SavedSubtitles, subtitlesOfCopy } from "../src/main/platform/saved-subtitles.ts";
@@ -51,6 +53,14 @@ import {
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
 const TRACKS = "TEST | Subtitles and two sound tracks";
+
+/** A release the update sources offer. */
+const RELEASE = {
+  version: { major: 0, minor: 3, patch: 0, nightly: null },
+  feedUrl: "https://example.test/download/v0.3.0",
+  notes: "",
+  page: "https://example.test/releases/v0.3.0",
+};
 
 /** The app's services on `dataDir`, as one start of the app has them. */
 async function app(dataDir: string, secrets = testSecrets) {
@@ -132,7 +142,7 @@ async function fileOf(dataDir: string, recording: Recording) {
 async function leftBehind(dataDir: string) {
   const root = join(dataDir, "recordings");
   const folders = (await readdir(root).catch(() => [])).filter(
-    (name) => name !== "recordings.json",
+    (name) => !name.startsWith("recordings.json"),
   );
   const kept = await readFile(join(root, "recordings.json"), "utf8").catch(() => null);
   const records = kept ? (JSON.parse(kept) as { recordings: unknown[] }).recordings : [];
@@ -841,12 +851,36 @@ describe.skipIf(!hasTools)("recordings", () => {
     }
   });
 
-  it("keeps an update's restart back while a Stop is neither written nor marked, then keeps it ended after a relaunch", async () => {
+  it("refuses an update's install while a Stop is neither written nor marked, then keeps it ended after a relaunch", async () => {
     // Stopped while it captures, and stopped once it had ended by itself, its end unwritten.
     for (const how of ["capturing", "ended"] as const) {
       const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected(
         how === "ended" ? { streams: (_source, out) => out.end(fixture("h264-aac.mpegts")) } : {},
       );
+      // The update's install as the app makes it, around an installer that only counts.
+      let installs = 0;
+      const confirmed: boolean[] = [];
+      const installer = installingOnceStopsKept(
+        {
+          download: async () => {},
+          install: async () => void installs++,
+        },
+        recordings.keepStops,
+        (confirm) => confirmed.push(confirm),
+      );
+      const updates = await promised(
+        runtimeFor(
+          Updates.layer({
+            dataDir,
+            installed: "0.2.0",
+            discover: async () => [RELEASE],
+            installer,
+          }),
+        ),
+        Updates,
+      );
+      await updates.check();
+      await updates.download();
       const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
       if (answer.kind !== "started") throw new Error("Not started");
       // Storage refuses both the end in recordings.json and the mark in the recording's folder.
@@ -867,15 +901,25 @@ describe.skipIf(!hasTools)("recordings", () => {
       await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
         error: { kind: "unexpected" },
       });
-      expect(await recordings.keepStops()).toBe(false);
+      await updates.restart();
+      expect((await updates.status()).update).toEqual({
+        kind: "failed",
+        step: "install",
+        version: "0.3.0",
+        detail:
+          "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.",
+      });
+      expect([installs, confirmed]).toEqual([0, []]);
 
-      // Storage works again: the next ask writes it, and the restart may go ahead.
+      // Storage works again: Try again, then the restart writes it and installs.
       await rm(mark);
       await rm(manifest, { recursive: true });
       await rename(`${manifest}.saved`, manifest);
-      expect(await recordings.keepStops()).toBe(true);
+      expect((await updates.download()).update).toEqual({ kind: "ready", version: "0.3.0" });
+      await updates.restart();
+      expect([installs, confirmed]).toEqual([1, [true]]);
       expect((await recordings.list())[0]?.unsaved).toBeUndefined();
-      // The quit then writes nothing more, so only what that ask kept can end it after a relaunch.
+      // The quit then writes nothing more, so only what the install kept can end it after a relaunch.
       await rename(manifest, `${manifest}.kept`);
       await mkdir(manifest);
       await quit();
@@ -926,6 +970,34 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: [] });
     expect(await leftBehind(dataDir)).toEqual([]);
   });
+
+  it("takes a failed start's record out of recordings.json once storage works, unasked", async () => {
+    // The stream answers once recordings.json can't be written, with no MPEG-TS program.
+    const asked = Promise.withResolvers<Writable>();
+    const { dataDir, channel, recordings } = await connected({
+      streams: (_source, out) => asked.resolve(out),
+    });
+    const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    starting.catch(() => {});
+    const out = await asked.promise;
+    const manifest = join(dataDir, "recordings", "recordings.json");
+    expect(await leftBehind(dataDir)).toHaveLength(2);
+    await rename(manifest, `${manifest}.saved`);
+    await mkdir(manifest);
+    out.end(Buffer.alloc(64 * 1024, 0x20));
+    await expect(starting).rejects.toMatchObject({
+      error: { kind: "stream", failure: { kind: "unsupported" } },
+    });
+    // Storage works again: the check writes recordings.json by itself, without the record.
+    await rm(manifest, { recursive: true });
+    const kept = await until(
+      () => readFile(manifest, "utf8").catch(() => null),
+      (text) => text !== null,
+      15_000,
+    );
+    expect(JSON.parse(kept ?? "null")).toMatchObject({ recordings: [] });
+    expect(await leftBehind(dataDir)).toEqual([]);
+  }, 20_000);
 
   it("keeps raw transport messages out of a recording's start failure", async () => {
     const { channel, recordings } = await connected({

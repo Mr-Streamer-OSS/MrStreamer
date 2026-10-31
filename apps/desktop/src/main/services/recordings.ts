@@ -17,8 +17,8 @@
 // request ended and its file closed: the list never claims more than the file holds. A record still
 // recording as the app starts is one the app didn't see end, as after a crash: it goes on, from a
 // gap since its file was last written, or, its time over, counts as cut short by the quit. A
-// recording's folder left without its record, as an older version's crash could leave one as it
-// started, goes then.
+// recording's folder left without its record, as a crash leaves one as its start fails, goes
+// then.
 //
 // Capture takes one of its subscription's connections through PlaybackCoordination, which
 // admits it only while fewer than the account's limit are held here, and keeps it until it ends:
@@ -413,7 +413,7 @@ function make(deps: RecordingsDeps) {
             ...(!open && { gaps: [...(record.gaps ?? []), { from: last, to: null, why: "away" }] }),
           });
       }
-      // A recording's folder whose record was never written, as an older version's crash left one:
+      // A recording's folder without its record, as a crash leaves one as its start fails:
       // only once recordings.json is there to say so, and in a chosen folder only one it marked.
       const listed = yield* Effect.promise(() =>
         stat(path).then(
@@ -483,11 +483,18 @@ function make(deps: RecordingsDeps) {
         ),
       );
 
-    /** Takes a start's record out of recordings.json, now or at the next check. */
+    /** Takes a start's record out of recordings.json, now or at the next check, which it wakes. */
     const unpend = (id: string) =>
       Effect.suspend(() => {
         beginning.delete(id);
-        return save.pipe(Effect.catch(() => Effect.sync(() => (unsaved.recordings = true))));
+        return save.pipe(
+          Effect.catch(() =>
+            Effect.andThen(
+              Effect.sync(() => (unsaved.recordings = true)),
+              wake,
+            ),
+          ),
+        );
       });
 
     /** Ended recordings whose file was gone when last looked for: on each read of the list. */
@@ -862,8 +869,9 @@ function make(deps: RecordingsDeps) {
                   },
                 }),
         }).pipe(
-          // Also when the app closes meanwhile: whatever started ends before its folder goes. One
-          // going on keeps its folder, its file as it was.
+          // Also when the app closes meanwhile: whatever started ends before its folder goes, and
+          // its record before that, so a crash between leaves a folder the next start cleans up,
+          // not a record that goes on. One going on keeps its folder, its file as it was.
           Effect.onError(() =>
             Effect.promise(async () => {
               controller.abort();
@@ -872,8 +880,18 @@ function make(deps: RecordingsDeps) {
                 () => {},
               );
               held.release();
-              if (!resumes) await rm(folderOf(record), { recursive: true, force: true });
-            }).pipe(Effect.andThen(resumes ? Effect.void : unpend(id))),
+            }).pipe(
+              Effect.andThen(
+                resumes
+                  ? Effect.void
+                  : Effect.andThen(
+                      unpend(id),
+                      Effect.promise(() =>
+                        rm(folderOf(record), { recursive: true, force: true }).catch(() => {}),
+                      ),
+                    ),
+              ),
+            ),
           ),
         );
         const { promise: settled, resolve } = Promise.withResolvers<Failed | null>();

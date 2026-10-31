@@ -60,7 +60,7 @@ import { fieldMenu } from "./menu.ts";
 import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
 import { installedDistribution } from "./platform/installation.ts";
 import { electronInstaller } from "./platform/installer.ts";
-import type { Installer } from "./services/updates.ts";
+import { installingOnceStopsKept } from "./recordings/restart.ts";
 import trayIcon from "../../build/icon.png?asset";
 import { diagnosticsExporter } from "./platform/diagnostics-export.ts";
 import { removeUnfinishedWrites } from "./platform/json-file.ts";
@@ -203,31 +203,6 @@ let reopen = () => {
 let staysWithoutWindow = () => false;
 /** How often an update waiting for recordings to end looks again. */
 const RECORDING_WAIT_MS = 5000;
-
-/**
- * `installer`, whose restart quits without asking: `confirm` says so as it installs, and takes
- * that back when the system refuses the release and the app goes on. `ready` goes first, and
- * refuses the install itself, with its reason, when the restart would lose something.
- */
-function confirming(
-  installer: Installer,
-  ready: () => Promise<void>,
-  confirm: (confirmed: boolean) => void,
-): Installer {
-  return {
-    ...installer,
-    install: async () => {
-      await ready();
-      confirm(true);
-      try {
-        return await installer.install();
-      } catch (cause) {
-        confirm(false);
-        throw cause;
-      }
-    },
-  };
-}
 
 /** Puts the window on screen and in front, from out of sight or minimised. */
 function bringBack(window: BrowserWindow): void {
@@ -526,7 +501,7 @@ async function start(): Promise<void> {
             // A test feed serves its own files.
             ...(process.env["MR_STREAMER_UPDATE_FEED"] ? { filesFrom: "" } : {}),
           }),
-          installer: confirming(
+          installer: installingOnceStopsKept(
             electronInstaller(),
             () => stopsKept(),
             (confirmed) => (quitConfirmed = confirmed),
@@ -540,12 +515,8 @@ async function start(): Promise<void> {
   let showWindow = () => {};
   /** Whether a recording's time goes on now. Set once recordings are read. */
   let recordingNow = () => false;
-  /**
-   * Refuses an update's install while a recording the viewer stopped isn't kept as stopped, which
-   * the relaunch would go on with: Settings shows why and offers to try again. Set once
-   * recordings are read.
-   */
-  let stopsKept = () => Promise.resolve();
+  /** Whether every recording the viewer stopped is kept as stopped. Set once recordings are read. */
+  let stopsKept = () => Promise.resolve(true);
   /** The viewer confirmed Quit while recording, or an update restarts: the quit asks no more. */
   let quitConfirmed = false;
   /**
@@ -650,14 +621,7 @@ async function start(): Promise<void> {
   };
   powerMonitor.on("shutdown", shutsDown);
   recordingNow = () => runtime.runSync(recordings.live).recording;
-  stopsKept = async () => {
-    if (!(await runtime.runPromise(recordings.keepStops)))
-      throw new Error(
-        t(
-          "A recording you stopped couldn't be saved as stopped. Check its storage, then try again.",
-        ),
-      );
-  };
+  stopsKept = () => runtime.runPromise(recordings.keepStops);
   /**
    * The update's restart, once nothing records: one wait however often it is asked for, and only
    * for the release last asked for, still ready and not put off meanwhile. From the moment nothing
