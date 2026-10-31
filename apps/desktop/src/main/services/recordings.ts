@@ -15,16 +15,34 @@
 // admits it only while fewer than the account's limit are held here, and keeps it until it ends:
 // nothing playing or downloading stops for it, unless the viewer stops playing to record, and
 // nothing takes it back. Capture itself is in ../recordings/capture.ts.
+//
+// Schedules start recordings the same way, at their padded times (../recordings/schedules.ts),
+// and are kept in schedules.json beside the records. A loop checks them at the next start, at
+// most a minute apart so a clock that was set or slept catches up, when the computer wakes, and
+// as the lists, the guide or the recordings change. One whose time came while every connection
+// was held waits, asking again every few seconds, and records the rest of its time once one is
+// free; nothing stops for it. One whose time came while the app was away records the rest, late,
+// and one whose time passed records a missed result. A programme schedule follows the guide's end
+// for its start, and holds while the guide lists another programme or none then: it never records
+// another show by its title or time. Each start reads its subscription's login as it is then, so
+// a replaced login is the one used, and a removed subscription takes its schedules with it.
 import { randomUUID } from "node:crypto";
 import { mkdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type {
+  ConnectionHolder,
   Recording,
   RecordingConnections,
+  RecordingPlan,
   RecordingStart,
+  ScheduledRecording,
+  ScheduleMiss,
+  ScheduleStatus,
 } from "@mrstreamer/contracts/recordings";
 import { RECORDING_MAX_MS } from "@mrstreamer/contracts/recordings";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { t } from "@mrstreamer/core/i18n";
@@ -32,22 +50,55 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
+import * as Queue from "effect/Queue";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { CaptureFailure, startCapture, type CaptureEnd } from "../recordings/capture.ts";
 import {
+  conflictOf,
+  nextOccurrence,
+  occurrences,
+  type Holding,
+  type Occurrence,
+} from "../recordings/schedules.ts";
+import {
   readRecordings,
+  readSchedules,
   recordingFileName,
   writeRecordings,
+  writeSchedules,
+  type KeptSchedule,
   type StoredRecording,
 } from "../recordings/store.ts";
 import { Library } from "./library.ts";
 import { Playback, type LocalCopy } from "./playback.ts";
 import { PlaybackCoordination } from "./playback-coordination.ts";
+import { Settings } from "./preferences.ts";
 import { Subscriptions } from "./subscription.ts";
 
 /** How often the window hears a recording grow, at most. */
 const CHANGES_MS = 1000;
+/** The longest the schedules go unchecked, so a clock that was set or slept catches up. */
+const CHECK_MS = 60_000;
+/** How soon a schedule waiting for a connection asks again; one whose start failed, a minute. */
+const RETRY_MS = 10_000;
+/** How far back a long absence writes missed results. */
+const MISSED_KEPT_MS = 7 * 24 * 60 * 60_000;
+/** A schedule that starts within this of its time started on time. */
+const ON_TIME_MS = 60_000;
+/** How long the guide settles after a change before the schedules follow it. */
+const GUIDE_SETTLE = "2 seconds";
+
+/** How `Recordings.start` records, beside its stop time. */
+export interface StartOptions {
+  /**
+   * The channel's streams to try, by id, in order; else those playback would try: the one chosen
+   * for it before, or Auto's.
+   */
+  readonly variants?: readonly string[];
+  /** Closes what plays of its subscription first. */
+  readonly stopPlaying?: boolean;
+}
 
 export interface RecordingsDeps {
   readonly dataDir: string;
@@ -62,15 +113,14 @@ export class Recordings extends Context.Service<
     /** What holds the subscription's connections now, against the account's limit. */
     connections(subscriptionId: string): Effect.Effect<RecordingConnections, Failed>;
     /**
-     * Records `channel` from now until `stop`, through the first of `variants` (its id alone when
-     * absent) whose stream has a program table. Busy, starting nothing, while every connection the
-     * account allows is held here; `stopPlaying` closes what plays of its subscription first.
-     * Answers once the table is on disk and the record written.
+     * Records `channel` from now until `stop`, through the first of its streams to try whose
+     * stream has a program table. Busy, starting nothing, while every connection the account
+     * allows is held here. Answers once the table is on disk and the record written.
      */
     start(
       channel: OwnedId,
       stop: number,
-      options?: { readonly variants?: readonly string[]; readonly stopPlaying?: boolean },
+      options?: StartOptions,
     ): Effect.Effect<RecordingStart, Failed>;
     /** Stops a recording, answering once its request ended and how it ended is written down. */
     stop(id: string): Effect.Effect<void, Failed>;
@@ -85,10 +135,32 @@ export class Recordings extends Context.Service<
     copy(id: string): Effect.Effect<LocalCopy | null, Failed>;
     /** The list after each change, and as recordings grow, about once a second. */
     readonly changes: Stream.Stream<readonly Recording[]>;
+    /** Every schedule, by when it records next. Fails while schedules.json can't be read. */
+    readonly schedules: Effect.Effect<readonly ScheduledRecording[], Failed>;
+    /**
+     * How `plan` would stand, saved as a new schedule, or as the one `id` names. Fails when its
+     * channel isn't listed, or it has no time to come.
+     */
+    plan(plan: RecordingPlan, id?: string): Effect.Effect<ScheduledRecording, Failed>;
+    /** Saves `plan` as a new schedule, or as the one `id` names, and answers it as saved. */
+    schedule(plan: RecordingPlan, id?: string): Effect.Effect<ScheduledRecording, Failed>;
+    /** Takes a schedule out; a recording it started goes on. */
+    cancel(id: string): Effect.Effect<void, Failed>;
+    /**
+     * Checks the schedules now, as when the computer wakes or the clock may have moved, answering
+     * once the check is done. Starts it asks for go on in the background.
+     */
+    readonly check: Effect.Effect<void>;
+    /** The schedules after each change. */
+    readonly scheduleChanges: Stream.Stream<readonly ScheduledRecording[]>;
   }
 >()("mrstreamer/Recordings") {
   static readonly layer = (deps: RecordingsDeps) => Layer.effect(Recordings, make(deps));
 }
+
+/** What holds a schedule back from recording. */
+type Hold = Extract<ScheduleStatus, { readonly kind: "gone" | "changed" }>;
+const gone: Hold = { kind: "gone" };
 
 /** A recording that captures now. */
 interface Active {
@@ -107,9 +179,13 @@ function make(deps: RecordingsDeps) {
     const guide = yield* Guide;
     const playback = yield* Playback;
     const coordination = yield* PlaybackCoordination;
+    const settings = yield* Settings;
     const root = join(deps.dataDir, "recordings");
     const path = join(root, "recordings.json");
     const changes = yield* PubSub.sliding<readonly Recording[]>(4);
+    /** Asks the schedules to be checked: a recording started or ended, or the lists changed. */
+    const wakes = yield* Queue.sliding<void>(1);
+    const wake = Effect.asVoid(Queue.offer(wakes, undefined));
     /** One write of recordings.json at a time, each with every record as it is then. */
     const writing = (yield* Semaphore.make(1)).withPermits(1);
 
@@ -133,7 +209,7 @@ function make(deps: RecordingsDeps) {
     const usable = read.kind === "read" ? Effect.void : Effect.fail(unreadable());
     if (read.kind === "read") {
       // Never seen to end: cut short by the quit, with what its file holds.
-      for (const record of read.recordings) {
+      for (const record of read.items) {
         if (record.status.kind !== "recording") {
           records.set(record.id, record);
           continue;
@@ -158,12 +234,15 @@ function make(deps: RecordingsDeps) {
       }),
     );
 
+    /** What a check, or a recording's end, couldn't write, for the next check to write again. */
+    const unsaved = { recordings: false, schedules: false };
+
     /** Ended recordings whose file was gone when last looked for: on each read of the list. */
     const missing = new Set<string>();
     const look = Effect.promise(() =>
       Promise.all(
         [...records.values()].map(async (record) => {
-          if (active.has(record.id)) return;
+          if (active.has(record.id) || record.status.kind === "missed") return;
           const there = await stat(fileOf(record)).then(
             () => true,
             () => false,
@@ -213,17 +292,24 @@ function make(deps: RecordingsDeps) {
               : { kind: "partial", cut: end };
         records.set(id, { ...record, status, bytes: live.bytes(), ended: Date.now() });
         active.delete(id);
-        // Any later write takes it down too; until then a restart reads it as cut by the quit.
+        // Any later write takes it down too, the next check's at the latest; until then a restart
+        // reads it as cut by the quit, and its schedule's time stays unsettled.
         const written = yield* Effect.result(save);
+        if (written._tag === "Failure") unsaved.recordings = true;
         yield* publish;
+        // Its connection is free for a schedule that waits.
+        yield* wake;
         return written._tag === "Failure" ? written.failure : null;
       });
 
-    /** Starts as `start` does; `controller` stops it at any step, `settle` once it's active. */
+    /**
+     * Starts as `start` does, for a schedule as `scheduled` says, named `title`; `controller` stops
+     * it at any step, `settle` once it's active.
+     */
     const begin = (
       channel: OwnedId,
       stop: number,
-      options: { readonly variants?: readonly string[]; readonly stopPlaying?: boolean },
+      options: StartOptions & Pick<StoredRecording, "scheduled"> & { readonly title?: string },
       controller: AbortController,
       settle: () => void,
     ) =>
@@ -239,24 +325,47 @@ function make(deps: RecordingsDeps) {
         const listed = (yield* library.lookup(subscriptionId))(channel.id);
         if (!listed)
           return yield* new Failed({ error: { kind: "channel-not-found", channelId: channel.id } });
-        const streams = yield* Effect.forEach(
-          options.variants?.length ? options.variants : [listed.id],
-          (id) =>
-            Effect.tryPromise({
-              try: (signal) =>
-                source.provider.liveStream(id, AbortSignal.any([signal, controller.signal])),
-              catch: (cause) =>
-                cause instanceof Failed
-                  ? cause
-                  : new Failed({
-                      error: {
-                        kind: "stream",
-                        failure: { kind: "network", detail: String(cause) },
-                      },
-                    }),
-            }),
-        );
-        const programme = (yield* guide.listings([ownedId(listed)]))[ownedKey(listed)]?.now;
+        // A schedule's start tries what playback would: the stream chosen for it before, or Auto's.
+        const preferences = {
+          ...(yield* settings.get),
+          ...(yield* settings.ofSubscription(subscriptionId)),
+        };
+        const ask = (id: string) =>
+          Effect.tryPromise({
+            try: (signal) =>
+              source.provider.liveStream(id, AbortSignal.any([signal, controller.signal])),
+            catch: (cause) =>
+              cause instanceof Failed
+                ? cause
+                : new Failed({
+                    error: {
+                      kind: "stream",
+                      failure: { kind: "network", detail: String(cause) },
+                    },
+                  }),
+          });
+        // Streams asked for are each needed. Auto's are tried in its order, so one the provider
+        // can't name, as a playlist that dropped it, leaves the others; the first failure says
+        // why when none is left.
+        const streams = options.variants?.length
+          ? yield* Effect.forEach(options.variants, ask)
+          : yield* Effect.flatMap(
+              Effect.forEach(streamsToPlay(listed, preferences, undefined), ({ id }) =>
+                Effect.result(ask(id)),
+              ),
+              (tried) => {
+                const found = tried.flatMap((each) =>
+                  each._tag === "Success" ? [each.success] : [],
+                );
+                const failed = tried.find((each) => each._tag === "Failure");
+                return found.length === 0 && failed
+                  ? Effect.fail(failed.failure)
+                  : Effect.succeed(found);
+              },
+            );
+        const programme = options.title
+          ? { title: options.title }
+          : (yield* guide.listings([ownedId(listed)]))[ownedKey(listed)]?.now;
         if (options.stopPlaying) yield* playback.closeOf(subscriptionId);
         const admitted = yield* coordination.hold(
           subscriptionId,
@@ -280,6 +389,7 @@ function make(deps: RecordingsDeps) {
           title,
           start: now,
           stop,
+          ...(options.scheduled && { scheduled: options.scheduled }),
           ended: null,
           bytes: 0,
           status: { kind: "recording" },
@@ -351,6 +461,8 @@ function make(deps: RecordingsDeps) {
           return yield* written.failure;
         }
         yield* publish;
+        // What the schedules say of the connections changed.
+        yield* wake;
         const { file: _file, ...recording } = record;
         return {
           kind: "started",
@@ -361,7 +473,7 @@ function make(deps: RecordingsDeps) {
     const start = (
       channel: OwnedId,
       stop: number,
-      options: { readonly variants?: readonly string[]; readonly stopPlaying?: boolean } = {},
+      options: StartOptions & Pick<StoredRecording, "scheduled"> & { readonly title?: string } = {},
     ) =>
       Effect.suspend(() => {
         if (closing)
@@ -422,6 +534,560 @@ function make(deps: RecordingsDeps) {
       ),
     );
 
+    // Schedules.
+    const schedulesPath = join(root, "schedules.json");
+    const readKept = yield* Effect.promise(() => readSchedules(schedulesPath));
+    const schedules = new Map(
+      (readKept.kind === "read" ? readKept.items : []).map((each) => [each.id, each]),
+    );
+    // Both files: with recordings.json unread no check runs, and a schedule saved never records.
+    const schedulesUsable = Effect.andThen(
+      usable,
+      readKept.kind === "read"
+        ? Effect.void
+        : Effect.fail(
+            new Failed({
+              error: { kind: "unexpected", detail: t("Schedules could not be read.") },
+            }),
+          ),
+    );
+    /** One check, or change of the schedules, at a time. */
+    const scheduling = (yield* Semaphore.make(1)).withPermits(1);
+    const scheduleChanges = yield* PubSub.sliding<readonly ScheduledRecording[]>(4);
+    /** What the window was last told, so a check that changed nothing tells nothing. */
+    let shownSchedules: readonly ScheduledRecording[] = [];
+    /** What holds each schedule back, as the last check found; null for nothing. */
+    let holds = new Map<string, Hold | null>();
+    /**
+     * Why an occurrence whose time came isn't recording, by `occurrenceKey`: what its last start
+     * answered, `held` or `unread` while its schedule was held then, or `starting` while a start is
+     * under way.
+     */
+    const why = new Map<string, ScheduleMiss | "starting">();
+    /** When each occurrence whose time came was last asked to start, by `occurrenceKey`. */
+    const tried = new Map<string, number>();
+    /**
+     * Subscriptions a schedule starts on now: one at a time each, so the first in line, by its
+     * start and then by when it was saved, takes a connection first.
+     */
+    const startingOn = new Set<string>();
+    /** Each schedule's start under way, settling once it answered, for a change to wait on. */
+    const startsOf = new Map<string, Promise<void>>();
+    /** When this run of the app began checking schedules. */
+    const started = Date.now();
+    const occurrenceKey = (id: string, occurrence: Occurrence) => `${id}@${occurrence.start}`;
+    /** The recording a schedule made of `occurrence`, if one did. */
+    const recordOf = (id: string, occurrence: Occurrence) =>
+      [...records.values()].find(
+        (each) => each.scheduled?.schedule === id && each.scheduled.from === occurrence.start,
+      );
+    /** The recording a schedule records now, if one does. */
+    const recordingOf = (id: string) =>
+      [...active.keys()].find((each) => records.get(each)?.scheduled?.schedule === id);
+
+    /**
+     * Writes schedules.json, after what a check couldn't write of recordings.json: a time it
+     * settled is only kept settled once its missed result is kept too.
+     */
+    const saveSchedules = Effect.andThen(
+      Effect.suspend(() =>
+        unsaved.recordings
+          ? Effect.tap(save, () => Effect.sync(() => (unsaved.recordings = false)))
+          : Effect.void,
+      ),
+      Effect.tryPromise({
+        try: () => writeSchedules(schedulesPath, [...schedules.values()]),
+        catch: () =>
+          new Failed({ error: { kind: "unexpected", detail: t("Schedules could not be saved.") } }),
+      }),
+    );
+    /** Keeps `schedule` as `id`, or takes `id` out for null, putting it back if the write fails. */
+    const keep = (id: string, schedule: KeptSchedule | null) =>
+      Effect.gen(function* () {
+        const was = schedules.get(id);
+        if (schedule) schedules.set(id, schedule);
+        else schedules.delete(id);
+        const written = yield* Effect.result(saveSchedules);
+        if (written._tag === "Failure") {
+          if (was) schedules.set(id, was);
+          else schedules.delete(id);
+          return yield* written.failure;
+        }
+      });
+
+    /**
+     * `plan` as the lists and the guide stand now: its channel, and what holds it back, its
+     * channel not listed, or listed under a name other than `channelName`, the one it was saved
+     * with, or, for a programme, another programme or none at its start; undefined while that
+     * can't be told, as before the lists or the guide are read. A programme listed at its start
+     * under its title takes the guide's end.
+     */
+    const follow = (plan: RecordingPlan, channelName?: string) =>
+      Effect.gen(function* () {
+        const { subscriptionId } = plan.channel;
+        const found = (yield* library.lookup(subscriptionId))(plan.channel.id);
+        // Another name under its id, as after a playlist's link was replaced: another channel.
+        if (found && channelName !== undefined && found.title !== channelName)
+          return { plan, listed: undefined, hold: gone };
+        const listed = found;
+        if (!listed) {
+          const read = (yield* library.status).some(
+            (each) => each.subscriptionId === subscriptionId && each.fetchedAt !== null,
+          );
+          return { plan, listed, hold: read ? gone : undefined };
+        }
+        if (plan.kind === "slot") return { plan, listed, hold: null };
+        const answer = yield* guide.startingAt(plan.channel, plan.start);
+        // A guide not read yet can't say what is on then: it waits for one, recording no other show.
+        if (answer.kind === "unknown") return { plan, listed, hold: undefined };
+        if (answer.kind === "none") return { plan, listed, hold: gone };
+        const { title, stop } = answer.programme;
+        if (title !== plan.title)
+          return { plan, listed, hold: { kind: "changed", title } satisfies Hold };
+        // Within the longest a recording runs, as schedules.json keeps it.
+        const longest =
+          plan.start + RECORDING_MAX_MS - (plan.padding.before + plan.padding.after) * 60_000;
+        // A guide whose end isn't after the start keeps the end it was saved with.
+        const followed = stop > plan.start ? Math.min(stop, longest) : plan.stop;
+        return { plan: { ...plan, stop: followed }, listed, hold: null };
+      });
+
+    /** What of this app holds the subscription's connections now. */
+    const holdersNow = (subscriptionId: string) =>
+      Effect.map(coordination.uses(subscriptionId), (uses): ConnectionHolder[] => [
+        ...recordingHoldings(subscriptionId).map((each) => each.holder),
+        ...uses.flatMap((use) => (use === "recording" ? [] : [{ kind: use }])),
+      ]);
+    const recordingHoldings = (subscriptionId: string): Holding[] =>
+      [...active.keys()].flatMap((id) => {
+        const record = records.get(id);
+        if (record?.channel.subscriptionId !== subscriptionId) return [];
+        const holder = { kind: "recording", title: record.title, until: record.stop } as const;
+        return [{ holder, start: record.start, first: true }];
+      });
+
+    /**
+     * How `schedule` stands at `now`, held back as `hold` says, against the others of `kept` and
+     * what records now.
+     */
+    const standingOf = (
+      schedule: KeptSchedule,
+      kept: readonly KeptSchedule[],
+      now: number,
+      hold = holds.get(schedule.id),
+    ) =>
+      Effect.gen(function* () {
+        const { plan } = schedule;
+        const on = nextOccurrence(plan, now);
+        const as = (status: ScheduleStatus, next = on): ScheduledRecording => ({
+          id: schedule.id,
+          plan,
+          channelName: schedule.channelName,
+          next,
+          status,
+        });
+        // What records goes on whatever the guide says now, or a change made meanwhile, until its
+        // own stop.
+        const recording = recordingOf(schedule.id);
+        const record = recording === undefined ? undefined : records.get(recording);
+        if (recording && record)
+          return as(
+            { kind: "recording", recording },
+            { start: record.scheduled?.from ?? record.start, stop: record.stop },
+          );
+        // A time on now that it recorded, stopped or cut short, or a change settled, records no
+        // more: the one after it is next.
+        const next =
+          on && (recordOf(schedule.id, on) || on.stop <= schedule.through)
+            ? nextOccurrence(plan, on.stop)
+            : on;
+        if (hold) return as(hold, next);
+        if (!next) return as({ kind: "planned" }, next);
+        const { subscriptionId } = plan.channel;
+        const reason = next.start <= now ? why.get(occurrenceKey(schedule.id, next)) : undefined;
+        if (reason === "busy")
+          return as({ kind: "waiting", holders: yield* holdersNow(subscriptionId) }, next);
+        if (reason === "stream" || reason === "disk")
+          return as({ kind: "retrying", why: reason }, next);
+        const holdings = [
+          ...recordingHoldings(subscriptionId),
+          ...kept.flatMap((other): Holding[] => {
+            if (other.id === schedule.id || other.plan.channel.subscriptionId !== subscriptionId)
+              return [];
+            if (holds.get(other.id)) return [];
+            // Each of its times within this one, but one it records now, which counts above.
+            return occurrences(other.plan, next.start, next.stop).flatMap((theirs) => {
+              // One recording counts above as what it holds; one that recorded, or was settled,
+              // holds nothing more.
+              if (recordOf(other.id, theirs) || theirs.stop <= other.through) return [];
+              const holder = {
+                kind: "schedule",
+                title: other.plan.title,
+                until: theirs.stop,
+              } as const;
+              return [{ holder, start: theirs.start, first: other.created < schedule.created }];
+            });
+          }),
+        ];
+        const holders = conflictOf(next, holdings, yield* limitOf(subscriptionId));
+        return as(holders.length > 0 ? { kind: "conflict", holders } : { kind: "planned" }, next);
+      });
+
+    /** Every schedule kept, by when it records next. */
+    const standings = (now: number) => {
+      const kept = [...schedules.values()];
+      return Effect.map(
+        Effect.forEach(kept, (schedule) => standingOf(schedule, kept, now)),
+        (list) =>
+          list.toSorted(
+            (a, b) =>
+              (a.next?.start ?? Infinity) - (b.next?.start ?? Infinity) ||
+              a.channelName.localeCompare(b.channelName),
+          ),
+      );
+    };
+
+    /**
+     * When a recording of `schedule`'s `occurrence` is owed from: its start, or when the schedule
+     * was first saved, when that was later. The time before there was a schedule is nobody's fault.
+     */
+    const owedOf = (schedule: KeptSchedule, occurrence: Occurrence) =>
+      Math.max(occurrence.start, schedule.created);
+
+    /**
+     * What a recording or missed result of `schedule`'s `occurrence` says of it: when it was owed
+     * from, and the occurrence by its start all the same, so it is found as that time's.
+     */
+    const scheduledOf = (
+      schedule: KeptSchedule,
+      occurrence: Occurrence,
+      late: ScheduleMiss | null,
+    ): NonNullable<StoredRecording["scheduled"]> => {
+      const owed = owedOf(schedule, occurrence);
+      return {
+        schedule: schedule.id,
+        from: occurrence.start,
+        ...(owed > occurrence.start && { owed }),
+        late,
+      };
+    };
+
+    /**
+     * Starts a schedule's occurrence on now, in the background; a check follows its answer. It is
+     * late once more than ON_TIME_MS passed since it was owed.
+     */
+    const startOccurrence = (schedule: KeptSchedule, occurrence: Occurrence, now: number) => {
+      const key = occurrenceKey(schedule.id, occurrence);
+      const before = why.get(key);
+      const late =
+        now - owedOf(schedule, occurrence) <= ON_TIME_MS
+          ? null
+          : before === undefined || before === "starting"
+            ? "away"
+            : before;
+      const { subscriptionId } = schedule.plan.channel;
+      why.set(key, "starting");
+      startingOn.add(subscriptionId);
+      const answered = Promise.withResolvers<void>();
+      startsOf.set(schedule.id, answered.promise);
+      const { plan } = schedule;
+      Effect.runFork(
+        Effect.gen(function* () {
+          // A programme is named as saved; a repeat by what the guide lists at its unpadded
+          // start, else as saved.
+          const at = occurrence.start + plan.padding.before * 60_000;
+          const listed =
+            plan.kind === "slot"
+              ? (yield* guide.schedule(plan.channel, at, at + 1)).find(
+                  (each) => each.start <= at && at < each.stop,
+                )
+              : undefined;
+          // Taken out meanwhile, as with its subscription, it starts nothing.
+          if (!schedules.has(schedule.id)) return null;
+          return yield* start(plan.channel, occurrence.stop, {
+            scheduled: scheduledOf(schedule, occurrence, late),
+            title: listed?.title ?? plan.title,
+          });
+        }).pipe(
+          Effect.match({
+            onSuccess: (answer) =>
+              answer === null || answer.kind === "started" ? why.delete(key) : why.set(key, "busy"),
+            // This computer's when unexpected, as a file it couldn't write; else the stream's,
+            // a lost login included.
+            onFailure: ({ error }) => why.set(key, error.kind === "unexpected" ? "disk" : "stream"),
+          }),
+          // A defect, as a capture folder this computer won't remove, is this computer's too.
+          Effect.catchDefect(() => Effect.sync(() => why.set(key, "disk"))),
+          // However it ended, the subscription's next schedule may start, and a change goes on.
+          Effect.ensuring(
+            Effect.sync(() => {
+              startingOn.delete(subscriptionId);
+              if (startsOf.get(schedule.id) === answered.promise) startsOf.delete(schedule.id);
+              answered.resolve();
+            }),
+          ),
+          Effect.andThen(wake),
+        ),
+      );
+    };
+
+    /**
+     * Brings every schedule up to date at the time now: drops those of a subscription that
+     * went, follows the lists and the guide, starts what is due, writes what was missed, and
+     * tells the window what changed. Answers when the next check is due, or null while none is
+     * kept. Only runs in a turn.
+     */
+    const checkNow = Effect.gen(function* () {
+      if (readKept.kind !== "read" || read.kind !== "read" || closing) return null;
+      // With none kept, nothing is asked of the lists, the guide or the clock: a schedule saved
+      // wakes the next check.
+      if (schedules.size === 0 && !unsaved.recordings && !unsaved.schedules) {
+        if (shownSchedules.length > 0) {
+          shownSchedules = [];
+          yield* PubSub.publish(scheduleChanges, shownSchedules);
+        }
+        return null;
+      }
+      const now = Date.now();
+      const saved = new Set((yield* subscriptions.saved).map((each) => each.id));
+      let dirty = false;
+      let missed = false;
+      let retry = false;
+      const found = new Map<string, Hold | null>();
+      const inLine = (each: KeptSchedule) => nextOccurrence(each.plan, now)?.start ?? Infinity;
+      const ordered = [...schedules.values()].toSorted(
+        (a, b) => inLine(a) - inLine(b) || a.created - b.created,
+      );
+      for (const schedule of ordered) {
+        if (!saved.has(schedule.plan.channel.subscriptionId)) {
+          schedules.delete(schedule.id);
+          dirty = true;
+          continue;
+        }
+        const seen = yield* Effect.orElseSucceed(
+          follow(schedule.plan, schedule.channelName),
+          () => null,
+        );
+        const hold = seen?.hold;
+        found.set(schedule.id, hold ?? null);
+        // While it records, its plan stays as the recording was started: a guide that moves the
+        // end then moves it for no recording.
+        let kept: KeptSchedule = {
+          ...schedule,
+          plan: (!recordingOf(schedule.id) && seen?.plan) || schedule.plan,
+        };
+        // Each occurrence since it was last settled, up to now. One that ended is settled, as
+        // recorded, missed or let go; one on now starts, unless it is held or one records.
+        let through = kept.through;
+        let settling = true;
+        for (const occurrence of occurrences(kept.plan, kept.through, now + 1)) {
+          const key = occurrenceKey(kept.id, occurrence);
+          const made = recordOf(kept.id, occurrence);
+          const reason = why.get(key);
+          if (occurrence.stop <= now) {
+            if (reason === "starting" || (made && active.has(made.id))) {
+              settling = false;
+              continue;
+            }
+            // A long absence writes its last week, not every day of it.
+            if (!made && occurrence.stop > now - MISSED_KEPT_MS) {
+              const record: StoredRecording = {
+                id: randomUUID(),
+                file: recordingFileName(kept.plan.title, kept.channelName, occurrence.start),
+                channel: kept.plan.channel,
+                channelName: kept.channelName,
+                title: kept.plan.title,
+                start: occurrence.start,
+                stop: occurrence.stop,
+                scheduled: scheduledOf(kept, occurrence, reason ?? "away"),
+                ended: null,
+                bytes: 0,
+                status: { kind: "missed", why: reason ?? "away" },
+              };
+              records.set(record.id, record);
+              missed = true;
+            }
+            why.delete(key);
+            tried.delete(key);
+            if (settling) through = occurrence.stop;
+            continue;
+          }
+          // Recorded, and stopped or cut short already: the rest of its time is done with too.
+          // Not while its start is still answering: one whose record couldn't be kept goes.
+          if (made && !active.has(made.id) && reason !== "starting") {
+            why.delete(key);
+            tried.delete(key);
+            if (settling) through = occurrence.stop;
+            continue;
+          }
+          if (made || reason === "starting" || recordingOf(kept.id)) continue;
+          if (hold) why.set(key, "held");
+          else if (hold === undefined) {
+            // Not for a time that began before the app started: that one was missed while away.
+            if (reason === undefined && occurrence.start >= started) why.set(key, "unread");
+            retry = true;
+          } else if (startingOn.has(kept.plan.channel.subscriptionId)) retry = true;
+          // Busy asks again soon; a failed start, which may not change, once a minute.
+          else if (
+            (tried.get(key) ?? -Infinity) + (reason === "busy" ? RETRY_MS : CHECK_MS) <=
+            now
+          ) {
+            tried.set(key, now);
+            startOccurrence(kept, occurrence, now);
+          } else retry = true;
+        }
+        kept = { ...kept, through };
+        // A programme records once: settled, it goes.
+        const once =
+          kept.plan.kind === "programme" && occurrences(kept.plan, through, Infinity).length === 0;
+        if (once) schedules.delete(kept.id);
+        else schedules.set(kept.id, kept);
+        dirty ||= once || !isDeepStrictEqual(kept, schedule);
+      }
+      holds = found;
+      // The missed results first, and what settled them only once they are written: a crash, or
+      // a write that fails, leaves their occurrences to settle again, which finds them.
+      if (missed || unsaved.recordings) {
+        unsaved.recordings = (yield* Effect.result(save))._tag === "Failure";
+        yield* publish;
+      }
+      if (dirty || unsaved.schedules)
+        unsaved.schedules = (yield* Effect.result(saveSchedules))._tag === "Failure";
+      if (unsaved.recordings || unsaved.schedules) {
+        yield* Effect.logWarning("[recordings] schedules could not be saved; trying again");
+        retry = true;
+      }
+      const list = yield* standings(now);
+      if (!isDeepStrictEqual(list, shownSchedules)) {
+        shownSchedules = list;
+        yield* PubSub.publish(scheduleChanges, list);
+      }
+      const starts = list.flatMap((each) =>
+        each.next && each.next.start > now ? [each.next.start] : [],
+      );
+      return Math.min(now + (retry ? RETRY_MS : CHECK_MS), ...starts);
+    });
+
+    const checkOnce = scheduling(checkNow).pipe(
+      Effect.catchDefect((defect) =>
+        Effect.andThen(
+          Effect.logWarning("[recordings] checking schedules failed", defect),
+          Effect.sync(() => Date.now() + CHECK_MS),
+        ),
+      ),
+    );
+    yield* Effect.forkScoped(
+      Effect.gen(function* () {
+        for (;;) {
+          const next = yield* checkOnce;
+          yield* next === null
+            ? Queue.take(wakes)
+            : Effect.raceFirst(Effect.sleep(Math.max(0, next - Date.now())), Queue.take(wakes));
+        }
+      }),
+    );
+    // The lists may list a schedule's channel anew or no longer, and the guide another programme
+    // at its start.
+    yield* Effect.forkScoped(
+      Stream.runForEach(guide.changes.pipe(Stream.debounce(GUIDE_SETTLE)), () => wake),
+    );
+    yield* Effect.forkScoped(Stream.runForEach(library.changes, () => wake));
+
+    /**
+     * Runs `turn` in a turn once `id`'s start under way, if any, answered, waiting for it outside
+     * the turn so other schedules go on meanwhile. What it began for then records, or is still to
+     * record, as a change finds it: its recording names the time it began for, which a changed
+     * start would no longer find.
+     */
+    const onceAnswered = <A, E>(
+      id: string | undefined,
+      turn: Effect.Effect<A, E>,
+    ): Effect.Effect<A, E> =>
+      Effect.suspend(() => {
+        const answering = id === undefined ? undefined : startsOf.get(id);
+        if (answering)
+          return Effect.andThen(
+            Effect.promise(() => answering),
+            onceAnswered(id, turn),
+          );
+        // Another may have started before the turn came.
+        return Effect.flatMap(
+          scheduling(
+            Effect.suspend(() =>
+              id !== undefined && startsOf.has(id)
+                ? Effect.succeed(null)
+                : Effect.map(turn, (value) => ({ value })),
+            ),
+          ),
+          (done) => (done ? Effect.succeed(done.value) : onceAnswered(id, turn)),
+        );
+      });
+
+    /**
+     * `plan` as `recordings.plan` and `recordings.schedule` take it: the schedule it would be,
+     * new or the one `id` names, and how it would stand. Only runs in a turn.
+     */
+    const draft = (plan: RecordingPlan, id: string | undefined) =>
+      Effect.gen(function* () {
+        yield* schedulesUsable;
+        const now = Date.now();
+        const was = id === undefined ? undefined : schedules.get(id);
+        if (id !== undefined && !was)
+          return yield* new Failed({
+            error: { kind: "unexpected", detail: t("This schedule is no longer there.") },
+          });
+        const found = yield* follow(plan);
+        if (!found.listed)
+          return yield* new Failed({
+            error: { kind: "channel-not-found", channelId: plan.channel.id },
+          });
+        if (!nextOccurrence(found.plan, now))
+          return yield* new Failed({
+            error: { kind: "invalid-input", detail: t("Its time has passed.") },
+          });
+        // Changed, it settles from now: what it recorded or missed stays as it was, and once it
+        // recorded its time on now, still recording, stopped or deleted, or a change before this
+        // one settled it, the change starts with its next.
+        const recording = id === undefined ? undefined : recordingOf(id);
+        // Until when that holds its time: the recording's stop, the recorded time's, or where the
+        // change before settled it. Each changed time within it is settled too, one that starts
+        // later or ends later than the recording included.
+        const held =
+          was === undefined
+            ? []
+            : [
+                ...(recording === undefined ? [] : [records.get(recording)?.stop ?? now]),
+                ...occurrences(was.plan, now, now + 1)
+                  .filter((each) => recordOf(was.id, each))
+                  .map((each) => each.stop),
+                ...(was.through > now ? [was.through] : []),
+              ];
+        const heldTo = Math.max(now + 1, ...held);
+        const schedule: KeptSchedule = {
+          id: id ?? randomUUID(),
+          plan: found.plan,
+          channelName: found.listed.title,
+          // Strictly after every other: of two that start together, the one saved first records.
+          created:
+            was?.created ??
+            Math.max(now, ...[...schedules.values()].map((each) => each.created + 1)),
+          through: Math.max(
+            now,
+            ...held,
+            ...(held.length > 0
+              ? occurrences(found.plan, now, heldTo).map((each) => each.stop)
+              : []),
+          ),
+        };
+        const standing = yield* standingOf(
+          schedule,
+          [...schedules.values()],
+          now,
+          found.hold ?? null,
+        );
+        return { schedule, standing };
+      });
+
     return {
       list: usable.pipe(Effect.andThen(look), Effect.andThen(shown)),
       connections: (subscriptionId: string) =>
@@ -438,23 +1104,41 @@ function make(deps: RecordingsDeps) {
         ),
       subscriptionGone: (subscriptionId: string) =>
         Effect.andThen(
-          // Those starting end, or become active and are ended with the others.
-          Effect.promise(() =>
-            Promise.all(
-              [...starting].flatMap(([controller, start]) => {
-                if (start.subscriptionId !== subscriptionId) return [];
-                controller.abort("stopped");
-                return [start.done];
-              }),
-            ),
+          // Its schedules go first, so none starts meanwhile.
+          scheduling(
+            Effect.suspend(() => {
+              const before = schedules.size;
+              for (const [id, each] of schedules)
+                if (each.plan.channel.subscriptionId === subscriptionId) schedules.delete(id);
+              if (schedules.size === before) return Effect.void;
+              // A failed write is tried again by the next check, as its own are.
+              return Effect.andThen(
+                Effect.map(Effect.result(saveSchedules), (written) => {
+                  unsaved.schedules = written._tag === "Failure";
+                }),
+                wake,
+              );
+            }),
           ),
-          Effect.suspend(() =>
-            Effect.ignore(
-              end(
-                [...active.keys()].filter(
-                  (id) => records.get(id)?.channel.subscriptionId === subscriptionId,
+          Effect.andThen(
+            // Those starting end, or become active and are ended with the others.
+            Effect.promise(() =>
+              Promise.all(
+                [...starting].flatMap(([controller, start]) => {
+                  if (start.subscriptionId !== subscriptionId) return [];
+                  controller.abort("stopped");
+                  return [start.done];
+                }),
+              ),
+            ),
+            Effect.suspend(() =>
+              Effect.ignore(
+                end(
+                  [...active.keys()].filter(
+                    (id) => records.get(id)?.channel.subscriptionId === subscriptionId,
+                  ),
+                  "stopped",
                 ),
-                "stopped",
               ),
             ),
           ),
@@ -468,6 +1152,25 @@ function make(deps: RecordingsDeps) {
             return yield* new Failed({
               error: { kind: "unexpected", detail: t("Stop the recording before deleting it.") },
             });
+          // A schedule's time it recorded stays settled without it, so it never records again.
+          const { scheduled } = record;
+          if (scheduled)
+            yield* scheduling(
+              Effect.suspend(() => {
+                const schedule = schedules.get(scheduled.schedule);
+                if (!schedule) return Effect.void;
+                // That time as the plan has it now, as a guide that ran later moved its end.
+                const through = Math.max(
+                  record.stop,
+                  ...occurrences(schedule.plan, scheduled.from, scheduled.from + 1)
+                    .filter((each) => each.start === scheduled.from)
+                    .map((each) => each.stop),
+                );
+                return schedule.through < through
+                  ? keep(schedule.id, { ...schedule, through })
+                  : Effect.void;
+              }),
+            );
           yield* playback.closeCopy(id);
           // The file goes first: one that stays, as one Windows holds open, keeps its record to
           // delete again, and a record whose file went lists it as missing until it is deleted.
@@ -495,7 +1198,7 @@ function make(deps: RecordingsDeps) {
       copy: (id: string) =>
         Effect.gen(function* () {
           const record = records.get(id);
-          if (!record) return null;
+          if (!record || record.status.kind === "missed") return null;
           if (active.has(id))
             return yield* new Failed({
               error: { kind: "unexpected", detail: t("It is still recording.") },
@@ -509,6 +1212,42 @@ function make(deps: RecordingsDeps) {
           } satisfies LocalCopy;
         }),
       changes: Stream.fromPubSub(changes),
+      schedules: scheduling(
+        Effect.andThen(
+          schedulesUsable,
+          Effect.suspend(() => standings(Date.now())),
+        ),
+      ),
+      plan: (plan: RecordingPlan, id?: string) =>
+        onceAnswered(
+          id,
+          Effect.map(draft(plan, id), ({ standing }) => ({ ...standing, id: id ?? "" })),
+        ),
+      schedule: (plan: RecordingPlan, id?: string) =>
+        Effect.tap(
+          onceAnswered(
+            id,
+            Effect.gen(function* () {
+              const { schedule, standing } = yield* draft(plan, id);
+              yield* keep(schedule.id, schedule);
+              return standing;
+            }),
+          ),
+          () => wake,
+        ),
+      cancel: (id: string) =>
+        Effect.andThen(
+          scheduling(
+            Effect.gen(function* () {
+              yield* schedulesUsable;
+              if (schedules.has(id)) yield* keep(id, null);
+            }),
+          ),
+          wake,
+        ),
+      // Checked now, and the loop then waits for the next time from there.
+      check: Effect.andThen(checkOnce, wake),
+      scheduleChanges: Stream.fromPubSub(scheduleChanges),
     };
   });
 }

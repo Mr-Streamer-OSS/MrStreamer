@@ -7,8 +7,14 @@ import { createServer } from "node:http";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
-import type { Recording } from "@mrstreamer/contracts/recordings";
-import { describe, expect, it, onTestFinished } from "vitest";
+import type { Recording, RecordingPlan } from "@mrstreamer/contracts/recordings";
+import { ownedId } from "@mrstreamer/contracts/subscription";
+import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
+import { Guide } from "@mrstreamer/core/guide/service";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { Deferred, Effect, Layer } from "effect";
+import * as TestClock from "effect/testing/TestClock";
+import { occurrences } from "../src/main/recordings/schedules.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Downloads } from "../src/main/services/downloads.ts";
 import { Library } from "../src/main/services/library.ts";
@@ -18,18 +24,27 @@ import { Recordings } from "../src/main/services/recordings.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { startFakeHls } from "./fake-hls.ts";
-import { fixture, liveStreams, type FakeProviderOptions } from "./fake-provider.ts";
-import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { fakeGuide, fixture, liveStreams, type FakeProviderOptions } from "./fake-provider.ts";
+import {
+  demoLogin,
+  fakeProvider,
+  promised,
+  runtimeFor,
+  tempDir,
+  testConfig,
+  testSecrets,
+} from "./support.ts";
 
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
 const TRACKS = "TEST | Subtitles and two sound tracks";
 
 /** The app's services on `dataDir`, as one start of the app has them. */
-async function app(dataDir: string) {
+async function app(dataDir: string, secrets = testSecrets) {
   const runtime = runtimeFor(
     mainLayer({
       ...testConfig(dataDir),
+      secrets,
       ffmpeg: "ffmpeg",
       ffprobe: "ffprobe",
       // A picture for every artwork address, so a download needs no network.
@@ -46,6 +61,7 @@ async function app(dataDir: string) {
     subscriptions: await promised(runtime, Subscriptions),
     library: await promised(runtime, Library),
     roster: await promised(runtime, Roster),
+    guide: await promised(runtime, Guide),
     quit: () => runtime.dispose(),
   };
 }
@@ -545,6 +561,46 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await recordings.list()).toHaveLength(1);
   });
 
+  it("records from a channel's next stream when its playlist no longer names the one Auto tries first", async () => {
+    const host = await startFakeHls();
+    onTestFinished(() => host.close());
+    // One channel's HD and SD feeds, both the fixture's playable stream.
+    const playlist = (...feeds: string[]) => ({
+      body: [
+        "#EXTM3U",
+        ...feeds.flatMap((feed) => [
+          `#EXTINF:-1 group-title="News" http-user-agent="HlsFixture/1.0",Newsroom ${feed}`,
+          `${host.origin}/media/compatible.m3u8?feed=${feed}`,
+        ]),
+        "",
+      ].join("\n"),
+    });
+    host.overrides.set("/list.m3u", playlist("HD", "SD"));
+    const dataDir = await tempDir();
+    const first = await app(dataDir);
+    const { id: subscriptionId } = await first.subscriptions.add({
+      server: host.link,
+      username: "",
+      password: "",
+    });
+    await first.library.refresh(subscriptionId);
+    const [listed] = await first.library.channels({});
+    if (!listed) throw new Error("No channel");
+    const tried = streamsToPlay(listed, {}, undefined).map(({ id }) => id);
+    expect(tried).toHaveLength(2);
+    await first.quit();
+
+    // The playlist dropped the first while the app was closed; the channel list on disk has both.
+    const kept = tried[1]!.endsWith("@HD") ? "HD" : "SD";
+    host.overrides.set("/list.m3u", playlist(kept));
+    const { recordings, quit } = await app(dataDir);
+    onTestFinished(quit);
+    const answer = await recordings.start(ownedId(listed), Date.now() + 60_000, {});
+    expect(answer.kind).toBe("started");
+    const [ended] = await until(recordings.list, ([each]) => each?.status.kind !== "recording");
+    expect(ended?.bytes).toBe(4 * fixture("h264-aac.mpegts").length);
+  });
+
   it("takes no connection a download holds, and a download waits for the one it holds", async () => {
     const { provider, channel, subscriptionId, recordings, downloads, onDemand } =
       await connected();
@@ -644,10 +700,20 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(listed.find((each) => each.id === gone)?.status).toEqual({ kind: "missing" });
   });
 
-  it("leaves a recordings file it can't read as it is, and records nothing meanwhile", async () => {
+  it("leaves a recordings file it can't read as it is, and records or schedules nothing meanwhile", async () => {
     const { dataDir, channel, provider } = await connected();
     const path = join(dataDir, "recordings", "recordings.json");
     await mkdir(join(dataDir, "recordings"), { recursive: true });
+    const slot: RecordingPlan = {
+      kind: "slot",
+      channel: channel(TRACKS),
+      days: [0, 1, 2, 3, 4, 5, 6],
+      at: 0,
+      minutes: 30,
+      title: "Night",
+      padding: { before: 0, after: 0 },
+    };
+    const unread = { error: { kind: "unexpected", detail: "Recordings could not be read." } };
     for (const unreadable of ["{ not json", JSON.stringify({ version: 2, recordings: [] })]) {
       await writeFile(path, unreadable);
       const { recordings } = await app(dataDir);
@@ -655,8 +721,887 @@ describe.skipIf(!hasTools)("recordings", () => {
       await expect(
         recordings.start(channel(TRACKS), Date.now() + 60_000, {}),
       ).rejects.toMatchObject({ error: { kind: "unexpected" } });
+      // A schedule saved now would never record: no check runs until the file can be read.
+      await expect(recordings.schedule(slot)).rejects.toMatchObject(unread);
       expect(await readFile(path, "utf8")).toBe(unreadable);
     }
+    expect(existsSync(join(dataDir, "recordings", "schedules.json"))).toBe(false);
     expect(provider.streamRequests()).toBe(0);
+  });
+});
+
+const GUIDED = "TEST | H.264 + AAC";
+const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
+/** Ten past seven in the evening, UTC: the fake guide's half-hour programmes start at :00 and :30. */
+const TEN_PAST = Date.UTC(2026, 9, 30, 19, 10);
+const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
+
+describe.skipIf(!hasTools)("recording schedules", () => {
+  /** A connected app whose clock the test sets, at `TEN_PAST`, with the guide read. */
+  async function scheduling(options: FakeProviderOptions = {}) {
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(TEN_PAST);
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const started = await connected(options);
+    await started.guide.refresh(started.subscriptionId);
+    const listing = async () => {
+      const own = started.channel(GUIDED);
+      const listed = (await started.guide.listings([own]))[`${own.subscriptionId}:${own.id}`];
+      if (!listed?.now || !listed.next) throw new Error("No guide");
+      return { now: listed.now, next: listed.next };
+    };
+    const programmePlan = (
+      programme: { start: number; stop: number; title: string },
+      padding = { before: 0, after: 0 },
+    ): RecordingPlan => ({
+      kind: "programme",
+      channel: started.channel(GUIDED),
+      start: programme.start,
+      stop: programme.stop,
+      title: programme.title,
+      padding,
+    });
+    /** The clock moves to `time`, and the app checks, as when the computer wakes. */
+    const clockTo = async (time: number) => {
+      vi.setSystemTime(time);
+      await started.recordings.check();
+    };
+    return { ...started, listing, programmePlan, clockTo };
+  }
+
+  it("continues checking schedules after one lookup defect without another wake", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TEN_PAST);
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const provider = await fakeProvider({ live: true, maxConnections: 1, slotReleaseMs: 0 });
+    const dataDir = await tempDir();
+    const clock = Layer.effectDiscard(TestClock.setTime(TEN_PAST)).pipe(
+      Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
+    );
+    const runtime = runtimeFor(
+      mainLayer({ ...testConfig(dataDir), ffmpeg: "ffmpeg", ffprobe: "ffprobe" }).pipe(
+        Layer.provideMerge(clock),
+      ),
+    );
+    const subscriptions = await promised(runtime, Subscriptions);
+    const library = await runtime.runPromise(Library);
+    const guide = await promised(runtime, Guide);
+    const recordings = await promised(runtime, Recordings);
+    const { id } = await subscriptions.add(demoLogin(provider));
+    await runtime.runPromise(library.refresh(id));
+    await guide.refresh(id);
+    const listed = provider.catalogue.channels.find((each) => each.name === GUIDED)!;
+    const at = new Date(TEN_PAST + 2 * MINUTE);
+    await recordings.schedule({
+      kind: "slot",
+      channel: { subscriptionId: id, id: String(listed.streamId) },
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 5,
+      title: "News",
+      padding: { before: 0, after: 0 },
+    });
+    // Let the initial guide/catalogue notifications settle before the one failed lookup.
+    await runtime.runPromise(TestClock.adjust(MINUTE));
+    const release = await runtime.runPromise(Deferred.make<void>());
+    const lookup = vi
+      .spyOn(library, "lookup")
+      .mockImplementationOnce(() =>
+        Effect.andThen(
+          Deferred.await(release),
+          Effect.die(new Error("One scheduled lookup failed")),
+        ),
+      );
+    onTestFinished(() => lookup.mockRestore());
+    vi.setSystemTime(at.getTime());
+    await runtime.runPromise(TestClock.adjust(MINUTE));
+    expect(lookup).toHaveBeenCalled();
+    expect(provider.streamRequests()).toBe(0);
+    // Fail only after the clock is at the start, so the timed retry cannot run in the same jump.
+    await runtime.runPromise(Deferred.succeed(release, undefined));
+    await runtime.runPromise(TestClock.adjust(0));
+    vi.setSystemTime(at.getTime() + MINUTE);
+    await runtime.runPromise(TestClock.adjust(MINUTE));
+    const [recording] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    expect(recording?.status.kind).toBe("recording");
+    expect(provider.streamRequests()).toBe(1);
+    await recordings.stop(recording!.id);
+  }, 10_000);
+
+  it("records a programme from its padded start to its end, and lets it go once recorded", async () => {
+    const { provider, recordings, listing, programmePlan, clockTo } = await scheduling();
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next, { before: 1, after: 0 }));
+    expect(saved).toMatchObject({
+      status: { kind: "planned" },
+      next: { start: next.start - MINUTE, stop: next.stop },
+    });
+    expect(await recordings.schedules()).toEqual([saved]);
+    expect(provider.streamRequests()).toBe(0);
+
+    await clockTo(next.start - MINUTE);
+    const [recording] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    expect(recording).toMatchObject({
+      title: next.title,
+      stop: next.stop,
+      scheduled: { schedule: saved.id, from: next.start - MINUTE, late: null },
+    });
+    expect((await recordings.schedules())[0]?.status).toEqual({
+      kind: "recording",
+      recording: recording?.id,
+    });
+
+    // The capture sees its stop time pass, as the clock reads it.
+    vi.setSystemTime(next.stop + 1000);
+    const [done] = await until(recordings.list, ([first]) => first?.status.kind !== "recording");
+    expect(done?.status).toEqual({ kind: "complete" });
+    expect(await allClosed(provider)).toBe(true);
+    await recordings.check();
+    expect(await until(recordings.schedules, (list) => list.length === 0)).toEqual([]);
+    expect(await recordings.list()).toHaveLength(1);
+  });
+
+  it("writes how a scheduled recording ended once it can, after a failed write", async () => {
+    const { dataDir, recordings, listing, programmePlan, clockTo, quit } = await scheduling();
+    const { next } = await listing();
+    await recordings.schedule(programmePlan(next));
+    await clockTo(next.start);
+    const [recording] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    const manifest = join(dataDir, "recordings", "recordings.json");
+    await rename(manifest, `${manifest}.saved`);
+    await mkdir(manifest);
+    vi.setSystemTime(next.stop + 1000);
+    await until(recordings.list, ([first]) => first?.status.kind === "complete");
+
+    // Nobody presses Stop for it: a check writes it.
+    await rm(manifest, { recursive: true });
+    await rename(`${manifest}.saved`, manifest);
+    await recordings.check();
+    await quit();
+    const again = await app(dataDir);
+    expect(await again.recordings.list()).toEqual([
+      expect.objectContaining({ id: recording?.id, status: { kind: "complete" } }),
+    ]);
+    await again.quit();
+  });
+
+  it("waits while every connection is held, then records the rest, saying it started late", async () => {
+    const {
+      provider,
+      dataDir,
+      subscriptionId,
+      recordings,
+      playback,
+      channel,
+      listing,
+      programmePlan,
+      clockTo,
+      quit,
+    } = await scheduling();
+    const watching = await playback.open(channel(GUIDED), ["h264", "aac"]);
+    const player = await fetch(watching.url);
+    await player.body?.getReader().read();
+    const { now } = await listing();
+    const before = provider.streamRequests();
+
+    // Ten minutes into the programme.
+    const savedFrom = Date.now();
+    const saved = await recordings.schedule(programmePlan(now));
+    const savedBy = Date.now();
+    const [waiting] = await until(
+      recordings.schedules,
+      ([first]) => first?.status.kind === "waiting",
+    );
+    expect(waiting?.status).toEqual({ kind: "waiting", holders: [{ kind: "watch" }] });
+    expect(await recordings.list()).toEqual([]);
+    expect(provider.streamRequests()).toBe(before);
+
+    // Nothing stops for it: it records once Watch lets its connection go.
+    await playback.close(watching.sessionId);
+    await clockTo(now.start + 15 * MINUTE);
+    const [recording] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    // Late from when it was saved, not the programme's start, which still names its time.
+    expect(recording?.scheduled).toEqual({
+      schedule: saved.id,
+      from: now.start,
+      owed: expect.any(Number),
+      late: "busy",
+    });
+    expect(recording!.scheduled!.owed).toBeGreaterThanOrEqual(savedFrom);
+    expect(recording!.scheduled!.owed).toBeLessThanOrEqual(savedBy);
+    expect(recording?.stop).toBe(now.stop);
+    expect(recording!.start).toBeGreaterThanOrEqual(now.start + 15 * MINUTE);
+
+    // After the app starts again it is that time's one recording, and the programme is let go.
+    const requests = provider.streamRequests();
+    await quit();
+    const again = await app(dataDir);
+    await again.library.refresh(subscriptionId);
+    await again.guide.refresh(subscriptionId);
+    await again.recordings.check();
+    const kept = [
+      expect.objectContaining({
+        id: recording?.id,
+        scheduled: recording?.scheduled,
+        status: { kind: "partial", cut: "quit" },
+      }),
+    ];
+    expect(await again.recordings.list()).toEqual(kept);
+    expect(await again.recordings.schedules()).toEqual([]);
+    expect(provider.streamRequests()).toBe(requests);
+    await again.quit();
+  });
+
+  it("misses a programme saved partway through from when it was saved, while every connection stays held", async () => {
+    const { recordings, playback, channel, listing, programmePlan, clockTo } = await scheduling();
+    const watching = await playback.open(channel(GUIDED), ["h264", "aac"]);
+    const player = await fetch(watching.url);
+    await player.body?.getReader().read();
+    const { now } = await listing();
+    const savedFrom = Date.now();
+    const saved = await recordings.schedule(programmePlan(now));
+    const savedBy = Date.now();
+    await until(recordings.schedules, ([first]) => first?.status.kind === "waiting");
+
+    await clockTo(now.stop + 1000);
+    const [missed] = await until(recordings.list, (list) => list.length > 0);
+    expect(missed).toMatchObject({
+      start: now.start,
+      status: { kind: "missed", why: "busy" },
+      scheduled: { schedule: saved.id, from: now.start, late: "busy" },
+    });
+    expect(missed!.scheduled!.owed).toBeGreaterThanOrEqual(savedFrom);
+    expect(missed!.scheduled!.owed).toBeLessThanOrEqual(savedBy);
+    await playback.close(watching.sessionId);
+  });
+
+  it("writes a missed result for a time that passed while the app was closed, and records the rest of one it wakes into", async () => {
+    const { dataDir, subscriptionId, channel, recordings, quit } = await scheduling();
+    // Twenty past seven, UTC, every day in this computer's time zone, for ten minutes.
+    const at = new Date(TEN_PAST + 10 * MINUTE);
+    const plan: RecordingPlan = {
+      kind: "slot",
+      channel: channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 10,
+      title: "Evening",
+      padding: { before: 0, after: 0 },
+    };
+    const saved = await recordings.schedule(plan);
+    expect(saved.next).toEqual({ start: at.getTime(), stop: at.getTime() + 10 * MINUTE });
+    await quit();
+
+    vi.setSystemTime(TEN_PAST + 25 * MINUTE);
+    const again = await app(dataDir);
+    await again.library.refresh(subscriptionId);
+    const [missed] = await until(again.recordings.list, (list) => list.length > 0);
+    expect(missed).toMatchObject({
+      title: "Evening",
+      start: at.getTime(),
+      stop: at.getTime() + 10 * MINUTE,
+      bytes: 0,
+      status: { kind: "missed", why: "away" },
+    });
+    const tomorrow = new Date(
+      at.getFullYear(),
+      at.getMonth(),
+      at.getDate() + 1,
+      at.getHours(),
+      at.getMinutes(),
+    );
+    expect((await again.recordings.schedules())[0]).toMatchObject({
+      next: { start: tomorrow.getTime() },
+      status: { kind: "planned" },
+    });
+    // Removed, a missed result stays removed.
+    await again.recordings.remove(missed!.id);
+    await again.recordings.check();
+    expect(await again.recordings.list()).toEqual([]);
+
+    // The computer wakes three minutes into tomorrow's time: it records the rest.
+    vi.setSystemTime(tomorrow.getTime() + 3 * MINUTE);
+    await again.recordings.check();
+    const [late] = await until(
+      again.recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    expect(late?.scheduled).toEqual({ schedule: saved.id, from: tomorrow.getTime(), late: "away" });
+    expect(late?.stop).toBe(tomorrow.getTime() + 10 * MINUTE);
+  });
+
+  it("holds a programme the guide no longer lists at its start, recording no other show", async () => {
+    const { provider, recordings, listing, programmePlan, clockTo } = await scheduling();
+    const { next } = await listing();
+    const renamed = await recordings.schedule(programmePlan({ ...next, title: "Another show" }));
+    expect(renamed.status).toEqual({ kind: "changed", title: next.title });
+    const moved = await recordings.schedule(
+      programmePlan({ ...next, start: next.start + 5 * MINUTE }),
+    );
+    expect(moved.status).toEqual({ kind: "gone" });
+
+    await clockTo(next.start + 6 * MINUTE);
+    await clockTo(next.stop + MINUTE);
+    expect(provider.streamRequests()).toBe(0);
+    // Each says it was missed, and why.
+    expect(
+      (await recordings.list()).map(({ title, status, bytes }) => ({ title, status, bytes })),
+    ).toEqual([
+      { title: next.title, status: { kind: "missed", why: "held" }, bytes: 0 },
+      { title: "Another show", status: { kind: "missed", why: "held" }, bytes: 0 },
+    ]);
+    expect(await recordings.schedules()).toEqual([]);
+  });
+
+  it("shows who holds the connection when two schedules overlap, and records the first saved first", async () => {
+    const { recordings, channel, listing, programmePlan, clockTo } = await scheduling();
+    const { next } = await listing();
+    const first = await recordings.schedule(programmePlan(next));
+    const at = new Date(next.start);
+    const overlapping: RecordingPlan = {
+      kind: "slot",
+      channel: channel(TRACKS),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 30,
+      title: "Tracks",
+      padding: { before: 0, after: 0 },
+    };
+    expect((await recordings.plan(overlapping)).status).toEqual({
+      kind: "conflict",
+      holders: [{ kind: "schedule", title: next.title, until: next.stop }],
+    });
+    // Previewed only: nothing was saved.
+    expect(await recordings.schedules()).toEqual([first]);
+
+    // Saved anyway, it waits at their time while the first saved records.
+    const second = await recordings.schedule(overlapping);
+    await clockTo(next.start);
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    expect(recording?.scheduled?.schedule).toBe(first.id);
+    const waiting = await until(recordings.schedules, (list) =>
+      list.some((each) => each.id === second.id && each.status.kind === "waiting"),
+    );
+    expect(waiting.find((each) => each.id === second.id)?.status).toEqual({
+      kind: "waiting",
+      holders: [{ kind: "recording", title: next.title, until: next.stop }],
+    });
+  });
+
+  it("never records a time again once its recording was stopped and deleted", async () => {
+    const { provider, recordings, listing, programmePlan } = await scheduling();
+    const { now } = await listing();
+    await recordings.schedule(programmePlan(now));
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    await recordings.stop(recording!.id);
+    await recordings.remove(recording!.id);
+    await recordings.check();
+    expect(await recordings.list()).toEqual([]);
+    expect(await recordings.schedules()).toEqual([]);
+    expect(await allClosed(provider)).toBe(true);
+  });
+
+  it("stands at a repeat's next time once its recording on now was stopped", async () => {
+    const { channel, recordings, listing } = await scheduling();
+    const { now } = await listing();
+    const at = new Date(now.start);
+    const plan: RecordingPlan = {
+      kind: "slot",
+      channel: channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 30,
+      title: now.title,
+      padding: { before: 0, after: 0 },
+    };
+    await recordings.schedule(plan);
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    await recordings.stop(recording!.id);
+    await recordings.check();
+    // Today's time records no more: it says when it records next, not that today's is planned.
+    const [following] = occurrences(plan, now.stop, now.stop + 2 * DAY);
+    expect((await recordings.schedules())[0]).toMatchObject({
+      next: following,
+      status: { kind: "planned" },
+    });
+  });
+
+  it("records a time once when a change moves its start and end later while it starts", async () => {
+    const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+    const { provider, recordings, listing, programmePlan, clockTo } = await scheduling({
+      streams: (source, out, signal) => {
+        arrived();
+        void gate.then(() => liveStreams(source, out, signal));
+      },
+    });
+    onTestFinished(() => open());
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next, { before: 2, after: 0 }));
+    await clockTo(next.start - 2 * MINUTE);
+    await asked;
+    const changing = recordings.schedule(programmePlan(next, { before: 0, after: 2 }), saved.id);
+    open();
+    await changing;
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+
+    // Its recording ends at the end it began with; the changed time's last minutes don't start
+    // another, and nothing is missed.
+    vi.setSystemTime(next.stop + 1000);
+    await until(recordings.list, ([each]) => each?.status.kind === "complete");
+    await recordings.check();
+    await clockTo(next.stop + 3 * MINUTE);
+    expect((await recordings.list()).map((each) => each.id)).toEqual([recording!.id]);
+    expect(await recordings.schedules()).toEqual([]);
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("records the changed time when the start a change waited for failed", async () => {
+    // The first stream breaks off once the test lets it, before a packet; the next plays.
+    let first = true;
+    const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+    const { recordings, listing, programmePlan, clockTo } = await scheduling({
+      streams: (source, out, signal) => {
+        if (!first) return liveStreams(source, out, signal);
+        first = false;
+        arrived();
+        void gate.then(() => out.destroy());
+      },
+    });
+    onTestFinished(() => open());
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next));
+    await clockTo(next.start);
+    await asked;
+    const changing = recordings.schedule(programmePlan(next, { before: 2, after: 0 }), saved.id);
+    open();
+    await changing;
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    expect(recording?.scheduled).toMatchObject({
+      schedule: saved.id,
+      from: next.start - 2 * MINUTE,
+    });
+  });
+
+  it("lets a programme go once its recording was stopped partway through", async () => {
+    const { provider, recordings, listing, programmePlan } = await scheduling();
+    const { now } = await listing();
+    await recordings.schedule(programmePlan(now));
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    await recordings.stop(recording!.id);
+    await recordings.check();
+    expect(await recordings.schedules()).toEqual([]);
+    expect((await recordings.list()).map((each) => each.id)).toEqual([recording!.id]);
+    expect(await allClosed(provider)).toBe(true);
+  });
+
+  it("records a time once when its padding changes while its start is under way", async () => {
+    // The stream answers once the test lets it, so the start stays under way until then.
+    const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
+    const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+    const { provider, recordings, listing, programmePlan, clockTo } = await scheduling({
+      streams: (source, out, signal) => {
+        arrived();
+        void gate.then(() => liveStreams(source, out, signal));
+      },
+    });
+    onTestFinished(() => open());
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next));
+    await clockTo(next.start);
+    await asked;
+    // The change waits for the start's answer, and the schedules go on meanwhile.
+    const changing = recordings.schedule(programmePlan(next, { before: 2, after: 0 }), saved.id);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const listed = await Promise.race([
+      recordings.schedules().then(() => "listed"),
+      new Promise((resolve) => setTimeout(resolve, 2000, "held")),
+    ]);
+    expect(listed).toBe("listed");
+    open();
+    await changing;
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+
+    // Its time ends as recorded: no missed result for the changed time, and no second start.
+    vi.setSystemTime(next.stop + 1000);
+    await until(recordings.list, ([each]) => each?.status.kind === "complete");
+    await recordings.check();
+    expect((await recordings.list()).map((each) => each.id)).toEqual([recording!.id]);
+    expect(await recordings.schedules()).toEqual([]);
+    expect(provider.streamRequests()).toBe(1);
+  });
+
+  it("records a repeat's time once through changes made after it was stopped or deleted", async () => {
+    const { provider, channel, recordings, listing } = await scheduling();
+    const { now } = await listing();
+    const at = new Date(now.start);
+    const slot = (before: number): RecordingPlan => ({
+      kind: "slot",
+      channel: channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 30,
+      title: now.title,
+      padding: { before, after: 0 },
+    });
+    const saved = await recordings.schedule(slot(0));
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    await recordings.stop(recording!.id);
+    /** No second recording of today's time starts, waiting a moment for one that would. */
+    const recordedOnce = async (count: number) =>
+      (await until(recordings.list, (list) => list.length > count, 2000)).length === count;
+    for (const before of [5, 2]) await recordings.schedule(slot(before), saved.id);
+    await recordings.check();
+    expect(await recordedOnce(1)).toBe(true);
+    await recordings.remove(recording!.id);
+    await recordings.schedule(slot(0), saved.id);
+    await recordings.check();
+    expect(await recordedOnce(0)).toBe(true);
+    expect(await allClosed(provider)).toBe(true);
+  });
+
+  it("plans a programme listed more than a week ahead", async () => {
+    const { recordings, listing, programmePlan } = await scheduling();
+    const { next } = await listing();
+    const later = { ...next, start: next.start + 9 * DAY, stop: next.stop + 9 * DAY };
+    const planned = await recordings.plan(programmePlan(later));
+    expect(planned.next).toEqual({ start: later.start, stop: later.stop });
+  });
+
+  it("cancels a schedule before its time, and leaves a recording it started going", async () => {
+    const { provider, recordings, listing, programmePlan, clockTo } = await scheduling();
+    const { now, next } = await listing();
+    const later = await recordings.schedule(programmePlan(next));
+    // Changed by its id: the same schedule, with padding.
+    const changed = await recordings.schedule(
+      programmePlan(next, { before: 2, after: 3 }),
+      later.id,
+    );
+    expect(changed).toMatchObject({
+      id: later.id,
+      next: { start: next.start - 2 * MINUTE, stop: next.stop + 3 * MINUTE },
+    });
+    await recordings.cancel(later.id);
+    expect(await recordings.schedules()).toEqual([]);
+
+    // On air as it is saved: it records the rest, not late, as it had no earlier time to record.
+    const current = await recordings.schedule(programmePlan(now));
+    const [recording] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    expect(recording?.scheduled).toEqual({
+      schedule: current.id,
+      from: now.start,
+      owed: expect.any(Number),
+      late: null,
+    });
+    await recordings.cancel(current.id);
+    // At the padded start the change gave it: nothing records, and the first goes on.
+    await clockTo(next.start - 2 * MINUTE + 1000);
+    expect(await recordings.schedules()).toEqual([]);
+    const list = await recordings.list();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: recording?.id, status: { kind: "recording" } });
+    expect(provider.activeStreams()).toBe(1);
+  });
+
+  it("takes a change made while it records from its next time, which it records", async () => {
+    const { recordings, channel, listing, programmePlan, clockTo } = await scheduling();
+    const { now } = await listing();
+    const saved = await recordings.schedule(programmePlan(now));
+    const [first] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    // Changed to every day at the same time, ten minutes longer: today's recording goes on to
+    // its own end, today's longer time doesn't start again, and tomorrow's comes.
+    const at = new Date(now.start);
+    const tomorrow = new Date(
+      at.getFullYear(),
+      at.getMonth(),
+      at.getDate() + 1,
+      at.getHours(),
+      at.getMinutes(),
+    );
+    const changed = await recordings.schedule(
+      {
+        kind: "slot",
+        channel: channel(GUIDED),
+        days: EVERY_DAY,
+        at: at.getHours() * 60 + at.getMinutes(),
+        minutes: 40,
+        title: now.title,
+        padding: { before: 0, after: 0 },
+      },
+      saved.id,
+    );
+    expect(changed.status).toEqual({ kind: "recording", recording: first?.id });
+    // Its row says when today's recording stops, not the changed time's end.
+    expect(changed.next).toEqual({ start: now.start, stop: first?.stop });
+
+    // Today's recording ends at the programme's end, inside the changed time.
+    vi.setSystemTime(now.stop + 1000);
+    await until(recordings.list, ([each]) => each?.status.kind !== "recording");
+    await recordings.check();
+    expect(await recordings.list()).toHaveLength(1);
+
+    await clockTo(tomorrow.getTime());
+    const list = await until(recordings.list, (each) =>
+      each.some((recording) => recording.scheduled?.from === tomorrow.getTime()),
+    );
+    expect(list).toHaveLength(2);
+    expect(list.find((each) => each.scheduled?.from === tomorrow.getTime())).toMatchObject({
+      status: { kind: "recording" },
+      stop: tomorrow.getTime() + 40 * MINUTE,
+      scheduled: { schedule: saved.id, late: null },
+    });
+  });
+
+  it("follows the guide's revised end until it records, then keeps the end it started with", async () => {
+    const { provider, subscriptionId, guide, recordings, listing, programmePlan, clockTo } =
+      await scheduling();
+    const { next } = await listing();
+    const saved = await recordings.schedule(programmePlan(next));
+    /** The guide, with the next programme ending `minutes` later (earlier, below 0). */
+    const ending = async (minutes: number) => {
+      const at = (time: number) =>
+        `${new Date(time + 2 * 60 * MINUTE).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0200`;
+      provider.serveGuide(
+        fakeGuide(provider.catalogue, TEN_PAST).replace(
+          `start="${at(next.start)}" stop="${at(next.stop)}"`,
+          `start="${at(next.start)}" stop="${at(next.stop + minutes * MINUTE)}"`,
+        ),
+      );
+      await guide.refresh(subscriptionId);
+      await recordings.check();
+    };
+    // Sooner: a later end would overlap the programme after it.
+    await ending(-10);
+    expect((await recordings.schedules())[0]?.next?.stop).toBe(next.stop - 10 * MINUTE);
+
+    await clockTo(next.start);
+    const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    expect(recording?.stop).toBe(next.stop - 10 * MINUTE);
+    await ending(-20);
+    expect((await recordings.schedules())[0]).toMatchObject({
+      id: saved.id,
+      next: { stop: next.stop - 10 * MINUTE },
+      status: { kind: "recording", recording: recording?.id },
+    });
+  });
+
+  it("holds a repeat whose channel is listed under another name, as after a playlist was replaced", async () => {
+    const { provider, subscriptionId, library, channel, recordings, clockTo } = await scheduling();
+    const at = new Date(TEN_PAST + 10 * MINUTE);
+    await recordings.schedule({
+      kind: "slot",
+      channel: channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 10,
+      title: "Evening",
+      padding: { before: 0, after: 0 },
+    });
+    // The same id, another channel.
+    provider.serveChannels((all) =>
+      all.map((each) => (each.name === GUIDED ? { ...each, name: "Another channel" } : each)),
+    );
+    await library.refresh(subscriptionId);
+    await recordings.check();
+    expect((await recordings.schedules())[0]?.status).toEqual({ kind: "gone" });
+
+    await clockTo(at.getTime() + MINUTE);
+    await clockTo(at.getTime() + 11 * MINUTE);
+    expect(provider.streamRequests()).toBe(0);
+    expect((await recordings.list())[0]?.status).toEqual({ kind: "missed", why: "held" });
+  });
+
+  it("reports a lost login as a provider problem, not a disk failure", async () => {
+    const first = await scheduling();
+    const at = new Date(TEN_PAST + 2 * MINUTE);
+    await first.recordings.schedule({
+      kind: "slot",
+      channel: first.channel(GUIDED),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 5,
+      title: "Evening",
+      padding: { before: 0, after: 0 },
+    });
+    await first.quit();
+    vi.setSystemTime(at.getTime() + MINUTE);
+    const locked = await app(first.dataDir, {
+      seal: testSecrets.seal,
+      open: () => {
+        throw new Error("The keychain opens nothing.");
+      },
+    });
+    await locked.library.channels({});
+    await locked.recordings.check();
+    const [retrying] = await until(
+      locked.recordings.schedules,
+      ([each]) => each?.status.kind === "retrying",
+    );
+    expect(retrying?.status).toEqual({ kind: "retrying", why: "stream" });
+    vi.setSystemTime(at.getTime() + 6 * MINUTE);
+    await locked.recordings.check();
+    expect((await locked.recordings.list())[0]?.status).toEqual({ kind: "missed", why: "stream" });
+    expect(first.provider.streamRequests()).toBe(0);
+  });
+
+  it("tries a start that failed again, and says why it was missed", async () => {
+    const { provider, channel, recordings, clockTo } = await scheduling();
+    const at = new Date(TEN_PAST - 5 * MINUTE);
+    await recordings.schedule({
+      kind: "slot",
+      channel: channel("TEST | Offline"),
+      days: EVERY_DAY,
+      at: at.getHours() * 60 + at.getMinutes(),
+      minutes: 10,
+      title: "Offline",
+      padding: { before: 0, after: 0 },
+    });
+    const [retrying] = await until(
+      recordings.schedules,
+      ([each]) => each?.status.kind === "retrying",
+    );
+    expect(retrying?.status).toEqual({ kind: "retrying", why: "stream" });
+    const asked = provider.streamRequests();
+    // Not before a minute has passed.
+    await clockTo(TEN_PAST + 30_000);
+    expect(provider.streamRequests()).toBe(asked);
+    await clockTo(TEN_PAST + 2 * MINUTE);
+    await until(recordings.schedules, () => provider.streamRequests() > asked);
+    expect(provider.streamRequests()).toBeGreaterThan(asked);
+
+    await clockTo(at.getTime() + 11 * MINUTE);
+    expect((await recordings.list())[0]?.status).toEqual({ kind: "missed", why: "stream" });
+  });
+
+  it("leaves a schedules file it can't read as it is, and schedules nothing meanwhile", async () => {
+    const { dataDir, listing, programmePlan } = await scheduling();
+    const { next } = await listing();
+    const path = join(dataDir, "recordings", "schedules.json");
+    await mkdir(join(dataDir, "recordings"), { recursive: true });
+    for (const unreadable of [
+      JSON.stringify({ version: 2, schedules: [] }),
+      // A plan outside what the window may send.
+      JSON.stringify({
+        version: 1,
+        schedules: [
+          {
+            id: "a",
+            plan: { ...programmePlan(next), padding: { before: 600, after: 0 } },
+            channelName: GUIDED,
+            created: 0,
+            through: 0,
+          },
+        ],
+      }),
+    ]) {
+      await writeFile(path, unreadable);
+      const { recordings } = await app(dataDir);
+      await expect(recordings.schedules()).rejects.toMatchObject({ error: { kind: "unexpected" } });
+      await expect(recordings.schedule(programmePlan(next))).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      expect(await readFile(path, "utf8")).toBe(unreadable);
+    }
+  });
+
+  it("goes with its subscription", async () => {
+    const { subscriptionId, recordings, roster, listing, programmePlan } = await scheduling();
+    await recordings.schedule(programmePlan((await listing()).next));
+    await roster.remove(subscriptionId, false);
+    expect(await recordings.schedules()).toEqual([]);
+  });
+});
+
+describe("recording slot times", () => {
+  /** Runs `body` with this computer's time zone as `zone`. */
+  function inZone(zone: string, body: () => void) {
+    const was = process.env.TZ;
+    process.env.TZ = zone;
+    try {
+      body();
+    } finally {
+      if (was === undefined) delete process.env.TZ;
+      else process.env.TZ = was;
+    }
+  }
+  const slot = (at: number, minutes: number): RecordingPlan => ({
+    kind: "slot",
+    channel: { subscriptionId: "s", id: "1" },
+    days: EVERY_DAY,
+    at,
+    minutes,
+    title: "Night",
+    padding: { before: 2, after: 5 },
+  });
+
+  it("keeps a slot at its local time across daylight saving, an hour later where the clocks skip it", () => {
+    inZone("Europe/Amsterdam", () => {
+      // 02:30 for an hour: the clocks go forward at 02:00 on 29 March 2026 and back at 03:00 on
+      // 25 October.
+      const night = slot(150, 60);
+      const day = (from: string) =>
+        occurrences(night, Date.parse(from), Date.parse(from) + 20 * 60 * MINUTE)[0];
+      // CET, before the change: 02:28 local is 01:28 UTC.
+      expect(day("2026-03-28T00:00:00Z")).toEqual({
+        start: Date.parse("2026-03-28T01:28:00Z"),
+        stop: Date.parse("2026-03-28T02:35:00Z"),
+      });
+      // 02:30 doesn't happen: it starts at 03:30 CEST, 01:30 UTC.
+      expect(day("2026-03-29T00:00:00Z")).toEqual({
+        start: Date.parse("2026-03-29T01:28:00Z"),
+        stop: Date.parse("2026-03-29T02:35:00Z"),
+      });
+      // 02:30 happens twice: the first, in CEST.
+      expect(day("2026-10-24T23:00:00Z")).toEqual({
+        start: Date.parse("2026-10-25T00:28:00Z"),
+        stop: Date.parse("2026-10-25T01:35:00Z"),
+      });
+    });
+  });
+
+  it("carries a slot's padding and length past midnight, and only on its days", () => {
+    inZone("UTC", () => {
+      const fridays = { ...slot(23 * 60 + 30, 60), days: [5] };
+      // Friday 30 October 2026, 23:28 to Saturday 00:35.
+      expect(
+        occurrences(
+          fridays,
+          Date.parse("2026-10-29T00:00:00Z"),
+          Date.parse("2026-11-07T00:00:00Z"),
+        ),
+      ).toEqual([
+        { start: Date.parse("2026-10-30T23:28:00Z"), stop: Date.parse("2026-10-31T00:35:00Z") },
+        { start: Date.parse("2026-11-06T23:28:00Z"), stop: Date.parse("2026-11-07T00:35:00Z") },
+      ]);
+      // One under way at midnight is found from after it.
+      expect(
+        occurrences(
+          fridays,
+          Date.parse("2026-10-31T00:10:00Z"),
+          Date.parse("2026-10-31T01:00:00Z"),
+        ),
+      ).toHaveLength(1);
+    });
   });
 });

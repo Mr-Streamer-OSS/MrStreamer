@@ -160,6 +160,7 @@ const bridge = {
       return Promise.resolve({ ok: true, value: { revision: preferenceRevision, preferences } });
     }
     if (method === "recordings.list") return Promise.resolve({ ok: true, value: [] });
+    if (method === "recordings.schedules") return Promise.resolve({ ok: true, value: [] });
     if (method === "subscription.preferences") {
       return Promise.resolve({ ok: true, value: defaultSubscriptionPreferences });
     }

@@ -429,7 +429,7 @@ describe("the guide grid", () => {
     await page.press("ArrowLeft");
     const now = guide.get("1")!.find((p) => p.start <= Date.now() && Date.now() < p.stop)!;
     await ready(() => expect(page.details()).toContain(now.description));
-    expect(page.actions()).toEqual(["Watch live", "Play from start"]);
+    expect(page.actions()).toEqual(["Watch live", "Play from start", "Record"]);
 
     // Ended, within the archive: Play from start comes first, and Enter plays it.
     await page.press("ArrowLeft");
@@ -469,7 +469,7 @@ describe("the guide grid", () => {
     expect(Date.now() - begun.start).toBeLessThan(MINUTE);
     await ready(() => expect(page.cell(begun.title)).toBeDefined());
     await act(async () => page.cell(begun.title)!.click());
-    expect(page.actions()).toEqual(["Watch live", "Play from start"]);
+    expect(page.actions()).toEqual(["Watch live", "Play from start", "Record"]);
     await page.click("Play from start");
     expect(player.state().archive?.title).toBe(begun.title);
   });
@@ -846,12 +846,12 @@ describe("reminders in the guide grid", () => {
     // On now: nothing to remind of.
     await page.press("ArrowRight");
     await page.press("ArrowLeft");
-    expect(page.actions()).toEqual(["Watch live"]);
+    expect(page.actions()).toEqual(["Watch live", "Record"]);
 
     await page.press("ArrowRight");
     const next = guide.get("1")!.find((each) => each.start > Date.now())!;
     expect(page.selected()).toBe(next.title);
-    await ready(() => expect(page.actions()).toEqual(["Watch live", "Remind me"]));
+    await ready(() => expect(page.actions()).toEqual(["Watch live", "Remind me", "Record"]));
     expect(pressed("Remind me")).toBe("false");
     await page.click("Remind me");
     await ready(() => expect(pressed("Reminder set")).toBe("true"));
@@ -871,7 +871,7 @@ describe("reminders in the guide grid", () => {
     const page = await gridPage([channel("1", "One")], "grid", null, () => remindersOf());
     await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
     await page.press("ArrowRight");
-    await ready(() => expect(page.actions()).toEqual(["Watch live", "Remind me"]));
+    await ready(() => expect(page.actions()).toEqual(["Watch live", "Remind me", "Record"]));
 
     // A save that fails says so, and the button stays as it was; pressing again tries again.
     ipc.refuse("reminders.set", { kind: "unexpected", detail: "disk full" });

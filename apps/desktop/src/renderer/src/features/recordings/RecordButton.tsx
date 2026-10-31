@@ -1,12 +1,14 @@
 // Record, in Live TV's now strip: a popover that records the channel from now, to when its
-// programme ends (two minutes after the guide's time, as guides run late), or for an hour or two,
-// and says how many of its subscription's connections are in use. When every one is held, it says
-// so, and where only playing here holds them, offers to stop that and record. While the channel
-// records, the button reads Recording and opens Recordings.
+// programme ends (two minutes after the guide's time, as guides run late), for an hour or two, or
+// until a time of day it is given (today's, or tomorrow's once that passed, within
+// RECORDING_MAX_MS), and says how many of its subscription's connections are in use. When every
+// one is held, it says so, and where only playing here holds them, offers to stop that and record.
+// While the channel records, the button reads Recording and opens Recordings.
 import { Popover } from "@base-ui/react/popover";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
@@ -15,9 +17,11 @@ import { ownedId } from "@mrstreamer/contracts/subscription";
 import { formatDate, t, type PlainKey } from "@mrstreamer/core/i18n";
 import { openView } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
+import { Input } from "../../components/ui/input.tsx";
 import { menuSurface } from "../../components/ui/menu.ts";
-import { useNow } from "../../lib/clock.ts";
+import { refreshNow, useNow } from "../../lib/clock.ts";
 import { appError, describeError } from "../../lib/errors.ts";
+import { clockTime } from "../../lib/format.ts";
 import { call } from "../../lib/ipc.ts";
 import { cn } from "../../lib/utils.ts";
 import { player } from "../../player/player.ts";
@@ -27,16 +31,25 @@ import { useRecordingOf } from "./recordings.ts";
 const LATE_MS = 2 * 60_000;
 const HOUR_MS = 60 * 60_000;
 
-type StopChoice = "end" | "1h" | "2h";
+type StopChoice = "end" | "1h" | "2h" | "at";
 
 const CHOICES = [
   { choice: "end", label: "When it ends" },
   { choice: "1h", label: "In 1 hour" },
   { choice: "2h", label: "In 2 hours" },
+  { choice: "at", label: "At a time…" },
 ] as const satisfies readonly { readonly choice: StopChoice; readonly label: PlainKey }[];
 
-/** When `choice` stops a recording started at `now`, or null where it can't: no programme on. */
-function stopOf(choice: StopChoice, programme: Programme | null, now: number): number | null {
+/**
+ * When `choice` stops a recording started at `now`, or null where it can't: no programme on, or
+ * `at`, a time input's "21:30", empty, more than RECORDING_MAX_MS ahead or skipped by the clocks.
+ */
+function stopOf(
+  choice: StopChoice,
+  programme: Programme | null,
+  now: number,
+  at: string,
+): number | null {
   switch (choice) {
     case "end": {
       if (!programme) return null;
@@ -47,7 +60,49 @@ function stopOf(choice: StopChoice, programme: Programme | null, now: number): n
       return now + HOUR_MS;
     case "2h":
       return now + 2 * HOUR_MS;
+    case "at": {
+      const stop = atTime(now, at);
+      return typeof stop === "number" ? stop : null;
+    }
   }
+}
+
+/**
+ * The time `at`, a time input's "21:30", next comes after `now`: today's, or tomorrow's once that
+ * passed. "skipped" where the clocks go forward past it then, null for none or one more than
+ * RECORDING_MAX_MS ahead.
+ */
+function atTime(now: number, at: string): number | "skipped" | null {
+  const [hours, minutes] = at.split(":").map(Number);
+  if (hours === undefined || minutes === undefined || Number.isNaN(hours + minutes)) return null;
+  const stop = new Date(now);
+  stop.setHours(hours, minutes, 0, 0);
+  // Where the clocks go back, by an hour or half of one, a time they repeat comes again by as
+  // much after the first.
+  const back = new Date(stop.getTime() + HOUR_MS).getTimezoneOffset() - stop.getTimezoneOffset();
+  const again = new Date(stop.getTime() + back * 60_000);
+  if (
+    stop.getTime() <= now &&
+    back > 0 &&
+    again.getHours() === hours &&
+    again.getMinutes() === minutes
+  )
+    stop.setTime(again.getTime());
+  if (stop.getTime() <= now) {
+    stop.setDate(stop.getDate() + 1);
+    stop.setHours(hours, minutes, 0, 0);
+  }
+  // A time the clocks go forward past isn't there: setHours moves it on by the change.
+  if (stop.getHours() !== hours || stop.getMinutes() !== minutes) return "skipped";
+  return stop.getTime() <= now + RECORDING_MAX_MS ? stop.getTime() : null;
+}
+
+/** "22:30" in this computer's time, as a time input takes it. */
+function inputTime(at: number): string {
+  const date = new Date(at);
+  return [date.getHours(), date.getMinutes()]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
 }
 
 const dot = <span aria-hidden className="size-2 flex-none rounded-full bg-destructive" />;
@@ -103,6 +158,8 @@ export function RecordButton({
             // button keeps its Enter and Space, and Escape and Tab do what they do in a popup.
             onKeyDown={(event) => {
               if (event.metaKey || event.ctrlKey || event.altKey) return;
+              // The stop time's field keeps its keys; the page leaves a field's alone.
+              if (event.target instanceof HTMLInputElement) return;
               const pressed =
                 (event.key === "Enter" || event.key === " ") &&
                 event.target instanceof Element &&
@@ -142,12 +199,23 @@ function RecordPanel({
 }) {
   const now = useNow();
   const [choice, setChoice] = useState<StopChoice>(
-    stopOf("end", programme, now) !== null ? "end" : "1h",
+    stopOf("end", programme, now, "") !== null ? "end" : "1h",
   );
+  // The half hour after an hour from now, until one is typed.
+  const [at, setAt] = useState(() => {
+    const when = new Date(now + HOUR_MS);
+    const past =
+      when.getMinutes() % 30 !== 0 || when.getSeconds() > 0 || when.getMilliseconds() > 0;
+    when.setMinutes(Math.floor(when.getMinutes() / 30) * 30 + (past ? 30 : 0), 0, 0);
+    return inputTime(when.getTime());
+  });
+  const time = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<RecordingConnections | null>(null);
+  // At a time is offered with any time typed; Start waits for one it can record to.
   const offered = CHOICES.flatMap((each) =>
-    stopOf(each.choice, programme, now) === null ? [] : [each.choice],
+    each.choice !== "at" && stopOf(each.choice, programme, now, at) === null ? [] : [each.choice],
   );
+  const stop = stopOf(choice, programme, now, at);
   const connections = useQuery({
     queryKey: ["recordings", "connections", channel.subscriptionId],
     queryFn: () => call("recordings.connections", { subscriptionId: channel.subscriptionId }),
@@ -155,8 +223,12 @@ function RecordPanel({
   const start = useMutation({
     mutationFn: async (stopPlaying: boolean) => {
       // Times are taken as it starts: the popover may have stood open a while.
-      const stop = stopOf(choice, programme, Date.now());
-      if (stop === null) return null;
+      const stop = stopOf(choice, programme, Date.now(), at);
+      // Its time went since the last tick: the popover reads the clock again and says so.
+      if (stop === null) {
+        refreshNow();
+        return null;
+      }
       if (stopPlaying) player.stop();
       onStarting(true);
       return call("recordings.start", { channel: ownedId(channel), stop, stopPlaying });
@@ -205,8 +277,8 @@ function RecordPanel({
         }}
       >
         {CHOICES.map((each) => {
-          const stop = stopOf(each.choice, programme, now);
-          if (stop === null) return null;
+          if (!offered.includes(each.choice)) return null;
+          const stop = stopOf(each.choice, programme, now, at);
           const chosen = each.choice === choice;
           return (
             <button
@@ -220,7 +292,16 @@ function RecordPanel({
                 chosen || (!offered.includes(choice) && each.choice === offered[0]) ? 0 : -1
               }
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() => setChoice(each.choice)}
+              onClick={(event) => {
+                // The time field may hold the focus, and goes with At a time: the keys stay here.
+                if (each.choice !== "at") {
+                  event.currentTarget.focus();
+                  return setChoice(each.choice);
+                }
+                // Picked, as by a click, it opens on its time to type.
+                flushSync(() => setChoice("at"));
+                time.current?.focus();
+              }}
               className={cn(
                 "flex h-8.5 flex-none items-center gap-2 rounded-lg px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 chosen ? "bg-white/10" : "hover:bg-white/6",
@@ -231,12 +312,27 @@ function RecordPanel({
               </span>
               <span className="min-w-0 flex-1 text-sm">{t(each.label)}</span>
               <span className="text-[0.8125rem] text-muted-foreground tabular-nums">
-                {formatDate(stop, "time")}
+                {stop !== null &&
+                  (each.choice === "at" ? clockTime(stop, now) : formatDate(stop, "time"))}
               </span>
             </button>
           );
         })}
       </div>
+      {choice === "at" && (
+        <div className="flex items-center gap-2 py-1 pr-2 pl-8">
+          <Input
+            ref={time}
+            type="time"
+            compact
+            required
+            aria-label={t("Stop at")}
+            value={at}
+            onChange={(event) => setAt(event.target.value)}
+            className="w-[7.5rem] tabular-nums [color-scheme:dark]"
+          />
+        </div>
+      )}
       <div className="my-1 h-px flex-none bg-white/12" />
       <div className="flex flex-col gap-1.5 px-2 pt-1.5 pb-3 text-[0.8125rem]">
         {busy && (
@@ -255,6 +351,13 @@ function RecordPanel({
         {choice === "end" && (
           <p className="text-muted-foreground">{t("Ends 2 min after the guide time.")}</p>
         )}
+        {choice === "at" && stop === null && (
+          <p className="text-muted-foreground">
+            {atTime(now, at) === "skipped"
+              ? t("The clocks skip that time.")
+              : t("Pick a time within 12 hours.")}
+          </p>
+        )}
         {start.isError && (
           <p role="alert" className="text-destructive">
             {startFailure(appError(start.error))}
@@ -270,7 +373,7 @@ function RecordPanel({
           size="sm"
           className="gap-1.5"
           // A programme that ended while it stood open takes "When it ends" with it.
-          disabled={start.isPending || !offered.includes(choice)}
+          disabled={start.isPending || stop === null}
           onClick={() => start.mutate(onlyWatch)}
         >
           {dot}

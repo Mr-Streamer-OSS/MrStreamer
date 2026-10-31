@@ -4,12 +4,22 @@
 //
 //   { "version": 1, "recordings": [ { "id": …, "file": "….ts", "status": { "kind": … }, … } ] }
 //
+// schedules.json beside it keeps the schedules, in a file of their own, which a build from before
+// them leaves alone. Such a build can't read a recordings.json that holds a missed result, and
+// so records nothing, as with any file it can't make sense of:
+//
+//   { "version": 1, "schedules": [ { "id": …, "plan": { "kind": "slot", … }, "through": …, … } ] }
+//
 // A file this build can't make sense of, or one a later version wrote as newer, is never written
 // over: nothing of it is used, and nothing records until it can be read.
 import { readFile } from "node:fs/promises";
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
-import type { Recording } from "@mrstreamer/contracts/recordings";
+import {
+  RecordingPlanSchema,
+  type Recording,
+  type RecordingPlan,
+} from "@mrstreamer/contracts/recordings";
 import { writeJsonFile } from "../platform/json-file.ts";
 
 /** The version this build writes, and the newest it reads. */
@@ -21,48 +31,111 @@ export interface StoredRecording extends Omit<Recording, "status"> {
   readonly status: Exclude<Recording["status"], { readonly kind: "missing" }>;
 }
 
+const Channel = lazy(() => type({ subscriptionId: "string > 0", id: "string" }));
+
 const Entry = lazy(() =>
   type({
     id: "string > 0",
     file: "string > 0",
-    channel: { subscriptionId: "string > 0", id: "string" },
+    channel: Channel(),
     channelName: "string",
     title: "string",
     start: "number",
     stop: "number",
+    "scheduled?": {
+      schedule: "string > 0",
+      from: "number",
+      "owed?": "number",
+      late: "'away' | 'busy' | 'stream' | 'disk' | 'held' | 'unread' | null",
+    },
     ended: "number | null",
     bytes: "number >= 0",
-    status: type({ kind: "'recording' | 'complete' | 'stopped'" }).or({
-      kind: "'partial'",
-      cut: "'quit' | 'stream' | 'disk'",
-    }),
+    status: type({ kind: "'recording' | 'complete' | 'stopped'" })
+      .or({ kind: "'partial'", cut: "'quit' | 'stream' | 'disk'" })
+      .or({
+        kind: "'missed'",
+        why: "'away' | 'busy' | 'stream' | 'disk' | 'held' | 'unread'",
+      }),
   }),
 );
 
 const File = lazy(() => type({ version: "number.integer", recordings: Entry().array() }));
 
-/** recordings.json as read: its records, or that none of it can be used. */
-export type ReadRecordings =
-  | { readonly kind: "read"; readonly recordings: readonly StoredRecording[] }
-  | { readonly kind: "refused" };
+/** A schedule as kept. */
+export interface KeptSchedule {
+  readonly id: string;
+  readonly plan: RecordingPlan;
+  /** Its channel's name when it was saved: listed under another, it is held as gone. */
+  readonly channelName: string;
+  /** When it was saved: of two that start together, the one saved first records first. */
+  readonly created: number;
+  /**
+   * Every occurrence that ends by this time is settled: recorded, missed or let go. One that ended
+   * later and was never settled was missed while the app was away.
+   */
+  readonly through: number;
+}
 
-/** Reads recordings.json at `path`. A file that isn't there holds no recordings. */
-export async function readRecordings(path: string): Promise<ReadRecordings> {
+const Schedule = lazy(() =>
+  type({
+    id: "string > 0",
+    plan: RecordingPlanSchema(),
+    channelName: "string",
+    created: "number",
+    through: "number",
+  }),
+);
+
+const Schedules = lazy(() => type({ version: "number.integer", schedules: Schedule().array() }));
+
+/** A file of ours as read: what it holds, or that none of it can be used. */
+export type Read<A> =
+  { readonly kind: "read"; readonly items: readonly A[] } | { readonly kind: "refused" };
+
+/** Reads one of our files at `path` through `parse`. A file that isn't there holds nothing. */
+async function readOurs<A>(
+  path: string,
+  parse: (data: unknown) => { readonly version: number; readonly items: readonly A[] } | null,
+): Promise<Read<A>> {
   let text: string;
   try {
     text = await readFile(path, "utf8");
   } catch (cause) {
     if (cause instanceof Error && "code" in cause && cause.code === "ENOENT")
-      return { kind: "read", recordings: [] };
+      return { kind: "read", items: [] };
     return { kind: "refused" };
   }
   try {
-    const parsed = File()(JSON.parse(text));
-    if (parsed instanceof type.errors || parsed.version !== VERSION) return { kind: "refused" };
-    return { kind: "read", recordings: parsed.recordings };
+    const parsed = parse(JSON.parse(text));
+    if (!parsed || parsed.version !== VERSION) return { kind: "refused" };
+    return { kind: "read", items: parsed.items };
   } catch {
     return { kind: "refused" };
   }
+}
+
+/** Reads recordings.json at `path`. */
+export function readRecordings(path: string): Promise<Read<StoredRecording>> {
+  return readOurs(path, (data) => {
+    const parsed = File()(data);
+    return parsed instanceof type.errors
+      ? null
+      : { version: parsed.version, items: parsed.recordings };
+  });
+}
+
+/** Reads schedules.json at `path`. */
+export function readSchedules(path: string): Promise<Read<KeptSchedule>> {
+  return readOurs(path, (data) => {
+    const parsed = Schedules()(data);
+    return parsed instanceof type.errors
+      ? null
+      : { version: parsed.version, items: parsed.schedules };
+  });
+}
+
+export function writeSchedules(path: string, schedules: readonly KeptSchedule[]): Promise<void> {
+  return writeJsonFile(path, { version: VERSION, schedules });
 }
 
 export function writeRecordings(

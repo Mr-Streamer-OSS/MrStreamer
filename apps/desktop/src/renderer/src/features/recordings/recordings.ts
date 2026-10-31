@@ -1,13 +1,15 @@
 // Recordings as the window reads them. The main process keeps each one's record and file and says
 // when any changes (`recordings.changed`), about once a second while one records, so the list is
-// read once and then follows those events. An ended recording plays like a downloaded copy.
+// read once and then follows those events, as the schedules do (./schedules.ts). An ended
+// recording plays like a downloaded copy.
 import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
-import type { Recording } from "@mrstreamer/contracts/recordings";
+import type { Recording, ScheduleMiss } from "@mrstreamer/contracts/recordings";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatDate, t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { call, listen } from "../../lib/ipc.ts";
 import { titlePlayer } from "../../player/title-player.ts";
+import { schedulesQuery, useSchedules } from "./schedules.ts";
 
 const recordingsQuery = () =>
   queryOptions({
@@ -16,13 +18,26 @@ const recordingsQuery = () =>
     staleTime: Infinity,
   });
 
-/** Keeps the list current from main's events. Returns the unsubscribe function. */
+/**
+ * Keeps the recordings and the schedules current from main's events, and the previews of plans
+ * being edited, whose conflicts follow the schedules. Returns the unsubscribe function.
+ */
 export function syncRecordings(client: QueryClient): () => void {
-  return listen("recordings.changed", (list) => {
+  const stopRecordings = listen("recordings.changed", (list) => {
     // A read still under way holds an older list than this: it must not land after it.
     void client.cancelQueries({ queryKey: recordingsQuery().queryKey, exact: true });
     client.setQueryData(recordingsQuery().queryKey, list);
   });
+  const stopSchedules = listen("recordings.schedulesChanged", (list) => {
+    const { queryKey } = schedulesQuery();
+    void client.cancelQueries({ queryKey, exact: true });
+    client.setQueryData(queryKey, list);
+    void client.invalidateQueries({ queryKey: [...queryKey, "plan"] });
+  });
+  return () => {
+    stopRecordings();
+    stopSchedules();
+  };
 }
 
 export function useRecordings() {
@@ -31,9 +46,14 @@ export function useRecordings() {
 
 const anyRecording = (list: readonly Recording[]) => list.length > 0;
 
-/** Whether any recording is kept, for the window bar's entry; true until the list is read. */
+/**
+ * Whether any recording is kept or scheduled, for the window bar's entry: true until both lists
+ * are read, so one that failed can be read again from Recordings.
+ */
 export function useAnyRecording(): boolean {
-  return useQuery({ ...recordingsQuery(), select: anyRecording }).data ?? true;
+  const recorded = useQuery({ ...recordingsQuery(), select: anyRecording }).data;
+  const scheduled = useSchedules().data;
+  return recorded !== false || scheduled === undefined || scheduled.length > 0;
 }
 
 /** The recording capturing `channel` now, if one does. */
@@ -68,22 +88,73 @@ export function playRecording(recording: Recording): void {
 
 const MINUTE_MS = 60_000;
 
-/** Captured and planned whole minutes: what the coverage bar and "3 of 52 min" show. */
-export function coverage(recording: Recording, now: number): { captured: number; planned: number } {
-  const planned = Math.max(1, Math.round((recording.stop - recording.start) / MINUTE_MS));
-  const until =
-    recording.status.kind === "complete"
-      ? recording.stop
-      : (recording.ended ?? Math.min(now, recording.stop));
-  const captured = Math.min(
-    planned,
-    Math.max(0, Math.floor((until - recording.start) / MINUTE_MS)),
-  );
-  return { captured, planned };
+/**
+ * Where a recording's coverage starts: for a late schedule, when capture was owed, its padded
+ * start or when it was saved, if later; else when capture began.
+ */
+export function coverageStart(recording: Recording): number {
+  const { scheduled } = recording;
+  return scheduled?.late ? (scheduled.owed ?? scheduled.from) : recording.start;
 }
 
-/** How a recording ended or stands, in one word, and why, in a short sentence. */
+/**
+ * Captured and planned whole minutes, what the coverage bar and "3 of 52 min" show, and those
+ * missed at the start: a late schedule's from when it was owed to when it began, or all of a
+ * missed one. One on time, or saved after its start, is planned from when it began. All three
+ * count whole minutes from where coverage starts, and a complete one's add up to what was planned,
+ * at least a minute.
+ */
+export function coverage(
+  recording: Recording,
+  now: number,
+): { captured: number; planned: number; missed: number } {
+  const from = coverageStart(recording);
+  const minutesTo = (at: number) => Math.max(0, Math.floor((at - from) / MINUTE_MS));
+  const planned = Math.max(1, minutesTo(recording.stop));
+  if (recording.status.kind === "missed") return { captured: 0, planned, missed: planned };
+  // Whole minutes, as main counts a start within one as on time.
+  const missed = Math.min(planned, minutesTo(recording.start));
+  const reached =
+    recording.status.kind === "complete"
+      ? planned
+      : minutesTo(recording.ended ?? Math.min(now, recording.stop));
+  const captured = Math.min(planned - missed, Math.max(0, reached - missed));
+  return { captured, planned, missed };
+}
+
+/** Why a schedule recorded late, or not at all. */
+function missText(why: ScheduleMiss): string {
+  switch (why) {
+    case "away":
+      return t("Mr. Streamer wasn't open, or the computer slept.");
+    case "busy":
+      return t("Every connection was in use.");
+    case "stream":
+      return t("The stream couldn't be opened.");
+    case "disk":
+      return t("It couldn't be written to this computer.");
+    case "held":
+      return t("The guide listed another programme then, or the channel was gone.");
+    case "unread":
+      return t("The channel list or guide wasn't read yet.");
+  }
+}
+
+/**
+ * How a recording ended or stands, in one word, and why, in a short sentence; one a schedule
+ * started late says so first.
+ */
 export function outcome(recording: Recording, now: number): { word: string; reason: string } {
+  const { word, reason } = ending(recording, now);
+  const { scheduled } = recording;
+  if (!scheduled?.late || recording.status.kind === "missed") return { word, reason };
+  // Whole minutes, as the coverage bar hatches them.
+  const minutes = Math.max(1, Math.floor((recording.start - coverageStart(recording)) / MINUTE_MS));
+  const started = `${t("Started {minutes} min late.", { minutes })} ${missText(scheduled.late)}`;
+  return { word, reason: recording.status.kind === "complete" ? started : `${started} ${reason}` };
+}
+
+function ending(recording: Recording, now: number): { word: string; reason: string } {
   const ended = formatDate(recording.ended ?? now, "time");
   const { status } = recording;
   switch (status.kind) {
@@ -95,7 +166,10 @@ export function outcome(recording: Recording, now: number): { word: string; reas
         }),
       };
     case "complete":
-      return { word: t("Complete"), reason: t("From when you pressed Record.") };
+      return {
+        word: t("Complete"),
+        reason: recording.scheduled ? t("As scheduled.") : t("From when you pressed Record."),
+      };
     case "stopped":
       return { word: t("Stopped"), reason: t("You stopped it at {time}.", { time: ended }) };
     case "partial":
@@ -110,5 +184,7 @@ export function outcome(recording: Recording, now: number): { word: string; reas
       };
     case "missing":
       return { word: t("Missing"), reason: t("Its file is no longer on this computer.") };
+    case "missed":
+      return { word: t("Missed"), reason: `${missText(status.why)} ${t("No file.")}` };
   }
 }

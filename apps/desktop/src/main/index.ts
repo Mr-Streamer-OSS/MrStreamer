@@ -563,10 +563,11 @@ async function start(): Promise<void> {
   );
 
   // Back from sleep or unlocked, the clock may have moved past where a guide hands a channel on,
-  // and past a reminder's start.
+  // and past a reminder's or a schedule's start.
   const woke = () => {
     void runtime.runFork(guide.checkTime);
     void runtime.runFork(reminders.check);
+    void runtime.runFork(recordings.check);
   };
   powerMonitor.on("resume", woke);
   powerMonitor.on("unlock-screen", woke);
@@ -677,6 +678,7 @@ async function start(): Promise<void> {
   forward(downloads.changes, "downloads.changed", (list) => list);
   forward(reminders.changes, "reminders.changed", () => null);
   forward(recordings.changes, "recordings.changed", (list) => list);
+  forward(recordings.scheduleChanges, "recordings.schedulesChanged", (list) => list);
   forward(playback.fileReplaced, "playback.fileReplaced", (sessionId) => ({ sessionId }));
   forward(playback.readingAhead, "playback.readingAhead", (sessionId) => ({ sessionId }));
   forward(playback.tracksChanged, "playback.tracksChanged", (sessionId) => ({ sessionId }));

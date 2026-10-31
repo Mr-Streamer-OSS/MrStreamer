@@ -71,7 +71,13 @@ import {
 import { LOCALES, type InterfaceLanguage } from "./language.ts";
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
 import type { Reminder, ReminderList } from "./reminders.ts";
-import type { Recording, RecordingConnections, RecordingStart } from "./recordings.ts";
+import {
+  RecordingPlanSchema,
+  type Recording,
+  type RecordingConnections,
+  type RecordingStart,
+  type ScheduledRecording,
+} from "./recordings.ts";
 
 import { PlaylistMode, type PlaylistGroupPage, type PlaylistOmissionPage } from "./playlist.ts";
 import type { OwnedId, SubscriptionSummary } from "./subscription.ts";
@@ -294,6 +300,16 @@ export const ipcInputs = {
   "recordings.stop": () => type({ id: "string > 0" }),
   /** Deletes a recording that has ended, with its file. */
   "recordings.remove": () => type({ id: "string > 0" }),
+  "recordings.schedules": none,
+  /**
+   * How a schedule would stand, saving nothing: as the one `id` names would, changed to `plan`,
+   * or as a new one.
+   */
+  "recordings.plan": () => type({ plan: RecordingPlanSchema(), "id?": "string > 0" }),
+  /** Saves a new schedule, or changes the one `id` names. */
+  "recordings.schedule": () => type({ plan: RecordingPlanSchema(), "id?": "string > 0" }),
+  /** Takes a schedule out. A recording it started goes on until it stops. */
+  "recordings.cancel": () => type({ id: "string > 0" }),
   "ondemand.status": none,
   "ondemand.refresh": () => type({ subscriptionId: "string > 0" }),
   "ondemand.search": () => type({ query: "string" }),
@@ -702,6 +718,17 @@ export interface IpcOutputs {
   "recordings.stop": null;
   /** Once its file is gone; what played it closes first. Fails while it still records. */
   "recordings.remove": null;
+  /** Every schedule, by when it records next. Fails while they can't be read. */
+  "recordings.schedules": readonly ScheduledRecording[];
+  /**
+   * Fails when the channel isn't listed, or the plan has no time to come: a programme whose padded
+   * end passed.
+   */
+  "recordings.plan": ScheduledRecording;
+  /** As saved. Fails as `recordings.plan` does, or when it can't be written. */
+  "recordings.schedule": ScheduledRecording;
+  /** Once it is out of the file. One that is gone changes nothing. */
+  "recordings.cancel": null;
   "ondemand.status": OnDemandStatus;
   /** Fetches one subscription's movie and series lists again. */
   "ondemand.refresh": OnDemandStatus;
@@ -992,6 +1019,8 @@ export interface IpcEvents {
   "downloads.changed": DownloadList;
   /** A recording started, grew, ended or was removed: about once a second while one records. */
   "recordings.changed": readonly Recording[];
+  /** A schedule was saved, changed, cancelled, or its next time came, went or changed status. */
+  "recordings.schedulesChanged": readonly ScheduledRecording[];
   /** Favourites, watched channels, progress or marks changed, up to `sequence`. */
   "viewing.changed": { readonly sequence: number };
   /** A title was saved to the watchlist or taken out of it. */

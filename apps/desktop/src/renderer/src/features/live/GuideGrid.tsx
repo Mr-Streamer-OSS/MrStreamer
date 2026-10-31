@@ -18,7 +18,9 @@
 //   A click on a programme opens its details, and on it again closes them; a double click does
 // what Enter does, and a click on the channel watches it. Wheels and trackpads scroll both ways.
 //   A programme still to come offers Remind me beside Watch live in its details, and once a
-// reminder is set its cell shows a bell (../reminders/).
+// reminder is set its cell shows a bell (../reminders/). One that hasn't ended offers Record,
+// which opens the schedule's controls in the details (../recordings/SchedulePanel.tsx); its cell
+// shows a ring once a schedule records it, and Record there changes or cancels that.
 //   The timeline goes back as far as the list's longest archive, and ahead to where the guide
 // ends: see `timeline`. Rows are drawn as they come into view, and each draws only the hours in
 // view. The grid reads slots with `guide.range` in pages of channels by hours, those in view and
@@ -42,8 +44,9 @@ import {
 } from "react";
 import type { GuideSlot, Programme } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import type { ScheduledRecording } from "@mrstreamer/contracts/recordings";
 import type { ReminderList } from "@mrstreamer/contracts/reminders";
-import { ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatDate, t } from "@mrstreamer/core/i18n";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Progress } from "../../components/Progress.tsx";
@@ -57,6 +60,14 @@ import { useOutput } from "../../player/output.ts";
 import { archiveHolds } from "@mrstreamer/core/catchup";
 import { useRem } from "../../lib/use-rem.ts";
 import { cn } from "../../lib/utils.ts";
+import { SchedulePanel } from "../recordings/SchedulePanel.tsx";
+import {
+  basisOfProgramme,
+  basisOfSchedule,
+  recordsAt,
+  scheduleAt,
+  useSchedules,
+} from "../recordings/schedules.ts";
 import { ReminderButton } from "../reminders/ReminderButton.tsx";
 import {
   blocksIn,
@@ -87,6 +98,8 @@ const ROW_REM = 48 / 14;
 const HEAD_REM = 2;
 /** Rows above and below the view that are drawn, and read, before they scroll in. */
 const OVERSCAN = 6;
+/** How long after a key the cursor's details may still grow as they are read. */
+const DETAILS_SETTLE_MS = 2000;
 const HALF_HOUR_MS = HOUR_MS / 2;
 const JUMP_ROWS = 10;
 
@@ -173,6 +186,7 @@ export function GuideGrid({
   );
   const archiveDays = useMemo(() => longestArchive(channels), [channels]);
   const reminders = useReminders().data;
+  const schedules = useSchedules().data;
   const now = useNow();
   const visible = usePresentationVisible();
   const minute = Math.floor(now / MINUTE_MS) * MINUTE_MS;
@@ -484,12 +498,20 @@ export function GuideGrid({
     if (initial > 0) virtualizer.scrollToIndex(initial, { align: "center" });
   }, [channels.length > 0]);
 
-  // A key that moved the cursor brings it into view, the row and then the programme.
+  // A key that moved the cursor brings it into view, the row and then the programme. A row whose
+  // details leave it taller than the room under the times, as larger text in a short window
+  // does, shows its top: the cursor's programme, rather than the foot of its details. It is
+  // measured as drawn now, as the last programme's details may still be counted; one not drawn
+  // yet, as after End, shows its top too.
   useEffect(() => {
     if (cursor.asked === 0) return;
-    virtualizer.scrollToIndex(index, { align: "auto" });
     const element = scroller.current;
     if (!element) return;
+    const outgrows = (row: HTMLElement) => row.offsetHeight > element.clientHeight - headPx;
+    const row = element.querySelector<HTMLElement>(`[data-index="${index}"]`);
+    if (row) virtualizer.measureElement(row);
+    const tall = !row || outgrows(row);
+    virtualizer.scrollToIndex(index, { align: tall ? "start" : "auto" });
     const { programmes } = latest.current.rowGuide(index);
     const cell = cellAt(programmes, latest.current.at, latest.current.bounds);
     const { origin, msPx, columnPx } = geometry.current;
@@ -502,6 +524,26 @@ export function GuideGrid({
     if (from < left) target = from - margin;
     else if (to > left + room) target = Math.min(from - margin, to - room + margin);
     if (target !== left) scrollTo(origin + Math.max(target, 0) / msPx);
+    if (tall || !row) return;
+    // Details read just after the key, as a description, can still make it outgrow the room: it
+    // then shows its top too, while the keys are in the grid. The viewer's own wheel or click, or
+    // a later change, is left alone.
+    const observer = new ResizeObserver(() => {
+      if (document.activeElement !== element || !outgrows(row)) return;
+      observer.disconnect();
+      virtualizer.scrollToIndex(index, { align: "start" });
+    });
+    observer.observe(row);
+    const done = new AbortController();
+    const stop = () => observer.disconnect();
+    element.addEventListener("wheel", stop, { signal: done.signal, passive: true });
+    element.addEventListener("pointerdown", stop, { signal: done.signal });
+    const settled = setTimeout(stop, DETAILS_SETTLE_MS);
+    return () => {
+      stop();
+      done.abort();
+      clearTimeout(settled);
+    };
   }, [cursor.asked]);
 
   const watchLive = useRef(onWatch);
@@ -596,6 +638,7 @@ export function GuideGrid({
                   }
                   remote={remote}
                   reminders={reminders}
+                  schedules={schedules}
                   onPick={pick}
                   onWatch={watch}
                   onPlay={play}
@@ -726,6 +769,7 @@ const GridRow = memo(function GridRow({
   remind,
   remote,
   reminders,
+  schedules,
   ids,
   onPick,
   onWatch,
@@ -756,6 +800,8 @@ const GridRow = memo(function GridRow({
   remote: boolean;
   /** The reminders set, whose programmes' cells show a bell. */
   reminders: ReminderList | undefined;
+  /** The recordings scheduled, whose programmes' cells show a ring. */
+  schedules: readonly ScheduledRecording[] | undefined;
   /** The grid's prefix for its cells' ids, which name the cursor's to assistive technology. */
   ids: string;
   onPick: (row: number, at: number) => void;
@@ -837,6 +883,8 @@ const GridRow = memo(function GridRow({
             const chosen = selected(block);
             const box = place(block);
             const reminded = reminderAt(reminders, channel, slot.start) !== undefined;
+            const scheduled =
+              !ended && recordsAt(scheduleAt(schedules, channel, slot.start), slot.start);
             return (
               <div
                 key={slot.start}
@@ -850,6 +898,7 @@ const GridRow = memo(function GridRow({
                   spanText(slot, minute),
                   replay && !remote && t("Catch-up"),
                   reminded && t("Reminder set"),
+                  scheduled && t("Recording scheduled"),
                 ]
                   .filter(Boolean)
                   .join(", ")}
@@ -869,6 +918,12 @@ const GridRow = memo(function GridRow({
                 {/* Padding stays inside the clipped cell, so tiny slots keep their timeline width.
                     The grid moves this title into view when the programme's start is scrolled past. */}
                 <span className={cn("truncate px-2.5 text-sm", on && "font-semibold")}>
+                  {scheduled && (
+                    <span
+                      aria-hidden
+                      className="mr-1.5 -mt-0.5 inline-block size-1.5 rounded-full align-middle ring-[1.5px] ring-destructive ring-inset"
+                    />
+                  )}
                   {reminded && (
                     <Bell aria-hidden className="mr-1.5 -mt-0.5 inline size-3 align-middle" />
                   )}
@@ -891,6 +946,8 @@ const GridRow = memo(function GridRow({
       </div>
       {cursor && details !== null && (
         <Details
+          // Its controls are for the programme they opened under: another one closes them.
+          key={cursor.start}
           channel={channel}
           cell={cursor}
           minute={minute}
@@ -906,7 +963,8 @@ const GridRow = memo(function GridRow({
 
 /**
  * What the cursor's programme is, under its row: its title, when it is on, its description once
- * read, and what it plays, the first of `actions` foremost, then Remind me while it is to come.
+ * read, and what it plays, the first of `actions` foremost, then Remind me while it is to come and
+ * Record until it ends, which opens the schedule's controls under them.
  */
 function Details({
   channel,
@@ -933,6 +991,17 @@ function Details({
     enabled: slot !== null,
   }).data;
   const on = slot !== null && slot.start <= minute && minute < slot.stop;
+  const schedule = scheduleAt(useSchedules().data, channel, slot?.start ?? 0);
+  // A schedule the guide holds, another show listed then or none, won't record: Record re-saves
+  // it. Nor will one that already recorded, stopped or let this airing go.
+  const records = recordsAt(schedule, slot?.start ?? 0);
+  const [scheduling, setScheduling] = useState(false);
+  const open = slot !== null && scheduling;
+  const record = useRef<HTMLButtonElement>(null);
+  const close = () => {
+    setScheduling(false);
+    record.current?.focus({ preventScroll: true });
+  };
   return (
     <div
       role="region"
@@ -971,7 +1040,44 @@ function Details({
             start={slot.start}
           />
         )}
+        {slot && slot.stop > minute && (
+          <Button
+            ref={record}
+            variant="secondary"
+            size="sm"
+            aria-expanded={open}
+            onClick={() => setScheduling(!open)}
+            className="aria-expanded:bg-white/16 aria-expanded:ring-1 aria-expanded:ring-white/30 aria-expanded:ring-inset"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "size-2 flex-none rounded-full",
+                records ? "ring-[1.5px] ring-destructive ring-inset" : "bg-destructive",
+              )}
+            />
+            {records ? t("Scheduled") : t("Record")}
+          </Button>
+        )}
       </div>
+      {slot && open && (
+        <SchedulePanel
+          key={`${ownedKey(channel)}:${slot.start}`}
+          // A repeat edited from one of its programmes keeps its own time and length. A programme
+          // schedule the guide holds is saved again as the programme listed now, under its id.
+          basis={
+            schedule && (records || schedule.plan.kind === "slot")
+              ? basisOfSchedule(schedule, slot)
+              : basisOfProgramme(ownedId(channel), slot)
+          }
+          channelName={channel.title}
+          schedule={schedule}
+          autoFocus
+          onEscape={close}
+          onDone={close}
+          className="mt-3.5"
+        />
+      )}
     </div>
   );
 }
