@@ -616,8 +616,9 @@ A line that spans segments is in each. To recover one already on screen where pl
 or after a seek, the session reads it from its cluster using the file's index and cue length
 (FFmpeg and mkvmerge list subtitle lines there by default). Recall is bounded to eight lines per
 pass and 8 MiB beyond each cluster; Cues tables larger than 16 MiB are not read. A line outside
-those bounds can remain absent after a seek. A read that fails, such as the provider's, fails
-only that segment's request: asked again, the segment holds every line it would have. A listed line without a length is
+those bounds can remain absent after a seek. In the core, a read its source fails fails only that
+request: asked again once the source reads, the segment holds every line it would have. The app
+ends the session on such a failure instead, and Try again opens a new one. A listed line without a length is
 read only when it is the last to begin before the segment. A file whose index leaves a line out
 shows it only once playing passes where it begins. The other subtitle tracks, pictures such as
 PGS, DVD and DVB, teletext, formats the session doesn't know, and text tracks compressed with zlib

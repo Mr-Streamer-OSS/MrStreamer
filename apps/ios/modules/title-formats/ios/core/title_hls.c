@@ -183,7 +183,7 @@ typedef struct Listed {
   int64_t time, duration;
   /** The file offset of its cluster. */
   int64_t cluster;
-  /** Its cluster was read for it already, whatever that found; a read that failed doesn't count. */
+  /** Its cluster was read for it already, whatever that found; a read the source failed doesn't count. */
   int tried;
 } Listed;
 
@@ -1513,8 +1513,8 @@ static int recall(TitleHls *title, Text *text, Listed *listed) {
   if (atomic_load(&title->interrupted)) return AVERROR_EXIT;
   // A line not found within reach is left out, as a read that doesn't reach it would.
   if (over || error >= 0 || error == AVERROR_EOF || error == AVERROR_INVALIDDATA) return 0;
-  // A read that failed, such as the provider's, is made again when the segment is asked again.
-  listed->tried = 0;
+  // A read the source failed is made again when the segment is asked again.
+  if (error == AVERROR(EIO)) listed->tried = 0;
   return error;
 }
 
