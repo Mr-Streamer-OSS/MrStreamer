@@ -14,9 +14,8 @@ description: |
   you stopped, save copies to watch offline, and record live programmes. Subtitles and audio
   tracks are yours to choose.
 
-  Your subscription's password is kept in your desktop's keyring (GNOME Keyring or KWallet),
-  never in plain text. If Mr. Streamer cannot reach it, it says how to connect it and saves
-  nothing until then.
+  Your subscription's password is kept in your desktop's keyring, never in plain text. If
+  Mr. Streamer cannot reach it, it says how to connect it and saves nothing until then.
 grade: stable
 confinement: strict
 license: GPL-3.0-only

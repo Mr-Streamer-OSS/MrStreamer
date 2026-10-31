@@ -152,7 +152,7 @@ export function LoginForm({
         )}
       </div>
 
-      {error && <p className="mt-5 text-sm text-destructive">{error}</p>}
+      {error && <p className="mt-5 text-sm text-destructive select-text">{error}</p>}
 
       {asking ? (
         <div className="mt-8">

@@ -610,7 +610,9 @@ function Edit({
         </button>
       </p>
       {update.error && (
-        <p className="mt-4 text-sm text-destructive">{describeError(appError(update.error))}</p>
+        <p className="mt-4 text-sm text-destructive select-text">
+          {describeError(appError(update.error))}
+        </p>
       )}
       <div className="mt-6 flex items-center gap-3">
         <Button type="submit" variant="primary" size="sm" disabled={update.isPending}>
@@ -659,7 +661,9 @@ function Secret({
         />
       </Field>
       {update.error && (
-        <p className="mt-4 text-sm text-destructive">{describeError(appError(update.error))}</p>
+        <p className="mt-4 text-sm text-destructive select-text">
+          {describeError(appError(update.error))}
+        </p>
       )}
       <Button
         type="submit"

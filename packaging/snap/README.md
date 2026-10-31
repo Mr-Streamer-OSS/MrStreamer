@@ -18,9 +18,11 @@ publishes: each of those is a maintainer action that needs its own approval.
   gives Chromium its user namespaces. Without that connection the app stops at launch (exit 133);
   it is never started with `--no-sandbox`.
 - **Passwords in the desktop keyring or nowhere.** Run from `$SNAP`, the app pins Chromium's
-  password store: `kwallet5`/`kwallet6` on KDE, `gnome-libsecret` everywhere else. It never
-  enables Chromium's fixed-key fallback. With no reachable keyring, saving a login fails and
-  names `sudo snap connect mr-streamer:password-manager-service`.
+  password store: `kwallet6`, `kwallet5` or `kwallet` on KDE, by `KDE_SESSION_VERSION`, and
+  `gnome-libsecret` everywhere else. It never enables Chromium's fixed-key fallback. With no
+  reachable keyring, saving a login fails and names
+  `sudo snap connect mr-streamer:password-manager-service`. The plug's AppArmor rules allow
+  KWallet's own D-Bus API, but **KWallet is untested**: only GNOME Keyring has been run.
 - **Updates belong to snapd.** The app reports the `snap` distribution: no update checks,
   downloads, installer, channel or update notice. Settings > Updates names
   `sudo snap refresh mr-streamer`.
@@ -38,10 +40,11 @@ publishes: each of those is a maintainer action that needs its own approval.
 
 ## Sleep and shutdown
 
-- **Keeping awake.** Chromium keeps the computer awake for a playing receiver through
-  `org.gnome.SessionManager` or `org.freedesktop.PowerManagement` Inhibit, which
-  `screen-inhibit-control` allows. Electron has no desktop-portal Inhibit, so there is nothing
-  to try there, and no `shutdown` connection is needed for it.
+- **Keeping awake.** `screen-inhibit-control` allows the `org.gnome.SessionManager`,
+  `org.freedesktop.PowerManagement` and `org.freedesktop.ScreenSaver` Inhibit calls Chromium makes
+  for its wake locks. In the VM runs, playback made no logind call; only Electron's two delay locks
+  at start were denied. Electron has no desktop-portal Inhibit to try instead. A playing receiver
+  keeping a real GNOME or KDE session awake is untested.
 - **Sleep notices are lost.** Electron hears sleep and wake from logind's `PrepareForSleep` and
   takes logind delay locks. The Snap's AppArmor profile lets it do neither, and `shutdown` would
   allow only the locks. So under the Snap a recording isn't paused before the computer sleeps.

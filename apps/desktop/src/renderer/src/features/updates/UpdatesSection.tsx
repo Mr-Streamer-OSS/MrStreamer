@@ -65,13 +65,15 @@ export function UpdatesSection() {
     const instructions =
       status.distribution === "pacman"
         ? t("Updates come from the AUR. Use an AUR helper or makepkg.")
-        : t("Snap updates Mr. Streamer on its own. To update now: sudo snap refresh mr-streamer");
+        : t(
+            "Snap updates Mr. Streamer on its own. To update now, quit it and run: sudo snap refresh mr-streamer",
+          );
     return (
       <Section title={t("Updates")}>
         <Row
           id="update-check"
           label={status.version}
-          note={instructions}
+          note={<span className="select-text">{instructions}</span>}
           focusLabel={`${status.version}: ${instructions}`}
         />
       </Section>

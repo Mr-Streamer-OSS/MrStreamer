@@ -207,7 +207,9 @@ it("keeps keyboard focus on the update actions when retrying a failed Stop", asy
 
 it("shows the Snap refresh command without direct actions", async () => {
   const rows = await buttonsFor({ kind: "ready", version: "0.0.18" }, "snap");
-  expect(rows.textContent).toContain("To update now: sudo snap refresh mr-streamer");
+  expect(rows.textContent).toContain(
+    "To update now, quit it and run: sudo snap refresh mr-streamer",
+  );
   expect(rows.querySelector("select")).toBeNull();
   expect(rows.querySelector("button")).toBeNull();
 });

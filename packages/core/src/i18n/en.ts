@@ -146,8 +146,8 @@ export const en = {
   "Updates come from the AUR. Use an AUR helper or makepkg.":
     "Updates come from the AUR. Use an AUR helper or makepkg.",
   "settings.search.pacman": "AUR pacman package makepkg helper install update version",
-  "Snap updates Mr. Streamer on its own. To update now: sudo snap refresh mr-streamer":
-    "Snap updates Mr. Streamer on its own. To update now: sudo snap refresh mr-streamer",
+  "Snap updates Mr. Streamer on its own. To update now, quit it and run: sudo snap refresh mr-streamer":
+    "Snap updates Mr. Streamer on its own. To update now, quit it and run: sudo snap refresh mr-streamer",
   "settings.search.snap": "Snap snapd snapcraft refresh revert install update version",
   "Open Store": "Open Store",
   Channel: "Channel",

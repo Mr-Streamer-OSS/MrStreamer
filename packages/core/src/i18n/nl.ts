@@ -147,8 +147,8 @@ export const nl: Translation = {
   "Updates come from the AUR. Use an AUR helper or makepkg.":
     "Updates komen uit de AUR. Gebruik een AUR-helper of makepkg.",
   "settings.search.pacman": "AUR pacman pakket makepkg helper installatie bijwerken versie",
-  "Snap updates Mr. Streamer on its own. To update now: sudo snap refresh mr-streamer":
-    "Snap werkt Mr. Streamer zelf bij. Nu bijwerken: sudo snap refresh mr-streamer",
+  "Snap updates Mr. Streamer on its own. To update now, quit it and run: sudo snap refresh mr-streamer":
+    "Snap werkt Mr. Streamer zelf bij. Om nu bij te werken, sluit je het af en voer je uit: sudo snap refresh mr-streamer",
   "settings.search.snap": "Snap snapd snapcraft refresh revert installatie bijwerken versie",
   "Open Store": "Store openen",
   Channel: "Kanaal",

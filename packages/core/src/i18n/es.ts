@@ -151,8 +151,8 @@ export const es: Translation = {
     "Las actualizaciones vienen de AUR. Usa un asistente de AUR o makepkg.",
   "settings.search.pacman":
     "AUR pacman paquete makepkg asistente instalación actualización versión",
-  "Snap updates Mr. Streamer on its own. To update now: sudo snap refresh mr-streamer":
-    "Snap actualiza Mr. Streamer por su cuenta. Para actualizar ahora: sudo snap refresh mr-streamer",
+  "Snap updates Mr. Streamer on its own. To update now, quit it and run: sudo snap refresh mr-streamer":
+    "Snap actualiza Mr. Streamer por su cuenta. Para actualizar ahora, ciérralo y ejecuta: sudo snap refresh mr-streamer",
   "settings.search.snap": "Snap snapd snapcraft refresh revert instalación actualización versión",
   "Open Store": "Abrir Store",
   Channel: "Canal",

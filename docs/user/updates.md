@@ -20,7 +20,7 @@ Starting with the 0.0.21 client, direct and Homebrew Stable copies show a center
 
 The reminder appears at most once per app process launch, while you browse. Full Watch and movie or episode playback defer it until you return; the muted Home preview does not. **Not now** or Escape closes it and returns keyboard focus, leaving the quiet **Update** entry available. Rechecking, reopening the window or finding a newer offer during that launch does not repeat a reminder already shown. The next app launch can remind you again. **Download** starts only when you choose it, and restart still needs your confirmation.
 
-Nightly, Microsoft Store, AUR and Snap copies keep their existing update behavior.
+Nightly, Microsoft Store and AUR copies keep their existing update behavior, and Snap copies get none.
 
 ## Updates in Settings
 
@@ -68,9 +68,9 @@ To uninstall, run `sudo pacman -R mrstreamer-bin`. This removes the app and keep
 
 ## Installed as a Snap
 
-The Snap is built and tested with each stable release, but it is not in the Snap Store yet: the Store still has to allow the connection Chromium's sandbox needs. These notes describe how it works.
+The Snap is built and tested with each stable release and dry run, but it is not in the Snap Store yet: the Store still has to allow the connection Chromium's sandbox needs. Until then, a Snap build installed by hand (`sudo snap install --dangerous`) never updates on its own: install the next build the same way, and connect it as the [Snap runbook](../../packaging/snap/README.md#verify-an-artifact) says.
 
-Snapd updates a Snap installed from the Store, so Mr. Streamer never looks for updates, downloads them or offers a channel. Settings > **Updates** shows your version and the command that updates it now: `sudo snap refresh mr-streamer`. Snapd holds back its automatic updates while Mr. Streamer is open, for up to 14 days, and asks you to close it.
+Once it's in the Store, snapd updates the Snap, so Mr. Streamer never looks for updates, downloads them or offers a channel. Settings > **Updates** shows your version and how to update it now: quit Mr. Streamer, then run `sudo snap refresh mr-streamer`. Snapd holds its automatic updates back while Mr. Streamer is open, for up to 14 days, then updates it anyway.
 
 Your login is kept in your desktop's keyring: GNOME Keyring, or KWallet on KDE. The Snap never falls back to saving it in plain text. If the keyring can't be reached, adding a subscription fails and names the command that connects Mr. Streamer to it, which you run once:
 
@@ -83,7 +83,7 @@ Check that your keyring is running and unlocked too. On a desktop without one, s
 The Snap keeps its data with each version snapd keeps, in `~/snap/mr-streamer/`, downloaded copies and recordings included:
 
 - **Updates** copy everything to the new version, so your login, preferences, favourites, watchlist, progress, copies, recordings and saved subtitles carry over. Snapd keeps the previous version too, so copies take their space twice until it drops that one; `du -sh ~/snap/mr-streamer/*` shows how much.
-- **Going back** with `sudo snap revert mr-streamer` returns the data as it was before the update. What you changed or downloaded after it comes back when you return to the newer version.
+- **Going back** with `sudo snap revert mr-streamer` returns the data as it was before the update. What you changed or downloaded after it stays with the newer version while snapd keeps it: `snap list --all mr-streamer` lists the kept versions, and `sudo snap revert mr-streamer --revision=<revision>` returns to one. The next update copies the data you went back to, and the newer version's goes when snapd drops it.
 - **Uninstalling** with `sudo snap remove mr-streamer` keeps a snapshot of the current version's data for 31 days, without Chromium's caches. `snap saved` lists it; after installing again, `sudo snap restore <set>` brings it back, and `sudo snap forget <set>` deletes it. `sudo snap remove --purge mr-streamer` makes no snapshot. Neither touches your login in the desktop keyring.
 
 The Snap is separate from the deb, the AppImage and the AUR copy. It can't read their data, and doesn't import it: add your subscription again, and your favourites, history and copies stay with the other install. Both can be installed and open at the same time. Copies save to the Snap's own folder; to save or open files on a USB drive or under `/media`, connect `removable-media` once: `sudo snap connect mr-streamer:removable-media`.
