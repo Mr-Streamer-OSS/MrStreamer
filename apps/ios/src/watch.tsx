@@ -914,7 +914,7 @@ const serviceFailed = (reason: SubtitleServiceFailure | "not-saved") =>
  */
 function Cues({ item, bottom }: { item: Playing; bottom: number }) {
   const shown = useShownSubtitle();
-  if (!shown || !item.subtitles || shown.title !== item.subtitles) return null;
+  if (!shown || shown.title !== item.subtitles) return null;
   return <CueLines shown={shown} bottom={bottom} />;
 }
 

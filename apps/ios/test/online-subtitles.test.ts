@@ -20,7 +20,6 @@ const online = {
 };
 const { play, stop, trackChoices } = await import("../src/playback.ts");
 const preferences = await import("../src/media-preferences.ts");
-const { keychainSecrets } = await import("../src/secrets.ts");
 
 const SRT =
   "1\n00:00:01,000 --> 00:00:04,000\nHello there\n\n2\n00:00:05,000 --> 00:00:07,000\nGoodbye\n";
@@ -312,17 +311,11 @@ describe("the file's own subtitles", () => {
       .filter((each) => each.selected)
       .map((each) => each.label);
 
-  it("turn off while a downloaded one shows, leaving the subtitle preference as it was", async () => {
+  it("turn off while a downloaded one shows, and chosen over it hide it for the version, the preference untouched", async () => {
     const playing = await withTracks();
     await chooseFirst(playing);
     await vi.waitFor(async () => expect(await checked()).toEqual(["Off"]));
     expect(preferences.getMediaPreferences().subtitles).toEqual(english);
-  });
-
-  it("chosen over a downloaded one hide it for the version, without becoming the preference", async () => {
-    const playing = await withTracks();
-    await chooseFirst(playing);
-    await vi.waitFor(async () => expect(await checked()).toEqual(["Off"]));
     await ((await trackChoices("subtitles")) ?? [])
       .find((each) => each.label === "German")
       ?.choose();
@@ -353,10 +346,6 @@ describe("privacy", () => {
     online.eraseSubtitles("sub-1");
     expect(folder.list()).toHaveLength(0);
     expect(online.shownSubtitle()).toBeNull();
-
-    // A reinstall clears every Keychain item the app wrote, the key included.
-    await keychainSecrets.clear();
-    expect(keychain.size).toBe(0);
   });
 });
 

@@ -651,7 +651,7 @@ Matroska title's picture included, is still to be seen on the simulator and a ph
 ### Online subtitles
 
 Settings > Subtitles keeps the viewer's own SubDL API key in the Keychain, shown only as Saved or
-Not set, and the text size downloaded subtitles show at (`src/subtitle-settings.tsx`). Saving or
+Not set, and the text size downloaded subtitles show at (`src/app/(tabs)/(home)/settings.tsx`). Saving or
 opening either asks SubDL nothing. OpenSubtitles, which needs an account login as well as a key,
 stays on the desktop. For a movie or an episode, Watch's Subtitles lists the file's own tracks and
 Off as before, then the subtitle downloaded for that version, Find online and, while one shows,

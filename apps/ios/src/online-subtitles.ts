@@ -27,31 +27,22 @@ export interface FoundSubtitle {
   readonly hearingImpaired: boolean;
 }
 
-export type Found =
-  | { readonly kind: "found"; readonly results: readonly FoundSubtitle[] }
-  | { readonly kind: "failed"; readonly reason: SubtitleServiceFailure };
+type Failed = { readonly kind: "failed"; readonly reason: SubtitleServiceFailure };
+
+export type Found = { readonly kind: "found"; readonly results: readonly FoundSubtitle[] } | Failed;
 
 /**
  * Searches SubDL for `title` in the viewer's languages: their subtitle language, the language of
  * titles and English. Null when another play, search or download began meanwhile.
  */
-export async function findSubtitles(title: SubtitleTitle): Promise<Found | null> {
-  const controller = begin(title);
-  if (!controller) return null;
-  try {
+export function findSubtitles(title: SubtitleTitle): Promise<Found | null> {
+  return forPlay<Found>(title, async (signal) => {
     const key = await subdlKey();
-    if (controller.signal.aborted) return null;
+    if (signal.aborted) return null;
     if (!key) return { kind: "failed", reason: "not-configured" };
-    const candidates = await subdlSearch(
-      key,
-      { ...title.query, languages: languages() },
-      controller.signal,
-    );
-    if (controller.signal.aborted) return null;
-    found = {
-      title,
-      candidates: new Map(candidates.map((candidate, i) => [String(i), candidate])),
-    };
+    const candidates = await subdlSearch(key, { ...title.query, languages: languages() }, signal);
+    if (signal.aborted) return null;
+    found = { title, candidates };
     return {
       kind: "found",
       results: candidates.map(({ language, release, hearingImpaired }, i) => ({
@@ -61,12 +52,7 @@ export async function findSubtitles(title: SubtitleTitle): Promise<Found | null>
         hearingImpaired,
       })),
     };
-  } catch (cause) {
-    if (controller.signal.aborted) return null;
-    return { kind: "failed", reason: reasonOf(cause) };
-  } finally {
-    if (work === controller) work = null;
-  }
+  });
 }
 
 export type Chosen =
@@ -78,37 +64,48 @@ export type Chosen =
  * change and shows it. Null when another play, search or download began meanwhile.
  */
 export async function chooseSubtitle(title: SubtitleTitle, id: string): Promise<Chosen | null> {
-  const candidate = found?.title === title ? found.candidates.get(id) : undefined;
-  const controller = candidate && begin(title);
-  if (!candidate || !controller) return null;
-  try {
-    const subtitle = await subdlDownload(candidate, controller.signal);
-    if (controller.signal.aborted) return null;
-    if (!showDownloaded(title, subtitle)) return { kind: "failed", reason: "not-saved" };
-    return { kind: "shown" };
-  } catch (cause) {
-    if (controller.signal.aborted) return null;
-    return { kind: "failed", reason: reasonOf(cause) };
-  } finally {
-    if (work === controller) work = null;
-  }
+  const candidate = found?.title === title ? found.candidates[Number(id)] : undefined;
+  if (!candidate) return null;
+  return forPlay<Chosen>(title, async (signal) => {
+    const subtitle = await subdlDownload(candidate, signal);
+    if (signal.aborted) return null;
+    return showDownloaded(title, subtitle)
+      ? { kind: "shown" }
+      : { kind: "failed", reason: "not-saved" };
+  });
 }
 
 /** The search or download under way, which a newer one, or another play, ends. */
 let work: AbortController | null = null;
-/** The latest search's results, by the id the sheet shows them under, and the play they are for. */
-let found: { readonly title: SubtitleTitle; readonly candidates: Map<string, Candidate> } | null =
+/** The latest search's results, by their position, the id the sheet shows them under. */
+let found: { readonly title: SubtitleTitle; readonly candidates: readonly Candidate[] } | null =
   null;
 
-/** Ends the search or download under way and starts the next, for `title`'s play; null for none. */
-function begin(title: SubtitleTitle): AbortController | null {
+/**
+ * Runs `task` for `title`'s play, ending the search or download under way. Null when it isn't
+ * playing, or once another play, search or download began; a failure as its reason only.
+ */
+async function forPlay<T>(
+  title: SubtitleTitle,
+  task: (signal: AbortSignal) => Promise<T | null>,
+): Promise<T | Failed | null> {
   const play = playOf(title);
   if (!play) return null;
   work?.abort();
   const controller = new AbortController();
   play.addEventListener("abort", () => controller.abort(), { once: true });
   work = controller;
-  return controller;
+  try {
+    return await task(controller.signal);
+  } catch (cause) {
+    if (controller.signal.aborted) return null;
+    return {
+      kind: "failed",
+      reason: cause instanceof SubtitleFailure ? cause.reason : "unavailable",
+    };
+  } finally {
+    if (work === controller) work = null;
+  }
 }
 
 /** The viewer's subtitle language, then the language of titles, then English. */
@@ -121,9 +118,6 @@ function languages(): string[] {
   ];
   return [...new Set(wanted.filter((code): code is string => !!code && /^[a-z]{2,3}$/.test(code)))];
 }
-
-const reasonOf = (cause: unknown): SubtitleServiceFailure =>
-  cause instanceof SubtitleFailure ? cause.reason : "unavailable";
 
 // The viewer's SubDL API key, in the Keychain. Settings sees only whether one is saved.
 
@@ -171,12 +165,9 @@ class SubtitleFailure extends Error {
   }
 }
 
-/** A result's file, kept here: the sheet sees only its id. */
-interface Candidate {
+/** A result with its file, kept here: the sheet sees only its id. */
+interface Candidate extends Omit<FoundSubtitle, "id"> {
   readonly url: string;
-  readonly language: string;
-  readonly release: string;
-  readonly hearingImpaired: boolean;
 }
 
 const SubDLReply = lazy(() =>
@@ -221,6 +212,7 @@ async function subdlSearch(
   signal: AbortSignal,
 ): Promise<readonly Candidate[]> {
   if (query.languages.length === 0) throw new SubtitleFailure("unsupported");
+  const kind = query.kind === "movie" ? "movie" : "tv";
   const url = new URL("https://api.subdl.com/api/v1/subtitles");
   url.search = new URLSearchParams({
     api_key: key,
@@ -228,7 +220,7 @@ async function subdlSearch(
       ? { tmdb_id: String(query.tmdbId) }
       : { film_name: query.title ?? "" }),
     ...(query.year !== undefined ? { year: String(query.year) } : {}),
-    type: query.kind === "movie" ? "movie" : "tv",
+    type: kind,
     languages: query.languages.join(",").toUpperCase(),
     subs_per_page: "30",
     hi: "1",
@@ -248,7 +240,7 @@ async function subdlSearch(
   // SubDL may broaden an unsuccessful match. Do not import another title's results.
   if (
     (query.tmdbId !== undefined && reply.results?.[0]?.tmdb_id !== query.tmdbId) ||
-    reply.results?.[0]?.type !== (query.kind === "movie" ? "movie" : "tv")
+    reply.results?.[0]?.type !== kind
   )
     return [];
   const results: Candidate[] = [];
@@ -292,19 +284,17 @@ async function subdlDownload(
   const response = await request(downloadURL(candidate.url), {}, timeout);
   // A redirect followed elsewhere ends on a file SubDL didn't serve.
   if (response.url) downloadURL(response.url);
-  const data = await body(response, SUBTITLE_TEXT_LIMIT, timeout);
-  let cues: ReturnType<typeof subtitleTextFile>;
+  const text = textOf(await body(response, SUBTITLE_TEXT_LIMIT, timeout));
   try {
-    cues = subtitleTextFile(new TextDecoder("utf-8", { fatal: true }).decode(textOf(data)));
-  } catch (cause) {
-    throw cause instanceof SubtitleFailure ? cause : new SubtitleFailure("unsupported");
+    return {
+      service: "subdl",
+      language: candidate.language,
+      release: candidate.release.slice(0, 1024),
+      cues: [...subtitleTextFile(new TextDecoder("utf-8", { fatal: true }).decode(text))],
+    };
+  } catch {
+    throw new SubtitleFailure("unsupported");
   }
-  return {
-    service: "subdl",
-    language: candidate.language,
-    release: candidate.release.slice(0, 1024),
-    cues: [...cues],
-  };
 }
 
 async function request(url: URL, init: RequestInit, signal: AbortSignal): Promise<Response> {

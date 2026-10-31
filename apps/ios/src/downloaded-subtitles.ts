@@ -81,6 +81,13 @@ interface Kept {
   readonly subtitle: DownloadedSubtitle;
 }
 
+/** What `title`'s version keeps, as it shows over that play. */
+const shownOf = (title: SubtitleTitle, { subtitle, timing }: Kept): ShownSubtitle => ({
+  title,
+  subtitle,
+  timing,
+});
+
 const shown = store<ShownSubtitle | null>(null);
 /** The downloaded subtitle showing over what plays, for Watch to draw; null for none. */
 export const useShownSubtitle = (): ShownSubtitle | null => useStore(shown);
@@ -103,7 +110,7 @@ export function playSubtitles(title: SubtitleTitle | null) {
   play.abort();
   play = new AbortController();
   const kept = title ? keptOf(title) : null;
-  shown.set(title && kept?.shown ? { title, subtitle: kept.subtitle, timing: kept.timing } : null);
+  shown.set(title && kept?.shown ? shownOf(title, kept) : null);
 }
 
 /** The play `title` is of, while it stands: aborted once another begins. Null for another play. */
@@ -117,7 +124,7 @@ export function keptSubtitle(title: SubtitleTitle): ShownSubtitle | null {
   const showing = shown.get();
   if (showing?.title === title) return showing;
   const kept = keptOf(title);
-  return kept && { title, subtitle: kept.subtitle, timing: kept.timing };
+  return kept && shownOf(title, kept);
 }
 
 /** Shows what `title`'s version keeps again, after a file track or Off took its place. */
@@ -126,7 +133,7 @@ export function showKeptSubtitle(title: SubtitleTitle): boolean {
   const kept = keptOf(title);
   if (!kept) return false;
   if (!kept.shown && !keep(title, { ...kept, shown: true })) return false;
-  shown.set({ title, subtitle: kept.subtitle, timing: kept.timing });
+  shown.set(shownOf(title, kept));
   return true;
 }
 
@@ -187,7 +194,7 @@ export function showDownloaded(title: SubtitleTitle, subtitle: DownloadedSubtitl
   if (title !== playing) return false;
   const kept = { shown: true, timing: DEFAULT_SUBTITLE_TIMING, subtitle };
   if (!keep(title, kept)) return false;
-  shown.set({ title, subtitle, timing: kept.timing });
+  shown.set(shownOf(title, kept));
   return true;
 }
 
@@ -212,15 +219,15 @@ function keptOf(title: SubtitleTitle): Kept | null {
 
 /** Writes what `title`'s version keeps. False when the disk refuses. */
 function keep(title: SubtitleTitle, kept: Kept): boolean {
+  const folder = new Directory(Paths.document, FOLDER);
   try {
-    const folder = new Directory(Paths.document, FOLDER);
     if (!folder.exists) folder.create();
     writeJson(nameOf(title), kept);
   } catch {
     return false;
   }
   try {
-    const files = new Directory(Paths.document, FOLDER)
+    const files = folder
       .list()
       .filter((each): each is File => each instanceof File && each.name.endsWith(".json"));
     const oldest = files.toSorted((a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0));
@@ -242,6 +249,5 @@ export function eraseSubtitles(id: string) {
   for (const each of folder.list()) {
     if (each instanceof File && each.name.startsWith(prefix)) each.delete();
   }
-  const showing = shown.get();
-  if (showing?.title.subscriptionId === id) shown.set(null);
+  if (shown.get()?.title.subscriptionId === id) shown.set(null);
 }
