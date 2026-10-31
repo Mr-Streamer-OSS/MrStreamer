@@ -1,42 +1,63 @@
 // Recordings: what records now, what is scheduled, by when it records next, then what was
-// recorded, newest first. Each recording's row says what it is, its channel and when, a bar of the
-// minutes captured against those planned, hatched where a schedule's start was missed, how it
-// ended and why, and its size; one that records has Stop, an ended one Play and, in its menu,
+// recorded, newest first. The heading says how much the recordings take, the room left and what
+// is kept free, with Storage opening their settings. Each recording's row says what it is, its
+// channel and when, a bar of the minutes captured against those planned, hatched where a
+// schedule's start or a gap in between was missed, how it ended and why, and its size; one that
+// records, or waits paused for the rest of its time, has Stop, an ended one Play and, in its menu,
 // Delete. One a schedule missed has no file: it says why, and Remove. A schedule's row says how
 // often it records, how its next time stands, and offers Edit, the schedule's controls in a
 // popover, and Cancel schedule in its menu. An action that fails says so in place of the reason.
 // Narrower windows put the size, or a schedule's repeat, in the row's second line and the outcome
-// under the bar.
+// under the bar, and the heading keeps only the room left.
+//   With no subscription saved the page stands alone, opened from Connect: what was recorded,
+// with nothing scheduled and no way to record, in the bar Downloads shares (DownloadsPage.tsx).
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import { useMutation, useMutationState, useQuery } from "@tanstack/react-query";
 import { Ellipsis, Play, Repeat2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
-import type { Recording, ScheduledRecording } from "@mrstreamer/contracts/recordings";
+import type {
+  Recording,
+  RecordingStorage,
+  ScheduledRecording,
+} from "@mrstreamer/contracts/recordings";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatBytes, formatDate, formatNumber, t } from "@mrstreamer/core/i18n";
+import { useUi } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
 import { menuItem, menuSurface } from "../../components/ui/menu.ts";
 import { WindowBar } from "../../components/WindowBar.tsx";
+import { OfflineBar } from "../downloads/DownloadsPage.tsx";
 import { useNow } from "../../lib/clock.ts";
 import { appError, describeError } from "../../lib/errors.ts";
 import { dayTime } from "../../lib/format.ts";
 import { call } from "../../lib/ipc.ts";
 import { queries } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
-import { coverage, coverageStart, outcome, playRecording, useRecordings } from "./recordings.ts";
+import {
+  coverage,
+  coverageStart,
+  formatLimit,
+  isLive,
+  outcome,
+  playRecording,
+  useRecordings,
+  useRecordingStorage,
+} from "./recordings.ts";
 import { SchedulePanel } from "./SchedulePanel.tsx";
 import { basisOfSchedule, holdersText, repeatText, useSchedules } from "./schedules.ts";
 
-export function RecordingsPage() {
+export function RecordingsPage({ standalone = false }: { standalone?: boolean }) {
   const list = useRecordings();
-  const recordings = list.data ?? [];
   const schedules = useSchedules();
-  const scheduled = schedules.data ?? [];
-  const now = recordings.filter((each) => each.status.kind === "recording");
-  const recorded = recordings.filter((each) => each.status.kind !== "recording");
+  const storage = useRecordingStorage().data;
+  // Standing alone, what was recorded: nothing records or is scheduled without a subscription.
+  const recordings = (list.data ?? []).filter((each) => !standalone || !isLive(each));
+  const scheduled = standalone ? [] : (schedules.data ?? []);
+  const now = recordings.filter(isLive);
+  const recorded = recordings.filter((each) => !isLive(each));
   // Logos, from the channels as the lists have them now; a channel gone leaves its slot empty.
   const channels =
     useQuery(
@@ -47,10 +68,10 @@ export function RecordingsPage() {
     ).data ?? [];
   const logoOf = (owned: OwnedId) => channels.find((channel) => sameOwned(channel, owned)) ?? null;
   const count = recordings.length + scheduled.length;
-  const error = list.error ?? schedules.error;
+  const error = list.error ?? (standalone ? null : schedules.error);
   return (
     <div className="flex h-full flex-col">
-      <WindowBar className="bg-black" />
+      {standalone ? <OfflineBar /> : <WindowBar className="bg-black" />}
       <div className="min-h-0 flex-1 overflow-y-auto px-8 pt-2 pb-10 lg:px-10">
         <div className="flex items-baseline gap-3 pb-1.5">
           <h1 className="text-2xl font-semibold tracking-tight">{t("Recordings")}</h1>
@@ -59,6 +80,7 @@ export function RecordingsPage() {
               {formatNumber(count)}
             </span>
           )}
+          {storage && <StorageLine storage={storage} settings={!standalone} />}
         </div>
         {error ? (
           <div role="alert" className="flex items-center gap-3 pt-2 text-sm">
@@ -67,13 +89,13 @@ export function RecordingsPage() {
               size="sm"
               onClick={() => {
                 if (list.error) void list.refetch();
-                if (schedules.error) void schedules.refetch();
+                if (schedules.error && !standalone) void schedules.refetch();
               }}
             >
               {t("Retry")}
             </Button>
           </div>
-        ) : list.data && schedules.data && count === 0 ? (
+        ) : list.data && (standalone || schedules.data) && count === 0 ? (
           <p className="pt-2 text-[0.9375rem] text-muted-foreground">
             {t("Nothing recorded yet. Record a channel from Live TV.")}
           </p>
@@ -99,11 +121,48 @@ export function RecordingsPage() {
         </Section>
         {recordings.length > 0 && (
           <p className="pt-4 text-[0.8125rem] text-muted-foreground">
-            {t("Recordings stay until you delete them. Partial ones still play.")}
+            {t(
+              "Recordings stay until you delete them. Partial ones play, skipping what was missed.",
+            )}
           </p>
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * "38.4 GB used · 312 GB free · keeps 5 GB free" and Storage, which opens Recordings in Settings;
+ * narrow windows keep the room left alone. Standing alone there is no Settings to open.
+ */
+function StorageLine({ storage, settings }: { storage: RecordingStorage; settings: boolean }) {
+  const used =
+    storage.space === null
+      ? t("{size} used", { size: formatBytes(storage.used) })
+      : t("{size} of {limit} used", {
+          size: formatBytes(storage.used),
+          limit: formatLimit(storage.space),
+        });
+  return (
+    <span className="ml-auto flex items-baseline gap-4 text-[0.8125rem] text-muted-foreground tabular-nums">
+      <span>
+        <span className="hidden lg:inline">{used} · </span>
+        {storage.free !== null && t("{size} free", { size: formatBytes(storage.free) })}
+        <span className="hidden lg:inline">
+          {" · "}
+          {t("keeps {size} free", { size: formatLimit(storage.keepFree) })}
+        </span>
+      </span>
+      {settings && (
+        <button
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => useUi.setState({ settings: "recordings", searchOpen: false })}
+          className="text-foreground underline underline-offset-4 outline-none focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {t("Storage")}
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -139,11 +198,13 @@ function Section({
  */
 function Row({ recording, channel }: { recording: Recording; channel: LiveChannel | null }) {
   const now = useNow();
-  const active = recording.status.kind === "recording";
+  const active = isLive(recording);
+  // Waiting for the rest of its time: its dot is hollow, as nothing is captured now.
+  const paused = recording.status.kind === "paused";
   // Missed by a schedule: no file, so nothing plays and there is no size.
   const missed = recording.status.kind === "missed";
   const missing = recording.status.kind === "missing" || missed;
-  const { captured, planned, missed: late } = coverage(recording, now);
+  const { captured, planned, missed: late, gaps } = coverage(recording, now);
   const minutes = t("{captured} of {planned} min", { captured, planned });
   const { word, reason } = outcome(recording, now);
   // Kept by the recording, not the row: a Stop moves it from Now to Recorded, into a new row, before
@@ -182,14 +243,12 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
         </span>
       </div>
       <div className="flex w-[23.5rem] flex-none flex-col gap-1.5 lg:w-[10.75rem]">
-        <Coverage captured={captured} planned={planned} missed={late} faint={missing} />
+        <Coverage captured={captured} planned={planned} missed={late} gaps={gaps} faint={missing} />
         <span className="hidden text-xs text-muted-foreground tabular-nums lg:block">
           {minutes}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-xs lg:hidden">
-          {active && (
-            <span aria-hidden className="size-1.5 flex-none rounded-full bg-destructive" />
-          )}
+          {active && <LiveDot paused={paused} className="size-1.5" />}
           <span className="flex-none font-semibold text-foreground">{word}</span>
           <span
             title={failure ?? undefined}
@@ -200,7 +259,7 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
         </span>
       </div>
       <span className="hidden min-w-0 flex-1 items-center gap-2 text-[0.8125rem] lg:flex">
-        {active && <span aria-hidden className="size-2 flex-none rounded-full bg-destructive" />}
+        {active && <LiveDot paused={paused} className="size-2" />}
         <span className="flex-none font-semibold text-foreground">{word}</span>
         <span
           title={failure ?? undefined}
@@ -277,21 +336,50 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
   );
 }
 
+/** A recording's red dot, hollow while it waits paused. */
+function LiveDot({ paused, className }: { paused: boolean; className: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "flex-none rounded-full",
+        paused ? "ring-[1.5px] ring-destructive ring-inset" : "bg-destructive",
+        className,
+      )}
+    />
+  );
+}
+
+const HATCHED =
+  "h-full bg-[repeating-linear-gradient(135deg,rgb(255_255_255/55%)_0_1px,transparent_1px_4px)]";
+
 /**
- * Minutes captured against those planned: a white line on a faint track, after a hatched stretch
- * for the minutes `missed` at the start.
+ * Minutes captured against those planned: a white line on a faint track, hatched for the minutes
+ * `missed` at the start and for each of the `gaps` it missed since, by minutes from its start.
  */
 function Coverage({
   captured,
   planned,
   missed,
+  gaps,
   faint,
 }: {
   captured: number;
   planned: number;
   missed: number;
+  gaps: readonly { readonly from: number; readonly to: number }[];
   faint: boolean;
 }) {
+  // Where coverage reached: what was missed at the start, captured and missed since.
+  const reached = gaps.reduce((sum, gap) => sum + gap.to - gap.from, missed + captured);
+  const spans: { hatched: boolean; minutes: number }[] = [{ hatched: true, minutes: missed }];
+  let at = missed;
+  for (const gap of gaps) {
+    spans.push({ hatched: false, minutes: gap.from - at });
+    spans.push({ hatched: true, minutes: gap.to - Math.max(at, gap.from) });
+    at = Math.max(at, gap.to);
+  }
+  spans.push({ hatched: false, minutes: reached - at });
   return (
     <span
       role="meter"
@@ -301,13 +389,16 @@ function Coverage({
       aria-valuenow={captured}
       className={cn("flex h-1 overflow-hidden rounded-[2px]", faint ? "bg-white/8" : "bg-white/15")}
     >
-      {missed > 0 && (
-        <span
-          className="h-full bg-[repeating-linear-gradient(135deg,rgb(255_255_255/55%)_0_1px,transparent_1px_4px)]"
-          style={{ width: `${(missed / planned) * 100}%` }}
-        />
+      {spans.map(
+        (span, index) =>
+          span.minutes > 0 && (
+            <span
+              key={index}
+              className={span.hatched ? HATCHED : "h-full bg-foreground"}
+              style={{ width: `${(span.minutes / planned) * 100}%` }}
+            />
+          ),
       )}
-      <span className="h-full bg-foreground" style={{ width: `${(captured / planned) * 100}%` }} />
     </span>
   );
 }

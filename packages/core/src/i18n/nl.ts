@@ -24,6 +24,7 @@ export const nl: Translation = {
   "settings.search.subscriptions":
     "aanbieder account afspeellijst aanmelden herstellen importeren vernieuwen verwijderen gids koppelen",
   "settings.search.guides": "XMLTV EPG programma bronnen koppelen vernieuwen",
+  "settings.search.recordings": "opname opnames opslag map ruimte vrij limiet schijf",
   "settings.search.updates":
     "versie update kanaal stabiel nightly controleren downloaden herstarten winkel uitgave",
   "settings.search.privacy": "privacy analyse statistieken toestemming beleid volgen",
@@ -1347,6 +1348,52 @@ export const nl: Translation = {
   "Paused at {time}. Not enough free space; it goes on once there is room.":
     "Gepauzeerd om {time}. Niet genoeg vrije ruimte; gaat verder zodra er plek is.",
   "Not saved yet. Trying again.": "Nog niet bewaard. Opnieuw proberen.",
+  "Quit while recording?": "Stoppen tijdens opname?",
+  Quit: "Stoppen",
+  "Keep recording": "Blijven opnemen",
+  "{title} is recording until {time}. Quitting stops it now and keeps the {minutes} min recorded.":
+    "{title} neemt op tot {time}. Stoppen beëindigt de opname nu en bewaart de {minutes} min die is opgenomen.",
+  "{count} recordings go on until {time}. Quitting stops them now and keeps what they recorded.":
+    "{count} opnames lopen tot {time}. Stoppen beëindigt ze nu en bewaart wat ze hebben opgenomen.",
+  "{title}, {time}, won't record while Mr. Streamer is closed.":
+    "{title}, {time}, wordt niet opgenomen zolang Mr. Streamer gesloten is.",
+  "Closing the window instead keeps recording.":
+    "Sluit je in plaats daarvan het venster, dan gaat de opname door.",
+  "{size} used": "{size} gebruikt",
+  "{size} of {limit} used": "{size} van {limit} gebruikt",
+  "keeps {size} free": "houdt {size} vrij",
+  Storage: "Opslag",
+  Folder: "Map",
+  Change: "Wijzigen",
+  Open: "Openen",
+  "Keep free on disk": "Vrij houden op schijf",
+  "Below this, recording pauses and the rest is recorded once space is free.":
+    "Daaronder pauzeert de opname en wordt de rest opgenomen zodra er weer ruimte is.",
+  "Space for recordings": "Ruimte voor opnames",
+  "At the limit, recording pauses the same way. Nothing is deleted to make room.":
+    "Bij de limiet pauzeert de opname op dezelfde manier. Er wordt niets verwijderd om ruimte te maken.",
+  "No limit": "Geen limiet",
+  "While recording": "Tijdens opname",
+  "Close window": "Venster sluiten",
+  "Recording goes on. Open Mr. Streamer again to see it.":
+    "De opname gaat door. Open Mr. Streamer opnieuw om hem te zien.",
+  "Asks first. Quitting stops it and keeps what was recorded.":
+    "Vraagt eerst. Stoppen beëindigt hem en bewaart wat is opgenomen.",
+  Sleep: "Slaapstand",
+  "Leaves a gap. The rest is recorded after waking, until its time ends.":
+    "Laat een gat. De rest wordt na het ontwaken opgenomen, tot zijn tijd voorbij is.",
+  "Wait until recording ends.": "Wachten tot de opname klaar is.",
+  "It installs when {title} finishes at {time}.":
+    "Wordt geïnstalleerd als {title} om {time} klaar is.",
+  "It installs when the last recording finishes at {time}.":
+    "Wordt geïnstalleerd als de laatste opname om {time} klaar is.",
+  "{version} is ready; it installs when recording ends":
+    "{version} staat klaar; wordt geïnstalleerd als de opname klaar is",
+  "Restart now": "Nu herstarten",
+  "Update after recording": "Bijwerken na opname",
+  OK: "OK",
+  "Restarting now stops recording and keeps what was recorded.":
+    "Nu herstarten beëindigt de opname en bewaart wat is opgenomen.",
   "Choose a stop time within 12 hours.": "Kies een eindtijd binnen 12 uur.",
   "Stop the recording before deleting it.": "Stop de opname voordat je hem verwijdert.",
   "It is still recording.": "De opname loopt nog.",
@@ -1364,8 +1411,8 @@ export const nl: Translation = {
   "{captured} of {planned} min": "{captured} van {planned} min",
   "Nothing recorded yet. Record a channel from Live TV.":
     "Nog niets opgenomen. Neem een zender op vanuit Live-tv.",
-  "Recordings stay until you delete them. Partial ones still play.":
-    "Opnames blijven tot je ze verwijdert. Gedeeltelijke spelen ook af.",
+  "Recordings stay until you delete them. Partial ones play, skipping what was missed.":
+    "Opnames blijven tot je ze verwijdert. Gedeeltelijke spelen af en slaan over wat ontbrak.",
   "Play {title}": "{title} afspelen",
   "More for {title}": "Meer voor {title}",
   "When it ends": "Als het afloopt",

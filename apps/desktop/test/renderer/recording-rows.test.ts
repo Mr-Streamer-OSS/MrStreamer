@@ -106,3 +106,36 @@ it("counts the minutes a gap missed out of what was captured, and says when and 
   expect(row.text).toMatch(/12:20\D* to 12:35\D* missed\. The stream stopped\./);
   expect(row).toMatchObject({ captured: "45", planned: "60" });
 });
+
+it("keeps a paused recording in Now with Stop, its bar missing the time it waits", async () => {
+  ipc.reset();
+  // Begun 30 minutes ago, a second over so whole minutes come out even, paused 10 minutes ago.
+  const start = Date.now() - 30 * 60_000 - 1000;
+  ipc.always("recordings.list", [
+    {
+      id: "r1",
+      channel: { subscriptionId: SUBSCRIPTION, id: "11" },
+      channelName: "Eurosport 1",
+      title: "Noon News",
+      start,
+      stop: start + 60 * 60_000,
+      ended: null,
+      bytes: 188_000,
+      status: { kind: "paused", why: "stream" },
+      gaps: [{ from: start + 20 * 60_000, to: null, why: "stream" }],
+    },
+  ]);
+  const view = queryView(new QueryClient());
+  onTestFinished(() => view.unmount());
+  await view.render(createElement(RecordingsPage));
+  const row = await vi.waitFor(() => {
+    const found = document.querySelector("section[aria-label=Now] li");
+    if (!found) throw new Error("No row");
+    return found;
+  });
+  expect(row.textContent).toMatch(/Paused.*Paused at [^.]+\. The stream stopped\. Trying again\./);
+  expect(row.querySelector("[aria-label='Stop recording Noon News']")).not.toBeNull();
+  const meter = row.querySelector("[role=meter]");
+  expect(meter?.getAttribute("aria-valuenow")).toBe("20");
+  expect(meter?.getAttribute("aria-valuemax")).toBe("60");
+});

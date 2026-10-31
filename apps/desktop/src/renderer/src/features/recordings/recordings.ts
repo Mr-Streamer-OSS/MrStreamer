@@ -12,7 +12,7 @@ import type {
 } from "@mrstreamer/contracts/recordings";
 import { create } from "zustand";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
-import { formatDate, t } from "@mrstreamer/core/i18n";
+import { currentLanguage, formatDate, t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { call, listen } from "../../lib/ipc.ts";
 import { titlePlayer } from "../../player/title-player.ts";
@@ -86,6 +86,31 @@ listen("window.leaveAsked", () => useQuitAsked.setState({ asked: true }));
 export function confirmQuit(): Promise<null> {
   useQuitAsked.setState({ asked: false });
   return call("window.quit");
+}
+
+/** Whether `recording`'s time goes on: it records, or waits paused to record the rest. */
+export const isLive = (recording: Recording) =>
+  recording.status.kind === "recording" || recording.status.kind === "paused";
+
+/** The recordings whose time goes on, the one that stops last first. */
+export function useLiveRecordings(): readonly Recording[] {
+  const list = useRecordings().data ?? [];
+  return list.filter(isLive).toSorted((a, b) => b.stop - a.stop);
+}
+
+const GIB = 1024 ** 3;
+
+/**
+ * A storage limit as Settings offers it, "5 GB" or "1 TB": the limits count in binary units, so
+ * the default of 5 GiB reads as the 5 GB it was chosen as.
+ */
+export function formatLimit(bytes: number): string {
+  const tb = bytes >= 1024 * GIB;
+  return new Intl.NumberFormat(currentLanguage().locale, {
+    style: "unit",
+    unit: tb ? "terabyte" : "gigabyte",
+    maximumFractionDigits: 1,
+  }).format(bytes / (tb ? 1024 * GIB : GIB));
 }
 
 const anyRecording = (list: readonly Recording[]) => list.length > 0;

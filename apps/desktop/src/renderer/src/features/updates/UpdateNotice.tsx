@@ -1,6 +1,9 @@
 // The quiet notice in the top bar: an update waiting, downloading or ready. It fades with the
 // other controls while watching. Clicking it opens a panel with the next step: Download, then
 // Restart once it's ready. "Not now" hides the notice for that version; Settings still offers it.
+// While a recording's time goes on, a ready update reads Update after recording: its panel's OK
+// installs it once nothing records, and Restart now stops the recordings first, keeping what they
+// captured.
 // The launch's reminder (UpdateReminder.tsx) keeps the notice for its version until this "Not now".
 import { RotateCw } from "lucide-react";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
@@ -12,7 +15,7 @@ import { Button } from "../../components/ui/button.tsx";
 import { menuSurface } from "../../components/ui/menu.ts";
 import { cn } from "../../lib/utils.ts";
 import { noteItems } from "./notes.ts";
-import { useUpdates } from "./use-updates.ts";
+import { useUpdates, waitText } from "./use-updates.ts";
 
 /** How many lines of the notes the panel and the reminder show before pointing to Settings. */
 export const NOTE_LINES = 4;
@@ -42,11 +45,15 @@ function shownReminder(reminder: UpdateReminder | null): reminder is { readonly 
   return typeof reminder === "object" && reminder !== null && "kept" in reminder;
 }
 
-/** The visible notice's words, also used by the window bar when retrying its full labels. */
+/**
+ * The visible notice's words, also used by the window bar when retrying its full labels.
+ * `recording`: a recording's time goes on, which a ready update waits for.
+ */
 export function updateNoticeLabel(
   status: UpdateStatus | undefined,
   open: boolean,
   kept: string | null,
+  recording = false,
 ): string | undefined {
   if (
     !status ||
@@ -58,7 +65,9 @@ export function updateNoticeLabel(
   return update.kind === "downloading"
     ? `${t("Updating")} · ${formatPercent(update.percent / 100)}`
     : update.kind === "ready"
-      ? t("Restart to update")
+      ? recording
+        ? t("Update after recording")
+        : t("Restart to update")
       : update.kind === "failed"
         ? t("Update stopped")
         : t("Update");
@@ -66,9 +75,9 @@ export function updateNoticeLabel(
 
 /** The same popover trigger retains focus when the bar folds its words into a tooltip. */
 export function UpdateNotice({ compact = false }: { compact?: boolean }) {
-  const { status } = useUpdates();
+  const { status, recording } = useUpdates();
   const open = useUi((state) => state.updateDialog === "panel");
-  const label = updateNoticeLabel(status, open, useKeptUpdate());
+  const label = updateNoticeLabel(status, open, useKeptUpdate(), recording.length > 0);
   if (!status || !label) return null;
   const { update } = status;
   return (
@@ -119,8 +128,10 @@ export function UpdateNotice({ compact = false }: { compact?: boolean }) {
 }
 
 function UpdatePanel({ status }: { status: UpdateStatus }) {
-  const { download, cancel, restart, dismiss } = useUpdates();
+  const { download, cancel, restart, restartNow, recording, dismiss } = useUpdates();
   const { update, offer, channel } = status;
+  // When a ready update installs while something records.
+  const waiting = update.kind === "ready" ? waitText(recording) : null;
   const version = "version" in update ? update.version : (offer?.version ?? "");
   const notes = noteItems(offer?.notes ?? null);
   const close = () => useUi.setState({ updateDialog: null });
@@ -144,6 +155,7 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
           ))}
         </ul>
       )}
+      {waiting && <p className="mt-3 text-[0.875rem]">{waiting}</p>}
       {update.kind === "downloading" && (
         <div className="mt-4">
           <div className="h-1 overflow-hidden rounded-full bg-white/12">
@@ -173,16 +185,34 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
             {t("Cancel")}
           </Button>
         )}
-        {update.kind === "ready" && (
-          <>
-            <Button variant="primary" size="sm" onClick={restart}>
-              {t("Restart")}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={close}>
-              {t("Later")}
-            </Button>
-          </>
-        )}
+        {update.kind === "ready" &&
+          (waiting ? (
+            <>
+              {/* Main installs once nothing records. */}
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  restart();
+                  close();
+                }}
+              >
+                {t("OK")}
+              </Button>
+              <Button variant="destructive" size="sm" onClick={restartNow}>
+                {t("Restart now")}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="primary" size="sm" onClick={restart}>
+                {t("Restart")}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={close}>
+                {t("Later")}
+              </Button>
+            </>
+          ))}
         {update.kind === "failed" && update.step !== "check" && (
           <Button variant="primary" size="sm" onClick={download}>
             {t("Try again")}
@@ -204,7 +234,9 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
       </div>
       {update.kind === "ready" && (
         <p className="mt-3 text-[0.8125rem] text-muted-foreground">
-          {t("Playback stops for a moment while Mr. Streamer restarts.")}
+          {waiting
+            ? t("Restarting now stops recording and keeps what was recorded.")
+            : t("Playback stops for a moment while Mr. Streamer restarts.")}
         </p>
       )}
     </>

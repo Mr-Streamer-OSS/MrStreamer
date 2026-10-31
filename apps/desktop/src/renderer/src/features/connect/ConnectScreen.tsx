@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDownToLine } from "lucide-react";
+import { ArrowDownToLine, CircleDot } from "lucide-react";
 import { t } from "@mrstreamer/core/i18n";
 import { isMac, useWindowFullScreen } from "../../app/platform.ts";
 import { openView, resetForAccount } from "../../app/ui-store.ts";
@@ -8,17 +8,20 @@ import { Button } from "../../components/ui/button.tsx";
 import { useDownloads } from "../../lib/downloads.ts";
 import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { player } from "../../player/player.ts";
+import { useRecordings } from "../recordings/recordings.ts";
 import { LoginForm } from "./LoginForm.tsx";
 
 /**
  * The first subscription's login, shown while none is saved. Every later one is added in
  * Settings, beside those there, and a subscription whose password or link the keychain lost is
  * asked for it again there too: Connect never stands in front of lists that can still show. While
- * a download is on this computer, Downloads at the top opens it, to play with no subscription.
+ * a download is on this computer, Downloads at the top opens it, to play with no subscription;
+ * Recordings beside it does the same for what was recorded.
  */
 export function ConnectScreen() {
   const client = useQueryClient();
   const kept = useDownloads().data?.items.length ?? 0;
+  const recorded = useRecordings().data?.length ?? 0;
   const controls = !useWindowFullScreen();
   return (
     <div className="relative flex h-full items-center justify-center overflow-y-auto">
@@ -33,6 +36,12 @@ export function ConnectScreen() {
           <Button variant="ghost" size="sm" onClick={() => openView("downloads")}>
             <ArrowDownToLine />
             {t("Downloads")}
+          </Button>
+        )}
+        {recorded > 0 && (
+          <Button variant="ghost" size="sm" onClick={() => openView("recordings")}>
+            <CircleDot />
+            {t("Recordings")}
           </Button>
         )}
       </div>

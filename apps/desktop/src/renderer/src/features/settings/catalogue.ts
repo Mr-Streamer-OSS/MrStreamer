@@ -10,6 +10,7 @@ export const SETTINGS_SECTIONS = [
   { id: "home", label: "Home" },
   { id: "subscriptions", label: "Subscriptions" },
   { id: "guides", label: "Guides" },
+  { id: "recordings", label: "Recordings" },
   { id: "updates", label: "Updates" },
   { id: "privacy", label: "Privacy" },
   { id: "about", label: "About" },
@@ -133,6 +134,24 @@ const SETTINGS_CONTROLS = [
     synonyms: "settings.search.subscriptions",
   },
   { id: "guides", section: "guides", label: "Guides", synonyms: "settings.search.guides" },
+  {
+    id: "recordings-folder",
+    section: "recordings",
+    label: "Folder",
+    synonyms: "settings.search.recordings",
+  },
+  {
+    id: "recordings-keep-free",
+    section: "recordings",
+    label: "Keep free on disk",
+    synonyms: "settings.search.recordings",
+  },
+  {
+    id: "recordings-space",
+    section: "recordings",
+    label: "Space for recordings",
+    synonyms: "settings.search.recordings",
+  },
   { id: "update-check", section: "updates", label: "Updates", synonyms: "settings.search.updates" },
   {
     id: "update-channel",

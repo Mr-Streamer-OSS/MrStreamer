@@ -5,6 +5,7 @@ import { ConnectScreen } from "../features/connect/ConnectScreen.tsx";
 import { DownloadsPage } from "../features/downloads/DownloadsPage.tsx";
 import { RecordingsPage } from "../features/recordings/RecordingsPage.tsx";
 import { syncRecordings } from "../features/recordings/recordings.ts";
+import { QuitDialog } from "../features/recordings/QuitDialog.tsx";
 import { HomeScreen } from "../features/home/HomeScreen.tsx";
 import { GuidePage } from "../features/live/GuidePage.tsx";
 import { ReminderBanners } from "../features/reminders/ReminderBanners.tsx";
@@ -32,7 +33,17 @@ import { showReceiverPlayback } from "./receiver-playback.ts";
 import { useFeatureEntries } from "./analytics.ts";
 import { withoutTitles, useUi, type View } from "./ui-store.ts";
 
+/** The window, and the question Quit asks while a recording's time goes on, whatever it shows. */
 export function App() {
+  return (
+    <>
+      <Screen />
+      <QuitDialog />
+    </>
+  );
+}
+
+function Screen() {
   const subscriptions = useQuery(queries.subscriptions());
   const preferences = useQuery(queries.preferences());
   const updateOffer = !!useQuery(queries.updates()).data?.offer;
@@ -59,8 +70,11 @@ export function App() {
     subscriptions.isSuccess && !subscriptions.data.some(hasTitles),
     updateOffer,
   );
-  // Downloads stand alone without one: Connect opens them, and Add subscription goes back.
-  const offline = useUi((state) => state.view === "downloads");
+  // Downloads and Recordings stand alone without one: Connect opens them, and Add subscription
+  // goes back.
+  const offline = useUi((state) =>
+    state.view === "downloads" || state.view === "recordings" ? state.view : null,
+  );
   // The login form replaces everything, and a receiver's controls with it: what it plays ends.
   useEffect(() => {
     if (connect) outputs.stop();
@@ -80,7 +94,7 @@ export function App() {
       </p>
     );
   }
-  if (connect) return offline ? <Offline /> : <ConnectScreen />;
+  if (connect) return offline ? <Offline page={offline} /> : <ConnectScreen />;
   // The first Home read belongs to restored discovery, not the temporary default All list.
   if (!restored) return null;
   return <Shell liveOnly={!subscriptions.data.some(hasTitles)} />;
@@ -194,17 +208,17 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
 }
 
 /**
- * Downloads with no subscription saved: the page alone, and a copy playing over it. Nothing else
- * plays, so a copy is all the sound there is.
+ * Downloads or Recordings with no subscription saved: the page alone, and a copy or a recording
+ * playing over it. Nothing else plays, so that is all the sound there is.
  */
-function Offline() {
+function Offline({ page }: { page: "downloads" | "recordings" }) {
   const playingTitle = useUi((state) => state.playingTitle);
   useEffect(() => player.setAudible(playingTitle), [playingTitle]);
   useEffect(() => () => titlePlayer.close(), []);
   return (
     <>
       <div className={cn("h-full", playingTitle && "invisible")} inert={playingTitle || undefined}>
-        <DownloadsPage standalone />
+        {page === "downloads" ? <DownloadsPage standalone /> : <RecordingsPage standalone />}
       </div>
       {playingTitle && <TitleWatch />}
     </>

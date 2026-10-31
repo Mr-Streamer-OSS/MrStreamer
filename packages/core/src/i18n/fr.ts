@@ -24,6 +24,8 @@ export const fr: Translation = {
   "settings.search.subscriptions":
     "fournisseur compte liste lecture connexion réparer importer actualiser supprimer guide associer",
   "settings.search.guides": "XMLTV EPG programme sources associer actualiser",
+  "settings.search.recordings":
+    "enregistrement enregistrements stockage dossier espace libre limite disque",
   "settings.search.updates":
     "version mise à jour canal stable nightly vérifier télécharger redémarrer boutique nouveautés",
   "settings.search.privacy": "confidentialité analyse statistiques consentement politique suivi",
@@ -1415,6 +1417,52 @@ export const fr: Translation = {
   "Paused at {time}. Not enough free space; it goes on once there is room.":
     "En pause depuis {time}. Pas assez d’espace libre ; reprise dès qu’il y a de la place.",
   "Not saved yet. Trying again.": "Pas encore enregistré. Nouvel essai en cours.",
+  "Quit while recording?": "Quitter pendant l'enregistrement ?",
+  Quit: "Quitter",
+  "Keep recording": "Continuer l'enregistrement",
+  "{title} is recording until {time}. Quitting stops it now and keeps the {minutes} min recorded.":
+    "{title} s'enregistre jusqu'à {time}. Quitter l'arrête maintenant et garde les {minutes} min enregistrées.",
+  "{count} recordings go on until {time}. Quitting stops them now and keeps what they recorded.":
+    "{count} enregistrements continuent jusqu'à {time}. Quitter les arrête maintenant et garde ce qu'ils ont enregistré.",
+  "{title}, {time}, won't record while Mr. Streamer is closed.":
+    "{title}, {time}, ne sera pas enregistré tant que Mr. Streamer est fermé.",
+  "Closing the window instead keeps recording.":
+    "Fermer plutôt la fenêtre permet de continuer l'enregistrement.",
+  "{size} used": "{size} utilisés",
+  "{size} of {limit} used": "{size} sur {limit} utilisés",
+  "keeps {size} free": "garde {size} libres",
+  Storage: "Stockage",
+  Folder: "Dossier",
+  Change: "Changer",
+  Open: "Ouvrir",
+  "Keep free on disk": "Garder libre sur le disque",
+  "Below this, recording pauses and the rest is recorded once space is free.":
+    "En dessous, l'enregistrement se met en pause et le reste est enregistré dès que l'espace se libère.",
+  "Space for recordings": "Espace pour les enregistrements",
+  "At the limit, recording pauses the same way. Nothing is deleted to make room.":
+    "À la limite, l'enregistrement se met en pause de la même façon. Rien n'est supprimé pour faire de la place.",
+  "No limit": "Sans limite",
+  "While recording": "Pendant l'enregistrement",
+  "Close window": "Fermer la fenêtre",
+  "Recording goes on. Open Mr. Streamer again to see it.":
+    "L'enregistrement continue. Rouvrez Mr. Streamer pour le voir.",
+  "Asks first. Quitting stops it and keeps what was recorded.":
+    "Demande d'abord. Quitter l'arrête et garde ce qui a été enregistré.",
+  Sleep: "Veille",
+  "Leaves a gap. The rest is recorded after waking, until its time ends.":
+    "Laisse un trou. Le reste est enregistré au réveil, jusqu'à la fin de son horaire.",
+  "Wait until recording ends.": "Attendent la fin de l'enregistrement.",
+  "It installs when {title} finishes at {time}.":
+    "Elle s'installe quand {title} se termine à {time}.",
+  "It installs when the last recording finishes at {time}.":
+    "Elle s'installe quand le dernier enregistrement se termine à {time}.",
+  "{version} is ready; it installs when recording ends":
+    "{version} est prête ; elle s'installe à la fin de l'enregistrement",
+  "Restart now": "Redémarrer maintenant",
+  "Update after recording": "Mettre à jour après l'enregistrement",
+  OK: "OK",
+  "Restarting now stops recording and keeps what was recorded.":
+    "Redémarrer maintenant arrête l'enregistrement et garde ce qui a été enregistré.",
   "Choose a stop time within 12 hours.": "Choisissez une heure de fin dans les 12 heures.",
   "Stop the recording before deleting it.": "Arrêtez l’enregistrement avant de le supprimer.",
   "It is still recording.": "L’enregistrement est toujours en cours.",
@@ -1432,8 +1480,8 @@ export const fr: Translation = {
   "{captured} of {planned} min": "{captured} sur {planned} min",
   "Nothing recorded yet. Record a channel from Live TV.":
     "Rien d'enregistré pour l'instant. Enregistrez une chaîne depuis la TV en direct.",
-  "Recordings stay until you delete them. Partial ones still play.":
-    "Les enregistrements restent jusqu'à ce que vous les supprimiez. Les enregistrements partiels se lisent aussi.",
+  "Recordings stay until you delete them. Partial ones play, skipping what was missed.":
+    "Les enregistrements restent jusqu'à ce que vous les supprimiez. Les enregistrements partiels se lisent en sautant ce qui manque.",
   "Play {title}": "Lire {title}",
   "More for {title}": "Plus pour {title}",
   "When it ends": "À la fin",

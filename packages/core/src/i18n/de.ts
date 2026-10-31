@@ -24,6 +24,8 @@ export const de: Translation = {
   "settings.search.subscriptions":
     "Anbieter Konto Wiedergabeliste Anmeldung reparieren importieren aktualisieren entfernen Programm Zuordnung",
   "settings.search.guides": "XMLTV EPG Programm Quellen Zuordnung aktualisieren",
+  "settings.search.recordings":
+    "Aufnahme Aufnahmen Speicher Ordner Speicherplatz frei Grenze Limit Festplatte",
   "settings.search.updates":
     "Version Update Kanal stabil Nightly prüfen herunterladen neu starten Store Versionshinweise",
   "settings.search.privacy": "Datenschutz Analyse Statistik Einwilligung Richtlinie Tracking",
@@ -1359,6 +1361,51 @@ export const de: Translation = {
   "Paused at {time}. Not enough free space; it goes on once there is room.":
     "Um {time} pausiert. Nicht genug freier Speicher; es geht weiter, sobald Platz ist.",
   "Not saved yet. Trying again.": "Noch nicht gespeichert. Wird erneut versucht.",
+  "Quit while recording?": "Während der Aufnahme beenden?",
+  Quit: "Beenden",
+  "Keep recording": "Weiter aufnehmen",
+  "{title} is recording until {time}. Quitting stops it now and keeps the {minutes} min recorded.":
+    "{title} wird bis {time} aufgenommen. Beenden stoppt die Aufnahme jetzt und behält die {minutes} Min, die aufgenommen sind.",
+  "{count} recordings go on until {time}. Quitting stops them now and keeps what they recorded.":
+    "{count} Aufnahmen laufen bis {time}. Beenden stoppt sie jetzt und behält, was sie aufgenommen haben.",
+  "{title}, {time}, won't record while Mr. Streamer is closed.":
+    "{title}, {time}, wird nicht aufgenommen, solange Mr. Streamer beendet ist.",
+  "Closing the window instead keeps recording.":
+    "Schließt du stattdessen das Fenster, wird weiter aufgenommen.",
+  "{size} used": "{size} belegt",
+  "{size} of {limit} used": "{size} von {limit} belegt",
+  "keeps {size} free": "behält {size} frei",
+  Storage: "Speicher",
+  Folder: "Ordner",
+  Change: "Ändern",
+  Open: "Öffnen",
+  "Keep free on disk": "Auf der Festplatte frei lassen",
+  "Below this, recording pauses and the rest is recorded once space is free.":
+    "Darunter pausiert die Aufnahme, und der Rest wird aufgenommen, sobald wieder Platz frei ist.",
+  "Space for recordings": "Platz für Aufnahmen",
+  "At the limit, recording pauses the same way. Nothing is deleted to make room.":
+    "Am Limit pausiert die Aufnahme genauso. Nichts wird gelöscht, um Platz zu schaffen.",
+  "No limit": "Kein Limit",
+  "While recording": "Während der Aufnahme",
+  "Close window": "Fenster schließen",
+  "Recording goes on. Open Mr. Streamer again to see it.":
+    "Die Aufnahme läuft weiter. Öffne Mr. Streamer erneut, um sie zu sehen.",
+  "Asks first. Quitting stops it and keeps what was recorded.":
+    "Fragt zuerst. Beenden stoppt sie und behält, was aufgenommen ist.",
+  Sleep: "Ruhezustand",
+  "Leaves a gap. The rest is recorded after waking, until its time ends.":
+    "Hinterlässt eine Lücke. Der Rest wird nach dem Aufwachen aufgenommen, bis ihre Zeit endet.",
+  "Wait until recording ends.": "Warten, bis die Aufnahme endet.",
+  "It installs when {title} finishes at {time}.": "Wird installiert, wenn {title} um {time} endet.",
+  "It installs when the last recording finishes at {time}.":
+    "Wird installiert, wenn die letzte Aufnahme um {time} endet.",
+  "{version} is ready; it installs when recording ends":
+    "{version} ist bereit; wird installiert, wenn die Aufnahme endet",
+  "Restart now": "Jetzt neu starten",
+  "Update after recording": "Nach der Aufnahme aktualisieren",
+  OK: "OK",
+  "Restarting now stops recording and keeps what was recorded.":
+    "Jetzt neu starten stoppt die Aufnahme und behält, was aufgenommen ist.",
   "Choose a stop time within 12 hours.": "Wähle ein Ende innerhalb von 12 Stunden.",
   "Stop the recording before deleting it.": "Beende die Aufnahme, bevor du sie löschst.",
   "It is still recording.": "Die Aufnahme läuft noch.",
@@ -1376,8 +1423,8 @@ export const de: Translation = {
   "{captured} of {planned} min": "{captured} von {planned} Min.",
   "Nothing recorded yet. Record a channel from Live TV.":
     "Noch nichts aufgenommen. Nimm einen Sender im Live-TV auf.",
-  "Recordings stay until you delete them. Partial ones still play.":
-    "Aufnahmen bleiben, bis du sie löschst. Auch unvollständige Aufnahmen sind abspielbar.",
+  "Recordings stay until you delete them. Partial ones play, skipping what was missed.":
+    "Aufnahmen bleiben, bis du sie löschst. Unvollständige spielen ab und überspringen, was fehlt.",
   "Play {title}": "{title} abspielen",
   "More for {title}": "Mehr zu {title}",
   "When it ends": "Wenn sie endet",
