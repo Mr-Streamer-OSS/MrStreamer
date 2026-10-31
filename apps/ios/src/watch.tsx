@@ -955,6 +955,7 @@ function frameRate(title: SubtitleTitle, stands: () => boolean) {
   showSheet(
     {
       title: "Frame rate",
+      message: "Subtitle fps → video fps",
       options: [
         ...choices.map(({ label, speed }) => `${speed === timing.speed ? "✓ " : ""}${label}`),
         "Cancel",

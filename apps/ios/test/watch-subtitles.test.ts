@@ -186,6 +186,32 @@ describe("Watch's online subtitles", () => {
     expect(again.message).toContain("Picture in Picture and AirPlay show no subtitles");
   });
 
+  it("offers what a search found after the controls hid while it ran", async () => {
+    await saveSubtitleKey("key");
+    await watchMovie();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const answer = fetch;
+    vi.stubGlobal("fetch", async (input: URL | string) => {
+      await held;
+      return answer(input);
+    });
+    await pick(await openSubtitles(), "Find online");
+    await React.act(async () => {
+      container
+        .querySelector('[aria-label="Hide controls"]')!
+        .dispatchEvent(new Event("click", { bubbles: true }));
+      await tick();
+    });
+    expect(container.querySelector('[data-testid="watch-subtitles"]')).toBeNull();
+    await React.act(async () => {
+      release();
+      await new Promise((done) => setTimeout(done, 20));
+      await tick();
+    });
+    expect(sheets.at(-1)?.title).toBe("Online subtitles");
+  });
+
   it("points to Settings when no SubDL key is saved", async () => {
     await watchMovie();
     await pick(await openSubtitles(), "Find online");

@@ -99,6 +99,7 @@ beforeEach(async () => {
 afterEach(() => {
   vi.unstubAllGlobals();
   native.sync = null;
+  locked = false;
   return stop();
 });
 
@@ -414,6 +415,29 @@ describe("the file's own subtitles", () => {
     await picking;
     await vi.waitFor(async () => expect(await checked()).toEqual(["German"]));
     expect(online.shownSubtitle()).toBeNull();
+  });
+
+  it("shown again from what was kept end a download under way", async () => {
+    const playing = await withTracks();
+    await chooseFirst(playing);
+    await ((await trackChoices("subtitles")) ?? [])
+      .find((each) => each.label === "German")
+      ?.choose();
+    await vi.waitFor(async () => expect(await checked()).toEqual(["German"]));
+    answer = (url) =>
+      url.hostname === "api.subdl.com"
+        ? searchReply(550, "movie", [{ ...movieResult, release_name: "Other.Release" }])
+        : new Response(SRT);
+    const found = await online.findSubtitles(playing);
+    const release = holdDownloads();
+    const choosing = online.chooseSubtitle(
+      playing,
+      found?.kind === "found" ? found.results[0]!.id : "",
+    );
+    expect(online.showKeptSubtitle(playing)).toBe(true);
+    release();
+    expect(await choosing).toBeNull();
+    expect(online.shownSubtitle()?.subtitle.release).toBe("Movie.2001.1080p");
   });
 
   it("chosen while a download runs end it, so it neither shows nor keeps", async () => {
