@@ -12,7 +12,7 @@ import {
   type Result,
 } from "./guide-native.ts";
 import type { Provider } from "@mrstreamer/core/provider";
-import { normalize, searchWords } from "@mrstreamer/core/text";
+import { searchWords } from "@mrstreamer/core/text";
 import type { Part } from "./library.ts";
 import type { SourceLogin } from "./login-safety.ts";
 import { currentSource } from "./sources.ts";
@@ -670,8 +670,7 @@ export function createGuide(
      * Up to 20 programmes on now or later whose title has every word of `text`, from every guide:
      * on now first, then by start. Each is on the first of `keys` (`Channel.key`, in the order
      * Search lists channels) whose programmes are read from the guide and id it was found by, as
-     * `listings` reads them, and its `detail` reads it with `programme`. The native reader takes a
-     * query's first 8 words, and the rest narrow what it finds. Nothing is found once guides,
+     * `listings` reads them, and its `detail` reads it with `programme`. Nothing is found once guides,
      * sources, catalogues or mappings change during it; it fails where a standing guide could not
      * be read.
      */
@@ -682,8 +681,12 @@ export function createGuide(
     ): Promise<readonly FoundProgramme[]> {
       const signal = options?.signal;
       const words = [...new Set(searchWords(text))];
-      // No title holds a word longer than the native reader takes.
-      if (words.length === 0 || words.some((word) => new TextEncoder().encode(word).length > 128))
+      // Past what the native reader takes, as no title of its 300 characters folds to more.
+      if (
+        words.length === 0 ||
+        words.length > 160 ||
+        words.some((word) => new TextEncoder().encode(word).length > 32768)
+      )
         return [];
       // What every answer stands on, which a change during the search leaves it none of.
       const footing = () => [
@@ -732,22 +735,11 @@ export function createGuide(
       const found: { captured: Token; match: Match }[] = [];
       for (const { asking, by } of guides.values()) {
         const answer = await asked(asking, (native, lease, job) =>
-          native.search(
-            lease,
-            asking.generation.id,
-            job,
-            [...by.keys()],
-            words.slice(0, 8),
-            at,
-            20,
-          ),
+          native.search(lease, asking.generation.id, job, [...by.keys()], words, at, 20),
         );
         for (const match of answer?.rows ?? []) {
           const captured = by.get(match.guideId);
-          // The words past the native reader's eight.
-          const title = normalize(match.title);
-          if (captured && words.slice(8).every((word) => title.includes(word)))
-            found.push({ captured, match });
+          if (captured) found.push({ captured, match });
         }
       }
       const after = footing();
