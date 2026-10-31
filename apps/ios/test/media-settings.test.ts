@@ -28,6 +28,8 @@ const scenario = vi.hoisted(() => ({
   /** The text prompt last shown: its buttons, which take what was typed. */
   prompt: null as readonly { text: string; onPress?: (typed?: string) => void }[] | null,
   keychain: new Map<string, string>(),
+  /** The Keychain answers nothing while this holds. */
+  locked: false,
 }));
 
 vi.mock("react-native", async () => ({
@@ -84,7 +86,12 @@ vi.mock("../src/account.ts", () => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
-vi.mock("expo-secure-store", () => keychain(() => scenario.keychain));
+vi.mock("expo-secure-store", () =>
+  keychain(() => {
+    if (scenario.locked) throw new Error("The Keychain is locked");
+    return scenario.keychain;
+  }),
+);
 // The actual Settings route imports the real preferences owner. Native views and OS sheets
 // are the only UI doubles. The base-revision control must render before a missing row fails.
 let Settings: typeof import("../src/app/(tabs)/(home)/settings.tsx").default;
@@ -100,6 +107,7 @@ beforeEach(async () => {
   scenario.members = [];
   scenario.alerts.length = 0;
   scenario.keychain.clear();
+  scenario.locked = false;
   native.sync = null;
 });
 afterEach(() => {
@@ -216,4 +224,15 @@ it("saves a typed SubDL key to the Keychain only, shows only that one is saved, 
   await React.act(async () => sheet?.pick(1));
   await vi.waitFor(() => expect(row("subdl-key").textContent).toContain("Not set"));
   expect([...scenario.keychain.values()]).not.toContain("k-123");
+});
+
+it("leaves the SubDL key unknown while the Keychain won't answer, never Not set", async () => {
+  scenario.keychain.set("s.online-subtitles.subdl", "k-123");
+  scenario.locked = true;
+  render();
+  await React.act(async () => {
+    await new Promise((done) => setTimeout(done, 10));
+  });
+  expect(row("subdl-key").textContent).not.toContain("Not set");
+  expect(row("subdl-key").textContent).not.toContain("Saved");
 });
