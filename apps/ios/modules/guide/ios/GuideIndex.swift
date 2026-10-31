@@ -170,7 +170,7 @@ final class GuideIndex {
   /// hold each of `words`: on now first, then by start. Titles programmes repeat are folded once.
   func search(ids: [String], words: [String], at: Double, limit: Int) throws -> [String: Any] {
     let started = ProcessInfo.processInfo.systemUptime
-    guard ids.count <= 65536, ids.allSatisfy({ $0.utf8.count <= 512 }), (1...8).contains(words.count), words.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 128 }), (1...50).contains(limit), at.isFinite else { throw GuideFailure("reply") }
+    guard ids.count <= 65536, ids.allSatisfy({ $0.utf8.count <= 512 }), (1...160).contains(words.count), words.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 32768 }), (1...50).contains(limit), at.isFinite else { throw GuideFailure("reply") }
     typealias Found = (channel: String, start: Double, stop: Double, title: String)
     let wanted = Set(ids)
     let needles = words.map { Array(guideFold($0).unicodeScalars) }

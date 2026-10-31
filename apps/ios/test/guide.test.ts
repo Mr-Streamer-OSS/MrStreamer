@@ -1103,7 +1103,6 @@ describe("programme search", () => {
     native.search = async (lease, _generation, _job, ids, words, now, limit) => {
       const guide = held.get(ownerOf(lease))!;
       searched.push({ owner: ownerOf(lease), ids, limit });
-      if (words.length > 8) return { kind: "failed", error: "reply" };
       const rows = ids
         .flatMap((guideId) => (guide.get(guideId) ?? []).map((row) => ({ ...row, guideId })))
         .filter(
@@ -1179,10 +1178,15 @@ describe("programme search", () => {
     ]);
   });
 
-  it("finds by every word of a query longer than the native reader's eight", async () => {
+  it("finds by every word of a long query, and by a long word", async () => {
     const { owner, held } = await searching();
     const words = "one two three four five six seven eight nine";
-    held.get("a")!.set("news.tv", [show(words, at), show(words.replace("nine", "ten"), at)]);
+    const partial = Array.from({ length: 20 }, (_, n) => show(words.replace("nine", `${n}`), at));
+    const long = "ㄱ".repeat(150);
+    held.get("a")!.set("news.tv", [...partial, show(words, at + 60_000), show(long, at)]);
+    expect((await owner.search(long, keys)).map(({ programme }) => programme.title)).toEqual([
+      long,
+    ]);
     const found = await owner.search(words, keys);
     expect(found.map(({ programme }) => programme.title)).toEqual([words]);
   });
