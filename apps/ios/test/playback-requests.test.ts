@@ -73,8 +73,21 @@ vi.mock("../src/viewing.ts", () => ({
 
 const { failureOf, playEpisode, playMovie, resumeEpisode, resumeMovie } =
   await import("../src/play-title.ts");
-const { closeWatch, onScreen, play, playbackState, playingItem, playNext, showVersions, stop } =
-  await import("../src/playback.ts");
+const {
+  cancelUpNext,
+  closeWatch,
+  onScreen,
+  pictureInPicture,
+  play,
+  playbackState,
+  playingItem,
+  playNext,
+  playUpNext,
+  seekBy,
+  showVersions,
+  stop,
+  togglePause,
+} = await import("../src/playback.ts");
 const { resume } = await import("../src/resume.ts");
 
 function title(kind: Title["kind"], id: string, versions: readonly string[] = [id]): Title {
@@ -404,6 +417,153 @@ describe("Next episode", () => {
     held.standing.shift()?.(nothingPlayed);
     await settle();
     expect(sources).toEqual(["file:episode:s1e1", "file:movie:m1"]);
+  });
+});
+
+describe("an episode's end", () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }));
+  afterEach(() => vi.useRealTimers());
+
+  /** Three episodes of s1, for a next one the record can skip past. */
+  const threeEpisodes = (): SeriesDetails => {
+    const details = seriesDetails("s1");
+    return {
+      ...details,
+      seasons: [{ ...details.seasons[0]!, episodes: [1, 2, 3].map((n) => episode("s1", n)) }],
+    };
+  };
+
+  /** `number` of `details` plays in Watch to its end, and the record answers with `standing`. */
+  async function ends(details: SeriesDetails, number: number, standing = nothingPlayed) {
+    playEpisode(details, episode("s1", number), 0, () => undefined);
+    await settle();
+    startsAt();
+    fakePlayer.state(true);
+    fakePlayer.currentTime = 600;
+    fakePlayer.observation({ kind: "ended" });
+    fakePlayer.state(false);
+    await settle();
+    held.standing.shift()?.(standing);
+    await settle();
+  }
+
+  it("counts down to the next episode not yet watched and plays it at zero", async () => {
+    const third = progressAt("episode", "s1e3", 120);
+    await ends(threeEpisodes(), 1, {
+      ...nothingPlayed,
+      progress: [{ ...progressAt("episode", "s1e2", 600), finished: true }, third],
+    });
+    expect(saves.asked).toContain(600);
+    vi.advanceTimersByTime(9_000);
+    expect(sources).toEqual(["file:episode:s1e1"]);
+    vi.advanceTimersByTime(1_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e3"]);
+    // Resumed a few seconds before where it got to, as every resume is.
+    expect(startsAt()).toBe(115);
+  });
+
+  it("plays it at once on Play next", async () => {
+    await ends(seriesDetails("s1"), 1);
+    playUpNext();
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
+  });
+
+  it("stays on the ended episode once cancelled, with Next episode still playing the next", async () => {
+    await ends(seriesDetails("s1"), 1);
+    cancelUpNext();
+    vi.advanceTimersByTime(20_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1"]);
+    playNext();
+    await settle();
+    held.standing.shift()?.(nothingPlayed);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
+  });
+
+  it.each([
+    ["Pause", () => togglePause()],
+    ["a seek back", () => seekBy(-10)],
+    ["Close", () => void closeWatch()],
+    ["Stop", () => void stop()],
+    ["another screen", () => onScreen("/films")],
+  ])("plays nothing after %s during the countdown", async (_, act) => {
+    await ends(seriesDetails("s1"), 1);
+    act();
+    vi.advanceTimersByTime(20_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1"]);
+  });
+
+  it("counts nothing down when the save at the end was refused", async () => {
+    playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
+    await settle();
+    startsAt();
+    fakePlayer.state(true);
+    const refuse = holdNextSave();
+    fakePlayer.currentTime = 600;
+    fakePlayer.observation({ kind: "ended" });
+    await settle();
+    refuse(new Error("disk full"));
+    await settle();
+    expect(held.standing).toEqual([]);
+    vi.advanceTimersByTime(20_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1"]);
+  });
+
+  it("counts nothing down for an end Picture in Picture showed", async () => {
+    playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
+    await settle();
+    startsAt();
+    fakePlayer.state(true);
+    pictureInPicture(true);
+    fakePlayer.currentTime = 600;
+    fakePlayer.observation({ kind: "ended" });
+    await settle();
+    vi.advanceTimersByTime(20_000);
+    await settle();
+    expect(held.standing).toEqual([]);
+    expect(sources).toEqual(["file:episode:s1e1"]);
+  });
+
+  it("counts nothing down after the series' last episode", async () => {
+    await ends(seriesDetails("s1"), 2);
+    vi.advanceTimersByTime(20_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e2"]);
+  });
+
+  it("takes no end from an earlier item of the player", async () => {
+    playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
+    await settle();
+    startsAt();
+    fakePlayer.state(true);
+    const { itemId } = fakePlayer.identity();
+    fakePlayer.observation({ kind: "ended" }, { itemId: itemId - 1 });
+    await settle();
+    vi.advanceTimersByTime(20_000);
+    await settle();
+    expect(held.standing).toEqual([]);
+    expect(sources).toEqual(["file:episode:s1e1"]);
+  });
+
+  it("plays nothing once the provider's login was replaced during the countdown", async () => {
+    const { setSource, dropSource } = await import("../src/sources.ts");
+    const { demoProvider } = await import("../src/demo.ts");
+    const source = { revision: 1, provider: demoProvider(), login: ["viewer", "fixture"] };
+    setSource(SUB, source);
+    try {
+      await ends(seriesDetails("s1"), 1);
+      setSource(SUB, { ...source, revision: 2 });
+      vi.advanceTimersByTime(20_000);
+      await settle();
+      expect(sources).toEqual(["file:episode:s1e1"]);
+    } finally {
+      dropSource(SUB);
+    }
   });
 });
 
