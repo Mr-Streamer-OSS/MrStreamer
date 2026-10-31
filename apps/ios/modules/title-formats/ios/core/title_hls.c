@@ -1185,8 +1185,8 @@ static void mark_read(Text *text, int64_t time) {
 static int read_frame(TitleHls *title, AVPacket *packet) {
   int error = av_read_frame(title->input, packet);
   Text *text = error < 0 ? NULL : text_of(title, packet);
-  if (text && packet->pts != AV_NOPTS_VALUE) mark_read(text, packet->pts);
   if (text && (error = keep_cue(title, text, packet)) < 0) av_packet_unref(packet);
+  else if (text && packet->pts != AV_NOPTS_VALUE) mark_read(text, packet->pts);
   return error;
 }
 
