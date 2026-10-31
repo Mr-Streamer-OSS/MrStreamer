@@ -349,6 +349,15 @@ describe("a chosen result", () => {
     expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
     serving(() => new Response(SRT, { headers: { "content-length": String(11 * 1024 * 1024) } }));
     expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
+    // A small ZIP file whose one subtitle unpacks past the limit.
+    const huge = `1\n00:00:01,000 --> 00:00:02,000\n${"a".repeat(11 * 1024 * 1024)}\n`;
+    serving(() => new Response(zipSync({ "big.srt": strToU8(huge) })));
+    expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
+    // Text with no subtitle in it, and a search answer that isn't JSON.
+    serving(() => new Response("just words"));
+    expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
+    answer = () => new Response("<html>busy</html>");
+    expect(await online.findSubtitles(playing)).toEqual({ kind: "failed", reason: "unavailable" });
   });
 
   it("refuses a ZIP file with several subtitles and a file from another host", async () => {

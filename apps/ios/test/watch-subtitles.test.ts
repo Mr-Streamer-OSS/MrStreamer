@@ -19,7 +19,13 @@ const sheets: Array<{
 const alerts: string[][] = [];
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
-vi.mock("expo-secure-store", () => keychainStore(() => keychain));
+let locked = false;
+vi.mock("expo-secure-store", () =>
+  keychainStore(() => {
+    if (locked) throw new Error("The Keychain is locked");
+    return keychain;
+  }),
+);
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => port,
@@ -80,6 +86,7 @@ vi.mock("../src/glass.tsx", async () => {
 });
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
 
+const { native } = await import("./native-files.ts");
 const playback = await import("../src/playback.ts");
 const subtitles = await import("../src/downloaded-subtitles.ts");
 const { saveSubtitleKey } = await import("../src/online-subtitles.ts");
@@ -115,6 +122,8 @@ beforeEach(async () => {
   React.act(() => root.render(React.createElement(WatchLayer)));
 });
 afterEach(async () => {
+  locked = false;
+  native.sync = null;
   unmount();
   vi.unstubAllGlobals();
   await playback.stop();
@@ -308,6 +317,46 @@ describe("Watch's online subtitles", () => {
       ["No subtitles found", "SubDL has none for this in your languages."],
       ["SubDL refused the key", "Check your SubDL API key in Settings > Subtitles."],
     ]);
+  });
+
+  it("says why a search, a download or keeping it failed, each in its own words", async () => {
+    await saveSubtitleKey("key");
+    await watchMovie();
+    const found = () =>
+      Response.json({
+        status: true,
+        results: [{ tmdb_id: 550, type: "movie" }],
+        subtitles: [{ language: "EN", release_name: "Movie.2001", url: "/s/1.srt" }],
+      });
+    const serve = (file: () => Response) =>
+      vi.stubGlobal("fetch", async (input: URL | string) =>
+        new URL(input).hostname === "api.subdl.com" ? found() : file(),
+      );
+    for (const status of [429, 500]) {
+      vi.stubGlobal("fetch", async () => new Response("", { status }));
+      await pick(await openSubtitles(), "Find online");
+    }
+    // Text that isn't UTF-8 subtitles, then a disk that won't keep a good file.
+    serve(() => new Response(new Uint8Array([0xff, 0xfe, 0xfd])));
+    await pick(await openSubtitles(), "Find online");
+    await pick(sheets.at(-1)!, "Movie.2001");
+    serve(() => new Response(SRT));
+    native.sync = (operation, path) => {
+      if (operation === "write" && path.includes("online-subtitles")) throw new Error("Disk full");
+    };
+    await pick(await openSubtitles(), "Find online");
+    await pick(sheets.at(-1)!, "Movie.2001");
+    native.sync = null;
+    locked = true;
+    await pick(await openSubtitles(), "Find online");
+    expect(alerts).toEqual([
+      ["SubDL limit reached", "Your SubDL key has no requests left for now. Try again later."],
+      ["SubDL isn't available", "Check your connection and try again."],
+      ["Can't use this subtitle", "It isn't text the app can read. Try another."],
+      ["Couldn't keep this subtitle", "This iPhone refused to save it. Try again."],
+      ["Couldn't read your SubDL key", "This iPhone didn't give it. Try again."],
+    ]);
+    expect(subtitles.shownSubtitle()).toBeNull();
   });
 
   it("points to Settings when no SubDL key is saved", async () => {
