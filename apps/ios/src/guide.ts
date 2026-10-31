@@ -744,8 +744,9 @@ export function createGuide(
         );
         for (const match of answer?.rows ?? []) {
           const captured = by.get(match.guideId);
+          // The words past the native reader's eight.
           const title = normalize(match.title);
-          if (captured && words.every((word) => title.includes(word)))
+          if (captured && words.slice(8).every((word) => title.includes(word)))
             found.push({ captured, match });
         }
       }

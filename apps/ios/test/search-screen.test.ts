@@ -34,6 +34,9 @@ const scenario = vi.hoisted(() => ({
   notify: null as ((change: { content: boolean }) => void) | null,
   /** What the screen did, in order. */
   did: [] as string[],
+  /** Whether Watch shows, and who hears it open. */
+  watching: false,
+  watchers: new Set<() => void>(),
   /** What VoiceOver was given to read out. */
   said: [] as string[],
   /** The text size the viewer chose, as a multiple of the default. */
@@ -137,8 +140,11 @@ vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   useCatalogue: () => scenario.catalogue,
-  playChannel: (channel: Channel, _place: string, options: { watch: boolean }) =>
-    scenario.did.push(`play ${channel.key}${options.watch ? " in Watch" : ""}`),
+  playChannel: (channel: Channel, _place: string, options: { watch: boolean }) => {
+    scenario.did.push(`play ${channel.key}${options.watch ? " in Watch" : ""}`);
+    scenario.watching ||= options.watch;
+    scenario.watchers.forEach((listener) => listener());
+  },
   retry: (id: string) => scenario.did.push(`retry ${id}`),
   // What the title owner reads of the subscriptions. No launch is reading saved lists here.
   members: () => scenario.members,
@@ -211,7 +217,16 @@ vi.mock("../src/resume.ts", () => ({
   },
 }));
 vi.mock("../src/playback.ts", () => ({
-  usePlayback: () => ({ phase: { kind: "idle" } }),
+  usePlayback: () => ({
+    phase: { kind: "idle" },
+    watch: React.useSyncExternalStore(
+      (listener) => {
+        scenario.watchers.add(listener);
+        return () => scenario.watchers.delete(listener);
+      },
+      () => scenario.watching,
+    ),
+  }),
   channelStatus: () => null,
 }));
 vi.mock("../src/glass.tsx", async () => {
@@ -414,6 +429,7 @@ beforeEach(async () => {
   Object.assign(scenario, {
     catalogue: ready,
     did: [],
+    watching: false,
     opened: [],
     said: [],
     fontScale: 1,
@@ -1501,6 +1517,15 @@ describe("Programmes in Search", () => {
     // The same list, never remounted, so it is still scrolled where it was.
     expect(container.querySelector('[data-testid="search-list"]')).toBe(list);
     expect(scenario.did).toEqual([]);
+  });
+
+  it("closes Search under Watch when a programme's detail plays its channel", async () => {
+    scenario.search = async () => [programme("News at Six", "six")];
+    await open();
+    await type("news");
+    await press(`search-programme-b:7-${at}`);
+    await press("text-Watch live");
+    expect(scenario.did).toEqual(["play b:7 in Watch", "back"]);
   });
 
   it("never shows an answer held across a provider's replaced login", async () => {
