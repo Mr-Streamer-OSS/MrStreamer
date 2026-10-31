@@ -22,7 +22,7 @@ function deferred<T>() {
 
 type Unshown = { language: string | null; format: string | null; forced: boolean };
 type Opened =
-  | { kind: "session"; playlist: string; unshown?: Unshown[] }
+  | { kind: "session"; playlist: string; unshown?: { named: Unshown[]; more: number } }
   | { kind: "direct" }
   | { kind: "closed" }
   | { kind: "failed"; failure: { kind: "status"; status: number } };
@@ -167,10 +167,13 @@ describe("a file AVPlayer can't open", () => {
   });
 
   it("names the file's subtitle tracks the session can't carry, for the file playing only", async () => {
-    const pictures = [
-      { language: "eng", format: "PGS", forced: false },
-      { language: "nld", format: "DVD", forced: true },
-    ];
+    const pictures = {
+      named: [
+        { language: "eng", format: "PGS", forced: false },
+        { language: "nld", format: "DVD", forced: true },
+      ],
+      more: 0,
+    };
     void play(
       movie("a"),
       {
@@ -201,7 +204,7 @@ describe("a file AVPlayer can't open", () => {
     sessions[0]!.closed.resolve();
     await settle();
     expect(given.at(-1)).toEqual({ uri: "http://panel/b.mp4", contentType: "auto" });
-    expect(unshownSubtitles()).toEqual([]);
+    expect(unshownSubtitles()).toEqual({ named: [], more: 0 });
   });
 
   it("asks the provider nothing more until the session it let go of has closed", async () => {

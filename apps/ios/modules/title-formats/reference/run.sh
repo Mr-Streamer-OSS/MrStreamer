@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Builds the reference check against vendor/ffmpeg/reference and runs it on each file given:
-#   modules/title-formats/reference/run.sh <out-folder> [--start <seconds>] [--uncued] <file>...
+#   modules/title-formats/reference/run.sh <out-folder> [--start <seconds>] [--uncued] [--faults]
+#     <file>...
 # --uncued says the files' indexes leave subtitle lines out, so lines a seek lands in may be missing.
+# --faults fails each read of a fresh subtitle segment in turn, and asks the segment again.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 ff=$here/../../../vendor/ffmpeg/reference/prefix
@@ -14,6 +16,10 @@ if [[ ${1:-} == --start ]]; then
 fi
 if [[ ${1:-} == --uncued ]]; then
   export CHECK_UNCUED=1
+  shift
+fi
+if [[ ${1:-} == --faults ]]; then
+  export CHECK_FAULTS=1
   shift
 fi
 mkdir -p "$out"

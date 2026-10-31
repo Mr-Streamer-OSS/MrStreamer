@@ -27,6 +27,8 @@
 # - subs-many.mkv: over 4 MB of French SubRip lines in the first segment; subs-huge.mkv: one in a
 #   packet over 1 MB.
 # - subs-dvb.mkv: English SubRip and Dutch DVB subtitles.
+# - subs-crowded.mkv: its picture and sound with the Dutch DVB track 20 times over, past the 16
+#   unshown tracks the core names.
 # Needs an ffmpeg with libx264 and its AAC encoder on PATH, as Ubuntu's and Homebrew's builds have.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -136,6 +138,10 @@ ffmpeg -v error -y -i "$out/subs.mkv" -i "$work/huge.srt" -map 0:0 -map 0:1 -map
 # DVB subtitles from the desktop's channel clip; Matroska carries them, not teletext.
 ffmpeg -v error -y -i "$out/subs.mkv" -i "$here/../../../../desktop/test/fixtures/h264-subtitles.mpegts" \
   -map 0:0 -map 0:1 -map 0:2 -map 1:3 -c copy -fflags +bitexact "$out/subs-dvb.mkv"
+crowded=()
+for _ in $(seq 20); do crowded+=(-map 1:3); done
+ffmpeg -v error -y -i "$out/subs.mkv" -i "$here/../../../../desktop/test/fixtures/h264-subtitles.mpegts" \
+  -map 0:0 -map 0:1 "${crowded[@]}" -c copy -fflags +bitexact "$out/subs-crowded.mkv"
 
 for kind in drawing:ass longline:srt; do
   name=${kind%:*} codec=${kind#*:}

@@ -8,7 +8,9 @@
 // after a seek: once with the rendition chosen before the seek, once after, and must hold the
 // same lines, unless CHECK_UNCUED says the file's index leaves lines out. It counts the separate
 // runs of reading the file asks for, which is how many requests a provider would see, and the
-// bytes read before the first segment is ready.
+// bytes read before the first segment is ready. With CHECK_FAULTS set, the reads such a subtitle
+// segment makes fail from each in turn on, as when the provider drops, and the segment asked
+// again, as AVPlayer does, must hold the same lines.
 //
 //   check <file> <folder> [start-seconds [interrupt-after-reads]]
 #define _FILE_OFFSET_BITS 64
@@ -24,14 +26,16 @@ typedef struct File {
   int64_t next; /* where the last read ended: a read elsewhere is a new request */
   int runs;
   int64_t bytes;
-  int reads, interrupt_after;
+  int reads, interrupt_after, fail_at;
   TitleHls *title;
 } File;
 
 static int read_at(void *opaque, int64_t offset, uint8_t *buffer, int size) {
   File *file = opaque;
-  if (file->interrupt_after && ++file->reads == file->interrupt_after && file->title)
+  file->reads++;
+  if (file->interrupt_after && file->reads == file->interrupt_after && file->title)
     title_hls_interrupt(file->title);
+  if (file->fail_at && file->reads >= file->fail_at) return -1;
   if (offset != file->next) file->runs++;
   if (fseeko(file->file, offset, SEEK_SET) != 0) return -1;
   size_t read = fread(buffer, 1, (size_t)size, file->file);
@@ -78,10 +82,13 @@ static int get(TitleHls *title, const char *name, uint8_t **copy, size_t *size) 
  * Asks a title just opened from the start for segment `index` of subtitle rendition `track`
  * after a seek to it: with `chosen`, its playlist first, as when the viewer chose the subtitles
  * before seeking; else the picture's segment first. 1 when it differs from `made`, -1 on
- * failure; `*listed` is how many lines the index lists of the rendition's stream.
+ * failure; `*listed` is how many lines the index lists of the rendition's stream. With `fault`,
+ * the segment's reads fail from its `fault`th on, and a segment that failed for it is asked
+ * again; `*faulted` says whether it had that many reads.
  */
 static int fresh(TitleHlsSource *source, int track, int index, int chosen, const uint8_t *made,
-                 size_t made_size, int *listed) {
+                 size_t made_size, int *listed, int fault, int *faulted) {
+  File *file = source->opaque;
   TitleHls *title = NULL;
   char detail[256] = "", name[64], playlist[64];
   TitleHlsResult opened = title_hls_open(source, 0, &title, detail, sizeof(detail));
@@ -101,9 +108,27 @@ static int fresh(TitleHlsSource *source, int track, int index, int chosen, const
   if (get(title, chosen ? name : playlist, &data, &size) < 0) goto done;
   free(data);
   snprintf(name, sizeof(name), "s%d-%d.vtt", track, index);
+  if (fault) {
+    file->fail_at = file->reads + fault;
+    const uint8_t *served;
+    const char *type;
+    TitleHlsResult result =
+        title_hls_get(title, name, &served, &size, &type, detail, sizeof(detail));
+    *faulted = file->reads >= file->fail_at;
+    file->fail_at = 0;
+    if (result == TITLE_HLS_OK) {
+      status = size != made_size || memcmp(served, made, size) != 0;
+      goto compared;
+    }
+    if (result != TITLE_HLS_READ_FAILED) {
+      printf("faulted %s result=%d detail=%s\n", name, result, detail);
+      goto done;
+    }
+  }
   if (get(title, name, &data, &size) < 0) goto done;
   status = size != made_size || memcmp(data, made, size) != 0;
   free(data);
+compared:
   *listed = title_hls_subtitle_listed(title, track);
 done:
   title_hls_close(title);
@@ -131,6 +156,7 @@ int main(int argc, char **argv) {
   for (int i = 0; title_hls_unshown(title, i, &unshown); i++)
     printf("unshown: %s %s%s\n", unshown.language ? unshown.language : "-",
            unshown.format ? unshown.format : "-", unshown.forced ? " forced" : "");
+  if (title_hls_unshown_more(title)) printf("unshown: %d more\n", title_hls_unshown_more(title));
   if (argc > 4) file.interrupt_after = file.reads + atoi(argv[4]);
   uint8_t *data, **made = NULL;
   size_t size, *sizes = NULL;
@@ -254,7 +280,8 @@ int main(int argc, char **argv) {
     for (int chosen = 1; chosen >= 0; chosen--) {
       for (int i = 0; i < segments; i++) {
         int before = file.runs;
-        int got = fresh(&source, track, i, chosen, made[i * count + r], sizes[i * count + r], &listed);
+        int got = fresh(&source, track, i, chosen, made[i * count + r], sizes[i * count + r],
+                        &listed, 0, NULL);
         if (got < 0) goto done;
         apart[chosen] += got;
         many[chosen] += file.runs - before;
@@ -271,6 +298,29 @@ int main(int argc, char **argv) {
     else differ += apart[0] + apart[1];
   }
   if (uncued) printf("%d fresh seeks differ in a file whose index leaves lines out\n", unlisted);
+  if (getenv("CHECK_FAULTS")) {
+    int faults = 0, apart = 0;
+    for (int r = 1; r < count; r++) {
+      if (renditions[r][0] != 's') continue;
+      int track = atoi(renditions[r] + 1), listed;
+      for (int chosen = 1; chosen >= 0; chosen--) {
+        for (int i = 0; i < segments; i++) {
+          for (int fault = 1, faulted = 1; faulted; fault++) {
+            int got = fresh(&source, track, i, chosen, made[i * count + r], sizes[i * count + r],
+                            &listed, fault, &faulted);
+            if (got < 0) goto done;
+            faults += faulted;
+            apart += got;
+            if (got && apart <= 3)
+              printf("%s-%d.vtt differs after read %d failed (%s)\n", renditions[r], i, fault,
+                     chosen ? "chosen before" : "chosen after");
+          }
+        }
+      }
+    }
+    printf("faults: %d reads failed, %d segments differ when asked again\n", faults, apart);
+    differ += apart;
+  }
   status = differ ? 1 : 0;
 done:
   for (int i = 0; made && i < segments * count; i++) free(made[i]);

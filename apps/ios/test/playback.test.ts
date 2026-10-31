@@ -91,7 +91,8 @@ vi.mock("../src/glass.tsx", async () => {
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
 // The native format module: each session serves its playlist at once, naming `unshown` as the
 // subtitle tracks it can't carry, and closes when asked.
-let unshown: Array<{ language: string | null; format: string | null; forced: boolean }> = [];
+type Unshown = { language: string | null; format: string | null; forced: boolean };
+let unshown: { named: Unshown[]; more: number } = { named: [], more: 0 };
 const closeSession = new Map<string, () => void>();
 Object.assign(globalThis, {
   expo: {
@@ -228,7 +229,7 @@ beforeEach(() => {
   }));
   opened.length = 0;
   sheets.length = 0;
-  unshown = [];
+  unshown = { named: [], more: 0 };
   port.tracks = null;
   onNow = null;
   listingGate = null;
@@ -866,11 +867,15 @@ describe("sound and subtitles in Watch", () => {
 
   it("names a file's subtitles it can't show, by language and format, beside those it can", async () => {
     await connect([null, null, null]);
-    unshown = [
-      { language: "eng", format: "PGS", forced: false },
-      { language: "nld", format: "DVD", forced: true },
-      { language: null, format: null, forced: false },
-    ];
+    // Past the tracks the session names, it counts the rest.
+    unshown = {
+      named: [
+        { language: "eng", format: "PGS", forced: false },
+        { language: "nld", format: "DVD", forced: true },
+        { language: null, format: null, forced: false },
+      ],
+      more: 2,
+    };
     const film = {
       id: "film",
       subscriptionId: null,
@@ -892,7 +897,7 @@ describe("sound and subtitles in Watch", () => {
     await until(() => opened.length === 1);
     offer();
     const cantShow =
-      "Can't show here: English (PGS), Dutch (DVD, forced), Unknown language (unknown format).";
+      "Can't show here: English (PGS), Dutch (DVD, forced), Unknown language (unknown format) and 2 more.";
     const subtitles = await open("watch-subtitles");
     expect(subtitles.options).toEqual(["✓ Off", "Dutch", "Cancel"]);
     expect(subtitles.message).toBe(cantShow);

@@ -63,7 +63,7 @@ import {
   usePlaybackClock,
   usePlaybackLength,
 } from "./playback.ts";
-import type { UnshownSubtitle } from "./title-formats.ts";
+import type { UnshownSubtitles } from "./title-formats.ts";
 import { colors } from "./ui.tsx";
 import { currentSource } from "./sources.ts";
 import { store, useStore } from "./store.ts";
@@ -676,7 +676,7 @@ function TextButtons({ item }: { item: Playing }) {
       asked.stands() &&
       playbackState.get().watch &&
       playingItem(playbackState.get().phase) === playing;
-    const unshown = of === "subtitles" ? unshownSubtitles() : [];
+    const unshown = of === "subtitles" ? unshownSubtitles() : null;
     const known = await trackChoices(of);
     if (!stands()) return;
     const choices = known ?? [];
@@ -691,7 +691,7 @@ function TextButtons({ item }: { item: Playing }) {
         cancelButtonIndex: choices.length,
         ...(known === null
           ? { message: "Not known yet. Try again in a moment." }
-          : unshown.length > 0
+          : unshown && unshown.named.length > 0
             ? { message: cantShow(unshown) }
             : none
               ? { message: item.live ? "No choices on this channel." : "No choices in this file." }
@@ -727,14 +727,14 @@ function spoken(code: string | null) {
 
 /**
  * The Subtitles sheet's message for tracks the file has that Watch can't show, by language and
- * format: "Can't show here: English (PGS), Dutch (DVD, forced)."
+ * format, then how many more: "Can't show here: English (PGS), Dutch (DVD, forced) and 2 more."
  */
-function cantShow(tracks: readonly UnshownSubtitle[]) {
-  const named = tracks.map(({ language, format, forced }) => {
+function cantShow({ named, more }: UnshownSubtitles) {
+  const tracks = named.map(({ language, format, forced }) => {
     const details = [format ?? "unknown format", ...(forced ? ["forced"] : [])].join(", ");
     return `${spoken(language) ?? "Unknown language"} (${details})`;
   });
-  return `Can't show here: ${named.join(", ")}.`;
+  return `Can't show here: ${tracks.join(", ")}${more > 0 ? ` and ${more} more` : ""}.`;
 }
 
 function TextControl({

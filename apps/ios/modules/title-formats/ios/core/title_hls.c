@@ -183,7 +183,7 @@ typedef struct Listed {
   int64_t time, duration;
   /** The file offset of its cluster. */
   int64_t cluster;
-  /** Its cluster was read for it already, whatever that found. */
+  /** Its cluster was read for it already, whatever that found; a read that failed doesn't count. */
   int tried;
 } Listed;
 
@@ -245,7 +245,8 @@ struct TitleHls {
   int text_count;
   /** The file's subtitle streams the stream doesn't carry, and which of them are encoded. */
   int unshown[UNSHOWN_MOST], unshown_encoded[UNSHOWN_MOST];
-  int unshown_count;
+  /** How many it names, and how many more it has past UNSHOWN_MOST. */
+  int unshown_count, unshown_more;
   /** Bytes every track's kept lines take together. */
   size_t cue_bytes;
   /** The file's first HEAD_BYTES, as opening read them, until the tracks are chosen. */
@@ -1512,6 +1513,8 @@ static int recall(TitleHls *title, Text *text, Listed *listed) {
   if (atomic_load(&title->interrupted)) return AVERROR_EXIT;
   // A line not found within reach is left out, as a read that doesn't reach it would.
   if (over || error >= 0 || error == AVERROR_EOF || error == AVERROR_INVALIDDATA) return 0;
+  // A read that failed, such as the provider's, is made again when the segment is asked again.
+  listed->tried = 0;
   return error;
 }
 
@@ -2053,6 +2056,8 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
       } else if (title->unshown_count < UNSHOWN_MOST) {
         title->unshown_encoded[title->unshown_count] = text_codec(st->codecpar->codec_id) ? encoded[i] : 0;
         title->unshown[title->unshown_count++] = (int)i;
+      } else {
+        title->unshown_more++;
       }
     }
     if ((int)i != title->video && !offered) st->discard = AVDISCARD_ALL;
@@ -2497,6 +2502,8 @@ int title_hls_unshown(const TitleHls *title, int index, TitleHlsUnshown *out) {
   out->forced = !!(st->disposition & AV_DISPOSITION_FORCED);
   return 1;
 }
+
+int title_hls_unshown_more(const TitleHls *title) { return title->unshown_more; }
 
 void title_hls_interrupt(TitleHls *title) { atomic_store(&title->interrupted, 1); }
 

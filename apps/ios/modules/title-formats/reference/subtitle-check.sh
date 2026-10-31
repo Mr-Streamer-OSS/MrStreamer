@@ -88,7 +88,20 @@ done
 # Dutch DVB pictures are named.
 dvb=$fixtures/subs-dvb.mkv
 check "$dvb" && verify "$dvb" && says "$dvb" "unshown: dut DVB"
+# Past the 16 unshown tracks it names, the core counts the rest.
+crowded=$fixtures/subs-crowded.mkv
+if check "$crowded"; then
+  named=$(grep -cxF "unshown: dut DVB" "$log" || true)
+  [[ $named == 16 ]] || fail "subs-crowded.mkv: $named unshown tracks named for 16"
+  says "$crowded" "unshown: 4 more"
+fi
 check "$fixtures/subs.mkv" --start 30 && verify "$fixtures/subs.mkv"
+# A read failing from any point of a fresh segment's request on fails that request only: asked
+# again, the segment holds the lines it would have.
+if check "$subs" --faults; then
+  grep -qE "^faults: [1-9][0-9]* reads failed, 0 segments differ when asked again$" "$log" ||
+    fail "subs.mkv: no failed reads"
+fi
 check "$fixtures/subs-uncued.mkv" --uncued && verify "$fixtures/subs-uncued.mkv"
 # The track marked compressed is named, not served; ffmpeg can't read these files' lines.
 for name in subs-zlib:compressed subs-far:compressed subs-bzip2:compressed subs-twice:compressed \

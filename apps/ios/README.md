@@ -621,7 +621,9 @@ read only when it is the last to begin before the segment. A file whose index le
 shows it only once playing passes where it begins. The other subtitle tracks, pictures such as
 PGS, DVD and DVB, teletext, formats the session doesn't know, and text tracks compressed with zlib
 or bzip2 or encrypted, which its FFmpeg can't read, aren't served, and Watch's Subtitles names
-them, with their format, as ones that can't show here. Track numbers and encodings come from the
+them, with their format, as ones that can't show here: the first 16, then how many more. A read
+that fails while recalling a line fails that segment's request, and the line is read again when
+the segment is asked again. Track numbers and encodings come from the
 file's Tracks: from its first 256 KB, as opening read them, else from where its SeekHead says, 1 MB
 at most. A file whose Tracks can't be read that way
 has its text tracks named as ones that can't show, their encoding unknown. A line whose text is
@@ -640,8 +642,8 @@ plays on.
 line, forced, ASS and WebVTT tracks, and copies whose index lists none of them, whose tracks are
 out of number order, with a track zlib, bzip2, header-stripping, twice or encrypted encoded,
 with Tracks past the first 256 KB or none it can find, with a damaged index, with a 111 KB
-drawing, a 70 KB line, a 1 MB packet or 4 MB of lines, and with DVB subtitles; `check.c` asks each subtitle segment
-of a title just opened, as after a seek, and `verify.py` checks every segment's lines against
+drawing, a 70 KB line, a 1 MB packet or 4 MB of lines, and with one or 20 DVB tracks; `check.c` asks each subtitle segment
+of a title just opened, as after a seek, for `subs.mkv` also with its reads failing from each one on, and `verify.py` checks every segment's lines against
 ffmpeg's own reading of the source. `subtitle-check.sh <out>` runs them all with what each must
 show, and fails on any miss. Whether AVPlayer shows, seeks and
 switches these renditions as HLS describes, captions inside a Matroska title's picture included,

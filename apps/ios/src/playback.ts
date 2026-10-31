@@ -34,7 +34,7 @@ import {
 } from "./media-preferences.ts";
 import { currentSource, onSignedIn, type Source as SignedInSource } from "./sources.ts";
 import { store, useStore, type Store } from "./store.ts";
-import { openFormat, type FormatSession, type UnshownSubtitle } from "./title-formats.ts";
+import { openFormat, type FormatSession, type UnshownSubtitles } from "./title-formats.ts";
 
 // The app's one player and what it plays: a live channel, or a movie or an episode. Every surface
 // shows this player and no other: Home's preview, Watch, Picture in Picture and AirPlay, and the
@@ -1734,11 +1734,11 @@ export async function trackChoices(
 
 /**
  * The subtitle tracks of the file the current attempt plays that can't show: those a format
- * session doesn't carry, such as pictures. Empty where every track can, or AVPlayer opened the
+ * session doesn't carry, such as pictures. None where every track can, or AVPlayer opened the
  * file itself. Read it beside `trackChoices`, before awaiting that, for the same attempt.
  */
-export function unshownSubtitles(): readonly UnshownSubtitle[] {
-  return current?.resource.session?.unshown ?? [];
+export function unshownSubtitles(): UnshownSubtitles {
+  return current?.resource.session?.unshown ?? { named: [], more: 0 };
 }
 
 /**

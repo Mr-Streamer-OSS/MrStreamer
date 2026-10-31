@@ -94,9 +94,12 @@ typedef struct TitleHlsUnshown {
 
 /**
  * Subtitle track `index` of those the stream doesn't carry, valid while the title is: 0 past the
- * last.
+ * last it names, the first 16.
  */
 int title_hls_unshown(const TitleHls *title, int index, TitleHlsUnshown *out);
+
+/** How many subtitle tracks the stream doesn't carry past those `title_hls_unshown` names. */
+int title_hls_unshown_more(const TitleHls *title);
 
 void title_hls_interrupt(TitleHls *title);
 void title_hls_close(TitleHls *title);

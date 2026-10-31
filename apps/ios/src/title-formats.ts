@@ -25,11 +25,17 @@ export interface UnshownSubtitle {
   readonly forced: boolean;
 }
 
+/** The subtitle tracks of the file a session doesn't carry: the first 16, and how many more. */
+export interface UnshownSubtitles {
+  readonly named: readonly UnshownSubtitle[];
+  readonly more: number;
+}
+
 type NativeOpened =
   | {
       readonly kind: "session";
       readonly playlist: string;
-      readonly unshown: readonly UnshownSubtitle[];
+      readonly unshown: UnshownSubtitles;
     }
   | { readonly kind: "direct" }
   | { readonly kind: "closed" }
@@ -75,7 +81,7 @@ export interface FormatSession {
   /** The loopback playlist to give AVPlayer. It carries no login. */
   readonly playlist: string;
   /** The file's subtitle tracks the playlist doesn't carry; AVPlayer never sees them. */
-  readonly unshown: readonly UnshownSubtitle[];
+  readonly unshown: UnshownSubtitles;
   /** Why it stopped serving, if it did. */
   failure(): StreamFailure | null;
   /**

@@ -7,8 +7,9 @@ import Foundation
 /// a queue of its own.
 final class FormatSession {
   enum Opened {
-    /// `unshown` names the file's subtitle tracks the playlist doesn't carry, such as pictures.
-    case session(playlist: String, unshown: [[String: Any]])
+    /// `unshown` names the file's subtitle tracks the playlist doesn't carry, such as pictures,
+    /// and counts those past the ones it names.
+    case session(playlist: String, unshown: [String: Any])
     case direct
     case failed(SessionFailure)
     case closed
@@ -111,8 +112,9 @@ final class FormatSession {
     }
   }
 
-  /// The file's subtitle tracks the stream doesn't carry: language and format when known.
-  private func unshown(_ title: OpaquePointer?) -> [[String: Any]] {
+  /// The file's subtitle tracks the stream doesn't carry: language and format when known, and
+  /// how many more the core doesn't name.
+  private func unshown(_ title: OpaquePointer?) -> [String: Any] {
     var tracks: [[String: Any]] = []
     var track = TitleHlsUnshown()
     while title_hls_unshown(title, Int32(tracks.count), &track) != 0 {
@@ -122,7 +124,7 @@ final class FormatSession {
         "forced": track.forced != 0,
       ])
     }
-    return tracks
+    return ["named": tracks, "more": Int(title_hls_unshown_more(title))]
   }
 
   private var isClosed: Bool {
