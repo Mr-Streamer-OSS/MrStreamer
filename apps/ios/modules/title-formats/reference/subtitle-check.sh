@@ -91,6 +91,7 @@ check "$dvb" && verify "$dvb" && says "$dvb" "unshown: dut DVB"
 # Past the 16 unshown tracks it names, the core counts the rest.
 crowded=$fixtures/subs-crowded.mkv
 if check "$crowded"; then
+  verify "$crowded"
   named=$(grep -cxF "unshown: dut DVB" "$log" || true)
   [[ $named == 16 ]] || fail "subs-crowded.mkv: $named unshown tracks named for 16"
   says "$crowded" "unshown: 4 more"

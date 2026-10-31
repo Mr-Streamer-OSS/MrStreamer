@@ -10,7 +10,7 @@
 // runs of reading the file asks for, which is how many requests a provider would see, and the
 // bytes read before the first segment is ready. With CHECK_FAULTS set, the reads such a subtitle
 // segment makes fail from each in turn on, as when the provider drops, and the segment asked
-// again, as AVPlayer does, must hold the same lines.
+// again, as AVPlayer does, must hold the same lines, with the same CHECK_UNCUED exception.
 //
 //   check <file> <folder> [start-seconds [interrupt-after-reads]]
 #define _FILE_OFFSET_BITS 64
@@ -322,7 +322,9 @@ int main(int argc, char **argv) {
       }
     }
     printf("faults: %d reads failed, %d segments differ when asked again\n", faults, apart);
-    differ += apart;
+    if (uncued)
+      printf("%d fault retries differ in a file whose index leaves lines out\n", apart);
+    else differ += apart;
   }
   status = differ ? 1 : 0;
 done:
