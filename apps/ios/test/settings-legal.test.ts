@@ -3,6 +3,7 @@ import * as React from "react";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { keychain } from "./keychain.ts";
 
 // Settings' legal rows and Licences, as the viewer meets them: the privacy policy opening in the
 // browser, Licences opening on the tab Settings is on, a component's facts and its full notices
@@ -23,6 +24,7 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+vi.mock("expo-secure-store", () => keychain(() => new Map()));
 vi.mock("react-native", async () => {
   const { createElement } = await import("react");
   return {

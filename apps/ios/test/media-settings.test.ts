@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Member } from "../src/account.ts";
+import { keychain } from "./keychain.ts";
 
 // The real Settings route rendered over native view/sheet doubles and a temporary disk.
 
@@ -77,6 +78,7 @@ vi.mock("../src/account.ts", () => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+vi.mock("expo-secure-store", () => keychain(() => new Map()));
 // The actual Settings route imports the real preferences owner. Native views and OS sheets
 // are the only UI doubles. The base-revision control must render before a missing row fails.
 let Settings: typeof import("../src/app/(tabs)/(home)/settings.tsx").default;

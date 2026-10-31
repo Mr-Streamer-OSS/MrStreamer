@@ -2,6 +2,7 @@ import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Member, PlaylistReport } from "../src/account.ts";
+import { keychain } from "./keychain.ts";
 
 // A playlist in Settings: its row says it is one, never its link, with how many groups wait for
 // a pick, and its sheet offers its groups and one reload for both its lists. The real Settings
@@ -19,6 +20,7 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+vi.mock("expo-secure-store", () => keychain(() => new Map()));
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   ActionSheetIOS: {
