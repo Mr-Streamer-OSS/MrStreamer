@@ -390,6 +390,32 @@ describe("the file's own subtitles", () => {
     expect(online.shownSubtitle()?.title).toBe(again);
   });
 
+  it("chosen while a download runs stay chosen when the download ends before the native pick", async () => {
+    const playing = await withTracks();
+    const found = await online.findSubtitles(playing);
+    const release = holdDownloads();
+    const choosing = online.chooseSubtitle(
+      playing,
+      found?.kind === "found" ? found.results[0]!.id : "",
+    );
+    let acknowledge!: () => void;
+    const acknowledged = new Promise<void>((resolve) => (acknowledge = resolve));
+    const select = port.selectObservedTrackAsync.getMockImplementation()!;
+    port.selectObservedTrackAsync.mockImplementationOnce(async (...args) => {
+      await acknowledged;
+      return select(...args);
+    });
+    const picking = ((await trackChoices("subtitles")) ?? [])
+      .find((each) => each.label === "German")
+      ?.choose();
+    release();
+    expect(await choosing).toBeNull();
+    acknowledge();
+    await picking;
+    await vi.waitFor(async () => expect(await checked()).toEqual(["German"]));
+    expect(online.shownSubtitle()).toBeNull();
+  });
+
   it("chosen while a download runs end it, so it neither shows nor keeps", async () => {
     const playing = await withTracks();
     const found = await online.findSubtitles(playing);
@@ -440,7 +466,7 @@ describe("privacy", () => {
 });
 
 describe("a refused save", () => {
-  it("never comes back as accepted at the next play", async () => {
+  it("keeps what was saved before, not the refused change, for the next play", async () => {
     const playing = await openTitle();
     await chooseFirst(playing);
     // The disk takes the new file, deletes the old one, then refuses the move.
@@ -452,7 +478,10 @@ describe("a refused save", () => {
     expect(online.shownSubtitle()?.timing.offset).toBe(0);
     native.sync = null;
     await openTitle();
-    expect(online.shownSubtitle()?.timing.offset).not.toBe(5);
+    expect(online.shownSubtitle()).toMatchObject({
+      timing: { offset: 0, speed: 1 },
+      subtitle: { release: "Movie.2001.1080p" },
+    });
   });
 });
 

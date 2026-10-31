@@ -33,6 +33,7 @@ import {
   updateMediaPreferences,
 } from "./media-preferences.ts";
 import {
+  endSubtitleWork,
   hideSubtitle,
   onShownSubtitle,
   playSubtitles,
@@ -1079,8 +1080,10 @@ function chooseManually(resource: Resource, revision: number, selection: Observe
   if (!stands(resource)) return Promise.resolve();
   const choice = current!.choice;
   const group = selection.kind;
-  // A pick over a downloaded subtitle isn't remembered.
+  // A pick over a downloaded subtitle isn't remembered. A download under way ends now, so it can't
+  // show over this pick while the native one is requested.
   const downloaded = group === "subtitles" ? downloadedOver(choice) : undefined;
+  if (group === "subtitles" && choice.item.subtitles) endSubtitleWork(choice.item.subtitles);
   const state = resource[group];
   const op = ++state.op;
   state.pending = null;

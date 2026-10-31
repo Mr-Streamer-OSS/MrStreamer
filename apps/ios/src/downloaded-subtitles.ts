@@ -149,6 +149,11 @@ export function showKeptSubtitle(title: SubtitleTitle): boolean {
   return true;
 }
 
+/** The viewer is choosing `title`'s subtitles anew: a search or download under way ends. */
+export function endSubtitleWork(title: SubtitleTitle) {
+  if (title === playing) renew();
+}
+
 /**
  * The viewer chose one of the file's own tracks, or Off, for `title`'s play: a download under way
  * ends, and the downloaded subtitle showing stays kept, with its timing, but no longer shows by
@@ -234,14 +239,22 @@ function keptOf(title: SubtitleTitle): Kept | null {
 /** Writes what `title`'s version keeps. False when the disk refuses. */
 function keep(title: SubtitleTitle, kept: Kept): boolean {
   const folder = new Directory(Paths.document, FOLDER);
+  const file = new File(Paths.document, nameOf(title));
+  let before: string | null = null;
   try {
     if (!folder.exists) folder.create();
+    before = file.exists ? file.textSync() : null;
     writeJson(nameOf(title), kept);
   } catch {
-    // A refused write can leave its proposal beside the file, which a read would take instead.
+    // A refused write can leave its proposal beside the file, which a read would take instead,
+    // and the move that refused may already have deleted the file: what it held goes back.
     try {
       const pending = new File(Paths.document, `${nameOf(title)}.next`);
       if (pending.exists) pending.delete();
+      if (before !== null && !file.exists) {
+        file.create();
+        file.writeSync(before);
+      }
     } catch {
       // The disk refused that too.
     }

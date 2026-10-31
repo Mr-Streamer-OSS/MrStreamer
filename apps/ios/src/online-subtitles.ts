@@ -140,12 +140,17 @@ const KEY = "online-subtitles.subdl";
 const keySaved = store<boolean | null>(null);
 let keyRead: Promise<void> | null = null;
 
-/** Whether a SubDL key is saved; null while the Keychain is still asked. */
+/**
+ * Whether a SubDL key is saved; null while the Keychain is still asked, or when it wouldn't answer,
+ * which Settings asks again the next time it shows.
+ */
 export function useSubtitleKey(): boolean | null {
-  keyRead ??= keychainSecrets
-    .read(KEY)
-    .then((key) => keySaved.set(!!key))
-    .catch(() => keySaved.set(false));
+  keyRead ??= keychainSecrets.read(KEY).then(
+    (key) => keySaved.set(!!key),
+    () => {
+      keyRead = null;
+    },
+  );
   return useStore(keySaved);
 }
 
