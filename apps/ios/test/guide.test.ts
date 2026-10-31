@@ -1230,6 +1230,17 @@ describe("programme search", () => {
     expect((await owner.search("news", keys)).found).toEqual([]);
   });
 
+  it("finds nothing on a guide's channels while it can't say which ids it holds", async () => {
+    const { owner, native, held } = await searching();
+    held.get("a")!.set("news.tv", [show("News", at)]);
+    held.get("xmltv-1")!.set("news.tv", [show("Other news", at)]);
+    const listed = native.current;
+    native.current = async (...args) =>
+      args[1] === "db-x" ? listed(...args) : { kind: "failed", error: "disk" };
+    const search = await owner.search("news", keys);
+    expect(search).toEqual({ found: [], unsearched: true });
+  });
+
   it("takes a search the background cancelled for no failure", async () => {
     const { owner, native, held } = await searching();
     held.get("a")!.set("news.tv", [show("News", at)]);
