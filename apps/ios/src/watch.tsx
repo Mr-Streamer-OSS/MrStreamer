@@ -95,13 +95,13 @@ const STILL = STREAMING.filter((shortcut) => shortcut.id === "close" || shortcut
  * Picture in Picture, Downloads and Settings at the top, and everything else in one large glass
  * panel, all showing and hiding together. Both a channel and a title add their sound and subtitle
  * tracks. A channel adds Quality, its star, which stars or unstars it and leaves what plays alone,
- * and Play from start while its catch-up keeps the programme on now. A movie or an episode adds a scrubber and the next episode. It is the app's
- * own layer rather than a route, because the view that starts Picture in Picture has to stay while
- * it plays: Watch then hides, and the tabs and accessory take over. Closing it shows the screen
- * under it, a title's details among them. A movie or an episode turns Watch to landscape while it
- * shows in a window under 700 points on its short side, as on a phone; the screens under it turn
- * as the phone does again once it closes. A larger window, as an iPad's, shows the picture as the
- * window stands.
+ * and Play from start while its catch-up keeps the programme on now.
+ * A movie or an episode adds a scrubber and the next episode. It is the app's own layer rather
+ * than a route, because the view that starts Picture in Picture has to stay while it plays: Watch
+ * then hides, and the tabs and accessory take over. Closing it shows the screen under it, a
+ * title's details among them. A movie or an episode turns Watch to landscape while it shows in a
+ * window under 700 points on its short side, as on a phone; the screens under it turn as the phone
+ * does again once it closes. A larger window, as an iPad's, shows the picture as the window stands.
  *
  * Downloads and Settings open on the tab under Watch without stopping what plays: where Picture in
  * Picture can, it takes the picture over, as its own button does; otherwise Watch is set aside,
