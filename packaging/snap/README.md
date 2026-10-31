@@ -34,6 +34,10 @@ publishes: each of those is a maintainer action that needs its own approval.
   The cost: each kept revision holds its own copies (snapd keeps 2 on classic systems by
   default), and `snap remove` keeps a 31-day snapshot of the current revision's data, copies
   and recordings included. `snap/local/snapshots.yaml` leaves Chromium's caches out of it.
+- **Chosen recording folders are shared, safely.** A recording folder the viewer chooses
+  outside the profile is the same for every revision. Each recording in it is marked with the
+  profile that made it, which includes the revision, and startup only removes stray recordings
+  marked with its own, so a revert never deletes a newer revision's recordings there.
 - **No import.** The Snap cannot read a deb or AppImage profile, and doesn't try. A viewer adds
   their subscription again. Both installs can run side by side.
 - **Media keys.** The `mpris` slot named `chromium` lets Chromium own its MPRIS bus name.
