@@ -639,21 +639,15 @@ describe.skipIf(!hasTools)("recordings", () => {
     await library.refresh(subscriptionId);
     const channel = (name: string) => ({ subscriptionId, id: `${name}.test` });
 
-    // The fixture's playlist ends after four segments: the recording pauses there and goes on
-    // at once, appending the four again after its gap, then waits to try again.
-    const segments = 4 * fixture("h264-aac.mpegts").length;
+    // The fixture's playlist ends after four segments: its stream is over, so the recording ends
+    // with it, early, and never records them again.
     const answer = await recordings.start(channel("compatible"), Date.now() + 60_000, {});
-    if (answer.kind !== "started") throw new Error("Not started");
-    const [paused] = await until(
-      recordings.list,
-      ([first]) => first?.status.kind === "paused" && first.bytes === 2 * segments,
-    );
-    expect(paused?.status).toEqual({ kind: "paused", why: "stream" });
-    await recordings.stop(answer.recording.id);
-    const [ended] = await recordings.list();
-    expect(ended?.status).toEqual({ kind: "stopped" });
+    expect(answer.kind).toBe("started");
+    const [ended] = await until(recordings.list, ([first]) => first?.status.kind !== "recording");
+    expect(ended?.status).toEqual({ kind: "partial", cut: "stream" });
+    expect(ended?.gaps).toBeUndefined();
     const file = await fileOf(dataDir, ended!);
-    expect(file.size).toBe(2 * segments);
+    expect(file.size).toBe(4 * fixture("h264-aac.mpegts").length);
     expect(probe(file.path)).toEqual(["h264", "aac"]);
     expect(decodes(file.path)).toBe(true);
 
@@ -699,11 +693,9 @@ describe.skipIf(!hasTools)("recordings", () => {
     const { recordings, quit } = await app(dataDir);
     onTestFinished(quit);
     const answer = await recordings.start(ownedId(listed), Date.now() + 60_000, {});
-    if (answer.kind !== "started") throw new Error("Not started");
-    const [paused] = await until(recordings.list, ([each]) => each?.status.kind === "paused");
-    expect(paused!.bytes % (4 * fixture("h264-aac.mpegts").length)).toBe(0);
-    expect(paused!.bytes).toBeGreaterThan(0);
-    await recordings.stop(answer.recording.id);
+    expect(answer.kind).toBe("started");
+    const [ended] = await until(recordings.list, ([each]) => each?.status.kind !== "recording");
+    expect(ended?.bytes).toBe(4 * fixture("h264-aac.mpegts").length);
   });
 
   it("takes no connection a download holds, and a download waits for the one it holds", async () => {
@@ -884,8 +876,10 @@ describe.skipIf(!hasTools)("recordings", () => {
   });
 
   it("starts nothing while the disk has less free than it keeps, asking the provider nothing", async () => {
-    const { channel, recordings, provider } = await connected();
+    const { dataDir, channel, recordings, provider } = await connected();
     await recordings.setLimits({ keepFree: Number.MAX_SAFE_INTEGER, space: null });
+    // As on a fresh profile, its folder isn't there yet: its disk is still measured.
+    await rm(join(dataDir, "recordings"), { recursive: true });
     const before = provider.streamRequests();
     await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject({
       error: { kind: "unexpected", detail: "There isn't enough free space to record." },
@@ -912,10 +906,15 @@ describe.skipIf(!hasTools)("recordings", () => {
     const stray = join(folder, "00000000-0000-4000-8000-0000000000bb");
     await mkdir(theirs);
     await mkdir(stray);
-    await writeFile(join(stray, ".mrstreamer-recording"), "");
+    await writeFile(join(stray, ".mrstreamer-recording"), join(dataDir, "recordings"));
+    // Another profile's, recording to the same folder.
+    const other = join(folder, "00000000-0000-4000-8000-0000000000cc");
+    await mkdir(other);
+    await writeFile(join(other, ".mrstreamer-recording"), join(await tempDir(), "recordings"));
     const again = await app(dataDir);
     onTestFinished(again.quit);
     expect(existsSync(theirs)).toBe(true);
+    expect(existsSync(other)).toBe(true);
     expect(existsSync(stray)).toBe(false);
     expect((await again.recordings.storage()).folder).toBe(folder);
     expect((await again.recordings.list())[0]?.status).toEqual({ kind: "complete" });

@@ -139,3 +139,9 @@ it("keeps a paused recording in Now with Stop, its bar missing the time it waits
   expect(meter?.getAttribute("aria-valuenow")).toBe("20");
   expect(meter?.getAttribute("aria-valuemax")).toBe("60");
 });
+
+it("says a late schedule's recording isn't saved yet, as well as how late it started", async () => {
+  const row = await rowOf({ schedule: "s1", from: at("12:00"), late: "busy" }, { unsaved: true });
+  expect(row.text).toContain("Started 25 min late. Every connection was in use.");
+  expect(row.text).toContain("Not saved yet. Trying again.");
+});

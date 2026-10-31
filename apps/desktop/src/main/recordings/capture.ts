@@ -45,10 +45,10 @@ export class CaptureFailure extends Error {
 class DiskFailure extends Error {}
 
 /**
- * Why a capture under way ended: at its stop time, as asked, cut short, or out of the room
- * `room` allows.
+ * Why a capture under way ended: at its stop time, as asked, cut short, out of the room `room`
+ * allows, or `ended`, as an HLS playlist says its stream is over.
  */
-export type CaptureEnd = "until" | "aborted" | "space" | Exclude<RecordingCut, "quit">;
+export type CaptureEnd = "until" | "aborted" | "space" | "ended" | Exclude<RecordingCut, "quit">;
 
 export interface Capture {
   /** Bytes on disk so far. */
@@ -140,10 +140,14 @@ export async function startCapture(
   throw new CaptureFailure(last instanceof CaptureFailure ? last.failure : failureOf(last));
 }
 
-/** A source's stream, in order, and what ends its request, once the signal it opened with aborts. */
+/**
+ * A source's stream, in order, and what ends its request, once the signal it opened with aborts.
+ * `ends`: the stream running out means it is over, as an HLS playlist's end says.
+ */
 interface Opened {
   readonly chunks: AsyncGenerator<Uint8Array, void, undefined>;
   close(): Promise<void>;
+  readonly ends?: boolean;
 }
 
 async function openSource(
@@ -193,6 +197,7 @@ async function openSource(
         await chunks.return().catch(() => {});
         await input.close();
       },
+      ends: true,
     };
   }
   const answer = await ask(source.url, signal);
@@ -255,6 +260,7 @@ async function run(
   let late = false;
   for (;;) {
     const next = await opened.chunks.next().catch(() => null);
+    if (next?.done && opened.ends) end = "ended";
     if (!next || next.done) break;
     if (Date.now() >= options.until) {
       late = true;
@@ -275,8 +281,8 @@ async function run(
   }
   stop.abort();
   await opened.close();
-  if (end === "stream" && options.signal.aborted) end = "aborted";
-  else if (end === "stream" && (deadline.aborted || late)) end = "until";
+  if ((end === "stream" || end === "ended") && options.signal.aborted) end = "aborted";
+  else if ((end === "stream" || end === "ended") && (deadline.aborted || late)) end = "until";
   const flushed = await file.sync().then(
     () => true,
     () => false,

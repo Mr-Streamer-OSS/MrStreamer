@@ -281,20 +281,28 @@ function missText(why: ScheduleMiss): string {
  */
 export function outcome(recording: Recording, now: number): { word: string; reason: string } {
   const { word, reason: why } = ending(recording, now);
-  // Gaps in between say what they missed; an end the app couldn't write down yet says so.
+  const { scheduled } = recording;
+  // Whole minutes, as the coverage bar hatches them.
+  const late =
+    scheduled?.late && recording.status.kind !== "missed"
+      ? `${t("Started {minutes} min late.", {
+          minutes: Math.max(
+            1,
+            Math.floor((recording.start - coverageStart(recording)) / MINUTE_MS),
+          ),
+        })} ${missText(scheduled.late)}`
+      : null;
+  // A complete one that started late says that in place of how it ended. Gaps in between say
+  // what they missed; an end the app couldn't write down yet says so.
   const reason = [
-    why,
+    late,
+    late && recording.status.kind === "complete" ? null : why,
     recording.status.kind === "paused" ? null : gapsText(recording.gaps ?? [], now),
     recording.unsaved ? t("Not saved yet. Trying again.") : null,
   ]
     .filter(Boolean)
     .join(" ");
-  const { scheduled } = recording;
-  if (!scheduled?.late || recording.status.kind === "missed") return { word, reason };
-  // Whole minutes, as the coverage bar hatches them.
-  const minutes = Math.max(1, Math.floor((recording.start - coverageStart(recording)) / MINUTE_MS));
-  const started = `${t("Started {minutes} min late.", { minutes })} ${missText(scheduled.late)}`;
-  return { word, reason: recording.status.kind === "complete" ? started : `${started} ${reason}` };
+  return { word, reason };
 }
 
 function ending(recording: Recording, now: number): { word: string; reason: string } {

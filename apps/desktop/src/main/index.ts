@@ -1012,7 +1012,7 @@ async function start(): Promise<void> {
   reopen = showWindow;
   const live = () => {
     const now = runtime.runSync(recordings.live);
-    return now.recording || now.scheduled;
+    return now.recording || now.scheduled || now.unsaved;
   };
   staysWithoutWindow = () => {
     if (closing || leaving || !live()) return false;
