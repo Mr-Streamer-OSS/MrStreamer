@@ -255,6 +255,10 @@ verified release without replacing upstream assets. External repository setup,
 publication, automation and website activation require separate authorization;
 this tool configures none of them.
 
+## Snap package
+
+The **Package Snap** job makes a strict Snap from the Linux job's deb for dry runs and stable releases, installs it on the runner with Chromium's sandbox and a keyring connected, and runs the packaged-app smoke against it. Its `snap-<version>` artifact and the SHA-256 in the job summary name the exact file a maintainer may later upload: snapcraft's output differs between builds. Outside a dry run it may fail without failing the release. It uploads and publishes nothing; the [Snap runbook](../../packaging/snap/README.md) has the Store steps, which need their own approval.
+
 ## Microsoft Store package
 
 The Microsoft Store gets an MSIX of the same app for Windows x64, which electron-builder's `appx` target builds from the same files as the installer. The [Store runbook](microsoft-store.md) covers Partner Center and the submission.

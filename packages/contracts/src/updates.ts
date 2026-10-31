@@ -36,9 +36,10 @@ export type UpdatePhase =
  * download, and the app updates it. A Store copy is an MSIX package, as the Microsoft Store
  * installs it: only the Store updates it, so the app never checks, downloads or installs, and
  * offers no channel. Pacman owns the files of an Arch package; upgrades use makepkg or an AUR
- * helper, and the app never updates that copy.
+ * helper, and the app never updates that copy. Snapd refreshes a Snap, and the app never updates
+ * that copy either.
  */
-export type Distribution = "direct" | "store" | "pacman";
+export type Distribution = "direct" | "store" | "pacman" | "snap";
 
 /** An Arch package adds this file beside app.asar; signed direct/Homebrew apps have none. */
 export const INSTALLATION_MARKER = "mrstreamer-installation.json";
@@ -51,6 +52,7 @@ export function updatesInApp(distribution: Distribution): boolean {
       return true;
     case "store":
     case "pacman":
+    case "snap":
       return false;
   }
 }

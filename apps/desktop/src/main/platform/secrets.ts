@@ -1,5 +1,5 @@
 import { safeStorage } from "electron";
-import { AppFailure } from "@mrstreamer/contracts/errors";
+import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 
 /** Encrypts subscription and subtitle-service secrets before they are written to disk. */
 export interface Secrets {
@@ -9,22 +9,29 @@ export interface Secrets {
 
 /**
  * Secrets backed by Electron's safeStorage: the key lives in the macOS Keychain, Windows DPAPI,
- * or the Linux keyring. Only usable after the app's `ready` event.
+ * or the Linux keyring. Only usable after the app's `ready` event. A Snap, named by `snap`, reaches
+ * the keyring through a connection the viewer may still have to make, so its refusal says how.
  */
-export const keychainSecrets: Secrets = {
-  seal(plain) {
-    if (!safeStorage.isEncryptionAvailable()) throw new AppFailure({ kind: "keychain-refused" });
-    try {
-      return safeStorage.encryptString(plain).toString("base64");
-    } catch {
-      throw new AppFailure({ kind: "keychain-refused" });
-    }
-  },
-  open(sealed) {
-    try {
-      return safeStorage.decryptString(Buffer.from(sealed, "base64"));
-    } catch {
-      throw new AppFailure({ kind: "keychain-refused" });
-    }
-  },
-};
+export function keychainSecrets(snap: string | null): Secrets {
+  const error: AppError = snap
+    ? { kind: "keychain-refused", connect: `sudo snap connect ${snap}:password-manager-service` }
+    : { kind: "keychain-refused" };
+  const refused = () => new AppFailure(error);
+  return {
+    seal(plain) {
+      if (!safeStorage.isEncryptionAvailable()) throw refused();
+      try {
+        return safeStorage.encryptString(plain).toString("base64");
+      } catch {
+        throw refused();
+      }
+    },
+    open(sealed) {
+      try {
+        return safeStorage.decryptString(Buffer.from(sealed, "base64"));
+      } catch {
+        throw refused();
+      }
+    },
+  };
+}

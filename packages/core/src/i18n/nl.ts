@@ -147,6 +147,9 @@ export const nl: Translation = {
   "Updates come from the AUR. Use an AUR helper or makepkg.":
     "Updates komen uit de AUR. Gebruik een AUR-helper of makepkg.",
   "settings.search.pacman": "AUR pacman pakket makepkg helper installatie bijwerken versie",
+  "Quit Mr. Streamer first. Snap Store: sudo snap refresh mr-streamer. Local install: install a newer Snap file.":
+    "Sluit Mr. Streamer eerst af. Snap Store: sudo snap refresh mr-streamer. Lokale installatie: installeer een nieuwer Snap-bestand.",
+  "settings.search.snap": "Snap snapd snapcraft refresh revert installatie bijwerken versie",
   "Open Store": "Store openen",
   Channel: "Kanaal",
   "newest builds": "nieuwste builds",
@@ -332,6 +335,8 @@ export const nl: Translation = {
     "De macOS-sleutelhanger kon je wachtwoord niet bewaren. Stop en open Mr. Streamer opnieuw en probeer het nog eens. Lees de probleemoplossing voordat je Safe Storage opnieuw instelt.",
   "Your system's keychain would not store your password.":
     "De sleutelhanger van je systeem wilde je wachtwoord niet bewaren.",
+  "Your system's keychain would not store your password. Check that GNOME Keyring or KWallet is running and unlocked, and connect Mr. Streamer to it once in a terminal: {command}":
+    "Je systeemsleutelhanger wilde je wachtwoord niet bewaren. Controleer dat GNOME Keyring of KWallet draait en ontgrendeld is, en verbind Mr. Streamer er eenmalig mee in een terminal: {command}",
   "This channel is no longer in the provider's list.":
     "Deze zender staat niet meer in de lijst van de provider.",
   "This channel has no catch-up.": "Op deze zender kun je niet terugkijken.",

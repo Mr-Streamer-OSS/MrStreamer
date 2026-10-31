@@ -473,3 +473,10 @@ it.each(["en-US", "nl-NL", "fr-FR", "de-DE", "es-ES"] as const)(
     ]);
   },
 );
+
+it("finds the Snap refresh route without offering direct channels", () => {
+  expect(findSettings("snap refresh", "snap").map((control) => control.id)).toEqual([
+    "update-check",
+  ]);
+  expect(findSettings("nightly", "snap")).toEqual([]);
+});

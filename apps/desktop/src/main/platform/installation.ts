@@ -7,6 +7,29 @@ import {
   type Distribution,
 } from "@mrstreamer/contracts/updates";
 
+/**
+ * The Snap's instance name, as `snap connect` takes it, when this copy runs from a Snap. Snapd
+ * mounts the app at $SNAP; a SNAP variable inherited from another snap's terminal, with the app
+ * itself outside it, does not count. Synchronous, so the keyring is chosen before `ready`.
+ */
+export function snapName(env: NodeJS.ProcessEnv, resources: string): string | null {
+  const root = env["SNAP"];
+  const name = env["SNAP_INSTANCE_NAME"];
+  return root && name && resources.startsWith(`${root}/`) ? name : null;
+}
+
+/**
+ * The keyring a Snap must use. Left to itself, Chromium picks one by desktop and falls back to a
+ * fixed key outside GNOME and KDE (on Openbox or Xfce, say). Pinned, it refuses instead: KWallet
+ * on KDE, the Secret Service, as GNOME Keyring offers it, everywhere else.
+ */
+export function snapPasswordStore(env: NodeJS.ProcessEnv): string {
+  const desktops = (env["XDG_CURRENT_DESKTOP"] ?? "").split(":");
+  if (!desktops.includes("KDE")) return "gnome-libsecret";
+  const version = env["KDE_SESSION_VERSION"];
+  return version === "5" || version === "6" ? `kwallet${version}` : "kwallet";
+}
+
 /** Resolves installation-owned metadata before Analytics or an updater is constructed. */
 export async function installedDistribution(options: {
   readonly platform: string;

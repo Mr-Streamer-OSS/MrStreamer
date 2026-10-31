@@ -101,16 +101,19 @@ export interface StoreUpdates {
   readonly openStore: () => Promise<void>;
 }
 
-/** Pacman owns an Arch installation. No direct updater capability enters this branch. */
-export interface PacmanUpdates {
-  readonly managed: "pacman";
+/**
+ * Pacman owns an Arch installation, and snapd a Snap. No direct updater capability enters this
+ * branch.
+ */
+export interface PackageUpdates {
+  readonly managed: "pacman" | "snap";
 }
 
 /** What the app passes in: its version, and who updates this copy. */
 export type UpdatesConfig = {
   /** The running build's version. */
   readonly installed: string;
-} & (DirectUpdates | StoreUpdates | PacmanUpdates);
+} & (DirectUpdates | StoreUpdates | PackageUpdates);
 
 export type UpdatesDeps = UpdatesConfig & {
   readonly dataDir: string;
@@ -533,7 +536,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
  * Externally managed copies never check, download, install or read/write updates.json.
  * Only the Store variant has an action, which opens its Store page.
  */
-function managed(deps: UpdatesDeps & (StoreUpdates | PacmanUpdates)) {
+function managed(deps: UpdatesDeps & (StoreUpdates | PackageUpdates)) {
   const status: UpdateStatus = {
     version: deps.installed,
     distribution: "managed" in deps ? deps.managed : "store",

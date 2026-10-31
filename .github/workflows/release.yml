@@ -842,6 +842,89 @@ jobs:
             apps/desktop/dist/*.wack.xml
           retention-days: 14
 
+  # The strict Snap, made from the Linux job's deb and smoke-tested installed, for a maintainer to
+  # upload by hand once the Store grants its connections: packaging/snap/README.md. Snapcraft's
+  # output differs from build to build, so the one this job tests is the one to upload, by the
+  # SHA-256 in its summary. Never uploaded or published here, and not a release-* artifact, so
+  # publish leaves it out.
+  snap:
+    name: Package Snap
+    needs: [plan, package]
+    if: needs.plan.outputs.dry-run == 'true' || needs.plan.outputs.channel == 'stable'
+    continue-on-error: ${{ needs.plan.outputs.dry-run != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      SNAP_DAYS: ${{ needs.plan.outputs.dry-run == 'true' && 14 || 90 }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .workflow
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      # For the smoke test's dependencies; the Snap takes the app from the deb.
+      - uses: ./.workflow/.github/actions/setup
+        with:
+          version: ${{ needs.plan.outputs.version }}
+          bundle: "false"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-linux-x64-${{ needs.plan.outputs.version }}
+          path: ${{ runner.temp }}/release
+      - name: Build the Snap
+        run: |
+          sudo snap install snapcraft --classic --channel=9.x/stable
+          build="$RUNNER_TEMP/snap"
+          mkdir "$build"
+          cp -r packaging/snap/. "$build"
+          cp "$RUNNER_TEMP"/release/*.deb "$build/mrstreamer.deb"
+          (cd "$build" && sudo snapcraft pack --destructive-mode)
+          mkdir dist-snap
+          cp "$build"/mr-streamer_*_amd64.snap dist-snap/
+          (cd dist-snap && sha256sum -- *.snap | tee SHA256SUMS.txt)
+      - name: Smoke test the installed Snap
+        # With Chromium's sandbox, and a keyring the app has to reach: it saves no login otherwise.
+        # Snap run tracks the app in a scope of the user's own systemd, which a runner step lacks,
+        # so the test runs in the user's manager. The Snap has its own /tmp and can't see dot
+        # folders, so the profile goes in a visible one.
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb gnome-keyring dbus-user-session
+          sudo snap install --dangerous dist-snap/*.snap
+          sudo snap connect mr-streamer:browser-support
+          sudo snap connect mr-streamer:password-manager-service
+          sudo loginctl enable-linger "$USER"
+          XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          for _ in $(seq 60); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
+          mkdir -p ~/snap-e2e
+          systemd-run --user --wait --pipe --collect --working-directory="$PWD" \
+            --setenv=PATH="$PATH" --setenv=TMPDIR="$HOME/snap-e2e" \
+            --setenv=MR_STREAMER_FFMPEG=/snap/mr-streamer/current/app/resources/ffmpeg/ffmpeg \
+            sh -c 'printf ci | gnome-keyring-daemon --replace --unlock --components=secrets -d >/dev/null &&
+              xvfb-run -a node apps/desktop/test/e2e/packaged-app.ts /snap/bin/mr-streamer'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snap-${{ needs.plan.outputs.version }}
+          path: dist-snap/
+          retention-days: ${{ env.SNAP_DAYS }}
+          if-no-files-found: error
+      - name: Name the tested Snap
+        run: |
+          {
+            echo "### Snap $VERSION"
+            echo '```'
+            cat dist-snap/SHA256SUMS.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # The source archives the installers' licences ask for, which every release attaches: FFmpeg and
   # x264, Chromium's FFmpeg and Electron, and the Windows setup's plug-ins. Each is checked against
   # its pinned SHA-256 or commit, and the notices built into the app have to link exactly these

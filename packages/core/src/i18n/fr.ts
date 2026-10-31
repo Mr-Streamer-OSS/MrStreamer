@@ -151,6 +151,9 @@ export const fr: Translation = {
   "Updates come from the AUR. Use an AUR helper or makepkg.":
     "Les mises à jour viennent de l’AUR. Utilisez un assistant AUR ou makepkg.",
   "settings.search.pacman": "AUR pacman paquet makepkg assistant installation mise à jour version",
+  "Quit Mr. Streamer first. Snap Store: sudo snap refresh mr-streamer. Local install: install a newer Snap file.":
+    "Quittez d’abord Mr. Streamer. Snap Store : sudo snap refresh mr-streamer. Installation locale : installez un fichier Snap plus récent.",
+  "settings.search.snap": "Snap snapd snapcraft refresh revert installation mise à jour version",
   "Open Store": "Ouvrir le Store",
   Channel: "Canal",
   "newest builds": "versions les plus récentes",
@@ -342,6 +345,8 @@ export const fr: Translation = {
     "Le trousseau macOS n’a pas pu enregistrer votre mot de passe. Quittez et rouvrez Mr. Streamer, puis réessayez. Consultez le guide de dépannage avant de réinitialiser Safe Storage.",
   "Your system's keychain would not store your password.":
     "Le trousseau de votre système n'a pas voulu enregistrer votre mot de passe.",
+  "Your system's keychain would not store your password. Check that GNOME Keyring or KWallet is running and unlocked, and connect Mr. Streamer to it once in a terminal: {command}":
+    "Le trousseau de votre système n'a pas voulu enregistrer votre mot de passe. Vérifiez que GNOME Keyring ou KWallet est lancé et déverrouillé, puis connectez-y Mr. Streamer une fois dans un terminal : {command}",
   "This channel is no longer in the provider's list.":
     "Cette chaîne ne figure plus dans la liste du fournisseur.",
   "This channel has no catch-up.": "Cette chaîne ne propose pas de replay.",

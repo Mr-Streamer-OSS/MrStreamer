@@ -38,7 +38,7 @@ export function SaveFeedback({
   if (!error) return null;
   return (
     <div role="alert" className="flex flex-wrap items-center gap-2 py-2 text-sm">
-      <span>{describeError(appError(error))}</span>
+      <span className="select-text">{describeError(appError(error))}</span>
       <Button
         size="sm"
         variant="ghost"

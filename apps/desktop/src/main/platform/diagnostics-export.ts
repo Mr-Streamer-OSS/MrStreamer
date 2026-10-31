@@ -263,5 +263,7 @@ function distributionLabel(distribution: DiagnosticsPreview["distribution"]): st
       return "Microsoft Store";
     case "pacman":
       return "AUR (pacman)";
+    case "snap":
+      return "Snap";
   }
 }

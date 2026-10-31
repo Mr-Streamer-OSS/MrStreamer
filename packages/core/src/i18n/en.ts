@@ -146,6 +146,9 @@ export const en = {
   "Updates come from the AUR. Use an AUR helper or makepkg.":
     "Updates come from the AUR. Use an AUR helper or makepkg.",
   "settings.search.pacman": "AUR pacman package makepkg helper install update version",
+  "Quit Mr. Streamer first. Snap Store: sudo snap refresh mr-streamer. Local install: install a newer Snap file.":
+    "Quit Mr. Streamer first. Snap Store: sudo snap refresh mr-streamer. Local install: install a newer Snap file.",
+  "settings.search.snap": "Snap snapd snapcraft refresh revert install update version",
   "Open Store": "Open Store",
   Channel: "Channel",
   "newest builds": "newest builds",
@@ -326,6 +329,8 @@ export const en = {
     "The macOS Keychain would not store your password. Quit and reopen Mr. Streamer, then try again. See Troubleshooting before resetting Safe Storage.",
   "Your system's keychain would not store your password.":
     "Your system's keychain would not store your password.",
+  "Your system's keychain would not store your password. Check that GNOME Keyring or KWallet is running and unlocked, and connect Mr. Streamer to it once in a terminal: {command}":
+    "Your system's keychain would not store your password. Check that GNOME Keyring or KWallet is running and unlocked, and connect Mr. Streamer to it once in a terminal: {command}",
   "This channel is no longer in the provider's list.":
     "This channel is no longer in the provider's list.",
   "This channel has no catch-up.": "This channel has no catch-up.",

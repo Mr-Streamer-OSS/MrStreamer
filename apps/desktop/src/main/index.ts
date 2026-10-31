@@ -58,7 +58,7 @@ import { emit, registerIpc, type IpcHandlers } from "./ipc.ts";
 import { applyLanguage, languageFor } from "./language.ts";
 import { fieldMenu } from "./menu.ts";
 import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
-import { installedDistribution } from "./platform/installation.ts";
+import { installedDistribution, snapName, snapPasswordStore } from "./platform/installation.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { installingOnceStopsKept } from "./recordings/restart.ts";
 import trayIcon from "../../build/icon.png?asset";
@@ -122,6 +122,15 @@ const REPOSITORY = "Mr-Streamer-OSS/MrStreamer";
 const storeCopy = process.windowsStore === true;
 if (storeCopy && !app.commandLine.hasSwitch("user-data-dir")) {
   app.setPath("userData", join(app.getPath("appData"), "Mr. Streamer Store"));
+}
+/**
+ * A Snap, which snapd updates, saves passwords in the keyring it is pinned to or not at all: never
+ * under Chromium's fixed key, which `start` doesn't allow it. An explicit --password-store wins,
+ * but naming the fixed key ("basic") only gets the same refusal.
+ */
+const snap = snapName(process.env, process.resourcesPath);
+if (snap && !app.commandLine.hasSwitch("password-store")) {
+  app.commandLine.appendSwitch("password-store", snapPasswordStore(process.env));
 }
 // Capture the evidence before application services or their migrations create profile files.
 const initialProfileOrigin = profileOrigin(app.getPath("userData"));
@@ -402,7 +411,11 @@ async function start(): Promise<void> {
     // macOS uses its own spellchecker and downloads nothing.
     session.defaultSession.setSpellCheckerLanguages([]);
   }
-  if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") {
+  if (
+    process.platform === "linux" &&
+    !snap &&
+    safeStorage.getSelectedStorageBackend() === "basic_text"
+  ) {
     // No keyring (GNOME Keyring or KWallet) to hold the key. Like Chromium's own passwords, the
     // login then uses a fixed key: it still saves, but other programs of the same user can read it.
     safeStorage.setUsePlainTextEncryption(true);
@@ -410,12 +423,14 @@ async function start(): Promise<void> {
   const dataDir = app.getPath("userData");
   // Installation validation can fail before the runtime loads Settings.
   applyLanguage(languageFor(await Settings.readInterfaceLanguage(dataDir).catch(() => undefined)));
-  const distribution = await installedDistribution({
-    platform: process.platform,
-    packaged: app.isPackaged,
-    store: storeCopy,
-    resources: process.resourcesPath,
-  });
+  const distribution = snap
+    ? "snap"
+    : await installedDistribution({
+        platform: process.platform,
+        packaged: app.isPackaged,
+        store: storeCopy,
+        resources: process.resourcesPath,
+      });
   const appUpdates = updatesInApp(distribution);
   await removeUnfinishedWrites(dataDir);
   // And in the folder of the guides of Settings > Guides.
@@ -479,7 +494,8 @@ async function start(): Promise<void> {
       case "store":
         return { installed: app.getVersion(), openStore: () => shell.openExternal(STORE_PAGE) };
       case "pacman":
-        return { installed: app.getVersion(), managed: "pacman" };
+      case "snap":
+        return { installed: app.getVersion(), managed: distribution };
       case "direct":
         return {
           installed: app.getVersion(),
@@ -539,7 +555,7 @@ async function start(): Promise<void> {
         setting: (setting) => analytics.settingObserver(setting),
       },
       downloads: { observeTransfer: observeOperation("download_ended") },
-      secrets: keychainSecrets,
+      secrets: keychainSecrets(snap),
       userAgent,
       ffmpeg: toolPath("ffmpeg"),
       ffprobe: toolPath("ffprobe"),

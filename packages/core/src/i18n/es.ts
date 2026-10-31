@@ -151,6 +151,9 @@ export const es: Translation = {
     "Las actualizaciones vienen de AUR. Usa un asistente de AUR o makepkg.",
   "settings.search.pacman":
     "AUR pacman paquete makepkg asistente instalación actualización versión",
+  "Quit Mr. Streamer first. Snap Store: sudo snap refresh mr-streamer. Local install: install a newer Snap file.":
+    "Primero sal de Mr. Streamer. Snap Store: sudo snap refresh mr-streamer. Instalación local: instala un archivo Snap más reciente.",
+  "settings.search.snap": "Snap snapd snapcraft refresh revert instalación actualización versión",
   "Open Store": "Abrir Store",
   Channel: "Canal",
   "newest builds": "versiones más recientes",
@@ -342,6 +345,8 @@ export const es: Translation = {
     "El llavero de macOS no ha podido guardar tu contraseña. Sal y vuelve a abrir Mr. Streamer e inténtalo de nuevo. Consulta la guía de solución de problemas antes de restablecer Safe Storage.",
   "Your system's keychain would not store your password.":
     "El llavero de tu sistema no quiso guardar tu contraseña.",
+  "Your system's keychain would not store your password. Check that GNOME Keyring or KWallet is running and unlocked, and connect Mr. Streamer to it once in a terminal: {command}":
+    "El llavero de tu sistema no quiso guardar tu contraseña. Comprueba que GNOME Keyring o KWallet está en marcha y desbloqueado, y conecta Mr. Streamer a él una vez en un terminal: {command}",
   "This channel is no longer in the provider's list.":
     "Este canal ya no está en la lista del proveedor.",
   "This channel has no catch-up.": "Este canal no permite ver programas ya emitidos.",

@@ -29,8 +29,11 @@ export type AppError =
    * nothing of it plays or refreshes until the viewer enters it again.
    */
   | { readonly kind: "needs-secret"; readonly subscriptionId: string }
-  /** The system keychain would not store the password, or no longer gives it back. */
-  | { readonly kind: "keychain-refused" }
+  /**
+   * The system keychain would not store the password, or no longer gives it back. A Snap names
+   * the command that connects it to the keyring, which it may not reach until the viewer runs it.
+   */
+  | { readonly kind: "keychain-refused"; readonly connect?: string }
   | { readonly kind: "channel-not-found"; readonly channelId: string }
   /**
    * A programme asked for from the provider's catch-up archive that it doesn't keep: the channel
