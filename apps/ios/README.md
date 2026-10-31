@@ -83,7 +83,11 @@ Schedule and programme routes stay on their originating Home or Live stack, reta
 browse context. Day controls use each local date's first valid instant, including a skipped
 midnight,
 page at most 128 programme rows with Show more, and inspect one opaque programme detail. Only
-Watch live starts playback; there is no catch-up. Search finds
+Watch live and Play from start start playback. A programme the channel's catch-up keeps shows ↺
+and offers Play from start, before Watch live once it ended and after it while it is on; Watch
+offers it too for the programme on now. It plays from the programme's start for the programme's
+length, never as Live, and says "Catch-up" and when it aired; an ended programme the archive
+doesn't keep says why. Search finds
 movies, series and channels: 20 movies and 20 series at first, each kind with its own Show more
 for the next 20 until every match shows. A movie's details and each episode row have a download button whose
 symbol is the download's state; Downloads lists the queue, then the copies on the phone, with

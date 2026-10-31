@@ -74,8 +74,15 @@ export interface Playing {
   readonly title: string;
   /** Where the catalogue lists a channel, "Netherlands · News"; a title's line, "S1 E2 · Name". */
   readonly place: string;
-  /** A live channel plays on; a title has a length. */
+  /** A live channel plays on; a title, or a programme from catch-up, has a length. */
   readonly live: boolean;
+  /**
+   * A channel's programme from its catch-up archive, when it aired: it plays as the channel's own
+   * streams do, trying another when one fails, but with a length and never live. Its times count
+   * from the programme's start and its length is the programme's, even where the recording
+   * starts on the minute before it, is still being made or sends on past it: it stops at the end.
+   */
+  readonly past?: { readonly start: number; readonly stop: number };
   /** An episode with one after it, which Watch offers. */
   readonly next: boolean;
   /** A title with other versions to try when this one fails. */
@@ -119,6 +126,8 @@ export interface Source {
   readonly container: string;
   /** Bound by titles.ts to the exact provider row; only original AVPlayer reads report facts. */
   readonly observed?: (tracks: ObservedFileTracks) => void;
+  /** Epoch milliseconds a recording from catch-up starts at: its programme's start or before. */
+  readonly start?: number;
 }
 
 /**
@@ -129,6 +138,10 @@ const THROUGH_SESSION: ReadonlySet<string> = new Set(["mkv"]);
 
 /** How the latest save of a title's progress ended: kept, or refused with what it was refused for. */
 export type Saved = { readonly saved: true } | { readonly saved: false; readonly error: AppError };
+
+/** A title's length in seconds as the player knows it; a programme from catch-up's own. */
+const lengthOf = (item: Playing, known: number | null): number =>
+  item.past ? (item.past.stop - item.past.start) / 1000 : (known ?? 0);
 
 /** Opens what plays; aborted when the viewer moves on first. */
 type Open = (signal: AbortSignal) => Promise<Source>;
@@ -306,6 +319,11 @@ let current: {
   readonly epoch: Epoch;
   /** Seconds to seek to once the title is ready; null once done. */
   seek: number | null;
+  /**
+   * Seconds of the stream before what plays starts, which positions leave out: a recording that
+   * starts before its programme. 0 otherwise.
+   */
+  offset: number;
   /** Whether the stream got as far as playing, so a position means something. */
   loaded: boolean;
   /** Where a title was when it was let go of, for Try again. */
@@ -616,11 +634,15 @@ export function player(): VideoPlayer {
 /** Releases readers independently of the ordered progress-save result. */
 function release(): Promise<Saved> {
   const saved = report();
+  endAtLength(false);
   if (current) {
     clearWatchdog(current.epoch);
     playingTime(current.epoch, false);
   }
-  if (current?.loaded && !current.item.live) current.stoppedAt = player().currentTime;
+  if (current?.loaded && !current.item.live) {
+    const at = Math.max(0, player().currentTime - current.offset);
+    current.stoppedAt = current.item.past ? Math.min(at, lengthOf(current.item, null)) : at;
+  }
   if (checkpoint) clearInterval(checkpoint);
   checkpoint = null;
   if (current) void retire(current.resource);
@@ -1117,11 +1139,12 @@ function observe(event: PlaybackObservation) {
     case "media-services-reset":
       return fail({ kind: "reset" });
     case "ready": {
-      if (!current.item.live) length.set(event.durationSeconds ?? 0);
+      if (!current.item.live) length.set(lengthOf(current.item, event.durationSeconds));
       if (current.seek !== null) {
-        const from = current.seek;
+        const from = current.seek + current.offset;
         current.seek = null;
-        if (from > 0) player().currentTime = from;
+        // A recording still being made would start where it is now, so a programme always seeks.
+        if (from > 0 || current.item.past) player().currentTime = from;
       }
       void refreshTracks(resource);
       return;
@@ -1145,8 +1168,9 @@ function observe(event: PlaybackObservation) {
       else if (held?.acknowledged && previous === "paused" && playing) held = null;
       const viewerPaused = paused && pauseOnStart === "viewer-applied";
       if (viewerPaused) pauseOnStart = false;
-      clock.set(event.mediaTimeSeconds);
+      clock.set(Math.max(0, event.mediaTimeSeconds - current.offset));
       if (!stands(resource) || resource.sequence !== event.sequence) return;
+      endAtLength(playing);
       const { phase } = state.get();
       if (phase.kind === "idle" || phase.kind === "failed") return;
       if (playing && pauseOnStart) {
@@ -1267,7 +1291,9 @@ async function start(choice: Choice, options: PlayOptions) {
     choice,
     options,
     epoch,
-    seek: options.from ?? null,
+    // A programme from catch-up starts at its start, which its recording can start before.
+    seek: options.from ?? (choice.item.past ? 0 : null),
+    offset: 0,
     loaded: false,
     stoppedAt: null,
     resource,
@@ -1355,6 +1381,9 @@ async function admit(owned: NonNullable<typeof current>) {
   if (!sourceStands(owned) || !attended() || held !== null) return terminal(owned);
   const resource = makeResource(owned.choice, owned.epoch, true);
   owned.resource = resource;
+  // A recording plays on where it got to, or where it was to start, even from another stream
+  // whose recording starts elsewhere; a channel plays live again.
+  if (owned.item.past) owned.seek = owned.stoppedAt ?? owned.options.from ?? 0;
   owned.loaded = false;
   owned.epoch.playingSince = null;
   owned.epoch.playedMs = 0;
@@ -1406,6 +1435,10 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
     }
     const source = await open(controller.signal);
     resource.admit = source.admit ?? null;
+    owned.offset =
+      item.past && source.start !== undefined
+        ? Math.max(0, (item.past.start - source.start) / 1000)
+        : 0;
     if (!attemptStands(owned, resource)) return;
     resource.observed =
       plan.kind === "file" && !item.live && item.subscriptionId !== null
@@ -1495,7 +1528,7 @@ function groupState(hold: TrackHold | undefined): GroupState {
 
 /** The candidate actually playing, never a backoff or a failed override. */
 export function liveStream() {
-  if (!current || current.choice.plan.kind !== "live") return null;
+  if (!current?.item.live || current.choice.plan.kind !== "live") return null;
   const { kind } = state.get().phase;
   return {
     channel: current.item.id,
@@ -1574,14 +1607,44 @@ export function togglePause() {
   attentionChanged();
 }
 
+/** Moves by `seconds`; a programme from catch-up, within the programme. */
 export function seekBy(seconds: number) {
-  player().seekBy(seconds);
+  if (!current?.item.past) return player().seekBy(seconds);
+  const at = player().currentTime - current.offset + seconds;
+  seekTo(Math.min(length.get(), at));
 }
 
 /** Moves a title to `seconds` from its start. */
 export function seekTo(seconds: number) {
-  player().currentTime = Math.max(0, seconds);
-  clock.set(Math.max(0, seconds));
+  const at = Math.max(0, seconds);
+  player().currentTime = at + (current?.offset ?? 0);
+  clock.set(at);
+  endAtLength(state.get().phase.kind === "playing", at);
+}
+
+/** Pauses a programme from catch-up at its end, which no event of the player's marks. */
+let ending: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Times the pause at a programme's end from where it is, or `at` where a seek still lands, while
+ * it plays: told each time it starts or stops playing and after each seek. A timer that fires
+ * early, as after a seek back, times again from where it is then.
+ */
+function endAtLength(playing: boolean, at?: number) {
+  if (ending) clearTimeout(ending);
+  ending = null;
+  const owned = current;
+  if (!playing || !owned?.item.past) return;
+  const left = (from = player().currentTime - owned.offset) => length.get() - from;
+  ending = setTimeout(
+    () => {
+      ending = null;
+      if (current !== owned) return;
+      if (left() > 0.5) endAtLength(true);
+      else player().pause();
+    },
+    Math.max(0, left(at)) * 1000,
+  );
 }
 
 export function setMuted(muted: boolean) {

@@ -159,10 +159,11 @@ describe("the native verification fixture", () => {
 
   it("answers catch-up as HLS recordings of programmes within the days kept, never as Live", async () => {
     const now = Date.now();
-    /** The catch-up playlist of `channel` from `start` to `end`, at the address core makes. */
+    /** The catch-up playlist of `channel` from `start` to `end`, at the HLS address core makes. */
     const past = async (channel: string, start: number, end: number) => {
-      const { url } = await provider().archiveStream(channel, { start, end });
-      return fetch(url.replace(/\.ts$/, ".m3u8"));
+      const { url, format } = await provider().archiveStream(channel, { start, end });
+      expect(format).toBe("hls");
+      return fetch(url);
     };
     const seconds = (playlist: string) =>
       [...playlist.matchAll(/#EXTINF:([\d.]+)/g)].reduce((sum, [, each]) => sum + Number(each), 0);
