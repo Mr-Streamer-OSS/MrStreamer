@@ -2,7 +2,7 @@
 // First, so that everything main imports fetches with it.
 import "./fetch.ts";
 import { existsSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
@@ -898,6 +898,8 @@ async function start(): Promise<void> {
           // in, is never made anew on another disk.
           if (folder === join(dataDir, "recordings"))
             await mkdir(folder, { recursive: true }).catch(() => {});
+          // Linux's opener says nothing of a folder that isn't there.
+          else await stat(folder);
           // The system answers with why it couldn't, or nothing.
           const failed = await shell.openPath(folder);
           if (failed) throw new Error(failed);
