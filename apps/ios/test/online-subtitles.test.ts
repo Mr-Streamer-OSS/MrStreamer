@@ -3,6 +3,7 @@ import { strToU8, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { keychain as keychainStore } from "./keychain.ts";
 import { nativePlayer } from "./native-player.ts";
+import type { SubtitleTitle } from "../src/downloaded-subtitles.ts";
 
 // The real online-subtitle and playback owners against a SubDL stand-in: what a search sends, what
 // a chosen result keeps and shows, which play it belongs to, and the file's own tracks around it.
@@ -13,7 +14,10 @@ vi.mock("expo-video", () => ({ createVideoPlayer: () => port }));
 vi.mock("expo-secure-store", () => keychainStore(() => keychain));
 const { native } = await import("./native-files.ts");
 const { File, Directory, Paths } = await import("expo-file-system");
-const online = await import("../src/online-subtitles.ts");
+const online = {
+  ...(await import("../src/downloaded-subtitles.ts")),
+  ...(await import("../src/online-subtitles.ts")),
+};
 const { play, stop, trackChoices } = await import("../src/playback.ts");
 const preferences = await import("../src/media-preferences.ts");
 const { keychainSecrets } = await import("../src/secrets.ts");
@@ -62,7 +66,7 @@ const open = (playing: ReturnType<typeof item>) =>
   );
 
 /** Searches and chooses the first result for `title`, as Watch's sheets would. */
-async function chooseFirst(title: online.SubtitleTitle) {
+async function chooseFirst(title: SubtitleTitle) {
   const found = await online.findSubtitles(title);
   if (found?.kind !== "found") throw new Error(`Search: ${JSON.stringify(found)}`);
   return online.chooseSubtitle(title, found.results[0]!.id);

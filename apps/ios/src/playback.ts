@@ -38,7 +38,7 @@ import {
   playSubtitles,
   shownSubtitle,
   type SubtitleTitle,
-} from "./online-subtitles.ts";
+} from "./downloaded-subtitles.ts";
 import { currentSource, onSignedIn, type Source as SignedInSource } from "./sources.ts";
 import { store, useStore, type Store } from "./store.ts";
 import { openFormat, type FormatSession, type UnshownSubtitles } from "./title-formats.ts";

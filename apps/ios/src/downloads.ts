@@ -43,7 +43,7 @@ import {
   stop,
   type Playing,
 } from "./playback.ts";
-import { subtitleTitle } from "./online-subtitles.ts";
+import { subtitleTitle } from "./downloaded-subtitles.ts";
 import { fetchPicture } from "./picture-transfer.ts";
 import { keychainSecrets } from "./secrets.ts";
 import { currentSource, onSignedIn, sourceOf, type Source } from "./sources.ts";

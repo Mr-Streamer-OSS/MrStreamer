@@ -1,134 +1,23 @@
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { lazy } from "@mrstreamer/contracts/lazy";
-import {
-  DEFAULT_SUBTITLE_TIMING,
-  SavedSubtitle,
-  SubtitleTiming,
-  type DownloadedSubtitle,
-  type SubtitleServiceFailure,
+import type {
+  DownloadedSubtitle,
+  SubtitleServiceFailure,
 } from "@mrstreamer/contracts/online-subtitles";
 import { SUBTITLE_TEXT_LIMIT, subtitleTextFile } from "@mrstreamer/core/subtitles/text-file";
 import { type } from "arktype";
-import { Directory, File, Paths } from "expo-file-system";
 import { unzipSync } from "fflate";
-import { readJson, writeJson } from "./files.ts";
+import { playOf, showDownloaded, type SubtitleTitle } from "./downloaded-subtitles.ts";
 import { effectiveTitleLanguage, getMediaPreferences } from "./media-preferences.ts";
 import { keychainSecrets } from "./secrets.ts";
 import { store, useStore } from "./store.ts";
 
 // Online subtitles: SubDL searched with the viewer's own API key for the movie or episode playing,
-// and the result chosen for each exact version kept on this phone with its timing, so it shows
-// again when that version or a downloaded copy of it plays, offline too. The key stays in the
-// Keychain. A search sends only the title's TMDB identity, or its title and year, an episode's
-// season and number and the languages; never a provider's name, login or address. Official API:
-// subdl.com/api-doc.
-//
-// The playback owner tells this one which version each play is of (`playSubtitles`), and asks it
-// whether a downloaded subtitle shows over it, to turn the file's own off meanwhile. Searches,
-// downloads and changes are for the play they were asked for: another play ends them.
-
-/** What a search asks for: a movie, or an episode by its series and number. */
-type TitleQuery = {
-  readonly tmdbId?: number;
-  readonly title?: string;
-  readonly year?: number;
-} & (
-  | { readonly kind: "movie" }
-  | { readonly kind: "episode"; readonly season: number; readonly episode: number }
-);
-
-/**
- * One play of a movie or episode version, as online subtitles know it. Each play makes its own,
- * so what was asked for one play can't reach another, a later play of the same version included.
- */
-export interface SubtitleTitle {
-  /** The version's subscription, whose history removal takes what was kept for it. */
-  readonly subscriptionId: string;
-  /** The exact version in that subscription: "movie|<id>" or "episode|<id>". */
-  readonly version: string;
-  readonly query: TitleQuery;
-}
-
-/** The subtitle identity of a movie or episode version, for its play. */
-export function subtitleTitle(version: {
-  readonly subscriptionId: string;
-  readonly id: string;
-  readonly tmdbId: string | null;
-  readonly title: string;
-  readonly year: number | null;
-  readonly episode?: { readonly season: number; readonly number: number };
-}): SubtitleTitle {
-  const tmdbId =
-    version.tmdbId && /^[1-9]\d{0,9}$/.test(version.tmdbId) ? Number(version.tmdbId) : null;
-  const known = {
-    ...(tmdbId !== null ? { tmdbId } : { title: version.title }),
-    // A series' year is when it began, which no episode search needs.
-    ...(version.year !== null && !version.episode ? { year: version.year } : {}),
-  };
-  return {
-    subscriptionId: version.subscriptionId,
-    version: `${version.episode ? "episode" : "movie"}|${version.id}`,
-    query: version.episode
-      ? {
-          ...known,
-          kind: "episode",
-          season: version.episode.season,
-          episode: version.episode.number,
-        }
-      : { ...known, kind: "movie" },
-  };
-}
-
-/** A downloaded subtitle over the play it shows for, with its timing. */
-export interface ShownSubtitle {
-  readonly title: SubtitleTitle;
-  readonly subtitle: DownloadedSubtitle;
-  readonly timing: SubtitleTiming;
-}
-
-/** What one version keeps: the result chosen last, whether it shows by itself, and its timing. */
-interface Kept {
-  readonly shown: boolean;
-  readonly timing: SubtitleTiming;
-  readonly subtitle: DownloadedSubtitle;
-}
-
-const shown = store<ShownSubtitle | null>(null);
-/** The downloaded subtitle showing over what plays, for Watch to draw; null for none. */
-export const useShownSubtitle = (): ShownSubtitle | null => useStore(shown);
-/** The same, for the playback owner. */
-export const shownSubtitle = (): ShownSubtitle | null => shown.get();
-export const onShownSubtitle = (listener: () => void): (() => void) => shown.subscribe(listener);
-
-/** The play subtitles are asked for now; null while no movie or episode plays. */
-let playing: SubtitleTitle | null = null;
-/** The search or download under way for it, which a newer one, or another play, ends. */
-let work: AbortController | null = null;
-/** The current search's results, by the id the sheet shows them under. */
-let found = new Map<string, Candidate>();
-
-/**
- * A play begins, of `title` or of something without one, or nothing plays any more. What its
- * version keeps showing shows again; a search or download for the play before ends.
- */
-export function playSubtitles(title: SubtitleTitle | null) {
-  if (title === playing) return;
-  playing = title;
-  work?.abort();
-  work = null;
-  found = new Map();
-  const kept = title ? keptOf(title) : null;
-  shown.set(title && kept?.shown ? { title, subtitle: kept.subtitle, timing: kept.timing } : null);
-}
-
-/** What `title`'s version keeps, shown or not, while `title` plays; null for nothing. */
-export function keptSubtitle(title: SubtitleTitle): ShownSubtitle | null {
-  if (title !== playing) return null;
-  const showing = shown.get();
-  if (showing?.title === title) return showing;
-  const kept = keptOf(title);
-  return kept && { title, subtitle: kept.subtitle, timing: kept.timing };
-}
+// and the result chosen downloaded, for `downloaded-subtitles.ts` to keep and show. The key stays
+// in the Keychain. A search sends only the title's TMDB identity, or its title and year, an
+// episode's season and number and the languages; never a provider's name, login or address.
+// Official API: subdl.com/api-doc. Searches and downloads are for the play they were asked for:
+// another play ends them.
 
 /** One result of a search, as the sheet lists it. */
 export interface FoundSubtitle {
@@ -147,8 +36,8 @@ export type Found =
  * titles and English. Null when another play, search or download began meanwhile.
  */
 export async function findSubtitles(title: SubtitleTitle): Promise<Found | null> {
-  if (title !== playing) return null;
-  const controller = begin();
+  const controller = begin(title);
+  if (!controller) return null;
   try {
     const key = await subdlKey();
     if (controller.signal.aborted) return null;
@@ -159,7 +48,10 @@ export async function findSubtitles(title: SubtitleTitle): Promise<Found | null>
       controller.signal,
     );
     if (controller.signal.aborted) return null;
-    found = new Map(candidates.map((candidate, i) => [String(i), candidate]));
+    found = {
+      title,
+      candidates: new Map(candidates.map((candidate, i) => [String(i), candidate])),
+    };
     return {
       kind: "found",
       results: candidates.map(({ language, release, hearingImpaired }, i) => ({
@@ -186,15 +78,13 @@ export type Chosen =
  * change and shows it. Null when another play, search or download began meanwhile.
  */
 export async function chooseSubtitle(title: SubtitleTitle, id: string): Promise<Chosen | null> {
-  const candidate = found.get(id);
-  if (title !== playing || !candidate) return null;
-  const controller = begin();
+  const candidate = found?.title === title ? found.candidates.get(id) : undefined;
+  const controller = candidate && begin(title);
+  if (!candidate || !controller) return null;
   try {
     const subtitle = await subdlDownload(candidate, controller.signal);
     if (controller.signal.aborted) return null;
-    const kept = { shown: true, timing: DEFAULT_SUBTITLE_TIMING, subtitle };
-    if (!keep(title, kept)) return { kind: "failed", reason: "not-saved" };
-    shown.set({ title, subtitle, timing: kept.timing });
+    if (!showDownloaded(title, subtitle)) return { kind: "failed", reason: "not-saved" };
     return { kind: "shown" };
   } catch (cause) {
     if (controller.signal.aborted) return null;
@@ -204,70 +94,21 @@ export async function chooseSubtitle(title: SubtitleTitle, id: string): Promise<
   }
 }
 
-/** Shows what `title`'s version keeps again, after a file track or Off took its place. */
-export function showKeptSubtitle(title: SubtitleTitle): boolean {
-  if (title !== playing) return false;
-  const kept = keptOf(title);
-  if (!kept) return false;
-  if (!kept.shown && !keep(title, { ...kept, shown: true })) return false;
-  shown.set({ title, subtitle: kept.subtitle, timing: kept.timing });
-  return true;
-}
+/** The search or download under way, which a newer one, or another play, ends. */
+let work: AbortController | null = null;
+/** The latest search's results, by the id the sheet shows them under, and the play they are for. */
+let found: { readonly title: SubtitleTitle; readonly candidates: Map<string, Candidate> } | null =
+  null;
 
-/**
- * The viewer chose one of the file's own tracks, or Off, over the downloaded subtitle: it stays
- * kept, with its timing, but no longer shows by itself when the version plays again. Shown no more
- * now, also when the disk refuses to note that.
- */
-export function hideSubtitle(title: SubtitleTitle) {
-  if (shown.get()?.title !== title) return;
-  const kept = keptOf(title);
-  if (kept?.shown) keep(title, { ...kept, shown: false });
-  shown.set(null);
-}
-
-/**
- * Moves the downloaded subtitle showing over `title`: its clock times `speed`, then `offset`
- * seconds later. False keeps the timing as it was: out of range, nothing showing or a refused save.
- */
-export function retimeSubtitle(title: SubtitleTitle, timing: SubtitleTiming): boolean {
-  const showing = shown.get();
-  if (title !== playing || showing?.title !== title) return false;
-  const checked = SubtitleTiming()(timing);
-  if (checked instanceof type.errors) return false;
-  if (!keep(title, { shown: true, timing: checked, subtitle: showing.subtitle })) return false;
-  shown.set({ ...showing, timing: checked });
-  return true;
-}
-
-/**
- * The cue lines to show at `seconds` of the picture, after the timing: the subtitle's clock is the
- * picture's less `offset`, divided by `speed`. Empty between cues.
- */
-export function cuesAt({ subtitle, timing }: ShownSubtitle, seconds: number): readonly string[] {
-  const at = (seconds - timing.offset) / timing.speed;
-  return subtitle.cues.filter((cue) => cue.start <= at && at < cue.end).map((cue) => cue.text);
-}
-
-/**
- * The picture's next second at which the cues `cuesAt` answers change, after `seconds`; null when
- * none does.
- */
-export function nextCueChange({ subtitle, timing }: ShownSubtitle, seconds: number): number | null {
-  const at = (seconds - timing.offset) / timing.speed;
-  let next = Infinity;
-  for (const cue of subtitle.cues) {
-    if (cue.start > at) next = Math.min(next, cue.start);
-    else if (cue.end > at) next = Math.min(next, cue.end);
-  }
-  return Number.isFinite(next) ? next * timing.speed + timing.offset : null;
-}
-
-/** Ends the search or download under way and starts the next. */
-function begin(): AbortController {
+/** Ends the search or download under way and starts the next, for `title`'s play; null for none. */
+function begin(title: SubtitleTitle): AbortController | null {
+  const play = playOf(title);
+  if (!play) return null;
   work?.abort();
-  work = new AbortController();
-  return work;
+  const controller = new AbortController();
+  play.addEventListener("abort", () => controller.abort(), { once: true });
+  work = controller;
+  return controller;
 }
 
 /** The viewer's subtitle language, then the language of titles, then English. */
@@ -283,61 +124,6 @@ function languages(): string[] {
 
 const reasonOf = (cause: unknown): SubtitleServiceFailure =>
   cause instanceof SubtitleFailure ? cause.reason : "unavailable";
-
-// What each version keeps, as its own JSON file in one folder, named by its subscription and then
-// its version so that removing a subscription's history finds them. At most KEPT_FILES are kept;
-// the least recently changed go first.
-
-const FOLDER = "online-subtitles";
-const KEPT_FILES = 100;
-
-/** Letters, digits and "-" as they are; every other UTF-16 unit "_" and four hex digits. */
-const encoded = (text: string) =>
-  text.replace(/[^A-Za-z0-9-]/g, (unit) => `_${unit.charCodeAt(0).toString(16).padStart(4, "0")}`);
-const nameOf = (title: SubtitleTitle) =>
-  `${FOLDER}/${encoded(title.subscriptionId)}.${encoded(title.version)}.json`;
-
-function keptOf(title: SubtitleTitle): Kept | null {
-  const saved = SavedSubtitle()(readJson(nameOf(title)));
-  if (saved instanceof type.errors || !saved.subtitle) return null;
-  return { shown: saved.shown ?? true, timing: saved.timing, subtitle: saved.subtitle };
-}
-
-/** Writes what `title`'s version keeps. False when the disk refuses. */
-function keep(title: SubtitleTitle, kept: Kept): boolean {
-  try {
-    const folder = new Directory(Paths.document, FOLDER);
-    if (!folder.exists) folder.create();
-    writeJson(nameOf(title), kept);
-  } catch {
-    return false;
-  }
-  try {
-    const files = new Directory(Paths.document, FOLDER)
-      .list()
-      .filter((each): each is File => each instanceof File && each.name.endsWith(".json"));
-    const oldest = files.toSorted((a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0));
-    for (const file of oldest.slice(0, Math.max(0, files.length - KEPT_FILES))) file.delete();
-  } catch {
-    // Kept anyway; the next write tries again.
-  }
-  return true;
-}
-
-/**
- * Deletes what every version of subscription `id` keeps, as erasing its history does. Throws when
- * one stays, for the next launch to try again.
- */
-export function eraseSubtitles(id: string) {
-  const folder = new Directory(Paths.document, FOLDER);
-  if (!folder.exists) return;
-  const prefix = `${encoded(id)}.`;
-  for (const each of folder.list()) {
-    if (each instanceof File && each.name.startsWith(prefix)) each.delete();
-  }
-  const showing = shown.get();
-  if (showing?.title.subscriptionId === id) shown.set(null);
-}
 
 // The viewer's SubDL API key, in the Keychain. Settings sees only whether one is saved.
 
@@ -431,7 +217,7 @@ const JSON_LIMIT = 2 * 1024 * 1024;
 
 async function subdlSearch(
   key: string,
-  query: TitleQuery & { readonly languages: readonly string[] },
+  query: SubtitleTitle["query"] & { readonly languages: readonly string[] },
   signal: AbortSignal,
 ): Promise<readonly Candidate[]> {
   if (query.languages.length === 0) throw new SubtitleFailure("unsupported");

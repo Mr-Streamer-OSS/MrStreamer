@@ -98,7 +98,7 @@ import {
   type PlaylistEntry,
   type SubscriptionEntry,
 } from "./subscriptions.ts";
-import { eraseSubtitles } from "./online-subtitles.ts";
+import { eraseSubtitles } from "./downloaded-subtitles.ts";
 import { noteAction } from "./telemetry/index.ts";
 import {
   eraseViewing,

@@ -85,7 +85,6 @@ describe("accepted media preferences", () => {
       titleLanguage: "fr",
       subtitles: { kind: "off" },
       liveQuality: "sd",
-      subtitleSize: "medium",
     });
   });
 

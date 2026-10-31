@@ -20,7 +20,7 @@ import {
 import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { members } from "./account.ts";
 import { DEMO_ID } from "./demo.ts";
-import { subtitleTitle } from "./online-subtitles.ts";
+import { subtitleTitle } from "./downloaded-subtitles.ts";
 import { play, progressSettled, request, type Playing, type Request } from "./playback.ts";
 import { currentSource, loginOf } from "./sources.ts";
 import { store, useStore } from "./store.ts";

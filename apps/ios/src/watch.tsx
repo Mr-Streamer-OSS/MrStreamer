@@ -1,6 +1,10 @@
 import { router, usePathname } from "expo-router";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { Quality } from "@mrstreamer/contracts/library";
+import {
+  DEFAULT_SUBTITLE_TIMING,
+  type SubtitleServiceFailure,
+} from "@mrstreamer/contracts/online-subtitles";
 import { formatLanguageName } from "@mrstreamer/core/i18n";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
@@ -37,6 +41,20 @@ import { dayLabel, localDay, programmeRange } from "./guide-ui.tsx";
 import { openOnTabs, useTabs, type TabScreen } from "./header.tsx";
 import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
 import type { Channel } from "./library.ts";
+import { useMediaPreferences, type SubtitleSize } from "./media-preferences.ts";
+import {
+  cuesAt,
+  hideSubtitle,
+  keptSubtitle,
+  nextCueChange,
+  retimeSubtitle,
+  showKeptSubtitle,
+  shownSubtitle,
+  useShownSubtitle,
+  type ShownSubtitle,
+  type SubtitleTitle,
+} from "./downloaded-subtitles.ts";
+import { chooseSubtitle, findSubtitles, type FoundSubtitle } from "./online-subtitles.ts";
 import {
   closeWatch,
   playbackState,
@@ -48,6 +66,7 @@ import {
   playingItem,
   playNext,
   type Playing,
+  type TrackChoice,
   restoreFromPictureInPicture,
   retry,
   seekBy,
@@ -114,11 +133,17 @@ const STILL = STREAMING.filter((shortcut) => shortcut.id === "close" || shortcut
  * offline list, offered only while Picture in Picture can take the picture, and Settings isn't
  * offered. If the tabs go while Watch is set aside, as when the last provider is removed and a
  * downloaded copy waits there, Watch shows that copy again as it stands.
+ *
+ * A subtitle downloaded for the movie or episode playing shows over the picture (`Cues`), above
+ * the panel while the controls show.
  */
 export function WatchLayer() {
   const { phase, watch, pip, external } = usePlayback();
   const view = useRef<VideoView>(null);
   const [controls, setControls] = useState(true);
+  // The panel's height, which the cues sit above while the controls show.
+  const [panel, setPanel] = useState(0);
+  const insets = useSafeAreaInsets();
   const tabs = useTabs();
   const tab = tabs?.tab ?? null;
   const pathname = usePathname();
@@ -260,11 +285,19 @@ export function WatchLayer() {
           onPress={() => setControls((shown) => !shown)}
         />
       ) : null}
+      {watch && streaming && item && !item.live ? (
+        <Cues
+          item={item}
+          // Over the panel and its bottom margin, with a gap.
+          bottom={insets.bottom + (controls ? 12 + panel + 12 : 24)}
+        />
+      ) : null}
       {watch && controls ? (
         <Controls
           onPictureInPicture={() => void view.current?.startPictureInPicture()}
           screens={screens}
           onScreen={openScreen}
+          onPanel={setPanel}
         />
       ) : null}
     </View>
@@ -281,11 +314,14 @@ function Controls({
   onPictureInPicture,
   screens,
   onScreen,
+  onPanel,
 }: {
   onPictureInPicture: () => void;
   /** The screens Watch can open from here. */
   screens: readonly TabScreen[];
   onScreen: (screen: TabScreen) => void;
+  /** The panel's height, as it lays out. */
+  onPanel: (height: number) => void;
 }) {
   const { phase } = usePlayback();
   const insets = useSafeAreaInsets();
@@ -333,6 +369,11 @@ function Controls({
         </Glass>
       ) : null}
       <Glass style={[styles.panel, { bottom: insets.bottom + 12, ...edge }]}>
+        <View
+          pointerEvents="none"
+          style={StyleSheet.absoluteFill}
+          onLayout={(event: LayoutChangeEvent) => onPanel(event.nativeEvent.layout.height)}
+        />
         <View style={[styles.top, !wide && styles.stacked]}>
           <View style={styles.names}>
             <Text style={styles.title} numberOfLines={1}>
@@ -657,7 +698,9 @@ function Scrubber() {
 
 /**
  * Audio and Subtitles, then Play from start for a live channel or Next episode for a title: one
- * row of text controls that wraps when it runs out of width.
+ * row of text controls that wraps when it runs out of width. For a movie or an episode, Subtitles
+ * also lists the subtitle downloaded for its version, with Find online and, while that shows,
+ * Adjust timing. Every sheet that follows acts only while the play it was opened for stands.
  */
 function TextButtons({ item }: { item: Playing }) {
   const menu = useRef(0);
@@ -681,14 +724,18 @@ function TextButtons({ item }: { item: Playing }) {
     if (!stands()) return;
     const choices = known ?? [];
     const none = choices.length === 0 || (choices.length === 1 && choices[0]?.kind === "off");
+    const title = of === "subtitles" ? item.subtitles : undefined;
+    const rows = title
+      ? subtitleRows(title, choices, stands)
+      : choices.map((choice) => ({
+          label: choice.selected ? `✓ ${choice.label}` : choice.label,
+          run: () => void choice.choose(),
+        }));
     showSheet(
       {
         title: of === "audio" ? "Audio" : "Subtitles",
-        options: [
-          ...choices.map((choice) => (choice.selected ? `✓ ${choice.label}` : choice.label)),
-          "Cancel",
-        ],
-        cancelButtonIndex: choices.length,
+        options: [...rows.map((row) => row.label), "Cancel"],
+        cancelButtonIndex: rows.length,
         ...(known === null
           ? { message: "Not known yet. Try again in a moment." }
           : unshown && unshown.named.length > 0
@@ -698,7 +745,7 @@ function TextButtons({ item }: { item: Playing }) {
               : {}),
       },
       (index) => {
-        if (stands()) void choices[index]?.choose();
+        if (stands()) rows[index]?.run();
       },
     );
   };
@@ -718,6 +765,216 @@ function TextButtons({ item }: { item: Playing }) {
     </View>
   );
 }
+
+interface Row {
+  readonly label: string;
+  readonly run: () => void;
+}
+
+/**
+ * The Subtitles sheet's rows for a movie or an episode: the file's own tracks and Off, the
+ * subtitle downloaded for its version, checked while it shows, Find online, and Adjust timing
+ * while one shows. While it shows, the file's own are off, so none of theirs is checked; a file
+ * without Off of its own gets one that hides it.
+ */
+function subtitleRows(
+  title: SubtitleTitle,
+  choices: readonly TrackChoice[],
+  stands: () => boolean,
+): readonly Row[] {
+  const kept = keptSubtitle(title);
+  const showing = shownSubtitle()?.title === title;
+  return [
+    ...(showing && !choices.some((choice) => choice.kind === "off")
+      ? [{ label: "Off", run: () => hideSubtitle(title) }]
+      : []),
+    ...choices.map((choice) => ({
+      label: choice.selected && !showing ? `✓ ${choice.label}` : choice.label,
+      run: () => void choice.choose(),
+    })),
+    ...(kept
+      ? [
+          {
+            label: `${showing ? "✓ " : ""}${spoken(kept.subtitle.language) || "Subtitles"} · ${kept.subtitle.release || "SubDL"}`,
+            run: () => {
+              if (!showing && !showKeptSubtitle(title))
+                Alert.alert(
+                  "Couldn't show subtitles",
+                  "This iPhone refused the change. Try again.",
+                );
+            },
+          },
+        ]
+      : []),
+    { label: "Find online", run: () => void findOnline(title, stands) },
+    ...(showing ? [{ label: "Adjust timing", run: () => adjustTiming(title, stands) }] : []),
+  ];
+}
+
+/**
+ * Searches SubDL for what plays and offers its results, each by language, HI for the hearing
+ * impaired, and release; the one picked is downloaded, kept for the version and shown.
+ */
+async function findOnline(title: SubtitleTitle, stands: () => boolean) {
+  const found = await findSubtitles(title);
+  if (!found || !stands()) return;
+  if (found.kind === "failed") return serviceFailed(found.reason);
+  const { results } = found;
+  if (results.length === 0) {
+    return Alert.alert("No subtitles found", "SubDL has none for this in your languages.");
+  }
+  showSheet(
+    {
+      title: "Online subtitles",
+      options: [...results.map(resultName), "Cancel"],
+      cancelButtonIndex: results.length,
+    },
+    (index) => {
+      const picked = results[index];
+      if (!picked || !stands()) return;
+      void chooseSubtitle(title, picked.id).then((chosen) => {
+        if (chosen?.kind === "failed" && stands()) serviceFailed(chosen.reason);
+      });
+    },
+  );
+}
+
+/** "English · HI · Movie.2024.1080p.WEB". */
+const resultName = ({ language, hearingImpaired, release }: FoundSubtitle) =>
+  [spoken(language) || "Unknown language", ...(hearingImpaired ? ["HI"] : []), release]
+    .filter(Boolean)
+    .join(" · ");
+
+/** Steps the downloaded subtitle earlier or later by, in seconds. */
+const STEPS = [
+  { by: -1, label: "1 s earlier" },
+  { by: -0.1, label: "0.1 s earlier" },
+  { by: 0.1, label: "0.1 s later" },
+  { by: 1, label: "1 s later" },
+] as const;
+
+/**
+ * Moves the downloaded subtitle showing over what plays a step earlier or later, or back with
+ * Reset, opening again after each step until Done.
+ */
+function adjustTiming(title: SubtitleTitle, stands: () => boolean) {
+  const showing = shownSubtitle();
+  if (showing?.title !== title || !stands()) return;
+  const { timing } = showing;
+  const changed =
+    timing.offset !== DEFAULT_SUBTITLE_TIMING.offset ||
+    timing.speed !== DEFAULT_SUBTITLE_TIMING.speed;
+  const steps = [
+    ...STEPS.map(({ by, label }) => ({
+      label,
+      // In tenths, so steps add up without float drift.
+      timing: { ...timing, offset: Math.round((timing.offset + by) * 10) / 10 },
+    })),
+    ...(changed ? [{ label: "Reset", timing: DEFAULT_SUBTITLE_TIMING }] : []),
+  ];
+  const offset = Math.abs(timing.offset).toFixed(1);
+  showSheet(
+    {
+      title: "Adjust timing",
+      message:
+        timing.offset === 0
+          ? "Original timing"
+          : `Shown ${offset} s ${timing.offset > 0 ? "later" : "earlier"}`,
+      options: [...steps.map((step) => step.label), "Done"],
+      cancelButtonIndex: steps.length,
+    },
+    (index) => {
+      const step = steps[index];
+      if (!step || !stands()) return;
+      if (!retimeSubtitle(title, step.timing)) {
+        return Alert.alert("Couldn't change timing", "The previous timing is kept.");
+      }
+      adjustTiming(title, stands);
+    },
+  );
+}
+
+const failures: Readonly<
+  Record<SubtitleServiceFailure | "not-saved", readonly [title: string, message: string]>
+> = {
+  "not-configured": ["SubDL key needed", "Add your SubDL API key in Settings > Subtitles."],
+  credentials: ["SubDL refused the key", "Check your SubDL API key in Settings > Subtitles."],
+  quota: ["SubDL limit reached", "Your SubDL key has no requests left for now. Try again later."],
+  unavailable: ["SubDL isn't available", "Check your connection and try again."],
+  unsupported: ["Can't use this subtitle", "It isn't text the app can read. Try another."],
+  "not-saved": ["Couldn't keep this subtitle", "This iPhone refused to save it. Try again."],
+};
+
+const serviceFailed = (reason: SubtitleServiceFailure | "not-saved") =>
+  Alert.alert(...failures[reason]);
+
+/**
+ * The downloaded subtitle showing over the movie or episode playing, drawn over the picture at
+ * the viewer's text size, which Dynamic Type scales. Nothing for another play's.
+ */
+function Cues({ item, bottom }: { item: Playing; bottom: number }) {
+  const shown = useShownSubtitle();
+  if (!shown || !item.subtitles || shown.title !== item.subtitles) return null;
+  return <CueLines shown={shown} bottom={bottom} />;
+}
+
+const cueSizes: Readonly<Record<SubtitleSize, number>> = { small: 16, medium: 20, large: 26 };
+
+function CueLines({ shown, bottom }: { shown: ShownSubtitle; bottom: number }) {
+  const text = useCueText(shown);
+  const { subtitleSize } = useMediaPreferences();
+  if (!text) return null;
+  const fontSize = cueSizes[subtitleSize];
+  return (
+    <View pointerEvents="none" style={[styles.cues, { bottom }]}>
+      <Text
+        style={[styles.cue, { fontSize, lineHeight: Math.round(fontSize * 1.25) }]}
+        maxFontSizeMultiplier={2}
+        testID="watch-cues"
+      >
+        {text}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * The lines to show now, from the player's time: read again as the playback clock moves, as a
+ * seek does, and while it plays at the next cue's start or end. Nothing redraws between those.
+ */
+function useCueText(shown: ShownSubtitle): string {
+  const clock = usePlaybackClock();
+  const playing = usePlayback().phase.kind === "playing";
+  const [text, setText] = useState("");
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const update = () => {
+      const now = player().currentTime;
+      setText(cuesAt(shown, now).map(plain).join("\n"));
+      const next = nextCueChange(shown, now);
+      if (!playing || next === null) return;
+      const rate = player().playbackRate > 0 ? player().playbackRate : 1;
+      timer = setTimeout(update, Math.max(20, ((next - now) / rate) * 1000));
+    };
+    update();
+    return () => clearTimeout(timer);
+  }, [shown, clock, playing]);
+  return text;
+}
+
+const entities: Readonly<Record<string, string>> = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&nbsp;": "\u00A0",
+};
+
+/** A cue's text without its markup: tags such as <i>, and SSA overrides such as {\an8}. */
+const plain = (text: string) =>
+  text
+    .replace(/<[^>]*>|\{\\[^}]*\}/g, "")
+    .replace(/&(?:amp|lt|gt|nbsp);/g, (entity) => entities[entity] ?? entity)
+    .trim();
 
 /** A language's name in the app's language, like the rest of its copy; null when unknown. */
 function spoken(code: string | null) {
@@ -792,4 +1049,13 @@ const styles = StyleSheet.create({
   textControlLabel: { color: colors.text, fontSize: 15, fontWeight: "600" },
   pressed: { opacity: 0.5 },
   spacer: { flex: 1 },
+  cues: { position: "absolute", left: 24, right: 24, alignItems: "center" },
+  cue: {
+    color: colors.text,
+    fontWeight: "600",
+    textAlign: "center",
+    backgroundColor: "#000000A6",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
 });

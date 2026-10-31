@@ -44,6 +44,7 @@ import {
 } from "../../../media-preferences.ts";
 import { openLink } from "../../../open-link.ts";
 import { playlistHref, useUnmapped } from "../../../playlist-groups.tsx";
+import { SubtitleSettings } from "../../../subtitle-settings.tsx";
 import { setStatistics, useStatistics } from "../../../telemetry/index.ts";
 import { hasTmdb, useMetadataStatus, useTitleTimings } from "../../../titles.ts";
 import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
@@ -53,10 +54,9 @@ const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
 /**
  * Settings as one list: the providers first, each a row with Add provider and Guides, the XMLTV
  * guides added apart from theirs, under them, then Downloads, a row with what they take that
- * opens them, Media policies, Privacy with its policy in the browser, and About with Licences.
- * TMDB's terms ask for its logo and notice, as
- * the desktop's Settings show them. It opens on whichever tab's top bar asked for it, and what it
- * opens goes on that tab too.
+ * opens them, Media policies, Subtitles, Privacy with its policy in the browser, and About with
+ * Licences. TMDB's terms ask for its logo and notice, as the desktop's Settings show them. It
+ * opens on whichever tab's top bar asked for it, and what it opens goes on that tab too.
  */
 export default function Settings() {
   const roster = useRoster();
@@ -158,6 +158,7 @@ export default function Settings() {
         }
         testID="settings-live-quality"
       />
+      <SubtitleSettings />
 
       <Section name="Privacy" />
       <View style={styles.toggle}>
