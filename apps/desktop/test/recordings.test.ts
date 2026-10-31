@@ -996,6 +996,44 @@ describe.skipIf(!hasTools)("recordings", () => {
       15_000,
     );
     expect(JSON.parse(kept ?? "null")).toMatchObject({ recordings: [] });
+    // Its folder, marked as recordings.json couldn't take its record out, goes after that write.
+    expect(
+      await until(
+        () => leftBehind(dataDir),
+        (left) => left.length === 0,
+      ),
+    ).toEqual([]);
+  }, 20_000);
+
+  it("never records a failed start after a Quit and relaunch, though recordings.json kept its record", async () => {
+    const asked = Promise.withResolvers<Writable>();
+    const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
+      streams: (_source, out) => asked.resolve(out),
+    });
+    const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    starting.catch(() => {});
+    const out = await asked.promise;
+    // Only recordings.json is refused from here: the recording's folder can still be written.
+    const manifest = join(dataDir, "recordings", "recordings.json");
+    await rename(manifest, `${manifest}.saved`);
+    await mkdir(manifest);
+    out.end(Buffer.alloc(64 * 1024, 0x20));
+    await expect(starting).rejects.toMatchObject({
+      error: { kind: "stream", failure: { kind: "unsupported" } },
+    });
+    await quit();
+    await rm(manifest, { recursive: true });
+    await rename(`${manifest}.saved`, manifest);
+
+    const before = provider.streamRequests();
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    await again.library.refresh(subscriptionId);
+    await again.recordings.check();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(provider.streamRequests()).toBe(before);
+    expect(await again.recordings.list()).toEqual([]);
+    // The check wrote recordings.json without its record, and its folder went.
     expect(await leftBehind(dataDir)).toEqual([]);
   }, 20_000);
 

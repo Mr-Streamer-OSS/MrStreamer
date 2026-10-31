@@ -19,7 +19,8 @@
 // gap since its file was last written, or, its time over, counts as cut short by the quit. A
 // recording's folder left without its record, as a crash leaves one as its start fails, or a
 // failed start whose folder couldn't be removed, or an older version's crash as it started, goes
-// then.
+// then. A failed start whose record recordings.json couldn't take out marks its folder instead, so
+// a relaunch, also after a Quit, drops that record rather than going on with it.
 //
 // Capture takes one of its subscription's connections through PlaybackCoordination, which
 // admits it only while fewer than the account's limit are held here, and keeps it until it ends:
@@ -129,6 +130,12 @@ const OURS = ".mrstreamer-recording";
  * same way, as of when it was left, when recordings.json couldn't be written to say so.
  */
 const ENDED = { stopped: ".mrstreamer-stopped", quit: ".mrstreamer-quit" } as const;
+/**
+ * Left empty in a failed start's folder, which then stays, when recordings.json couldn't take its
+ * record out: a relaunch drops that record, never capturing for it, and its folder goes once
+ * recordings.json no longer lists it.
+ */
+const FAILED = ".mrstreamer-failed";
 
 /** How `Recordings.start` records, beside its stop time. */
 export interface StartOptions {
@@ -383,6 +390,12 @@ function make(deps: RecordingsDeps) {
       return null;
     };
 
+    /**
+     * Folders of failed starts recordings.json still lists, by id (see FAILED): they go once it is
+     * written without them, as the next check does.
+     */
+    const failedFolders = new Map<string, string>();
+
     const unreadable = () =>
       new Failed({ error: { kind: "unexpected", detail: t("Recordings could not be read.") } });
     const usable = read.kind === "read" ? Effect.void : Effect.fail(unreadable());
@@ -393,6 +406,16 @@ function make(deps: RecordingsDeps) {
       for (const record of read.items) {
         if (!isLive(record)) {
           records.set(record.id, record);
+          continue;
+        }
+        const failed = yield* Effect.promise(() =>
+          stat(join(folderOf(record), FAILED)).then(
+            () => true,
+            () => false,
+          ),
+        );
+        if (failed) {
+          failedFolders.set(record.id, folderOf(record));
           continue;
         }
         const file = yield* Effect.promise(() => stat(fileOf(record)).catch(() => null));
@@ -428,7 +451,7 @@ function make(deps: RecordingsDeps) {
         );
         for (const entry of entries) {
           if (!entry.isDirectory() || !RECORDING_FOLDER.test(entry.name)) continue;
-          if (records.has(entry.name)) continue;
+          if (records.has(entry.name) || failedFolders.has(entry.name)) continue;
           const stray = join(folder, entry.name);
           yield* Effect.promise(async () => {
             const owner = await readFile(join(stray, OURS), "utf8").catch(() => null);
@@ -440,7 +463,7 @@ function make(deps: RecordingsDeps) {
     }
 
     /** What a check, or a recording's end, couldn't write, for the next check to write again. */
-    const unsaved = { recordings: false, schedules: false };
+    const unsaved = { recordings: failedFolders.size > 0, schedules: false };
     /** Recordings whose end the last write of recordings.json couldn't keep. */
     const unsavedEnds = new Set<string>();
     /** Recordings the viewer is stopping: none of them goes on meanwhile. */
@@ -463,10 +486,15 @@ function make(deps: RecordingsDeps) {
     ).pipe(
       // Every record is written each time: what couldn't be kept before is now.
       Effect.tap(() =>
-        Effect.sync(() => {
+        Effect.promise(async () => {
           unsaved.recordings = false;
           unsavedEnds.clear();
           unsavedStops.clear();
+          const folders = [...failedFolders.values()];
+          failedFolders.clear();
+          await Promise.all(
+            folders.map((folder) => rm(folder, { recursive: true, force: true }).catch(() => {})),
+          );
         }),
       ),
     );
@@ -484,15 +512,19 @@ function make(deps: RecordingsDeps) {
         ),
       );
 
-    /** Takes a start's record out of recordings.json, now or at the next check, which it wakes. */
+    /**
+     * Takes a start's record out of recordings.json, now or at the next check, which it wakes.
+     * Answers whether it is out now.
+     */
     const unpend = (id: string) =>
       Effect.suspend(() => {
         beginning.delete(id);
         return save.pipe(
+          Effect.as(true),
           Effect.catch(() =>
             Effect.andThen(
               Effect.sync(() => (unsaved.recordings = true)),
-              wake,
+              Effect.as(wake, false),
             ),
           ),
         );
@@ -872,7 +904,8 @@ function make(deps: RecordingsDeps) {
         }).pipe(
           // Also when the app closes meanwhile: whatever started ends before its folder goes, and
           // its record before that, so a crash between leaves a folder the next start cleans up,
-          // not a record that goes on. One going on keeps its folder, its file as it was.
+          // not a record that goes on; while recordings.json still lists it, its folder stays
+          // marked FAILED. One going on keeps its folder, its file as it was.
           Effect.onError(() =>
             Effect.promise(async () => {
               controller.abort();
@@ -885,11 +918,23 @@ function make(deps: RecordingsDeps) {
               Effect.andThen(
                 resumes
                   ? Effect.void
-                  : Effect.andThen(
-                      unpend(id),
-                      Effect.promise(() =>
-                        rm(folderOf(record), { recursive: true, force: true }).catch(() => {}),
-                      ),
+                  : Effect.flatMap(unpend(id), (out) =>
+                      Effect.promise(async () => {
+                        // Still listed: its marked folder stays, so a relaunch never goes on.
+                        if (
+                          !out &&
+                          (await writeFile(join(folderOf(record), FAILED), "").then(
+                            () => true,
+                            () => false,
+                          ))
+                        ) {
+                          failedFolders.set(id, folderOf(record));
+                          return;
+                        }
+                        await rm(folderOf(record), { recursive: true, force: true }).catch(
+                          () => {},
+                        );
+                      }),
                     ),
               ),
             ),
