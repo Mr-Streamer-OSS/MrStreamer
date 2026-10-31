@@ -1,6 +1,6 @@
 import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
-import { mkdirSync, rmSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Member } from "../src/account.ts";
@@ -25,6 +25,9 @@ const scenario = vi.hoisted(() => ({
   /** The action sheet last shown: its options, and what picking one does. */
   sheet: null as { options: readonly string[]; pick: (index: number) => void } | null,
   alerts: [] as Shown[],
+  /** The text prompt last shown: its buttons, which take what was typed. */
+  prompt: null as readonly { text: string; onPress?: (typed?: string) => void }[] | null,
+  keychain: new Map<string, string>(),
 }));
 
 vi.mock("react-native", async () => ({
@@ -40,6 +43,9 @@ vi.mock("react-native", async () => ({
   Alert: {
     alert: (title: string, message: string, buttons?: readonly Button[]) => {
       scenario.alerts.push({ title, message, ...(buttons ? { buttons } : {}) });
+    },
+    prompt: (_title: string, _message: string, buttons: NonNullable<typeof scenario.prompt>) => {
+      scenario.prompt = buttons;
     },
   },
 }));
@@ -78,7 +84,7 @@ vi.mock("../src/account.ts", () => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
-vi.mock("expo-secure-store", () => keychain(() => new Map()));
+vi.mock("expo-secure-store", () => keychain(() => scenario.keychain));
 // The actual Settings route imports the real preferences owner. Native views and OS sheets
 // are the only UI doubles. The base-revision control must render before a missing row fails.
 let Settings: typeof import("../src/app/(tabs)/(home)/settings.tsx").default;
@@ -93,6 +99,7 @@ beforeEach(async () => {
   Settings = (await import("../src/app/(tabs)/(home)/settings.tsx")).default;
   scenario.members = [];
   scenario.alerts.length = 0;
+  scenario.keychain.clear();
   native.sync = null;
 });
 afterEach(() => {
@@ -174,4 +181,39 @@ it("offers Follow title language explicitly and saves it after another audio pol
   choose("audio", "Original language");
   choose("audio", "Follow title language");
   expect(row("audio").textContent).toContain("Follow title language");
+});
+
+it("sizes downloaded subtitles through their row, kept for the next launch", async () => {
+  render();
+  expect(row("subtitle-size").textContent).toContain("Medium");
+  choose("subtitle-size", "Large");
+  unmount();
+  vi.resetModules();
+  Settings = (await import("../src/app/(tabs)/(home)/settings.tsx")).default;
+  render();
+  expect(row("subtitle-size").textContent).toContain("Large");
+});
+
+it("saves a typed SubDL key to the Keychain only, shows only that one is saved, and removes it", async () => {
+  render();
+  await vi.waitFor(() => expect(row("subdl-key").textContent).toContain("Not set"));
+  React.act(() => row("subdl-key").dispatchEvent(new Event("click", { bubbles: true })));
+  await React.act(async () =>
+    scenario.prompt?.find((each) => each.text === "Save")?.onPress?.(" k-123 "),
+  );
+  expect([...scenario.keychain.values()]).toContain("k-123");
+  expect(row("subdl-key").textContent).toContain("Saved");
+  expect(container.textContent).not.toContain("k-123");
+  const documents = join(native.root, "documents");
+  const written = readdirSync(documents, { recursive: true, withFileTypes: true })
+    .filter((each) => each.isFile())
+    .map((each) => readFileSync(join(each.parentPath, each.name), "utf8"));
+  expect(written.join()).not.toContain("k-123");
+
+  React.act(() => row("subdl-key").dispatchEvent(new Event("click", { bubbles: true })));
+  const sheet = scenario.sheet;
+  expect(sheet?.options).toEqual(["Replace", "Remove", "Cancel"]);
+  await React.act(async () => sheet?.pick(1));
+  await vi.waitFor(() => expect(row("subdl-key").textContent).toContain("Not set"));
+  expect([...scenario.keychain.values()]).not.toContain("k-123");
 });
