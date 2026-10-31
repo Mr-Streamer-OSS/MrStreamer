@@ -47,6 +47,9 @@ const scenario = vi.hoisted(() => ({
   sources: new Map<string, number>(),
   /** Who listens to providers signing in. */
   signedIn: new Set<() => void>(),
+  /** The guide owner's status snapshot, replaced as it reads again, and who hears it. */
+  guideSnapshot: new Map(),
+  guideListeners: new Set<() => void>(),
   /** The guide owner's programme search, and each programme's detail by its token. */
   search: (async () => []) as (text: string, keys: readonly string[]) => Promise<FoundProgramme[]>,
   details: new Map<string, Programme>(),
@@ -177,11 +180,13 @@ vi.mock("../src/sources.ts", () => ({
 }));
 // The guide owner's public reads; guide.test.ts proves them against the native guide.
 vi.mock("../src/guide.ts", () => {
-  const snapshot = new Map();
   return {
     guide: {
-      subscribe: () => () => undefined,
-      getSnapshot: () => snapshot,
+      subscribe: (listener: () => void) => {
+        scenario.guideListeners.add(listener);
+        return () => scenario.guideListeners.delete(listener);
+      },
+      getSnapshot: () => scenario.guideSnapshot,
       search: (text: string, keys: readonly string[]) => scenario.search(text, keys),
       programme: async (detail: string) => scenario.details.get(detail) ?? null,
     },
@@ -1517,6 +1522,51 @@ describe("Programmes in Search", () => {
     // The same list, never remounted, so it is still scrolled where it was.
     expect(container.querySelector('[data-testid="search-list"]')).toBe(list);
     expect(scenario.did).toEqual([]);
+  });
+
+  /** The guide's minute tick, or a guide's new status: Search reads again. */
+  const reread = () =>
+    React.act(() => {
+      scenario.guideSnapshot = new Map();
+      scenario.guideListeners.forEach((listener) => listener());
+    });
+
+  it("keeps its programmes, and says nothing of searching, while the guide reads again", async () => {
+    const later = held();
+    const answers = [Promise.resolve([programme("News at Six", "six")]), later.answer];
+    scenario.search = () => answers.shift() ?? Promise.resolve([]);
+    await open();
+    await type("news");
+    reread();
+    await settled();
+    expect(text()).toContain("News at Six");
+    expect(text()).not.toContain("Searching.");
+    await React.act(async () => later.release([programme("News at Seven", "seven")]));
+    await settled();
+    expect(text()).toContain("News at Seven");
+  });
+
+  it("keeps an open detail reading as the guide reads again", async () => {
+    const news = {
+      start: at,
+      stop: at + 1_800_000,
+      title: "News at Six",
+      description: "Headlines",
+    };
+    const answers = [[programme("News at Six", "six")], [programme("News at Six", "six-again")]];
+    scenario.search = async () => answers.shift() ?? [];
+    scenario.details.set("six", news);
+    await open();
+    await type("news");
+    await press(`search-programme-b:7-${at}`);
+    // Its first token withdrawn, as on return from the background.
+    scenario.details.delete("six");
+    scenario.details.set("six-again", news);
+    reread();
+    await settled();
+    expect(container.querySelector('[data-testid="guide-programme"]')?.textContent).toContain(
+      "Headlines",
+    );
   });
 
   it("closes Search under Watch when a programme's detail plays its channel", async () => {
