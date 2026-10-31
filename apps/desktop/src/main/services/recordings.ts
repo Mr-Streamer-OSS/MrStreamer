@@ -466,6 +466,15 @@ function make(deps: RecordingsDeps) {
 
     /** What a check, or a recording's end, couldn't write, for the next check to write again. */
     const unsaved = { recordings: failedFolders.size > 0, schedules: false };
+    /**
+     * Drops a failed start's record (see FAILED) whose mark couldn't be read as the app started,
+     * for the next write to take out, with its folder.
+     */
+    const forgetStart = (record: StoredRecording) => {
+      records.delete(record.id);
+      failedFolders.set(record.id, folderOf(record));
+      unsaved.recordings = true;
+    };
     /** Recordings whose end the last write of recordings.json couldn't keep. */
     const unsavedEnds = new Set<string>();
     /** Recordings the viewer is stopping: none of them goes on meanwhile. */
@@ -553,7 +562,8 @@ function make(deps: RecordingsDeps) {
                     () => true,
                     () => false,
                   ));
-              if (marked) return;
+              // Still listed as far as this knows: else a save took it out as it was marked.
+              if (marked && failedFolders.has(record.id)) return;
               failedFolders.delete(record.id);
               await rm(folder, { recursive: true, force: true }).catch(() => {});
             }),
@@ -773,6 +783,13 @@ function make(deps: RecordingsDeps) {
         });
         // Stopped since it was asked to go on: it asks the provider nothing.
         if (stopped()) return yield* stoppedFailure;
+        // A failed start whose mark couldn't be read as the app started, as on a drive away then.
+        if (resumes && (yield* failedStart(resumes))) {
+          forgetStart(resumes);
+          yield* publish;
+          yield* wake;
+          return yield* stoppedFailure;
+        }
         // A disk without room records nothing, asks the provider nothing and holds no connection
         // for it. One going on stays where it began.
         const folder = resumes ? placeOf(resumes) : (storage.folder ?? root);
@@ -894,16 +911,6 @@ function make(deps: RecordingsDeps) {
             yield* dropStart(record);
             return yield* kept.failure;
           }
-        }
-        // A failed start whose mark couldn't be read as the app started, as on a drive away then.
-        if (resumes && (yield* failedStart(record))) {
-          held.release();
-          records.delete(id);
-          failedFolders.set(id, folderOf(record));
-          unsaved.recordings = true;
-          yield* publish;
-          yield* wake;
-          return yield* stoppedFailure;
         }
         // Its own folder is made, or made again when it went while the recording paused.
         const opening = mkdir(folderOf(record), { recursive: true })
@@ -1496,7 +1503,8 @@ function make(deps: RecordingsDeps) {
             continue;
           }
           if (record.stop <= now) {
-            records.set(record.id, finalOf(record, now));
+            if (yield* failedStart(record)) forgetStart(record);
+            else records.set(record.id, finalOf(record, now));
             resumeTried.delete(record.id);
             over.push(record.id);
             continue;

@@ -1007,15 +1007,17 @@ describe.skipIf(!hasTools)("recordings", () => {
   }, 20_000);
 
   it("never records a failed start after a Quit and relaunch, though recordings.json kept its record", async () => {
-    // In the data folder, and in a chosen folder that can't be read as the app starts again.
-    for (const where of ["data", "chosen"] as const) {
+    // In the data folder, and in a chosen folder that can't be read as the app starts again, until
+    // later while its time remains, or until after its stop time.
+    for (const where of ["data", "chosen", "chosen late"] as const) {
       const asked = Promise.withResolvers<Writable>();
       const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
         streams: (_source, out) => asked.resolve(out),
       });
       const chosen = join(await tempDir(), "Mr. Streamer");
-      if (where === "chosen") await recordings.setFolder(chosen);
-      const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+      if (where !== "data") await recordings.setFolder(chosen);
+      const stop = Date.now() + (where === "chosen late" ? 5000 : 60_000);
+      const starting = recordings.start(channel(TRACKS), stop, {});
       starting.catch(() => {});
       const out = await asked.promise;
       // Only recordings.json is refused from here: the recording's folder can still be written.
@@ -1031,12 +1033,14 @@ describe.skipIf(!hasTools)("recordings", () => {
       await rename(`${manifest}.saved`, manifest);
 
       const before = provider.streamRequests();
-      if (where === "chosen") await chmod(chosen, 0);
+      if (where !== "data") await chmod(chosen, 0);
       const again = await app(dataDir);
       onTestFinished(again.quit);
       await again.library.refresh(subscriptionId);
-      if (where === "chosen") {
+      if (where !== "data") {
         await again.recordings.check();
+        if (where === "chosen late")
+          await new Promise((resolve) => setTimeout(resolve, stop - Date.now() + 100));
         await chmod(chosen, 0o700);
       }
       await again.recordings.check();
