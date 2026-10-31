@@ -1370,7 +1370,7 @@ export const de: Translation = {
   Quit: "Beenden",
   "Keep recording": "Weiter aufnehmen",
   "{title} is recording until {time}. Quitting stops it now and keeps the {minutes} min recorded.":
-    "{title} wird bis {time} aufgenommen. Beenden stoppt die Aufnahme jetzt und behält die {minutes} Min., die aufgenommen sind.",
+    "{title} wird bis {time} aufgenommen. Beenden stoppt die Aufnahme jetzt und behält die bisher aufgenommenen {minutes} Min.",
   "{count} recordings go on until {time}. Quitting stops them now and keeps what they recorded.":
     "{count} Aufnahmen laufen bis {time}. Beenden stoppt sie jetzt und behält, was sie aufgenommen haben.",
   "{title}, {time}, won't record while Mr. Streamer is closed.":

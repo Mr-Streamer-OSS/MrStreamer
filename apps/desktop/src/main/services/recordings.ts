@@ -395,12 +395,13 @@ function make(deps: RecordingsDeps) {
      * written without them, as the next check does.
      */
     const failedFolders = new Map<string, string>();
-    /** Whether `record` is a failed start (see FAILED). */
+    /** Whether `record` is a failed start (see FAILED), or null while its mark can't be read. */
     const failedStart = (record: StoredRecording) =>
       Effect.promise(() =>
         stat(join(folderOf(record), FAILED)).then(
-          () => true,
-          () => false,
+          (): boolean | null => true,
+          (cause: NodeJS.ErrnoException) =>
+            cause.code === "ENOENT" || cause.code === "ENOTDIR" ? false : null,
         ),
       );
 
@@ -416,7 +417,8 @@ function make(deps: RecordingsDeps) {
           records.set(record.id, record);
           continue;
         }
-        if (yield* failedStart(record)) {
+        const failed = yield* failedStart(record);
+        if (failed) {
           failedFolders.set(record.id, folderOf(record));
           continue;
         }
@@ -428,7 +430,7 @@ function make(deps: RecordingsDeps) {
         // Paused, its gap lasts until it was ended; else it ended where its file was last written.
         if (left)
           records.set(record.id, finalOf(seen, open ? left.at : Math.min(last, left.at), left.as));
-        else if (record.stop <= now)
+        else if (record.stop <= now && failed !== null)
           records.set(
             record.id,
             finalOf(seen, open ? record.stop : last, open ? undefined : "quit"),
@@ -784,11 +786,18 @@ function make(deps: RecordingsDeps) {
         // Stopped since it was asked to go on: it asks the provider nothing.
         if (stopped()) return yield* stoppedFailure;
         // A failed start whose mark couldn't be read as the app started, as on a drive away then.
-        if (resumes && (yield* failedStart(resumes))) {
-          forgetStart(resumes);
-          yield* publish;
-          yield* wake;
-          return yield* stoppedFailure;
+        if (resumes) {
+          const failed = yield* failedStart(resumes);
+          if (failed === null)
+            return yield* new Failed({
+              error: { kind: "unexpected", detail: t("The folder for recordings isn't there.") },
+            });
+          if (failed) {
+            forgetStart(resumes);
+            yield* publish;
+            yield* wake;
+            return yield* stoppedFailure;
+          }
         }
         // A disk without room records nothing, asks the provider nothing and holds no connection
         // for it. One going on stays where it began.
@@ -1503,7 +1512,12 @@ function make(deps: RecordingsDeps) {
             continue;
           }
           if (record.stop <= now) {
-            if (yield* failedStart(record)) forgetStart(record);
+            const failed = yield* failedStart(record);
+            if (failed === null) {
+              paused = true;
+              continue;
+            }
+            if (failed) forgetStart(record);
             else records.set(record.id, finalOf(record, now));
             resumeTried.delete(record.id);
             over.push(record.id);

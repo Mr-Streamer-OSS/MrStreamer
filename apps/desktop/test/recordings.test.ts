@@ -1006,59 +1006,79 @@ describe.skipIf(!hasTools)("recordings", () => {
     ).toEqual([]);
   }, 20_000);
 
-  it("never records a failed start after a Quit and relaunch, though recordings.json kept its record", async () => {
-    // In the data folder, and in a chosen folder that can't be read as the app starts again, until
-    // later while its time remains, or until after its stop time.
-    for (const where of ["data", "chosen", "chosen late"] as const) {
-      const asked = Promise.withResolvers<Writable>();
-      const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
-        streams: (_source, out) => asked.resolve(out),
-      });
-      const chosen = join(await tempDir(), "Mr. Streamer");
-      if (where !== "data") await recordings.setFolder(chosen);
-      const stop = Date.now() + (where === "chosen late" ? 5000 : 60_000);
-      const starting = recordings.start(channel(TRACKS), stop, {});
-      starting.catch(() => {});
-      const out = await asked.promise;
-      // Only recordings.json is refused from here: the recording's folder can still be written.
-      const manifest = join(dataDir, "recordings", "recordings.json");
-      await rename(manifest, `${manifest}.saved`);
-      await mkdir(manifest);
-      out.end(Buffer.alloc(64 * 1024, 0x20));
-      await expect(starting).rejects.toMatchObject({
-        error: { kind: "stream", failure: { kind: "unsupported" } },
-      });
-      await quit();
-      // The quit couldn't write it either: its folder stays, marked.
-      const place = where === "data" ? join(dataDir, "recordings") : chosen;
-      const [folder] = (await readdir(place)).filter((name) => !name.includes("."));
-      expect(existsSync(join(place, folder!, ".mrstreamer-failed"))).toBe(true);
-      await rm(manifest, { recursive: true });
-      await rename(`${manifest}.saved`, manifest);
+  // Permission faults need a user whose reads chmod can actually refuse.
+  for (const where of ["data", "chosen", "chosen late", "chosen expired"] as const) {
+    it.skipIf(where !== "data" && (process.getuid?.() === 0 || process.platform === "win32"))(
+      `never records a failed start after a Quit and relaunch, though recordings.json kept its record (${where})`,
+      async () => {
+        const asked = Promise.withResolvers<Writable>();
+        const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
+          streams: (_source, out) => asked.resolve(out),
+        });
+        const chosen = join(await tempDir(), "Mr. Streamer");
+        if (where !== "data") await recordings.setFolder(chosen);
+        const stop =
+          Date.now() + (where === "chosen late" || where === "chosen expired" ? 5000 : 60_000);
+        const starting = recordings.start(channel(TRACKS), stop, {});
+        starting.catch(() => {});
+        const out = await asked.promise;
+        // Only recordings.json is refused from here: the recording's folder can still be written.
+        const manifest = join(dataDir, "recordings", "recordings.json");
+        await rename(manifest, `${manifest}.saved`);
+        await mkdir(manifest);
+        out.end(Buffer.alloc(64 * 1024, 0x20));
+        await expect(starting).rejects.toMatchObject({
+          error: { kind: "stream", failure: { kind: "unsupported" } },
+        });
+        await quit();
+        // The quit couldn't write it either: its folder stays, marked.
+        const place = where === "data" ? join(dataDir, "recordings") : chosen;
+        const [folder] = (await readdir(place)).filter((name) => !name.includes("."));
+        expect(existsSync(join(place, folder!, ".mrstreamer-failed"))).toBe(true);
+        await rm(manifest, { recursive: true });
+        await rename(`${manifest}.saved`, manifest);
 
-      const before = provider.streamRequests();
-      if (where !== "data") await chmod(chosen, 0);
-      const again = await app(dataDir);
-      onTestFinished(again.quit);
-      await again.library.refresh(subscriptionId);
-      if (where !== "data") {
+        const before = provider.streamRequests();
+        let again: Awaited<ReturnType<typeof app>>;
+        try {
+          if (where !== "data") {
+            await chmod(chosen, 0);
+            await expect(stat(join(place, folder!, ".mrstreamer-failed"))).rejects.toMatchObject({
+              code: "EACCES",
+            });
+            if (where === "chosen expired")
+              await new Promise((resolve) => setTimeout(resolve, stop - Date.now() + 100));
+          }
+          again = await app(dataDir);
+          onTestFinished(again.quit);
+          await again.library.refresh(subscriptionId);
+          if (where !== "data") {
+            await again.recordings.check();
+            if (where === "chosen late") {
+              await new Promise((resolve) => setTimeout(resolve, stop - Date.now() + 100));
+              await again.recordings.check();
+            }
+            // An unread marker cannot say a failed start became an ended recording.
+            expect(await again.recordings.list()).toMatchObject([{ status: { kind: "paused" } }]);
+            expect(provider.streamRequests()).toBe(before);
+          }
+        } finally {
+          if (where !== "data") await chmod(chosen, 0o700);
+        }
         await again.recordings.check();
-        if (where === "chosen late")
-          await new Promise((resolve) => setTimeout(resolve, stop - Date.now() + 100));
-        await chmod(chosen, 0o700);
-      }
-      await again.recordings.check();
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      expect(provider.streamRequests()).toBe(before);
-      expect(await again.recordings.list()).toEqual([]);
-      // recordings.json is written without its record, and its folder goes.
-      const left = async () => [
-        ...(await leftBehind(dataDir)).filter((name) => name !== "storage.json"),
-        ...(await readdir(chosen).catch(() => [])),
-      ];
-      expect(await until(left, (names) => names.length === 0)).toEqual([]);
-    }
-  }, 30_000);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(provider.streamRequests()).toBe(before);
+        expect(await again.recordings.list()).toEqual([]);
+        // recordings.json is written without its record, and its folder goes.
+        const left = async () => [
+          ...(await leftBehind(dataDir)).filter((name) => name !== "storage.json"),
+          ...(await readdir(chosen).catch(() => [])),
+        ];
+        expect(await until(left, (names) => names.length === 0)).toEqual([]);
+      },
+      20_000,
+    );
+  }
 
   it("keeps raw transport messages out of a recording's start failure", async () => {
     const { channel, recordings } = await connected({
