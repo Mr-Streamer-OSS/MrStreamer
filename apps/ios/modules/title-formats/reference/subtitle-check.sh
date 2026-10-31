@@ -37,7 +37,7 @@ verify() {
 says() { grep -qxF "$2" "$log" || fail "$(basename "$1"): no \"$2\""; }
 # Whether rendition `$2` of the last run of file `$1` served the line `$3`, exactly.
 serves() {
-  cat "$out/runs/$(basename "$1")/$2"-*.vtt | grep -qxF "$3" ||
+  grep -qxF "$3" "$out/runs/$(basename "$1")/$2"-*.vtt ||
     fail "$(basename "$1"): $2 serves no \"$3\""
 }
 subtitles() {
@@ -63,7 +63,7 @@ if check "$subs"; then
   serves "$subs" s0 "FORCED SIGN"
   serves "$subs" s1 "FORCED SIGN"
   for other in s2 s3; do
-    ! cat "$out/runs/subs.mkv/$other"-*.vtt | grep -qF "FORCED" || fail "subs.mkv: $other holds a forced line"
+    ! grep -qF "FORCED" "$out/runs/subs.mkv/$other"-*.vtt || fail "subs.mkv: $other holds a forced line"
   done
   # Text as WebVTT has it: tags kept, others gone, escapes, line breaks and a no-break space.
   serves "$subs" s0 "Over the <i>long</i> line"
