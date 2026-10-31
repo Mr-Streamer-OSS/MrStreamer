@@ -379,7 +379,9 @@ function make(deps: RecordingsDeps) {
         const seen = { ...record, bytes: file?.size ?? record.bytes };
         const open = openGap(record);
         const left = yield* Effect.promise(() => endedAs(record));
-        if (left) records.set(record.id, finalOf(seen, left.at, left.as));
+        // Paused, its gap lasts until it was ended; else it ended where its file was last written.
+        if (left)
+          records.set(record.id, finalOf(seen, open ? left.at : Math.min(last, left.at), left.as));
         else if (record.stop <= now)
           records.set(
             record.id,
@@ -974,9 +976,24 @@ function make(deps: RecordingsDeps) {
         Effect.suspend(() =>
           Effect.andThen(
             Effect.ignore(end([...active.keys()], leaving)),
-            // Quit ends those paused too: none goes on when the app runs again.
+            // Quit ends those paused too, and those whose end wasn't written: none goes on when
+            // the app runs again.
             Effect.suspend(() =>
-              leaving === "quit" ? endPaused(() => true, "quit") : Effect.void,
+              leaving === "quit"
+                ? Effect.andThen(
+                    Effect.forEach(
+                      [...unsavedEnds].flatMap((id) => records.get(id) ?? []),
+                      (record) => markEnded(record, "quit"),
+                      { discard: true },
+                    ),
+                    Effect.andThen(
+                      endPaused(() => true, "quit"),
+                      Effect.suspend(() =>
+                        unsaved.recordings ? Effect.ignore(save) : Effect.void,
+                      ),
+                    ),
+                  )
+                : Effect.void,
             ),
           ),
         ),
@@ -1726,13 +1743,11 @@ function make(deps: RecordingsDeps) {
           // Paused, it ends where its capture last stopped.
           const record = records.get(id);
           if (!record) return;
-          if (isLive(record) && !active.has(id)) {
+          if (isLive(record) && !active.has(id))
             records.set(id, finalOf(record, Date.now(), "stopped"));
-            yield* markEnded(record, "stopped");
-          } else if (unsavedEnds.has(id)) {
-            // Ended by itself, unwritten: as stopped, it never goes on after a relaunch either.
-            yield* markEnded(record, "stopped");
-          }
+          // Also one that ended by itself, its end maybe not written yet: stopped, it never goes on
+          // after a relaunch either.
+          yield* markEnded(record, "stopped");
           // Capture may have ended before Stop arrived. Retry its terminal record too; until it is
           // written, the list says so and the check tries again.
           const written = yield* Effect.result(save);

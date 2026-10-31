@@ -894,7 +894,10 @@ async function start(): Promise<void> {
           return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
         },
         openFolder: async (folder) => {
-          await mkdir(folder, { recursive: true }).catch(() => {});
+          // Only the profile's own folder is made: a chosen one that went, as on a drive not plugged
+          // in, is never made anew on another disk.
+          if (folder === join(dataDir, "recordings"))
+            await mkdir(folder, { recursive: true }).catch(() => {});
           // The system answers with why it couldn't, or nothing.
           const failed = await shell.openPath(folder);
           if (failed) throw new Error(failed);
