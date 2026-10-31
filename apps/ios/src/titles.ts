@@ -205,7 +205,6 @@ export function listedIndex(id: string, signal: AbortSignal): Promise<IndexedCat
 }
 
 export const useMetadataVersion = () => useStore(metadataVersion);
-export const useMetadataStatus = () => useStore(metadataStatus);
 export const useTitleTimings = () => useStore(timings);
 
 const locale = new Intl.Locale(Intl.DateTimeFormat().resolvedOptions().locale);
@@ -223,37 +222,168 @@ const currentLanguage = (reading: ReadingLanguage) => reading.epoch === language
 const retiredLanguage = Symbol("retired title language");
 const region = locale.region ?? "US";
 
-const TMDB_KEY = process.env.EXPO_PUBLIC_TMDB_KEY ?? "";
+// TMDB is asked with the viewer's own key, kept in the Keychain, else the app's built-in one
+// (EXPO_PUBLIC_TMDB_KEY). Nothing is asked until the Keychain answered which. A key TMDB refused
+// stops fetching until the key changes; changing it starts metadata again with the new one.
+
+const BUILT_IN_KEY = process.env.EXPO_PUBLIC_TMDB_KEY ?? "";
 /** A test server that answers like TMDB, for the fixture panel. */
 const TMDB_API = process.env.EXPO_PUBLIC_TMDB_API;
-const client: Tmdb | null = TMDB_KEY
-  ? tmdb({ key: TMDB_KEY, ...(TMDB_API ? { api: TMDB_API } : {}) })
-  : null;
-/** Whether TMDB answers this build at all: its key, and the attribution Settings shows. */
-export const hasTmdb = client !== null;
+/** The viewer's own TMDB key's Keychain id. */
+const TMDB_KEY_ID = "metadata.tmdb";
+
+/** Whose key TMDB is asked with: the viewer's, the app's, or none. */
+export type TmdbKeyOwner = "yours" | "app" | "none";
+
+/** The key's owner; null until the Keychain answered whether the viewer saved one. */
+const tmdbKey = store<TmdbKeyOwner | null>(null);
+
+/**
+ * How TMDB stands, for Settings and diagnostics: whose key it is asked with, and whether it
+ * refused that key, stopped answering before every listed title had an answer, is still asking,
+ * or answered them all. `known` counts the titles TMDB answered for, those it doesn't know too.
+ */
+export type MetadataStanding =
+  /** The Keychain hasn't said yet whether the viewer saved a key. */
+  | { readonly kind: "reading" }
+  | { readonly kind: "no-key" }
+  | {
+      readonly kind: "waiting" | "refused" | "unavailable" | "fetching" | "answered";
+      readonly key: Exclude<TmdbKeyOwner, "none">;
+      readonly known: number;
+      readonly wanted: number;
+    };
+
+function standingOf(key: TmdbKeyOwner | null, status: MetadataStatus | null): MetadataStanding {
+  if (key === null) return { kind: "reading" };
+  if (key === "none") return { kind: "no-key" };
+  const known = status?.known ?? 0;
+  const wanted = status?.wanted ?? 0;
+  const kind =
+    !status || wanted === 0
+      ? "waiting"
+      : status.refused
+        ? "refused"
+        : status.fetching
+          ? "fetching"
+          : known < wanted
+            ? "unavailable"
+            : "answered";
+  return { kind, key, known, wanted };
+}
+
+export const metadataStanding = () => standingOf(tmdbKey.get(), metadataStatus.get());
+export function useMetadataStanding(): MetadataStanding {
+  void readKey();
+  return standingOf(useStore(tmdbKey), useStore(metadataStatus));
+}
+
+/** Null while the Keychain is read, and without any key: metadata answers from disk alone. */
+let client: Tmdb | null = null;
 
 const metadataFile = () => new File(Paths.cache, "tmdb.json");
-const metadata = metadataStore({
-  read: async () => {
-    const file = metadataFile();
-    return file.exists ? (JSON.parse(await file.text()) as unknown) : null;
-  },
-  write: async (contents) => {
-    const file = metadataFile();
-    if (!file.exists) file.create();
-    await file.write(JSON.stringify(contents));
-  },
-  client,
-  region,
-  onChange: ({ content }) => {
-    if (content) {
-      metadataVersion.set((version) => version + 1);
-      collect("movie");
-      collect("series");
+/** A metadata store that fetches with `client` as it stands. Only the current one tells screens. */
+function metadataOf() {
+  const made = metadataStore({
+    read: async () => {
+      const file = metadataFile();
+      return file.exists ? (JSON.parse(await file.text()) as unknown) : null;
+    },
+    write: async (contents) => {
+      const file = metadataFile();
+      if (!file.exists) file.create();
+      await file.write(JSON.stringify(contents));
+    },
+    get client() {
+      return client;
+    },
+    region,
+    onChange: ({ content }) => {
+      if (metadata !== made) return;
+      if (content) {
+        metadataVersion.set((version) => version + 1);
+        collect("movie");
+        collect("series");
+      }
+      metadataStatus.set(made.status());
+    },
+  });
+  return made;
+}
+let metadata = metadataOf();
+
+/** Asks TMDB again for what the lists that show want, as when the key or the network came back. */
+function wantMetadata() {
+  const now = shown.get();
+  if (now.lists.kind === "ready") metadata.want(wantedOf(now.lists.index), language);
+}
+
+/** The last key change, which each waits for: one store is closed before the next starts. */
+let keying: Promise<void> = Promise.resolve();
+
+/**
+ * Asks TMDB with `key` from now on. A store that may have stopped on a refused key is closed,
+ * after its answers are written, and a new one starts with the key; before any key there was
+ * none, so the first just starts fetching.
+ */
+function askWith(key: string, owner: TmdbKeyOwner, fresh: boolean) {
+  keying = keying.then(async () => {
+    if (fresh) {
+      const old = metadata;
+      await old.close();
+      metadata = metadataOf();
     }
+    client = key ? tmdb({ key, ...(TMDB_API ? { api: TMDB_API } : {}) }) : null;
+    tmdbKey.set(owner);
+    wantMetadata();
     metadataStatus.set(metadata.status());
-  },
-});
+  });
+  return keying;
+}
+
+let keyRead: Promise<void> | null = null;
+
+/** The Keychain, loaded when first needed: nothing native is touched as this module loads. */
+const secrets = () => import("./secrets.ts").then(({ keychainSecrets }) => keychainSecrets);
+
+/**
+ * Reads which key TMDB is asked with, once, the first time there is something to ask it or
+ * Settings shows it, so a Demo, whose titles TMDB doesn't know, never touches the Keychain. The
+ * viewer's key, else the app's when the Keychain won't answer: never none for a refusal.
+ */
+const readKey = () =>
+  (keyRead ??= secrets()
+    .then((keychain) => keychain.read(TMDB_KEY_ID))
+    .then(
+      (yours) =>
+        askWith(yours || BUILT_IN_KEY, yours ? "yours" : BUILT_IN_KEY ? "app" : "none", false),
+      () => askWith(BUILT_IN_KEY, BUILT_IN_KEY ? "app" : "none", false),
+    ));
+
+/**
+ * Saves `key` as the viewer's own TMDB key and asks TMDB with it. Throws `keychain-refused` when
+ * the Keychain won't keep it, the key before it still in use.
+ */
+export async function saveTmdbKey(key: string) {
+  const trimmed = key.trim();
+  if (!trimmed || trimmed.length > 4096) throw new AppFailure({ kind: "keychain-refused" });
+  await readKey();
+  await (await secrets()).write(TMDB_KEY_ID, trimmed);
+  await askWith(trimmed, "yours", true);
+}
+
+/** Removes the viewer's TMDB key: the app's own is asked with again, if it has one. */
+export async function removeTmdbKey() {
+  await readKey();
+  await (await secrets()).remove(TMDB_KEY_ID);
+  await askWith(BUILT_IN_KEY, BUILT_IN_KEY ? "app" : "none", true);
+}
+
+/** Asks TMDB again for the titles it hasn't answered, after it stopped answering. */
+export function retryMetadata() {
+  wantMetadata();
+  metadataStatus.set(metadata.status());
+}
 
 /** The lists the index was made of, or is being made of. */
 let indexed: readonly Listed[] = [];
@@ -413,7 +543,10 @@ async function index(listed: readonly Listed[], signal: AbortSignal, reading: Re
   alignWatchlist(index, listed);
   // TMDB's metadata for what is listed, the newest first, once the lists show.
   setTimeout(() => {
-    if (wanted()) metadata.want(wantedOf(index), reading.language);
+    if (!wanted()) return;
+    const titles = wantedOf(index);
+    if (titles.length > 0) void readKey();
+    metadata.want(titles, reading.language);
   }, 0);
 }
 
@@ -804,17 +937,18 @@ async function underLogin<A>(id: string, read: (source: Source) => Promise<A>): 
  * show at once through `show`, while `source` stands: this run's answer, or the saved one while it
  * is fresher than a day and its lists haven't come again since; else the provider is asked, the
  * saved facts showing meanwhile and staying when it fails. TMDB's answer is waited for only by
- * the result, with what it said before showing until then.
+ * the result, with what it said before showing until then, and the result says where it stands.
  */
 async function detailsUnder(
   title: Title,
   source: Source,
   show: ((details: TitleDetails) => void) | undefined,
   reading: ReadingLanguage,
-): Promise<TitleDetails> {
+): Promise<ShownDetails> {
   if (!currentLanguage(reading)) throw retiredLanguage;
   const id = title.subscriptionId;
   const stands = () => savable(id, source);
+  if (title.tmdbId) await readKey();
   const saved = await readTitle(id, title.kind, title.id, stands);
   // Provider records belong to the source, not the presentation language. A retired
   // attempt must return before it can launch work or rejoin the current metadata map.
@@ -825,7 +959,7 @@ async function detailsUnder(
       ? movieDetails(title, raw, known)
       : seriesDetails(title, raw, known, reading.language);
   const early = async (raw: ProviderDetails) => {
-    const known = about ? await about.now : null;
+    const known = "now" in about ? await about.now : null;
     if (show && stands() && currentLanguage(reading)) show(shown(raw, known));
   };
   const fresh = saved && Date.now() - saved.at < PROVIDER_FRESH && saved.listedAt === listedAt(id);
@@ -842,7 +976,9 @@ async function detailsUnder(
     }
   }
   if (!raw) throw new AppFailure({ kind: "title-not-found", titleId: title.id });
-  return shown(raw, about ? await about.final : null);
+  if (!("now" in about)) return { ...shown(raw, null), about };
+  const told = await about.final;
+  return { ...shown(raw, told.value), about: told.standing };
 }
 
 /**
@@ -854,7 +990,7 @@ async function detailsUnder(
 export async function detailsOf(
   title: Title,
   show?: (details: TitleDetails) => void,
-): Promise<TitleDetails> {
+): Promise<ShownDetails> {
   if (title.adult) throw new AppFailure({ kind: "title-not-found", titleId: title.id });
   const check = () => admitTitle({ kind: title.kind, ...ownedId(title) });
   check();
@@ -884,12 +1020,36 @@ export async function detailsOf(
 }
 
 /**
+ * Where TMDB's part of a title's details stands, for details to say so: TMDB's answer, or why
+ * the provider's facts show without it. When TMDB refused the key or didn't answer, what it said
+ * before shows while it is saved (`savedAt`, epoch milliseconds), and asking again may help.
+ */
+export type AboutStanding =
+  | { readonly kind: "tmdb" }
+  /** The provider lists no TMDB id for the title. */
+  | { readonly kind: "unlinked" }
+  /** Neither the viewer nor the app has a TMDB key. */
+  | { readonly kind: "no-key" }
+  /** TMDB doesn't know the title. */
+  | { readonly kind: "missing" }
+  | { readonly kind: "refused" | "unavailable"; readonly savedAt: number | null };
+
+/** A title's details, and where TMDB's part of them stands once TMDB was waited for. */
+export type ShownDetails = TitleDetails & { readonly about?: AboutStanding };
+
+/** TMDB's answer to show, and where it stands. */
+interface Told<A> {
+  readonly value: A | null;
+  readonly standing: AboutStanding;
+}
+
+/**
  * A TMDB answer: what is known without waiting for TMDB, `now`, and the answer to show in the
  * end, `final`. `now` is the saved one, of any age, until `final` settles; then `final`'s.
  */
 interface Answer<A> {
   now: Promise<A | null>;
-  readonly final: Promise<A | null>;
+  readonly final: Promise<Told<A>>;
 }
 
 /**
@@ -901,20 +1061,33 @@ async function fromTmdb<A>(
   kept: Saved<A | null> | null,
   answer: (signal: AbortSignal) => Promise<A>,
   write: (saved: Saved<A | null>) => Promise<void>,
-): Promise<{ readonly value: A | null; readonly final: boolean }> {
+): Promise<Told<A> & { readonly final: boolean }> {
+  const told = (value: A | null): Told<A> => ({
+    value,
+    standing: value === null ? { kind: "missing" } : { kind: "tmdb" },
+  });
   if (kept && Date.now() - kept.at < (kept.value === null ? MISSING_FRESH : TMDB_REFRESH_MS)) {
-    return { value: kept.value, final: true };
+    return { ...told(kept.value), final: true };
   }
   try {
     const value = await answer(AbortSignal.timeout(20_000));
     void write({ at: Date.now(), value });
-    return { value, final: true };
+    return { ...told(value), final: true };
   } catch (cause) {
     if (!(cause instanceof TmdbError && cause.failure.kind === "missing")) {
-      return { value: kept?.value ?? null, final: false };
+      const shown = kept?.value ?? null;
+      const refused = cause instanceof TmdbError && cause.failure.kind === "refused";
+      return {
+        value: shown,
+        standing: {
+          kind: refused ? "refused" : "unavailable",
+          savedAt: shown === null ? null : (kept?.at ?? null),
+        },
+        final: false,
+      };
     }
     void write({ at: Date.now(), value: null });
-    return { value: null, final: true };
+    return { ...told(null), final: true };
   }
 }
 
@@ -933,10 +1106,10 @@ function tmdbAnswer<A>(
     now: kept.then((record) => record?.value ?? null),
     final: kept
       .then((record) => fromTmdb(record, answer, write))
-      .then(({ value, final }) => {
-        if (final) entry.now = Promise.resolve(value);
+      .then(({ final, ...told }) => {
+        if (final) entry.now = Promise.resolve(told.value);
         else if (map.get(key) === entry) map.delete(key);
-        return value;
+        return told;
       }),
   };
   keep(map, key, entry);
@@ -946,17 +1119,20 @@ function tmdbAnswer<A>(
 /** What TMDB says of a title for the viewer, by kind, TMDB id and language. */
 const abouts = new Map<string, Answer<TitleAbout>>();
 
-function aboutOf(title: Title, reading: ReadingLanguage): Answer<TitleAbout> | null {
+/** TMDB's answer for `title`, or why there is none to ask for. */
+function aboutOf(title: Title, reading: ReadingLanguage): Answer<TitleAbout> | AboutStanding {
   const { language } = reading;
   const { kind, tmdbId } = title;
-  if (!client || !tmdbId || title.adult) return null;
+  if (!tmdbId || title.adult) return { kind: "unlinked" };
+  if (!client) return { kind: "no-key" };
+  const asking = client;
   return tmdbAnswer(
     abouts,
     `${kind}|${tmdbId}|${language}`,
     () => readAbout(kind, tmdbId, language),
     (signal) => {
       if (!currentLanguage(reading)) throw retiredLanguage;
-      return client.about(tmdbKind(kind), tmdbId, language, signal);
+      return asking.about(tmdbKind(kind), tmdbId, language, signal);
     },
     (saved) =>
       currentLanguage(reading) ? writeAbout(kind, tmdbId, language, saved) : Promise.resolve(),
@@ -986,7 +1162,9 @@ export async function episodesOf(
   const reading = readingLanguage();
   const { language } = reading;
   const { tmdbId } = title;
+  if (tmdbId) await readKey();
   if (!client || !tmdbId) return seasonEpisodes(season, []);
+  const asking = client;
   const id = title.subscriptionId;
   const source = currentSource(id);
   const stands = () => source !== undefined && savable(id, source);
@@ -998,7 +1176,7 @@ export async function episodesOf(
       () => readSeason(tmdbId, number, asked),
       (signal) => {
         if (!currentLanguage(reading)) throw retiredLanguage;
-        return client.season(tmdbId, number, asked, signal);
+        return asking.season(tmdbId, number, asked, signal);
       },
       (saved) =>
         currentLanguage(reading) ? writeSeason(tmdbId, number, asked, saved) : Promise.resolve(),
@@ -1014,7 +1192,7 @@ export async function episodesOf(
     check();
     if (stands() && currentLanguage(reading)) show(worked(now));
   }
-  const told = await Promise.all(answers.map((answer) => answer.final));
+  const told = await Promise.all(answers.map((answer) => answer.final.then(({ value }) => value)));
   check();
   if (!stands()) throw new AppFailure({ kind: "no-subscription" });
   if (!currentLanguage(reading)) return episodesOf(title, season, show);

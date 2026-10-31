@@ -48,7 +48,7 @@ import { openLink } from "../../../open-link.ts";
 import { playlistHref, useUnmapped } from "../../../playlist-groups.tsx";
 import { removeSubtitleKey, saveSubtitleKey, useSubtitleKey } from "../../../online-subtitles.ts";
 import { setStatistics, useStatistics } from "../../../telemetry/index.ts";
-import { hasTmdb, useMetadataStatus, useTitleTimings } from "../../../titles.ts";
+import { useMetadataStanding, useTitleTimings, type MetadataStanding } from "../../../titles.ts";
 import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
 
 const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
@@ -65,6 +65,7 @@ export default function Settings() {
   const statistics = useStatistics();
   const media = useMediaPreferences();
   const subtitleKey = useSubtitleKey();
+  const tmdb = useMetadataStanding();
   const tab = useTabs()?.tab ?? "(home)";
   if (roster.kind !== "ready") return null;
   return (
@@ -231,8 +232,8 @@ export default function Settings() {
         onPress={() => router.push(tabHref(tab, "licences"))}
         testID="settings-licences"
       />
-      <TmdbLine />
-      {hasTmdb ? (
+      <TmdbLine tmdb={tmdb} />
+      {tmdb.kind !== "no-key" ? (
         <View style={styles.notice}>
           <Pressable
             accessibilityRole="link"
@@ -528,21 +529,22 @@ function transportNote({ enabled, transport }: AnalyticsSettings): string | null
 }
 
 /** TMDB's part: movie and series facts and pictures, when the build has a key. */
-function TmdbLine() {
-  const tmdb = useMetadataStatus();
+function TmdbLine({ tmdb }: { tmdb: MetadataStanding }) {
   return (
     <Line
       label="TMDB"
       value={
-        !hasTmdb
-          ? "Not in this build"
-          : !tmdb
-            ? "Waiting for the lists"
-            : tmdb.refused
-              ? "Refused the key"
-              : tmdb.known < tmdb.wanted
-                ? `${tmdb.known} of ${tmdb.wanted} titles`
-                : `${tmdb.known} titles`
+        tmdb.kind === "reading"
+          ? "Checking"
+          : tmdb.kind === "no-key"
+            ? "Not in this build"
+            : tmdb.kind === "waiting"
+              ? "Waiting for the lists"
+              : tmdb.kind === "refused"
+                ? "Refused the key"
+                : tmdb.known < tmdb.wanted
+                  ? `${tmdb.known} of ${tmdb.wanted} titles`
+                  : `${tmdb.known} titles`
       }
     />
   );
