@@ -249,6 +249,9 @@ final class GuideOwner {
   func queryAsync(_ lease: String, _ generation: String, _ id: String, _ ids: [String], _ at: Double, _ mode: String, _ from: Double, _ until: Double, _ after: Double, completion: @escaping ([String: Any]) -> Void) {
     submit(lease, id, read: true, work: { self.query(lease, generation, id, ids, at, mode, from, until, after) }, completion: completion)
   }
+  func currentAsync(_ lease: String, _ generation: String, _ id: String, _ at: Double, completion: @escaping ([String: Any]) -> Void) {
+    submit(lease, id, read: true, work: { self.current(lease, generation, id, at) }, completion: completion)
+  }
   func searchAsync(_ lease: String, _ generation: String, _ id: String, _ ids: [String], _ words: [String], _ at: Double, _ limit: Int, completion: @escaping ([String: Any]) -> Void) {
     submit(lease, id, read: true, work: { self.search(lease, generation, id, ids, words, at, limit) }, completion: completion)
   }
@@ -318,6 +321,9 @@ final class GuideOwner {
   }
   func query(_ lease: String, _ generation: String, _ id: String, _ ids: [String], _ at: Double, _ mode: String, _ from: Double, _ until: Double, _ after: Double) -> [String: Any] {
     read(lease, generation, id) { try $0.query(ids: ids, at: at, mode: mode, from: from, until: until, after: after) }
+  }
+  func current(_ lease: String, _ generation: String, _ id: String, _ at: Double) -> [String: Any] {
+    read(lease, generation, id) { try $0.current(at: at) }
   }
   func search(_ lease: String, _ generation: String, _ id: String, _ ids: [String], _ words: [String], _ at: Double, _ limit: Int) -> [String: Any] {
     read(lease, generation, id) { try $0.search(ids: ids, words: words, at: at, limit: limit) }

@@ -12,7 +12,7 @@ import {
   type Result,
 } from "./guide-native.ts";
 import type { Provider } from "@mrstreamer/core/provider";
-import { searchWords } from "@mrstreamer/core/text";
+import { normalize, searchWords } from "@mrstreamer/core/text";
 import type { Part } from "./library.ts";
 import type { SourceLogin } from "./login-safety.ts";
 import { currentSource } from "./sources.ts";
@@ -88,10 +88,6 @@ const dayOf = (at: number) => {
   const date = new Date(at);
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 };
-/** How many programmes `search` finds. */
-const SEARCH_LIMIT = 20;
-/** How many `search` asks each guide for: more, as some show on no channel. */
-const SEARCH_ASKED = 50;
 const FRESH = 6 * 3600_000;
 /**
  * Channel days whose withdrawals `withdrawn` tells apart: a week of the Guide grid's 24 rows
@@ -673,10 +669,11 @@ export function createGuide(
     /**
      * Up to 20 programmes on now or later whose title has every word of `text`, from every guide:
      * on now first, then by start. Each is on the first of `keys` (`Channel.key`, in the order
-     * Search lists channels) that reads its programmes from where it was found, and its `detail`
-     * reads it with `programme`. A guide whose first 50 mostly show on no channel finds fewer, and
-     * only the first 8 words count. Nothing is found once guides, sources, catalogues or mappings
-     * change during it; it fails where a standing guide could not be searched.
+     * Search lists channels) whose programmes are read from the guide and id it was found by, as
+     * `listings` reads them, and its `detail` reads it with `programme`. The native reader takes a
+     * query's first 8 words, and the rest narrow what it finds. Nothing is found once guides,
+     * sources, catalogues or mappings change during it; it fails where a standing guide could not
+     * be read.
      */
     async search(
       text: string,
@@ -684,7 +681,7 @@ export function createGuide(
       options?: { readonly signal?: AbortSignal },
     ): Promise<readonly FoundProgramme[]> {
       const signal = options?.signal;
-      const words = searchWords(text).slice(0, 8);
+      const words = [...new Set(searchWords(text))];
       // No title holds a word longer than the native reader takes.
       if (words.length === 0 || words.some((word) => new TextEncoder().encode(word).length > 128))
         return [];
@@ -695,42 +692,62 @@ export function createGuide(
         ...parts.values(),
       ];
       const before = footing();
-      // By guide, the channels that may read each of its guide ids, in the order of `keys`.
+      const at = now();
+      /** Runs `read` on `value`'s guide, failing where that guide stands but could not answer. */
+      const asked = async <T>(
+        value: Token,
+        read: (native: GuideNative, lease: string, job: string) => Promise<Result<T>>,
+      ) => {
+        const answer = await ask(value, signal, read);
+        if (!answer && !signal?.aborted && validToken(value)) throw new GuideFault("unavailable");
+        return answer;
+      };
+      // The guide ids each guide has programmes for now, which tell which guide answers a channel.
+      const current = new Map<string, ReadonlySet<string>>();
+      for (const key of keys)
+        for (const value of candidates(key))
+          if (!current.has(value.owner)) {
+            const answer = await asked(value, (native, lease, job) =>
+              native.current(lease, value.generation.id, job, at),
+            );
+            current.set(value.owner, new Set(answer?.ids));
+          }
+      // By guide, the first of `keys` that reads each of its guide ids.
       const guides = new Map<
         string,
-        { readonly asking: Token; readonly by: Map<string, Set<string>> }
+        { readonly asking: Token; readonly by: Map<string, Token & { readonly key: string }> }
       >();
       const places = new Map<string, number>();
       for (const [place, key] of keys.entries())
         for (const value of candidates(key)) {
-          if (!places.has(value.key)) places.set(value.key, place);
+          const guideId = value.ids.find((id) => current.get(value.owner)?.has(id));
+          if (!guideId) continue;
+          if (places.has(value.key)) break;
+          places.set(value.key, place);
           const read = guides.get(value.owner) ?? { asking: value, by: new Map() };
           guides.set(value.owner, read);
-          for (const guideId of value.ids)
-            read.by.set(guideId, (read.by.get(guideId) ?? new Set()).add(value.key));
+          if (!read.by.has(guideId)) read.by.set(guideId, value);
+          break;
         }
-      const at = now();
-      const reads = new Map<string, Awaited<ReturnType<typeof first>>>();
-      const found: { key: string; captured: Token; match: Match }[] = [];
+      const found: { captured: Token; match: Match }[] = [];
       for (const { asking, by } of guides.values()) {
-        const answer = await ask(asking, signal, (native, lease, job) =>
-          native.search(lease, asking.generation.id, job, [...by.keys()], words, at, SEARCH_ASKED),
+        const answer = await asked(asking, (native, lease, job) =>
+          native.search(
+            lease,
+            asking.generation.id,
+            job,
+            [...by.keys()],
+            words.slice(0, 8),
+            at,
+            20,
+          ),
         );
-        if (!answer && !signal?.aborted && validToken(asking)) throw new GuideFault("unavailable");
-        for (const match of answer?.rows ?? [])
-          for (const key of by.get(match.guideId) ?? []) {
-            if (!reads.has(key))
-              reads.set(key, await first(key, "listing", { from: 0, until: 0 }, signal));
-            const read = reads.get(key);
-            // Read from the generation searched, by the id it was found by.
-            if (
-              read?.captured.generation === asking.generation &&
-              read.answer.guideId === match.guideId
-            ) {
-              found.push({ key, captured: read.captured, match });
-              break;
-            }
-          }
+        for (const match of answer?.rows ?? []) {
+          const captured = by.get(match.guideId);
+          const title = normalize(match.title);
+          if (captured && words.every((word) => title.includes(word)))
+            found.push({ captured, match });
+        }
       }
       const after = footing();
       if (
@@ -746,11 +763,11 @@ export function createGuide(
           (a, b) =>
             rank(a) - rank(b) ||
             a.match.start - b.match.start ||
-            places.get(a.key)! - places.get(b.key)!,
+            places.get(a.captured.key)! - places.get(b.captured.key)!,
         )
-        .slice(0, SEARCH_LIMIT)
-        .map(({ key, captured, match: { guideId, start, stop, title } }) => ({
-          key,
+        .slice(0, 20)
+        .map(({ captured, match: { guideId, start, stop, title } }) => ({
+          key: captured.key,
           programme: {
             start,
             stop,

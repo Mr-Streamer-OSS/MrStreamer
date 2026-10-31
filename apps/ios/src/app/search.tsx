@@ -383,7 +383,15 @@ export default function Search() {
   );
   // The programme whose detail shows over the results, of the text it was found for.
   const [detail, setDetail] = useState<{ found: FoundProgramme; generation: number } | null>(null);
-  const shownDetail = detail?.generation === entry.generation ? detail.found : null;
+  // As the guide is read again, as on return from the background, the same programme's newest
+  // token, so the detail reads on.
+  const shownDetail =
+    detail?.generation === entry.generation
+      ? (programmeRead.value?.find(
+          ({ key, programme }) =>
+            key === detail.found.key && programme.start === detail.found.programme.start,
+        ) ?? detail.found)
+      : null;
   const showMore = useCallback(
     (section: Found) => {
       if (!section.more) return;
@@ -602,6 +610,9 @@ export default function Search() {
         />
         {shown && place === "bottom" ? (
           <View
+            // Under a programme's detail, as the results are.
+            accessibilityElementsHidden={shownDetail !== null}
+            importantForAccessibility={shownDetail ? "no-hide-descendants" : "auto"}
             style={[
               styles.dock,
               {
@@ -783,6 +794,7 @@ function ProgrammeRow({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityHint="Shows details"
       accessibilityLabel={`${found.programme.title}, ${line}`}
       onPress={() => onPress(found)}
       style={({ pressed }) => [styles.row, { minHeight: height }, pressed && styles.pressed]}
@@ -833,7 +845,7 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.5 },
   poster: { width: 32, height: 48, borderRadius: 4 },
   logo: { width: 56, height: 36 },
-  detailPane: { ...StyleSheet.absoluteFillObject, backgroundColor: "#000000" },
+  detailPane: { ...StyleSheet.absoluteFill, backgroundColor: "#000000" },
   names: { flex: 1, minWidth: 0, paddingVertical: 6 },
   title: { color: colors.text, fontSize: 17 },
   detail: { color: colors.dim, fontSize: 13, marginTop: 2 },

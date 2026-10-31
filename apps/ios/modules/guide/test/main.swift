@@ -49,12 +49,15 @@ import SQLite3
     try require(gap["guideId"] as? String == "gap" && gapRows.count == 1 && gapRows[0]["start"] as? Double == now + 3600000, "gap-no-fill")
     owner.finish("gap")
     owner.begin(lease, "search")
+    let current = try value(owner.current(lease, db, "search", now))["ids"] as! [String]
+    try require(Set(current) == ["trusted", "alternate", "gap"], "search-current")
     let search = try value(owner.search(lease, db, "search", ["trusted", "alternate", "gap"], ["e"], now, 3))["rows"] as! [[String: Any]]
     try require(search.map { $0["title"] as! String } == ["News & weather", "Never fill gaps", "After gap"] && search[2]["guideId"] as? String == "gap", "search-order")
     let narrow = try value(owner.search(lease, db, "search", ["alternate"], ["weather"], now, 3))["rows"] as! [[String: Any]]
     try require(narrow.isEmpty, "search-channels")
     owner.finish("search")
-    try require(guideFold(" Één, HD!") == "een hd" && guideFold("News & Weather") == "news weather", "search-fold")
+    try require(guideFold(" Één, HD!") == "een hd" && guideFold("News & Weather") == "news weather" && guideFold("ΕΙΔΗΣΕΙΣ") == guideFold("ειδήσεις"), "search-fold")
+    try require(guideHolds(Array(guideFold("한국").unicodeScalars), Array(guideFold("하").unicodeScalars)), "search-syllable")
     let pageActivation = try owner.attach("pages-provider", 1)
     let pageLease = pageActivation["lease"] as! String
     owner.begin(pageLease, "pages")
