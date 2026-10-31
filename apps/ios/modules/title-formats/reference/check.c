@@ -84,7 +84,8 @@ static int get(TitleHls *title, const char *name, uint8_t **copy, size_t *size) 
  * before seeking; else the picture's segment first. 1 when it differs from `made`, -1 on
  * failure; `*listed` is how many lines the index lists of the rendition's stream. With `fault`,
  * the segment's reads fail from its `fault`th on, and a segment that failed for it is asked
- * again; `*faulted` says whether it had that many reads.
+ * again; `*faulted` says whether it had that many reads. Faulted, a rendition chosen before the
+ * seek is asked before the picture, so the reads that fail are those of the pass it makes.
  */
 static int fresh(TitleHlsSource *source, int track, int index, int chosen, const uint8_t *made,
                  size_t made_size, int *listed, int fault, int *faulted) {
@@ -105,8 +106,6 @@ static int fresh(TitleHlsSource *source, int track, int index, int chosen, const
   free(data);
   if (get(title, chosen ? playlist : name, &data, &size) < 0) goto done;
   free(data);
-  // Faulted, a rendition chosen before the seek is asked before the picture, so the reads that
-  // fail are those of the pass its segment makes.
   if (!(fault && chosen)) {
     if (get(title, chosen ? name : playlist, &data, &size) < 0) goto done;
     free(data);

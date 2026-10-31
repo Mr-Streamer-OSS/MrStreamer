@@ -612,24 +612,23 @@ at the picture's segments, which Watch's Subtitles lists like any other. ASS kee
 and underline and loses positions, styles and drawings. A forced track is marked FORCED in the
 playlist, which AVPlayer reads as forced-only, and its lines also show in the regular track of its
 language.
-A line that spans segments is in each. To recover one already on screen where playing starts
-or after a seek, the session reads it from its cluster using the file's index and cue length
-(FFmpeg and mkvmerge list subtitle lines there by default). Recall is bounded to eight lines per
-pass and 8 MiB beyond each cluster; Cues tables larger than 16 MiB are not read. A line outside
-those bounds can remain absent after a seek. In the core, a read its source fails fails only that
-request: asked again once the source reads, the segment holds every line it would have. The app
-ends the session on such a failure instead, and Try again opens a new one. A listed line without a length is
-read only when it is the last to begin before the segment. A file whose index leaves a line out
-shows it only once playing passes where it begins. The other subtitle tracks, pictures such as
-PGS, DVD and DVB, teletext, formats the session doesn't know, and text tracks compressed with zlib
-or bzip2 or encrypted, which its FFmpeg can't read, aren't served, and Watch's Subtitles names
-them, with their format, as ones that can't show here: the first 16, then how many more. Track numbers and encodings come from the
-file's Tracks: from its first 256 KB, as opening read them, else from where its SeekHead says, 1 MB
-at most. A file whose Tracks can't be read that way
-has its text tracks named as ones that can't show, their encoding unknown. A line whose text is
-over 64 KB shows, at its time, "This line is too large to show."; a track whose lines outgrow 4 MB,
-or a title's 16 MB together, shows "These subtitles are too large to show." over the picture, which
-plays on.
+A line that spans segments is in each. To recover one already on screen where playing starts or
+after a seek, the session reads it from its cluster using the file's index and cue length (FFmpeg
+and mkvmerge list subtitle lines there by default). Recall is bounded to eight lines per pass and
+8 MiB beyond each cluster; Cues tables larger than 16 MiB are not read. A line outside those bounds
+can remain absent after a seek. In the core, a read its source fails fails only that request: asked
+again once the source reads, the segment holds every line it would have. The app ends the session on
+such a failure instead, and Try again opens a new one. A listed line without a length is read only
+when it is the last to begin before the segment. A file whose index leaves a line out shows it only
+once playing passes where it begins. The other subtitle tracks, pictures such as PGS, DVD and DVB,
+teletext, formats the session doesn't know, and text tracks compressed with zlib or bzip2 or
+encrypted, which its FFmpeg can't read, aren't served, and Watch's Subtitles names them, with their
+format, as ones that can't show here: the first 16, then how many more. Track numbers and encodings
+come from the file's Tracks: from its first 256 KB, as opening read them, else from where its
+SeekHead says, 1 MB at most. A file whose Tracks can't be read that way has its text tracks named as
+ones that can't show, their encoding unknown. A line whose text is over 64 KB shows, at its time,
+"This line is too large to show."; a track whose lines outgrow 4 MB, or a title's 16 MB together,
+shows "These subtitles are too large to show." over the picture, which plays on.
 
 | Where it plays                                 | Shows                                                              | Can't show                                                                                |
 | ---------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
@@ -638,16 +637,16 @@ plays on.
 | A downloaded copy                              | The same as the file played from the provider, read from the phone | The same                                                                                  |
 | A Live channel (HLS from the panel)            | The stream's WebVTT renditions and captions as AVPlayer reads them | DVB subtitles and teletext in its segments, which AVPlayer can't see and Watch can't name |
 
-`modules/title-formats/reference/subtitle-fixtures.sh` makes synthetic files with a 35-second
-line, forced, ASS and WebVTT tracks, and copies whose index lists none of them, whose tracks are
-out of number order, with a track zlib, bzip2, header-stripping, twice or encrypted encoded,
-with Tracks past the first 256 KB or none it can find, with a damaged index, with a 111 KB
-drawing, a 70 KB line, a 1 MB packet or 4 MB of lines, and with one or 20 DVB tracks; `check.c` asks each subtitle segment
-of a title just opened, as after a seek, for `subs.mkv` also with its reads failing from each one on, and `verify.py` checks every segment's lines against
-ffmpeg's own reading of the source. `subtitle-check.sh <out>` runs them all with what each must
-show, and fails on any miss. Whether AVPlayer shows, seeks and
-switches these renditions as HLS describes, captions inside a Matroska title's picture included,
-is still to be seen on the simulator and a phone.
+`modules/title-formats/reference/subtitle-fixtures.sh` makes synthetic files with a 35-second line,
+forced, ASS and WebVTT tracks, and copies whose index lists none of them, whose tracks are out of
+number order, with a track zlib, bzip2, header-stripping, twice or encrypted encoded, with Tracks
+past the first 256 KB or none it can find, with a damaged index, with a 111 KB drawing, a 70 KB
+line, a 1 MB packet or 4 MB of lines, and with one or 20 DVB tracks; `check.c` asks each subtitle
+segment of a title just opened, as after a seek, for `subs.mkv` also with its reads failing from
+each one on, and `verify.py` checks every segment's lines against ffmpeg's own reading of the
+source. `subtitle-check.sh <out>` runs them all with what each must show, and fails on any miss.
+Whether AVPlayer shows, seeks and switches these renditions as HLS describes, captions inside a
+Matroska title's picture included, is still to be seen on the simulator and a phone.
 
 `scripts/build-ffmpeg.sh ios` builds the FFmpeg libraries a session links, before
 `expo prebuild`; `modules/title-formats/reference` checks its segments on Linux. On the simulator
