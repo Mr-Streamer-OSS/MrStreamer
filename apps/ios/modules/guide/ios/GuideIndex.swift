@@ -164,7 +164,9 @@ final class GuideIndex {
       guard let channel = sqlite3_column_text(statement, 0) else { throw GuideFailure("disk") }
       ids.append(String(cString: channel))
     }
-    return ["ids": ids]
+    let result: [String: Any] = ["ids": ids]
+    if try JSONSerialization.data(withJSONObject: result).count > 1024 * 1024 { throw GuideFailure("reply") }
+    return result
   }
   /// The first `limit` programmes on `ids`, not ended at `at`, whose title `guideFold` folds to
   /// hold each of `words`: on now first, then by start. Titles programmes repeat are folded once.
@@ -208,7 +210,7 @@ final class GuideIndex {
 
 /// `text` as core text.ts `normalize` folds it for search: compatibility-decomposed without
 /// marks, lowercase, and each run of what is no letter or digit one space, none at either end.
-/// Final sigma folds to sigma, as JS lowercases a capital one by its place in a word.
+/// Foundation's contextual lowercase keeps a word-final sigma, as JavaScript does.
 func guideFold(_ text: String) -> String {
   var bare = String.UnicodeScalarView()
   for scalar in text.decomposedStringWithCompatibilityMapping.unicodeScalars {
@@ -219,12 +221,12 @@ func guideFold(_ text: String) -> String {
   }
   var folded = String.UnicodeScalarView()
   var gap = false
-  for scalar in String(bare).lowercased().unicodeScalars {
+  for scalar in (String(bare) as NSString).lowercased.unicodeScalars {
     switch scalar.properties.generalCategory {
     case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter, .decimalNumber, .letterNumber, .otherNumber:
       if gap && !folded.isEmpty { folded.append(" ") }
       gap = false
-      folded.append(scalar == "\u{03C2}" ? "\u{03C3}" : scalar)
+      folded.append(scalar)
     default: gap = true
     }
   }
