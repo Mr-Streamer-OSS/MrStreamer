@@ -303,6 +303,46 @@ export async function inTasks<A>(steps: Steps<A>, wanted: () => boolean): Promis
   }
 }
 
+/**
+ * Whether two of a provider's lists hold the same rows in the same order, a field missing the
+ * same as one left undefined, pausing between rows. A list that answers the same as the one that
+ * shows keeps it, so nothing worked out of it (`partSteps`, titles.ts's index) is again.
+ */
+export function* sameSteps<A extends Record<keyof A, readonly unknown[]>>(
+  a: A,
+  b: A,
+): Steps<boolean> {
+  const due = pacer();
+  for (const key of Object.keys(a) as (keyof A)[]) {
+    const left = a[key];
+    const right = b[key];
+    if (left.length !== right.length) return false;
+    for (let at = 0; at < left.length; at++) {
+      if (due()) yield;
+      if (!same(left[at], right[at])) return false;
+    }
+  }
+  return true;
+}
+
+function same(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((each, at) => same(each, b[at]))
+    );
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  for (const key in left) if (!same(left[key], right[key])) return false;
+  for (const key in right) if (!(key in left) && right[key] !== undefined) return false;
+  return true;
+}
+
 /** Channels whose names hold every word of `query`, in the catalogue's order. */
 export function searchChannels(library: Library, query: string): readonly Channel[] {
   return finish(searchChannelsSteps(library, query));

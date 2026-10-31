@@ -29,6 +29,7 @@ import {
   combineSteps,
   inTasks,
   partSteps,
+  sameSteps,
   type Channel,
   type Labelled,
   type Library,
@@ -477,6 +478,9 @@ const savableChanged = () => {
   for (const listener of fences) listener();
 };
 
+/** The login each saved copy shown at launch was read for, whose answer alone may keep it. */
+const savedUnder = new WeakMap<object, Source>();
+
 /** Saves a list `source` gave, in a later task: a write that fails leaves the list as it shows. */
 function save(id: string, source: Source, saved: Saved) {
   setTimeout(
@@ -553,6 +557,7 @@ async function fromSaved(id: string, kind: Kind, source: Source): Promise<boolea
     const member = members().find((each) => each.entry.id === id);
     if (currentSource(id) !== source || member?.[kind].kind !== "idle") return false;
     if (!saved) return true;
+    savedUnder.set(saved.catalogue, source);
     const fresh = Date.now() - saved.fetchedAt < FRESH_FOR;
     const shown = <A>(value: A): Loadable<A> =>
       fresh
@@ -572,13 +577,15 @@ async function fromSaved(id: string, kind: Kind, source: Source): Promise<boolea
 
 /**
  * Loads one of a subscription's lists, dropping a load of it still under way. An answer for a
- * login replaced or removed since is dropped; a failure keeps what loaded before. `landed` has
- * the answer, the login that gave it and when.
+ * login replaced or removed since is dropped; a failure keeps what loaded before. An answer that
+ * holds the same as the saved copy that shows (`shown`), read for the same login, keeps that copy,
+ * as loaded now (`sameSteps`). `landed` has the answer, the login that gave it and when.
  */
-function follow<A>(
+function follow<A extends Record<keyof A, readonly unknown[]>>(
   id: string,
   kind: Kind,
   read: (provider: Provider, signal: AbortSignal) => Promise<A>,
+  shown: () => Loadable<A> | undefined,
   set: (change: (now: Loadable<A>) => Loadable<A>) => void,
   landed: (value: A, source: Source, fetchedAt: number) => void,
 ) {
@@ -592,9 +599,17 @@ function follow<A>(
   const started = Date.now();
   const stands = () => !controller.signal.aborted && currentSource(id) === source;
   read(source.provider, controller.signal).then(
-    (value) => {
+    async (answer) => {
       if (!stands()) return;
       const fetchedAt = Date.now();
+      const before = shown();
+      const last = before ? lastOf(before) : null;
+      const same =
+        last !== null &&
+        savedUnder.get(last) === source &&
+        (await inTasks(sameSteps(answer, last), stands));
+      if (!stands()) return;
+      const value = same && shown() === before ? last : answer;
       set(() => ({ kind: "ready", value, from: "provider", fetchedAt, took: fetchedAt - started }));
       landed(value, source, fetchedAt);
     },
@@ -612,6 +627,7 @@ export function reloadChannels(id: string) {
     id,
     "live",
     (provider, signal) => provider.liveCatalogue(signal),
+    () => members().find((member) => member.entry.id === id)?.live,
     (change) => setMember(id, (member) => ({ ...member, live: change(member.live) })),
     (catalogue, source, fetchedAt) => {
       if (id !== DEMO_ID || demoReserved()) noteAction("playlist_refreshed");
@@ -626,6 +642,7 @@ export function reloadTitles(id: string) {
     id,
     "titles",
     (provider, signal) => provider.onDemandCatalogue(signal),
+    () => members().find((member) => member.entry.id === id)?.titles,
     (change) => setMember(id, (member) => ({ ...member, titles: change(member.titles) })),
     (catalogue, source, fetchedAt) => save(id, source, { kind: "titles", catalogue, fetchedAt }),
   );
