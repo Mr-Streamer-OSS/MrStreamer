@@ -2,7 +2,7 @@
 // fixtures captured to a temporary data folder, and ffprobe and the app's own copy playback for
 // what was written.
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -1126,31 +1126,52 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(heard.at(-1)?.[0]?.status).toEqual({ kind: "missing" });
   });
 
-  it("writes a played position again while schedules.json can't be read", async () => {
-    const { dataDir, channel, recordings, quit } = await connected();
-    const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
-    if (answer.kind !== "started") throw new Error("Not started");
-    const { id } = answer.recording;
-    await until(recordings.list, ([first]) => first?.status.kind === "complete");
-    await quit();
-    await writeFile(join(dataDir, "recordings", "schedules.json"), "{ not json");
+  it.each(["check", "shutdown"] as const)(
+    "writes a played position again at %s while schedules.json can't be read",
+    async (when) => {
+      const { dataDir, channel, recordings, quit } = await connected();
+      const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
+      if (answer.kind !== "started") throw new Error("Not started");
+      const { id } = answer.recording;
+      await until(recordings.list, ([first]) => first?.status.kind === "complete");
+      await quit();
+      await writeFile(join(dataDir, "recordings", "schedules.json"), "{ not json");
 
-    const again = await app(dataDir);
-    const manifest = join(dataDir, "recordings", "recordings.json");
-    await rename(manifest, `${manifest}.saved`);
-    await mkdir(manifest);
-    await expect(again.recordings.recordProgress(id, 42, 90)).rejects.toMatchObject({
-      error: { kind: "unexpected" },
-    });
-    await rm(manifest, { recursive: true });
-    await rename(`${manifest}.saved`, manifest);
-    await again.recordings.check();
-    await again.quit();
+      const again = runtimeFor(
+        mainLayer({ ...testConfig(dataDir), ffmpeg: "ffmpeg", ffprobe: "ffprobe" }).pipe(
+          Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
+        ),
+      );
+      const kept = await promised(again, Recordings);
+      await again.runPromise(TestClock.adjust(0));
+      // A suspended app cannot run the ordinary retry before shutdown's final save.
+      if (when === "shutdown") await kept.suspend();
+      const manifest = join(dataDir, "recordings", "recordings.json");
+      await rename(manifest, `${manifest}.saved`);
+      await mkdir(manifest);
+      await expect(kept.recordProgress(id, 42, 90)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      // Let the wake settle while storage refuses writes, keeping its timer still.
+      await again.runPromise(TestClock.adjust(0));
+      if (when === "shutdown") await kept.leave("away");
+      rmSync(manifest, { recursive: true });
+      renameSync(`${manifest}.saved`, manifest);
+      if (when === "check") {
+        await kept.check();
+        expect(JSON.parse(await readFile(manifest, "utf8"))).toMatchObject({
+          recordings: expect.arrayContaining([
+            expect.objectContaining({ id, progress: { position: 42, duration: 90 } }),
+          ]),
+        });
+      }
+      await again.dispose();
 
-    const last = await app(dataDir);
-    onTestFinished(last.quit);
-    expect((await last.recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
-  });
+      const last = await app(dataDir);
+      onTestFinished(last.quit);
+      expect((await last.recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
+    },
+  );
 
   it("deletes what was saved for a recording's subtitles with it, and only its own", async () => {
     const { channel, recordings, savedSubtitles } = await connected({ maxConnections: 2 });

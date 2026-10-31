@@ -979,30 +979,21 @@ function make(deps: RecordingsDeps) {
           );
         }),
         // Read once they settled: one may have become active meanwhile.
-        Effect.suspend(() =>
-          Effect.andThen(
-            Effect.ignore(end([...active.keys()], leaving)),
-            // Quit ends those paused too, and those whose end wasn't written: none goes on when
-            // the app runs again.
-            Effect.suspend(() =>
-              leaving === "quit"
-                ? Effect.andThen(
-                    Effect.forEach(
-                      [...unsavedEnds].flatMap((id) => records.get(id) ?? []),
-                      (record) => markEnded(record, "quit"),
-                      { discard: true },
-                    ),
-                    Effect.andThen(
-                      endPaused(() => true, "quit"),
-                      Effect.suspend(() =>
-                        unsaved.recordings ? Effect.ignore(save) : Effect.void,
-                      ),
-                    ),
-                  )
-                : Effect.void,
-            ),
-          ),
-        ),
+        Effect.gen(function* () {
+          yield* Effect.ignore(end([...active.keys()], leaving));
+          // Quit ends those paused too, and those whose end wasn't written: none goes on when
+          // the app runs again.
+          if (leaving === "quit") {
+            yield* Effect.forEach(
+              [...unsavedEnds].flatMap((id) => records.get(id) ?? []),
+              (record) => markEnded(record, "quit"),
+              { discard: true },
+            );
+            yield* endPaused(() => true, "quit");
+          }
+          // Shutdown also retries recording metadata writes, including playback position.
+          if (unsaved.recordings) yield* Effect.ignore(save);
+        }),
       ),
     );
 
