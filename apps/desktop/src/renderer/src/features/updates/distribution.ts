@@ -10,5 +10,7 @@ export function distributionLabel(distribution: Distribution): string {
       return "Microsoft Store";
     case "pacman":
       return "AUR (pacman)";
+    case "snap":
+      return "Snap";
   }
 }

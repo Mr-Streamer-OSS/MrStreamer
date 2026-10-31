@@ -149,6 +149,9 @@ export const de: Translation = {
   "Updates come from the AUR. Use an AUR helper or makepkg.":
     "Updates kommen aus dem AUR. Verwende einen AUR-Helfer oder makepkg.",
   "settings.search.pacman": "AUR pacman Paket makepkg Helfer Installation Update Version",
+  "Snap updates Mr. Streamer on its own. To update now: sudo snap refresh mr-streamer":
+    "Snap aktualisiert Mr. Streamer selbst. Jetzt aktualisieren: sudo snap refresh mr-streamer",
+  "settings.search.snap": "Snap snapd snapcraft refresh revert Installation Update Version",
   "Open Store": "Store öffnen",
   Channel: "Kanal",
   "newest builds": "neueste Builds",
@@ -335,6 +338,8 @@ export const de: Translation = {
     "Der macOS-Schlüsselbund konnte dein Passwort nicht speichern. Beende und öffne Mr. Streamer erneut und versuche es noch einmal. Lies vor dem Zurücksetzen von Safe Storage die Fehlerbehebung.",
   "Your system's keychain would not store your password.":
     "Der Schlüsselbund deines Systems wollte dein Passwort nicht speichern.",
+  "Your system's keychain would not store your password. Check that GNOME Keyring or KWallet is running and unlocked, and connect Mr. Streamer to it once in a terminal: {command}":
+    "Der Schlüsselbund deines Systems wollte dein Passwort nicht speichern. Prüfe, ob GNOME Keyring oder KWallet läuft und entsperrt ist, und verbinde Mr. Streamer einmal im Terminal damit: {command}",
   "This channel is no longer in the provider's list.":
     "Dieser Sender ist nicht mehr in der Liste des Anbieters.",
   "This channel has no catch-up.": "Dieser Sender bietet kein Replay.",

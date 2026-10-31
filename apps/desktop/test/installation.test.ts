@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveLanguage, setLanguage } from "@mrstreamer/core/i18n";
 import { INSTALLATION_MARKER, PACMAN_INSTALLATION } from "@mrstreamer/contracts/updates";
-import { installedDistribution } from "../src/main/platform/installation.ts";
+import {
+  installedDistribution,
+  snapName,
+  snapPasswordStore,
+} from "../src/main/platform/installation.ts";
 import { tempDir } from "./support.ts";
 
 afterEach(() => setLanguage(resolveLanguage("en-US", ["en-US"])));
@@ -14,28 +18,47 @@ describe("installation-owned updates", () => {
     await writeFile(join(resources, INSTALLATION_MARKER), "broken");
     setLanguage(resolveLanguage("nl-NL", ["en-US"]));
     await expect(
-      installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
+      installedDistribution({
+        resources,
+        platform: "linux",
+        packaged: true,
+        store: false,
+        snap: false,
+      }),
     ).rejects.toThrow("Installeer Mr. Streamer opnieuw met je pakketbeheerder.");
   });
   it("keeps an ordinary packaged Linux install direct, including electron-builder's package-type", async () => {
     const resources = await tempDir();
     await writeFile(join(resources, "package-type"), "deb");
     expect(
-      await installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
+      await installedDistribution({
+        resources,
+        platform: "linux",
+        packaged: true,
+        store: false,
+        snap: false,
+      }),
     ).toBe("direct");
     await writeFile(join(resources, INSTALLATION_MARKER), JSON.stringify(PACMAN_INSTALLATION));
     expect(
-      await installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
+      await installedDistribution({
+        resources,
+        platform: "linux",
+        packaged: true,
+        store: false,
+        snap: false,
+      }),
     ).toBe("pacman");
   });
 
   it.each([
-    { platform: "linux", packaged: false, store: false, expected: "direct" },
-    { platform: "darwin", packaged: true, store: false, expected: "direct" },
-    { platform: "win32", packaged: true, store: false, expected: "direct" },
-    { platform: "win32", packaged: true, store: true, expected: "store" },
+    { platform: "linux", packaged: false, store: false, snap: false, expected: "direct" },
+    { platform: "darwin", packaged: true, store: false, snap: false, expected: "direct" },
+    { platform: "win32", packaged: true, store: false, snap: false, expected: "direct" },
+    { platform: "win32", packaged: true, store: true, snap: false, expected: "store" },
+    { platform: "linux", packaged: true, store: false, snap: true, expected: "snap" },
   ])(
-    "keeps $platform packaged=$packaged store=$store ownership",
+    "keeps $platform packaged=$packaged store=$store snap=$snap ownership",
     async ({ expected, ...options }) => {
       const resources = await tempDir();
       await writeFile(join(resources, INSTALLATION_MARKER), "damaged");
@@ -53,7 +76,13 @@ describe("installation-owned updates", () => {
     const resources = await tempDir();
     await writeFile(join(resources, INSTALLATION_MARKER), contents);
     await expect(
-      installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
+      installedDistribution({
+        resources,
+        platform: "linux",
+        packaged: true,
+        store: false,
+        snap: false,
+      }),
     ).rejects.toThrow("Reinstall Mr. Streamer with your package manager.");
   });
 
@@ -61,7 +90,13 @@ describe("installation-owned updates", () => {
     const resources = await tempDir();
     await mkdir(join(resources, INSTALLATION_MARKER));
     await expect(
-      installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
+      installedDistribution({
+        resources,
+        platform: "linux",
+        packaged: true,
+        store: false,
+        snap: false,
+      }),
     ).rejects.toThrow("Cannot read");
   });
 });
@@ -74,6 +109,31 @@ it("treats a dangling installation marker as present and unreadable", async () =
     "junction",
   );
   await expect(
-    installedDistribution({ resources, platform: "linux", packaged: true, store: false }),
+    installedDistribution({
+      resources,
+      platform: "linux",
+      packaged: true,
+      store: false,
+      snap: false,
+    }),
   ).rejects.toThrow("Cannot read");
+});
+
+describe("a Snap", () => {
+  it("is the app snapd mounted, not a terminal that inherited another snap's variables", () => {
+    const env = { SNAP: "/snap/mr-streamer/x2", SNAP_INSTANCE_NAME: "mr-streamer" };
+    expect(snapName(env, "/snap/mr-streamer/x2/app/resources")).toBe("mr-streamer");
+    expect(snapName(env, "/opt/Mr. Streamer/resources")).toBeNull();
+    expect(snapName({}, "/snap/mr-streamer/x2/app/resources")).toBeNull();
+  });
+
+  it.each([
+    [{ XDG_CURRENT_DESKTOP: "ubuntu:GNOME" }, "gnome-libsecret"],
+    [{ XDG_CURRENT_DESKTOP: "XFCE" }, "gnome-libsecret"],
+    [{}, "gnome-libsecret"],
+    [{ XDG_CURRENT_DESKTOP: "KDE", KDE_SESSION_VERSION: "6" }, "kwallet6"],
+    [{ XDG_CURRENT_DESKTOP: "KDE", KDE_SESSION_VERSION: "5" }, "kwallet5"],
+  ])("pins a keyring for %o: %s", (env, store) => {
+    expect(snapPasswordStore(env)).toBe(store);
+  });
 });

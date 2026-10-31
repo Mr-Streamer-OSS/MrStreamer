@@ -200,9 +200,13 @@ export function findSettings(query: string, distribution: Distribution = "direct
     if (control.id === "update-channel" && !updatesInApp(distribution)) return false;
     const section = SETTINGS_SECTIONS.find((section) => section.id === control.section)!;
     const synonyms =
-      control.id === "update-check" && distribution === "pacman"
-        ? t("settings.search.pacman")
-        : t(control.synonyms);
+      control.id !== "update-check"
+        ? t(control.synonyms)
+        : distribution === "pacman"
+          ? t("settings.search.pacman")
+          : distribution === "snap"
+            ? t("settings.search.snap")
+            : t(control.synonyms);
     const text = normalize(`${t(control.label)} ${t(section.label)} ${synonyms}`);
     return words.every((word) => text.includes(word));
   });

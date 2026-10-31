@@ -1,0 +1,84 @@
+# Mr. Streamer as a strict Snap, made from the release deb without changing its app: the same
+# Electron, ffmpeg and ffprobe, confined, with Chromium's own sandbox on. Build it from an empty
+# folder holding this file and the exact deb as mrstreamer.deb; README.md is the runbook.
+name: mr-streamer
+title: Mr. Streamer
+base: core24
+adopt-info: mr-streamer
+summary: A clean, fast, open-source IPTV player
+description: |
+  Mr. Streamer plays live TV, movies and series from your own IPTV subscription, through an
+  Xtream Codes login or an M3U playlist. It comes with no channels or content of its own.
+
+  Browse channels with their programme guide, keep favourites and a watchlist, carry on where
+  you stopped, save copies to watch offline, and record live programmes. Subtitles and audio
+  tracks are yours to choose.
+
+  Your subscription's password is kept in your desktop's keyring (GNOME Keyring or KWallet),
+  never in plain text. If Mr. Streamer cannot reach it, it says how to connect it and saves
+  nothing until then.
+grade: stable
+confinement: strict
+license: GPL-3.0-only
+website: https://mrstreamer.app
+contact: mailto:hello@mrstreamer.app
+source-code: https://github.com/Mr-Streamer-OSS/MrStreamer
+issues: https://github.com/Mr-Streamer-OSS/MrStreamer/issues
+icon: snap/gui/icon.png
+platforms:
+  amd64:
+
+apps:
+  mr-streamer:
+    command: app/mrstreamer
+    desktop: usr/share/applications/mrstreamer.desktop
+    extensions: [gnome]
+    plugs:
+      - audio-playback
+      - browser-support
+      - home
+      - network
+      - network-bind
+      - password-manager-service
+      - removable-media
+      - screen-inhibit-control
+    slots:
+      - mpris
+
+plugs:
+  # Chromium's own sandbox needs user namespaces. Without this the app stops at launch; it never
+  # runs unsandboxed. Connecting it needs a Store declaration (README.md).
+  browser-support:
+    allow-sandbox: true
+
+slots:
+  # Chromium asks the session bus for org.mpris.MediaPlayer2.chromium.instance<pid>.
+  mpris:
+    interface: mpris
+    name: chromium
+
+parts:
+  mr-streamer:
+    plugin: dump
+    source: mrstreamer.deb
+    source-type: deb
+    override-pull: |
+      craftctl default
+      # The deb writes a nightly's version as 0.0.23~nightly.x; the release calls it 0.0.23-nightly.x.
+      craftctl set version="$(dpkg-deb --field "$CRAFT_PROJECT_DIR/mrstreamer.deb" Version | tr '~' '-')"
+    override-build: |
+      craftctl default
+      desktop="$CRAFT_PART_INSTALL/usr/share/applications/mrstreamer.desktop"
+      grep -Fxq 'Exec="/opt/Mr. Streamer/mrstreamer" %U' "$desktop"
+      # Snapcraft names the app's command itself, but would split this path at its space.
+      sed -i 's|^Exec=.*|Exec=mr-streamer %U|' "$desktop"
+    organize:
+      opt/Mr. Streamer: app
+    prime:
+      # Snapd confines the app, and Chromium sandboxes with user namespaces: no SUID helper, and
+      # no AppArmor profile of the deb's own. Snapd updates it, so no updater files either.
+      - -app/chrome-sandbox
+      - -app/resources/apparmor-profile
+      - -app/resources/app-update.yml
+      - -app/resources/package-type
+      - -usr/share/doc

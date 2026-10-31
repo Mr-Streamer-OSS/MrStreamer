@@ -1,7 +1,8 @@
 // Updates, in Settings > Updates: the version and where its update stands, with the one action
 // it needs, then the channel, and the offered release's notes. The top bar's notice and these
 // rows share the updates service's state, so an action in either shows in both. A copy the
-// Microsoft Store installed gets one row instead, which opens the Store. Arch copies name the AUR upgrade route.
+// Microsoft Store installed gets one row instead, which opens the Store. Arch copies name the AUR
+// upgrade route, and Snaps the command that refreshes them.
 import type { CheckFailure, UpdateStatus } from "@mrstreamer/contracts/updates";
 import type { Channel } from "@mrstreamer/contracts/version";
 import { formatDate, formatPercent, t } from "@mrstreamer/core/i18n";
@@ -60,8 +61,11 @@ export function UpdatesSection() {
       </Section>
     );
   }
-  if (status.distribution === "pacman") {
-    const instructions = t("Updates come from the AUR. Use an AUR helper or makepkg.");
+  if (status.distribution === "pacman" || status.distribution === "snap") {
+    const instructions =
+      status.distribution === "pacman"
+        ? t("Updates come from the AUR. Use an AUR helper or makepkg.")
+        : t("Snap updates Mr. Streamer on its own. To update now: sudo snap refresh mr-streamer");
     return (
       <Section title={t("Updates")}>
         <Row

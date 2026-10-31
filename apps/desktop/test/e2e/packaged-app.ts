@@ -1,6 +1,7 @@
 // Smoke test for a built app: connects it to the fake provider through the login form and checks
 // who updates the build: the Microsoft Store for an installed MSIX package, which runs from
-// WindowsApps, and the app itself for everything else. Then it plays a stream the player decodes
+// WindowsApps, snapd for a Snap, run as /snap/bin/mr-streamer, and the app itself for everything
+// else. Then it plays a stream the player decodes
 // directly and one the bundled ffmpeg has to convert. Then it leaves Watch for Home and comes
 // back, which must keep the one stream rather than open another. Then it plays a movie from
 // Movies, which the bundled ffprobe reads and ffmpeg repackages, skips ahead and leaves it. Then
@@ -24,7 +25,8 @@
 // doesn't, the text subtitle shows its line in place of the pictures, whatever its class, and no
 // longer after a skip past it, the build offers its system's receivers, and both notices have
 // text. The app runs with a throwaway profile and remote debugging on a random port; on macOS
-// pass --use-mock-keychain so the test never touches a real keychain.
+// pass --use-mock-keychain so the test never touches a real keychain. A Snap sees neither the
+// system's /tmp nor hidden folders, so its run sets TMPDIR to a visible folder in the home.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -50,7 +52,11 @@ import {
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
 if (!executable) throw new Error("Usage: node test/e2e/packaged-app.ts <app executable> [-- args]");
-const updater = /[\\/]WindowsApps[\\/]/i.test(executable) ? "store" : "direct";
+const updater = /[\\/]WindowsApps[\\/]/i.test(executable)
+  ? "store"
+  : executable.startsWith("/snap/")
+    ? "snap"
+    : "direct";
 const target =
   process.platform === "darwin"
     ? "mac-arm64"

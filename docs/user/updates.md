@@ -1,6 +1,6 @@
 # Updates and channels
 
-Mr. Streamer looks for updates on its own, a little after it starts and then every four hours, unless you installed it through [the AUR](#installed-through-the-aur) or [the Microsoft Store](#installed-from-the-microsoft-store). It never downloads or restarts without you: you download an update, and then choose when to restart into it. Your login, preferences, favourites and history stay through every update.
+Mr. Streamer looks for updates on its own, a little after it starts and then every four hours, unless you installed it through [the AUR](#installed-through-the-aur), [as a Snap](#installed-as-a-snap) or from [the Microsoft Store](#installed-from-the-microsoft-store). It never downloads or restarts without you: you download an update, and then choose when to restart into it. Your login, preferences, favourites and history stay through every update.
 
 ## When an update is available
 
@@ -20,7 +20,7 @@ Starting with the 0.0.21 client, direct and Homebrew Stable copies show a center
 
 The reminder appears at most once per app process launch, while you browse. Full Watch and movie or episode playback defer it until you return; the muted Home preview does not. **Not now** or Escape closes it and returns keyboard focus, leaving the quiet **Update** entry available. Rechecking, reopening the window or finding a newer offer during that launch does not repeat a reminder already shown. The next app launch can remind you again. **Download** starts only when you choose it, and restart still needs your confirmation.
 
-Nightly, Microsoft Store and AUR copies keep their existing update behavior.
+Nightly, Microsoft Store, AUR and Snap copies keep their existing update behavior.
 
 ## Updates in Settings
 
@@ -66,6 +66,28 @@ Your login, preferences, favourites, watchlist, playback progress, downloaded co
 
 To uninstall, run `sudo pacman -R mrstreamer-bin`. This removes the app and keeps your profile, downloaded copies and keyring credentials. Installing it again reuses them.
 
+## Installed as a Snap
+
+The Snap is built and tested from each release, but it is not in the Snap Store yet: the Store still has to allow the connection Chromium's sandbox needs. Until it's published there, install a Snap only from a build the project gives you. These notes describe how it works.
+
+Snapd updates the Snap on its own, so Mr. Streamer never looks for updates, downloads them or offers a channel. Settings > **Updates** shows your version and the command that updates it now: `sudo snap refresh mr-streamer`. Snapd waits to update while Mr. Streamer is open, and tells you when it needs you to close it.
+
+Your login is kept in your desktop's keyring: GNOME Keyring, or KWallet on KDE. The Snap never falls back to saving it in plain text. If the keyring can't be reached, adding a subscription fails and names the command that connects Mr. Streamer to it, which you run once:
+
+```sh
+sudo snap connect mr-streamer:password-manager-service
+```
+
+Check that your keyring is running and unlocked too. On a desktop without one, such as a plain Openbox session, start GNOME Keyring first.
+
+The Snap keeps its data with each version snapd keeps, in `~/snap/mr-streamer/`, downloaded copies included:
+
+- **Updates** copy everything to the new version, so your login, preferences, favourites, watchlist, progress, copies and saved subtitles carry over. Until snapd drops the older version, the copies take their space twice; `du -sh ~/snap/mr-streamer/*` shows how much.
+- **Going back** with `sudo snap revert mr-streamer` returns the data as it was before the update. What you changed or downloaded after it comes back when you update again.
+- **Uninstalling** with `sudo snap remove mr-streamer` keeps a snapshot of your data for 31 days, which `snap saved` lists and `sudo snap restore` brings back. `sudo snap remove --purge mr-streamer` removes everything at once.
+
+The Snap is separate from the deb, the AppImage and the AUR copy. It can't read their data, and doesn't import it: add your subscription again, and your favourites, history and copies stay with the other install. Both can be installed and open at the same time. Copies save to the Snap's own folder; to save or open files on a USB drive or under `/media`, connect `removable-media` once: `sudo snap connect mr-streamer:removable-media`.
+
 ## Installed from the Microsoft Store
 
 The Microsoft Store updates a copy you installed from it, so Mr. Streamer never looks for updates or downloads them, and shows no update notice. Settings > **Updates** shows your version, updated by the Microsoft Store, and **Open Store** opens Mr. Streamer's page there. The Store only carries stable releases, so there's no channel to choose.
@@ -78,7 +100,7 @@ The Store copy and a copy installed from the setup file are separate. Each keeps
 
 ## Stable and Nightly
 
-These channels apply to direct downloads and Homebrew. The AUR and Microsoft Store carry stable releases and manage updates separately.
+These channels apply to direct downloads and Homebrew. The AUR, the Snap and the Microsoft Store carry stable releases and manage updates separately.
 
 - **Stable** gets tested releases only.
 - **Nightly** gets new builds first, up to four a day when there are changes. It never offers a stable release: each stable release is a tested nightly, so the nightlies carry its changes. Nightly builds can have rough edges.

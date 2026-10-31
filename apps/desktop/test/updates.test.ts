@@ -434,37 +434,40 @@ describe("a copy the Microsoft Store installed", () => {
   });
 });
 
-describe("a copy managed by pacman", () => {
-  it("ignores stale direct update state and leaves every update action inert", async () => {
-    const dataDir = await tempDir();
-    const path = join(dataDir, "updates.json");
-    const stored = JSON.stringify({ channel: "nightly", dismissed: "0.0.18", future: "keep" });
-    await writeFile(path, stored);
-    const service = await startUpdates({ dataDir, installed: "0.0.17", managed: "pacman" });
-    const initial = await service.status();
-    expect(initial).toEqual({
-      version: "0.0.17",
-      distribution: "pacman",
-      channel: "stable",
-      update: { kind: "idle" },
-      offer: null,
-      checked: null,
-      nextCheckAt: null,
-      dismissed: null,
-    });
-    expect(await service.check()).toEqual(initial);
-    expect(await service.download()).toEqual(initial);
-    expect(await service.setChannel("nightly")).toEqual(initial);
-    expect(await service.dismiss("0.0.18")).toEqual(initial);
-    await service.cancel();
-    await service.restart();
-    await service.openStore();
-    expect(await readdir(dataDir)).toEqual(["updates.json"]);
-    expect(await readFile(path, "utf8")).toBe(stored);
-    const direct = await updates("0.0.17", [], { dataDir });
-    expect((await direct.service.status()).distribution).toBe("direct");
-    expect((await direct.service.status()).channel).toBe("nightly");
-  });
+describe("a copy managed by pacman or snapd", () => {
+  it.each(["pacman", "snap"] as const)(
+    "ignores stale direct update state and leaves every %s update action inert",
+    async (managed) => {
+      const dataDir = await tempDir();
+      const path = join(dataDir, "updates.json");
+      const stored = JSON.stringify({ channel: "nightly", dismissed: "0.0.18", future: "keep" });
+      await writeFile(path, stored);
+      const service = await startUpdates({ dataDir, installed: "0.0.17", managed });
+      const initial = await service.status();
+      expect(initial).toEqual({
+        version: "0.0.17",
+        distribution: managed,
+        channel: "stable",
+        update: { kind: "idle" },
+        offer: null,
+        checked: null,
+        nextCheckAt: null,
+        dismissed: null,
+      });
+      expect(await service.check()).toEqual(initial);
+      expect(await service.download()).toEqual(initial);
+      expect(await service.setChannel("nightly")).toEqual(initial);
+      expect(await service.dismiss("0.0.18")).toEqual(initial);
+      await service.cancel();
+      await service.restart();
+      await service.openStore();
+      expect(await readdir(dataDir)).toEqual(["updates.json"]);
+      expect(await readFile(path, "utf8")).toBe(stored);
+      const direct = await updates("0.0.17", [], { dataDir });
+      expect((await direct.service.status()).distribution).toBe("direct");
+      expect((await direct.service.status()).channel).toBe("nightly");
+    },
+  );
 });
 
 describe("overlapping checks", () => {
@@ -1014,8 +1017,12 @@ describe("launch update reminders", () => {
     expect((await service.download()).update.kind).toBe("ready");
   });
 
-  it("leaves Store and AUR update ownership inert", async () => {
-    for (const managed of [{ openStore: async () => {} }, { managed: "pacman" as const }]) {
+  it("leaves Store, AUR and Snap update ownership inert", async () => {
+    for (const managed of [
+      { openStore: async () => {} },
+      { managed: "pacman" as const },
+      { managed: "snap" as const },
+    ]) {
       const service = await startUpdates({
         installed: "0.0.21",
         dataDir: await tempDir(),

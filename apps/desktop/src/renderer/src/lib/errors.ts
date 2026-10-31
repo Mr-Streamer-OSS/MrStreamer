@@ -49,7 +49,12 @@ export function describeError(error: AppError): string {
         ? t(
             "The macOS Keychain would not store your password. Quit and reopen Mr. Streamer, then try again. See Troubleshooting before resetting Safe Storage.",
           )
-        : t("Your system's keychain would not store your password.");
+        : error.connect
+          ? t(
+              "Your system's keychain would not store your password. Check that GNOME Keyring or KWallet is running and unlocked, and connect Mr. Streamer to it once in a terminal: {command}",
+              { command: error.connect },
+            )
+          : t("Your system's keychain would not store your password.");
     case "channel-not-found":
       return t("This channel is no longer in the provider's list.");
     case "catch-up":
