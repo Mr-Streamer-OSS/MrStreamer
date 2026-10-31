@@ -880,11 +880,12 @@ describe.skipIf(!hasTools)("recordings", () => {
     await recordings.setLimits({ keepFree: Number.MAX_SAFE_INTEGER, space: null });
     // As on a fresh profile, its folder isn't there yet: its disk is still measured.
     await rm(join(dataDir, "recordings"), { recursive: true });
-    const before = provider.streamRequests();
+    const asked = () => [provider.streamRequests(), provider.guideRequests()];
+    const before = asked();
     await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject({
       error: { kind: "unexpected", detail: "There isn't enough free space to record." },
     });
-    expect(provider.streamRequests()).toBe(before);
+    expect(asked()).toEqual(before);
     expect(await recordings.list()).toEqual([]);
   });
 
@@ -1216,7 +1217,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
   });
 
   it("owes a time a change moved it onto, already under way, from when the change was saved", async () => {
-    const { dataDir, subscriptionId, channel, recordings, quit } = await scheduling();
+    const { dataDir, subscriptionId, channel, recordings, playback, quit } = await scheduling();
     const slot = (start: number): RecordingPlan => {
       const at = new Date(start);
       return {
@@ -1229,41 +1230,41 @@ describe.skipIf(!hasTools)("recording schedules", () => {
         padding: { before: 0, after: 0 },
       };
     };
+    // Watch holds the one connection, so nothing captures before the app closes.
+    const watching = await playback.open(channel(GUIDED), ["h264", "aac"]);
+    const player = await fetch(watching.url);
+    await player.body?.getReader().read();
     // Saved at ten past for later; changed at forty past onto half past, ten minutes under way.
     const saved = await recordings.schedule(slot(TEN_PAST + 110 * MINUTE));
     vi.setSystemTime(TEN_PAST + 30 * MINUTE);
     const changedFrom = Date.now();
     await recordings.schedule(slot(TEN_PAST + 20 * MINUTE), saved.id);
     const changedBy = Date.now();
-    const [recording] = await until(
-      recordings.list,
-      ([first]) => first?.status.kind === "recording",
-    );
-    // The time it is still names it; nothing before the change counts as late or missed.
-    expect(recording?.scheduled).toEqual({
-      schedule: saved.id,
-      from: TEN_PAST + 20 * MINUTE,
-      owed: expect.any(Number),
-      late: null,
-    });
-    expect(recording!.scheduled!.owed).toBeGreaterThanOrEqual(changedFrom);
-    expect(recording!.scheduled!.owed).toBeLessThanOrEqual(changedBy);
-    await recordings.stop(recording!.id);
+    await until(recordings.schedules, ([first]) => first?.status.kind === "waiting");
     await quit();
 
-    // Kept with the schedule, so the time it owes stays after the app starts again.
+    // Kept with the schedule: after the app starts again, the time it records is still named by
+    // its start and owed from the change, its minutes before that neither late nor missed.
     const kept = JSON.parse(await readFile(join(dataDir, "recordings", "schedules.json"), "utf8"));
-    expect(kept.schedules[0].owed).toEqual({
-      from: TEN_PAST + 20 * MINUTE,
-      at: recording!.scheduled!.owed,
-    });
+    expect(kept.schedules[0].owed.from).toBe(TEN_PAST + 20 * MINUTE);
+    vi.setSystemTime(TEN_PAST + 35 * MINUTE);
     const again = await app(dataDir);
     onTestFinished(again.quit);
     await again.library.refresh(subscriptionId);
     await again.recordings.check();
-    expect(await again.recordings.list()).toEqual([
-      expect.objectContaining({ id: recording!.id, scheduled: recording!.scheduled }),
-    ]);
+    const [recording] = await until(
+      again.recordings.list,
+      ([first]) => first?.status.kind === "recording",
+    );
+    expect(recording?.scheduled).toEqual({
+      schedule: saved.id,
+      from: TEN_PAST + 20 * MINUTE,
+      owed: kept.schedules[0].owed.at,
+      late: "away",
+    });
+    expect(recording!.scheduled!.owed).toBeGreaterThanOrEqual(changedFrom);
+    expect(recording!.scheduled!.owed).toBeLessThanOrEqual(changedBy);
+    await again.recordings.stop(recording!.id);
   });
 
   it("writes a missed result for a time that passed while the app was closed, and records the rest of one it wakes into", async () => {

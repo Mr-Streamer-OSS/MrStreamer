@@ -100,7 +100,8 @@ export interface Recording {
   readonly gaps?: readonly RecordingGap[];
   /**
    * How it ended couldn't be written down yet, as while its disk refuses writes: the app tries
-   * again, and until then a restart would read it as cut short by the quit.
+   * again. Until then a restart reads it as one the app didn't see end: it goes on while its time
+   * remains, else it is cut short by the quit.
    */
   readonly unsaved?: boolean;
 }

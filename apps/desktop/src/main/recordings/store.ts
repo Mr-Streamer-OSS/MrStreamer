@@ -5,7 +5,9 @@
 //   { "version": 1, "recordings": [ { "id": …, "file": "….ts", "status": { "kind": … }, … } ] }
 //
 // A recording whose time goes on stays `recording` while capture waits to go on, its open gap
-// saying since when and why. A build from before gaps reads it as one the app didn't see end.
+// saying since when and why. A build from before gaps reads it as one the app didn't see end. A
+// build from before storage.json knows only the folder beside recordings.json: it lists one made
+// in a chosen folder as missing, and its Delete takes the record and leaves the file.
 //
 // storage.json beside them keeps where new recordings go and the room they may take:
 //

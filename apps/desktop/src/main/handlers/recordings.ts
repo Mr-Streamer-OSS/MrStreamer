@@ -1,4 +1,6 @@
 import { ownedId } from "@mrstreamer/contracts/subscription";
+import { Failed } from "@mrstreamer/core/failure";
+import { t } from "@mrstreamer/core/i18n";
 import * as Effect from "effect/Effect";
 import type { HandlersFor } from "../ipc.ts";
 import type { Library } from "../services/library.ts";
@@ -69,7 +71,13 @@ export function recordingHandlers({
     "recordings.openFolder": () =>
       Effect.gen(function* () {
         const { folder } = yield* recordings.storage;
-        yield* Effect.promise(() => openFolder(folder));
+        yield* Effect.tryPromise({
+          try: () => openFolder(folder),
+          catch: () =>
+            new Failed({
+              error: { kind: "unexpected", detail: t("The folder couldn't be opened.") },
+            }),
+        });
         return null;
       }),
   };

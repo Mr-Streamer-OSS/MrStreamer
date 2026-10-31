@@ -1337,6 +1337,7 @@ export const de: Translation = {
   "{episode} didn't download": "{episode} wurde nicht heruntergeladen",
   "Recordings could not be read.": "Aufnahmen konnten nicht gelesen werden.",
   "Recordings could not be saved.": "Aufnahmen konnten nicht gespeichert werden.",
+  "The folder couldn't be opened.": "Der Ordner konnte nicht geöffnet werden.",
   "There isn't enough free space to record.":
     "Es ist nicht genug freier Speicher für die Aufnahme da.",
   "Recording settings could not be saved.":

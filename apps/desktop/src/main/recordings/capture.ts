@@ -53,6 +53,10 @@ export type CaptureEnd = "until" | "aborted" | "space" | "ended" | Exclude<Recor
 export interface Capture {
   /** Bytes on disk so far. */
   bytes(): number;
+  /** When the last bytes were written, or capture began: what came after, until it ended, was lost. */
+  lastWrite(): number;
+  /** Which of the sources it captures, by its place among them. */
+  readonly source: number;
   /** Settles once the provider's request has ended and the file is closed, never rejecting. */
   readonly ended: Promise<CaptureEnd>;
 }
@@ -77,8 +81,17 @@ export async function startCapture(
     readonly append?: boolean;
   },
 ): Promise<Capture> {
-  // Appending takes the file as it is, or makes it when it went.
-  const file = await open(path, options.append ? "a+" : "wx").catch((cause: unknown) => {
+  // Appending takes the file as it is, or makes it when it went. Not in append mode, which
+  // Windows opens without the right to truncate it.
+  const file = await (
+    options.append
+      ? open(path, "r+").catch((cause: unknown) =>
+          cause instanceof Error && "code" in cause && cause.code === "ENOENT"
+            ? open(path, "wx")
+            : Promise.reject(cause),
+        )
+      : open(path, "wx")
+  ).catch((cause: unknown) => {
     throw new DiskFailure(cause instanceof Error ? cause.message : String(cause));
   });
   const before = options.append
@@ -90,6 +103,7 @@ export async function startCapture(
   // The stop time also ends a start that takes that long.
   const deadline = AbortSignal.timeout(Math.max(0, options.until - Date.now()));
   let written = before;
+  let wroteAt = Date.now();
   // Every byte, at its offset: a source that failed before leaves the file emptied, but not its
   // position.
   const write = async (chunk: Uint8Array) => {
@@ -104,10 +118,11 @@ export async function startCapture(
       offset += bytesWritten;
       written += bytesWritten;
     }
+    wroteAt = Date.now();
     options.changed();
   };
   let last: unknown = new CaptureFailure({ kind: "unavailable", status: 404 });
-  for (const source of sources) {
+  for (const [index, source] of sources.entries()) {
     const stop = new AbortController();
     const signal = AbortSignal.any([options.signal, deadline, stop.signal]);
     let opened: Opened | null = null;
@@ -116,6 +131,8 @@ export async function startCapture(
       await startTable(opened.chunks, write, signal);
       return {
         bytes: () => written,
+        lastWrite: () => wroteAt,
+        source: index,
         ended: run(opened, write, file, stop, deadline, { room: () => true, ...options }),
       };
     } catch (cause) {

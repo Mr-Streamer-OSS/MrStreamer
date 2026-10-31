@@ -205,19 +205,13 @@ let staysWithoutWindow = () => false;
 const RECORDING_WAIT_MS = 5000;
 
 /**
- * `installer`, waiting while `recording` says a recording's time goes on: the update restarts the
- * app once it has ended. `confirm` lets that restart quit without asking, and takes that back
- * when the system refuses the release and the app goes on.
+ * `installer`, whose restart quits without asking: `confirm` says so as it installs, and takes
+ * that back when the system refuses the release and the app goes on.
  */
-function afterRecording(
-  installer: Installer,
-  recording: () => boolean,
-  confirm: (confirmed: boolean) => void,
-): Installer {
+function confirming(installer: Installer, confirm: (confirmed: boolean) => void): Installer {
   return {
     ...installer,
     install: async () => {
-      while (recording()) await sleep(RECORDING_WAIT_MS);
       confirm(true);
       try {
         return await installer.install();
@@ -526,11 +520,7 @@ async function start(): Promise<void> {
             // A test feed serves its own files.
             ...(process.env["MR_STREAMER_UPDATE_FEED"] ? { filesFrom: "" } : {}),
           }),
-          installer: afterRecording(
-            electronInstaller(),
-            () => recordingNow(),
-            (confirmed) => (quitConfirmed = confirmed),
-          ),
+          installer: confirming(electronInstaller(), (confirmed) => (quitConfirmed = confirmed)),
           schedule: process.env["MR_STREAMER_UPDATE_CHECKS"] === "off" ? null : DEFAULT_SCHEDULE,
         };
     }
@@ -642,6 +632,31 @@ async function start(): Promise<void> {
   };
   powerMonitor.on("shutdown", shutsDown);
   recordingNow = () => runtime.runSync(recordings.live).recording;
+  /**
+   * The update's restart, once nothing records: one wait however often it is asked for, and only
+   * for the release that was ready, still ready and not put off meanwhile.
+   */
+  let restarting: Promise<void> | null = null;
+  const restartAfterRecording = Effect.promise(() => {
+    restarting ??= (async () => {
+      const asked = (await runtime.runPromise(updates.status)).update;
+      if (asked.kind !== "ready") return;
+      while (recordingNow()) await sleep(RECORDING_WAIT_MS);
+      const now = await runtime.runPromise(updates.status);
+      if (now.update.kind !== "ready" || now.update.version !== asked.version) return;
+      if (now.dismissed === asked.version) return;
+      await runtime.runPromise(updates.restart);
+    })().finally(() => {
+      restarting = null;
+    });
+    return restarting;
+  });
+  // A system that ends the session, as a Linux logout, asks the app to end this way.
+  for (const signal of ["SIGTERM", "SIGHUP"] as const)
+    process.on(signal, () => {
+      shuttingDown = true;
+      app.quit();
+    });
   powerMonitor.on("unlock-screen", woke);
 
   // mrstreamer://download/<id>/<poster|wide>: a download's kept picture, from its own folder.
@@ -850,13 +865,15 @@ async function start(): Promise<void> {
         },
         openFolder: async (folder) => {
           await mkdir(folder, { recursive: true }).catch(() => {});
-          await shell.openPath(folder);
+          // The system answers with why it couldn't, or nothing.
+          const failed = await shell.openPath(folder);
+          if (failed) throw new Error(failed);
         },
       }),
       ...analyticsHandlers({ analytics, playback }),
       ...preferenceHandlers({ preferences }),
       ...updateHandlers({
-        updates,
+        updates: { ...updates, restart: restartAfterRecording },
         storeReview: storeCopy ? () => shell.openExternal(STORE_REVIEW) : null,
       }),
       ...aboutHandlers({ licences, exporter, window: () => mainWindow }),
@@ -1051,10 +1068,12 @@ async function start(): Promise<void> {
   };
   // First, so the profile is handed on only by a quit that goes ahead.
   app.prependListener("before-quit", (event) => {
+    // Once closing, the runtime is going: nothing more to ask or tell it.
+    if (closing) return;
     // On macOS every Quit is the viewer's; a shutdown says so first.
     const chosen = isMac || quitChosen;
     quitChosen = false;
-    if (chosen && !quitConfirmed && !shuttingDown && !closing && recordingNow()) {
+    if (chosen && !quitConfirmed && !shuttingDown && recordingNow()) {
       event.preventDefault();
       askToQuit();
       return;
