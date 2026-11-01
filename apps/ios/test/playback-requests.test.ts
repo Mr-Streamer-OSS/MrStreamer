@@ -556,14 +556,20 @@ describe("an episode's end", () => {
   });
 
   it.each([
-    ["a skip", () => seekBy(10)],
-    ["a scrub", () => seekTo(600)],
-  ])("counts down for the end that %s to the end brings", async (_, act) => {
+    ["a skip", () => seekBy(10), false],
+    ["a scrub", () => seekTo(600), false],
+    ["a skip just after an earlier seek", () => seekBy(10), true],
+    ["a scrub just after an earlier seek", () => seekTo(600), true],
+  ] as const)("counts down for the end that %s to the end brings", async (_, act, earlier) => {
     playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
     await settle();
     startsAt();
     fakePlayer.state(true);
     fakePlayer.currentTime = 595;
+    if (earlier) {
+      seekTo(595);
+      vi.advanceTimersByTime(1_000);
+    }
     act();
     fakePlayer.currentTime = 600;
     fakePlayer.observation({ kind: "ended" });

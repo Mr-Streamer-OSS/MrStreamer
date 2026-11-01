@@ -298,7 +298,7 @@ const TOUCH_OVERTAKES = 2000;
 function moved(to: number) {
   cancelUpNext();
   const end = length.get();
-  if (!end || to < end - 1) touched = Date.now();
+  touched = !end || to < end - 1 ? Date.now() : -Infinity;
 }
 
 /** Retires every waiting request, the countdown to a next episode with them. */
