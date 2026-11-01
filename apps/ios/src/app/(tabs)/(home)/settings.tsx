@@ -65,12 +65,12 @@ const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
 
 /**
  * Settings as one list: the interface language first, then the providers, each a row with Add
- * provider and Guides, the XMLTV guides added apart from theirs, under them, then Downloads, a row with what they take that
- * opens them, Media policies, Subtitles, TMDB with the viewer's key and how it answers, Privacy
- * with its policy in the browser and Diagnostics, and About with Licences. TMDB's terms ask for
- * its logo and notice, as the desktop's Settings show them. It opens on whichever tab's top bar
- * asked for it, and what it opens goes on that tab too. All of it, its title too, shows in the
- * interface language, and again at once in the one chosen here.
+ * provider and Guides, the XMLTV guides added apart from theirs, under them, then Downloads, a
+ * row with what they take that opens them, Media policies, Subtitles, TMDB with the viewer's key
+ * and how it answers, Privacy with its policy in the browser and Diagnostics, and About with
+ * Licences. TMDB's terms ask for its logo and notice, as the desktop's Settings show them. It
+ * opens on whichever tab's top bar asked for it, and what it opens goes on that tab too. All of
+ * it, its title too, shows in the interface language, and again at once in the one chosen here.
  */
 export default function Settings() {
   const roster = useRoster();
@@ -88,18 +88,17 @@ export default function Settings() {
   const systemLanguage = t("System default ({language})", {
     language: mediaLanguageName(deviceLanguage),
   });
+  const systemInterface = t("System default ({language})", {
+    language: LANGUAGE_NAMES[language.system],
+  });
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
       <Section name={t("General")} />
       <Opens
         label={t("Interface language")}
-        value={
-          language.choice === "system"
-            ? t("System default ({language})", { language: LANGUAGE_NAMES[language.system] })
-            : LANGUAGE_NAMES[language.locale]
-        }
+        value={language.choice === "system" ? systemInterface : LANGUAGE_NAMES[language.locale]}
         role="button"
-        onPress={() => pickLanguage(LANGUAGE_NAMES[language.system])}
+        onPress={() => pickLanguage(systemInterface)}
         testID="settings-interface-language"
       />
 
@@ -313,12 +312,12 @@ const qualityNames: Record<Quality, string> = { uhd: "4K", fhd: "Full HD", hd: "
 const sizeNames = { small: "Small", medium: "Medium", large: "Large" } as const;
 
 /**
- * Offers System default, following `system`, and each interface language by its own name, as a
+ * Offers System default, labelled `system`, and each interface language by its own name, as a
  * system sheet. A pick shows at once; one that couldn't be saved changes nothing and says so.
  */
 function pickLanguage(system: string) {
   const choices: readonly { readonly label: string; readonly value: LanguageChoice }[] = [
-    { label: t("System default ({language})", { language: system }), value: "system" },
+    { label: system, value: "system" },
     ...LOCALES.map((locale) => ({ label: LANGUAGE_NAMES[locale], value: locale })),
   ];
   ActionSheetIOS.showActionSheetWithOptions(

@@ -50,7 +50,7 @@ const shortcuts = (): readonly Shortcut<Tab | "search" | "settings" | "back">[] 
 export default function TabsLayout() {
   const { locale } = useInterfaceLanguage();
   // Made again for a new language only: the native module installs them whenever they change.
-  const titled = useMemo(() => shortcuts(), [locale]);
+  const titled = useMemo(shortcuts, [locale]);
   useCloseOnTabChange();
   const { phase, watch, pip, external, aside } = usePlayback();
   const segments: readonly string[] = useSegments();
