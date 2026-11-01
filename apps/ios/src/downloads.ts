@@ -2072,12 +2072,12 @@ function playCopy(id: string, record: Stored) {
   };
   /**
    * The copy that goes on once this one's save ended and every earlier one settled; none when
-   * the save was refused or the viewer asked for anything else meanwhile (`stands`).
+   * the save was refused.
    */
-  const following = async (saved: Promise<Saved>, stands: () => boolean) => {
+  const following = async (saved: Promise<Saved>) => {
     if (!(await saved).saved) return;
     await progressSettled();
-    return stands() ? after() : undefined;
+    return after();
   };
   const since = Date.now();
   const item: Playing = {
@@ -2133,20 +2133,20 @@ function playCopy(id: string, record: Stored) {
       progress: (position, duration) => keepProgress(id, position, duration, since),
       next: (saved) => {
         const asked = request();
-        void following(saved, asked.stands).then((next) => next && playCopy(next.id, next));
+        void following(saved).then((next) => next && asked.stands() && playCopy(next.id, next));
       },
       // Counts down only to that same local copy, and ends once it no longer plays: a copy that
       // isn't downloaded is never streamed instead.
       upNext: async (saved) => {
-        const next = await following(saved, () => true);
+        const next = await following(saved);
         if (!next) return null;
         return {
           place: placeOf(next),
           stands: () => after()?.id === next.id,
-          // As its record stands at zero, for where it was left.
+          // Playback asks `stands` just before, so this is that copy as its record stands at zero.
           play: () => {
             const copy = after();
-            if (copy?.id === next.id) playCopy(copy.id, copy);
+            if (copy) playCopy(copy.id, copy);
           },
         };
       },
