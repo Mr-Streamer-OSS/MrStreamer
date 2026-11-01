@@ -38,17 +38,18 @@ export function useInterfaceLanguage(): InterfaceLanguage {
 }
 
 /**
- * Saves `choice` and shows the app in it. False when it couldn't be saved: the language stays as
- * it was, as it would after a relaunch.
+ * Saves `choice` and shows the app in what a relaunch would then show. A write cut short can leave
+ * either choice in the files (files.ts keeps a half-done write under its pending name, which a
+ * read takes), so the files are read back rather than trusted. True when they hold `choice`.
  */
 export function chooseLanguage(choice: LanguageChoice): boolean {
   try {
     writeJson(FILE, { choice });
   } catch {
-    return false;
+    // Read back below.
   }
-  const next = resolveLanguage(choice, systemTags());
+  const next = resolveLanguage(savedChoice(), systemTags());
   setLanguage(next);
   language.set(next);
-  return true;
+  return next.choice === choice;
 }

@@ -95,7 +95,9 @@ let unmount = () => {};
 afterEach(async () => {
   unmount();
   const { native } = await import("./native-files.ts");
-  rmSync(join(native.root, "documents", "language.json"), { force: true });
+  for (const name of ["language.json", "language.json.next"]) {
+    rmSync(join(native.root, "documents", name), { force: true });
+  }
   Object.assign(scenario, { phone: ["en-US"], sheet: null, title: "", members: [] });
   scenario.alerts.length = 0;
 });
@@ -180,17 +182,26 @@ it("returns to the iPhone's language when System default is picked again", async
   expect((await launch("settings")).language()).toBe("Langue de l'interface, Système (Français)");
 });
 
-it("keeps the language it shows when the choice can't be saved, and says so", async () => {
+/** Picks `label` while the files stand-in refuses `step`, as a full or failing disk would. */
+async function chooseRefused(
+  settings: Awaited<ReturnType<typeof launch>>,
+  label: string,
+  step: string,
+) {
   const { native } = await import("./native-files.ts");
-  const settings = await launch("settings");
-  native.sync = () => {
-    throw new Error("disk full");
+  native.sync = (operation) => {
+    if (operation === step) throw new Error("disk full");
   };
   try {
-    settings.choose("Deutsch");
+    settings.choose(label);
   } finally {
     native.sync = null;
   }
+}
+
+it("keeps the language it shows when the choice can't be written, and says so", async () => {
+  const settings = await launch("settings");
+  await chooseRefused(settings, "Deutsch", "write");
   expect(settings.language()).toBe("Interface language, System default (English)");
   expect(scenario.alerts).toEqual([
     {
@@ -202,4 +213,30 @@ it("keeps the language it shows when the choice can't be saved, and says so", as
   expect((await launch("settings")).language()).toBe(
     "Interface language, System default (English)",
   );
+});
+
+it("keeps the saved choice when the new one can't replace it", async () => {
+  const settings = await launch("settings");
+  settings.choose("Nederlands");
+  await chooseRefused(settings, "Deutsch", "move");
+  expect(settings.language()).toBe("Taal van de interface, Nederlands");
+  expect(scenario.alerts).toEqual([
+    {
+      title: "Kon de taal niet bewaren",
+      message: "Je vorige keuze is nog bewaard. Probeer het opnieuw.",
+    },
+  ]);
+  unmount();
+  expect((await launch("settings")).language()).toBe("Taal van de interface, Nederlands");
+});
+
+it("shows the choice a half-done replacement left, as the next launch reads it", async () => {
+  const settings = await launch("settings");
+  settings.choose("Nederlands");
+  // The old file is gone; the new choice waits under the pending name, which a read takes.
+  await chooseRefused(settings, "Deutsch", "move-after-delete");
+  expect(settings.language()).toBe("Sprache der Oberfläche, Deutsch");
+  expect(scenario.alerts).toEqual([]);
+  unmount();
+  expect((await launch("settings")).language()).toBe("Sprache der Oberfläche, Deutsch");
 });
