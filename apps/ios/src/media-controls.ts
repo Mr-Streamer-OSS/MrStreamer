@@ -24,7 +24,7 @@ import {
 // the viewer's Pause, the countdown and every request as Watch would. A command names what showed
 // when it was sent, and one for anything shown before is dropped. Play and pause; 10 seconds
 // back and forward and moving to a position, for a title or a programme from catch-up; and next,
-// for an episode with one after it. A channel takes only play and pause.
+// for an episode with one after it while Watch shows it. A channel takes only play and pause.
 
 interface NowPlaying {
   /** Rises for each item shown; commands carry the one they were sent for. */
@@ -85,7 +85,8 @@ function nowPlaying(): {
     rate: phase.kind === "playing" ? speed : 0,
     speed,
     seekable: !item.live,
-    next: item.next,
+    // Watch's Next episode, which shows nowhere else: elsewhere it would bring Watch back.
+    next: item.next && watch,
   };
   return { item, info };
 }

@@ -1316,6 +1316,7 @@ describe("the system's Now Playing and remote commands", () => {
     asked();
     await send({ command: "play" });
     expect(port.pause).not.toHaveBeenCalled();
+    expect(port.play).not.toHaveBeenCalled();
     await send({ command: "pause" });
     expect(port.pause).toHaveBeenCalledTimes(1);
     await React.act(async () => {
@@ -1331,6 +1332,27 @@ describe("the system's Now Playing and remote commands", () => {
     expect(port.currentTime).toBe(120);
     await send({ command: "next" });
     expect(nexts).toEqual(["Next episode"]);
+  });
+
+  it("clears Now Playing and its commands when the stream fails", async () => {
+    await watchEpisode();
+    await React.act(async () => {
+      port.failure();
+      await tick();
+    });
+    expect(system.shown).toBeNull();
+    expect(port.ownsNowPlaying).toBe(false);
+  });
+
+  it("offers next only while Watch shows, as Watch's Next episode", async () => {
+    await watchEpisode();
+    await React.act(async () => {
+      playback.setAside();
+      await tick();
+    });
+    expect(system.shown?.next).toBe(false);
+    await send({ command: "next" });
+    expect(nexts).toEqual([]);
   });
 
   it("drops a command sent for what showed before", async () => {
@@ -1461,15 +1483,26 @@ describe("speed in Watch", () => {
     expect(port.playbackRate).toBe(1.5);
   });
 
-  it("plays a live channel at its own speed, offering none", async () => {
+  it("plays a live channel and a programme from its catch-up at their own speed, offering none", async () => {
     preferences.updateMediaPreferences("titleSpeed", 2);
     port.playbackRate = 2;
-    await connect([null, null, null]);
+    await connect([3, 3, 3]);
     await React.act(async () => {
       account.playChannel(channel, "News", { watch: true });
       await tick();
     });
     await until(() => port.playbackRate === 1);
+    expect(button("watch-speed")).toBeNull();
+
+    port.playbackRate = 2;
+    await play(aired(2 * HOUR));
+    await until(() => port.playbackRate === 1);
+    await React.act(async () => {
+      port.ready();
+      port.state(true);
+      await tick();
+    });
+    expect(button("watch-audio")).not.toBeNull();
     expect(button("watch-speed")).toBeNull();
   });
 });

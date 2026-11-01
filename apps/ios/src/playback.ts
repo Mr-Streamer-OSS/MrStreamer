@@ -1967,7 +1967,7 @@ export function playOrPause(command: "play" | "pause" | "toggle") {
 
 /** The system's next track: the episode counted down to, at once, else Next episode's. */
 export function nextEpisode() {
-  if (counting?.play) playUpNext();
+  if (counting?.play && counting.stands()) playUpNext();
   else playNext();
 }
 

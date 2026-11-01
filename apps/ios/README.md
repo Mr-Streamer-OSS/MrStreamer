@@ -289,10 +289,12 @@ catch-up its channel's name and Catch-up. No address, provider, login or artwork
 channel's line in the app can name its provider). Stop, a failure and Close (which pauses) clear it
 and its commands. The player's `ownsNowPlaying` keeps the audio session unmixed so iOS shows it,
 without expo-video's own command targets. Play, pause, ±10 s, a position and next go through the
-same calls as Watch's buttons; a channel takes play and pause only. During a countdown, play and
+same calls as Watch's buttons; next only while Watch shows, and a channel takes play and pause
+only. During a countdown, play and
 pause only end it, as Space does, and Pause holds a Watch set aside paused. Each command names the
 item it was sent for and is dropped once another shows. These are source and service checks; the real lock
-screen, Control Center, headphones and background behavior still need native acceptance.
+screen, Control Center, headphones and background behavior still need native acceptance, including
+where iOS shows next beside the ±10 s skips.
 
 ## How it is built
 
