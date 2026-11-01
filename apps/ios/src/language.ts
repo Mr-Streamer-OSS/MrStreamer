@@ -6,9 +6,10 @@ import { store, useStore } from "./store.ts";
 
 // The interface language on iOS: the choice Settings saved in language.json, resolved by core's
 // rules against the iPhone's preferred languages, so System default is the first of them the app
-// speaks, else English. It applies when this module first loads, which the root layout makes
-// happen before any screen's module, and again when Settings changes it, without a relaunch. iOS relaunches
-// the app when the iPhone's languages change, so System default is resolved once per launch.
+// speaks, else English. It applies when this module first loads, which the root layout makes happen
+// before any screen's module, and again when Settings changes it, without a relaunch. iOS
+// relaunches the app when the iPhone's languages change, so System default is resolved once per
+// launch.
 
 const FILE = "language.json";
 
@@ -21,7 +22,7 @@ function systemTags(): readonly string[] {
   return tags.length > 0 ? tags : [Intl.DateTimeFormat().resolvedOptions().locale];
 }
 
-/** What Settings saved: a locale, "system", or a value a later release wrote, which shows English. */
+/** What Settings saved: a locale, "system", or a later release's value, which shows English. */
 function savedChoice(): string | undefined {
   const saved = readJson(FILE);
   const choice =

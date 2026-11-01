@@ -9,12 +9,12 @@ import {
 import { useSyncExternalStore } from "react";
 
 // The iOS app's own text, one catalogue per feature area (onboarding.ts, navigation.ts,
-// settings.ts, failures.ts), so a later area adds its own file without touching these. Each is keyed by its
-// English text, as core's catalogue is, in the language core's `setLanguage` made the active
-// one (language.ts sets it at launch and when Settings changes it; a screen renders again for it
-// with language.ts's `useInterfaceLanguage`):
+// settings.ts, failures.ts), so a later area adds its own file without touching these. Each is
+// keyed by its English text, as core's catalogue is, in the language core's `setLanguage` made the
+// active one (language.ts sets it at launch and when Settings changes it; a screen renders again
+// for it with language.ts's `useInterfaceLanguage`):
 //
-//   export const t = catalogue({ Settings: "Settings" }, { "nl-NL": { Settings: "Instellingen" }, ... });
+//   const t = catalogue({ Settings: "Settings" }, { "nl-NL": { Settings: "Instellingen" } });
 //   t("Settings");
 //
 // Every language must have every message, or the area doesn't compile. {placeholders} and plural

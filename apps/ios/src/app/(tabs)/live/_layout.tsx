@@ -1,5 +1,6 @@
 import { Stack } from "expo-router";
 import { useTabScreenOptions } from "../../../header.tsx";
+import { t } from "../../../i18n/navigation.ts";
 
 /**
  * Live: its tabs of shelves, tiles and the channel list, with a category's channels, every
@@ -9,7 +10,7 @@ import { useTabScreenOptions } from "../../../header.tsx";
 export default function LiveLayout() {
   return (
     <Stack screenOptions={useTabScreenOptions("live")}>
-      <Stack.Screen name="index" options={{ title: "Live", headerLargeTitle: true }} />
+      <Stack.Screen name="index" options={{ title: t("Live"), headerLargeTitle: true }} />
       <Stack.Screen name="category" options={{ title: "" }} />
       <Stack.Screen name="favourites" options={{ title: "Favourites" }} />
       <Stack.Screen name="list" options={{ title: "" }} />

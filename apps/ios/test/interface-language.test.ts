@@ -5,6 +5,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Member } from "../src/account.ts";
+import type { useTabScreenOptions } from "../src/header.tsx";
 import { keychain } from "./keychain.ts";
 
 // The interface language as a viewer meets it: System default follows the iPhone's first
@@ -23,6 +24,8 @@ const scenario = vi.hoisted(() => ({
   alerts: [] as { title: string; message?: string | undefined }[],
   title: "",
   members: [] as Member[],
+  /** What a tab's stack last drew: its first screen's title and its top bar's labelled buttons. */
+  stack: null as { title: string; buttons: string[] } | null,
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -54,6 +57,23 @@ vi.mock("expo-router", () => ({
       scenario.title = title;
     },
   }),
+  // A tab's stack, as far as its first screen's options and its top bar go.
+  Stack: Object.assign(
+    ({ children, screenOptions }: { children: unknown; screenOptions: ScreenOptions }) => {
+      const items = screenOptions({ route: { name: "index" } }).unstable_headerRightItems?.({});
+      scenario.stack = {
+        title: scenario.stack?.title ?? "",
+        buttons: (items ?? []).flatMap((item) => ("label" in item ? [item.label] : [])),
+      };
+      return children;
+    },
+    {
+      Screen: ({ name, options }: { name: string; options: { title: string } }) => {
+        if (name === "index" && scenario.stack) scenario.stack.title = options.title;
+        return null;
+      },
+    },
+  ),
 }));
 vi.mock("expo-video", () => ({ isPictureInPictureSupported: () => true }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
@@ -91,6 +111,8 @@ const livingRoom = {
   titles: { kind: "idle" },
 } as unknown as Member;
 
+type ScreenOptions = ReturnType<typeof useTabScreenOptions>;
+
 let unmount = () => {};
 afterEach(async () => {
   unmount();
@@ -98,7 +120,7 @@ afterEach(async () => {
   for (const name of ["language.json", "language.json.next"]) {
     rmSync(join(native.root, "documents", name), { force: true });
   }
-  Object.assign(scenario, { phone: ["en-US"], sheet: null, title: "", members: [] });
+  Object.assign(scenario, { phone: ["en-US"], sheet: null, title: "", members: [], stack: null });
   scenario.alerts.length = 0;
 });
 
@@ -179,27 +201,16 @@ it("words a provider's failure in the language, keeping its address as it is", a
   expect(settings.text()).toContain("Kan tv.example.com niet bereiken");
 });
 
-it("labels every tab's top bar buttons in a new language at once", async () => {
-  const labels: string[][] = [];
-  function LiveStack() {
-    const options = useTabScreenOptions("live")({ route: { name: "index" } });
-    labels.push(
-      (options.unstable_headerRightItems?.({}) ?? []).flatMap((item) =>
-        "label" in item && typeof item.label === "string" ? [item.label] : [],
-      ),
-    );
-    return null;
-  }
+it("titles another tab and labels its top bar in a new language at once", async () => {
   const settings = await launch("settings");
   // From the launch's own modules, which share its language.
-  const { useTabScreenOptions } = await import("../src/header.tsx");
-  const container = document.createElement("div");
-  const root = createRoot(container);
-  React.act(() => root.render(React.createElement(LiveStack)));
+  const { default: LiveLayout } = await import("../src/app/(tabs)/live/_layout.tsx");
+  const root = createRoot(document.createElement("div"));
+  React.act(() => root.render(React.createElement(LiveLayout)));
+  expect(scenario.stack).toEqual({ title: "Live", buttons: ["Search", "Settings"] });
   settings.choose("Español");
+  expect(scenario.stack).toEqual({ title: "En directo", buttons: ["Buscar", "Ajustes"] });
   React.act(() => root.unmount());
-  expect(labels.at(0)).toEqual(["Search", "Settings"]);
-  expect(labels.at(-1)).toEqual(["Buscar", "Ajustes"]);
 });
 
 it("returns to the iPhone's language when System default is picked again", async () => {
