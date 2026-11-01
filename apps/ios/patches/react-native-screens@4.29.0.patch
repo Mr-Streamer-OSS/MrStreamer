@@ -1,45 +1,31 @@
 diff --git a/ios/RNSScreenStackHeaderConfig.mm b/ios/RNSScreenStackHeaderConfig.mm
-index 3db8d1fbedd36368f60ac0f0efd82006b71f6bde..db162a28e93999c09b1163df97c291d7344c1423 100644
+index 3db8d1fbedd36368f60ac0f0efd82006b71f6bde..2449a3fc4db3078bfedad871ed726ae5d0895c04 100644
 --- a/ios/RNSScreenStackHeaderConfig.mm
 +++ b/ios/RNSScreenStackHeaderConfig.mm
-@@ -158,7 +158,32 @@ RNS_IGNORE_SUPER_CALL_END
+@@ -158,6 +158,18 @@ RNS_IGNORE_SUPER_CALL_END
      // As the header might have change in `updateViewController` we need to ensure that header height
      // returned by the `onHeaderHeightChange` event is correct.
      [self.screenView.controller calculateAndNotifyHeaderHeightChangeIsModal:NO];
 +  } else {
-+    [self updateBackItemOfScreenAbove];
-+  }
-+}
-+
-+/**
-+ * A screen under the visible one is configured again only once it shows, so the back button of
-+ * the screen above it would keep its old title, as after a change of the app's language. Keeps
-+ * this screen's title current and the back button above it following it.
-+ */
-+- (void)updateBackItemOfScreenAbove
-+{
 +#if !TARGET_OS_TV
-+  UIViewController *vc = _screenView.controller;
-+  if (vc == nil || ![vc.parentViewController isKindOfClass:UINavigationController.class]) {
-+    return;
-+  }
-+  NSArray<UIViewController *> *stack = ((UINavigationController *)vc.parentViewController).viewControllers;
-+  NSUInteger index = [stack indexOfObject:vc];
-+  if (index == NSNotFound || index + 1 >= stack.count || ![stack[index + 1] isKindOfClass:RNSScreen.class]) {
-+    return;
-   }
-+  vc.navigationItem.title = self.title;
-+  RNSScreenStackHeaderConfig *above = static_cast<RNSScreen *>(stack[index + 1]).screenView.findHeaderConfig;
-+  [above configureBackItem:vc.navigationItem withPrevVC:vc];
++    // A screen under the visible one is configured again only once it shows. Keep its title, and the
++    // back button of the screen above it, current, as after a change of the app's language.
++    NSArray<UIViewController *> *stack = nav.viewControllers;
++    NSUInteger index = [stack indexOfObject:vc];
++    if (index != NSNotFound && index + 1 < stack.count && [stack[index + 1] isKindOfClass:[RNSScreen class]]) {
++      vc.navigationItem.title = self.title;
++      RNSScreen *screenAbove = static_cast<RNSScreen *>(stack[index + 1]);
++      [screenAbove.screenView.findHeaderConfig configureBackItem:vc.navigationItem withPrevVC:vc];
++    }
 +#endif // !TARGET_OS_TV
+   }
  }
  
- - (void)setNeedsViewControllerUpdate
 diff --git a/ios/tabs/RNSTabBarItemCoordinator.mm b/ios/tabs/RNSTabBarItemCoordinator.mm
-index 1e681d0a92704791f2c9daba5365fff9bb91fd00..8eb833175de018c644d6ec8564793033f7edc32a 100644
+index 1e681d0a92704791f2c9daba5365fff9bb91fd00..fe952ec655caf7a6f8107a990bbd9d8f4cfb0654 100644
 --- a/ios/tabs/RNSTabBarItemCoordinator.mm
 +++ b/ios/tabs/RNSTabBarItemCoordinator.mm
-@@ -115,14 +115,16 @@
+@@ -115,14 +115,15 @@
    // remains the same but tabBarItem.title is nil. For consistency, we always
    // update both.
    if (![tabScreenCtrl.tabBarItem.title isEqualToString:newTitle] || ![tabScreenCtrl.title isEqualToString:newTitle]) {
@@ -48,9 +34,8 @@ index 1e681d0a92704791f2c9daba5365fff9bb91fd00..8eb833175de018c644d6ec8564793033
  #if RNS_UITAB_API_SDK_AVAILABLE
      if (RNS_UITAB_API_ENABLED) {
 -      // iPad sources the rendered title from the tab, not the item.
-+      // iPad sources the rendered title from the tab, not the item. The tab goes first: the item
-+      // write is what repaints the bar, from the tab's title, so a tab written after it shows only
-+      // at the next change, as with images (see setTabImage:forTabBarItem:screenView:).
++      // iPad sources the rendered title from the tab, not the item. The tab goes first, as with
++      // images in RNSTabBarAppearanceCoordinator: the item write repaints the bar from the tab.
        tabScreenCtrl.tab.title = newTitle;
      }
  #endif // RNS_UITAB_API_SDK_AVAILABLE
