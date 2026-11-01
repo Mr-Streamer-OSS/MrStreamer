@@ -341,24 +341,27 @@ function askWith(yours: string) {
   const key = yours || BUILT_IN_KEY;
   const fresh = keyed;
   keyed = true;
-  keying = keying.then(async () => {
-    if (fresh) {
-      abouts.clear();
-      seasons.clear();
-      // A last write that fails loses only answers TMDB can give again: the key changes anyway.
-      await metadata.close().catch(() => undefined);
-      metadata = metadataOf();
-    }
-    client = key ? tmdb({ key, ...(TMDB_API ? { api: TMDB_API } : {}) }) : null;
-    tmdbKey.set(yours ? "yours" : key ? "app" : "none");
-    // Details and collections are read again, for TMDB's part to follow the key, once the new
-    // store has read what was saved.
-    if (fresh) {
-      await metadata.flush().catch(() => undefined);
-      metadataVersion.set((version) => version + 1);
-    }
-    wantMetadata();
-  });
+  // One change that failed doesn't stop the next.
+  keying = keying
+    .catch(() => undefined)
+    .then(async () => {
+      if (fresh) {
+        abouts.clear();
+        seasons.clear();
+        // A last write that fails loses only answers TMDB can give again: the key changes anyway.
+        await metadata.close().catch(() => undefined);
+        metadata = metadataOf();
+      }
+      client = key ? tmdb({ key, ...(TMDB_API ? { api: TMDB_API } : {}) }) : null;
+      tmdbKey.set(yours ? "yours" : key ? "app" : "none");
+      // Details and collections are read again, for TMDB's part to follow the key, once the new
+      // store has read what was saved.
+      if (fresh) {
+        await metadata.flush().catch(() => undefined);
+        metadataVersion.set((version) => version + 1);
+      }
+      wantMetadata();
+    });
   return keying;
 }
 
@@ -377,10 +380,11 @@ const readKey = () =>
   (keyRead ??= secrets()
     .then((keychain) => keychain.read(TMDB_KEY_ID))
     .then(
-      (yours) => (yours || !keyed ? askWith(yours ?? "") : undefined),
+      // Otherwise the key stands as asked, once that ask is done.
+      (yours) => (yours || !keyed ? askWith(yours ?? "") : keying),
       () => {
         keyRead = null;
-        if (!keyed) return askWith("");
+        return keyed ? keying : askWith("");
       },
     ));
 
@@ -393,14 +397,17 @@ export async function saveTmdbKey(key: string) {
   if (!trimmed || trimmed.length > 4096) throw new AppFailure({ kind: "keychain-refused" });
   await readKey();
   await (await secrets()).write(TMDB_KEY_ID, trimmed);
-  await askWith(trimmed);
+  // The Keychain answered: it needn't be read again, as after a read it refused.
+  keyRead = askWith(trimmed);
+  await keyRead;
 }
 
 /** Removes the viewer's TMDB key: the app's own is asked with again, if it has one. */
 export async function removeTmdbKey() {
   await readKey();
   await (await secrets()).remove(TMDB_KEY_ID);
-  await askWith("");
+  keyRead = askWith("");
+  await keyRead;
 }
 
 /** Asks TMDB again for the titles it hasn't answered, after it stopped answering. */
