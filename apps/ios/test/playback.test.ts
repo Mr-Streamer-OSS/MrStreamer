@@ -473,6 +473,8 @@ describe("a programme from catch-up", () => {
       await tick();
     });
     await until(() => opened.length === 2);
+    // The recording it played, never another quality's.
+    expect(opened[1]).toBe(opened[0]);
     port.currentTime = 0;
     await React.act(async () => {
       port.ready();

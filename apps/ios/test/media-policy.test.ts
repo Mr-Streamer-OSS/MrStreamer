@@ -498,6 +498,7 @@ describe("Live recovery", () => {
     playedOn: null,
     reconnects: 0,
     playedMs: 0,
+    qualities: null,
   };
 
   it("keeps the desktop's reconnect waits and stable time", () => {
@@ -566,6 +567,47 @@ describe("Live recovery", () => {
     for (const failure of [native("missing"), native("decode"), native("auth")]) {
       expect(nextStep(failure, played, watched)).toEqual({ kind: "fail" });
     }
+  });
+
+  it("reconnects Automatic a quality lower after a stall, lost connection or no start", () => {
+    const automatic: Recovery = {
+      ...starting,
+      playedOn: 0,
+      playedMs: 5000,
+      qualities: ["fhd", "hd", "sd"],
+    };
+    const stall: PlaybackFailure = { kind: "deadline", stage: "stall" };
+    const noStart: PlaybackFailure = { kind: "deadline", stage: "startup" };
+    for (const failure of [network, stall, noStart]) {
+      expect(nextStep(failure, automatic, watched)).toEqual({
+        kind: "reconnect",
+        candidate: 1,
+        delayMs: 1000,
+        reconnects: 1,
+      });
+    }
+    // A provider error isn't a weak connection, and an unknown quality stays.
+    expect(nextStep(native("unknown"), automatic, watched)).toMatchObject({ candidate: 0 });
+    const unknown: Recovery = { ...automatic, qualities: [null, "hd", "sd"] };
+    expect(nextStep(stall, unknown, watched)).toMatchObject({ candidate: 0 });
+    // The best lower quality, wherever the order put it.
+    const preferredSd: Recovery = { ...automatic, qualities: ["sd", "uhd", "hd"], candidate: 1 };
+    expect(nextStep(stall, { ...preferredSd, playedOn: 1 }, watched)).toMatchObject({
+      candidate: 2,
+    });
+    // A lower stream failing before it plays, off air too, steps lower again, else goes back.
+    const stepped: Recovery = { ...automatic, candidate: 1, reconnects: 1, playedMs: 0 };
+    for (const failure of [native("missing"), native("unknown"), noStart]) {
+      expect(nextStep(failure, stepped, watched)).toEqual({
+        kind: "reconnect",
+        candidate: 2,
+        delayMs: 2000,
+        reconnects: 2,
+      });
+    }
+    expect(nextStep(native("missing"), { ...stepped, candidate: 2 }, watched)).toMatchObject({
+      candidate: 0,
+    });
   });
 
   it("opens at most 3 + 4 streams until one plays 30 seconds, and 4 after", () => {

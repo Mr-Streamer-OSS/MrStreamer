@@ -211,6 +211,49 @@ describe("Live attempt ownership", () => {
     expect(preferences.channelPicks("sub")).toEqual({});
   });
 
+  it("steps Automatic down a quality per stall within four reconnects, and keeps a chosen stream", async () => {
+    const stall = async () => {
+      waiting();
+      await vi.advanceTimersByTimeAsync(15_000);
+    };
+    const provider = signIn();
+    const item = await watch();
+    port.state(true);
+    for (const [delay, playing] of [
+      [1000, "11"],
+      [2000, "12"],
+      [4000, "12"],
+      [8000, "12"],
+    ] as const) {
+      await stall();
+      await vi.advanceTimersByTimeAsync(delay);
+      await tick();
+      port.state(true);
+      expect(owner.liveStream()).toEqual({ channel: item.id, explicit: false, playing });
+    }
+    await stall();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(opened(provider)).toEqual(["10", "11", "12", "12", "12"]);
+    expect(owner.playbackState.get().phase).toMatchObject({
+      kind: "failed",
+      error: "The stream stopped delivering data.",
+    });
+    expect(preferences.channelPicks("sub")).toEqual({});
+
+    await owner.stop();
+    expect(preferences.updateChannelPick(channel, "11")).toBe(true);
+    const chosen = signIn();
+    await watch();
+    port.state(true);
+    for (const delay of [1000, 2000, 4000, 8000]) {
+      await stall();
+      await vi.advanceTimersByTimeAsync(delay);
+      await tick();
+      port.state(true);
+    }
+    expect(opened(chosen)).toEqual(["11", "11", "11", "11", "11"]);
+  });
+
   it("earns four more reconnects after thirty seconds of real playing on one attempt", async () => {
     const provider = signIn();
     await watch();
@@ -677,7 +720,8 @@ describe("attended Live deadlines", () => {
     expect(owner.playbackState.get().phase.kind).toBe("loading");
     await vi.advanceTimersByTimeAsync(1000);
     await tick();
-    expect(opened(provider)).toEqual(["10", "10"]);
+    // Automatic reconnects a stalled stream a quality lower.
+    expect(opened(provider)).toEqual(["10", "11"]);
   });
 
   it("a native Play after acknowledged viewer Pause permits recovery again", async () => {
