@@ -46,6 +46,7 @@ export const t = catalogue(
     "Your latest position could not be saved.": "Your latest position could not be saved.",
     // Quality and Speed.
     Quality: "Quality",
+    Automatic: "Automatic",
     Playing: "Playing",
     "Couldn't save media preference": "Couldn't save media preference",
     "Your previous choice is still saved. Try again.":
@@ -160,6 +161,7 @@ export const t = catalogue(
       "Couldn't save progress": "Voortgang niet bewaard",
       "Your latest position could not be saved.": "Je laatste positie kon niet worden bewaard.",
       Quality: "Kwaliteit",
+      Automatic: "Automatisch",
       Playing: "Speelt af",
       "Couldn't save media preference": "Mediavoorkeur niet bewaard",
       "Your previous choice is still saved. Try again.":
@@ -272,6 +274,7 @@ export const t = catalogue(
       "Your latest position could not be saved.":
         "Impossible d'enregistrer votre dernière position.",
       Quality: "Qualité",
+      Automatic: "Automatique",
       Playing: "Lecture",
       "Couldn't save media preference": "Préférence non enregistrée",
       "Your previous choice is still saved. Try again.":
@@ -384,6 +387,7 @@ export const t = catalogue(
       "Your latest position could not be saved.":
         "Deine letzte Position konnte nicht gespeichert werden.",
       Quality: "Qualität",
+      Automatic: "Automatisch",
       Playing: "Läuft",
       "Couldn't save media preference": "Medieneinstellung nicht gespeichert",
       "Your previous choice is still saved. Try again.":
@@ -497,6 +501,7 @@ export const t = catalogue(
       "Couldn't save progress": "No se guardó el progreso",
       "Your latest position could not be saved.": "No se pudo guardar tu última posición.",
       Quality: "Calidad",
+      Automatic: "Automática",
       Playing: "Reproduciendo",
       "Couldn't save media preference": "No se guardó la preferencia",
       "Your previous choice is still saved. Try again.":

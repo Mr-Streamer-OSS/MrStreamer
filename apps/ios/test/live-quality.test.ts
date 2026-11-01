@@ -3,6 +3,7 @@ import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { setLanguage } from "@mrstreamer/core/i18n";
 import type { Provider } from "@mrstreamer/core/provider";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { nativePlayer } from "./native-player.ts";
@@ -184,6 +185,21 @@ describe("Live quality through the real owners", () => {
       playing: null,
     });
     expect(preferences.channelPicks(channel.subscriptionId)).toEqual({});
+  });
+
+  it("names Automatic in the interface language, where it still resets the pick", async () => {
+    preferences.updateChannelPick(channel, "11");
+    setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+    try {
+      await watch();
+      const sheet = menu();
+      expect(sheet.options[0]).toBe("Automatisch");
+      expect(sheet.options.at(-1)).toBe("Annuleren");
+      await pick(sheet, "Automatisch");
+      expect(preferences.channelPicks(channel.subscriptionId)).toEqual({});
+    } finally {
+      setLanguage({ locale: "en-US", formats: "en-US" });
+    }
   });
 
   it.each(["loading", "playing", "paused", "failed"] as const)(

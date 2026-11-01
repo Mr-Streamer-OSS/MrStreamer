@@ -656,9 +656,13 @@ function LiveQuality({ item }: { item: Playing }) {
         title: t("Quality"),
         options: [
           ...choices.map((choice) => {
-            const name = choice.quality
-              ? `${qualityNames[choice.quality]} · ${choice.name}`
-              : choice.name;
+            // Automatic is the app's word; a variant's name is the provider's.
+            const name =
+              choice.variantId === null
+                ? t("Automatic")
+                : choice.quality
+                  ? `${qualityNames[choice.quality]} · ${choice.name}`
+                  : choice.name;
             return `${choice.saved ? "✓ " : ""}${name}${choice.playing ? ` · ${t("Playing")}` : ""}`;
           }),
           t("Cancel"),
