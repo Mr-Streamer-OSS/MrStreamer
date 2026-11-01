@@ -258,6 +258,11 @@ export function Notice({
   );
 }
 
+/** A set reminder's bell, after the time it marks, as ↺ marks catch-up. */
+export function ReminderBell() {
+  return <SymbolView name="bell.fill" size={13} tintColor={colors.text} />;
+}
+
 export function TextButton({
   label,
   onPress,

@@ -2,7 +2,6 @@ import type { Programme as Aired } from "@mrstreamer/contracts/guide";
 import { archiveHolds } from "@mrstreamer/core/catchup";
 import { t } from "@mrstreamer/core/i18n";
 import { router, useLocalSearchParams } from "expo-router";
-import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -33,7 +32,7 @@ import { describeError } from "./errors.ts";
 import { tabHref } from "./header.tsx";
 import type { Channel, Library } from "./library.ts";
 import { cancelReminder, setReminder, useReminder } from "./reminders.ts";
-import { colors, Message, TextButton, useListWidth } from "./ui.tsx";
+import { colors, Message, ReminderBell, TextButton, useListWidth } from "./ui.tsx";
 
 const parameter = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : "";
@@ -305,9 +304,7 @@ export function Programme({
             <Text style={styles.copy}>
               {kept ? `${programmeRange(read.value)} ↺` : programmeRange(read.value)}
             </Text>
-            {reminder?.status.kind === "upcoming" ? (
-              <SymbolView name="bell.fill" size={13} tintColor={colors.text} />
-            ) : null}
+            {reminder?.status.kind === "upcoming" ? <ReminderBell /> : null}
           </View>
           <ProgrammeProgress value={progress} />
           {read.value.description ? (
