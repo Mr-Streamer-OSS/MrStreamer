@@ -186,14 +186,14 @@ export const t = catalogue(
       "Online subtitles": "Online ondertitels",
       "Hearing impaired": "Slechthorenden",
       "No subtitles found": "Geen ondertitels gevonden",
-      "SubDL has none for this in your languages.": "SubDL heeft er geen voor dit in je talen.",
+      "SubDL has none for this in your languages.": "SubDL heeft er geen in je talen.",
       "Adjust timing": "Timing aanpassen",
       "{seconds} s earlier": "{seconds} s eerder",
       "{seconds} s later": "{seconds} s later",
       "Shown {seconds} s earlier": "{seconds} s eerder getoond",
       "Shown {seconds} s later": "{seconds} s later getoond",
-      "Frame rate": "Framesnelheid",
-      "Frame rate {rate}": "Framesnelheid {rate}",
+      "Frame rate": "Beeldsnelheid",
+      "Frame rate {rate}": "Beeldsnelheid {rate}",
       "Subtitle fps → video fps": "Fps ondertitels → fps video",
       "Original timing": "Oorspronkelijke timing",
       Original: "Oorspronkelijk",
@@ -308,7 +308,7 @@ export const t = catalogue(
       "Frame rate {rate}": "Fréquence d'images {rate}",
       "Subtitle fps → video fps": "fps des sous-titres → fps de la vidéo",
       "Original timing": "Synchronisation d'origine",
-      Original: "Origine",
+      Original: "D'origine",
       Reset: "Réinitialiser",
       "Couldn't change timing": "Synchronisation non modifiée",
       "The previous timing is kept.": "La synchronisation précédente est conservée.",
@@ -387,11 +387,10 @@ export const t = catalogue(
       Playing: "Läuft",
       "Couldn't save media preference": "Medieneinstellung nicht gespeichert",
       "Your previous choice is still saved. Try again.":
-        "Deine vorherige Wahl ist noch gespeichert. Versuche es erneut.",
+        "Deine vorherige Wahl ist noch gespeichert. Versuch es erneut.",
       "Current speed not known yet.": "Aktuelle Geschwindigkeit noch unbekannt.",
       "Playing at {speed}.": "Läuft mit {speed}.",
-      "Not known yet. Try again in a moment.":
-        "Noch nicht bekannt. Versuche es gleich noch einmal.",
+      "Not known yet. Try again in a moment.": "Noch nicht bekannt. Versuch es gleich noch einmal.",
       "No choices on this channel.": "Keine Auswahl auf diesem Sender.",
       "No subtitles in this file.": "Keine Untertitel in dieser Datei.",
       "No choices in this file.": "Keine Auswahl in dieser Datei.",
@@ -404,10 +403,10 @@ export const t = catalogue(
       Off: "Aus",
       Sound: "Ton",
       "Downloaded subtitles show in this player only. While one is on, Picture in Picture and AirPlay show no subtitles.":
-        "Geladene Untertitel erscheinen nur in diesem Player. Solange einer an ist, zeigen Bild-in-Bild und AirPlay keine Untertitel.",
+        "Heruntergeladene Untertitel erscheinen nur in diesem Player. Solange einer an ist, zeigen Bild-in-Bild und AirPlay keine Untertitel.",
       "Couldn't show subtitles": "Untertitel nicht angezeigt",
       "This iPhone refused the change. Try again.":
-        "Dieses iPhone hat die Änderung abgelehnt. Versuche es erneut.",
+        "Dieses iPhone hat die Änderung abgelehnt. Versuch es erneut.",
       "Find online": "Online finden",
       "Online subtitles": "Online-Untertitel",
       "Hearing impaired": "Hörgeschädigte",
@@ -434,18 +433,18 @@ export const t = catalogue(
         "Prüfe deinen SubDL-API-Schlüssel in Einstellungen > Untertitel.",
       "SubDL limit reached": "SubDL-Limit erreicht",
       "Your SubDL key has no requests left for now. Try again later.":
-        "Dein SubDL-Schlüssel hat vorerst keine Anfragen mehr. Versuche es später erneut.",
+        "Dein SubDL-Schlüssel hat vorerst keine Anfragen mehr. Versuch es später erneut.",
       "SubDL isn't available": "SubDL ist nicht verfügbar",
       "Check your connection and try again.": "Prüfe deine Verbindung und versuche es erneut.",
       "Can't use this subtitle": "Untertitel nicht nutzbar",
       "It isn't text the app can read. Try another.":
-        "Es ist kein Text, den die App lesen kann. Versuche einen anderen.",
+        "Es ist kein Text, den die App lesen kann. Versuch einen anderen.",
       "Couldn't read your SubDL key": "SubDL-Schlüssel nicht lesbar",
       "This iPhone didn't give it. Try again.":
-        "Dieses iPhone hat ihn nicht herausgegeben. Versuche es erneut.",
+        "Dieses iPhone hat ihn nicht herausgegeben. Versuch es erneut.",
       "Couldn't keep this subtitle": "Untertitel nicht behalten",
       "This iPhone refused to save it. Try again.":
-        "Dieses iPhone hat das Speichern abgelehnt. Versuche es erneut.",
+        "Dieses iPhone hat das Speichern abgelehnt. Versuch es erneut.",
       "Next episode, {place}": "Nächste Folge, {place}",
       "Next episode, {place}, plays in {count} seconds.": {
         one: "Nächste Folge, {place}, startet in {count} Sekunde.",
@@ -461,8 +460,8 @@ export const t = catalogue(
       "The connection to the provider failed.": "Die Verbindung zum Anbieter ist fehlgeschlagen.",
       "Mr. Streamer can't play this file.": "Mr. Streamer kann diese Datei nicht abspielen.",
       "The previous stream is still closing. Try again.":
-        "Der vorherige Stream wird noch geschlossen. Versuche es erneut.",
-      "The player stopped. Try again.": "Der Player wurde beendet. Versuche es erneut.",
+        "Der vorherige Stream wird noch geschlossen. Versuch es erneut.",
+      "The player stopped. Try again.": "Der Player wurde beendet. Versuch es erneut.",
     },
     "es-ES": {
       "Play or Pause": "Reproducir o pausar",

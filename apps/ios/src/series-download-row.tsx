@@ -286,7 +286,8 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   count: { color: colors.text, fontSize: 15, flexShrink: 1 },
-  button: { minHeight: 44, justifyContent: "center", alignItems: "flex-end" },
+  // Shrinks with the count, so a long action wraps at large text instead of leaving the row.
+  button: { flexShrink: 1, minHeight: 44, justifyContent: "center", alignItems: "flex-end" },
   label: { color: colors.text, fontSize: 15, fontWeight: "700" },
   pressed: { opacity: 0.6 },
 });
