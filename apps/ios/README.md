@@ -924,8 +924,9 @@ or broadcast media is served. Catch-up plays as HLS on channel 1000 for three da
 two (`catch-up.ts`). Stream 7999, "TEST | Live sound and subtitles (EN/NL)", has two sound and two
 subtitle renditions for Live tracks (`tracks.ts`). `/title-transfers` paces, breaks off or replaces
 title files for the download queue (`transfers.ts`), and `/live-link` paces live segments for
-Automatic quality runs (`live-link.ts`). `test/native-fixtures.test.ts` checks them in the suite
-and needs ffmpeg and ffprobe.
+Automatic quality runs (`live-link.ts`). `test/native-fixtures.test.ts` checks the media's
+provenance, catch-up, the tracks and title transfers in the suite, and needs ffmpeg and ffprobe;
+`/live-link` pacing has no test of its own.
 
 Agents open the simulator with T3's `device_open` and launch, relaunch and drive the app, with
 taps, typing, screenshots and recordings, through the AgentDevice command it returns, never through
