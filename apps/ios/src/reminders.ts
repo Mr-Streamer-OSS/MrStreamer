@@ -219,7 +219,7 @@ const noticeOf = (reminder: KeptReminder): Notice => ({
   id: reminder.id,
   at: reminder.start,
   title: reminder.title,
-  body: t("Starting now on {channel}", { channel: reminder.channelName }),
+  body: t("{channel} · now", { channel: reminder.channelName }),
   channel: ownedKey({ subscriptionId: reminder.subscriptionId, id: reminder.channel }),
 });
 
