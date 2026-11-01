@@ -308,8 +308,8 @@ export interface Recovery {
   /** How long the failed attempt played, without pause, waiting or backoff. */
   readonly playedMs: number;
   /**
-   * Each candidate's quality, null where unknown, when Automatic chose them; null when the viewer
-   * chose the stream, which then never changes.
+   * Each candidate's quality, null where unknown, when Automatic chose them for a channel playing
+   * live; null for a stream the viewer chose or a recording from catch-up, which never changes.
    */
   readonly qualities: readonly (Quality | null)[] | null;
 }
@@ -373,9 +373,9 @@ function lower(qualities: readonly (Quality | null)[], failed: number): number |
  * it played, a reconnect after 1, 2, 4 and 8 seconds, earned back by playing STABLE_PLAYBACK_MS.
  * That is at most 3 + 4 opens until a stream plays that long, and 4 after. A reconnect opens the
  * candidate that played last, except when Automatic's stream stalled, lost its connection or
- * didn't start: then the candidate a quality below it, when the channel has one. A lower stream
- * that fails before it plays goes back to the one that played. Refusals and app failures stop at
- * once.
+ * didn't start: then the candidate a quality below it, when there is one among those Automatic
+ * tries. A lower stream that fails so before it plays steps lower again; with nothing lower, or
+ * failing otherwise, it goes back to the one that played. Refusals and app failures stop at once.
  */
 export function nextStep(
   failure: PlaybackFailure,

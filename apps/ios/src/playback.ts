@@ -769,7 +769,7 @@ function fail(failure: PlaybackFailure): void {
       reconnects: epoch.reconnects,
       playedMs: epoch.playedMs,
       qualities:
-        choice.plan.kind === "live" && !choice.plan.explicit
+        choice.item.live && choice.plan.kind === "live" && !choice.plan.explicit
           ? choice.plan.candidates.map((candidate) => candidate.quality ?? null)
           : null,
     },
