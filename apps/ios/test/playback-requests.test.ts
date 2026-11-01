@@ -514,15 +514,17 @@ describe("an episode's end", () => {
   });
 
   it.each([
-    ["Pause", () => togglePause()],
-    ["a seek back", () => seekTo(300)],
-  ])("counts nothing down for an end that arrives after %s", async (_, act) => {
+    ["Pause", () => togglePause(), 0],
+    ["a Pause still held three seconds later", () => togglePause(), 3_000],
+    ["a seek back", () => seekTo(300), 0],
+  ] as const)("counts nothing down for an end that arrives after %s", async (_, act, delay) => {
     playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
     await settle();
     startsAt();
     fakePlayer.state(true);
     fakePlayer.currentTime = 600;
     act();
+    vi.advanceTimersByTime(delay);
     // The player still stands at the end: its seek lands after the end it sent before.
     fakePlayer.currentTime = 600;
     fakePlayer.observation({ kind: "ended" });

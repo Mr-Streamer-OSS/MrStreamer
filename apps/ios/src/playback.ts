@@ -1258,7 +1258,12 @@ function observe(event: PlaybackObservation) {
       if (!pauseOnStart && !current.item.live) {
         const saved = report();
         current.options.ended?.();
-        if (current.item.next && state.get().watch && Date.now() - touched > TOUCH_OVERTAKES)
+        if (
+          current.item.next &&
+          state.get().watch &&
+          held?.by !== "viewer" &&
+          Date.now() - touched > TOUCH_OVERTAKES
+        )
           countDown(current, saved);
       }
       return;
