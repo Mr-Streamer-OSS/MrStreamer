@@ -486,6 +486,19 @@ describe("an episode's end", () => {
     expect(startsAt()).toBe(0);
   });
 
+  it("does not use another file's resume point for the next episode", async () => {
+    const partial = progressAt("episode", "s1e2", 120);
+    await ends(seriesDetails("s1"), 1, {
+      ...nothingPlayed,
+      progress: [{ ...partial, title: { ...partial.title, id: "another-file" } }],
+    });
+    vi.advanceTimersByTime(10_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
+    fakePlayer.currentTime = 0;
+    expect(startsAt()).toBe(0);
+  });
+
   it("plays the next episode of the version that ended", async () => {
     await ends(seriesDetails("s2", ["s1", "s2"]), 1);
     vi.advanceTimersByTime(10_000);
@@ -531,6 +544,17 @@ describe("an episode's end", () => {
     ["Pause", () => togglePause(), 0],
     ["a Pause still held three seconds later", () => togglePause(), 3_000],
     ["a seek back", () => seekTo(300), 0],
+    [
+      "a backward seek while paused, then Play",
+      () => {
+        togglePause();
+        fakePlayer.state(false);
+        seekTo(300);
+        togglePause();
+        fakePlayer.state(true);
+      },
+      0,
+    ],
   ] as const)("counts nothing down for an end that arrives after %s", async (_, act, delay) => {
     playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
     await settle();

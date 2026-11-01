@@ -157,7 +157,11 @@ export function playEpisode(
     const episode = nextUnwatched(details, at, progress, marks) ?? after;
     if (!episode || !stands()) return null;
     const state = episodeStates(progress, marks)(episode);
-    return { episode, from: resumePoint(state.kind === "partial" ? state.progress : undefined) };
+    const found =
+      state.kind === "partial" && sameOwned(state.progress.title, episode)
+        ? state.progress
+        : undefined;
+    return { episode, from: resumePoint(found) };
   };
   const item: Playing = {
     id: key,

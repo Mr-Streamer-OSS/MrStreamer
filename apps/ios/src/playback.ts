@@ -286,19 +286,19 @@ let requests = 0;
 let screen = "";
 
 /**
- * When the viewer last paused this play or moved it short of its end. An end the player sent
+ * When the viewer last sought a position short of this play's end. An end the player sent
  * before that is still on its way for a moment after, while the player's position may not yet be
- * where the viewer moved it: one that arrives within `TOUCH_OVERTAKES` milliseconds is obsolete
- * and starts no countdown. A move to the end leaves the end it brings to count down.
+ * where the viewer moved it: one that arrives within `SEEK_OVERTAKES` milliseconds is obsolete
+ * and starts no countdown. A seek to the end supersedes earlier seeks. Pauses are held separately.
  */
-let touched = -Infinity;
-const TOUCH_OVERTAKES = 2000;
+let seekAt = -Infinity;
+const SEEK_OVERTAKES = 2000;
 
 /** The viewer moved this play to `to` seconds, which ends any countdown. */
 function moved(to: number) {
   cancelUpNext();
   const end = length.get();
-  touched = !end || to < end - 1 ? Date.now() : -Infinity;
+  seekAt = !end || to < end - 1 ? Date.now() : -Infinity;
 }
 
 /** Retires every waiting request, the countdown to a next episode with them. */
@@ -1262,7 +1262,7 @@ function observe(event: PlaybackObservation) {
           current.item.next &&
           state.get().watch &&
           held?.by !== "viewer" &&
-          Date.now() - touched > TOUCH_OVERTAKES
+          Date.now() - seekAt > SEEK_OVERTAKES
         )
           countDown(current, saved);
       }
@@ -1383,7 +1383,7 @@ export function play(item: Playing, plan: Plan, options: PlayOptions) {
 /** A new budget on the same frozen Choice, including explicit Try again. */
 async function start(choice: Choice, options: PlayOptions) {
   supersede();
-  touched = -Infinity;
+  seekAt = -Infinity;
   if (current) cancelEpoch(current.epoch);
   release();
   const signedIn =
@@ -1713,7 +1713,6 @@ export function togglePause() {
   cancelUpNext();
   const { phase } = state.get();
   if (phase.kind === "playing" || phase.kind === "loading") {
-    touched = Date.now();
     held = { by: "viewer", acknowledged: false };
     pauseOnStart = phase.kind === "loading" ? "viewer" : false;
     if (pauseOnStart === "viewer" && current && current.resource.itemId !== null) {
@@ -1722,7 +1721,6 @@ export function togglePause() {
   } else if (phase.kind === "paused") {
     held = null;
     pauseOnStart = false;
-    touched = -Infinity;
     if (soundOnPlay) setMuted(false);
     player().play();
   }
