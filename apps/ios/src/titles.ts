@@ -331,6 +331,8 @@ function wantMetadata() {
 let keying: Promise<void> = Promise.resolve();
 /** Whether TMDB was given its first key, or none: each later one starts metadata again. */
 let keyed = false;
+/** Key changes begun so far: a details answer asked before the latest is never saved. */
+let keyChanges = 0;
 
 /**
  * Asks TMDB with the viewer's key `yours` from now on, else the app's when it is empty. After the
@@ -341,6 +343,7 @@ let keyed = false;
 function askWith(yours: string) {
   const key = yours || BUILT_IN_KEY;
   const fresh = keyed;
+  keyChanges++;
   keyed = true;
   // One change that failed doesn't stop the next.
   keying = keying
@@ -1190,6 +1193,7 @@ function aboutOf(title: Title, reading: ReadingLanguage): Answer<TitleAbout> | A
   const { kind, tmdbId } = title;
   if (!tmdbId || title.adult) return { kind: "unlinked" };
   const asking = client;
+  const changes = keyChanges;
   return tmdbAnswer(
     abouts,
     `${kind}|${tmdbId}|${language}`,
@@ -1200,7 +1204,7 @@ function aboutOf(title: Title, reading: ReadingLanguage): Answer<TitleAbout> | A
       return asking.about(tmdbKind(kind), tmdbId, language, signal);
     },
     (saved) =>
-      currentLanguage(reading) && client === asking
+      currentLanguage(reading) && client === asking && keyChanges === changes
         ? writeAbout(kind, tmdbId, language, saved)
         : Promise.resolve(),
   );
@@ -1232,6 +1236,7 @@ export async function episodesOf(
   if (tmdbId) await readKey();
   if (!tmdbId) return seasonEpisodes(season, []);
   const asking = client;
+  const changes = keyChanges;
   const id = title.subscriptionId;
   const source = currentSource(id);
   const stands = () => source !== undefined && savable(id, source);
@@ -1247,7 +1252,7 @@ export async function episodesOf(
         return asking.season(tmdbId, number, asked, signal);
       },
       (saved) =>
-        currentLanguage(reading) && client === asking
+        currentLanguage(reading) && client === asking && keyChanges === changes
           ? writeSeason(tmdbId, number, asked, saved)
           : Promise.resolve(),
     ),
