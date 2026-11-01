@@ -335,7 +335,8 @@ let keyed = false;
 /**
  * Asks TMDB with the viewer's key `yours` from now on, else the app's when it is empty. After the
  * first, a store that may have stopped on a refused key is closed, after its answers are written,
- * and a new one starts with the key; details' answers still asked with the old key are let go.
+ * and a new one starts with the key; details' answers asked with the old key are let go, and those
+ * still on their way are never saved (`aboutOf`, `episodesOf`).
  */
 function askWith(yours: string) {
   const key = yours || BUILT_IN_KEY;
@@ -346,13 +347,16 @@ function askWith(yours: string) {
     .catch(() => undefined)
     .then(async () => {
       if (fresh) {
-        abouts.clear();
-        seasons.clear();
         // A last write that fails loses only answers TMDB can give again: the key changes anyway.
         await metadata.close().catch(() => undefined);
         metadata = metadataOf();
       }
       client = key ? tmdb({ key, ...(TMDB_API ? { api: TMDB_API } : {}) }) : null;
+      // Only now, so details asked with the old client while the store closed are let go too.
+      if (fresh) {
+        abouts.clear();
+        seasons.clear();
+      }
       tmdbKey.set(yours ? "yours" : key ? "app" : "none");
       // Details and collections are read again, for TMDB's part to follow the key, once the new
       // store has read what was saved.
@@ -402,10 +406,19 @@ export async function saveTmdbKey(key: string) {
   await keyRead;
 }
 
-/** Removes the viewer's TMDB key: the app's own is asked with again, if it has one. */
+/**
+ * Removes the viewer's TMDB key: the app's own is asked with again, if it has one. Throws
+ * `keychain-refused` while the Keychain may still hold it, the key still in use.
+ */
 export async function removeTmdbKey() {
   await readKey();
-  await (await secrets()).remove(TMDB_KEY_ID);
+  const keychain = await secrets();
+  try {
+    await keychain.remove(TMDB_KEY_ID);
+  } catch (cause) {
+    // A removal can fail once the key is gone, writing the index of ids: it is removed all the same.
+    if ((await keychain.read(TMDB_KEY_ID).catch(() => undefined)) !== null) throw cause;
+  }
   keyRead = askWith("");
   await keyRead;
 }
@@ -1187,7 +1200,9 @@ function aboutOf(title: Title, reading: ReadingLanguage): Answer<TitleAbout> | A
       return asking.about(tmdbKind(kind), tmdbId, language, signal);
     },
     (saved) =>
-      currentLanguage(reading) ? writeAbout(kind, tmdbId, language, saved) : Promise.resolve(),
+      currentLanguage(reading) && client === asking
+        ? writeAbout(kind, tmdbId, language, saved)
+        : Promise.resolve(),
   );
 }
 
@@ -1232,7 +1247,9 @@ export async function episodesOf(
         return asking.season(tmdbId, number, asked, signal);
       },
       (saved) =>
-        currentLanguage(reading) ? writeSeason(tmdbId, number, asked, saved) : Promise.resolve(),
+        currentLanguage(reading) && client === asking
+          ? writeSeason(tmdbId, number, asked, saved)
+          : Promise.resolve(),
     ),
   );
   const worked = (told: readonly (readonly EpisodeAbout[] | null)[]) =>

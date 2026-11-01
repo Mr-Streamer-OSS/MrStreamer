@@ -18,6 +18,8 @@ const memory = vi.hoisted(() => ({
   tmdb: "",
   /** Every key TMDB was asked with, in order. */
   keys: [] as string[],
+  /** The keys details asked TMDB about a title with, in order. */
+  abouts: [] as string[],
   /** No TMDB request reaches it, as when it is down or the iPhone is offline. */
   offline: false,
   /** TMDB doesn't know these ids. */
@@ -26,8 +28,10 @@ const memory = vi.hoisted(() => ({
   panelDown: false,
   /** The viewer's TMDB key won't be read, as before the first unlock. */
   locked: false,
-  /** TMDB's answers for the refused key wait for this, while set. */
-  holdRefused: null as Promise<void> | null,
+  /** TMDB's answers for `key` wait for `until`, while set. */
+  held: null as { readonly key: string; readonly until: Promise<void> } | null,
+  /** The Keychain won't write its index of ids, as when it fails partway through a change. */
+  indexFails: false,
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -51,6 +55,10 @@ vi.mock("expo-secure-store", () => {
         throw new Error("User interaction is not allowed.");
       return items.getItemAsync(key);
     },
+    setItemAsync: async (key: string, value: string) => {
+      if (memory.indexFails && key === "index") throw new Error("The Keychain failed.");
+      return items.setItemAsync(key, value);
+    },
   };
 });
 vi.mock("react-native", () => ({ Platform: { OS: "ios", Version: "26.1" } }));
@@ -66,8 +74,9 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   const url = new URL(input);
   const key = url.searchParams.get("api_key") ?? "";
   memory.keys.push(key);
+  if (url.searchParams.has("append_to_response")) memory.abouts.push(key);
   if (memory.offline) throw new TypeError("Network request failed");
-  if (key === REFUSED_KEY) await memory.holdRefused;
+  if (memory.held?.key === key) await memory.held.until;
   if (key === REFUSED_KEY) return Response.json({ status_code: 7 }, { status: 401 });
   const id = /^\/3\/(?:movie|tv)\/(\d+)$/.exec(url.pathname)?.[1];
   if (id && memory.unknown.has(id)) return Response.json({ status_code: 34 }, { status: 404 });
@@ -124,11 +133,13 @@ beforeEach(async () => {
   memory.keychain.clear();
   memory.tmdb = tmdb.url;
   memory.keys.length = 0;
+  memory.abouts.length = 0;
   memory.offline = false;
   memory.unknown.clear();
   memory.panelDown = false;
   memory.locked = false;
-  memory.holdRefused = null;
+  memory.held = null;
+  memory.indexFails = false;
 });
 afterEach(async () => {
   await drained();
@@ -282,6 +293,18 @@ it("keeps TMDB's saved facts once the only key is removed", async () => {
   expect(kept.about).toEqual({ kind: "tmdb" });
 });
 
+it("removes the key once the Keychain has let it go, though its index of ids failed", async () => {
+  const app = await launch({ appKey: "app-key" });
+  await added(app);
+  await app.saveTmdbKey("viewer-key");
+  await settled(app, "answered");
+
+  memory.indexFails = true;
+  await app.removeTmdbKey();
+  expect(app.metadataStanding()).toMatchObject({ key: "app" });
+  expect([...memory.keychain.values()]).not.toContain("viewer-key");
+});
+
 it("finds the viewer's saved key once a locked Keychain answers, without a relaunch", async () => {
   memory.keychain.set("s.metadata.tmdb", "viewer-key");
   memory.locked = true;
@@ -306,7 +329,7 @@ it("lets go of details asked with a key that was replaced", async () => {
   await added(app);
   await settled(app, "refused");
   let release = () => {};
-  memory.holdRefused = new Promise((done) => (release = done));
+  memory.held = { key: REFUSED_KEY, until: new Promise((done) => (release = done)) };
   const before = memory.keys.length;
   const asked = app.detailsOf(firstMovie(app));
   await until(() => memory.keys.length > before, "the held ask");
@@ -315,6 +338,23 @@ it("lets go of details asked with a key that was replaced", async () => {
   expect((await app.detailsOf(firstMovie(app))).about).toEqual({ kind: "tmdb" });
   release();
   expect((await asked).about).toEqual({ kind: "refused", savedAt: null });
+});
+
+it("asks details with the new key, an answer still asked with the replaced one kept nowhere", async () => {
+  const app = await launch({ appKey: "app-key" });
+  await added(app);
+  await settled(app, "answered");
+  let release = () => {};
+  memory.held = { key: "app-key", until: new Promise((done) => (release = done)) };
+  const movie = firstMovie(app);
+  const asked = app.detailsOf(movie);
+  await until(() => memory.abouts.includes("app-key"), "the held ask");
+
+  await app.saveTmdbKey("viewer-key");
+  release();
+  expect((await asked).about).toEqual({ kind: "tmdb" });
+  expect((await app.detailsOf(movie)).about).toEqual({ kind: "tmdb" });
+  expect(memory.abouts).toEqual(["app-key", "viewer-key"]);
 });
 
 it("says when no listed title has a TMDB id", { timeout: 20_000 }, async () => {
