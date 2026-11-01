@@ -159,12 +159,12 @@ export function playEpisode(
     const state = episodeStates(progress, marks)(episode);
     // The logical episode can stand by another file; resume this file's own checkpoint.
     const selected =
-      state.kind === "partial"
-        ? episodeStates(
+      state.kind === "watched"
+        ? state
+        : episodeStates(
             progress.filter(({ title }) => sameOwned(title, episode)),
             marks,
-          )(episode)
-        : state;
+          )(episode);
     return {
       episode,
       from: resumePoint(selected.kind === "partial" ? selected.progress : undefined),

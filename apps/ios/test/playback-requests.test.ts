@@ -500,11 +500,12 @@ describe("an episode's end", () => {
   });
 
   it.each([
-    ["saved position", false, 115],
-    ["unwatched state", true, 0],
+    ["saved position", false, 240, 115],
+    ["saved position after the other file was reset", false, 0, 115],
+    ["unwatched state", true, 240, 0],
   ] as const)(
     "keeps the selected file's %s when another file was played later",
-    async (_, marked, from) => {
+    async (_, marked, position, from) => {
       const details = seriesDetails("s1");
       const next: Episode = {
         ...episode("s1", 2),
@@ -519,7 +520,7 @@ describe("an episode's end", () => {
           ...nothingPlayed,
           progress: [
             own,
-            { ...own, title: { ...own.title, id: "another-file" }, position: 240, at: 3, since: 3 },
+            { ...own, title: { ...own.title, id: "another-file" }, position, at: 3, since: 3 },
           ],
           marks: marked ? [{ season: 1, episode: 2, watched: false, at: 2, revision: 1 }] : [],
         },
