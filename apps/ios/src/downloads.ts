@@ -42,6 +42,7 @@ import {
   request,
   stop,
   type Playing,
+  type Saved,
 } from "./playback.ts";
 import { subtitleTitle } from "./downloaded-subtitles.ts";
 import { fetchPicture } from "./picture-transfer.ts";
@@ -2017,8 +2018,9 @@ const playable = (record: Stored | undefined): record is Stored =>
  * or Stop just saved counts; anything the viewer asks meanwhile, the copy going or its removal
  * being written down, cancels it. Its progress stays with the copy, and goes to its
  * subscription's viewing record too while that subscription is saved (`keepProgress`). A copy
- * whose file is gone fails in Watch as unavailable. Manual Next follows only its saved immediate
- * successor when that exact local copy is complete.
+ * whose file is gone fails in Watch as unavailable. Manual Next, and the countdown once an episode
+ * played to its end, follow only its saved immediate successor while that exact local copy is
+ * complete, allowed and on the phone; neither ever streams one that isn't.
  */
 export function playDownload(id: string): void {
   const asked = request();
@@ -2044,30 +2046,51 @@ function nextCopy(record: Stored): Stored | undefined {
     copy.title.episode === edge.title.episode
   ) {
     try {
-      if (mediaOf(copy).exists) return copy;
+      const media = mediaOf(copy);
+      if (media.exists && media.size === copy.size) return copy;
     } catch {
       // An unreadable successor cannot prevent this copy from playing.
     }
   }
 }
 
+/** A copy's line in Watch: "S1 E2 · Name" for an episode, a movie's year. */
+const placeOf = ({ title, about }: Stored) =>
+  title.kind === "episode"
+    ? [episodeLabel(title.season, title.episode), about.episodeName].filter(Boolean).join(" · ")
+    : about.year
+      ? String(about.year)
+      : "";
+
 /** Plays copy `id` as its record stands now. */
 function playCopy(id: string, record: Stored) {
   const media = mediaOf(record);
   const { about, title, progress } = record;
+  /** The copy that goes on after this one, as both records stand now. */
+  const after = () => {
+    const latest = find(id);
+    return latest && nextCopy(latest);
+  };
+  /**
+   * The copy that goes on once this one's save ended and every earlier one settled; none when
+   * the save was refused.
+   */
+  const following = async (saved: Promise<Saved>) => {
+    if (!(await saved).saved) return;
+    await progressSettled();
+    return after();
+  };
   const since = Date.now();
   const item: Playing = {
     id: copyKey(id),
     subscriptionId: null,
     title: about.name,
-    place:
-      title.kind === "episode"
-        ? [episodeLabel(title.season, title.episode), about.episodeName].filter(Boolean).join(" · ")
-        : about.year
-          ? String(about.year)
-          : "",
+    place: placeOf(record),
     live: false,
-    next: nextCopy(record) !== undefined,
+    // Read each time, so Watch, Now Playing and the end offer it only while that copy is here.
+    get next() {
+      return after() !== undefined;
+    },
     versions: false,
     // The version it is a copy of: what was kept for it shows here too, offline as well.
     subtitles: subtitleTitle({
@@ -2114,14 +2137,22 @@ function playCopy(id: string, record: Stored) {
       progress: (position, duration) => keepProgress(id, position, duration, since),
       next: (saved) => {
         const asked = request();
-        void saved.then(async (result) => {
-          if (!result.saved) return;
-          await progressSettled();
-          if (!asked.stands()) return;
-          const current = find(id);
-          const next = current && nextCopy(current);
-          if (next) playCopy(next.id, next);
-        });
+        void following(saved).then((next) => next && asked.stands() && playCopy(next.id, next));
+      },
+      // Counts down only to that same local copy, and ends once it no longer plays: a copy that
+      // isn't downloaded is never streamed instead.
+      upNext: async (saved) => {
+        const next = await following(saved);
+        if (!next) return null;
+        return {
+          place: placeOf(next),
+          stands: () => after()?.id === next.id,
+          // That same copy as its record stands at zero, for where it was left.
+          play: () => {
+            const copy = after();
+            if (copy?.id === next.id) playCopy(copy.id, copy);
+          },
+        };
       },
     },
   );

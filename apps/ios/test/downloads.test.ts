@@ -2422,7 +2422,7 @@ describe("offline Next", { timeout: 30_000 }, () => {
   }
   const item = (app: App) => app.playingItem(app.playbackState.get().phase);
 
-  it("keeps the saved immediate order across a removed provider and cold launch, with no network or autoplay", async () => {
+  it("keeps the saved immediate order across a removed provider and cold launch, with Next during its countdown and no network", async () => {
     let { app, a, from, to } = await pair();
     // The target's own resume position must survive too, without an online viewing read.
     app.playDownload(to.id);
@@ -2561,6 +2561,150 @@ describe("offline Next", { timeout: 30_000 }, () => {
       },
     );
   }
+
+  /**
+   * `from` plays from its copy and, after `meanwhile`, to its end, its save and every earlier one
+   * settled. Only intervals are faked from then on, so the countdown moves with the test.
+   */
+  async function ends(app: App, from: string, meanwhile = () => {}) {
+    app.playDownload(from);
+    await until(() => memory.played.length === 1, "the copy");
+    memory.player!.ready();
+    expect(item(app)).toMatchObject({ id: `copy:${from}`, next: true });
+    memory.player!.currentTime = 600;
+    memory.player!.state(true);
+    meanwhile();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    onTestFinished(() => void vi.useRealTimers());
+    memory.player!.observation({ kind: "ended" });
+    await app.progressSettled();
+    await sleep(30);
+  }
+
+  it("counts down to the next local copy and plays it at zero, with no provider or network", async () => {
+    let { app, a, from, to } = await pair();
+    await app.remove(a, { keepHistory: false });
+    app = await launch();
+    const network = vi.spyOn(globalThis, "fetch");
+    onTestFinished(() => network.mockRestore());
+    await ends(app, from.id);
+    expect(app.upNextState.get()).toMatchObject({ seconds: 10 });
+    vi.advanceTimersByTime(9_000);
+    await sleep(30);
+    expect(memory.played).toHaveLength(1);
+    vi.advanceTimersByTime(1_000);
+    await until(() => memory.played.length === 2, "the next copy at zero");
+    expect(memory.played[1]?.uri).toBe(`file://${mediaFile(to.id)!.path}`);
+    expect(network).not.toHaveBeenCalled();
+    await app.stop();
+  });
+
+  for (const change of [
+    "removed during the countdown",
+    "lost before the end",
+    "truncated before the end",
+    "truncated at countdown completion",
+  ] as const) {
+    it(`plays and streams nothing when the next copy is ${change}`, async () => {
+      const { app, from, to } = await pair();
+      const requests = one.fileRequests();
+      await ends(app, from.id, () => {
+        if (change === "lost before the end") mediaFile(to.id)!.delete();
+        if (change === "truncated before the end") mediaFile(to.id)!.writeSync("x");
+      });
+      if (change === "removed during the countdown") {
+        expect(app.upNextState.get()).not.toBeNull();
+        await app.removeDownload(to.id);
+        vi.advanceTimersByTime(1_000);
+      }
+      if (change === "truncated at countdown completion") {
+        expect(app.upNextState.get()).toMatchObject({ seconds: 10 });
+        vi.advanceTimersByTime(9_000);
+        expect(app.upNextState.get()).toMatchObject({ seconds: 1 });
+        mediaFile(to.id)!.writeSync("x");
+        vi.advanceTimersByTime(1_000);
+      }
+      expect(app.upNextState.get()).toBeNull();
+      vi.advanceTimersByTime(20_000);
+      app.playUpNext();
+      await sleep(30);
+      // The ended episode stays, no longer offering Next, with no failure of a copy that went.
+      expect(item(app)).toMatchObject({ id: `copy:${from.id}`, next: false });
+      expect(app.playbackState.get().phase.kind).not.toBe("failed");
+      expect(memory.played).toHaveLength(1);
+      expect(one.fileRequests()).toBe(requests);
+      await app.stop();
+    });
+  }
+
+  /** What can change under a countdown to the next copy, each of which must end it. */
+  const changes: Record<string, (copies: Awaited<ReturnType<typeof pair>>) => Promise<unknown>> = {
+    // A new copy of the same episode is another file than the one the countdown named.
+    "the next copy is downloaded again": async ({ app, a, to }) => {
+      await app.removeDownload(to.id);
+      const again = await app.addDownload({ ...to.title, subscriptionId: a } as TitleRef);
+      await until(() => isComplete(app, again.id), "the new copy");
+    },
+    "its series is excluded": async ({ app, a, to }) => {
+      if (to.title.kind !== "episode") throw new Error("Not an episode copy");
+      memory.restricted = { movies: [], series: [to.title.seriesId], channel: "" };
+      app.reloadTitles(a);
+      await until(
+        () => !app.downloadList().items.some((each) => each.id === to.id),
+        "the copies to be excluded",
+      );
+    },
+    "the ended copy is removed": ({ app, from }) => app.removeDownload(from.id),
+  };
+  for (const [change, make] of Object.entries(changes)) {
+    it(`ends the countdown and plays nothing more when ${change}`, async () => {
+      const copies = await pair();
+      const { app, from } = copies;
+      await ends(app, from.id);
+      expect(app.upNextState.get()).not.toBeNull();
+      await make(copies);
+      vi.advanceTimersByTime(1_000);
+      expect(app.upNextState.get()).toBeNull();
+      vi.advanceTimersByTime(20_000);
+      app.playUpNext();
+      await sleep(30);
+      // Nothing more reaches the player, whatever becomes of the ended copy.
+      expect(memory.played).toHaveLength(1);
+      await app.stop();
+    });
+  }
+
+  it("offers Next and counts down once the next copy completes during the episode", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    const { details } = await seriesDetails(app, a);
+    const [first, second] = details.seasons[0]!.episodes.slice(1, 3);
+    const from = await app.addDownload(episodeOf(first!));
+    await until(() => isComplete(app, from.id), "the first copy");
+    app.playDownload(from.id);
+    await until(() => memory.played.length === 1, "the copy");
+    memory.player!.ready();
+    expect(item(app)).toMatchObject({ id: `copy:${from.id}`, next: false });
+    const to = await app.addDownload(episodeOf(second!));
+    expect(item(app)?.next).toBe(false);
+    await until(() => isComplete(app, to.id), "the next copy");
+    expect(item(app)?.next).toBe(true);
+    memory.player!.currentTime = 600;
+    memory.player!.state(true);
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    onTestFinished(() => void vi.useRealTimers());
+    memory.player!.observation({ kind: "ended" });
+    await app.progressSettled();
+    await sleep(30);
+    expect(app.upNextState.get()).toMatchObject({ seconds: 10 });
+    vi.advanceTimersByTime(9_000);
+    await sleep(30);
+    expect(memory.played).toHaveLength(1);
+    vi.advanceTimersByTime(1_000);
+    await until(() => memory.played.length === 2, "the next copy at zero");
+    expect(memory.played[1]?.uri).toBe(`file://${mediaFile(to.id)!.path}`);
+    await app.stop();
+  });
 
   for (const continuation of [undefined, { version: 2, title: "future" }]) {
     it(`keeps a copy playable without guessing an unreadable saved order: ${JSON.stringify(continuation)}`, async () => {
