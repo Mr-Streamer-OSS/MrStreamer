@@ -256,7 +256,7 @@ describe("Settings' TMDB group", () => {
     expect(scenario.alerts).toEqual(["Couldn't save the key"]);
   });
 
-  it("says TMDB isn't answering in red with the titles it gave, and Try again asks again", () => {
+  it("says TMDB isn't answering with the titles it gave, and Try again asks again", () => {
     scenario.standing = { kind: "unavailable", key: "yours", known: 1204, wanted: 1318 };
     render(React.createElement(Settings));
     expect(text("settings-tmdb-key")).toContain("Saved");
@@ -373,7 +373,7 @@ describe("a title's details", () => {
   it("say why TMDB's part is missing, with no Try again where asking again can't help", async () => {
     const reasons: [AboutStanding, string][] = [
       [
-        { kind: "no-key" },
+        { kind: "no-key", savedAt: null },
         "Provider details only. This build has no TMDB key. Add yours in Settings.",
       ],
       [

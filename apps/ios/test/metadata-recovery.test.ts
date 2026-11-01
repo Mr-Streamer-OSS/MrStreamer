@@ -23,6 +23,10 @@ const memory = vi.hoisted(() => ({
   unknown: new Set<string>(),
   /** No provider request reaches its panel. */
   panelDown: false,
+  /** The viewer's TMDB key won't be read, as before the first unlock. */
+  locked: false,
+  /** TMDB's answers for the refused key wait for this, while set. */
+  holdRefused: null as Promise<void> | null,
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -37,7 +41,17 @@ vi.mock("expo-video", () => ({
     pause: () => undefined,
   }),
 }));
-vi.mock("expo-secure-store", () => keychain(() => memory.keychain));
+vi.mock("expo-secure-store", () => {
+  const items = keychain(() => memory.keychain);
+  return {
+    ...items,
+    getItemAsync: async (key: string) => {
+      if (memory.locked && key === "s.metadata.tmdb")
+        throw new Error("User interaction is not allowed.");
+      return items.getItemAsync(key);
+    },
+  };
+});
 vi.mock("react-native", () => ({ Platform: { OS: "ios", Version: "26.1" } }));
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 
@@ -52,6 +66,7 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   const key = url.searchParams.get("api_key") ?? "";
   memory.keys.push(key);
   if (memory.offline) throw new TypeError("Network request failed");
+  if (key === REFUSED_KEY) await memory.holdRefused;
   if (key === REFUSED_KEY) return Response.json({ status_code: 7 }, { status: 401 });
   const id = /^\/3\/(?:movie|tv)\/(\d+)$/.exec(url.pathname)?.[1];
   if (id && memory.unknown.has(id)) return Response.json({ status_code: 34 }, { status: 404 });
@@ -106,8 +121,11 @@ beforeEach(async () => {
   memory.offline = false;
   memory.unknown.clear();
   memory.panelDown = false;
+  memory.locked = false;
+  memory.holdRefused = null;
 });
-afterEach(() => {
+afterEach(async () => {
+  await drained();
   vi.useRealTimers();
   vi.unstubAllEnvs();
 });
@@ -120,8 +138,18 @@ async function until(ready: () => boolean, what = "the condition", limit = 8_000
   }
 }
 
+/** Every launch's app, whose metadata stops fetching before another launch or test. */
+const launched: App[] = [];
+/** Resolves once no launch's metadata is fetching, so none writes into the next. */
+async function drained() {
+  for (const app of launched.splice(0)) {
+    await until(() => app.metadataStanding().kind !== "fetching", "metadata to stop", 20_000);
+  }
+}
+
 /** The app as a launch starts it, with the app's own TMDB key or none. */
-async function launch({ appKey = "" } = {}) {
+async function launch({ appKey = "" } = {}): Promise<App> {
+  await drained();
   vi.resetModules();
   vi.stubEnv("EXPO_PUBLIC_TMDB_KEY", appKey);
   vi.stubEnv("EXPO_PUBLIC_TMDB_API", tmdb.url);
@@ -129,9 +157,13 @@ async function launch({ appKey = "" } = {}) {
   const titles = await import("../src/titles.ts");
   const diagnostics = await import("../src/diagnostics.ts");
   await account.restore();
-  return { ...account, ...titles, ...diagnostics };
+  const app = { ...account, ...titles, ...diagnostics };
+  launched.push(app);
+  return app;
 }
-type App = Awaited<ReturnType<typeof launch>>;
+type App = typeof import("../src/account.ts") &
+  typeof import("../src/titles.ts") &
+  typeof import("../src/diagnostics.ts");
 
 /** Adds the panel's account and waits for its movie and series lists. */
 async function added(app: App) {
@@ -156,7 +188,7 @@ it("asks TMDB with the viewer's own key, kept in the Keychain through a relaunch
   await added(app);
   // Without a key, browsing still works from the provider's facts, and details say why.
   await settled(app, "no-key");
-  expect((await app.detailsOf(firstMovie(app))).about).toEqual({ kind: "no-key" });
+  expect((await app.detailsOf(firstMovie(app))).about).toEqual({ kind: "no-key", savedAt: null });
   expect(memory.keys).toEqual([]);
 
   await app.saveTmdbKey("  viewer-key  ");
@@ -223,6 +255,55 @@ it(
     expect((await app.detailsOf(firstMovie(app))).about).toEqual({ kind: "tmdb" });
   },
 );
+
+it("keeps TMDB's saved facts once the only key is removed", async () => {
+  const app = await launch();
+  await added(app);
+  await app.saveTmdbKey("viewer-key");
+  await settled(app, "answered");
+  const answered = await app.detailsOf(firstMovie(app));
+
+  await app.removeTmdbKey();
+  await settled(app, "no-key");
+  const kept = await app.detailsOf(firstMovie(app));
+  expect(kept.plot).toBe(answered.plot);
+  expect(kept.about).toEqual({ kind: "tmdb" });
+});
+
+it("finds the viewer's saved key once a locked Keychain answers, without a relaunch", async () => {
+  memory.keychain.set("s.metadata.tmdb", "viewer-key");
+  memory.locked = true;
+  const app = await launch({ appKey: "app-key" });
+  await added(app);
+  await settled(app, "answered");
+  expect(app.metadataStanding()).toMatchObject({ key: "app" });
+
+  // Opening a title's details reads the Keychain again.
+  memory.locked = false;
+  await app.detailsOf(firstMovie(app));
+  await until(() => {
+    const standing = app.metadataStanding();
+    return "key" in standing && standing.key === "yours";
+  }, "the viewer's key");
+  await settled(app, "answered");
+  expect(new Set(memory.keys)).toContain("viewer-key");
+});
+
+it("lets go of details asked with a key that was replaced", async () => {
+  const app = await launch({ appKey: REFUSED_KEY });
+  await added(app);
+  await settled(app, "refused");
+  let release = () => {};
+  memory.holdRefused = new Promise((done) => (release = done));
+  const before = memory.keys.length;
+  const asked = app.detailsOf(firstMovie(app));
+  await until(() => memory.keys.length > before, "the held ask");
+
+  await app.saveTmdbKey("viewer-key");
+  expect((await app.detailsOf(firstMovie(app))).about).toEqual({ kind: "tmdb" });
+  release();
+  expect((await asked).about).toEqual({ kind: "refused", savedAt: null });
+});
 
 it("says when TMDB doesn't know a title", async () => {
   const app = await launch({ appKey: "app-key" });
