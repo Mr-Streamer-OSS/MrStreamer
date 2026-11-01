@@ -243,7 +243,7 @@ export function Programme({
   origin,
   onBack,
   onSettings,
-  back,
+  back = t("Back to Schedule"),
 }: {
   channel: string;
   detail: string;
@@ -275,12 +275,11 @@ export function Programme({
   const kept = catchUp.kind === "past" || catchUp.kind === "on";
   const reminder = useReminder(channel?.key ?? key, read.value?.start);
   const belled = reminder?.status.kind === "upcoming";
-  const backLabel = back ?? t("Back to Schedule");
   if (!channel || !library) {
     return (
       <Message
         text={t("Channel unavailable")}
-        {...(onBack ? { action: { label: backLabel, onPress: onBack } } : {})}
+        {...(onBack ? { action: { label: back, onPress: onBack } } : {})}
       />
     );
   }
@@ -291,7 +290,7 @@ export function Programme({
       contentContainerStyle={content}
       testID="guide-programme"
     >
-      {onBack ? <TextButton label={backLabel} onPress={onBack} /> : null}
+      {onBack ? <TextButton label={back} onPress={onBack} /> : null}
       <Text ref={heading} style={styles.channel}>
         {channel.title}
       </Text>

@@ -210,10 +210,6 @@ it("keeps the tab, the country and the screen it shows when the language changes
   // The same grid, not one drawn afresh: its scroll and the tiles in view stay.
   expect(find("live-categories")).toBe(grid);
   expect(text("live-categories")).toContain("Sport");
-
-  // Back to every country's All for the next test, as the viewer would set it.
-  press("live-country-clear");
-  press("tab-all");
 });
 
 it("counts channels and says what it can't find in Spanish, quoting the search as typed", () => {

@@ -474,14 +474,7 @@ export function useGuideSchedule(key: string, day: Day, catalogue: Library) {
  * Safe, deliberately small status copy, as live.ts's key: callers compare the key and show its
  * `t`. Recovery uses the existing account/settings path.
  */
-export function guideMessage(
-  status: GuideStatus | undefined,
-):
-  | "Guide may be out of date"
-  | "Guide unavailable"
-  | "Loading guide…"
-  | "No programme information"
-  | null {
+export function guideMessage(status: GuideStatus | undefined) {
   if (!status) return null;
   if (status.availability === "available")
     return status.stale || status.error ? "Guide may be out of date" : null;

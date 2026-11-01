@@ -230,7 +230,6 @@ export function Entry({
 
 /** Live's rows for the viewer's lists, under Favourites; none without lists. */
 export function ListEntries() {
-  useLocale();
   const lists = useChannelLists();
   return (
     <>

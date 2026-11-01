@@ -363,6 +363,7 @@ function RemindersEntry() {
  * or categories. A category's screen has none of these rows.
  */
 function Entries() {
+  // LiveHome hands it to Channels made once, so the language reaches it here.
   useLocale();
   return (
     <>
@@ -509,7 +510,6 @@ function Still({ children }: { children: ReactNode }) {
 }
 
 function Browse({ library }: { library: Library }) {
-  useLocale();
   const kept = useStore(place);
   const region =
     kept.region === null
@@ -1135,7 +1135,6 @@ function ForYou({
   categories: readonly Category[];
   header: ReactNode;
 }) {
-  useLocale();
   const inset = useDockInset();
   const playing = channelStatus(usePlayback().phase);
   const { recentChannels } = useSavedState();
@@ -1382,7 +1381,6 @@ function Country({
   chosen: Region | null;
   onChoose: (region: Region | null) => void;
 }) {
-  useLocale();
   const name = chosen?.name ?? t("All countries");
   const open = () =>
     ActionSheetIOS.showActionSheetWithOptions(

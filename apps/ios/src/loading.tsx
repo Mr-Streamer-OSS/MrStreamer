@@ -249,14 +249,7 @@ export function useProviderStatus(status: Status | null): Status | null {
 /** The status line while a screen's content is worked out with no provider's list to name. */
 export const loadingStatus = (
   what: "channels" | "movies" | "series" | "movies and series",
-): Status => ({
-  text: {
-    channels: t("Loading channels."),
-    movies: t("Loading movies."),
-    series: t("Loading series."),
-    "movies and series": t("Loading movies and series."),
-  }[what],
-});
+): Status => ({ text: t(`Loading ${what}.`) });
 
 /** The room the status line takes over a screen's bottom edge, for its scrolling content. */
 const DockInset = createContext(0);

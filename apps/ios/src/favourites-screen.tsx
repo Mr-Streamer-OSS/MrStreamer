@@ -65,7 +65,6 @@ interface Draft {
 
 /** Live's row that opens every favourite, with how many open. */
 export function FavouritesEntry() {
-  useLocale();
   const favourites = useFavourites();
   return (
     <Entry
