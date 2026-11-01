@@ -42,6 +42,7 @@ import { catchUpOf } from "./guide-screen.tsx";
 import { dayLabel, localDay, programmeRange } from "./guide-ui.tsx";
 import { openOnTabs, useTabs, type TabScreen } from "./header.tsx";
 import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
+import { startMediaControls } from "./media-controls.ts";
 import type { Channel } from "./library.ts";
 import { useMediaPreferences, type SubtitleSize } from "./media-preferences.ts";
 import {
@@ -204,6 +205,8 @@ export function WatchLayer() {
     }, unless);
   };
 
+  // The system's Now Playing and remote commands follow the player for the app's life.
+  useEffect(() => startMediaControls(), []);
   useEffect(() => {
     onEndPictureInPicture(() => void view.current?.stopPictureInPicture());
     return () => onEndPictureInPicture(null);

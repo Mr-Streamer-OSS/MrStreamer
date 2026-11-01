@@ -32,6 +32,7 @@ import {
   effectiveTitleLanguage,
   getMediaPreferences,
   updateMediaPreferences,
+  type Speed,
 } from "./media-preferences.ts";
 import {
   endSubtitleWork,
@@ -70,6 +71,9 @@ import { openFormat, type FormatSession, type UnshownSubtitles } from "./title-f
 // Closing Watch pauses what plays, saving where it got to, unless Picture in Picture or AirPlay
 // already shows it, where it plays on with its sound. Stop ends it and saves. Both resolve once
 // their save ended, saying whether it was kept.
+//
+// A movie or an episode plays at the viewer's saved speed (`setSpeed`); a channel, and a programme
+// from its catch-up, at their own. What the player says it plays at is `playbackSpeed`.
 //
 // An episode that plays to its end in Watch counts down to the episode that goes on, once its
 // save ended and its owner said which (`upNext`), and plays it at zero. Anything the viewer does
@@ -237,7 +241,15 @@ export const usePlayback = () => useStore(state);
 export const playbackState: Pick<Store<Playback>, "get" | "subscribe"> = state;
 export const playbackClock: Pick<Store<number>, "get" | "subscribe"> = clock;
 export const usePlaybackClock = () => useStore(clock);
+export const playbackLength: Pick<Store<number>, "get" | "subscribe"> = length;
 export const usePlaybackLength = () => useStore(length);
+/**
+ * The rate the player says it plays at, or plays at once played again; null before the current
+ * stream's first report. Only the native player's own report sets it, never a request.
+ */
+const speed = store<number | null>(null);
+export const playbackSpeed: Pick<Store<number | null>, "get" | "subscribe"> = speed;
+export const usePlaybackSpeed = () => useStore(speed);
 const upNext = store<UpNext | null>(null);
 /** The countdown to the next episode while Watch shows one; null otherwise. */
 export const useUpNext = () => useStore(upNext);
@@ -713,6 +725,7 @@ function release(): Promise<Saved> {
   player().pause();
   clock.set(0);
   length.set(0);
+  speed.set(null);
   return saved;
 }
 
@@ -901,6 +914,8 @@ function applyViewerPause(resource: Resource) {
 
 /** Read current intent after asynchronous admission and complete its initial action. */
 function startAttached(resource: Resource) {
+  // The rate its plays take, which a paused player only keeps for its next play.
+  player().playbackRate = speedOf(current);
   if (pauseOnStart === "viewer") applyViewerPause(resource);
   else if (!pauseOnStart && !resource.holdInitialPlay) player().play();
 }
@@ -1277,6 +1292,7 @@ function observe(event: PlaybackObservation) {
       const viewerPaused = paused && pauseOnStart === "viewer-applied";
       if (viewerPaused) pauseOnStart = false;
       clock.set(Math.max(0, event.mediaTimeSeconds - current.offset));
+      if (event.speed !== undefined && event.speed > 0) speed.set(event.speed);
       if (!stands(resource) || resource.sequence !== event.sequence) return;
       endAtLength(playing);
       const { phase } = state.get();
@@ -1727,6 +1743,21 @@ export function togglePause() {
   attentionChanged();
 }
 
+/** The speed `owned` plays at: a movie's or an episode's saved one, else its own. */
+const speedOf = (owned: typeof current): Speed =>
+  owned?.choice.plan.kind === "file" ? getMediaPreferences().titleSpeed : 1;
+
+/**
+ * Plays movies and episodes at `next` from now on, saved before it applies: what plays now too,
+ * if it is one. False when the save was refused, which leaves the speed as it was.
+ */
+export function setSpeed(next: Speed): boolean {
+  if (!updateMediaPreferences("titleSpeed", next)) return false;
+  // One still opening takes it as it attaches.
+  if (current?.resource.itemId != null) player().playbackRate = speedOf(current);
+  return true;
+}
+
 /** Moves by `seconds`; a programme from catch-up, within the programme. */
 export function seekBy(seconds: number) {
   const at = player().currentTime - (current?.offset ?? 0) + seconds;
@@ -1917,6 +1948,12 @@ function countDown(owned: NonNullable<typeof current>, saved: Promise<Saved>) {
     },
     () => counting === mine && cancelUpNext(),
   );
+}
+
+/** The system's next track: the episode counted down to, at once, else Next episode's. */
+export function nextEpisode() {
+  if (counting?.play) playUpNext();
+  else playNext();
 }
 
 /** Plays the episode Watch counts down to at once. */

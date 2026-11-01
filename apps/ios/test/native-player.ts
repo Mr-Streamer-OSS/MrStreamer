@@ -28,6 +28,8 @@ export function nativePlayer(
     muted: true,
     timeUpdateEventInterval: 0,
     staysActiveInBackground: false,
+    playbackRate: 1,
+    ownsNowPlaying: false,
     currentTime: 0,
     duration: 600,
     identity: () => identity,
@@ -53,6 +55,7 @@ export function nativePlayer(
         mediaTimeSeconds: port.currentTime,
         bufferEmpty: false,
         likelyToKeepUp: true,
+        speed: port.playbackRate,
       }),
     failure: (failure: ObservedFailure = { kind: "unknown", evidence: null }) =>
       port.observation({ kind: "failure", terminal: true, failure }),

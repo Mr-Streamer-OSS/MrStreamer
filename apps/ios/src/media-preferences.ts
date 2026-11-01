@@ -18,6 +18,10 @@ type Subtitles =
 export const SUBTITLE_SIZES = ["small", "medium", "large"] as const;
 export type SubtitleSize = (typeof SUBTITLE_SIZES)[number];
 
+/** The speeds a movie or an episode plays at, slowest first; 1 is its own. As the desktop's. */
+export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+export type Speed = (typeof SPEEDS)[number];
+
 /** Global media policies. Native track and Live variant consumers apply these on a later item. */
 interface MediaPreferences {
   /** null keeps the device's language, including languages outside the offered choices. */
@@ -32,6 +36,8 @@ interface MediaPreferences {
   readonly liveQuality: Quality;
   /** App text size for downloaded subtitle cues. */
   readonly subtitleSize: SubtitleSize;
+  /** What every movie and episode plays at, until the viewer picks another. Live plays at 1. */
+  readonly titleSpeed: Speed;
 }
 
 const FILE = "media-preferences.json";
@@ -112,6 +118,7 @@ function saved(): Store<MediaPreferences> {
       liveQuality:
         QUALITIES.find((quality) => quality === contents["liveQuality"]) ?? DEFAULT_LIVE_QUALITY,
       subtitleSize: SUBTITLE_SIZES.find((size) => size === contents["subtitleSize"]) ?? "medium",
+      titleSpeed: SPEEDS.find((speed) => speed === contents["titleSpeed"]) ?? 1,
     }),
   );
   return cached;
