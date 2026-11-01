@@ -565,7 +565,7 @@ export const t = catalogue(
       "Set one from a later programme's details.":
         "Programmez-en un depuis les détails d’une émission à venir.",
       "iOS notifies you as each one starts. A reminder never records or plays.":
-        "iOS vous avertit au début de chacune. Un rappel n’enregistre et ne lit jamais rien.",
+        "iOS vous avertit au début de chaque émission. Un rappel n’enregistre et ne lit jamais rien.",
       "On now": "En ce moment",
       "Changed to {title} · won't notify": "Remplacée par {title} · pas de notification",
       "No longer in the guide · won't notify": "N’est plus dans le guide · pas de notification",
@@ -832,7 +832,7 @@ export const t = catalogue(
       "channels still loading": "canales aún cargando",
       "channels didn't load": "los canales no se cargaron",
       "password needed in Settings": "falta la contraseña en Ajustes",
-      "no longer listed": "ya no está en la lista",
+      "no longer listed": "fuera del catálogo",
       "Favourites changed": "Los favoritos cambiaron",
       "Nothing was moved. They changed while you arranged them: edit them as they are now.":
         "No se movió nada. Cambiaron mientras los ordenabas: edítalos como están ahora.",

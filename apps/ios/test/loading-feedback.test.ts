@@ -1,5 +1,6 @@
 import { createRoot, document, type Root } from "./dom.ts";
 import * as React from "react";
+import { setLanguage } from "@mrstreamer/core/i18n";
 import { indexCatalogue, kindOf } from "@mrstreamer/core/ondemand/catalogue";
 import type { LiveCatalogue, ProviderTitle, OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { buildLibrary } from "../src/library.ts";
@@ -441,6 +442,18 @@ describe("Movies while its lists load", () => {
     expect(count("placeholder-shelf")).toBe(2);
     expect(line()).toBe("Loading movies and series from Northwind.");
     expect(text()).not.toContain("Nothing new or popular yet");
+  });
+
+  it("says its status line again in a new language, with nothing else changed", () => {
+    scenario.members = [member("a", "Northwind", { titles: { kind: "loading", last: null } })];
+    open(React.createElement(TitlesHome, { kind: "movie" }));
+    expect(line()).toBe("Loading movies and series from Northwind.");
+    try {
+      React.act(() => setLanguage({ locale: "de-DE", formats: "de-DE" }));
+      expect(line()).toBe("Filme und Serien von Northwind werden geladen.");
+    } finally {
+      React.act(() => setLanguage({ locale: "en-US", formats: "en-US" }));
+    }
   });
 
   it("says nothing is new or popular only once collections are made, with no shapes", () => {

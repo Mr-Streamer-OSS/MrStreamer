@@ -35,6 +35,7 @@ import {
 import { useReduceMotion } from "../glass.tsx";
 import { openOnTabs, useTabs } from "../header.tsx";
 import { useLocale } from "../i18n/catalogue.ts";
+import { t } from "../i18n/status.ts";
 import { DownloadStatusButton } from "../download-status.tsx";
 import { guide, type FoundProgramme } from "../guide.ts";
 import { Programme } from "../guide-screen.tsx";
@@ -669,8 +670,9 @@ function searchLine(
 ): Status | null {
   if (!status && !providers && !pending && !unsearched) return null;
   const actions = [...(providers?.actions ?? [])];
-  if (status?.retry.length && !actions.some((action) => action.label === "Retry")) {
-    actions.push({ label: "Retry", onPress: () => status.retry.forEach(retry) });
+  // One Retry, the shared line's own when it has one, in the interface language either way.
+  if (status?.retry.length && !actions.some((action) => action.label === t("Retry"))) {
+    actions.push({ label: t("Retry"), onPress: () => status.retry.forEach(retry) });
   }
   // The persistent recovery owns its full explanation. Otherwise Search supplies the loading
   // sentence, including indexing and provider counts, rather than repeating libraryStatus's.
