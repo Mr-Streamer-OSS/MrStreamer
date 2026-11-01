@@ -286,17 +286,19 @@ let requests = 0;
 let screen = "";
 
 /**
- * When the viewer last paused or moved this play. An end the player sent before that is still on
- * its way for a moment after, while the player's position may not yet be where the viewer moved
- * it: one that arrives within `TOUCH_OVERTAKES` milliseconds is obsolete and starts no countdown.
+ * When the viewer last paused this play or moved it short of its end. An end the player sent
+ * before that is still on its way for a moment after, while the player's position may not yet be
+ * where the viewer moved it: one that arrives within `TOUCH_OVERTAKES` milliseconds is obsolete
+ * and starts no countdown. A move to the end leaves the end it brings to count down.
  */
 let touched = -Infinity;
 const TOUCH_OVERTAKES = 2000;
 
-/** The viewer paused or moved what plays, which ends any countdown. */
-function touch() {
-  touched = Date.now();
+/** The viewer moved this play to `to` seconds, which ends any countdown. */
+function moved(to: number) {
   cancelUpNext();
+  const end = length.get();
+  if (!end || to < end - 1) touched = Date.now();
 }
 
 /** Retires every waiting request, the countdown to a next episode with them. */
@@ -1703,9 +1705,10 @@ export async function stop(): Promise<Saved> {
  */
 export function togglePause() {
   resumeOnReturn = false;
-  touch();
+  cancelUpNext();
   const { phase } = state.get();
   if (phase.kind === "playing" || phase.kind === "loading") {
+    touched = Date.now();
     held = { by: "viewer", acknowledged: false };
     pauseOnStart = phase.kind === "loading" ? "viewer" : false;
     if (pauseOnStart === "viewer" && current && current.resource.itemId !== null) {
@@ -1722,16 +1725,16 @@ export function togglePause() {
 
 /** Moves by `seconds`; a programme from catch-up, within the programme. */
 export function seekBy(seconds: number) {
-  touch();
-  if (!current?.item.past) return player().seekBy(seconds);
-  const at = player().currentTime - current.offset + seconds;
-  seekTo(Math.min(length.get(), at));
+  const at = player().currentTime - (current?.offset ?? 0) + seconds;
+  if (current?.item.past) return seekTo(Math.min(length.get(), at));
+  moved(at);
+  player().seekBy(seconds);
 }
 
 /** Moves a title to `seconds` from its start. */
 export function seekTo(seconds: number) {
-  touch();
   const at = Math.max(0, seconds);
+  moved(at);
   player().currentTime = at + (current?.offset ?? 0);
   clock.set(at);
   endAtLength(state.get().phase.kind === "playing", at);

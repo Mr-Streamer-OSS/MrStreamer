@@ -538,6 +538,27 @@ describe("an episode's end", () => {
     expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
   });
 
+  it.each([
+    ["a skip", () => seekBy(10)],
+    ["a scrub", () => seekTo(600)],
+  ])("counts down for the end that %s to the end brings", async (_, act) => {
+    playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
+    await settle();
+    startsAt();
+    fakePlayer.state(true);
+    fakePlayer.currentTime = 595;
+    act();
+    fakePlayer.currentTime = 600;
+    fakePlayer.observation({ kind: "ended" });
+    fakePlayer.state(false);
+    await settle();
+    held.standing.shift()?.(nothingPlayed);
+    await settle();
+    vi.advanceTimersByTime(10_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
+  });
+
   it("plays the next at once for Next episode pressed just before the end", async () => {
     playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
     await settle();
