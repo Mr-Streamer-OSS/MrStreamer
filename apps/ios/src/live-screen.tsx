@@ -1,4 +1,4 @@
-import { t } from "@mrstreamer/core/i18n";
+import { formatNumber } from "@mrstreamer/core/i18n";
 import { router, useNavigation, useRootNavigationState } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -24,6 +24,8 @@ import { failureOf } from "./errors.ts";
 import { starChannel, useFavouriteKeys } from "./favourites.ts";
 import { FavouritesEntry } from "./favourites-screen.tsx";
 import { Entry, ListEntries, openListSheet } from "./custom-lists-screen.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/live.ts";
 import { useReminders } from "./reminders.ts";
 import { Glass, IconButton } from "./glass.tsx";
 import type { ScheduleItem } from "./guide.ts";
@@ -246,6 +248,7 @@ function useHandover(split: boolean) {
  * and the pages shown, as Back does on the stack.
  */
 function LiveDetail() {
+  useLocale();
   const shown = useStore(detail);
   const { gutter } = useListWidth();
   if (!shown) {
@@ -257,7 +260,7 @@ function LiveDetail() {
         contentContainerStyle={{ paddingHorizontal: gutter, paddingTop: 20 }}
         testID="live-detail"
       >
-        <Text style={styles.empty}>Choose a channel's Schedule</Text>
+        <Text style={styles.empty}>{t("Choose a channel's Schedule")}</Text>
       </ScrollView>
     );
   }
@@ -271,7 +274,7 @@ function LiveDetail() {
           {...(shown.start === undefined ? {} : { start: shown.start })}
           origin="live"
           onBack={closeDetail}
-          back={shown.programme ? "Back to Guide" : "Back"}
+          back={shown.programme ? t("Back to Guide") : t("Back")}
         />
       </View>
     );
@@ -360,6 +363,7 @@ function RemindersEntry() {
  * or categories. A category's screen has none of these rows.
  */
 function Entries() {
+  useLocale();
   return (
     <>
       <FavouritesEntry />
@@ -367,13 +371,13 @@ function Entries() {
       <RemindersEntry />
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Find countries or categories"
+        accessibilityLabel={t("Find countries or categories")}
         onPress={() => router.push("/live/discover")}
         style={({ pressed }) => [styles.find, pressed && styles.pressed]}
         testID="live-discover"
       >
         <SymbolView name="magnifyingglass" size={15} tintColor={colors.dim} />
-        <Text style={styles.findText}>Find countries or categories</Text>
+        <Text style={styles.findText}>{t("Find countries or categories")}</Text>
       </Pressable>
     </>
   );
@@ -389,7 +393,7 @@ export function CategoryScreen({ region, name }: { region: string; name: string 
         if (!found || !shelf) {
           return (
             <Still>
-              <Message text="This category isn't listed any more." />
+              <Message text={t("This category isn't listed any more.")} />
             </Still>
           );
         }
@@ -420,6 +424,7 @@ function Channels({
   lead?: ReactNode;
   children: (library: Library) => ReactNode;
 }) {
+  useLocale();
   const catalogue = useCatalogue();
   const roster = useRoster();
   const height = useRowHeight();
@@ -453,12 +458,12 @@ function Channels({
         {lead}
         <Notice
           failure={{
-            headline: "Couldn't load channels",
+            headline: t("Couldn't load channels"),
             advice: [failure.headline, failure.advice].filter(Boolean).join(". "),
           }}
           actions={[
-            { label: "Try again", onPress: retryChannels },
-            { label: "Provider settings", onPress: openSettings },
+            { label: t("Try again"), onPress: retryChannels },
+            { label: t("Provider settings"), onPress: openSettings },
           ]}
         />
       </Still>
@@ -471,10 +476,12 @@ function Channels({
           {lead}
           <Notice
             failure={{
-              headline: "No live channels",
-              advice: `${host || "Your providers"} ${host ? "lists" : "list"} no live channels.`,
+              headline: t("No live channels"),
+              advice: host
+                ? t("{provider} lists no live channels.", { provider: host })
+                : t("Your providers list no live channels."),
             }}
-            actions={[{ label: "Reload", onPress: reloadAllChannels }]}
+            actions={[{ label: t("Reload"), onPress: reloadAllChannels }]}
           />
         </Still>
       </Docked>
@@ -502,6 +509,7 @@ function Still({ children }: { children: ReactNode }) {
 }
 
 function Browse({ library }: { library: Library }) {
+  useLocale();
   const kept = useStore(place);
   const region =
     kept.region === null
@@ -523,14 +531,14 @@ function Browse({ library }: { library: Library }) {
     library.regions.reduce((count, each) => count + each.shelves.length, 0) > 1;
   const tabs: readonly { value: Tab; label: string }[] = browsable
     ? [
-        { value: "for-you", label: "For you" },
-        { value: "categories", label: "Categories" },
-        { value: "all", label: "All" },
-        { value: "guide", label: "Guide" },
+        { value: "for-you", label: t("For you") },
+        { value: "categories", label: t("Categories") },
+        { value: "all", label: t("All") },
+        { value: "guide", label: t("Guide") },
       ]
     : [
-        { value: "all", label: "All" },
-        { value: "guide", label: "Guide" },
+        { value: "all", label: t("All") },
+        { value: "guide", label: t("Guide") },
       ];
   const tab = browsable || kept.tab === "guide" ? kept.tab : "all";
   // A country chosen before is kept by name: one a refresh took away says so until another is.
@@ -543,7 +551,9 @@ function Browse({ library }: { library: Library }) {
       <Entries />
       {countries || tabs.length > 1 ? (
         <>
-          {gone ? <Text style={styles.note}>{`${gone} isn't listed any more.`}</Text> : null}
+          {gone ? (
+            <Text style={styles.note}>{t("{name} isn't listed any more.", { name: gone })}</Text>
+          ) : null}
           <TextTabs
             lead={
               countries ? (
@@ -612,6 +622,7 @@ function ChannelList({
   const height =
     useRowHeight() + Math.round(58 * fontScale) + (largeText(fontScale) ? stackedActions : 0);
   const inset = useDockInset();
+  const locale = useLocale();
   const playing = channelStatus(usePlayback().phase);
   const favourites = useFavouriteKeys();
   const [top, setTop] = useState(0);
@@ -630,11 +641,11 @@ function ChannelList({
   );
   const read = useGuideListings(visible, library);
   const onPress = useCallback((channel: Channel) => watch(library, channel), [library]);
-  // Rows draw again when a star or what plays changes.
+  // Rows draw again when a star, what plays or the interface language changes.
   const playingNow = playing && `${playing.id} ${playing.word}`;
   const extraData = useMemo(
-    () => ({ favourites, playingNow, read: read.value }),
-    [favourites, playingNow, read.value],
+    () => ({ favourites, playingNow, read: read.value, locale }),
+    [favourites, playingNow, read.value, locale],
   );
   return (
     <FlatList
@@ -661,7 +672,7 @@ function ChannelList({
             channel={item}
             detail={place}
             providerLabel={provider}
-            status={item.key === playing?.id ? playing.word : null}
+            status={item.key === playing?.id ? t(playing.word) : null}
             height={height}
             onPress={onPress}
             favourite={favourites.has(item.key)}
@@ -677,7 +688,7 @@ function ChannelList({
                 ) : null}
                 <ProgrammeLines
                   listing={read.value?.get(item.key)}
-                  fallback={fallback || "No programme information"}
+                  fallback={fallback || t("No programme information")}
                   at={read.now}
                 />
               </>
@@ -764,6 +775,7 @@ function GuideGrid({
   const lineHeight = useRowHeight();
   const height = large ? 44 + lineHeight : lineHeight;
   const inset = useDockInset();
+  const locale = useLocale();
   const place = useStore(gridPlace);
   const shown = useStore(detail);
   const scheduled = split && shown && !shown.alone ? shown.channel : null;
@@ -789,7 +801,7 @@ function GuideGrid({
     ...new Set(
       visible
         .map((key) => guideMessage(read.snapshot.get(library.byKey.get(key)?.subscriptionId ?? "")))
-        .filter(Boolean),
+        .filter((message) => message !== null),
     ),
   ];
   const onProgramme = useCallback(
@@ -800,10 +812,20 @@ function GuideGrid({
     [split],
   );
   const onSchedule = useCallback((channel: Channel) => showSchedule(split, channel), [split]);
-  // Rows draw again as the window, the day read, the mark or the width change.
+  // Rows draw again as the window, the day read, the mark, the width or the language change.
   const extraData = useMemo(
-    () => ({ rows: read.rows, from, until, now, chosen: place.chosen, scheduled, strip, split }),
-    [read.rows, from, until, now, place.chosen, scheduled, strip, split],
+    () => ({
+      rows: read.rows,
+      from,
+      until,
+      now,
+      chosen: place.chosen,
+      scheduled,
+      strip,
+      split,
+      locale,
+    }),
+    [read.rows, from, until, now, place.chosen, scheduled, strip, split, locale],
   );
   const saved = gridScroll.get(scope);
   return (
@@ -817,38 +839,38 @@ function GuideGrid({
           {header}
           {messages.map((message) => (
             <Text key={message} style={styles.note}>
-              {message}
+              {t(message)}
             </Text>
           ))}
           {messages.includes("Guide unavailable") ? (
             <View style={styles.settingsInset}>
-              <TextButton label="Provider settings" onPress={openSettings} />
+              <TextButton label={t("Provider settings")} onPress={openSettings} />
             </View>
           ) : null}
           <View style={styles.moves}>
             <TextButton
-              label="Previous day"
+              label={t("Previous day")}
               onPress={() => moveGrid({ day: localDay(day.from, -1).from, offset })}
             />
             <Text accessibilityRole="header" style={styles.day}>
               {dayLabel(day, now)}
             </Text>
             <TextButton
-              label="Next day"
+              label={t("Next day")}
               onPress={() => moveGrid({ day: localDay(day.from, 1).from, offset })}
             />
           </View>
           <View style={styles.moves}>
             <TextButton
-              label="Earlier"
+              label={t("Earlier")}
               disabled={offset <= 0}
               onPress={() => moveGrid({ day: day.from, offset: offset - step })}
             />
             {place.day !== null || place.offset !== null ? (
-              <TextButton label="Now" onPress={() => moveGrid({ day: null, offset: null })} />
+              <TextButton label={t("Now")} onPress={() => moveGrid({ day: null, offset: null })} />
             ) : null}
             <TextButton
-              label="Later"
+              label={t("Later")}
               disabled={offset >= latest}
               onPress={() => moveGrid({ day: day.from, offset: offset + step })}
             />
@@ -859,7 +881,7 @@ function GuideGrid({
       renderItem={({ item }) => {
         const row = read.rows.get(item.key);
         const said = guideMessage(read.snapshot.get(item.subscriptionId));
-        const reason = said === "Guide may be out of date" ? null : said;
+        const reason = said === "Guide may be out of date" ? null : said && t(said);
         const shown = row?.programmes.some((each) => each.stop > from && each.start < until);
         return (
           <GridRow
@@ -872,10 +894,10 @@ function GuideGrid({
               !row || shown
                 ? null
                 : row.programmes.length === 0
-                  ? (reason ?? "No programme information")
+                  ? (reason ?? t("No programme information"))
                   : row.more && from >= (row.programmes.at(-1)?.stop ?? Infinity)
-                    ? "More in Schedule"
-                    : "Nothing in this window"
+                    ? t("More in Schedule")
+                    : t("Nothing in this window")
             }
             from={from}
             until={until}
@@ -999,12 +1021,18 @@ const GridRow = memo(function GridRow({
   onSchedule: (channel: Channel) => void;
   onProgramme: (channel: string, programme: ScheduleItem) => void;
 }) {
+  // Memoised on its props, so the language reaches it here.
+  useLocale();
   const inWindow = (programmes ?? []).filter((each) => each.stop > from && each.start < until);
   return (
     <View style={[styles.guideRow, { height }, large && styles.stackedRow]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={[`Schedule for ${channel.title}`, provider, scheduled && "shown"]
+        accessibilityLabel={[
+          t("Schedule for {channel}", { channel: channel.title }),
+          provider,
+          scheduled && t("shown"),
+        ]
           .filter(Boolean)
           .join(", ")}
         onPress={() => onSchedule(channel)}
@@ -1035,7 +1063,13 @@ const GridRow = memo(function GridRow({
               // A start and its place, as two programmes can share a start in bad data.
               key={`${programme.start} ${index}`}
               accessibilityRole="button"
-              accessibilityLabel={[channel.title, provider, time, programme.title, airing && "now"]
+              accessibilityLabel={[
+                channel.title,
+                provider,
+                time,
+                programme.title,
+                airing && t("now"),
+              ]
                 .filter(Boolean)
                 .join(", ")}
               accessibilityState={{ selected: chosen === programme.start }}
@@ -1101,6 +1135,7 @@ function ForYou({
   categories: readonly Category[];
   header: ReactNode;
 }) {
+  useLocale();
   const inset = useDockInset();
   const playing = channelStatus(usePlayback().phase);
   const { recentChannels } = useSavedState();
@@ -1123,7 +1158,7 @@ function ForYou({
   const onPress = useCallback((channel: Channel) => watch(library, channel), [library]);
   const lineOf = (channel: Channel, otherwise: string) =>
     channel.key === playing?.id
-      ? playing.word
+      ? t(playing.word)
       : channel.ambiguous
         ? (library.labels.get(channel.subscriptionId) ?? otherwise)
         : otherwise;
@@ -1140,15 +1175,17 @@ function ForYou({
           channel={recent.lead}
           line={
             recent.lead.key === playing?.id
-              ? playing.word
-              : ["Last watched", library.placeOf.get(recent.lead.key)].filter(Boolean).join(" · ")
+              ? t(playing.word)
+              : [t("Last watched"), library.placeOf.get(recent.lead.key)]
+                  .filter(Boolean)
+                  .join(" · ")
           }
           onPlay={onPress}
         />
       ) : null}
       {recent.shown.length > 0 ? (
         <Tiles
-          name="Recent"
+          name={t("Recent")}
           channels={recent.shown}
           line={(channel) =>
             lineOf(channel, (library.placeOf.get(channel.key) ?? "").split(" · ").at(-1) ?? "")
@@ -1200,7 +1237,7 @@ function Lead({
       <Glass style={styles.capsule}>
         <IconButton
           symbol="play.fill"
-          label={`Play ${channel.title}`}
+          label={t("Play {channel}", { channel: channel.title })}
           onPress={() => onPlay(channel)}
           testID="live-play"
         />
@@ -1272,6 +1309,7 @@ function CategoryGrid({
   chosen: boolean;
   header: ReactNode;
 }) {
+  const locale = useLocale();
   const inset = useDockInset();
   const { width } = useListWidth();
   const tile = Math.floor((width - 42) / 2);
@@ -1282,19 +1320,21 @@ function CategoryGrid({
       data={categories}
       numColumns={2}
       keyExtractor={(category) => category.shelf.id}
+      // Tiles draw again in a new language, which writes their counts.
+      extraData={locale}
       ListHeaderComponent={header ? <View style={styles.gridHead}>{header}</View> : undefined}
       renderItem={({ item }) => {
         const count = item.shelf.channels.length;
         const line = [
           chosen || item.shelf.title === item.region.name ? null : item.region.name,
-          String(count),
+          formatNumber(count),
         ]
           .filter(Boolean)
           .join(" · ");
         return (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${nameOf(item, chosen)}, ${count}`}
+            accessibilityLabel={`${nameOf(item, chosen)}, ${formatNumber(count)}`}
             onPress={() => router.push(categoryHref(item))}
             style={({ pressed }) => [{ width: tile }, pressed && styles.pressed]}
             testID={`live-category-${item.shelf.id}`}
@@ -1342,15 +1382,16 @@ function Country({
   chosen: Region | null;
   onChoose: (region: Region | null) => void;
 }) {
-  const name = chosen?.name ?? "All countries";
+  useLocale();
+  const name = chosen?.name ?? t("All countries");
   const open = () =>
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        title: "Country",
+        title: t("Country"),
         options: [
-          chosen ? "All countries" : "✓ All countries",
+          chosen ? t("All countries") : `✓ ${t("All countries")}`,
           ...regions.map((each) => (each === chosen ? `✓ ${each.name}` : each.name)),
-          "Cancel",
+          t("Cancel"),
         ],
         cancelButtonIndex: regions.length + 1,
       },
@@ -1364,8 +1405,8 @@ function Country({
     <View style={styles.country}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Country, ${name}`}
-        accessibilityHint="Lists the countries"
+        accessibilityLabel={t("Country, {name}", { name })}
+        accessibilityHint={t("Lists the countries")}
         onPress={open}
         style={({ pressed }) => [styles.countryButton, pressed && styles.pressed]}
         testID="live-country"
@@ -1380,7 +1421,7 @@ function Country({
       {chosen ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Clear ${chosen.name}`}
+          accessibilityLabel={t("Clear {name}", { name: chosen.name })}
           onPress={() => onChoose(null)}
           style={({ pressed }) => [styles.clear, pressed && styles.pressed]}
           testID="live-country-clear"

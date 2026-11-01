@@ -13,6 +13,8 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useArtwork } from "./artwork-cache.ts";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/live.ts";
 import { Placeholders, Shape, useDockInset } from "./loading.tsx";
 import { colors } from "./ui.tsx";
 
@@ -196,10 +198,11 @@ export function ShelfHead({
   onAll?: (() => void) | undefined;
   testID?: string;
 }) {
+  useLocale();
   return (
     <Pressable
       accessibilityRole={onAll ? "button" : "header"}
-      accessibilityLabel={onAll ? `${name}, all ${total}` : name}
+      accessibilityLabel={onAll ? t("{name}, all {total}", { name, total }) : name}
       disabled={!onAll}
       onPress={onAll}
       style={styles.shelfHead}

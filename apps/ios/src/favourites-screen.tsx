@@ -12,7 +12,7 @@ import {
   type AccessibilityActionEvent,
 } from "react-native";
 import { playChannel, useCatalogue } from "./account.ts";
-import { Entry, openListSheet, WHY } from "./custom-lists-screen.tsx";
+import { Entry, openListSheet, why } from "./custom-lists-screen.tsx";
 import { appError, describeError } from "./errors.ts";
 import {
   currentFavourites,
@@ -23,6 +23,8 @@ import {
   type FavouriteList,
   type Hidden,
 } from "./favourites.ts";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/live.ts";
 import type { Channel } from "./library.ts";
 import { useDockInset } from "./loading.tsx";
 import { channelStatus, usePlayback } from "./playback.ts";
@@ -41,14 +43,16 @@ import { reorderFavourites } from "./viewing.ts";
 // with nothing moved, as is one whose list was closed. A refused write keeps the draft.
 
 /** "2 saved from Home: password needed in Settings", or "Saved from Home: …" without a count. */
-const hiddenLine = ({ label, why, count }: Hidden) =>
-  `${count === null ? "Saved" : `${count} saved`} from ${label}: ${WHY[why]}`;
+const hiddenLine = ({ label, why: reason, count }: Hidden) =>
+  count === null
+    ? t("Saved from {provider}: {why}", { provider: label, why: why(reason) })
+    : t("{count} saved from {provider}: {why}", { count, provider: label, why: why(reason) });
 
 /** Nothing was moved: the favourites no longer show the rows the order was made of. */
 const changedAlert = () =>
   Alert.alert(
-    "Favourites changed",
-    "Nothing was moved. They changed while you arranged them: edit them as they are now.",
+    t("Favourites changed"),
+    t("Nothing was moved. They changed while you arranged them: edit them as they are now."),
   );
 
 /** The rows as being arranged, from the favourites they were arranged from. */
@@ -61,10 +65,11 @@ interface Draft {
 
 /** Live's row that opens every favourite, with how many open. */
 export function FavouritesEntry() {
+  useLocale();
   const favourites = useFavourites();
   return (
     <Entry
-      name="Favourites"
+      name={t("Favourites")}
       count={favourites?.shown.length ?? 0}
       onPress={() => router.push("/live/favourites")}
       testID="live-favourites"
@@ -73,6 +78,7 @@ export function FavouritesEntry() {
 }
 
 export function FavouritesScreen() {
+  const locale = useLocale();
   const favourites = useFavourites();
   const catalogue = useCatalogue();
   const inset = useDockInset();
@@ -105,12 +111,16 @@ export function FavouritesScreen() {
     const order = draft.order.toSpliced(from, 1).toSpliced(to, 0, favourite);
     setDraft({ ...draft, order });
     AccessibilityInfo.announceForAccessibility(
-      `${favourite.channel.title}, ${to + 1} of ${order.length}`,
+      t("{name}, {position} of {count}", {
+        name: favourite.channel.title,
+        position: to + 1,
+        count: order.length,
+      }),
     );
   };
   const save = (from: Draft) => {
     if (open.current !== from) {
-      Alert.alert("The order wasn't saved", "Nothing was moved: the list was closed.");
+      Alert.alert(t("The order wasn't saved"), t("Nothing was moved: the list was closed."));
       return;
     }
     if (from.order.every((each, at) => each === from.listed[at])) return setDraft(null);
@@ -133,7 +143,7 @@ export function FavouritesScreen() {
         const error = appError(cause);
         // The list closed meanwhile: there is no draft left to send again.
         if (open.current !== sent) {
-          Alert.alert("The order wasn't saved", "Nothing was moved.");
+          Alert.alert(t("The order wasn't saved"), t("Nothing was moved."));
           return;
         }
         if (error.kind === "favourites-changed") {
@@ -143,9 +153,9 @@ export function FavouritesScreen() {
         const kept = { ...from, saving: false };
         setDraft(kept);
         open.current = kept;
-        Alert.alert("Couldn't save the order", describeError(error), [
-          { text: "Cancel", style: "cancel" },
-          { text: "Try again", onPress: () => save(kept) },
+        Alert.alert(t("Couldn't save the order"), describeError(error), [
+          { text: t("Cancel"), style: "cancel" },
+          { text: t("Try again"), onPress: () => save(kept) },
         ]);
       },
     );
@@ -158,8 +168,9 @@ export function FavouritesScreen() {
       contentInsetAdjustmentBehavior="automatic"
       data={rows}
       keyExtractor={(favourite) => favourite.channel.key}
-      // Rows draw again as editing starts, saves or ends, and as what plays changes.
-      extraData={`${draft ? (draft.saving ? "saving" : "editing") : "list"} ${playing?.id ?? ""} ${playing?.word ?? ""}`}
+      // Rows draw again as editing starts, saves or ends, as what plays changes, and in a new
+      // language.
+      extraData={`${draft ? (draft.saving ? "saving" : "editing") : "list"} ${playing?.id ?? ""} ${playing?.word ?? ""} ${locale}`}
       renderItem={({ item, index }) =>
         draft ? (
           <ArrangedRow
@@ -173,7 +184,7 @@ export function FavouritesScreen() {
         ) : (
           <FavouriteRow
             favourite={item}
-            detail={item.channel.key === playing?.id ? playing.word : placeOf(item.channel)}
+            detail={item.channel.key === playing?.id ? t(playing.word) : placeOf(item.channel)}
             height={height}
             onPress={(channel) => playChannel(channel, placeOf(channel), { watch: true })}
           />
@@ -185,13 +196,13 @@ export function FavouritesScreen() {
             {draft ? (
               <>
                 <TextButton
-                  label="Cancel"
+                  label={t("Cancel")}
                   onPress={() => setDraft(null)}
                   disabled={draft.saving}
                   testID="favourites-cancel"
                 />
                 <TextButton
-                  label="Save"
+                  label={t("Save")}
                   onPress={() => save(draft)}
                   disabled={draft.saving}
                   testID="favourites-save"
@@ -200,7 +211,7 @@ export function FavouritesScreen() {
             ) : (
               <>
                 <View />
-                <TextButton label="Edit" onPress={edit} testID="favourites-edit" />
+                <TextButton label={t("Edit")} onPress={edit} testID="favourites-edit" />
               </>
             )}
           </View>
@@ -219,7 +230,9 @@ export function FavouritesScreen() {
       }
       ListEmptyComponent={
         empty ? (
-          <Notice failure={{ headline: "No favourites yet.", advice: "Star a channel in Live." }} />
+          <Notice
+            failure={{ headline: t("No favourites yet."), advice: t("Star a channel in Live.") }}
+          />
         ) : undefined
       }
       contentContainerStyle={{ paddingBottom: 32 + inset }}
@@ -239,6 +252,8 @@ const FavouriteRow = memo(function FavouriteRow({
   height: number;
   onPress: (channel: Channel) => void;
 }) {
+  // Memoised on its props, so the language reaches it here.
+  useLocale();
   const { channel } = favourite;
   const row = useRef<ComponentRef<typeof Pressable>>(null);
   const act = ({ nativeEvent }: AccessibilityActionEvent) => {
@@ -255,8 +270,8 @@ const FavouriteRow = memo(function FavouriteRow({
         accessibilityHint={detail}
         accessibilityActions={[
           { name: "activate" },
-          { name: "unstar", label: "Remove from Favourites" },
-          { name: "lists", label: "Lists" },
+          { name: "unstar", label: t("Remove from Favourites") },
+          { name: "lists", label: t("Lists") },
         ]}
         onAccessibilityAction={act}
         onPress={() => onPress(channel)}
@@ -306,10 +321,14 @@ function ArrangedRow({
     <View style={[styles.row, { height }]}>
       <View
         accessible
-        accessibilityLabel={`${channel.title}, ${position + 1} of ${count}`}
+        accessibilityLabel={t("{name}, {position} of {count}", {
+          name: channel.title,
+          position: position + 1,
+          count,
+        })}
         accessibilityActions={[
-          ...(first || disabled ? [] : [{ name: "up", label: "Move up" }]),
-          ...(last || disabled ? [] : [{ name: "down", label: "Move down" }]),
+          ...(first || disabled ? [] : [{ name: "up", label: t("Move up") }]),
+          ...(last || disabled ? [] : [{ name: "down", label: t("Move down") }]),
         ]}
         onAccessibilityAction={act}
         style={styles.main}
@@ -319,14 +338,14 @@ function ArrangedRow({
       </View>
       <Move
         symbol="chevron.up"
-        label={`Move ${channel.title} up`}
+        label={t("Move {name} up", { name: channel.title })}
         disabled={first || disabled}
         onPress={() => onMove(favourite, -1)}
         testID={`arranged-${channel.key}-up`}
       />
       <Move
         symbol="chevron.down"
-        label={`Move ${channel.title} down`}
+        label={t("Move {name} down", { name: channel.title })}
         disabled={last || disabled}
         onPress={() => onMove(favourite, 1)}
         testID={`arranged-${channel.key}-down`}

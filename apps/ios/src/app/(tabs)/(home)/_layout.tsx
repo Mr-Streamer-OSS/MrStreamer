@@ -1,5 +1,6 @@
 import { Stack } from "expo-router";
 import { useTabScreenOptions } from "../../../header.tsx";
+import { t } from "../../../i18n/live.ts";
 
 /**
  * Home, with the shared top bar (`header.tsx`): Downloads and Settings open on its stack, and
@@ -12,9 +13,9 @@ export default function HomeLayout() {
     <Stack screenOptions={useTabScreenOptions("(home)")}>
       <Stack.Screen name="index" options={{ title: "", headerTransparent: true }} />
       <Stack.Screen name="watchlist" options={{ title: "Watchlist" }} />
-      <Stack.Screen name="favourites" options={{ title: "Favourites" }} />
-      <Stack.Screen name="schedule" options={{ title: "Schedule" }} />
-      <Stack.Screen name="programme" options={{ title: "Programme" }} />
+      <Stack.Screen name="favourites" options={{ title: t("Favourites") }} />
+      <Stack.Screen name="schedule" options={{ title: t("Schedule") }} />
+      <Stack.Screen name="programme" options={{ title: t("Programme") }} />
       <Stack.Screen name="downloads" options={{ title: "Downloads" }} />
       <Stack.Screen name="settings" options={{ title: "Settings" }} />
       <Stack.Screen name="provider" options={{ title: "" }} />

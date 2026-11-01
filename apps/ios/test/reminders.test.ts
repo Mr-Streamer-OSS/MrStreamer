@@ -808,6 +808,25 @@ describe("the reminders list", () => {
     screen.close();
   });
 
+  it("speaks the interface language, scheduling its notification again in a new one", async () => {
+    await reminders.setReminder(channel(), later);
+    const screen = await list();
+    // The launch read every module afresh, the language with them.
+    const { setLanguage } = await import("@mrstreamer/core/i18n");
+    await React.act(async () => setLanguage({ locale: "de-DE", formats: "de-DE" }));
+    // With nothing else to check them for: the programme and channel keep the guide's and the
+    // provider's names.
+    await vi.waitFor(() =>
+      expect(notices()).toEqual([`Late film at ${2 * HOUR}: Beginnt jetzt auf Channel 1`]),
+    );
+    await idle();
+    expect(screen.text()).toMatch(/^(Heute|Morgen)AbbrechenC1Late film/);
+    // Its times as German writes them, on a 24-hour clock.
+    expect(screen.text()).toMatch(/Channel 1 · \d\d:\d\d–\d\d:\d\d/);
+    expect(screen.text()).toContain("iOS benachrichtigt dich, wenn jede beginnt.");
+    screen.close();
+  });
+
   it("moves with the clock while it shows", async () => {
     await reminders.setReminder(channel(), later);
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
