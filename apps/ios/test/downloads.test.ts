@@ -2422,7 +2422,7 @@ describe("offline Next", { timeout: 30_000 }, () => {
   }
   const item = (app: App) => app.playingItem(app.playbackState.get().phase);
 
-  it("keeps the saved immediate order across a removed provider and cold launch, with no network or autoplay", async () => {
+  it("keeps the saved immediate order across a removed provider and cold launch, with Next during its countdown and no network", async () => {
     let { app, a, from, to } = await pair();
     // The target's own resume position must survive too, without an online viewing read.
     app.playDownload(to.id);

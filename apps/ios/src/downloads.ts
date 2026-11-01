@@ -2146,10 +2146,10 @@ function playCopy(id: string, record: Stored) {
         return {
           place: placeOf(next),
           stands: () => after()?.id === next.id,
-          // Playback asks `stands` just before, so this is that copy as its record stands at zero.
+          // That same copy as its record stands at zero, for where it was left.
           play: () => {
             const copy = after();
-            if (copy) playCopy(copy.id, copy);
+            if (copy?.id === next.id) playCopy(copy.id, copy);
           },
         };
       },
