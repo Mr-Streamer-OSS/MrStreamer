@@ -127,7 +127,7 @@ its menu and an episode's check. The native owner schedules the queue and hands 
 task to iOS before answering a background wake. iOS can defer starts, and force quit ends transfers.
 Actual background and physical-device acceptance remain separate from source and compilation checks.
 
-### Where it stands
+## Where it stands
 
 - **iOS 0.1.0**, build 17, went to Apple App Review on 27 October 2026 with manual release. It
   isn't on the App Store, and none of the work below changes that build or its review
@@ -143,7 +143,7 @@ Actual background and physical-device acceptance remain separate from source and
 - **Gated, not delivered:** more media formats and Google Cast each have a researched route that
   hasn't been qualified on a device; their delivery cards are blocked
   ([formats](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196422), [Cast](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196691)). AirPlay is the only TV output.
-- **Elsewhere:** the Mac App Store is a separate desktop feasibility study
+- **Elsewhere:** the Mac App Store is a separate, planned desktop release whose sandbox feasibility comes first, with nothing submitted
   ([card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=262337967)), and an
   Apple TV app is a future plan. Full desktop parity isn't claimed.
 
@@ -887,9 +887,10 @@ Guide grid's scroll, window, cells and programme crossing it with Back to Guide,
 and Picture in Picture surviving a fold with no second stream, the key commands reaching the app
 and listed while ⌘ is held, also with no text field focused, keyboard focus and VoiceOver reaching
 every Guide grid cell, VoiceOver moving to the column's channel, large text, and safe areas and bar
-placement. The [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148)
-records which of these ran on the managed iPad and Duo simulators, for which build, and what those
-tools couldn't reach, such as the Duo's hinge and notification permission.
+placement. Results on the managed iPad and Duo simulators go on the
+[native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148)
+as they run, with the build they ran on. It already records what those tools couldn't reach: the
+Duo's hinge and notification permission.
 
 ## On the simulator
 
@@ -926,12 +927,12 @@ title files for the download queue (`transfers.ts`), and `/live-link` paces live
 Automatic quality runs (`live-link.ts`). `test/native-fixtures.test.ts` checks them in the suite
 and needs ffmpeg and ffprobe.
 
-Agents drive the simulator's screen, taps, typing, screenshots and recordings through T3's device
-tools and the agent-device command they bind, never through ssh or `simctl`; the commands below
-only serve Metro and the fixtures, build, install and launch. A simulator run proves what that exact build did on that
+Agents open the simulator with T3's `device_open` and launch, relaunch and drive the app, with
+taps, typing, screenshots and recordings, through the AgentDevice command it returns, never through
+ssh or `simctl` (see the `mac-mini` skill). The commands below serve Metro and the fixtures, build
+and install; the last line launches the app only in a session without T3's device tools. A simulator run proves what that exact build did on that
 simulator. Physical iPhones, iPads and Duos, background transfers iOS defers, notifications iOS
-delivers and receivers are separate results: the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148) records
-what ran, and the [owner's card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197485) the checks only the owner's hardware can make.
+delivers and receivers are separate results: what runs goes on the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148), and the [owner's card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197485) the checks only the owner's hardware can make.
 
 ```sh
 node scripts/fixture-server.ts 8791 8792
@@ -944,8 +945,8 @@ onmac run -- zsh -c 'cd apps/ios && pnpm install --frozen-lockfile && npx expo r
 ssh mac-mini xcrun simctl launch <udid> app.mrstreamer.player -RCT_jsLocation 127.0.0.1:8197
 ```
 
-The build has no development client, so a deep link doesn't tell it where Metro is: launch it
-with `-RCT_jsLocation`, at the port Metro advertises, which its lazy chunks use too. `app.json`
+The build has no development client, so a deep link doesn't tell it where Metro is: launch it,
+either way, with `-RCT_jsLocation`, at the port Metro advertises, which its lazy chunks use too. `app.json`
 turns off Expo's tsconfig `paths` support, which the app doesn't use: it followed `extends` above
 `apps/ios`, outside what Metro watches, and failed the first bundle after every start with
 "Failed to collapse". Metro on the workbench has served transforms of files as they were before

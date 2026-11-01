@@ -100,7 +100,7 @@ A movie or episode starts later on a TV than on your computer, and so does a ski
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
 - Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.
 - On a TV, a movie or episode plays at normal speed, subtitle timing can't be shifted, and the mini player is off, since it has no picture to show. Video the TV could play itself, such as HEVC, is still converted on your computer.
-- After a gap, a recording of a live HLS channel goes on up to three segments before live, as playback starts. After a gap shorter than that, its first seconds can repeat what was recorded just before.
+- From 0.0.23, after a gap, a recording of a live HLS channel goes on up to three segments before live, as playback starts. After a gap shorter than that, its first seconds can repeat what was recorded just before.
 - If your TV doesn't show up or doesn't play, please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its make and model.
 
 ## When something won't play
