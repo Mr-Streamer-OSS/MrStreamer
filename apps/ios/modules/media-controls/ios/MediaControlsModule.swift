@@ -28,27 +28,19 @@ public class MediaControlsModule: Module {
         guard MediaControlsRelay.shared.owner == owner else { return }
         MediaControlsRelay.shared.owner = nil
         MediaControlsRelay.shared.send = nil
-        MediaControlsRelay.shared.show(nil)
+        MediaControlsRelay.shared.show(nil, nil)
       }
     }
 
-    Function("set") { (info: NowPlaying) in
-      let shown = Shown(
-        title: info.title,
-        subtitle: info.subtitle,
-        live: info.live,
-        duration: info.duration,
-        elapsed: info.elapsed,
-        rate: info.rate,
-        speed: info.speed,
-        seekable: info.seekable,
-        next: info.next
-      )
-      DispatchQueue.main.async { MediaControlsRelay.shared.show(shown) }
+    // Read off the JavaScript thread before the main thread shows it.
+    Function("set") { (playing: NowPlaying) in
+      let info = playing.info
+      let commands = Commands(seekable: playing.seekable, next: playing.next)
+      DispatchQueue.main.async { MediaControlsRelay.shared.show(info, commands) }
     }
 
     Function("clear") {
-      DispatchQueue.main.async { MediaControlsRelay.shared.show(nil) }
+      DispatchQueue.main.async { MediaControlsRelay.shared.show(nil, nil) }
     }
   }
 }
@@ -63,19 +55,6 @@ struct NowPlaying: Record {
   @Field var speed: Double = 1
   @Field var seekable: Bool = false
   @Field var next: Bool = false
-}
-
-/** What shows, copied off the JavaScript thread. */
-struct Shown {
-  let title: String
-  let subtitle: String
-  let live: Bool
-  let duration: Double?
-  let elapsed: Double
-  let rate: Double
-  let speed: Double
-  let seekable: Bool
-  let next: Bool
 
   /** iOS counts the elapsed time on from here at `rate`; a channel has neither. */
   var info: [String: Any] {
@@ -111,10 +90,10 @@ final class MediaControlsRelay {
   private var answering: Commands?
   private var targets: [(command: MPRemoteCommand, target: Any)] = []
 
-  /** Shows `shown`, or nothing for nil, with only the commands it answers. */
-  func show(_ shown: Shown?) {
-    answer(shown.map { Commands(seekable: $0.seekable, next: $0.next) })
-    MPNowPlayingInfoCenter.default().nowPlayingInfo = shown?.info
+  /** Shows `info` with only `commands` answered, or nothing for nil. */
+  func show(_ info: [String: Any]?, _ commands: Commands?) {
+    answer(commands)
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = info
   }
 
   private func answer(_ commands: Commands?) {

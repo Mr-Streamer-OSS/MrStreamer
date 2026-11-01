@@ -741,7 +741,8 @@ function Scrubber() {
  * Audio and Subtitles, then Play from start for a live channel, or Speed and Next episode for a
  * movie or an episode: one row of text controls that wraps when it runs out of width. For a movie
  * or an episode, Subtitles also lists the subtitle downloaded for its version, with Find online
- * and, while that shows, Adjust timing. Every sheet that follows acts only while the play it was opened for stands.
+ * and, while that shows, Adjust timing. Every sheet that follows acts only while the play it was
+ * opened for stands.
  * While an ended episode counts down to the next, the row is that countdown instead (`UpNextRow`).
  */
 function TextButtons({ item }: { item: Playing }) {
@@ -813,11 +814,16 @@ function TextButtons({ item }: { item: Playing }) {
         onPress={() => void choose("subtitles")}
         testID="watch-subtitles"
       />
-      {item.live ? <StartOver item={item} /> : null}
-      {item.live || item.past ? null : <TitleSpeed />}
-      {!item.live && item.next ? (
-        <TextControl label="Next episode" onPress={playNext} testID="watch-next" />
-      ) : null}
+      {item.live ? (
+        <StartOver item={item} />
+      ) : (
+        <>
+          {item.past ? null : <TitleSpeed />}
+          {item.next ? (
+            <TextControl label="Next episode" onPress={playNext} testID="watch-next" />
+          ) : null}
+        </>
+      )}
     </View>
   );
 }

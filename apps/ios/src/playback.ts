@@ -914,7 +914,7 @@ function applyViewerPause(resource: Resource) {
 
 /** Read current intent after asynchronous admission and complete its initial action. */
 function startAttached(resource: Resource) {
-  // The rate its plays take, which a paused player only keeps for its next play.
+  // The rate it plays at; a paused player keeps it for its next play.
   player().playbackRate = speedOf(current);
   if (pauseOnStart === "viewer") applyViewerPause(resource);
   else if (!pauseOnStart && !resource.holdInitialPlay) player().play();
@@ -1292,7 +1292,7 @@ function observe(event: PlaybackObservation) {
       const viewerPaused = paused && pauseOnStart === "viewer-applied";
       if (viewerPaused) pauseOnStart = false;
       clock.set(Math.max(0, event.mediaTimeSeconds - current.offset));
-      if (event.speed !== undefined && event.speed > 0) speed.set(event.speed);
+      if (event.speed) speed.set(event.speed);
       if (!stands(resource) || resource.sequence !== event.sequence) return;
       endAtLength(playing);
       const { phase } = state.get();

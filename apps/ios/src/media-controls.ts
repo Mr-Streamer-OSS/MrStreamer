@@ -93,15 +93,17 @@ function changed(before: { readonly info: NowPlaying; readonly at: number }, nex
   return Math.abs(next.elapsed - counted) > DRIFT_S;
 }
 
+/** Takes Now Playing and its commands away, if anything shows. */
+function hide(module: Native) {
+  if (!shown) return;
+  shown = null;
+  module.clear();
+  player().ownsNowPlaying = false;
+}
+
 function publish(module: Native) {
   const info = nowPlaying();
-  if (!info) {
-    if (!shown) return;
-    shown = null;
-    module.clear();
-    player().ownsNowPlaying = false;
-    return;
-  }
+  if (!info) return hide(module);
   if (shown && !changed(shown, info)) return;
   if (!shown) player().ownsNowPlaying = true;
   shown = { info, at: Date.now() };
@@ -149,10 +151,6 @@ export function startMediaControls(): () => void {
   return () => {
     for (const stop of stops) stop();
     listening.remove();
-    if (shown) {
-      shown = null;
-      module.clear();
-      player().ownsNowPlaying = false;
-    }
+    hide(module);
   };
 }
