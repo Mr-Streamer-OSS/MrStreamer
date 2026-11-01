@@ -95,6 +95,7 @@ vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: [] }),
   onRoster: () => () => {},
   onCatalogue: () => () => {},
+  currentCatalogue: () => state.catalogue,
   useCatalogue: () => state.catalogue,
   useRoster: () => ({ kind: "ready", members: [] }),
   playChannel: (channel: Channel, _place: string, options: { watch: boolean }) =>
@@ -1008,8 +1009,12 @@ describe("a programme's catch-up", () => {
     expect(state.did.at(-1)).toMatchObject({ programme: { start: current.start } });
   });
 
+  it("offers one still to come a reminder after Watch live, and no catch-up", async () => {
+    expect(await actions(next, 3)).toEqual(["Watch live", "Remind me"]);
+    expect(container.textContent).not.toContain("↺");
+  });
+
   it.each([
-    { days: 3, programme: next, says: null },
     { days: null, programme: current, says: null },
     { days: null, programme: ended, says: "This channel has no catch-up." },
     {

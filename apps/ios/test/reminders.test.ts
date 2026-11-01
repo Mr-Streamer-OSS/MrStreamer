@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue, Member } from "../src/account.ts";
 import type { Query, Result } from "../src/guide-native.ts";
 import type { createGuide } from "../src/guide.ts";
+import { programmeRange } from "../src/guide-ui.tsx";
 import { combine, partSteps, type Channel } from "../src/library.ts";
 import type { Notice, Permission, RemindersNative } from "../src/reminders.ts";
 import { native as files } from "./native-files.ts";
@@ -29,6 +30,9 @@ const scenario = vi.hoisted(() => ({
   pushed: [] as unknown[],
   played: [] as unknown[],
   params: {} as Record<string, string>,
+  /** How often iOS Settings was opened, and the alerts shown. */
+  settings: 0,
+  alerts: [] as string[],
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -39,6 +43,8 @@ vi.mock("expo-router", () => ({
 }));
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
+  Linking: { openURL: async () => undefined, openSettings: async () => void scenario.settings++ },
+  Alert: { alert: (title: string) => void scenario.alerts.push(title) },
   AppState: {
     currentState: "active",
     addEventListener: (_event: string, listener: (state: string) => void) => {
@@ -237,6 +243,8 @@ beforeEach(async () => {
   scenario.pushed = [];
   scenario.played = [];
   scenario.params = {};
+  scenario.settings = 0;
+  scenario.alerts = [];
   await launch();
   await scenario.owner!.restore(["a"]);
   scenario.owner!.foreground();
@@ -390,6 +398,133 @@ describe("programme reminders", () => {
     expect(container.textContent).toContain("A film");
     expect(scenario.played).toEqual([]);
     React.act(() => screen.unmount());
+  });
+});
+
+/** A screen drawn as the viewer sees it, with what it says and its buttons. */
+async function draw(element: React.ReactElement) {
+  const container = document.createElement("div");
+  const at = createRoot(container);
+  await React.act(async () => at.render(element));
+  await idle();
+  return {
+    text: () => container.textContent ?? "",
+    has: (testID: string) => container.querySelector(`[data-testid="${testID}"]`) !== null,
+    label: (label: string) => container.querySelector(`[aria-label="${label}"]`) !== null,
+    async press(testID: string) {
+      const button = [...container.querySelectorAll("button")].find(
+        (each) => each.getAttribute("data-testid") === testID,
+      );
+      if (!button) throw new Error(`No ${testID} on screen: ${container.textContent}`);
+      await React.act(async () => button.click());
+      await settled();
+      await idle();
+    },
+    close: () => React.act(() => at.unmount()),
+  };
+}
+/** Every promise the screen started has settled, and React drew what they changed. */
+async function idle() {
+  await React.act(async () => {
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+  });
+}
+/** Programme details for `programme` of channel `a:1`, as a notification or the list opens them. */
+async function details(programme: Programme) {
+  scenario.params = { channel: "a:1", start: String(programme.start) };
+  const { ProgrammeScreen } = await import("../src/guide-screen.tsx");
+  return draw(React.createElement(ProgrammeScreen, { origin: "live" }));
+}
+async function list() {
+  const { RemindersScreen } = await import("../src/reminders-screen.tsx");
+  return draw(React.createElement(RemindersScreen));
+}
+
+describe("programme details", () => {
+  it("sets a reminder beside Watch live, marks the time, and cancels it", async () => {
+    const screen = await details(later);
+    expect(screen.has("guide-watch-live")).toBe(true);
+    await screen.press("guide-remind-me");
+    expect(ios.asked).toBe(1);
+    expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
+    expect(screen.label(`${programmeRange(later)}, Reminder set`)).toBe(true);
+    expect(screen.has("guide-remind-me")).toBe(false);
+
+    await screen.press("guide-cancel-reminder");
+    expect(shown()).toEqual([]);
+    expect(notices()).toEqual([]);
+    expect(screen.label(`${programmeRange(later)}, Reminder set`)).toBe(false);
+    expect(screen.has("guide-remind-me")).toBe(true);
+    screen.close();
+  });
+
+  it("offers no reminder once the programme has started", async () => {
+    scenario.programmes = [on, later];
+    const screen = await details(on);
+    expect(screen.text()).toContain("News");
+    expect(screen.has("guide-watch-live")).toBe(true);
+    expect(screen.has("guide-remind-me")).toBe(false);
+    screen.close();
+  });
+
+  it("saves nothing where iOS refuses, and offers iOS Settings", async () => {
+    ios.answer = "denied";
+    const screen = await details(later);
+    await screen.press("guide-remind-me");
+    expect(shown()).toEqual([]);
+    expect(screen.text()).toContain("Notifications are off for Mr. Streamer");
+    expect(screen.has("guide-remind-me")).toBe(true);
+    await screen.press("guide-open-settings");
+    expect(scenario.settings).toBe(1);
+    screen.close();
+  });
+
+  it("says a save failed, keeping Remind me", async () => {
+    writeFileSync(file(), JSON.stringify({ version: 2, reminders: [] }));
+    await launch();
+    const screen = await details(later);
+    await screen.press("guide-remind-me");
+    expect(screen.text()).toContain("Couldn't save. Try again.");
+    expect(screen.has("guide-remind-me")).toBe(true);
+    screen.close();
+  });
+});
+
+describe("the reminders list", () => {
+  it("lists each by day, says what is off, opens and cancels", async () => {
+    const film = await list();
+    expect(film.text()).toContain("No reminders yet.");
+    film.close();
+
+    await reminders.setReminder(channel(), later);
+    scenario.programmes = [on, { ...later, title: "Football" }];
+    shows();
+    await settled();
+    const screen = await list();
+    expect(screen.text()).toMatch(/^(Today|Tomorrow)C1Late film/);
+    expect(screen.text()).toContain(`Channel 1 · ${programmeRange(later)}`);
+    expect(screen.text()).toContain("Changed to Football · won't notify");
+
+    const [set] = remindersShown();
+    await screen.press(`reminder-${set!.id}`);
+    expect(scenario.pushed).toEqual([
+      { pathname: "/live/programme", params: { channel: "a:1", start: String(later.start) } },
+    ]);
+
+    await screen.press(`reminder-${set!.id}-cancel`);
+    expect(screen.text()).toContain("No reminders yet.");
+    screen.close();
+  });
+
+  it("leads with a notice once iOS stops letting the app notify", async () => {
+    await reminders.setReminder(channel(), later);
+    ios.permission = "denied";
+    for (const listener of scenario.appState) listener("active");
+    await settled();
+    const screen = await list();
+    expect(screen.text()).toMatch(/^Notifications are off\..*Open iOS Settings/);
+    expect(screen.text()).toContain("Late film");
+    screen.close();
   });
 });
 
