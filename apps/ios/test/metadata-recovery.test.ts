@@ -172,7 +172,6 @@ it("asks TMDB with the viewer's own key, kept in the Keychain through a relaunch
   await settled(app, "answered");
   expect(app.metadataStanding()).toMatchObject({ key: "yours" });
 
-  memory.keys.length = 0;
   await app.removeTmdbKey();
   expect(app.metadataStanding()).toMatchObject({ key: "app" });
   expect((await app.detailsOf(firstMovie(app))).about).toEqual({ kind: "tmdb" });

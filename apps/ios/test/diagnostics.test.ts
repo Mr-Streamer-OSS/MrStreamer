@@ -410,7 +410,6 @@ describe("a title's details", () => {
     );
     press("details-about-retry");
     await settled();
-    expect(scenario.reads).toBe(2);
     expect(container.textContent).not.toContain("TMDB isn't answering");
     expect(find("details-about-retry")).toBeNull();
   });

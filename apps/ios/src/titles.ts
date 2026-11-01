@@ -316,27 +316,27 @@ let metadata = metadataOf();
 function wantMetadata() {
   const now = shown.get();
   if (now.lists.kind === "ready") metadata.want(wantedOf(now.lists.index), language);
+  metadataStatus.set(metadata.status());
 }
 
 /** The last key change, which each waits for: one store is closed before the next starts. */
 let keying: Promise<void> = Promise.resolve();
 
 /**
- * Asks TMDB with `key` from now on. A store that may have stopped on a refused key is closed,
- * after its answers are written, and a new one starts with the key; before any key there was
- * none, so the first just starts fetching.
+ * Asks TMDB with the viewer's key `yours` from now on, else the app's when it is empty. A store
+ * that may have stopped on a refused key is closed (`fresh`), after its answers are written, and
+ * a new one starts with the key; before any key there was none, so the first just starts fetching.
  */
-function askWith(key: string, owner: TmdbKeyOwner, fresh: boolean) {
+function askWith(yours: string, fresh: boolean) {
+  const key = yours || BUILT_IN_KEY;
   keying = keying.then(async () => {
     if (fresh) {
-      const old = metadata;
-      await old.close();
+      await metadata.close();
       metadata = metadataOf();
     }
     client = key ? tmdb({ key, ...(TMDB_API ? { api: TMDB_API } : {}) }) : null;
-    tmdbKey.set(owner);
+    tmdbKey.set(yours ? "yours" : key ? "app" : "none");
     wantMetadata();
-    metadataStatus.set(metadata.status());
   });
   return keying;
 }
@@ -355,9 +355,8 @@ const readKey = () =>
   (keyRead ??= secrets()
     .then((keychain) => keychain.read(TMDB_KEY_ID))
     .then(
-      (yours) =>
-        askWith(yours || BUILT_IN_KEY, yours ? "yours" : BUILT_IN_KEY ? "app" : "none", false),
-      () => askWith(BUILT_IN_KEY, BUILT_IN_KEY ? "app" : "none", false),
+      (yours) => askWith(yours ?? "", false),
+      () => askWith("", false),
     ));
 
 /**
@@ -369,21 +368,18 @@ export async function saveTmdbKey(key: string) {
   if (!trimmed || trimmed.length > 4096) throw new AppFailure({ kind: "keychain-refused" });
   await readKey();
   await (await secrets()).write(TMDB_KEY_ID, trimmed);
-  await askWith(trimmed, "yours", true);
+  await askWith(trimmed, true);
 }
 
 /** Removes the viewer's TMDB key: the app's own is asked with again, if it has one. */
 export async function removeTmdbKey() {
   await readKey();
   await (await secrets()).remove(TMDB_KEY_ID);
-  await askWith(BUILT_IN_KEY, BUILT_IN_KEY ? "app" : "none", true);
+  await askWith("", true);
 }
 
 /** Asks TMDB again for the titles it hasn't answered, after it stopped answering. */
-export function retryMetadata() {
-  wantMetadata();
-  metadataStatus.set(metadata.status());
-}
+export const retryMetadata = wantMetadata;
 
 /** The lists the index was made of, or is being made of. */
 let indexed: readonly Listed[] = [];
