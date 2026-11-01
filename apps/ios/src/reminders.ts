@@ -445,7 +445,7 @@ export type ReminderList =
   | { readonly kind: "read"; readonly reminders: readonly Reminder[] }
   | { readonly kind: "unreadable" | "foreign" };
 
-/** Calls `listener` as the reminders or the channels change, and each minute, as time moves rows on. */
+/** Calls `listener` as the reminders or the channels change, and each minute, as rows move on. */
 const subscribeAll = (listener: () => void) => {
   const clock = setInterval(listener, 60_000);
   const stops = [kept.subscribe(listener), unscheduled.subscribe(listener), onCatalogue(listener)];

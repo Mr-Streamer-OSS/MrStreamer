@@ -363,8 +363,8 @@ export function Programme({
 /**
  * Remind me on a programme still to come, or Cancel reminder once one is set (`reminder`, its id).
  * Where iOS refuses notifications nothing is saved, and a line under the actions offers iOS
- * Settings; one past the 64 iOS holds, or a save or cancel that failed, says so there. Keyed by programme, so that line goes
- * with it.
+ * Settings; one past the 64 iOS holds, one whose programme began meanwhile, or a save or
+ * cancel that failed, says so there. Keyed by programme, so that line goes with it.
  */
 function RemindMe({
   channel,

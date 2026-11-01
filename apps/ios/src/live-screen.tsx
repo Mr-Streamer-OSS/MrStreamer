@@ -189,7 +189,8 @@ function useHandover(split: boolean) {
   useEffect(() => {
     if (!split || !stack || !target) return;
     const [, schedule, programme, ...rest] = stack.routes;
-    // A programme pushed from the Guide grid, or a reminder's notification, with no Schedule under it.
+    // A programme pushed from the Guide grid, or a reminder's notification, with no Schedule
+    // under it.
     const chosen = schedule?.name === "programme" && !programme ? schedule : null;
     const alone = text(chosen?.params, "channel");
     const token = text(chosen?.params, "detail");

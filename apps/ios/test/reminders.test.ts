@@ -376,6 +376,20 @@ describe("programme reminders", () => {
     expect(notices()).toEqual([]);
   });
 
+  it("keeps none scheduled while iOS doesn't allow them, and schedules again once it does", async () => {
+    await reminders.setReminder(channel(), later);
+    ios.permission = "denied";
+    for (const listener of scenario.appState) listener("active");
+    await settled();
+    expect(notices()).toEqual([]);
+    expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
+
+    ios.permission = "granted";
+    for (const listener of scenario.appState) listener("active");
+    await settled();
+    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Starting now on Channel 1`]);
+  });
+
   it("takes down a provider's notifications, scheduled or shown, while iOS doesn't allow them too", async () => {
     await reminders.setReminder(channel(), later);
     const [set] = remindersShown();

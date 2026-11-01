@@ -20,9 +20,9 @@ import { colors, monogram, Notice } from "./ui.tsx";
 // The reminders still set, pushed on Live's stack: grouped by day as Downloads groups its list,
 // rows in start order. A row gives the programme, its channel and time, and a third line only when
 // something is off: it is on now, another programme took its start, or the guide no longer lists
-// it; the last two don't notify. Tapping a row opens the programme's details; its cross or
-// VoiceOver's Cancel reminder takes it out. A row leaves once its programme ends
-// (reminders.ts). While iOS doesn't let the app notify, a notice leads the list.
+// it, or iOS hasn't it scheduled; those don't notify. Tapping a row opens the programme's details;
+// its cross, a swipe to the left or VoiceOver's Cancel reminder takes it out. A row leaves once its
+// programme ends (reminders.ts). While iOS doesn't let the app notify, a notice leads the list.
 
 interface Day {
   readonly from: number;
