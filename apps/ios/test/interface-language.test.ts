@@ -23,6 +23,7 @@ const scenario = vi.hoisted(() => ({
   sheet: null as { title: string; options: readonly string[]; pick: (at: number) => void } | null,
   alerts: [] as { title: string; message?: string | undefined }[],
   title: "",
+  titles: [] as string[],
   members: [] as Member[],
   tmdb: { kind: "no-key" } as { kind: string; known?: number; wanted?: number },
   /** What a tab's stack last drew: its first screen's title and its top bar's labelled buttons. */
@@ -52,10 +53,12 @@ vi.mock("react-native-safe-area-context", async () => ({
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
 vi.mock("expo-router", () => ({
   router: { push: () => undefined },
+  useLocalSearchParams: () => ({}),
   useRootNavigationState: () => ({ index: 0, routes: [{ name: "(tabs)" }] }),
   useNavigation: () => ({
     setOptions: ({ title }: { title: string }) => {
       scenario.title = title;
+      scenario.titles.push(title);
     },
   }),
   // A tab's stack, as far as its first screen's options and its top bar go.
@@ -130,6 +133,7 @@ afterEach(async () => {
     tmdb: { kind: "no-key" },
   });
   scenario.alerts.length = 0;
+  scenario.titles.length = 0;
 });
 
 /** Launches the app's modules afresh and shows `route`, as a launch reading the saved files. */
@@ -232,6 +236,21 @@ it("titles another tab and labels its top bar in a new language at once", async 
   settings.choose("Español");
   expect(scenario.stack).toEqual({ title: "En directo", buttons: ["Buscar", "Ajustes"] });
   React.act(() => root.unmount());
+});
+
+it("updates the mounted Add provider title after a language change", async () => {
+  const settings = await launch("settings");
+  const { default: Provider } = await import("../src/app/(tabs)/(home)/provider.tsx");
+  const root = createRoot(document.createElement("div"));
+  try {
+    React.act(() => root.render(React.createElement(Provider)));
+    expect(scenario.titles).toContain("Add provider");
+    scenario.titles.length = 0;
+    settings.choose("Nederlands");
+    expect(scenario.titles).toContain("Provider toevoegen");
+  } finally {
+    React.act(() => root.unmount());
+  }
 });
 
 it("returns to the iPhone's language when System default is picked again", async () => {
