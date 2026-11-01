@@ -37,6 +37,7 @@ import {
 import { starChannel, useFavouriteKeys } from "./favourites.ts";
 import { Glass, IconButton } from "./glass.tsx";
 import { DownloadStatusButton } from "./download-status.tsx";
+import { useDownloads } from "./downloads.ts";
 import { guide } from "./guide.ts";
 import { catchUpOf } from "./guide-screen.tsx";
 import { dayLabel, localDay, programmeRange } from "./guide-ui.tsx";
@@ -747,6 +748,8 @@ function Scrubber() {
  */
 function TextButtons({ item }: { item: Playing }) {
   const upNext = useUpNext();
+  // A copy's Next episode reads the downloads, so it shows again as its next copy comes or goes.
+  useDownloads();
   const menu = useRef(0);
   useEffect(
     () => () => {

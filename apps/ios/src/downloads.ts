@@ -2086,7 +2086,10 @@ function playCopy(id: string, record: Stored) {
     title: about.name,
     place: placeOf(record),
     live: false,
-    next: nextCopy(record) !== undefined,
+    // Read each time, so Watch, Now Playing and the end offer it only while that copy is here.
+    get next() {
+      return after() !== undefined;
+    },
     versions: false,
     // The version it is a copy of: what was kept for it shows here too, offline as well.
     subtitles: subtitleTitle({

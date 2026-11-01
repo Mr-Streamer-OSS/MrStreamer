@@ -2588,6 +2588,7 @@ describe("offline Next", { timeout: 30_000 }, () => {
     const network = vi.spyOn(globalThis, "fetch");
     onTestFinished(() => network.mockRestore());
     await ends(app, from.id);
+    expect(app.upNextState.get()).toMatchObject({ seconds: 10 });
     vi.advanceTimersByTime(9_000);
     await sleep(30);
     expect(memory.played).toHaveLength(1);
@@ -2605,12 +2606,18 @@ describe("offline Next", { timeout: 30_000 }, () => {
       await ends(app, from.id, () => {
         if (change === "lost before the end") mediaFile(to.id)!.delete();
       });
-      if (change === "removed during the countdown") await app.removeDownload(to.id);
+      if (change === "removed during the countdown") {
+        expect(app.upNextState.get()).not.toBeNull();
+        await app.removeDownload(to.id);
+        vi.advanceTimersByTime(1_000);
+      }
+      expect(app.upNextState.get()).toBeNull();
       vi.advanceTimersByTime(20_000);
       app.playUpNext();
       await sleep(30);
-      // The ended episode stays, with no failure of a copy that went.
-      expect(app.playbackState.get().phase).toMatchObject({ item: { id: `copy:${from.id}` } });
+      // The ended episode stays, no longer offering Next, with no failure of a copy that went.
+      expect(item(app)).toMatchObject({ id: `copy:${from.id}`, next: false });
+      expect(app.playbackState.get().phase.kind).not.toBe("failed");
       expect(memory.played).toHaveLength(1);
       expect(one.fileRequests()).toBe(requests);
       await app.stop();

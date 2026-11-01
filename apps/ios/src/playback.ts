@@ -100,7 +100,7 @@ export interface Playing {
    * starts on the minute before it, is still being made or sends on past it: it stops at the end.
    */
   readonly past?: { readonly start: number; readonly stop: number };
-  /** An episode with one after it, which Watch offers. */
+  /** An episode with one after it, which Watch offers; a copy's says so only while that copy is here. */
   readonly next: boolean;
   /** A title with other versions to try when this one fails. */
   readonly versions: boolean;
@@ -254,6 +254,7 @@ export const playbackSpeed: Pick<Store<number | null>, "get" | "subscribe"> = sp
 export const usePlaybackSpeed = () => useStore(speed);
 const upNext = store<UpNext | null>(null);
 /** The countdown to the next episode while Watch shows one; null otherwise. */
+export const upNextState: Pick<Store<UpNext | null>, "get" | "subscribe"> = upNext;
 export const useUpNext = () => useStore(upNext);
 
 /** A channel that plays or is about to, and how it stands, in the accessory's words. */
