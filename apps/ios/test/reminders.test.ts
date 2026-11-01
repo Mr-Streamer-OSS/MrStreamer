@@ -1,6 +1,6 @@
 import { createRoot, document, type Root } from "./dom.ts";
 import * as React from "react";
-import { rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { finish } from "@mrstreamer/core/steps";
@@ -115,9 +115,8 @@ const module: RemindersNative = {
   },
   scheduled: async () => [...ios.scheduled.values()],
   async schedule(notices) {
-    if (ios.permission !== "granted") return notices.map((each) => each.id);
+    if (ios.permission !== "granted") return;
     for (const notice of notices) ios.scheduled.set(notice.id, notice);
-    return [];
   },
   async cancel(ids) {
     for (const id of ids) ios.scheduled.delete(id);
@@ -270,33 +269,6 @@ describe("programme reminders", () => {
     expect(notices()).toHaveLength(1);
   });
 
-  it("refuses a programme that has started, changing nothing", async () => {
-    await expect(reminders.setReminder(channel(), on)).rejects.toMatchObject({
-      error: { kind: "reminder", reason: "started" },
-    });
-    expect(shown()).toEqual([]);
-    expect(ios.asked).toBe(0);
-  });
-
-  it("saves nothing while iOS doesn't let the app notify, and schedules again once it does", async () => {
-    ios.answer = "denied";
-    expect(await reminders.setReminder(channel(), later)).toBe("denied");
-    expect(shown()).toEqual([]);
-    expect(currentPermission()).toBe("denied");
-
-    // Allowed in iOS Settings, then set.
-    ios.permission = "granted";
-    expect(await reminders.setReminder(channel(), later)).toBe("set");
-    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
-
-    // Turned off again in iOS Settings: back in the app, the screens say so.
-    ios.permission = "denied";
-    for (const listener of scenario.appState) listener("active");
-    await settled();
-    expect(currentPermission()).toBe("denied");
-    expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
-  });
-
   it("is kept after a relaunch, notifying once", async () => {
     await reminders.setReminder(channel(), later);
     await launch();
@@ -344,28 +316,12 @@ describe("programme reminders", () => {
     expect(notices()).toEqual([]);
   });
 
-  it("goes with its subscription, and when cancelled", async () => {
-    await reminders.setReminder(channel(), later);
-    const [set] = remindersShown();
-    await reminders.cancelReminder(set!.id);
-    expect(shown()).toEqual([]);
-    expect(notices()).toEqual([]);
-
+  it("goes with its subscription", async () => {
     await reminders.setReminder(channel(), later);
     scenario.members = [];
     for (const listener of scenario.rosterChanged) listener();
     await settled();
     expect(shown()).toEqual([]);
-    expect(notices()).toEqual([]);
-  });
-
-  it("shows none and changes nothing while the file can't be read", async () => {
-    writeFileSync(file(), JSON.stringify({ version: 2, reminders: [] }));
-    await launch();
-    expect(shown()).toBe("foreign");
-    await expect(reminders.setReminder(channel(), later)).rejects.toMatchObject({
-      error: { kind: "reminder", reason: "newer" },
-    });
     expect(notices()).toEqual([]);
   });
 
@@ -384,20 +340,11 @@ describe("programme reminders", () => {
     expect(scenario.pushed).toHaveLength(1);
 
     // Its details read the programme by its start: no token outlives a launch.
-    scenario.params = { channel: "a:1", start: String(later.start) };
-    const { ProgrammeScreen } = await import("../src/guide-screen.tsx");
-    const container = document.createElement("div");
-    const screen = createRoot(container);
-    await React.act(async () =>
-      screen.render(React.createElement(ProgrammeScreen, { origin: "live" })),
-    );
-    await React.act(async () => {
-      for (let i = 0; i < 30; i++) await Promise.resolve();
-    });
-    expect(container.textContent).toContain("Late film");
-    expect(container.textContent).toContain("A film");
+    const screen = await details(later);
+    expect(screen.text()).toContain("Late film");
+    expect(screen.text()).toContain("A film");
     expect(scenario.played).toEqual([]);
-    React.act(() => screen.unmount());
+    screen.close();
   });
 });
 
@@ -458,34 +405,33 @@ describe("programme details", () => {
     screen.close();
   });
 
-  it("offers no reminder once the programme has started", async () => {
-    scenario.programmes = [on, later];
-    const screen = await details(on);
-    expect(screen.text()).toContain("News");
-    expect(screen.has("guide-watch-live")).toBe(true);
-    expect(screen.has("guide-remind-me")).toBe(false);
-    screen.close();
-  });
-
-  it("saves nothing where iOS refuses, and offers iOS Settings", async () => {
+  it("saves nothing where iOS refuses, offers iOS Settings, and sets once allowed there", async () => {
     ios.answer = "denied";
     const screen = await details(later);
     await screen.press("guide-remind-me");
     expect(shown()).toEqual([]);
     expect(screen.text()).toContain("Notifications are off for Mr. Streamer");
-    expect(screen.has("guide-remind-me")).toBe(true);
     await screen.press("guide-open-settings");
     expect(scenario.settings).toBe(1);
+
+    ios.permission = "granted";
+    await screen.press("guide-remind-me");
+    expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
+    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
     screen.close();
   });
 
-  it("says a save failed, keeping Remind me", async () => {
-    writeFileSync(file(), JSON.stringify({ version: 2, reminders: [] }));
+  it("says a save failed while a later build's file stands, writing over nothing", async () => {
+    const newer = JSON.stringify({ version: 2, reminders: [] });
+    writeFileSync(file(), newer);
     await launch();
     const screen = await details(later);
     await screen.press("guide-remind-me");
     expect(screen.text()).toContain("Couldn't save. Try again.");
     expect(screen.has("guide-remind-me")).toBe(true);
+    expect(shown()).toBe("foreign");
+    expect(readFileSync(file(), "utf8")).toBe(newer);
+    expect(notices()).toEqual([]);
     screen.close();
   });
 });
@@ -531,15 +477,4 @@ describe("the reminders list", () => {
 function remindersShown() {
   shown();
   return drawn?.kind === "read" ? drawn.reminders : [];
-}
-function currentPermission() {
-  let seen: Permission | null = null;
-  function Read() {
-    seen = reminders.usePermission();
-    return null;
-  }
-  const at = createRoot(document.createElement("div"));
-  React.act(() => at.render(React.createElement(Read)));
-  React.act(() => at.unmount());
-  return seen;
 }

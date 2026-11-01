@@ -14,7 +14,13 @@ import { type } from "arktype";
 import { router } from "expo-router";
 import { useSyncExternalStore } from "react";
 import { AppState } from "react-native";
-import { currentCatalogue, currentRoster, onCatalogue, onRoster } from "./account.ts";
+import {
+  currentCatalogue,
+  currentRoster,
+  onCatalogue,
+  onRoster,
+  type Catalogue,
+} from "./account.ts";
 import { readJsonStrictly, writeJson } from "./files.ts";
 import { guide } from "./guide.ts";
 import type { Channel, Library } from "./library.ts";
@@ -83,8 +89,8 @@ export interface RemindersNative {
   ask(): Promise<Permission>;
   /** The app's notifications still to come. */
   scheduled(): Promise<readonly Notice[]>;
-  /** Schedules each, in place of one with its id. Answers the ids iOS refused. */
-  schedule(notices: readonly Notice[]): Promise<readonly string[]>;
+  /** Schedules each, in place of one with its id; one iOS refuses is left out. */
+  schedule(notices: readonly Notice[]): Promise<void>;
   /** Takes these down, scheduled or shown. */
   cancel(ids: readonly string[]): Promise<void>;
   /** The notification the viewer tapped last, once, or null. */
@@ -280,15 +286,10 @@ async function checkOnce() {
       checked.set(reminder, found ? relisted(reminder, found) : reminder);
       continue;
     }
-    let programme: Pick<Programme, "title" | "stop"> | null | undefined;
-    if (channel) {
-      try {
-        const answer = await guide.programmeAt(channel.key, reminder.start);
-        programme = answer === null ? undefined : answer.kind === "none" ? null : answer.programme;
-      } catch {
-        // As a guide that didn't answer: nothing is known.
-      }
-    }
+    // A guide that didn't answer, as one that can't be read: nothing is known.
+    const programme = channel
+      ? await guide.programmeAt(channel.key, reminder.start).catch(() => undefined)
+      : undefined;
     checked.set(reminder, seen(reminder, found, programme));
   }
   const current = keptNow();
@@ -297,19 +298,17 @@ async function checkOnce() {
     const after = checked.get(each);
     return after === undefined ? [each] : after ? [after] : [];
   });
-  if (
-    next.length !== current.reminders.length ||
-    next.some((each, at) => JSON.stringify(each) !== JSON.stringify(current.reminders[at]))
-  ) {
+  let shown = current.reminders;
+  if (JSON.stringify(next) !== JSON.stringify(shown)) {
     try {
       save(next);
+      shown = next;
     } catch {
       // The disk keeps what it had; notifications follow what the screens show, and the next
       // check writes again.
     }
   }
-  const shown = keptNow();
-  await sync(shown.kind === "read" ? shown.reminders : current.reminders);
+  await sync(shown);
 }
 
 let checking: Promise<void> | null = null;
@@ -361,8 +360,12 @@ export async function setReminder(
   if (started()) throw new AppFailure({ kind: "reminder", reason: "started" });
   const reminders = stored();
   const found = foundAs(channel);
-  const wanted = { subscriptionId: channel.subscriptionId, streams: found.streams };
-  if (!reminders.some((each) => sameReminder(each, { ...wanted, start: programme.start }))) {
+  const wanted = {
+    subscriptionId: channel.subscriptionId,
+    streams: found.streams,
+    start: programme.start,
+  };
+  if (!reminders.some((each) => sameReminder(each, wanted))) {
     save([
       ...reminders,
       {
@@ -409,21 +412,21 @@ const subscribeAll = (listener: () => void) => {
   };
 };
 
-let listed: { readonly from: readonly unknown[]; readonly list: ReminderList } | null = null;
+let listed: {
+  readonly from: Kept;
+  readonly catalogue: Catalogue;
+  readonly minute: number;
+  readonly list: ReminderList;
+} | null = null;
 /** The reminders as they stand: drawn again as they, or the channels Live lists, change. */
 function currentList(): ReminderList {
   const from = keptNow();
   const catalogue = currentCatalogue();
-  const minute = Math.floor(Date.now() / 60_000);
-  if (
-    listed &&
-    listed.from[0] === from &&
-    listed.from[1] === catalogue &&
-    listed.from[2] === minute
-  )
+  const now = Date.now();
+  const minute = Math.floor(now / 60_000);
+  if (listed?.from === from && listed.catalogue === catalogue && listed.minute === minute)
     return listed.list;
   const library = catalogue.kind === "ready" ? catalogue.library : null;
-  const now = Date.now();
   const list: ReminderList =
     from.kind === "read"
       ? {
@@ -434,7 +437,7 @@ function currentList(): ReminderList {
             .map((each) => shownAs(each, library, now)),
         }
       : from;
-  listed = { from: [from, catalogue, minute], list };
+  listed = { from, catalogue, minute, list };
   return list;
 }
 

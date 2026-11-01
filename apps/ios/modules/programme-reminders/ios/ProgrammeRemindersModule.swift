@@ -63,20 +63,10 @@ public class ProgrammeRemindersModule: Module {
     AsyncFunction("schedule") { (notices: [Notice], promise: Promise) in
       let center = UNUserNotificationCenter.current()
       let group = DispatchGroup()
-      let lock = NSLock()
-      var refused = [String]()
-      let refuse = { (id: String) in
-        lock.lock()
-        refused.append(id)
-        lock.unlock()
-      }
       for notice in notices {
         // An absolute instant: neither the time zone nor daylight saving moves it.
         let seconds = notice.at / 1000 - Date().timeIntervalSince1970
-        guard seconds >= 1 else {
-          refuse(notice.id)
-          continue
-        }
+        guard seconds >= 1 else { continue }
         let content = UNMutableNotificationContent()
         content.title = notice.title
         content.body = notice.body
@@ -89,12 +79,10 @@ public class ProgrammeRemindersModule: Module {
           trigger: UNTimeIntervalNotificationTrigger(timeInterval: seconds, repeats: false)
         )
         group.enter()
-        center.add(request) { error in
-          if error != nil { refuse(notice.id) }
-          group.leave()
-        }
+        // One iOS refuses is left out: the next check schedules it again.
+        center.add(request) { _ in group.leave() }
       }
-      group.notify(queue: .main) { promise.resolve(refused) }
+      group.notify(queue: .main) { promise.resolve(nil) }
     }
 
     AsyncFunction("cancel") { (ids: [String]) in

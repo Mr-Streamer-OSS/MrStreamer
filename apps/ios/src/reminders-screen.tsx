@@ -26,7 +26,7 @@ import { colors, monogram, Notice } from "./ui.tsx";
 interface Day {
   readonly from: number;
   readonly title: string;
-  readonly data: readonly Reminder[];
+  readonly data: Reminder[];
 }
 
 /** Today, Tomorrow, else the short date, as a day's heading. */
@@ -44,8 +44,7 @@ export function RemindersScreen() {
     for (const reminder of reminders) {
       const from = localDay(reminder.start).from;
       const last = grouped.at(-1);
-      if (last?.from === from)
-        grouped[grouped.length - 1] = { ...last, data: [...last.data, reminder] };
+      if (last?.from === from) last.data.push(reminder);
       else grouped.push({ from, title: dayTitle(from, now), data: [reminder] });
     }
     return grouped;
@@ -78,21 +77,17 @@ export function RemindersScreen() {
         </Text>
       )}
       renderItem={({ item }) => <Row reminder={item} />}
-      {...(permission === "denied" && days.length > 0
-        ? {
-            ListHeaderComponent: (
-              <Notice
-                failure={{
-                  headline: "Notifications are off.",
-                  advice: "iOS won't show these until you turn them on.",
-                }}
-                actions={[
-                  { label: "Open iOS Settings", onPress: () => void Linking.openSettings() },
-                ]}
-              />
-            ),
-          }
-        : {})}
+      ListHeaderComponent={
+        permission === "denied" && days.length > 0 ? (
+          <Notice
+            failure={{
+              headline: "Notifications are off.",
+              advice: "iOS won't show these until you turn them on.",
+            }}
+            actions={[{ label: "Open iOS Settings", onPress: () => void Linking.openSettings() }]}
+          />
+        ) : undefined
+      }
       ListEmptyComponent={
         <Notice
           failure={{

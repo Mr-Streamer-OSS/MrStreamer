@@ -254,8 +254,7 @@ export function Programme({
     async (signal: AbortSignal) => {
       if (!channel || !library) return null;
       if (detail || start === undefined) return guide.programme(detail, { signal });
-      const found = await guide.programmeAt(channel.key, start, { signal });
-      return found?.kind === "found" ? found.programme : null;
+      return (await guide.programmeAt(channel.key, start, { signal })) ?? null;
     },
     [channel, library, detail, start],
   );
@@ -266,6 +265,7 @@ export function Programme({
     read.value && channel ? catchUpOf(channel, read.value, read.now) : { kind: "later" };
   const kept = catchUp.kind === "past" || catchUp.kind === "on";
   const reminder = useReminder(key, read.value?.start);
+  const belled = reminder?.status.kind === "upcoming";
   if (!channel || !library) {
     return (
       <Message
@@ -296,7 +296,7 @@ export function Programme({
             accessibilityLabel={
               kept
                 ? `${programmeRange(read.value)}, catch-up`
-                : reminder?.status.kind === "upcoming"
+                : belled
                   ? `${programmeRange(read.value)}, ${t("Reminder set")}`
                   : undefined
             }
@@ -304,7 +304,7 @@ export function Programme({
             <Text style={styles.copy}>
               {kept ? `${programmeRange(read.value)} ↺` : programmeRange(read.value)}
             </Text>
-            {reminder?.status.kind === "upcoming" ? <ReminderBell /> : null}
+            {belled ? <ReminderBell /> : null}
           </View>
           <ProgrammeProgress value={progress} />
           {read.value.description ? (

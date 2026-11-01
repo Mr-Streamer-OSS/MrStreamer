@@ -906,35 +906,26 @@ export function createGuide(
     },
     /**
      * The programme channel `key` (`Channel.key`) has starting exactly at `start`, from the
-     * first guide with current programmes for it, as `listings` reads it, with a `detail` token
-     * for `programme`. `none` where that guide lists nothing starting then; null where no guide
-     * answers for the channel now, or one that stands couldn't be read: nothing is known.
+     * first guide with current programmes for it, as `listings` reads it: null where that guide
+     * lists nothing starting then, undefined where no guide answers for the channel now or one
+     * that stands couldn't be read, so nothing is known.
      */
     async programmeAt(
       key: string,
       start: number,
       options?: { readonly signal?: AbortSignal },
-    ): Promise<
-      | { readonly kind: "found"; readonly programme: Programme; readonly detail: string }
-      | { readonly kind: "none" }
-      | null
-    > {
-      if (!Number.isFinite(start)) return null;
+    ): Promise<Programme | null | undefined> {
       for (const captured of candidates(key)) {
-        const asking = { ...captured, start };
-        const answer = await query(asking, "detail", { from: 0, until: 0 }, options?.signal);
-        if (!answer || options?.signal?.aborted || !validToken(captured)) return null;
-        if (!answer.guideId) continue;
-        const programme = answer.rows[0];
-        if (!programme) return { kind: "none" };
-        const ids = [answer.guideId];
-        return {
-          kind: "found",
-          programme,
-          detail: token({ ...asking, ids, start: programme.start, on: dayOf(programme.start) }),
-        };
+        const answer = await query(
+          { ...captured, start },
+          "detail",
+          { from: 0, until: 0 },
+          options?.signal,
+        );
+        if (!answer || options?.signal?.aborted || !validToken(captured)) return undefined;
+        if (answer.guideId) return answer.rows[0] ?? null;
       }
-      return null;
+      return undefined;
     },
   };
   return service;
