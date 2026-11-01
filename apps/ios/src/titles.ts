@@ -281,7 +281,7 @@ function standingOf(
 export const metadataStanding = () =>
   standingOf(tmdbKey.get(), metadataStatus.get(), titleLists().kind === "ready");
 export function useMetadataStanding(): MetadataStanding {
-  void readKey();
+  useEffect(() => void readKey(), []);
   const listed = useTitleLists().kind === "ready";
   return standingOf(useStore(tmdbKey), useStore(metadataStatus), listed);
 }
@@ -979,12 +979,15 @@ async function detailsUnder(
       : seriesDetails(title, raw, known, reading.language);
   const early = async (raw: ProviderDetails) => {
     const known = "now" in about ? await about.now : null;
-    const since = "now" in about ? await about.asking : null;
+    // Asking again only with a key to ask with; no TMDB id says so from the first.
+    const since = "now" in about && client ? await about.asking : null;
+    const standing = !("now" in about)
+      ? about
+      : since === null
+        ? undefined
+        : ({ kind: "asking", savedAt: since } as const);
     if (show && stands() && currentLanguage(reading)) {
-      show({
-        ...shown(raw, known),
-        ...(since === null ? {} : { about: { kind: "asking", savedAt: since } }),
-      });
+      show({ ...shown(raw, known), ...(standing ? { about: standing } : {}) });
     }
   };
   const fresh = saved && Date.now() - saved.at < PROVIDER_FRESH && saved.listedAt === listedAt(id);

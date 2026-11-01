@@ -49,6 +49,8 @@ const scenario = vi.hoisted(() => ({
   /** The providers saved: Settings' tests leave them out, the film's details list one. */
   members: [] as { entry: { id: string }; label: string }[],
   reads: 0,
+  /** The metadata version, which a TMDB key change bumps, and who is told when it does. */
+  metadata: { version: 0, told: new Set<() => void>() },
 }));
 
 vi.mock("react-native", async () => ({
@@ -98,7 +100,7 @@ vi.mock("../src/ui.tsx", async () => {
     Message: ({ text }: { text: string }) => createElement("p", null, text),
   };
 });
-vi.mock("../src/titles.ts", () => ({
+vi.mock("../src/titles.ts", async () => ({
   useMetadataStanding: () => scenario.standing,
   useTitleTimings: () => null,
   saveTmdbKey: async (key: string) => {
@@ -110,7 +112,14 @@ vi.mock("../src/titles.ts", () => ({
   },
   retryMetadata: () => scenario.asked.push("retry"),
   useTitleLists: () => scenario.lists,
-  useMetadataVersion: () => 0,
+  useMetadataVersion: (await import("react")).useSyncExternalStore.bind(
+    null,
+    (tell: () => void) => {
+      scenario.metadata.told.add(tell);
+      return () => scenario.metadata.told.delete(tell);
+    },
+    () => scenario.metadata.version,
+  ),
   titleOf: (index: IndexedCatalogue, kind: "movie" | "series", version: OwnedId) =>
     byIds(index, kind, [version])[0],
   useCollections: () => null,
@@ -396,6 +405,22 @@ describe("a title's details", () => {
     await open();
     expect(container.textContent).not.toContain("Provider details only");
     expect(container.textContent).not.toContain("TMDB");
+  });
+
+  it("read again once the TMDB key changes, as from Settings", async () => {
+    scenario.details = [
+      async () => facts({ kind: "refused", savedAt: null }),
+      async () => facts({ kind: "no-key", savedAt: null }),
+    ];
+    await open();
+    expect(container.textContent).toContain("TMDB refused the key in Settings.");
+    React.act(() => {
+      scenario.metadata.version++;
+      for (const tell of scenario.metadata.told) tell();
+    });
+    await settled();
+    expect(container.textContent).toContain("This build has no TMDB key.");
+    expect(container.textContent).not.toContain("refused");
   });
 
   it("date TMDB's saved answer while it isn't answering, and Try again reads them anew", async () => {
