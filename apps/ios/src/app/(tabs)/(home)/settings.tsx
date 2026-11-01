@@ -2,7 +2,7 @@ import type { AnalyticsSettings } from "@mrstreamer/contracts/analytics";
 import { QUALITIES, type Quality } from "@mrstreamer/contracts/library";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { AccountStatus } from "@mrstreamer/contracts/subscription";
-import { formatDate } from "@mrstreamer/core/i18n";
+import { formatDate, formatNumber } from "@mrstreamer/core/i18n";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
 import Constants from "expo-constants";
@@ -48,7 +48,14 @@ import { openLink } from "../../../open-link.ts";
 import { playlistHref, useUnmapped } from "../../../playlist-groups.tsx";
 import { removeSubtitleKey, saveSubtitleKey, useSubtitleKey } from "../../../online-subtitles.ts";
 import { setStatistics, useStatistics } from "../../../telemetry/index.ts";
-import { useMetadataStanding, useTitleTimings, type MetadataStanding } from "../../../titles.ts";
+import {
+  removeTmdbKey,
+  retryMetadata,
+  saveTmdbKey,
+  useMetadataStanding,
+  useTitleTimings,
+  type MetadataStanding,
+} from "../../../titles.ts";
 import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
 
 const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
@@ -56,9 +63,10 @@ const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
 /**
  * Settings as one list: the providers first, each a row with Add provider and Guides, the XMLTV
  * guides added apart from theirs, under them, then Downloads, a row with what they take that
- * opens them, Media policies, Subtitles, Privacy with its policy in the browser, and About with
- * Licences. TMDB's terms ask for its logo and notice, as the desktop's Settings show them. It
- * opens on whichever tab's top bar asked for it, and what it opens goes on that tab too.
+ * opens them, Media policies, Subtitles, TMDB with the viewer's key and how it answers, Privacy
+ * with its policy in the browser and Diagnostics, and About with Licences. TMDB's terms ask for
+ * its logo and notice, as the desktop's Settings show them. It opens on whichever tab's top bar
+ * asked for it, and what it opens goes on that tab too.
  */
 export default function Settings() {
   const roster = useRoster();
@@ -192,6 +200,9 @@ export default function Settings() {
         subtitles.
       </Text>
 
+      <Section name="TMDB" />
+      <Tmdb tmdb={tmdb} />
+
       <Section name="Privacy" />
       <View style={styles.toggle}>
         <Text style={styles.label} importantForAccessibility="no" accessibilityElementsHidden>
@@ -219,6 +230,12 @@ export default function Settings() {
         onPress={() => openLink(PRIVACY_POLICY)}
         testID="settings-privacy-policy"
       />
+      <Opens
+        label="Diagnostics"
+        role="button"
+        onPress={() => router.push(tab === "(home)" ? "/diagnostics" : `/${tab}/diagnostics`)}
+        testID="settings-diagnostics"
+      />
 
       <Section name="About" />
       <Line
@@ -232,7 +249,6 @@ export default function Settings() {
         onPress={() => router.push(tabHref(tab, "licences"))}
         testID="settings-licences"
       />
-      <TmdbLine tmdb={tmdb} />
       {tmdb.kind !== "no-key" ? (
         <View style={styles.notice}>
           <Pressable
@@ -528,25 +544,117 @@ function transportNote({ enabled, transport }: AnalyticsSettings): string | null
     : "This build sends nothing.";
 }
 
-/** TMDB's part: movie and series facts and pictures, when the build has a key. */
-function TmdbLine({ tmdb }: { tmdb: MetadataStanding }) {
+/** Whose key TMDB is asked with, as the key row says it. */
+const tmdbKeyNames = { yours: "Saved", app: "This build's" } as const;
+
+/**
+ * TMDB's group, as the SubDL key's: the viewer's key, how TMDB answers, how many titles it gave
+ * when it stopped, and Try again while it isn't answering. A refused key waits for another.
+ */
+function Tmdb({ tmdb }: { tmdb: MetadataStanding }) {
+  const count =
+    "known" in tmdb ? `${formatNumber(tmdb.known)} of ${formatNumber(tmdb.wanted)}` : "";
   return (
-    <Line
-      label="TMDB"
-      value={
-        tmdb.kind === "reading"
-          ? "Checking"
-          : tmdb.kind === "no-key"
-            ? "Not in this build"
-            : tmdb.kind === "waiting"
-              ? "Waiting for the lists"
-              : tmdb.kind === "refused"
-                ? "Refused the key"
-                : tmdb.known < tmdb.wanted
-                  ? `${tmdb.known} of ${tmdb.wanted} titles`
-                  : `${tmdb.known} titles`
+    <>
+      <Opens
+        label="TMDB API key"
+        value={tmdb.kind === "reading" ? undefined : "key" in tmdb ? tmdbKeyNames[tmdb.key] : "Add"}
+        role="button"
+        // Until the Keychain answers, whether there is one to replace isn't known.
+        onPress={
+          tmdb.kind === "reading"
+            ? undefined
+            : "key" in tmdb && tmdb.key === "yours"
+              ? manageTmdbKey
+              : enterTmdbKey
+        }
+        testID="settings-tmdb-key"
+      />
+      <Line
+        label="Status"
+        value={tmdbStatus(tmdb)}
+        alert={tmdb.kind === "refused" || tmdb.kind === "unavailable"}
+        testID="settings-tmdb-status"
+      />
+      {tmdb.kind === "refused" || tmdb.kind === "unavailable" ? (
+        <Line
+          label="Titles"
+          value={tmdb.kind === "refused" ? `${count} saved` : count}
+          testID="settings-tmdb-titles"
+        />
+      ) : null}
+      {tmdb.kind === "unavailable" ? (
+        <View style={styles.retry}>
+          <TextButton label="Try again" onPress={retryMetadata} testID="settings-tmdb-retry" />
+        </View>
+      ) : null}
+      <Text style={styles.paragraph}>
+        {
+          "Facts and pictures for movies and series. Your key replaces this build's and stays in the Keychain. Titles TMDB already gave keep their saved facts."
+        }
+      </Text>
+    </>
+  );
+}
+
+function tmdbStatus(tmdb: MetadataStanding): string {
+  switch (tmdb.kind) {
+    case "reading":
+      return "Checking";
+    case "no-key":
+      return "No key, provider facts only";
+    case "waiting":
+      return "Waiting for the lists";
+    case "refused":
+      return "Refused the key";
+    case "unavailable":
+      return "Not answering";
+    case "fetching":
+    case "answered":
+      return tmdb.known < tmdb.wanted
+        ? `${formatNumber(tmdb.known)} of ${formatNumber(tmdb.wanted)} titles`
+        : `${formatNumber(tmdb.known)} titles`;
+  }
+}
+
+/** Asks for the viewer's own TMDB key, which TMDB is then asked with, never showing one saved. */
+function enterTmdbKey() {
+  Alert.prompt(
+    "TMDB API key",
+    "From your account settings on themoviedb.org.",
+    [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Save",
+        onPress: (typed = "") => {
+          if (!typed.trim()) return;
+          saveTmdbKey(typed).catch(() =>
+            Alert.alert("Couldn't save the key", "The Keychain refused it. Try again."),
+          );
+        },
+      },
+    ],
+    "secure-text",
+  );
+}
+
+/** A saved key can be replaced, typed again in full, or removed, for this build's key again. */
+function manageTmdbKey() {
+  ActionSheetIOS.showActionSheetWithOptions(
+    {
+      title: "TMDB API key",
+      options: ["Replace", "Remove", "Cancel"],
+      destructiveButtonIndex: 1,
+      cancelButtonIndex: 2,
+    },
+    (index) => {
+      if (index === 0) enterTmdbKey();
+      else if (index === 1) {
+        removeTmdbKey().catch(() =>
+          Alert.alert("Couldn't remove the key", "It's still saved. Try again."),
+        );
       }
-    />
+    },
   );
 }
 
@@ -626,11 +734,22 @@ function Opens({
   );
 }
 
-function Line({ label, value }: { label: string; value: string }) {
+/** A label and its value; `alert` reds the value, as a provider's failed line. */
+function Line({
+  label,
+  value,
+  alert = false,
+  testID,
+}: {
+  label: string;
+  value: string;
+  alert?: boolean;
+  testID?: string;
+}) {
   return (
-    <View style={styles.line} accessible accessibilityLabel={`${label}, ${value}`}>
+    <View style={styles.line} accessible accessibilityLabel={`${label}, ${value}`} testID={testID}>
       <Text style={styles.label}>{label}</Text>
-      <Text style={styles.value} numberOfLines={2}>
+      <Text style={[styles.value, alert && styles.failed]} numberOfLines={2}>
         {value}
       </Text>
     </View>
@@ -692,6 +811,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   actions: { marginHorizontal: 16, marginTop: 4 },
+  retry: { marginHorizontal: 16 },
   notice: { marginHorizontal: 16, marginTop: 24, gap: 10 },
   logo: { width: 108, height: 14 },
   noticeText: { color: colors.dim, fontSize: 13, lineHeight: 18 },

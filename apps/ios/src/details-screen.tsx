@@ -7,7 +7,7 @@ import type {
   TitleKind,
   TitleRef,
 } from "@mrstreamer/contracts/ondemand";
-import { formatBytes } from "@mrstreamer/core/i18n";
+import { formatBytes, formatDate } from "@mrstreamer/core/i18n";
 import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { EpisodeMark, SeriesViewing, TitleProgress } from "@mrstreamer/contracts/viewing";
 import { versionOptions } from "@mrstreamer/core/ondemand/version-options";
@@ -58,9 +58,11 @@ import {
   useCollections,
   useMetadataVersion,
   useTitleLists,
+  type AboutStanding,
+  type ShownDetails,
 } from "./titles.ts";
 import { Artwork, ProgressLine, Shelf, TextTabs } from "./titles-ui.tsx";
-import { colors, Message } from "./ui.tsx";
+import { colors, Message, TextButton } from "./ui.tsx";
 import { markEpisode, progressOf, relist, seriesViewing, undoMark, useViewing } from "./viewing.ts";
 import { removeTitle, saveTitle, savedEntry, useWatchlist } from "./watchlist.ts";
 
@@ -411,7 +413,7 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
             }}
           />
         ) : facts ? (
-          <About facts={facts} provider={!title.tmdbId} />
+          <About facts={facts} onRetry={() => setAgain((count) => count + 1)} />
         ) : (
           <PlaceholderLines widths={["100%", "92%", "56%"]} />
         )}
@@ -440,8 +442,11 @@ function DownloadFact({ of: ref }: { of: TitleRef }) {
   return ` · ${stateWord(download)}${size}`;
 }
 
-/** The plot and credits; a note where only the provider's facts are known. */
-function About({ facts, provider }: { facts: TitleDetails; provider: boolean }) {
+/**
+ * The plot and credits, and a grey line where TMDB's part is missing or saved from before, saying
+ * why; with Try again, which reads the details anew, while TMDB isn't answering.
+ */
+function About({ facts, onRetry }: { facts: ShownDetails; onRetry: () => void }) {
   const credits = [
     facts.directors.length > 0
       ? `${facts.kind === "movie" ? "Directed by" : "Created by"} ${facts.directors.slice(0, 2).join(", ")}`
@@ -453,13 +458,38 @@ function About({ facts, provider }: { facts: TitleDetails; provider: boolean }) 
           .join(", ")}`
       : null,
   ].filter(Boolean);
+  const why = aboutReason(facts.about);
   return (
     <>
       {facts.plot ? <Text style={styles.plot}>{facts.plot}</Text> : null}
       {credits.length > 0 ? <Text style={styles.dim}>{credits.join(" · ")}</Text> : null}
-      {provider ? <Text style={styles.dim}>Provider details only.</Text> : null}
+      {why ? <Text style={styles.dim}>{why}</Text> : null}
+      {facts.about?.kind === "unavailable" ? (
+        <TextButton label="Try again" onPress={onRetry} testID="details-about-retry" />
+      ) : null}
     </>
   );
+}
+
+const REASONS = {
+  unlinked: null,
+  "no-key": "This build has no TMDB key. Add yours in Settings.",
+  missing: "TMDB doesn't know this title.",
+  refused: "TMDB refused the key in Settings.",
+  unavailable: "TMDB isn't answering.",
+} as const;
+
+/** Why TMDB's part shows as it does, or null when TMDB answered or isn't known yet. */
+function aboutReason(about: AboutStanding | undefined): string | null {
+  if (!about || about.kind === "tmdb") return null;
+  const savedAt = "savedAt" in about ? about.savedAt : null;
+  // "12 Oct" this year, "12 Oct 2025" before it.
+  const style = new Date(savedAt ?? 0).getFullYear() === new Date().getFullYear() ? "day" : "date";
+  const shown =
+    savedAt === null
+      ? "Provider details only."
+      : `Saved TMDB facts from ${formatDate(savedAt, style)}.`;
+  return [shown, REASONS[about.kind]].filter(Boolean).join(" ");
 }
 
 /** Play for a series: where its episodes say it goes on. */
