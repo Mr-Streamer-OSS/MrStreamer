@@ -595,15 +595,19 @@ describe("Live recovery", () => {
     expect(nextStep(stall, { ...preferredSd, playedOn: 1 }, watched)).toMatchObject({
       candidate: 2,
     });
-    // The lower stream failing before it plays goes back to the one that played.
+    // A lower stream failing before it plays, off air too, steps lower again, else goes back.
     const stepped: Recovery = { ...automatic, candidate: 1, reconnects: 1, playedMs: 0 };
-    expect(nextStep(native("missing"), stepped, watched)).toEqual({
-      kind: "reconnect",
+    for (const failure of [native("missing"), native("unknown"), noStart]) {
+      expect(nextStep(failure, stepped, watched)).toEqual({
+        kind: "reconnect",
+        candidate: 2,
+        delayMs: 2000,
+        reconnects: 2,
+      });
+    }
+    expect(nextStep(native("missing"), { ...stepped, candidate: 2 }, watched)).toMatchObject({
       candidate: 0,
-      delayMs: 2000,
-      reconnects: 2,
     });
-    expect(nextStep(noStart, stepped, watched)).toMatchObject({ candidate: 2 });
   });
 
   it("opens at most 3 + 4 streams until one plays 30 seconds, and 4 after", () => {

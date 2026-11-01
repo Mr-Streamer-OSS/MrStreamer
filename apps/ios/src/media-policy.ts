@@ -324,7 +324,10 @@ export type Step =
       readonly reconnects: number;
     };
 
-/** "slow" is what a connection too weak for the stream gives: it lost the connection or stalled. */
+/**
+ * "slow" is a lost connection or a stall: what a connection too weak for the stream gives, though
+ * a host that can't be reached or a refused certificate counts as a lost connection too.
+ */
 type FailureClass =
   "refusal" | "missing" | "transient" | "slow" | "no-start" | "media" | "terminal";
 
@@ -374,8 +377,8 @@ function lower(qualities: readonly (Quality | null)[], failed: number): number |
  * That is at most 3 + 4 opens until a stream plays that long, and 4 after. A reconnect opens the
  * candidate that played last, except when Automatic's stream stalled, lost its connection or
  * didn't start: then the candidate a quality below it, when there is one among those Automatic
- * tries. A lower stream that fails so before it plays steps lower again; with nothing lower, or
- * failing otherwise, it goes back to the one that played. Refusals and app failures stop at once.
+ * tries. A lower stream that fails before it plays, however, steps lower again, or with nothing
+ * lower goes back to the one that played. Refusals and app failures stop at once.
  */
 export function nextStep(
   failure: PlaybackFailure,
@@ -395,14 +398,13 @@ export function nextStep(
     const next = recovery.candidate + 1;
     return next < recovery.candidates ? { kind: "candidate", candidate: next } : failed;
   }
-  // A missing or undecodable stream fails, unless it is the lower one: that goes back.
-  if ((kind === "missing" || kind === "media") && recovery.candidate === recovery.playedOn)
-    return failed;
+  const steppedDown = recovery.candidate !== recovery.playedOn;
+  if (!steppedDown && (kind === "missing" || kind === "media")) return failed;
   const used = recovery.playedMs >= STABLE_PLAYBACK_MS ? 0 : recovery.reconnects;
   const delayMs = RECONNECT_DELAYS_MS[used];
   if (delayMs === undefined) return failed;
   const below =
-    recovery.qualities && (kind === "slow" || kind === "no-start")
+    recovery.qualities && (steppedDown || kind === "slow" || kind === "no-start")
       ? lower(recovery.qualities, recovery.candidate)
       : null;
   return {

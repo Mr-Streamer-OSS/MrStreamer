@@ -19,7 +19,7 @@
 // apps/desktop/test/fixtures, codecs as they are, so the ones AVPlayer can't decode fail as they
 // would; every other channel loops a 720p H.264 + AAC test picture made here with ffmpeg, light
 // for even ids and dark for odd ones, apart from "BE | KWALITEIT 1": its HD stream is a heavier
-// 720p picture (about 2.6 Mbit/s) and its SD one a light 360p one (about 0.5 Mbit/s), so a paced
+// 720p picture (about 2.6 Mbit/s) and its SD one a light 360p one (about 0.57 Mbit/s), so a paced
 // link (`/live-link`) carries one and not the other. Each request is logged without the login, to
 // .local/ios-fixture/requests.jsonl. Stream 7999, "TEST | Live sound and subtitles (EN/NL)",
 // declares sound and subtitle renditions instead (scripts/native-fixtures/tracks.ts). The
