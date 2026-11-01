@@ -10,6 +10,7 @@ import {
   type ObservedTrackSnapshot,
   type PlaybackObservation,
   type VideoPlayer,
+  type VideoSourceObject,
 } from "expo-video";
 import { appError, describeError, withoutLogin } from "./errors.ts";
 import { t } from "./i18n/watch.ts";
@@ -1591,7 +1592,7 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
       plan.kind === "file" && !item.live && item.subscriptionId !== null
         ? (source.observed ?? null)
         : null;
-    let playable = {
+    let playable: VideoSourceObject & { uri: string } = {
       uri: source.url,
       ...(source.headers ? { headers: { ...source.headers } } : {}),
       contentType: source.container === "m3u8" ? ("hls" as const) : ("auto" as const),
@@ -1616,6 +1617,10 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
       } else {
         await opening.closed;
         if (!attemptStands(owned, resource)) return;
+        // A copy that is MP4 or MOV after all: AVFoundation types a file on the phone by its
+        // name and refuses one named .mkv. As `progressive`, modules/title-formats opens it as MP4.
+        if (source.url.startsWith("file:"))
+          playable = { uri: source.url, contentType: "progressive" };
       }
     }
     stage = "native";

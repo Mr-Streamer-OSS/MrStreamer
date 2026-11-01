@@ -407,6 +407,22 @@ describe("a file AVPlayer can't open", () => {
     await settle();
     expect(given.at(-1)).toEqual({ uri: "http://panel/a.mkv", contentType: "auto" });
   });
+
+  // AVFoundation types a file on the phone by its name, and refuses MP4 named .mkv. As
+  // `progressive`, the native module has the player open it as MP4.
+  it("plays a copy that turns out to be MP4 as a file of its own type", async () => {
+    const copy = "file:///documents/downloads/d-1/media.mkv";
+    void play(
+      movie("a"),
+      { kind: "file", originalLanguage: null, open: async () => ({ url: copy, container: "mkv" }) },
+      options,
+    );
+    await settle();
+    sessions[0]!.opened.resolve({ kind: "direct" });
+    sessions[0]!.closed.resolve();
+    await settle();
+    expect(given.at(-1)).toEqual({ uri: copy, contentType: "progressive" });
+  });
 });
 
 it("plays MP4, AVI and other files, and live channels, directly as before", async () => {

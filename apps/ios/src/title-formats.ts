@@ -93,7 +93,10 @@ export interface FormatSession {
 
 export type Opened =
   | { readonly kind: "session"; readonly session: FormatSession }
-  /** An MP4 or MOV, whatever its name said: AVPlayer opens the address itself. */
+  /**
+   * An MP4 or MOV, whatever its name said: AVPlayer opens the address itself, a copy's given as
+   * `progressive` so the native module opens it as MP4 (`MisnamedCopy.swift`).
+   */
   | { readonly kind: "direct" };
 
 let made = 0;
