@@ -1460,7 +1460,9 @@ describe("Programmes in Search", () => {
       ["b", "Southwind"],
     ]),
   } as unknown as Library;
-  const at = Date.UTC(2026, 9, 31, 18);
+  // A whole minute an hour ahead: the programme is always still to come, so its detail offers
+  // Watch live rather than catch-up, whatever day the suite runs.
+  const at = Math.ceil(Date.now() / 60_000) * 60_000 + 3_600_000;
   const programme = (title: string, detail: string): FoundProgramme => ({
     key: "b:7",
     programme: { start: at, stop: at + 1_800_000, title, detail },
