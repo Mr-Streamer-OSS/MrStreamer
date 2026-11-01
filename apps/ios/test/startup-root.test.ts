@@ -73,6 +73,7 @@ vi.mock("expo-router", async () => {
 vi.mock("../src/language.ts", () => ({}));
 vi.mock("../src/downloads.ts", () => ({ startDownloads: () => {} }));
 vi.mock("../src/playback.ts", () => ({ onScreen: () => {} }));
+vi.mock("../src/reminders.ts", () => ({ startReminders: () => {} }));
 vi.mock("../src/telemetry/index.ts", () => ({
   onTelemetryScreen: () => {},
   startTelemetry: () => {},

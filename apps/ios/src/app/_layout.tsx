@@ -7,6 +7,7 @@ import { StyleSheet, View } from "react-native";
 import { useRoster } from "../account.ts";
 import { startDownloads } from "../downloads.ts";
 import { onScreen } from "../playback.ts";
+import { startReminders } from "../reminders.ts";
 import { holdLaunchScreen, StartupScreen } from "../startup-screen.tsx";
 import { requestStatisticsChoice } from "../statistics-consent.ts";
 import { startUp, useStartup } from "../startup.ts";
@@ -54,6 +55,8 @@ export default function RootLayout() {
     if (!opening && restored && !asked.current) {
       asked.current = true;
       requestStatisticsChoice();
+      // Once the tabs are mounted, so a tapped notification's programme can open over them.
+      startReminders();
     }
   }, [opening, restored]);
   return (

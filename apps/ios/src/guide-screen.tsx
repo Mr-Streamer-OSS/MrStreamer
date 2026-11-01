@@ -203,25 +203,32 @@ function Schedule({
   );
 }
 
+/**
+ * A programme by the owner's `detail` token, or, from a reminder's notification, by its channel
+ * and `start`, which no token outlives.
+ */
 export function ProgrammeScreen({ origin }: { origin: GuideOrigin }) {
-  const params = useLocalSearchParams<{ channel?: string; detail?: string }>();
+  const params = useLocalSearchParams<{ channel?: string; detail?: string; start?: string }>();
+  const start = Number(parameter(params.start));
   return (
     <Programme
       channel={parameter(params.channel)}
       detail={parameter(params.detail)}
+      {...(Number.isFinite(start) && start > 0 ? { start } : {})}
       origin={origin}
     />
   );
 }
 
 /**
- * One programme of a channel's Schedule, by the owner's detail token: a pushed screen, or Live's
- * detail column, which passes `onBack` for the Back a pushed screen has in its top bar, named
- * `back` for where it returns.
+ * One programme of a channel's Schedule, by the owner's detail token, else the one starting at
+ * `start`: a pushed screen, or Live's detail column, which passes `onBack` for the Back a pushed
+ * screen has in its top bar, named `back` for where it returns.
  */
 export function Programme({
   channel: key,
   detail,
+  start,
   origin,
   onBack,
   onSettings,
@@ -229,6 +236,7 @@ export function Programme({
 }: {
   channel: string;
   detail: string;
+  start?: number;
   origin: GuideOrigin;
   onBack?: () => void;
   onSettings?: () => void;
@@ -240,9 +248,13 @@ export function Programme({
   const channel = library?.byKey.get(key);
   const heading = useAnnounced(onBack !== undefined && channel !== undefined);
   const load = useCallback(
-    (signal: AbortSignal) =>
-      channel && library ? guide.programme(detail, { signal }) : Promise.resolve(null),
-    [channel, library, detail],
+    async (signal: AbortSignal) => {
+      if (!channel || !library) return null;
+      if (detail || start === undefined) return guide.programme(detail, { signal });
+      const found = await guide.programmeAt(channel.key, start, { signal });
+      return found?.kind === "found" ? found.programme : null;
+    },
+    [channel, library, detail, start],
   );
   const read = useGuideRead(load, channel ? [channel.subscriptionId] : []);
   const listing = useMemo(() => ({ now: read.value ?? null, next: null }), [read.value]);
