@@ -10,7 +10,6 @@ import {
   type ObservedTrackSnapshot,
   type PlaybackObservation,
   type VideoPlayer,
-  type VideoSourceObject,
 } from "expo-video";
 import { appError, describeError, withoutLogin } from "./errors.ts";
 import { t } from "./i18n/watch.ts";
@@ -1592,10 +1591,10 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
       plan.kind === "file" && !item.live && item.subscriptionId !== null
         ? (source.observed ?? null)
         : null;
-    let playable: VideoSourceObject & { uri: string } = {
+    let playable: Parameters<typeof attach>[1] = {
       uri: source.url,
       ...(source.headers ? { headers: { ...source.headers } } : {}),
-      contentType: source.container === "m3u8" ? ("hls" as const) : ("auto" as const),
+      contentType: source.container === "m3u8" ? "hls" : "auto",
     };
     if (!item.live && THROUGH_SESSION.has(source.container.toLowerCase())) {
       resource.submitted = true;
