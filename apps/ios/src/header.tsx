@@ -6,9 +6,11 @@ import {
   type NativeStackNavigationOptions,
 } from "expo-router";
 import type { SFSymbol } from "expo-symbols";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import { DownloadStatusButton } from "./download-status.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/navigation.ts";
 import { colors } from "./ui.tsx";
 
 // The top bar every tab's screens share, layout A: the brand on the left, after the system's back
@@ -134,7 +136,7 @@ export function openSearch() {
 
 const ACTIONS: readonly {
   readonly screen: "search" | "downloads" | "settings";
-  readonly label: string;
+  readonly label: Parameters<typeof t>[0];
   readonly symbol: SFSymbol;
 }[] = [
   { screen: "search", label: "Search", symbol: "magnifyingglass" },
@@ -142,7 +144,7 @@ const ACTIONS: readonly {
   { screen: "settings", label: "Settings", symbol: "gearshape" },
 ];
 
-/** The three buttons, less the one for the screen they show on. */
+/** The three buttons, less the one for the screen they show on, in the interface language. */
 function actions(tab: Tab, current: string): NativeStackHeaderItem[] {
   return ACTIONS.filter(({ screen }) => screen !== current).map(({ screen, label, symbol }) =>
     screen === "downloads"
@@ -152,7 +154,7 @@ function actions(tab: Tab, current: string): NativeStackHeaderItem[] {
         }
       : {
           type: "button",
-          label,
+          label: t(label),
           icon: { type: "sfSymbol", name: symbol },
           // The same item on the next screen, so the glass group carries over as a screen is pushed.
           identifier: screen,
@@ -177,6 +179,16 @@ export function tabScreenOptions(tab: Tab) {
     ],
     unstable_headerRightItems: () => actions(tab, route.name),
   });
+}
+
+/**
+ * `tabScreenOptions(tab)` for a tab's stack layout, made again when the interface language
+ * changes: React Navigation keeps the other tabs' stacks from rendering again on their own, so
+ * their buttons' labels would keep the language they were made in.
+ */
+export function useTabScreenOptions(tab: Tab) {
+  const locale = useLocale();
+  return useMemo(() => tabScreenOptions(tab), [tab, locale]);
 }
 
 /**

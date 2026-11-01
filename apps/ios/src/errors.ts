@@ -2,6 +2,7 @@ import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { formatDate, t } from "@mrstreamer/core/i18n";
 import { withoutAddresses } from "@mrstreamer/core/provider";
+import { t as failure } from "./i18n/failures.ts";
 
 /** The typed error behind a failed call, or an `unexpected` error for anything else. */
 export function appError(cause: unknown): AppError {
@@ -100,48 +101,54 @@ export function hostOf(server: string): string {
 
 /**
  * A provider failure in two short sentences, for Connect and the screens that load from the
- * provider. Status codes and the system's own words stay out; `describeError` keeps them.
+ * provider, in the interface language with the provider's host as it is. Status codes and the
+ * system's own words stay out; `describeError` keeps them.
  */
 export function failureOf(error: AppError, server: string): Failure {
   const host = hostOf(error.kind === "unreachable" ? error.server : server);
   switch (error.kind) {
     case "unreachable":
       return {
-        headline: `Couldn't reach ${host}`,
-        advice: "Check the address and that your iPhone is online.",
+        headline: failure("Couldn't reach {host}", { host }),
+        advice: failure("Check the address and that your iPhone is online."),
       };
     case "invalid-login":
       return {
-        headline: `${host} didn't accept this login`,
-        advice: "Check the username and password from your provider.",
+        headline: failure("{host} didn't accept this login", { host }),
+        advice: failure("Check the username and password from your provider."),
       };
     case "account-inactive":
       if (error.state === "expired") {
         return {
           headline: error.expiresAt
-            ? `This subscription expired on ${formatDate(Date.parse(error.expiresAt), "date")}`
-            : "This subscription has expired",
-          advice: `Renew it with ${host}, then try again.`,
+            ? failure("This subscription expired on {date}", {
+                date: formatDate(Date.parse(error.expiresAt), "date"),
+              })
+            : failure("This subscription has expired"),
+          advice: failure("Renew it with {host}, then try again.", { host }),
         };
       }
       return {
-        headline: `${host} reports this subscription as ${error.state}`,
-        advice: `Ask ${host} about it, then try again.`,
+        headline:
+          error.state === "banned"
+            ? failure("{host} reports this subscription as banned", { host })
+            : failure("{host} reports this subscription as disabled", { host }),
+        advice: failure("Ask {host} about it, then try again.", { host }),
       };
     case "provider-error":
       return {
-        headline: `${host} isn't answering`,
-        advice: "This usually passes. Try again in a minute.",
+        headline: failure("{host} isn't answering", { host }),
+        advice: failure("This usually passes. Try again in a minute."),
       };
     case "needs-secret":
       return {
-        headline: `Enter the password for ${host} again`,
-        advice: "Your iPhone no longer gives it back. Enter it in Settings.",
+        headline: failure("Enter the password for {host} again", { host }),
+        advice: failure("Your iPhone no longer gives it back. Enter it in Settings."),
       };
     case "keychain-refused":
       return {
-        headline: "Your iPhone wouldn't save the password",
-        advice: "Try again. If it keeps failing, restart the iPhone.",
+        headline: failure("Your iPhone wouldn't save the password"),
+        advice: failure("Try again. If it keeps failing, restart the iPhone."),
       };
     default:
       return { headline: describeError(error), advice: null };

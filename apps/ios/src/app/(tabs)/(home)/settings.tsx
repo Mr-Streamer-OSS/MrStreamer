@@ -2,12 +2,14 @@ import type { AnalyticsSettings } from "@mrstreamer/contracts/analytics";
 import { QUALITIES, type Quality } from "@mrstreamer/contracts/library";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { AccountStatus } from "@mrstreamer/contracts/subscription";
-import { formatDate, formatNumber } from "@mrstreamer/core/i18n";
+import { LANGUAGE_NAMES, LOCALES, type LanguageChoice } from "@mrstreamer/contracts/language";
+import { formatDate } from "@mrstreamer/core/i18n";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
 import Constants from "expo-constants";
-import { router } from "expo-router";
+import { router, useNavigation } from "expo-router";
 import { SymbolView } from "expo-symbols";
+import { useLayoutEffect } from "react";
 import {
   ActionSheetIOS,
   Alert,
@@ -36,13 +38,14 @@ import {
 import { DownloadsLink } from "../../../downloads-screen.tsx";
 import { failureOf } from "../../../errors.ts";
 import { tabHref, useTabs, type Tab } from "../../../header.tsx";
+import { t } from "../../../i18n/settings.ts";
+import { chooseLanguage, useInterfaceLanguage } from "../../../language.ts";
 import { licences } from "../../../licences.ts";
 import {
   getMediaPreferences,
   SUBTITLE_SIZES,
   updateMediaPreferences,
   useMediaPreferences,
-  type SubtitleSize,
 } from "../../../media-preferences.ts";
 import { openLink } from "../../../open-link.ts";
 import { playlistHref, useUnmapped } from "../../../playlist-groups.tsx";
@@ -61,12 +64,13 @@ import { ChannelLogo, colors, TextButton } from "../../../ui.tsx";
 const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
 
 /**
- * Settings as one list: the providers first, each a row with Add provider and Guides, the XMLTV
- * guides added apart from theirs, under them, then Downloads, a row with what they take that
- * opens them, Media policies, Subtitles, TMDB with the viewer's key and how it answers, Privacy
- * with its policy in the browser and Diagnostics, and About with Licences. TMDB's terms ask for
- * its logo and notice, as the desktop's Settings show them. It opens on whichever tab's top bar
- * asked for it, and what it opens goes on that tab too.
+ * Settings as one list: the interface language first, then the providers, each a row with Add
+ * provider and Guides, the XMLTV guides added apart from theirs, under them, then Downloads, a
+ * row with what they take that opens them, Media policies, Subtitles, TMDB with the viewer's key
+ * and how it answers, Privacy with its policy in the browser and Diagnostics, and About with
+ * Licences. TMDB's terms ask for its logo and notice, as the desktop's Settings show them. It
+ * opens on whichever tab's top bar asked for it, and what it opens goes on that tab too. All of
+ * it, its title too, shows in the interface language, and again at once in the one chosen here.
  */
 export default function Settings() {
   const roster = useRoster();
@@ -75,10 +79,30 @@ export default function Settings() {
   const subtitleKey = useSubtitleKey();
   const tmdb = useMetadataStanding();
   const tab = useTabs()?.tab ?? "(home)";
+  const language = useInterfaceLanguage();
+  const navigation = useNavigation();
+  useLayoutEffect(() => {
+    navigation.setOptions({ title: t("Settings") });
+  }, [navigation, language.locale]);
   if (roster.kind !== "ready") return null;
+  const systemLanguage = t("System default ({language})", {
+    language: mediaLanguageName(deviceLanguage),
+  });
+  const systemInterface = t("System default ({language})", {
+    language: LANGUAGE_NAMES[language.system],
+  });
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
-      <Section name="Providers" />
+      <Section name={t("General")} />
+      <Opens
+        label={t("Interface language")}
+        value={language.choice === "system" ? systemInterface : LANGUAGE_NAMES[language.locale]}
+        role="button"
+        onPress={() => pickLanguage(systemInterface)}
+        testID="settings-interface-language"
+      />
+
+      <Section name={t("Providers")} />
       {roster.members.map((member) => (
         <Provider key={member.entry.id} member={member} tab={tab} />
       ))}
@@ -89,28 +113,28 @@ export default function Settings() {
         testID="settings-add-provider"
       >
         <SymbolView name="plus" size={20} tintColor={colors.text} style={styles.mark} />
-        <Text style={styles.name}>Add provider</Text>
+        <Text style={styles.name}>{t("Add provider")}</Text>
       </Pressable>
       <Opens
-        label="Guides"
+        label={t("Guides")}
         role="button"
         // Home's at the root, as tabHref places Settings' own screens.
         onPress={() => router.push(tab === "(home)" ? "/guides" : `/${tab}/guides`)}
         testID="settings-guides"
       />
 
-      <Section name="Downloads" />
+      <Section name={t("Downloads")} />
       <DownloadsLink onPress={() => router.push(tabHref(tab, "downloads"))} />
 
-      <Section name="Media" />
+      <Section name={t("Media")} />
       <Opens
-        label="Titles language"
+        label={t("Titles language")}
         value={
           media.titleLanguage === null ? systemLanguage : mediaLanguageName(media.titleLanguage)
         }
         role="button"
         onPress={() =>
-          chooseMedia("titleLanguage", "Titles language", [
+          chooseMedia("titleLanguage", t("Titles language"), [
             { label: systemLanguage, value: null },
             ...TITLE_LANGUAGES.map(({ code, name }) => ({ label: name, value: code })),
           ])
@@ -118,17 +142,17 @@ export default function Settings() {
         testID="settings-title-language"
       />
       <Opens
-        label="Audio"
+        label={t("Audio")}
         value={
           media.audio.kind === "language"
             ? mediaLanguageName(media.audio.language)
-            : audioNames[media.audio.kind]
+            : t(audioNames[media.audio.kind])
         }
         role="button"
         onPress={() =>
-          chooseMedia("audio", "Audio", [
-            { label: audioNames["follow-title"], value: { kind: "follow-title" } },
-            { label: audioNames.original, value: { kind: "original" } },
+          chooseMedia("audio", t("Audio"), [
+            { label: t(audioNames["follow-title"]), value: { kind: "follow-title" } },
+            { label: t(audioNames.original), value: { kind: "original" } },
             ...TITLE_LANGUAGES.map(({ code, name }) => ({
               label: name,
               value: { kind: "language" as const, language: code },
@@ -138,17 +162,17 @@ export default function Settings() {
         testID="settings-audio"
       />
       <Opens
-        label="Subtitles"
+        label={t("Subtitles")}
         value={
           media.subtitles.kind === "language"
             ? mediaLanguageName(media.subtitles.language)
-            : subtitleNames[media.subtitles.kind]
+            : t(subtitleNames[media.subtitles.kind])
         }
         role="button"
         onPress={() =>
-          chooseMedia("subtitles", "Subtitles", [
-            { label: subtitleNames["forced-only"], value: { kind: "forced-only" } },
-            { label: subtitleNames.off, value: { kind: "off" } },
+          chooseMedia("subtitles", t("Subtitles"), [
+            { label: t(subtitleNames["forced-only"]), value: { kind: "forced-only" } },
+            { label: t(subtitleNames.off), value: { kind: "off" } },
             ...TITLE_LANGUAGES.map(({ code, name }) => ({
               label: name,
               value: { kind: "language" as const, language: code },
@@ -158,23 +182,23 @@ export default function Settings() {
         testID="settings-subtitles"
       />
       <Opens
-        label="Live quality"
+        label={t("Live quality")}
         value={qualityNames[media.liveQuality]}
         role="button"
         onPress={() =>
           chooseMedia(
             "liveQuality",
-            "Live quality",
+            t("Live quality"),
             QUALITIES.map((quality) => ({ label: qualityNames[quality], value: quality })),
           )
         }
         testID="settings-live-quality"
       />
 
-      <Section name="Subtitles" />
+      <Section name={t("Subtitles")} />
       <Opens
-        label="SubDL API key"
-        value={subtitleKey === null ? undefined : subtitleKey ? "Saved" : "Not set"}
+        label={t("SubDL API key")}
+        value={subtitleKey === null ? undefined : t(subtitleKey ? "Saved" : "Not set")}
         role="button"
         // Until the Keychain answers, whether there is one to replace isn't known.
         onPress={
@@ -183,33 +207,34 @@ export default function Settings() {
         testID="settings-subdl-key"
       />
       <Opens
-        label="Text size"
-        value={sizeNames[media.subtitleSize]}
+        label={t("Text size")}
+        value={t(sizeNames[media.subtitleSize])}
         role="button"
         onPress={() =>
           chooseMedia(
             "subtitleSize",
-            "Text size",
-            SUBTITLE_SIZES.map((size) => ({ label: sizeNames[size], value: size })),
+            t("Text size"),
+            SUBTITLE_SIZES.map((size) => ({ label: t(sizeNames[size]), value: size })),
           )
         }
         testID="settings-subtitle-size"
       />
       <Text style={styles.paragraph}>
-        Find online in Watch searches SubDL with your own key. Text size is for downloaded
-        subtitles.
+        {t(
+          "Find online in Watch searches SubDL with your own key. Text size is for downloaded subtitles.",
+        )}
       </Text>
 
-      <Section name="TMDB" />
+      <Section name={t("TMDB")} />
       <Tmdb tmdb={tmdb} />
 
-      <Section name="Privacy" />
+      <Section name={t("Privacy")} />
       <View style={styles.toggle}>
         <Text style={styles.label} importantForAccessibility="no" accessibilityElementsHidden>
-          Share basic usage statistics
+          {t("Share basic usage statistics")}
         </Text>
         <Switch
-          accessibilityLabel="Share basic usage statistics"
+          accessibilityLabel={t("Share basic usage statistics")}
           value={statistics.enabled}
           onValueChange={(enabled) => void setStatistics(enabled)}
           testID="settings-statistics"
@@ -217,33 +242,33 @@ export default function Settings() {
       </View>
       <Text style={styles.paragraph}>
         {[
-          "Counts app use, the screens you open, and whether playback works and for how long.",
-          "No viewing history, searches or provider details. Off until you choose to share.",
+          t("Counts app use, the screens you open, and whether playback works and for how long."),
+          t("No viewing history, searches or provider details. Off until you choose to share."),
           transportNote(statistics),
         ]
           .filter(Boolean)
           .join(" ")}
       </Text>
       <Opens
-        label="Privacy policy"
+        label={t("Privacy policy")}
         role="link"
         onPress={() => openLink(PRIVACY_POLICY)}
         testID="settings-privacy-policy"
       />
       <Opens
-        label="Diagnostics"
+        label={t("Diagnostics")}
         role="button"
         onPress={() => router.push(tab === "(home)" ? "/diagnostics" : `/${tab}/diagnostics`)}
         testID="settings-diagnostics"
       />
 
-      <Section name="About" />
+      <Section name={t("About")} />
       <Line
-        label="Version"
+        label={t("Version")}
         value={`${Constants.expoConfig?.version ?? "?"} (${Constants.platform?.ios?.buildNumber ?? "?"})`}
       />
       <Opens
-        label="Licences"
+        label={t("Licences")}
         value={String(licences.components.length)}
         role="button"
         onPress={() => router.push(tabHref(tab, "licences"))}
@@ -263,8 +288,10 @@ export default function Settings() {
           />
         </Pressable>
         <Text style={styles.noticeText}>
-          This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise
-          approved by TMDB. Where titles stream comes from JustWatch.
+          {t(
+            "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.",
+          )}{" "}
+          {t("Where titles stream comes from {justWatch}.", { justWatch: "JustWatch" })}
         </Text>
       </View>
       {__DEV__ ? <Development /> : null}
@@ -276,15 +303,40 @@ export default function Settings() {
 const mediaLanguageName = (code: string) =>
   TITLE_LANGUAGES.find((language) => language.code === code)?.name ?? languageName(code) ?? code;
 const deviceLanguage = new Intl.Locale(Intl.DateTimeFormat().resolvedOptions().locale).language;
-const systemLanguage = `System default (${mediaLanguageName(deviceLanguage)})`;
-const audioNames = { "follow-title": "Follow title language", original: "Original language" };
-const subtitleNames = { "forced-only": "Only when forced", off: "Off" };
+const audioNames = {
+  "follow-title": "Follow title language",
+  original: "Original language",
+} as const;
+const subtitleNames = { "forced-only": "Only when forced", off: "Off" } as const;
 const qualityNames: Record<Quality, string> = { uhd: "4K", fhd: "Full HD", hd: "HD", sd: "SD" };
-const sizeNames: Record<SubtitleSize, string> = {
-  small: "Small",
-  medium: "Medium",
-  large: "Large",
-};
+const sizeNames = { small: "Small", medium: "Medium", large: "Large" } as const;
+
+/**
+ * Offers System default, labelled `system`, and each interface language by its own name, as a
+ * system sheet. A pick shows at once; one that couldn't be saved changes nothing and says so.
+ */
+function pickLanguage(system: string) {
+  const choices: readonly { readonly label: string; readonly value: LanguageChoice }[] = [
+    { label: system, value: "system" },
+    ...LOCALES.map((locale) => ({ label: LANGUAGE_NAMES[locale], value: locale })),
+  ];
+  ActionSheetIOS.showActionSheetWithOptions(
+    {
+      title: t("Interface language"),
+      options: [...choices.map(({ label }) => label), t("Cancel")],
+      cancelButtonIndex: choices.length,
+    },
+    (index) => {
+      const choice = choices[index];
+      if (choice && !chooseLanguage(choice.value)) {
+        Alert.alert(
+          t("Couldn't save the language"),
+          t("Your previous choice is still saved. Try again."),
+        );
+      }
+    },
+  );
+}
 
 /** A system sheet commits only a picked value; Cancel has no action. */
 function chooseMedia<K extends keyof ReturnType<typeof getMediaPreferences>>(
@@ -298,15 +350,15 @@ function chooseMedia<K extends keyof ReturnType<typeof getMediaPreferences>>(
   ActionSheetIOS.showActionSheetWithOptions(
     {
       title,
-      options: [...choices.map(({ label }) => label), "Cancel"],
+      options: [...choices.map(({ label }) => label), t("Cancel")],
       cancelButtonIndex: choices.length,
     },
     (index) => {
       const choice = choices[index];
       if (choice && !updateMediaPreferences(field, choice.value)) {
         Alert.alert(
-          "Couldn't save media preference",
-          "Your previous choice is still saved. Try again.",
+          t("Couldn't save media preference"),
+          t("Your previous choice is still saved. Try again."),
         );
       }
     },
@@ -316,16 +368,16 @@ function chooseMedia<K extends keyof ReturnType<typeof getMediaPreferences>>(
 /** Asks for a SubDL key, the one Watch's Find online searches with, never showing one saved. */
 function enterSubtitleKey() {
   Alert.prompt(
-    "SubDL API key",
-    "From your account on subdl.com.",
+    t("SubDL API key"),
+    t("From your account on subdl.com."),
     [
-      { text: "Cancel", style: "cancel" },
+      { text: t("Cancel"), style: "cancel" },
       {
-        text: "Save",
+        text: t("Save"),
         onPress: (typed = "") => {
           if (!typed.trim()) return;
           saveSubtitleKey(typed).catch(() =>
-            Alert.alert("Couldn't save the key", "The Keychain refused it. Try again."),
+            Alert.alert(t("Couldn't save the key"), t("The Keychain refused it. Try again.")),
           );
         },
       },
@@ -338,8 +390,8 @@ function enterSubtitleKey() {
 function manageSubtitleKey() {
   ActionSheetIOS.showActionSheetWithOptions(
     {
-      title: "SubDL API key",
-      options: ["Replace", "Remove", "Cancel"],
+      title: t("SubDL API key"),
+      options: [t("Replace"), t("Remove"), t("Cancel")],
       destructiveButtonIndex: 1,
       cancelButtonIndex: 2,
     },
@@ -347,7 +399,7 @@ function manageSubtitleKey() {
       if (index === 0) enterSubtitleKey();
       else if (index === 1) {
         removeSubtitleKey().catch(() =>
-          Alert.alert("Couldn't remove the key", "It's still saved. Try again."),
+          Alert.alert(t("Couldn't remove the key"), t("It's still saved. Try again.")),
         );
       }
     },
@@ -364,7 +416,7 @@ function Provider({ member, tab }: { member: Member; tab: Tab }) {
   const unmapped = useUnmapped(member);
   const line = [
     standing(member),
-    unmapped ? `${unmapped} ${unmapped === 1 ? "group needs" : "groups need"} mapping` : null,
+    unmapped ? t("{count} groups need mapping", { count: unmapped }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -373,11 +425,11 @@ function Provider({ member, tab }: { member: Member; tab: Tab }) {
     entry.kind === "m3u"
       ? [
           {
-            label: "Playlist groups",
+            label: t("Playlist groups"),
             run: () => router.push({ pathname: playlistHref(tab), params: { id: entry.id } }),
           },
           {
-            label: "Reload playlist",
+            label: t("Reload playlist"),
             run: () => {
               reloadChannels(entry.id);
               reloadTitles(entry.id);
@@ -385,37 +437,37 @@ function Provider({ member, tab }: { member: Member; tab: Tab }) {
           },
         ]
       : [
-          { label: "Reload channels", run: () => reloadChannels(entry.id) },
-          { label: "Reload movies and series", run: () => reloadTitles(entry.id) },
+          { label: t("Reload channels"), run: () => reloadChannels(entry.id) },
+          { label: t("Reload movies and series"), run: () => reloadTitles(entry.id) },
         ];
   const open = () => {
     const actions =
       entry.kind === "demo"
         ? [
-            { label: "Reload channels", run: () => reloadChannels(entry.id) },
-            { label: "Reload movies and series", run: () => reloadTitles(entry.id) },
-            { label: "Reset demo data", run: () => confirmDemo("reset") },
-            { label: "Exit demo", run: () => confirmDemo("exit") },
+            { label: t("Reload channels"), run: () => reloadChannels(entry.id) },
+            { label: t("Reload movies and series"), run: () => reloadTitles(entry.id) },
+            { label: t("Reset demo data"), run: () => confirmDemo("reset") },
+            { label: t("Exit demo"), run: () => confirmDemo("exit") },
           ]
         : [
             ...(member.needsSecret
               ? [
                   {
-                    label: entry.kind === "m3u" ? "Enter playlist link" : "Enter password",
+                    label: t(entry.kind === "m3u" ? "Enter playlist link" : "Enter password"),
                     run: edit,
                   },
                 ]
               : failed(member)
-                ? [{ label: "Retry", run: () => retry(entry.id) }]
+                ? [{ label: t("Retry"), run: () => retry(entry.id) }]
                 : []),
             ...(member.needsSecret ? [] : reloads),
-            { label: "Edit", run: edit },
-            { label: "Remove", run: () => confirmRemove(member) },
+            { label: t("Edit"), run: edit },
+            { label: t("Remove"), run: () => confirmRemove(member) },
           ];
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: label,
-        options: [...actions.map((action) => action.label), "Cancel"],
+        options: [...actions.map((action) => action.label), t("Cancel")],
         destructiveButtonIndex: actions.length - 1,
         cancelButtonIndex: actions.length,
       },
@@ -453,38 +505,44 @@ const failed = (member: Member) =>
 /** How a provider stands, in a line: its account, or what needs the viewer, or what loads. */
 function standing({ entry, account, needsSecret, live, titles }: Member): string {
   if (needsSecret) {
-    return entry.kind === "m3u" ? "Enter the playlist link again" : "Enter the password again";
+    return t(entry.kind === "m3u" ? "Enter the playlist link again" : "Enter the password again");
   }
   if (live.kind === "failed") return failureOf(live.error, entry.server).headline;
   if (titles.kind === "failed") {
-    return `Movies and series: ${failureOf(titles.error, entry.server).headline}`;
+    return t("Movies and series: {failure}", {
+      failure: failureOf(titles.error, entry.server).headline,
+    });
   }
-  if (entry.kind === "demo") return "Sample content";
+  if (entry.kind === "demo") return t("Sample content");
   const loading =
-    live.kind === "loading" ? "Loading channels" : titles.kind === "loading" ? "Loading" : null;
+    live.kind === "loading"
+      ? t("Loading channels")
+      : titles.kind === "loading"
+        ? t("Loading")
+        : null;
   // A playlist's provider says nothing of its account, only whether it answered.
   const state =
     entry.kind === "m3u" && !(account && "kind" in account)
-      ? "M3U playlist"
+      ? t("M3U playlist")
       : accountLine(account, entry.server);
   return [state, loading].filter(Boolean).join(" · ");
 }
 
 /** Both demo actions are ephemeral and name the data removed before the viewer confirms. */
 function confirmDemo(action: "reset" | "exit") {
-  const label = action === "reset" ? "Reset demo data" : "Exit demo";
+  const label = t(action === "reset" ? "Reset demo data" : "Exit demo");
   const report = (result: DemoErase | DemoStart) => {
     if (result.kind === "incomplete")
       Alert.alert(
-        "Demo removal incomplete",
-        "Some demo data couldn't be removed. Reopen the app to retry cleanup.",
+        t("Demo removal incomplete"),
+        t("Some demo data couldn't be removed. Reopen the app to retry cleanup."),
       );
     else if (result.kind === "refused")
-      Alert.alert("Demo isn't available", "The operation couldn't continue.");
+      Alert.alert(t("Demo isn't available"), t("The operation couldn't continue."));
   };
   Alert.alert(
-    `${label}?`,
-    "Demo downloads, favourites, watchlist, history and progress will be removed.",
+    t(action === "reset" ? "Reset demo data?" : "Exit demo?"),
+    t("Demo downloads, favourites, watchlist, history and progress will be removed."),
     [
       {
         text: label,
@@ -494,11 +552,14 @@ function confirmDemo(action: "reset" | "exit") {
           void operation
             .then(report)
             .catch(() =>
-              Alert.alert("Demo isn't available", "The operation couldn't continue. Try again."),
+              Alert.alert(
+                t("Demo isn't available"),
+                t("The operation couldn't continue. Try again."),
+              ),
             );
         },
       },
-      { text: "Cancel", style: "cancel" },
+      { text: t("Cancel"), style: "cancel" },
     ],
   );
 }
@@ -513,34 +574,36 @@ function confirmRemove({ entry, label }: Member) {
     void remove(entry.id, { keepHistory }).catch(() => {
       if (members().some((member) => member.entry.id === entry.id)) {
         Alert.alert(
-          `Couldn't remove ${label}`,
-          "It's still saved and nothing was deleted. Try again.",
+          t("Couldn't remove {name}", { name: label }),
+          t("It's still saved and nothing was deleted. Try again."),
         );
       } else if (!keepHistory) {
         Alert.alert(
-          `${label} is removed`,
-          "Its history couldn't all be deleted yet. The app tries again when it next opens.",
+          t("{name} is removed", { name: label }),
+          t("Its history couldn't all be deleted yet. The app tries again when it next opens."),
         );
       }
     });
   Alert.alert(
-    `Remove ${label}?`,
-    "What plays from it stops. Its favourites, watchlist, history and progress stay for when you add it again, unless you delete them too.",
+    t("Remove {name}?", { name: label }),
+    t(
+      "What plays from it stops. Its favourites, watchlist, history and progress stay for when you add it again, unless you delete them too.",
+    ),
     [
-      { text: "Remove", style: "destructive", onPress: removing(true) },
-      { text: "Remove and delete history", style: "destructive", onPress: removing(false) },
-      { text: "Cancel", style: "cancel" },
+      { text: t("Remove"), style: "destructive", onPress: removing(true) },
+      { text: t("Remove and delete history"), style: "destructive", onPress: removing(false) },
+      { text: t("Cancel"), style: "cancel" },
     ],
   );
 }
 
 /** Where statistics go in this build, when that isn't PostHog. */
 function transportNote({ enabled, transport }: AnalyticsSettings): string | null {
-  if (transport === "unavailable") return "They can't be saved on this iPhone right now.";
+  if (transport === "unavailable") return t("They can't be saved on this iPhone right now.");
   if (!enabled || transport === "production") return null;
   return transport === "local"
-    ? "This development build sends them to a test endpoint on this computer only."
-    : "This build sends nothing.";
+    ? t("This development build sends them to a test endpoint on this computer only.")
+    : t("This build sends nothing.");
 }
 
 /** Whose key TMDB is asked with, as the key row says it. */
@@ -551,13 +614,14 @@ const tmdbKeyNames = { yours: "Saved", app: "This build's" } as const;
  * when it stopped, and Try again while it isn't answering. A refused key waits for another.
  */
 function Tmdb({ tmdb }: { tmdb: MetadataStanding }) {
-  const count =
-    "known" in tmdb ? `${formatNumber(tmdb.known)} of ${formatNumber(tmdb.wanted)}` : "";
+  const count = "known" in tmdb ? t("{known} of {wanted}", tmdb) : "";
   return (
     <>
       <Opens
-        label="TMDB API key"
-        value={tmdb.kind === "reading" ? undefined : "key" in tmdb ? tmdbKeyNames[tmdb.key] : "Add"}
+        label={t("TMDB API key")}
+        value={
+          tmdb.kind === "reading" ? undefined : t("key" in tmdb ? tmdbKeyNames[tmdb.key] : "Add")
+        }
         role="button"
         // Until the Keychain answers, whether there is one to replace isn't known.
         onPress={
@@ -570,32 +634,32 @@ function Tmdb({ tmdb }: { tmdb: MetadataStanding }) {
         testID="settings-tmdb-key"
       />
       <Line
-        label="Status"
+        label={t("Status")}
         value={tmdbStatus(tmdb)}
         alert={tmdb.kind === "refused" || tmdb.kind === "unavailable"}
         testID="settings-tmdb-status"
       />
       {tmdb.kind === "refused" || tmdb.kind === "unavailable" ? (
         <Line
-          label="Titles"
-          value={tmdb.kind === "refused" ? `${count} saved` : count}
+          label={t("Titles")}
+          value={tmdb.kind === "refused" ? t("{titles} saved", { titles: count }) : count}
           testID="settings-tmdb-titles"
         />
       ) : null}
       {tmdb.kind === "unavailable" ? (
         <View style={styles.retry}>
           <TextButton
-            label="Try again"
-            accessibilityLabel="Ask TMDB again"
+            label={t("Try again")}
+            accessibilityLabel={t("Ask TMDB again")}
             onPress={retryMetadata}
             testID="settings-tmdb-retry"
           />
         </View>
       ) : null}
       <Text style={styles.paragraph}>
-        {
-          "Facts and pictures for movies and series. Your key replaces this build's and stays in the Keychain. Titles TMDB already gave keep their saved facts."
-        }
+        {t(
+          "Facts and pictures for movies and series. Your key replaces this build's and stays in the Keychain. Titles TMDB already gave keep their saved facts.",
+        )}
       </Text>
     </>
   );
@@ -604,38 +668,38 @@ function Tmdb({ tmdb }: { tmdb: MetadataStanding }) {
 function tmdbStatus(tmdb: MetadataStanding): string {
   switch (tmdb.kind) {
     case "reading":
-      return "Checking";
+      return t("Checking");
     case "no-key":
-      return "No key, provider facts only";
+      return t("No key, provider facts only");
     case "waiting":
-      return "Waiting for the lists";
+      return t("Waiting for the lists");
     case "unlinked":
-      return "No title has a TMDB id";
+      return t("No title has a TMDB id");
     case "refused":
-      return "Refused the key";
+      return t("Refused the key");
     case "unavailable":
-      return "Not answering";
+      return t("Not answering");
     case "fetching":
     case "answered":
       return tmdb.known < tmdb.wanted
-        ? `${formatNumber(tmdb.known)} of ${formatNumber(tmdb.wanted)} titles`
-        : `${formatNumber(tmdb.known)} titles`;
+        ? t("{known} of {wanted} titles", tmdb)
+        : t("{count} titles", { count: tmdb.known });
   }
 }
 
 /** Asks for the viewer's own TMDB key, which TMDB is then asked with, never showing one saved. */
 function enterTmdbKey() {
   Alert.prompt(
-    "TMDB API key",
-    "From your account settings on themoviedb.org.",
+    t("TMDB API key"),
+    t("From your account settings on themoviedb.org."),
     [
-      { text: "Cancel", style: "cancel" },
+      { text: t("Cancel"), style: "cancel" },
       {
-        text: "Save",
+        text: t("Save"),
         onPress: (typed = "") => {
           if (!typed.trim()) return;
           saveTmdbKey(typed).catch(() =>
-            Alert.alert("Couldn't save the key", "The Keychain refused it. Try again."),
+            Alert.alert(t("Couldn't save the key"), t("The Keychain refused it. Try again.")),
           );
         },
       },
@@ -648,8 +712,8 @@ function enterTmdbKey() {
 function manageTmdbKey() {
   ActionSheetIOS.showActionSheetWithOptions(
     {
-      title: "TMDB API key",
-      options: ["Replace", "Remove", "Cancel"],
+      title: t("TMDB API key"),
+      options: [t("Replace"), t("Remove"), t("Cancel")],
       destructiveButtonIndex: 1,
       cancelButtonIndex: 2,
     },
@@ -657,14 +721,14 @@ function manageTmdbKey() {
       if (index === 0) enterTmdbKey();
       else if (index === 1) {
         removeTmdbKey().catch(() =>
-          Alert.alert("Couldn't remove the key", "It's still saved. Try again."),
+          Alert.alert(t("Couldn't remove the key"), t("It's still saved. Try again.")),
         );
       }
     },
   );
 }
 
-/** What development builds also show. Release builds leave it out. */
+/** What development builds also show, in English only. Release builds leave it out. */
 function Development() {
   const timings = useTitleTimings();
   return (
@@ -681,22 +745,33 @@ function Development() {
   );
 }
 
+const stateNames = {
+  active: "Active",
+  expired: "Expired",
+  banned: "Banned",
+  disabled: "Disabled",
+  unknown: "Unknown",
+} as const;
+
 /** The account as one plain line: "Active until 12 Mar 2027, 1 of 2 streams". */
 function accountLine(account: AccountStatus | AppError | null, server: string): string {
-  if (!account) return "Checking";
+  if (!account) return t("Checking");
   if ("kind" in account) return failureOf(account, server).headline;
-  const state = account.state === "active" ? "Active" : capitalised(account.state);
+  const state = t(stateNames[account.state]);
   const until = account.expiresAt
-    ? ` until ${formatDate(Date.parse(account.expiresAt), "date")}`
-    : "";
-  const streams =
-    account.maxConnections !== null
-      ? `, ${account.activeConnections ?? 0} of ${account.maxConnections} streams`
-      : "";
-  return `${state}${until}${streams}`;
+    ? t("{state} until {date}", {
+        state,
+        date: formatDate(Date.parse(account.expiresAt), "date"),
+      })
+    : state;
+  return account.maxConnections !== null
+    ? t("{account}, {active} of {max} streams", {
+        account: until,
+        active: account.activeConnections ?? 0,
+        max: account.maxConnections,
+      })
+    : until;
 }
-
-const capitalised = (word: string) => word.charAt(0).toUpperCase() + word.slice(1);
 
 function Section({ name }: { name: string }) {
   return (
@@ -788,11 +863,13 @@ const styles = StyleSheet.create({
   failed: { color: "#FF453A" },
   name: { color: colors.text, fontSize: 17, fontWeight: "600" },
   plain: { color: colors.text, fontSize: 15 },
+  // Keep wrapped labels clear of the row's separators.
   line: {
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 16,
     minHeight: 44,
+    paddingVertical: 10,
     alignItems: "center",
     marginHorizontal: 16,
     borderBottomColor: colors.line,
@@ -804,11 +881,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 16,
     minHeight: 44,
+    paddingVertical: 10,
     marginHorizontal: 16,
   },
   label: { color: colors.text, fontSize: 17, flexShrink: 1 },
   value: { color: colors.dim, fontSize: 17, flexShrink: 1, textAlign: "right" },
-  opens: { flexDirection: "row", alignItems: "center", gap: 8 },
+  // Shrinks with the label, so a long value at large text wraps rather than crushing it.
+  opens: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
   paragraph: {
     color: colors.dim,
     fontSize: 13,

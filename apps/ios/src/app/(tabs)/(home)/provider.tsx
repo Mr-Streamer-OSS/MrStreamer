@@ -2,6 +2,8 @@ import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { useLayoutEffect } from "react";
 import { ScrollView, StyleSheet, Text } from "react-native";
 import { useRoster } from "../../../account.ts";
+import { useLocale } from "../../../i18n/catalogue.ts";
+import { t } from "../../../i18n/settings.ts";
 import { ProviderForm } from "../../../provider-form.tsx";
 import { colors, Message } from "../../../ui.tsx";
 
@@ -12,13 +14,14 @@ import { colors, Message } from "../../../ui.tsx";
 export default function Provider() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const navigation = useNavigation();
+  const locale = useLocale();
   const roster = useRoster();
   const member =
     id && roster.kind === "ready" ? roster.members.find((each) => each.entry.id === id) : null;
   useLayoutEffect(() => {
-    navigation.setOptions({ title: member ? member.label : "Add provider" });
-  }, [navigation, member]);
-  if (id && !member) return <Message text="This provider was removed." />;
+    navigation.setOptions({ title: member ? member.label : t("Add provider") });
+  }, [navigation, member, locale]);
+  if (id && !member) return <Message text={t("This provider was removed.")} />;
   return (
     <ScrollView
       style={styles.screen}
@@ -32,10 +35,10 @@ export default function Provider() {
         footnote={(kind) => (
           <Text style={styles.footnote}>
             {kind === "xtream"
-              ? "The password stays in this iPhone's Keychain."
+              ? t("The password stays in this iPhone's Keychain.")
               : member
-                ? "A new link replaces the saved one in this iPhone's Keychain."
-                : "The playlist link stays in this iPhone's Keychain."}
+                ? t("A new link replaces the saved one in this iPhone's Keychain.")
+                : t("The playlist link stays in this iPhone's Keychain.")}
           </Text>
         )}
       />

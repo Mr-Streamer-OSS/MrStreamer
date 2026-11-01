@@ -547,6 +547,19 @@ stands; pressing one offers Retry, its reloads, Edit and Remove as a system shee
 whether to delete its history too. A playlist's sheet offers Playlist groups and one Reload
 playlist instead of the two reloads.
 
+Settings > General > Interface language offers System default and the desktop's languages (English,
+Nederlands, Français, Deutsch, Español) as a system sheet. `src/language.ts` saves the choice in
+`language.json` and resolves it with core's `resolveLanguage` against the iPhone's preferred
+languages (`AppleLanguages`): System default is the first the app speaks, else English. The root
+layout applies it before any screen loads; a new pick shows at once, without a relaunch, in the tab
+bar and every tab's top bar too (`useTabScreenOptions`). The app's own text is in `src/i18n/`, one
+catalogue per feature area keyed by its English text (`onboarding.ts`, `navigation.ts`,
+`settings.ts`, and `failures.ts` for the provider failures `errors.ts` puts, so far), and an area
+compiles only with every language's text. Screens outside those areas still show English until their
+area gets its own catalogue; provider, channel, programme and title names are never translated.
+iOS's own controls, such as text menus, follow the localizations the app bundle declares, which this
+leaves as they were.
+
 Downloads' header entry and Watch's existing button show the queue's actual percentage, received
 bytes when its size is unknown, provider wait, queue count or failure. Search offers the same
 entry while that status exists, closing Search onto Downloads on its original tab and keeping

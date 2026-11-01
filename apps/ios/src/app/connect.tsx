@@ -4,6 +4,7 @@ import { Image, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DownloadsLink } from "../downloads-screen.tsx";
 import { useDownloads } from "../downloads.ts";
+import { t } from "../i18n/onboarding.ts";
 import { openLink } from "../open-link.ts";
 import { ProviderForm } from "../provider-form.tsx";
 import { requestStatisticsChoice } from "../statistics-consent.ts";
@@ -13,7 +14,8 @@ import { colors, TextButton } from "../ui.tsx";
  * Welcome, an optional statistics choice, then the ordinary cancellable provider form.
  * Welcome lays out inside the safe area, so its stretched content fits the screen exactly and
  * only scrolls when it truly overflows (large text, downloads). The form keeps native automatic
- * and keyboard insets.
+ * and keyboard insets. Its text is in the interface language, which can't change while it shows:
+ * Settings needs a provider.
  */
 export default function Connect() {
   const { fontScale } = useWindowDimensions();
@@ -31,13 +33,13 @@ export default function Connect() {
       >
         {form ? (
           <>
-            <TextButton label="Back" onPress={() => setForm(false)} />
+            <TextButton label={t("Back")} onPress={() => setForm(false)} />
             <View style={styles.heading}>
               <Text style={styles.title} accessibilityRole="header">
-                Add your provider
+                {t("Add your provider")}
               </Text>
               <Text style={styles.lead}>
-                Use the login or playlist link from your IPTV provider.
+                {t("Use the login or playlist link from your IPTV provider.")}
               </Text>
             </View>
             <ProviderForm
@@ -45,8 +47,8 @@ export default function Connect() {
               footnote={(kind) => (
                 <Text style={styles.footnote}>
                   {kind === "m3u"
-                    ? "Your playlist link goes only to your provider."
-                    : "Your login goes only to your provider."}
+                    ? t("Your playlist link goes only to your provider.")
+                    : t("Your login goes only to your provider.")}
                 </Text>
               )}
             />
@@ -62,22 +64,22 @@ export default function Connect() {
             </View>
             <View style={styles.welcome}>
               <Text style={styles.welcomeTitle} accessibilityRole="header">
-                {"Your TV.\nYour provider."}
+                {t("Your TV.\nYour provider.")}
               </Text>
               <Text style={styles.lead}>
-                {"Live TV, movies and series.\nFrom your own provider."}
+                {t("Live TV, movies and series.\nFrom your own provider.")}
               </Text>
             </View>
             <View style={styles.space} />
             <TextButton
-              label="Add provider"
+              label={t("Add provider")}
               primary
               onPress={() => requestStatisticsChoice(() => setForm(true))}
             />
           </>
         )}
         <TextButton
-          label="Privacy policy"
+          label={t("Privacy policy")}
           onPress={() => openLink("https://mrstreamer.app/privacy")}
         />
         {downloads.items.length > 0 ? (

@@ -1,5 +1,5 @@
 import { Stack } from "expo-router";
-import { tabScreenOptions } from "../../../header.tsx";
+import { useTabScreenOptions } from "../../../header.tsx";
 
 /**
  * Home, with the shared top bar (`header.tsx`): Downloads and Settings open on its stack, and
@@ -9,7 +9,7 @@ import { tabScreenOptions } from "../../../header.tsx";
  */
 export default function HomeLayout() {
   return (
-    <Stack screenOptions={tabScreenOptions("(home)")}>
+    <Stack screenOptions={useTabScreenOptions("(home)")}>
       <Stack.Screen name="index" options={{ title: "", headerTransparent: true }} />
       <Stack.Screen name="watchlist" options={{ title: "Watchlist" }} />
       <Stack.Screen name="favourites" options={{ title: "Favourites" }} />

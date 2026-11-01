@@ -1,5 +1,6 @@
 import { Stack } from "expo-router";
-import { tabScreenOptions } from "../../../header.tsx";
+import { useTabScreenOptions } from "../../../header.tsx";
+import { t } from "../../../i18n/navigation.ts";
 
 /**
  * Movies: its tabs of shelves and grids, with collections and details pushed over them, and the
@@ -8,8 +9,8 @@ import { tabScreenOptions } from "../../../header.tsx";
  */
 export default function FilmsLayout() {
   return (
-    <Stack screenOptions={tabScreenOptions("films")}>
-      <Stack.Screen name="index" options={{ title: "Movies", headerLargeTitle: true }} />
+    <Stack screenOptions={useTabScreenOptions("films")}>
+      <Stack.Screen name="index" options={{ title: t("Movies"), headerLargeTitle: true }} />
       <Stack.Screen name="collection/[id]" options={{ title: "" }} />
       <Stack.Screen name="title/[id]" options={{ title: "", headerTransparent: true }} />
       <Stack.Screen name="downloads" options={{ title: "Downloads" }} />
