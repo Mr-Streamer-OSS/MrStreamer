@@ -161,7 +161,7 @@ Closing the window never asks. While a recording's time goes on or a schedule is
 
 Quitting while something records, with ⌘Q, Ctrl+Q or the tray, asks first. **Quit while recording?** offers **Quit**, which stops the recordings and keeps what they recorded, and **Keep recording**. A schedule still to come doesn't record while Mr. Streamer is closed. A shutdown or logout doesn't ask: recordings whose time remains go on when Mr. Streamer starts again.
 
-An update that is ready while something records reads **Update after recording** and installs once nothing records. **Restart now** stops the recordings first and keeps what they recorded.
+A ready update offers **Update after recording** in Settings: choose it to install once nothing records. In the top-bar update panel, **OK** makes the same choice. **Restart now** stops the recordings first and keeps what they recorded.
 
 ### Where recordings are kept
 

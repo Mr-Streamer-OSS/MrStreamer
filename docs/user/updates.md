@@ -68,6 +68,8 @@ To uninstall, run `sudo pacman -R mrstreamer-bin`. This removes the app and keep
 
 ## Installed as a Snap
 
+Recording behavior in this section requires 0.0.23. Stable 0.0.22 and earlier cannot record live TV.
+
 The release workflow attempts to build and test a Snap for each stable release and dry run. A failed Snap job does not block a stable release, so its Snap artifact may be absent. The Snap is not in the Snap Store yet: the Store still has to allow the connection Chromium's sandbox needs. Until then, a Snap build installed by hand (`sudo snap install --dangerous`) never updates on its own: install the next build the same way, and connect it as the [Snap runbook](../../packaging/snap/README.md#verify-an-artifact) says.
 
 Once it's in the Store, snapd updates the Snap, so Mr. Streamer never looks for updates, downloads them or offers a channel. Settings > **Updates** shows your version and how to update it now: quit Mr. Streamer, then run `sudo snap refresh mr-streamer`. Snapd holds its automatic updates back while Mr. Streamer is open, for up to 14 days, then updates it anyway.

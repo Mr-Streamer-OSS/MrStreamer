@@ -930,10 +930,11 @@ provenance, catch-up, the tracks and title transfers in the suite, and needs ffm
 
 Agents open the simulator with T3's `device_open` and launch, relaunch and drive the app, with
 taps, typing, screenshots and recordings, through the AgentDevice command it returns, never through
-ssh or `simctl` (see the `mac-mini` skill). The commands below serve Metro and the fixtures, build
-and install; `expo run:ios` also launches the app as it installs it. In a session with T3's device
-tools, relaunch the app through the AgentDevice command before driving it, and use the last line
-only in a session without them. A simulator run proves what that exact build did on that
+ssh or `simctl` (see the `mac-mini` skill). The fixture, Metro and tunnel commands below can run
+in T3 sessions. Build and install the native app using the Xcode build/install-only steps in that
+skill, then launch it with the bound AgentDevice command. Do not run the `expo run:ios` or
+`simctl launch` lines below in T3: both launch outside its managed device session. Those two
+lines are for sessions without T3's device tools. A simulator run proves what that exact build did on that
 simulator. Physical iPhones, iPads and Duos, background transfers iOS defers, notifications iOS
 delivers and receivers are separate results: what runs goes on the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148), and the [owner's card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197485) the checks only the owner's hardware can make.
 
