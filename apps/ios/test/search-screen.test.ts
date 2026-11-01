@@ -1499,7 +1499,7 @@ describe("Programmes in Search", () => {
   });
 
   it("dates a programme on another day, and says when the guide could not be searched", async () => {
-    const tomorrow = Date.now() + 86_400_000;
+    const tomorrow = localDay(Date.now(), 1).from + 12 * 60 * 60_000;
     scenario.search = async (text) => {
       if (text === "film") throw new Error("unavailable");
       return [
@@ -1585,28 +1585,81 @@ describe("Programmes in Search", () => {
     expect(text()).toContain("News at Seven");
   });
 
-  it("keeps an open detail reading as the guide reads again", async () => {
-    const news = {
-      start: at,
-      stop: at + 1_800_000,
-      title: "News at Six",
-      description: "Headlines",
-    };
-    const answers = [[programme("News at Six", "six")], [programme("News at Six", "six-again")]];
-    scenario.search = async () => answers.shift() ?? [];
-    scenario.details.set("six", news);
-    await open();
-    await type("news");
-    await press(`search-programme-b:7-${at}`);
-    // Its first token withdrawn, as on return from the background.
-    scenario.details.delete("six");
-    scenario.details.set("six-again", news);
-    reread();
-    await settled();
-    expect(container.querySelector('[data-testid="guide-programme"]')?.textContent).toContain(
-      "Headlines",
-    );
-  });
+  it.each(["renewed token", "outside the search results"] as const)(
+    "keeps an open detail reading as the guide reads again with %s",
+    async (change) => {
+      const news = {
+        start: at,
+        stop: at + 1_800_000,
+        title: "News at Six",
+        description: "Headlines",
+      };
+      const answers = [
+        [programme("News at Six", "six")],
+        change === "renewed token" ? [programme("News at Six", "six-again")] : [],
+      ];
+      scenario.search = async () => answers.shift() ?? [];
+      scenario.details.set("six", news);
+      await open();
+      await type("news");
+      await press(`search-programme-b:7-${at}`);
+      if (change === "renewed token") {
+        // Its first token withdrawn, as on return from the background.
+        scenario.details.delete("six");
+        scenario.details.set("six-again", news);
+      }
+      reread();
+      await settled();
+      expect(container.querySelector('[data-testid="guide-programme"]')?.textContent).toContain(
+        "Headlines",
+      );
+    },
+  );
+
+  it.each(["provider replacement", "new channel catalogue"] as const)(
+    "closes an open programme detail after %s, even when the query stays",
+    async (change) => {
+      scenario.search = async () => [programme("News at Six", "six")];
+      scenario.details.set("six", {
+        start: at,
+        stop: at + 1_800_000,
+        title: "News at Six",
+        description: "Old headlines",
+      });
+      await open();
+      await type("news");
+      await press(`search-programme-b:7-${at}`);
+      expect(text()).toContain("Old headlines");
+
+      const next = held();
+      scenario.search = () => next.answer;
+      try {
+        if (change === "provider replacement") {
+          scenario.sources.set("b", 2);
+          React.act(() => scenario.signedIn.forEach((listener) => listener()));
+        } else {
+          const channels = guideChannels.filter((channel) => channel.key === "b:7");
+          scenario.catalogue = {
+            kind: "ready",
+            library: {
+              ...twoProviders,
+              channels,
+              byKey: new Map(channels.map((channel) => [channel.key, channel])),
+            },
+            failing: [],
+          };
+          React.act(render);
+        }
+        expect(container.querySelector('[data-testid="guide-programme"]')).toBeNull();
+      } finally {
+        await React.act(async () => next.release([programme("News at Seven", "seven")]));
+      }
+      await settled();
+      expect(container.querySelector('[data-testid="guide-programme"]')).toBeNull();
+      expect(text()).toContain("News at Seven");
+      expect(field().value).toBe("news");
+    },
+  );
 
   it("closes Search under Watch when a programme's detail plays its channel", async () => {
     scenario.search = async () => [programme("News at Six", "six")];

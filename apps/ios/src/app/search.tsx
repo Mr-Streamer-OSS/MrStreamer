@@ -381,12 +381,16 @@ export default function Search() {
     () => [movies.found, series.found, channels.found, programmes].filter((found) => found != null),
     [movies.found, series.found, channels.found, programmes],
   );
-  // The programme whose detail shows over the results, of the text it was found for.
-  const [detail, setDetail] = useState<{ found: FoundProgramme; generation: number } | null>(null);
+  // The programme whose detail shows, for the query and provider/catalogue it was found under.
+  const [detail, setDetail] = useState<{
+    found: FoundProgramme;
+    generation: number;
+    request: typeof programmeRead.request;
+  } | null>(null);
   // As the guide is read again, as on return from the background, the same programme's newest
   // token, so the detail reads on.
   const shownDetail =
-    detail?.generation === entry.generation
+    detail?.generation === entry.generation && detail.request === programmeRead.request
       ? (programmeRead.value?.found.find(
           ({ key, programme }) =>
             key === detail.found.key && programme.start === detail.found.programme.start,
@@ -442,7 +446,7 @@ export default function Search() {
     const { generation } = entry;
     if (session.current.closed || session.current.generation !== generation) return;
     Keyboard.dismiss();
-    setDetail({ found, generation });
+    setDetail({ found, generation, request: programmeRead.request });
   };
   const open = (title: Title) => {
     if (!(title.kind === "movie" ? movies : series).current()) return;

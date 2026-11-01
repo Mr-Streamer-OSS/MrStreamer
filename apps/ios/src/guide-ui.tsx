@@ -138,6 +138,7 @@ export function useGuideRead<T>(
     value: current?.value,
     failed: current?.failed ?? false,
     pending: focused && (!current || current.snapshot !== snapshot),
+    request,
     snapshot,
     now,
   };
