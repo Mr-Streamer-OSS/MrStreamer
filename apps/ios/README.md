@@ -278,14 +278,15 @@ app through native-port stand-ins. Actual consumer Release/UI verification remai
 ## Speed and Now Playing
 
 Watch's Speed plays movies and episodes at 0.5× to 2×, saved in `media-preferences.json` for
-every later title; channels and catch-up play at their own. A paused player stays paused when the
+every later title; channels and catch-up always play at 1×. A paused player stays paused when the
 speed changes. The checkmark is the rate the patched player reports in each state observation
 (AVPlayer's rate while it plays, else its default rate), never the request.
 
 `src/media-controls.ts` and `modules/media-controls` publish Now Playing while Watch, Picture in
 Picture, AirPlay or a Watch set aside shows the player, never Home's silent preview: a title's
-name, line, length when known, position and reported rate; a channel's name and Live; a programme from
-catch-up its own name and Catch-up. No address, provider, login or artwork goes there (a
+name, line, length when known and position; a channel's name and Live; a programme from
+catch-up its own name, Catch-up, length when known and position. Every kind also publishes its
+reported speed and current playback rate, zero while paused. No address, provider, login or artwork goes there (a
 channel's line in the app can name its provider). Stop and failure clear it and its commands.
 Close pauses and clears them only when neither AirPlay nor Picture in Picture retains playback;
 while either remains, Now Playing and its supported commands remain. The player's `ownsNowPlaying` keeps the audio session unmixed so iOS shows it,
