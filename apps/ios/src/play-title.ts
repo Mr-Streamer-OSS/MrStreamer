@@ -150,7 +150,7 @@ export function playEpisode(
   // next in order, while `stands`. A refused save was told (`onProgressRefused`), and an
   // unreadable record can't say which episode goes on or from where: either way none does, and
   // this one stays, for Next to be pressed again.
-  const upcoming = async (saved: Promise<Saved>, stands: () => boolean) => {
+  const upcoming = async (saved: Promise<Saved>, stands = () => true) => {
     const { saved: kept } = await saved;
     if (!kept || !stands()) return null;
     const { progress, marks } = await standing();
@@ -210,7 +210,7 @@ export function playEpisode(
       },
       // Playback keeps its own word on whether the countdown still stands.
       upNext: async (saved) => {
-        const found = await upcoming(saved, () => true).catch(() => null);
+        const found = await upcoming(saved).catch(() => null);
         return (
           found && {
             place: lineOf(found.episode),

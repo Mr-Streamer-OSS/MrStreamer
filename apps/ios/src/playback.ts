@@ -1843,14 +1843,11 @@ export function playNext() {
   current?.options.next?.(saved);
 }
 
-/** How long Watch counts down before the next episode plays, as the desktop app does by default. */
-const COUNTDOWN_SECONDS = DEFAULT_NEXT_EPISODE_DELAY;
-
 /** The countdown under way, from asking which episode goes on until it plays or ends. */
 let counting: {
   readonly stands: () => boolean;
-  play: (() => void) | null;
-  timer: ReturnType<typeof setInterval> | null;
+  play?: () => void;
+  timer?: ReturnType<typeof setInterval>;
 } | null = null;
 
 /**
@@ -1858,41 +1855,39 @@ let counting: {
  * it ended, its Next episode still offered.
  */
 export function cancelUpNext() {
-  if (counting?.timer) clearInterval(counting.timer);
+  clearInterval(counting?.timer);
   counting = null;
-  if (upNext.get()) upNext.set(null);
+  upNext.set(null);
 }
 
 /**
  * `owned` played to its end in Watch: once its owner says which episode goes on, as the record
- * stands after `saved`, Watch counts down to it and plays it at zero. It stands while nothing
- * newer was asked (`supersede`), the same play shows in Watch, and its provider's login stands.
+ * stands after `saved`, Watch counts down to it, for as long as the desktop app does by default,
+ * and plays it at zero. It stands while nothing newer was asked (`supersede` ends it), the same
+ * play shows in Watch, and its provider's login stands.
  */
 function countDown(owned: NonNullable<typeof current>, saved: Promise<Saved>) {
   const find = owned.options.upNext;
   if (!find) return;
-  const asked = request();
+  supersede();
   const mine: NonNullable<typeof counting> = {
     stands: () =>
       counting === mine &&
-      asked.stands() &&
       current === owned &&
       sourceStands(owned) &&
       state.get().watch &&
       playingItem(state.get().phase) === owned.item,
-    play: null,
-    timer: null,
   };
   counting = mine;
   void find(saved).then(
     (next) => {
       if (!next || !mine.stands()) return void (counting === mine && cancelUpNext());
       mine.play = next.play;
-      upNext.set({ place: next.place, seconds: COUNTDOWN_SECONDS });
+      let left = DEFAULT_NEXT_EPISODE_DELAY;
+      upNext.set({ place: next.place, seconds: left });
       mine.timer = setInterval(() => {
-        if (!mine.stands()) return cancelUpNext();
-        const left = (upNext.get()?.seconds ?? 0) - 1;
-        if (left > 0) upNext.set({ place: next.place, seconds: left });
+        if (!mine.stands()) cancelUpNext();
+        else if (--left > 0) upNext.set({ place: next.place, seconds: left });
         else playUpNext();
       }, 1000);
     },

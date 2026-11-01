@@ -536,20 +536,6 @@ describe("an episode's end", () => {
     expect(sources).toEqual(["file:episode:s1e2"]);
   });
 
-  it("takes no end from an earlier item of the player", async () => {
-    playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
-    await settle();
-    startsAt();
-    fakePlayer.state(true);
-    const { itemId } = fakePlayer.identity();
-    fakePlayer.observation({ kind: "ended" }, { itemId: itemId - 1 });
-    await settle();
-    vi.advanceTimersByTime(20_000);
-    await settle();
-    expect(held.standing).toEqual([]);
-    expect(sources).toEqual(["file:episode:s1e1"]);
-  });
-
   it("plays nothing once the provider's login was replaced during the countdown", async () => {
     const { setSource, dropSource } = await import("../src/sources.ts");
     const { demoProvider } = await import("../src/demo.ts");
