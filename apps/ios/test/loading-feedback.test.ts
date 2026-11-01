@@ -156,6 +156,7 @@ vi.mock("../src/account.ts", () => ({
   },
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   useCatalogue: () => scenario.catalogue,
+  currentCatalogue: () => scenario.catalogue,
   playChannel: (channel: Channel) => scenario.did.push(`play ${channel.key}`),
   retry: (id: string) => scenario.did.push(`retry ${id}`),
   retryChannels: () => scenario.did.push("retry channels"),

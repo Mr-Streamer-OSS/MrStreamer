@@ -66,6 +66,7 @@ vi.mock("../src/account.ts", () => ({
   onRoster: () => () => {},
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   useCatalogue: () => scenario.catalogue,
+  currentCatalogue: () => scenario.catalogue,
   playChannel: (channel: Channel, _place: string, { watch }: { watch: boolean }) =>
     scenario.did.push(`play ${channel.key}${watch ? " in Watch" : ""}`),
   retry: () => undefined,

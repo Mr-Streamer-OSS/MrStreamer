@@ -1,3 +1,4 @@
+import { t } from "@mrstreamer/core/i18n";
 import { router, useNavigation, useRootNavigationState } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -22,7 +23,8 @@ import {
 import { failureOf } from "./errors.ts";
 import { starChannel, useFavouriteKeys } from "./favourites.ts";
 import { FavouritesEntry } from "./favourites-screen.tsx";
-import { ListEntries, openListSheet } from "./custom-lists-screen.tsx";
+import { Entry, ListEntries, openListSheet } from "./custom-lists-screen.tsx";
+import { useReminders } from "./reminders.ts";
 import { Glass, IconButton } from "./glass.tsx";
 import type { ScheduleItem } from "./guide.ts";
 import {
@@ -324,15 +326,29 @@ export function LiveHome() {
   return <Channels lead={<Entries />}>{(library) => <Browse library={library} />}</Channels>;
 }
 
+/** Live's Reminders row, after Favourites and the viewer's lists, with how many are set. */
+function RemindersEntry() {
+  const list = useReminders();
+  return (
+    <Entry
+      name={t("Reminders")}
+      count={list.kind === "read" ? list.reminders.length : 0}
+      onPress={() => router.push("/live/reminders")}
+      testID="live-reminders"
+    />
+  );
+}
+
 /**
- * Live's own rows, before its tabs: Favourites, the viewer's lists, and Find countries or
- * categories. A category's screen has none of these rows.
+ * Live's own rows, before its tabs: Favourites, the viewer's lists, Reminders, and Find countries
+ * or categories. A category's screen has none of these rows.
  */
 function Entries() {
   return (
     <>
       <FavouritesEntry />
       <ListEntries />
+      <RemindersEntry />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Find countries or categories"

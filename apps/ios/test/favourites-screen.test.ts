@@ -286,6 +286,17 @@ describe("Live", () => {
     expect(scenario.did).toEqual(["push /live/favourites"]);
   });
 
+  it("has Reminders after Favourites, which opens the reminders with none set too", () => {
+    open(LiveHome);
+    const rows = [...container.querySelectorAll("[data-testid^='live-']")].map((row) =>
+      row.getAttribute("data-testid"),
+    );
+    expect(rows.indexOf("live-reminders")).toBeGreaterThan(rows.indexOf("live-favourites"));
+    expect(text("live-reminders")).toBe("Reminders");
+    press("live-reminders");
+    expect(scenario.did).toEqual(["push /live/reminders"]);
+  });
+
   it("stars a row's channel from its own provider, playing nothing", async () => {
     open(LiveHome);
     press("star-b:10");
