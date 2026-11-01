@@ -24,6 +24,7 @@ const scenario = vi.hoisted(() => ({
   alerts: [] as { title: string; message?: string | undefined }[],
   title: "",
   members: [] as Member[],
+  tmdb: { kind: "no-key" } as { kind: string; known?: number; wanted?: number },
   /** What a tab's stack last drew: its first screen's title and its top bar's labelled buttons. */
   stack: null as { title: string; buttons: string[] } | null,
 }));
@@ -83,7 +84,7 @@ vi.mock("../src/downloads.ts", () => ({
   useDownloads: () => ({ items: [], series: {}, bytes: 0, free: null, ended: 0 }),
 }));
 vi.mock("../src/titles.ts", () => ({
-  useMetadataStanding: () => ({ kind: "no-key" }),
+  useMetadataStanding: () => scenario.tmdb,
   useTitleTimings: () => null,
 }));
 vi.mock("../src/telemetry/index.ts", () => ({
@@ -120,7 +121,14 @@ afterEach(async () => {
   for (const name of ["language.json", "language.json.next"]) {
     rmSync(join(native.root, "documents", name), { force: true });
   }
-  Object.assign(scenario, { phone: ["en-US"], sheet: null, title: "", members: [], stack: null });
+  Object.assign(scenario, {
+    phone: ["en-US"],
+    sheet: null,
+    title: "",
+    members: [],
+    stack: null,
+    tmdb: { kind: "no-key" },
+  });
   scenario.alerts.length = 0;
 });
 
@@ -141,6 +149,7 @@ async function launch(route: "settings" | "connect") {
   return {
     text: () => container.textContent ?? "",
     language: () => find("settings-interface-language").getAttribute("aria-label"),
+    status: () => find("settings-tmdb-status").getAttribute("aria-label"),
     /** Picks `label` from the sheet Interface language opens. */
     choose(label: string) {
       React.act(() =>
@@ -199,6 +208,18 @@ it("words a provider's failure in the language, keeping its address as it is", a
   scenario.members = [{ ...livingRoom, live: { kind: "failed", error: failed } } as Member];
   const settings = await launch("settings");
   expect(settings.text()).toContain("Kan tv.example.com niet bereiken");
+});
+
+it("picks plural forms and writes counts as the language does", async () => {
+  scenario.phone = ["nl-NL"];
+  scenario.tmdb = { kind: "answered", known: 1, wanted: 1 };
+  expect((await launch("settings")).status()).toBe("Status, 1 titel");
+  unmount();
+  scenario.tmdb = { kind: "answered", known: 1234, wanted: 1234 };
+  expect((await launch("settings")).status()).toBe("Status, 1.234 titels");
+  unmount();
+  scenario.tmdb = { kind: "fetching", known: 1234, wanted: 2000 };
+  expect((await launch("settings")).status()).toBe("Status, 1.234 van 2.000 titels");
 });
 
 it("titles another tab and labels its top bar in a new language at once", async () => {
