@@ -2655,7 +2655,7 @@ describe("offline Next", { timeout: 30_000 }, () => {
       vi.advanceTimersByTime(20_000);
       app.playUpNext();
       await sleep(30);
-      // Nothing more reaches the player; an excluded series closes the ended copy too.
+      // Nothing more reaches the player, whatever becomes of the ended copy.
       expect(memory.played).toHaveLength(1);
       await app.stop();
     });
@@ -2683,7 +2683,11 @@ describe("offline Next", { timeout: 30_000 }, () => {
     memory.player!.observation({ kind: "ended" });
     await app.progressSettled();
     await sleep(30);
-    vi.advanceTimersByTime(10_000);
+    expect(app.upNextState.get()).toMatchObject({ seconds: 10 });
+    vi.advanceTimersByTime(9_000);
+    await sleep(30);
+    expect(memory.played).toHaveLength(1);
+    vi.advanceTimersByTime(1_000);
     await until(() => memory.played.length === 2, "the next copy at zero");
     expect(memory.played[1]?.uri).toBe(`file://${mediaFile(to.id)!.path}`);
     await app.stop();
