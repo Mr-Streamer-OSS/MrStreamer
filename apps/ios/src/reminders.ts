@@ -89,8 +89,8 @@ export interface RemindersNative {
   ask(): Promise<Permission>;
   /** The app's notifications still to come. */
   scheduled(): Promise<readonly Notice[]>;
-  /** Schedules each, in place of one with its id; one iOS refuses is left out. */
-  schedule(notices: readonly Notice[]): Promise<void>;
+  /** Schedules each, in place of one with its id. Answers the ids iOS refused. */
+  schedule(notices: readonly Notice[]): Promise<readonly string[]>;
   /** Takes these down, scheduled or shown. */
   cancel(ids: readonly string[]): Promise<void>;
   /** The notification the viewer tapped last, once, or null. */
@@ -236,34 +236,47 @@ const sameNotice = (a: Notice, b: Notice) =>
   a.body === b.body &&
   a.channel === b.channel;
 
+/** The reminders iOS refused to schedule at the last check, which don't notify. */
+let refused: ReadonlySet<string> = new Set();
+
 /**
- * Makes iOS's scheduled notifications those of `reminders` that notify, the soonest 64: takes
- * down every other the app scheduled, and schedules what is missing. Nothing while iOS doesn't
- * let the app notify, which it then schedules none of either.
+ * Makes iOS's scheduled notifications those of `reminders` that notify, the soonest 64, while iOS
+ * lets the app notify, and none while it doesn't: takes down every other the app scheduled, with
+ * those of `gone`, shown already or not, and schedules what is missing.
  */
-async function sync(reminders: readonly KeptReminder[]) {
+async function sync(reminders: readonly KeptReminder[], gone: readonly string[]) {
   const module = native();
   if (!module) return;
   const allowed = await module.permission();
   permission.set(allowed);
-  if (allowed !== "granted") return;
   const now = Date.now();
-  const wanted = reminders
-    .filter((each) => notifies(each, now))
-    .toSorted((a, b) => a.start - b.start)
-    .slice(0, SCHEDULED)
-    .map(noticeOf);
+  const wanted =
+    allowed === "granted"
+      ? reminders
+          .filter((each) => notifies(each, now))
+          .toSorted((a, b) => a.start - b.start)
+          .slice(0, SCHEDULED)
+          .map(noticeOf)
+      : [];
   const scheduled = await module.scheduled();
-  const stale = scheduled.filter((each) => !wanted.some((want) => sameNotice(want, each)));
-  if (stale.length) await module.cancel(stale.map((each) => each.id));
+  const down = [
+    ...new Set([
+      ...gone,
+      ...scheduled
+        .filter((each) => !wanted.some((want) => sameNotice(want, each)))
+        .map((each) => each.id),
+    ]),
+  ];
+  if (down.length) await module.cancel(down);
   const missing = wanted.filter((want) => !scheduled.some((each) => sameNotice(want, each)));
-  if (missing.length) await module.schedule(missing);
+  refused = new Set(missing.length ? await module.schedule(missing) : []);
 }
 
 /**
  * One check: every reminder against the saved subscriptions, the channels Live lists and the
- * guide at the time now, written when that changed it, then iOS's notifications made to match.
- * A reminder set or cancelled while the guide is read stays as that left it.
+ * guide at the time now, written when that changed it, then iOS's notifications made to match
+ * what it found, written or not, so none stays up for a programme other than the one set. A
+ * reminder set or cancelled while the guide is read stays as that left it.
  */
 async function checkOnce() {
   const before = keptNow();
@@ -298,17 +311,15 @@ async function checkOnce() {
     const after = checked.get(each);
     return after === undefined ? [each] : after ? [after] : [];
   });
-  let shown = current.reminders;
-  if (JSON.stringify(next) !== JSON.stringify(shown)) {
+  if (JSON.stringify(next) !== JSON.stringify(current.reminders)) {
     try {
       save(next);
-      shown = next;
     } catch {
-      // The disk keeps what it had; notifications follow what the screens show, and the next
-      // check writes again.
+      // The disk keeps what it had, and the next check writes again.
     }
   }
-  await sync(shown);
+  const gone = [...checked].flatMap(([reminder, after]) => (after ? [] : [reminder.id]));
+  await sync(next, gone);
 }
 
 let checking: Promise<void> | null = null;
@@ -336,14 +347,15 @@ export function checkReminders(): Promise<void> {
 
 /**
  * Sets a reminder for `programme` of `channel`, still to come, once iOS lets the app notify,
- * asking the viewer the first time: `denied`, saving nothing, where it doesn't. One already set for
- * that channel at that start stays as it is. Throws, changing nothing, while the programme has
- * started or the file can't be used or written.
+ * asking the viewer the first time: `denied`, saving nothing, where it doesn't, and `full` while
+ * 64 are to notify already, all iOS holds. One already set for that channel at that start stays as
+ * it is. Throws, changing nothing, while the programme has started, the file can't be used or
+ * written, or iOS refused to schedule it.
  */
 export async function setReminder(
   channel: Channel,
   programme: Pick<Programme, "start" | "stop" | "title">,
-): Promise<"set" | "denied"> {
+): Promise<"set" | "denied" | "full"> {
   const started = () => programme.start <= Date.now();
   if (started()) throw new AppFailure({ kind: "reminder", reason: "started" });
   if (channel.adult) throw new AppFailure({ kind: "reminder", reason: "not-in-guide" });
@@ -365,26 +377,31 @@ export async function setReminder(
     streams: found.streams,
     start: programme.start,
   };
-  if (!reminders.some((each) => sameReminder(each, wanted))) {
-    save([
-      ...reminders,
-      {
-        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
-        subscriptionId: channel.subscriptionId,
-        channel: found.id,
-        streams: found.streams,
-        channelName: found.name,
-        adult: found.adult,
-        start: programme.start,
-        stop: programme.stop,
-        set: programme.title,
-        title: programme.title,
-        state: { kind: "pending" },
-      },
-    ]);
-  }
+  if (reminders.some((each) => sameReminder(each, wanted))) return "set";
+  const now = Date.now();
+  if (reminders.filter((each) => notifies(each, now)).length >= SCHEDULED) return "full";
+  const id = `${now.toString(36)}-${Math.random().toString(36).slice(2)}`;
+  save([
+    ...reminders,
+    {
+      id,
+      subscriptionId: channel.subscriptionId,
+      channel: found.id,
+      streams: found.streams,
+      channelName: found.name,
+      adult: found.adult,
+      start: programme.start,
+      stop: programme.stop,
+      set: programme.title,
+      title: programme.title,
+      state: { kind: "pending" },
+    },
+  ]);
   await checkReminders();
-  return "set";
+  if (!refused.has(id)) return "set";
+  // One iOS won't notify for isn't kept, so no bell claims it will.
+  await cancelReminder(id);
+  throw new AppFailure({ kind: "unexpected", detail: "iOS didn't schedule the reminder." });
 }
 
 /** Takes reminder `id` out, with its notification. One that is gone changes nothing. */
@@ -392,12 +409,13 @@ export async function cancelReminder(id: string): Promise<void> {
   const reminders = stored();
   if (!reminders.some((each) => each.id === id)) return;
   save(reminders.filter((each) => each.id !== id));
-  try {
-    await native()?.cancel([id]);
-  } catch {
-    // The next check takes down what no reminder wants.
-    void checkReminders();
-  }
+  await native()
+    ?.cancel([id])
+    .catch(() => {
+      // The check below takes it down, as any notification no reminder wants.
+    });
+  // A check under way may have read it before it went: the next one takes it down again.
+  await checkReminders();
 }
 
 /** The reminders, in start order, or why they can't show. */
@@ -405,9 +423,12 @@ export type ReminderList =
   | { readonly kind: "read"; readonly reminders: readonly Reminder[] }
   | { readonly kind: "unreadable" | "foreign" };
 
+/** Calls `listener` as the reminders or the channels change, and each minute, as time moves rows on. */
 const subscribeAll = (listener: () => void) => {
+  const clock = setInterval(listener, 60_000);
   const stops = [kept.subscribe(listener), onCatalogue(listener)];
   return () => {
+    clearInterval(clock);
     for (const stop of stops) stop();
   };
 };
@@ -475,7 +496,8 @@ export function startReminders() {
   const check = () => void checkReminders();
   onRoster(check);
   onCatalogue(check);
-  guide.listingRevision.subscribe(check);
+  // Once the guide's change is over: it tells before it withdraws what it handed out.
+  guide.listingRevision.subscribe(() => queueMicrotask(check));
   AppState.addEventListener("change", (state) => {
     if (state === "active") check();
   });

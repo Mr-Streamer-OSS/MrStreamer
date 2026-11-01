@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { dayLabel, localDay, programmeRange } from "./guide-ui.tsx";
 import { cancelReminder, usePermission, useReminders, type Reminder } from "./reminders.ts";
+import { Swipe } from "./swipe.tsx";
 import { colors, monogram, Notice } from "./ui.tsx";
 
 // The reminders still set, pushed on Live's stack: grouped by day as Downloads groups its list,
@@ -140,40 +141,51 @@ const Row = memo(function Row({ reminder }: { reminder: Reminder }) {
     else if (nativeEvent.actionName === "cancel") void cancel(reminder);
   };
   return (
-    <View style={styles.row}>
-      <Pressable
-        accessible
-        accessibilityRole="button"
-        accessibilityLabel={[title, facts.replace(" · ", ", "), status].filter(Boolean).join(", ")}
-        accessibilityActions={[{ name: "activate" }, { name: "cancel", label: "Cancel reminder" }]}
-        onAccessibilityAction={act}
-        onPress={() => open(reminder)}
-        style={({ pressed }) => [styles.open, pressed && styles.pressed]}
-        testID={`reminder-${reminder.id}`}
-      >
-        <View style={styles.logo}>
-          <Text style={styles.monogram}>{monogram(reminder.channelName)}</Text>
-        </View>
-        <View style={styles.text}>
-          <Text style={styles.title} numberOfLines={2}>
-            {title}
-          </Text>
-          <Text style={styles.facts} numberOfLines={1}>
-            {facts}
-          </Text>
-          {status ? <Text style={styles.status}>{status}</Text> : null}
-        </View>
-      </Pressable>
-      <Pressable
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        onPress={() => void cancel(reminder)}
-        style={({ pressed }) => [styles.cross, pressed && styles.pressed]}
-        testID={`reminder-${reminder.id}-cancel`}
-      >
-        <SymbolView name="xmark" size={14} tintColor={colors.text} weight="semibold" />
-      </Pressable>
-    </View>
+    <Swipe
+      label="Cancel"
+      action={{ run: () => void cancel(reminder) }}
+      testID={`reminder-${reminder.id}-swiped`}
+    >
+      <View style={styles.row}>
+        <Pressable
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel={[title, facts.replace(" · ", ", "), status]
+            .filter(Boolean)
+            .join(", ")}
+          accessibilityActions={[
+            { name: "activate" },
+            { name: "cancel", label: "Cancel reminder" },
+          ]}
+          onAccessibilityAction={act}
+          onPress={() => open(reminder)}
+          style={({ pressed }) => [styles.open, pressed && styles.pressed]}
+          testID={`reminder-${reminder.id}`}
+        >
+          <View style={styles.logo}>
+            <Text style={styles.monogram}>{monogram(reminder.channelName)}</Text>
+          </View>
+          <View style={styles.text}>
+            <Text style={styles.title} numberOfLines={2}>
+              {title}
+            </Text>
+            <Text style={styles.facts} numberOfLines={1}>
+              {facts}
+            </Text>
+            {status ? <Text style={styles.status}>{status}</Text> : null}
+          </View>
+        </Pressable>
+        <Pressable
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          onPress={() => void cancel(reminder)}
+          style={({ pressed }) => [styles.cross, pressed && styles.pressed]}
+          testID={`reminder-${reminder.id}-cancel`}
+        >
+          <SymbolView name="xmark" size={14} tintColor={colors.text} weight="semibold" />
+        </Pressable>
+      </View>
+    </Swipe>
   );
 });
 

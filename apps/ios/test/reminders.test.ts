@@ -44,6 +44,14 @@ vi.mock("expo-router", () => ({
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   Linking: { openURL: async () => undefined, openSettings: async () => void scenario.settings++ },
+  Animated: {
+    View: ({ children }: { children?: React.ReactNode }) =>
+      React.createElement("div", null, children),
+    Value: class {
+      setValue() {}
+    },
+    timing: () => ({ start: () => undefined }),
+  },
   Alert: { alert: (title: string) => void scenario.alerts.push(title) },
   AppState: {
     currentState: "active",
@@ -103,6 +111,12 @@ const ios = {
   answer: "granted" as Permission,
   asked: 0,
   scheduled: new Map<string, Notice>(),
+  /** Titles iOS refuses to schedule. */
+  refuses: new Set<string>(),
+  /** Shown already, as iOS keeps them in Notification Centre until taken down. */
+  delivered: new Set<string>(),
+  /** While set, iOS hasn't answered `scheduled` yet. */
+  holding: null as Promise<void> | null,
   opened: null as { channel: string; at: number } | null,
   listeners: new Set<() => void>(),
 };
@@ -113,13 +127,22 @@ const module: RemindersNative = {
     if (ios.permission === "undetermined") ios.permission = ios.answer;
     return ios.permission;
   },
-  scheduled: async () => [...ios.scheduled.values()],
+  async scheduled() {
+    await ios.holding;
+    return [...ios.scheduled.values()];
+  },
   async schedule(notices) {
-    if (ios.permission !== "granted") return;
-    for (const notice of notices) ios.scheduled.set(notice.id, notice);
+    if (ios.permission !== "granted") return notices.map((each) => each.id);
+    const refused = notices.filter((each) => ios.refuses.has(each.title));
+    for (const notice of notices)
+      if (!refused.includes(notice)) ios.scheduled.set(notice.id, notice);
+    return refused.map((each) => each.id);
   },
   async cancel(ids) {
-    for (const id of ids) ios.scheduled.delete(id);
+    for (const id of ids) {
+      ios.scheduled.delete(id);
+      ios.delivered.delete(id);
+    }
   },
   takeOpened() {
     const opened = ios.opened;
@@ -237,6 +260,10 @@ beforeEach(async () => {
   rmSync(`${file()}.next`, { force: true });
   Object.assign(ios, { permission: "undetermined", answer: "granted", asked: 0, opened: null });
   ios.scheduled.clear();
+  ios.refuses.clear();
+  ios.delivered.clear();
+  ios.holding = null;
+  files.sync = null;
   scenario.members = [member("a")];
   scenario.programmes = [on, later];
   scenario.pushed = [];
@@ -297,6 +324,77 @@ describe("programme reminders", () => {
     await settled();
     expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
     expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
+  });
+
+  it("follows a guide the app replaces, with no other change", async () => {
+    await reminders.setReminder(channel(), later);
+    scenario.programmes = [on, { ...later, title: "Football" }];
+    // New external guides or mappings: the guide tells before it withdraws what it handed out.
+    scenario.owner!.configure(new Map(), new Map());
+    await heard();
+    expect(shown()).toEqual(["Football @ Channel 1: changed from Late film"]);
+    expect(notices()).toEqual([]);
+  });
+
+  it("takes a notification down when the check that found it changed couldn't be written", async () => {
+    await reminders.setReminder(channel(), later);
+    scenario.programmes = [on, { ...later, title: "Football" }];
+    files.sync = (operation) => {
+      if (operation === "write") throw new Error("disk full");
+    };
+    shows();
+    await settled();
+    expect(notices()).toEqual([]);
+  });
+
+  it("keeps a cancelled reminder down while a check under way had read it", async () => {
+    await reminders.setReminder(channel(), later);
+    const [set] = remindersShown();
+    let answer = () => {};
+    ios.holding = new Promise((resolve) => (answer = resolve));
+    const checking = reminders.checkReminders();
+    await heard();
+    const cancelled = reminders.cancelReminder(set!.id);
+    ios.holding = null;
+    answer();
+    await Promise.all([checking, cancelled]);
+    expect(notices()).toEqual([]);
+  });
+
+  it("takes down a provider's notifications, scheduled or shown, while iOS doesn't allow them too", async () => {
+    await reminders.setReminder(channel(), later);
+    const [set] = remindersShown();
+    // It notified early, as a test can have it: iOS keeps it shown.
+    ios.scheduled.delete(set!.id);
+    ios.delivered.add(set!.id);
+    ios.permission = "denied";
+    scenario.members = [];
+    for (const listener of scenario.rosterChanged) listener();
+    await settled();
+    expect(shown()).toEqual([]);
+    expect(ios.delivered.size).toBe(0);
+  });
+
+  it("sets no more than the 64 iOS holds, and keeps none iOS refused", async () => {
+    const programmes = Array.from({ length: 65 }, (_, at) => ({
+      title: `Programme ${at}`,
+      start: now + (at + 1) * HOUR,
+      stop: now + (at + 2) * HOUR,
+      description: null,
+    }));
+    scenario.programmes = [on, ...programmes];
+    for (const programme of programmes.slice(0, 64))
+      expect(await reminders.setReminder(channel(), programme)).toBe("set");
+    expect(await reminders.setReminder(channel(), programmes[64]!)).toBe("full");
+    expect(notices()).toHaveLength(64);
+
+    const [first] = remindersShown();
+    await reminders.cancelReminder(first!.id);
+    ios.refuses.add("Programme 64");
+    await expect(reminders.setReminder(channel(), programmes[64]!)).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "iOS didn't schedule the reminder." },
+    });
+    expect(remindersShown()).toHaveLength(63);
   });
 
   it("keeps a reminder while its guide can't be read, and drops one its provider stopped listing", async () => {
@@ -447,7 +545,7 @@ describe("the reminders list", () => {
     shows();
     await settled();
     const screen = await list();
-    expect(screen.text()).toMatch(/^(Today|Tomorrow)C1Late film/);
+    expect(screen.text()).toMatch(/^(Today|Tomorrow)CancelC1Late film/);
     expect(screen.text()).toContain(`Channel 1 · ${programmeRange(later)}`);
     expect(screen.text()).toContain("Changed to Football · won't notify");
 
@@ -459,7 +557,29 @@ describe("the reminders list", () => {
 
     await screen.press(`reminder-${set!.id}-cancel`);
     expect(screen.text()).toContain("No reminders yet.");
+
+    // A swipe to the left shows Cancel too.
+    await reminders.setReminder(channel(), later);
+    const [again] = remindersShown();
+    await screen.press(`reminder-${again!.id}-swiped`);
+    expect(screen.text()).toContain("No reminders yet.");
+    expect(notices()).toEqual([]);
     screen.close();
+  });
+
+  it("moves with the clock while it shows", async () => {
+    await reminders.setReminder(channel(), later);
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    try {
+      const screen = await list();
+      expect(screen.text()).not.toContain("On now");
+      vi.setSystemTime(later.start + 1);
+      React.act(() => void vi.advanceTimersByTime(60_000));
+      expect(screen.text()).toContain("On now");
+      screen.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("leads with a notice once iOS stops letting the app notify", async () => {
@@ -473,6 +593,11 @@ describe("the reminders list", () => {
     screen.close();
   });
 });
+
+/** What the app hears settles: the guide's own tasks, and each check they started. */
+async function heard() {
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 function remindersShown() {
   shown();

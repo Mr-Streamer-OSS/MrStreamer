@@ -93,11 +93,12 @@ and a refusal saves nothing and offers Open iOS Settings. A set reminder shows a
 time and Cancel reminder, and is a local notification iOS shows at the programme's start, "{channel}
 · now", whether or not the app runs; tapping it opens the programme's details on Live, by its
 channel and start, and plays nothing. Live's reminders list (`src/reminders-screen.tsx`, `live/reminders`) groups
-them by day, with a cross to cancel each. At launch, on return to the app and when a provider, its
+them by day; a cross, a swipe to the left or VoiceOver's action cancels one. At launch, on return to the app and when a provider, its
 channels or the guide change, each reminder is checked: another programme at its start, or none,
 takes its notification down and says so in the list, and it comes back if the programme does. A
 guide that can't be read changes nothing. Nothing runs in the background, so a schedule changed
-while the app is closed is seen at the next check. iOS holds the soonest 64. A reminder goes when
+while the app is closed is seen at the next check. iOS holds 64, so a 65th to notify is refused, as
+is one iOS won't schedule. A reminder goes when
 its programme ends or its provider is removed. Permission, delivery, tap routing and the lock
 screen need a native run. Search finds
 movies, series and channels: 20 movies and 20 series at first, each kind with its own Show more

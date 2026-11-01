@@ -363,7 +363,7 @@ export function Programme({
 /**
  * Remind me on a programme still to come, or Cancel reminder once one is set (`reminder`, its id).
  * Where iOS refuses notifications nothing is saved, and a line under the actions offers iOS
- * Settings; a save or cancel that failed says so there. Keyed by programme, so that line goes
+ * Settings; one past the 64 iOS holds, or a save or cancel that failed, says so there. Keyed by programme, so that line goes
  * with it.
  */
 function RemindMe({
@@ -376,11 +376,12 @@ function RemindMe({
   reminder: string | null;
 }) {
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<"refused" | "failed" | null>(null);
-  const run = async (change: () => Promise<"set" | "denied" | void>) => {
+  const [note, setNote] = useState<"refused" | "full" | "failed" | null>(null);
+  const run = async (change: () => Promise<"set" | "denied" | "full" | void>) => {
     setBusy(true);
     try {
-      setNote((await change()) === "denied" ? "refused" : null);
+      const done = await change();
+      setNote(done === "denied" ? "refused" : done === "full" ? "full" : null);
     } catch {
       setNote("failed");
     } finally {
@@ -415,6 +416,10 @@ function RemindMe({
             testID="guide-open-settings"
           />
         </View>
+      ) : note === "full" ? (
+        <Text style={[styles.copy, styles.note]}>
+          iOS holds 64 reminders. Cancel one to set another.
+        </Text>
       ) : note === "failed" ? (
         <Text style={[styles.copy, styles.note]}>{t("Couldn't save. Try again.")}</Text>
       ) : null}

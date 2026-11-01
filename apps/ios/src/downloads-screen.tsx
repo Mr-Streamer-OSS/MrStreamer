@@ -3,10 +3,8 @@ import { formatBytes, t } from "@mrstreamer/core/i18n";
 import { runtime, timeLeftOf } from "@mrstreamer/core/viewing/continue";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { SymbolView, type SFSymbol } from "expo-symbols";
-import { memo, useMemo, useRef, type ReactNode } from "react";
+import { memo, useMemo } from "react";
 import {
-  Animated,
-  PanResponder,
   Pressable,
   SectionList,
   StyleSheet,
@@ -22,12 +20,12 @@ import {
   episodeLine,
   statusLine,
   transferred,
-  type DownloadAction,
   showActions,
   waitingTurn,
 } from "./download-controls.tsx";
 import { playDownload, useDownloads } from "./downloads.ts";
 import { Glass } from "./glass.tsx";
+import { Swipe } from "./swipe.tsx";
 import { Artwork } from "./titles-ui.tsx";
 import { colors, Notice } from "./ui.tsx";
 
@@ -190,7 +188,7 @@ const Row = memo(function Row({
     actions.find((action) => action.label === actionName)?.run();
   };
   return (
-    <Swipe label={SWIPED[status.kind]} action={destructive}>
+    <Swipe label={SWIPED[status.kind]} action={destructive} testID="download-swiped">
       <Pressable
         accessible
         accessibilityLabel={spoken}
@@ -274,68 +272,6 @@ function Bar({ done, style }: { done: number; style?: StyleProp<ViewStyle> }) {
   );
 }
 
-/** How far the row slides to show its swiped action. */
-const REVEAL = 92;
-
-/**
- * A row that slides left under the finger to show `action` in red, as iOS's lists do. It follows
- * the finger and settles open or shut; tapping the red part runs the action, which asks first
- * where it would lose a download.
- */
-function Swipe({
-  label,
-  action,
-  children,
-}: {
-  label: string;
-  action: DownloadAction | undefined;
-  children: ReactNode;
-}) {
-  const x = useRef(new Animated.Value(0)).current;
-  const open = useRef(false);
-  const settle = (to: number) => {
-    open.current = to !== 0;
-    Animated.timing(x, { toValue: to, duration: 180, useNativeDriver: true }).start();
-  };
-  const settleRef = useRef(settle);
-  settleRef.current = settle;
-  const pan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, move) =>
-        Math.abs(move.dx) > 12 && Math.abs(move.dx) > Math.abs(move.dy) * 1.5,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderMove: (_, move) =>
-        x.setValue(Math.min(0, Math.max(-REVEAL * 1.3, (open.current ? -REVEAL : 0) + move.dx))),
-      onPanResponderRelease: (_, move) =>
-        settleRef.current((open.current ? -REVEAL : 0) + move.dx < -REVEAL / 2 ? -REVEAL : 0),
-      onPanResponderTerminate: () => settleRef.current(open.current ? -REVEAL : 0),
-    }),
-  ).current;
-  if (!action) return children;
-  return (
-    <View style={styles.swipe}>
-      <Pressable
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        onPress={() => {
-          settle(0);
-          action.run();
-        }}
-        style={styles.reveal}
-        testID="download-swiped"
-      >
-        <Text style={styles.revealLabel}>{label}</Text>
-      </Pressable>
-      <Animated.View
-        style={[styles.slide, { transform: [{ translateX: x }] }]}
-        {...pan.panHandlers}
-      >
-        {children}
-      </Animated.View>
-    </View>
-  );
-}
-
 /**
  * The row Settings and Connect open Downloads with: its name, what the copies take ("None"
  * without any) and a chevron.
@@ -373,19 +309,6 @@ const styles = StyleSheet.create({
   },
   note: { color: colors.dim, fontSize: 13, paddingHorizontal: 16, paddingTop: 8 },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: colors.line, marginLeft: 72 },
-  swipe: { overflow: "hidden" },
-  slide: { backgroundColor: "#000000" },
-  reveal: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    right: 0,
-    width: REVEAL,
-    backgroundColor: "#FF453A",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  revealLabel: { color: "#FFFFFF", fontSize: 17, fontWeight: "600" },
   row: {
     flexDirection: "row",
     alignItems: "center",
