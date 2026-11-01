@@ -1,3 +1,6 @@
+// First, before the modules that make text: every screen and prompt shows in the interface
+// language Settings saved.
+import "../language.ts";
 import { DarkTheme, Stack, ThemeProvider, usePathname } from "expo-router";
 import { useEffect, useRef } from "react";
 import { StyleSheet, View } from "react-native";

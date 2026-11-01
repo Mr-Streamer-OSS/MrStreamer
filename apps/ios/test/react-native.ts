@@ -165,6 +165,8 @@ export const reactNative = {
   Linking: { openURL: async () => undefined },
   Alert: { alert: () => undefined },
   ActionSheetIOS: { showActionSheetWithOptions: () => undefined },
+  // The iPhone's preferred languages (language.ts): English, whatever the machine running tests.
+  Settings: { get: (key: string) => (key === "AppleLanguages" ? ["en-US"] : undefined) },
   AppState: { currentState: "active", addEventListener: () => ({ remove: () => undefined }) },
   AccessibilityInfo: {
     isReduceTransparencyEnabled: async () => false,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { add, update, type Member } from "./account.ts";
 import { appError, failureOf, hostOf, type Failure } from "./errors.ts";
+import { t } from "./i18n/onboarding.ts";
 import { colors, TextButton } from "./ui.tsx";
 
 /** Connect adds the first provider, Settings the next ones, and edits a saved one. */
@@ -18,6 +19,7 @@ const KINDS = [
   { kind: "m3u", label: "Playlist link" },
 ] as const satisfies readonly { kind: LoginKind; label: string }[];
 
+/** Each mode's button, idle and while it waits for the provider. */
 const LABELS = {
   connect: { idle: "Connect", busy: "Connecting" },
   add: { idle: "Add", busy: "Adding" },
@@ -105,7 +107,7 @@ export function ProviderForm({
 
   const prefix = mode.kind === "connect" ? "connect" : "provider";
   const label = LABELS[mode.kind];
-  const unchanged = mode.kind === "edit" && !mode.member.needsSecret ? "Unchanged" : undefined;
+  const unchanged = mode.kind === "edit" && !mode.member.needsSecret ? t("Unchanged") : undefined;
   return (
     <>
       {saved ? null : (
@@ -120,23 +122,31 @@ export function ProviderForm({
               testID={`${prefix}-kind-${each.kind}`}
             >
               <Text style={[styles.kindLabel, kind === each.kind && styles.kindSelected]}>
-                {each.label}
+                {t(each.label)}
               </Text>
             </Pressable>
           ))}
         </View>
       )}
       {mode.kind === "connect" ? null : (
-        <Field label="Name" value={name} onChange={edit(setName)} prefix={prefix} optional />
+        <Field
+          id="name"
+          label={t("Name")}
+          value={name}
+          onChange={edit(setName)}
+          prefix={prefix}
+          optional
+        />
       )}
       {saved ? (
         <Text style={styles.account} numberOfLines={2}>
-          {saved.kind === "m3u" ? "M3U playlist" : `${hostOf(saved.server)} · ${saved.username}`}
+          {saved.kind === "m3u" ? t("M3U playlist") : `${hostOf(saved.server)} · ${saved.username}`}
         </Text>
       ) : null}
       {kind === "m3u" ? (
         <Field
-          label={saved ? "New playlist link" : "Playlist link"}
+          id={saved ? "new-playlist-link" : "playlist-link"}
+          label={t(saved ? "New playlist link" : "Playlist link")}
           value={link}
           onChange={edit(setLink)}
           placeholder={saved ? unchanged : "https://tv.example.com/playlist.m3u"}
@@ -150,7 +160,8 @@ export function ProviderForm({
           {saved ? null : (
             <>
               <Field
-                label="Server"
+                id="server"
+                label={t("Server")}
                 value={server}
                 onChange={edit(setServer)}
                 placeholder="http://line.example.com:8080"
@@ -158,7 +169,8 @@ export function ProviderForm({
                 prefix={prefix}
               />
               <Field
-                label="Username"
+                id="username"
+                label={t("Username")}
                 value={username}
                 onChange={edit(setUsername)}
                 prefix={prefix}
@@ -166,7 +178,8 @@ export function ProviderForm({
             </>
           )}
           <Field
-            label="Password"
+            id="password"
+            label={t("Password")}
             value={password}
             onChange={edit(setPassword)}
             placeholder={unchanged}
@@ -184,7 +197,7 @@ export function ProviderForm({
       ) : null}
       <TextButton
         primary={mode.kind === "connect"}
-        label={busy ? label.busy : failure ? "Try again" : label.idle}
+        label={t(busy ? label.busy : failure ? "Try again" : label.idle)}
         onPress={submit}
         disabled={busy}
         testID={`${prefix}-submit`}
@@ -194,7 +207,9 @@ export function ProviderForm({
   );
 }
 
+/** A labelled field, its testID `<prefix>-<id>` whatever the language. */
 function Field({
+  id,
   label,
   value,
   onChange,
@@ -205,6 +220,7 @@ function Field({
   optional,
   prefix,
 }: {
+  id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -222,7 +238,7 @@ function Field({
         accessibilityLabel={label}
         value={value}
         onChangeText={onChange}
-        placeholder={placeholder ?? (optional ? "Optional" : undefined)}
+        placeholder={placeholder ?? (optional ? t("Optional") : undefined)}
         placeholderTextColor="#636366"
         secureTextEntry={secret ?? false}
         // A playlist link is masked, but no password for AutoFill to offer or keep.
@@ -233,7 +249,7 @@ function Field({
         returnKeyType={onSubmit ? "go" : "next"}
         onSubmitEditing={onSubmit}
         style={styles.input}
-        testID={`${prefix}-${label.toLowerCase().replaceAll(" ", "-")}`}
+        testID={`${prefix}-${id}`}
       />
     </View>
   );

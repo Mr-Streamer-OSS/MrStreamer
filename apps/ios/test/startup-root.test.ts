@@ -69,6 +69,8 @@ vi.mock("expo-router", async () => {
     usePathname: () => "/",
   };
 });
+// The interface language is read from the phone's files, which this test leaves out.
+vi.mock("../src/language.ts", () => ({}));
 vi.mock("../src/downloads.ts", () => ({ startDownloads: () => {} }));
 vi.mock("../src/playback.ts", () => ({ onScreen: () => {} }));
 vi.mock("../src/telemetry/index.ts", () => ({

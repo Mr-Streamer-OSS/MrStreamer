@@ -41,7 +41,9 @@ vi.mock("expo-router", async () => {
     useSegments: () => ["(tabs)", "live"],
   };
 });
+vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("react-native", () => ({
+  Settings: { get: () => ["en-US"] },
   Image: () => null,
   Text: () => null,
   View: () => null,
@@ -155,6 +157,26 @@ describe("the tabs' keyboard shortcuts", () => {
     scenario.watch = true;
     await draw();
     expect(scenario.installed).toEqual([]);
+  });
+
+  it("titles them in the interface language as soon as Settings changes it", async () => {
+    const { chooseLanguage } = await import("../src/language.ts");
+    await draw();
+    try {
+      await React.act(async () => void chooseLanguage("fr-FR"));
+      expect(scenario.installed.map(({ title }) => title)).toEqual([
+        "Accueil",
+        "Direct",
+        "Films",
+        "Séries",
+        "Rechercher",
+        "Réglages",
+        "Retour",
+      ]);
+    } finally {
+      await React.act(async () => void chooseLanguage("system"));
+    }
+    expect(scenario.installed[0]?.title).toBe("Home");
   });
 
   it("selects a tab as its button does, closing Search over the tabs first", async () => {
