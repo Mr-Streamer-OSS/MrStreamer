@@ -1452,7 +1452,8 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: 16,
   },
-  findText: { color: colors.dim, fontSize: 17 },
+  // Shrinks so a long language or large text wraps beside the glyph rather than running off.
+  findText: { color: colors.dim, fontSize: 17, flexShrink: 1 },
   categoryName: {
     color: colors.text,
     fontSize: 28,
