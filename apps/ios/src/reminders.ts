@@ -219,7 +219,7 @@ const noticeOf = (reminder: KeptReminder): Notice => ({
   id: reminder.id,
   at: reminder.start,
   title: reminder.title,
-  body: t("{channel} · now", { channel: reminder.channelName }),
+  body: t("Starting now on {channel}", { channel: reminder.channelName }),
   channel: ownedKey({ subscriptionId: reminder.subscriptionId, id: reminder.channel }),
 });
 
@@ -336,16 +336,29 @@ export function checkReminders(): Promise<void> {
 }
 
 /**
- * Sets a reminder for `programme` of `channel`, still to come, and asks iOS's permission the
- * first time. One already set for that channel at that start stays as it is. Throws, changing
- * nothing, while the programme has started or the file can't be used or written.
+ * Sets a reminder for `programme` of `channel`, still to come, once iOS lets the app notify,
+ * asking the viewer the first time: `denied`, saving nothing, where it doesn't. One already set for
+ * that channel at that start stays as it is. Throws, changing nothing, while the programme has
+ * started or the file can't be used or written.
  */
 export async function setReminder(
   channel: Channel,
   programme: Pick<Programme, "start" | "stop" | "title">,
-): Promise<void> {
-  if (programme.start <= Date.now()) throw new AppFailure({ kind: "reminder", reason: "started" });
+): Promise<"set" | "denied"> {
+  const started = () => programme.start <= Date.now();
+  if (started()) throw new AppFailure({ kind: "reminder", reason: "started" });
   if (channel.adult) throw new AppFailure({ kind: "reminder", reason: "not-in-guide" });
+  // Before iOS asks anything: a file that can't be used refuses at once.
+  stored();
+  const module = native();
+  if (module) {
+    let allowed = await module.permission();
+    if (allowed === "undetermined") allowed = await module.ask();
+    permission.set(allowed);
+    if (allowed === "denied") return "denied";
+  }
+  // The viewer may have taken a while with iOS's prompt.
+  if (started()) throw new AppFailure({ kind: "reminder", reason: "started" });
   const reminders = stored();
   const found = foundAs(channel);
   const wanted = { subscriptionId: channel.subscriptionId, streams: found.streams };
@@ -367,10 +380,8 @@ export async function setReminder(
       },
     ]);
   }
-  const module = native();
-  if (module && (permission.get() ?? (await module.permission())) === "undetermined")
-    permission.set(await module.ask());
   await checkReminders();
+  return "set";
 }
 
 /** Takes reminder `id` out, with its notification. One that is gone changes nothing. */

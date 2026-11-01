@@ -252,7 +252,7 @@ describe("programme reminders", () => {
   it("asks iOS once and notifies at the programme's start, for the programme set", async () => {
     await reminders.setReminder(channel(), later);
     expect(ios.asked).toBe(1);
-    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
+    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Starting now on Channel 1`]);
     expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
 
     // Set again: the same reminder, and iOS isn't asked again.
@@ -270,25 +270,30 @@ describe("programme reminders", () => {
     expect(ios.asked).toBe(0);
   });
 
-  it("keeps a reminder iOS may not notify for, and schedules it once allowed", async () => {
+  it("saves nothing while iOS doesn't let the app notify, and schedules again once it does", async () => {
     ios.answer = "denied";
-    await reminders.setReminder(channel(), later);
-    expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
-    expect(notices()).toEqual([]);
+    expect(await reminders.setReminder(channel(), later)).toBe("denied");
+    expect(shown()).toEqual([]);
     expect(currentPermission()).toBe("denied");
 
-    // Allowed in iOS Settings, then back in the app.
+    // Allowed in iOS Settings, then set.
     ios.permission = "granted";
+    expect(await reminders.setReminder(channel(), later)).toBe("set");
+    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Starting now on Channel 1`]);
+
+    // Turned off again in iOS Settings: back in the app, the screens say so.
+    ios.permission = "denied";
     for (const listener of scenario.appState) listener("active");
     await settled();
-    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
+    expect(currentPermission()).toBe("denied");
+    expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
   });
 
   it("is kept after a relaunch, notifying once", async () => {
     await reminders.setReminder(channel(), later);
     await launch();
     expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
-    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
+    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Starting now on Channel 1`]);
   });
 
   it("never notifies for another programme the guide lists at its start", async () => {
@@ -311,7 +316,7 @@ describe("programme reminders", () => {
     shows();
     await settled();
     expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
-    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
+    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Starting now on Channel 1`]);
   });
 
   it("keeps a reminder while its guide can't be read, and drops one its provider stopped listing", async () => {
