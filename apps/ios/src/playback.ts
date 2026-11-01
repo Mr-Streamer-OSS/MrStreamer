@@ -1950,6 +1950,21 @@ function countDown(owned: NonNullable<typeof current>, saved: Promise<Saved>) {
   );
 }
 
+/**
+ * The system's Play, Pause or Play/Pause, the viewer's own as Watch's buttons are. Like Space in
+ * Watch, while an ended episode counts down any of them only ends the countdown. Pause also holds
+ * what is paused already, so bringing back a Watch set aside plays nothing.
+ */
+export function playOrPause(command: "play" | "pause" | "toggle") {
+  if (upNext.get()) return cancelUpNext();
+  const paused = state.get().phase.kind === "paused";
+  if (command === "toggle" || (command === "play" && paused)) return togglePause();
+  if (command !== "pause") return;
+  if (!paused) return togglePause();
+  resumeOnReturn = false;
+  cancelUpNext();
+}
+
 /** The system's next track: the episode counted down to, at once, else Next episode's. */
 export function nextEpisode() {
   if (counting?.play) playUpNext();

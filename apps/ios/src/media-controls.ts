@@ -5,24 +5,30 @@ import {
   playbackSpeed,
   playbackState,
   player,
+  playOrPause,
   seekBy,
   seekTo,
-  togglePause,
+  type Playing,
 } from "./playback.ts";
 
 // The system's Now Playing and remote commands (modules/media-controls): the lock screen, Control
 // Center, headphones and a car. They show what the app's one player plays while the viewer watches
 // it, in Watch, Picture in Picture or on AirPlay, or set Watch aside for Downloads or Settings;
 // never Home's silent preview, and nothing once it stopped or failed. A title shows its name, its
-// line ("S1 E2 · Name"), its length and where it is, at the rate the player says it plays at; a
-// channel shows that it is live. Nothing else of it, no address, provider or artwork, goes there.
+// line ("S1 E2 · Name" or its year), its length and where it is, at the rate the player says it
+// plays at; a channel shows its name and that it is live, and a programme from catch-up its
+// channel's name and Catch-up. No address, provider, login or artwork goes there: a channel's
+// line in the app can name its provider.
 //
 // Each command does what Watch's own button does, through the same playback calls, so it keeps
-// the viewer's Pause, the countdown and every request as Watch would: play and pause; 10 seconds
+// the viewer's Pause, the countdown and every request as Watch would. A command names what showed
+// when it was sent, and one for anything shown before is dropped. Play and pause; 10 seconds
 // back and forward and moving to a position, for a title or a programme from catch-up; and next,
 // for an episode with one after it. A channel takes only play and pause.
 
 interface NowPlaying {
+  /** Rises for each item shown; commands carry the one they were sent for. */
+  readonly session: number;
   readonly title: string;
   readonly subtitle: string;
   readonly live: boolean;
@@ -38,10 +44,11 @@ interface NowPlaying {
   readonly next: boolean;
 }
 
-type Command =
+type Command = { readonly session: number } & (
   | { readonly command: "play" | "pause" | "toggle" | "next" }
   | { readonly command: "skip"; readonly seconds: number }
-  | { readonly command: "seek"; readonly position: number };
+  | { readonly command: "seek"; readonly position: number }
+);
 
 interface Native {
   set(info: NowPlaying): void;
@@ -58,17 +65,20 @@ function native(): Native | null {
   return host.expo?.modules?.MediaControls ?? null;
 }
 
-/** What the system shows now, or null for nothing. */
-function nowPlaying(): NowPlaying | null {
+/** What the system shows now and what it is of, or null for nothing. */
+function nowPlaying(): {
+  readonly item: Playing;
+  readonly info: Omit<NowPlaying, "session">;
+} | null {
   const { phase, watch, pip, external, aside } = playbackState.get();
   if (phase.kind === "idle" || phase.kind === "failed") return null;
   if (!watch && !pip && !external && !aside) return null;
   const { item } = phase;
   const speed = playbackSpeed.get() ?? 1;
   const length = playbackLength.get();
-  return {
+  const info = {
     title: item.title,
-    subtitle: item.place,
+    subtitle: item.live ? "" : item.past ? "Catch-up" : item.place,
     live: item.live,
     duration: item.live || length <= 0 ? null : length,
     elapsed: item.live ? 0 : playbackClock.get(),
@@ -77,16 +87,23 @@ function nowPlaying(): NowPlaying | null {
     seekable: !item.live,
     next: item.next,
   };
+  return { item, info };
 }
 
 /** How far the shown position may drift from where the player is before it is shown again. */
 const DRIFT_S = 1.5;
 
-/** What was shown last and when, to count its position on as iOS does. */
-let shown: { readonly info: NowPlaying; readonly at: number } | null = null;
+/** What was shown last, of what, and when, to count its position on as iOS does. */
+interface Shown {
+  readonly item: Playing;
+  readonly info: NowPlaying;
+  readonly at: number;
+}
+let shown: Shown | null = null;
+let sessions = 0;
 
 /** Whether `next` says anything `before` doesn't, apart from a position iOS counts on to. */
-function changed(before: { readonly info: NowPlaying; readonly at: number }, next: NowPlaying) {
+function changed(before: Shown, next: NowPlaying) {
   const rest = (info: NowPlaying) => JSON.stringify({ ...info, elapsed: 0 });
   if (rest(before.info) !== rest(next)) return true;
   const counted = before.info.elapsed + ((Date.now() - before.at) / 1000) * before.info.rate;
@@ -102,28 +119,25 @@ function hide(module: Native) {
 }
 
 function publish(module: Native) {
-  const info = nowPlaying();
-  if (!info) return hide(module);
+  const now = nowPlaying();
+  if (!now) return hide(module);
+  const session = shown?.item === now.item ? shown.info.session : ++sessions;
+  const info = { ...now.info, session };
   if (shown && !changed(shown, info)) return;
   if (!shown) player().ownsNowPlaying = true;
-  shown = { info, at: Date.now() };
+  shown = { item: now.item, info, at: Date.now() };
   module.set(info);
 }
 
-/** Does what Watch's button for `command` does, while something shows. */
+/** Does what Watch's button for `command` does, for what still shows. */
 function answer(command: Command) {
-  const info = nowPlaying();
-  if (!info) return;
-  const { kind } = playbackState.get().phase;
+  if (!shown || command.session !== shown.info.session) return;
+  const { info } = shown;
   switch (command.command) {
     case "play":
-      if (kind === "paused") togglePause();
-      return;
     case "pause":
-      if (kind !== "paused") togglePause();
-      return;
     case "toggle":
-      return togglePause();
+      return playOrPause(command.command);
     case "skip":
       if (info.seekable) seekBy(command.seconds);
       return;

@@ -283,12 +283,15 @@ speed changes. The checkmark is the rate the patched player reports in each stat
 (AVPlayer's rate while it plays, else its default rate), never the request.
 
 `src/media-controls.ts` and `modules/media-controls` publish Now Playing while Watch, Picture in
-Picture, AirPlay or a Watch set aside shows the player, never Home's silent preview: the name, its
-line, the length, position and reported rate, or Live for a channel. No address, provider or
-artwork goes there. Stop, a failure and Close (which pauses) clear it and its commands. The
-player's `ownsNowPlaying` keeps the audio session unmixed so iOS shows it, without expo-video's own
-command targets. Play, pause, ±10 s, a position and next go through the same calls as Watch's
-buttons; a channel takes play and pause only. These are source and service checks; the real lock
+Picture, AirPlay or a Watch set aside shows the player, never Home's silent preview: a title's
+name, line, length, position and reported rate; a channel's name and Live; a programme from
+catch-up its channel's name and Catch-up. No address, provider, login or artwork goes there (a
+channel's line in the app can name its provider). Stop, a failure and Close (which pauses) clear it
+and its commands. The player's `ownsNowPlaying` keeps the audio session unmixed so iOS shows it,
+without expo-video's own command targets. Play, pause, ±10 s, a position and next go through the
+same calls as Watch's buttons; a channel takes play and pause only. During a countdown, play and
+pause only end it, as Space does, and Pause holds a Watch set aside paused. Each command names the
+item it was sent for and is dropped once another shows. These are source and service checks; the real lock
 screen, Control Center, headphones and background behavior still need native acceptance.
 
 ## How it is built

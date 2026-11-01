@@ -12,6 +12,8 @@ import { partSteps } from "../src/library.ts";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { nativePlayer } from "./native-player.ts";
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
 // A programme from a channel's catch-up through the real account, playback and Watch: only the
 // native player, files, secrets and the provider adapter are ports. It plays the channel's
 // streams that keep it, from its start, with a length, and never stands in for the channel live.
@@ -114,6 +116,7 @@ const closeSession = new Map<string, () => void>();
 const keys = { offered: [] as { id: string; input: string }[], press: (_id: string) => {} };
 // The system's Now Playing as the native media controls module holds it, and its commands.
 type NowPlaying = {
+  session: number;
   title: string;
   subtitle: string;
   live: boolean;
@@ -124,10 +127,11 @@ type NowPlaying = {
   seekable: boolean;
   next: boolean;
 };
-type MediaCommand =
+type MediaCommand = { session: number } & (
   | { command: "play" | "pause" | "toggle" | "next" }
   | { command: "skip"; seconds: number }
-  | { command: "seek"; position: number };
+  | { command: "seek"; position: number }
+);
 const system = {
   shown: null as NowPlaying | null,
   command: (_command: MediaCommand) => {},
@@ -1120,11 +1124,25 @@ describe("an episode's end in Watch", () => {
     await ends();
     await until(() => byTestId("watch-up-next") !== null);
     await React.act(async () => {
-      system.command({ command: "next" });
+      system.command({ command: "next", session: system.shown!.session });
       await tick();
     });
     expect(played).toEqual(["S1 E3"]);
     expect(byTestId("watch-up-next")).toBeNull();
+  });
+
+  it("only ends the countdown on the system's Play/Pause, as Space does", async () => {
+    await ends();
+    await until(() => byTestId("watch-up-next") !== null);
+    port.play.mockClear();
+    await React.act(async () => {
+      system.command({ command: "toggle", session: system.shown!.session });
+      await tick();
+    });
+    await seconds(20_000);
+    expect(byTestId("watch-up-next")).toBeNull();
+    expect(port.play).not.toHaveBeenCalled();
+    expect(played).toEqual([]);
   });
 
   it("returns today's row on Cancel, where Next episode still plays the next", async () => {
@@ -1218,16 +1236,17 @@ describe("the system's Now Playing and remote commands", () => {
     next: true,
     versions: false,
   };
-  const send = (command: MediaCommand) =>
+  /** Sends `command` for what the system shows, or for `session` when given. */
+  const send = (command: DistributiveOmit<MediaCommand, "session">, session?: number) =>
     React.act(async () => {
-      system.command(command);
+      system.command({ ...command, session: session ?? system.shown!.session });
       await tick();
     });
   /** An episode with one after it plays in Watch, or in Home's preview when `watch` is false. */
   async function watchEpisode(watch = true) {
     await React.act(async () => {
       await playback.play(
-        movie,
+        { ...movie },
         {
           kind: "file",
           originalLanguage: null,
@@ -1254,6 +1273,7 @@ describe("the system's Now Playing and remote commands", () => {
   it("shows an episode in Watch by its name, line, length, place and rate, and clears at Stop", async () => {
     await watchEpisode();
     expect(system.shown).toEqual({
+      session: expect.any(Number),
       title: "Harbour Lights",
       subtitle: "S1 E2 · The Quiet Ferry",
       live: false,
@@ -1313,6 +1333,34 @@ describe("the system's Now Playing and remote commands", () => {
     expect(nexts).toEqual(["Next episode"]);
   });
 
+  it("drops a command sent for what showed before", async () => {
+    await watchEpisode();
+    const before = system.shown!.session;
+    await watchEpisode();
+    asked();
+    await send({ command: "pause" }, before);
+    await send({ command: "next" }, before);
+    expect(port.pause).not.toHaveBeenCalled();
+    expect(nexts).toEqual([]);
+  });
+
+  it("keeps a Pause sent while Watch is set aside when Watch comes back", async () => {
+    await watchEpisode();
+    await React.act(async () => {
+      playback.setAside();
+      port.state(false);
+      await tick();
+    });
+    expect(system.shown?.rate).toBe(0);
+    asked();
+    await send({ command: "pause" });
+    await React.act(async () => {
+      playback.openWatch();
+      await tick();
+    });
+    expect(port.play).not.toHaveBeenCalled();
+  });
+
   it("takes only play and pause for a live channel", async () => {
     await connect([null, null, null]);
     await React.act(async () => {
@@ -1326,7 +1374,10 @@ describe("the system's Now Playing and remote commands", () => {
       await tick();
     });
     asked();
+    // A channel's line can name its provider, so only its name and that it is live show.
     expect(system.shown).toMatchObject({
+      title: "News",
+      subtitle: "",
       live: true,
       duration: null,
       seekable: false,

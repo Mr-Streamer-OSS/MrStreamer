@@ -36,7 +36,8 @@ public class MediaControlsModule: Module {
     Function("set") { (playing: NowPlaying) in
       let info = playing.info
       let commands = Commands(seekable: playing.seekable, next: playing.next)
-      DispatchQueue.main.async { MediaControlsRelay.shared.show(info, commands) }
+      let session = playing.session
+      DispatchQueue.main.async { MediaControlsRelay.shared.show(info, commands, session: session) }
     }
 
     Function("clear") {
@@ -46,6 +47,8 @@ public class MediaControlsModule: Module {
 }
 
 struct NowPlaying: Record {
+  /** What JavaScript showed, which each command names so one for something before is dropped. */
+  @Field var session: Double = 0
   @Field var title: String = ""
   @Field var subtitle: String = ""
   @Field var live: Bool = false
@@ -88,10 +91,12 @@ final class MediaControlsRelay {
   var owner: ObjectIdentifier?
   var send: (([String: Any]) -> Void)?
   private var answering: Commands?
+  private var session: Double = 0
   private var targets: [(command: MPRemoteCommand, target: Any)] = []
 
   /** Shows `info` with only `commands` answered, or nothing for nil. */
-  func show(_ info: [String: Any]?, _ commands: Commands?) {
+  func show(_ info: [String: Any]?, _ commands: Commands?, session: Double = 0) {
+    self.session = session
     answer(commands)
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
   }
@@ -133,8 +138,8 @@ final class MediaControlsRelay {
     _ body: @escaping (MPRemoteCommandEvent) -> [String: Any]?
   ) {
     let target = command.addTarget { [weak self] event in
-      guard let send = self?.send, let values = body(event) else { return .commandFailed }
-      send(values)
+      guard let self, let send = self.send, let values = body(event) else { return .commandFailed }
+      send(values.merging(["session": self.session]) { first, _ in first })
       return .success
     }
     command.isEnabled = true
