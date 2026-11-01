@@ -367,6 +367,56 @@ describe("online subtitle service ports", () => {
     expect(results.map(({ language }) => language)).toEqual(["pt-BR", "pt-PT", "en"]);
   });
 
+  it("asks each service for Arabic by its own code and keeps UTF-8 Arabic text as written", async () => {
+    // A BOM, joining letters, a trailing "!" and a mixed-direction line, as Arabic files have them.
+    const arabic = "مرحبا بالعالم!\nالحلقة 2 من Night Harbour";
+    const request = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.hostname === "dl.subdl.com")
+        return new Response(
+          zipSync({
+            "movie.ar.srt": strToU8(`\uFEFF1\n00:00:10,000 --> 00:00:12,000\n${arabic}\n\n`),
+          }),
+        );
+      if (url.hostname === "api.subdl.com") {
+        expect(url.searchParams.get("languages")).toBe("AR,EN");
+        return json({
+          status: true,
+          results: [{ tmdb_id: 123, type: "movie" }],
+          subtitles: [
+            { language: "Arabic", release_name: "Movie.AR", url: "/subtitle/arabic.zip" },
+            { lang: "AR", release_name: "Movie.AR.2", url: "/subtitle/arabic-2.zip" },
+          ],
+        });
+      }
+      expect(url.search).toBe("?languages=ar%2Cen&tmdb_id=123&type=movie");
+      return json({
+        data: [
+          {
+            attributes: {
+              language: "ar",
+              release: "Movie.AR",
+              feature_details: { tmdb_id: 123 },
+              files: [{ file_id: 7, file_name: "movie.srt" }],
+            },
+          },
+        ],
+      });
+    });
+    const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
+    const query = { kind: "movie" as const, tmdbId: 123, languages: ["ar", "en"] };
+
+    const subdl = await client.subdlSearch(keys.subdl, query, signal());
+    const open = await client.openSearch(keys.opensubtitles, query, signal());
+
+    expect(subdl.map(({ language }) => language)).toEqual(["ar", "ar"]);
+    expect(open.map(({ language }) => language)).toEqual(["ar"]);
+    expect((await client.download(subdl[0]!, keys, signal())).subtitle).toMatchObject({
+      language: "ar",
+      cues: [{ start: 10, end: 12, text: arabic }],
+    });
+  });
+
   it("downloads the text from a macOS ZIP without treating resource forks as another subtitle", async () => {
     const request = vi.fn<typeof fetch>(
       async () =>

@@ -10,9 +10,11 @@ import {
 import { suitability, versionLabels } from "../src/ondemand/languages.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
 import {
+  audioTracks,
   channelSubtitle,
   renditionAudio,
   renditionSubtitles,
+  subtitleTracks,
   type RenditionFacts,
 } from "../src/ondemand/tracks.ts";
 import type { OnDemandCatalogue } from "../src/provider.ts";
@@ -466,6 +468,29 @@ describe("subtitles a channel starts with", () => {
   });
 });
 
+describe("a file's tracks", () => {
+  it("name Arabic by its ISO 639-2 and 639-1 codes, as the language a viewer picks", () => {
+    const subtitles = subtitleTracks([
+      {
+        id: 2,
+        language: "ara",
+        name: null,
+        default: false,
+        page: null,
+        format: "text",
+        forced: false,
+        hearingImpaired: false,
+      },
+    ]);
+    const sound = audioTracks([
+      { id: 1, language: "ar", name: null, default: true, channels: 2, description: false },
+    ]);
+
+    expect(subtitles).toMatchObject([{ language: "ar", label: "العربية" }]);
+    expect(sound).toMatchObject([{ language: "ar", label: "العربية · Stereo" }]);
+  });
+});
+
 describe("an HLS stream's tracks", () => {
   const rendition = (id: number, facts: Partial<RenditionFacts> = {}): RenditionFacts => ({
     id,
@@ -542,6 +567,7 @@ describe("version labels", () => {
       "Night Harbour 720p (MULTI)",
       "Night Harbour (NL)",
       "Night Harbour (AR)",
+      "Night Harbour (HEB)",
       "Night Harbour",
     ];
 
@@ -556,7 +582,8 @@ describe("version labels", () => {
       "Deutsch sound",
       "Several languages · 720p",
       "English sound, Nederlands subtitles",
-      "AR",
+      "English sound, العربية subtitles",
+      "HEB",
       "Standard",
     ]);
   });
@@ -576,6 +603,11 @@ describe("version labels", () => {
     // It suits English viewers, and isn't dubbed for German ones.
     expect(suitability(tags, "en")).toBe(4);
     expect(suitability(tags, "de")).toBe(suitability(["NL"], "de"));
+  });
+
+  it("rank an (AR) version first for Arabic viewers, and as subtitled, not dubbed, for others", () => {
+    expect(suitability(["AR"], "ar")).toBe(4);
+    expect(suitability(["AR"], "en")).toBe(suitability(["NL"], "en"));
   });
 
   it("numbers versions that read the same", () => {

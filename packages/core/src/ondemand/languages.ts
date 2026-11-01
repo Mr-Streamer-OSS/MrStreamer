@@ -43,6 +43,7 @@ export const TITLE_LANGUAGES = [
   { code: "pt", name: "Português", marks: ["PT", "POR", "BR", "PTBR"], subtitled: false },
   { code: "pl", name: "Polski", marks: ["PL", "POL", "POLISH"], subtitled: false },
   { code: "tr", name: "Türkçe", marks: ["TR", "TUR", "TURKISH"], subtitled: false },
+  { code: "ar", name: "العربية", marks: ["AR", "ARA", "ARAB", "ARABIC"], subtitled: true },
 ] as const;
 
 export type TitleLanguage = (typeof TITLE_LANGUAGES)[number]["code"];
