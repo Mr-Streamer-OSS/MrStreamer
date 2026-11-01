@@ -44,7 +44,9 @@ Channel numbers stay each provider's own. When two channels share a number, typi
 
 ## One stream at a time
 
-Mr. Streamer plays one thing at a time, across all subscriptions. Starting a channel, movie or episode from another subscription stops what was playing first, so no provider ever sees a second connection from this app.
+Mr. Streamer plays one thing at a time, across all subscriptions. Starting a channel, movie or episode from another subscription stops what was playing first, so playing never takes a second connection from a provider.
+
+From 0.0.23, now in Nightly, a [recording](live-tv.md#recordings) uses a connection of its own, beside what plays. Mr. Streamer starts one only while the subscription has a connection free: as many as an Xtream account allows, and one for a playlist. It can't see other devices using the same account.
 
 Nothing switches to another subscription by itself. When a channel or a film doesn't play, Mr. Streamer says so and leaves the choice to you.
 
@@ -101,6 +103,7 @@ Open its row and choose **Remove**. Mr. Streamer asks first, and says what happe
 - Its login, its lists and its own guide are deleted from this computer, with the channels you mapped. The other subscriptions keep theirs, and the guides of Settings > Guides stay.
 - Its favourites, watchlist, history and progress stay, and come back when you add the same account again. This includes channels in your custom lists. Tick **Also delete…** to delete them too, along with saved subtitles. Your custom lists themselves stay. A title on the watchlist that another subscription saved as well stays there either way.
 - Removing a subscription also removes its programme reminders. Finished downloads stay; unfinished downloads are cancelled.
+- From 0.0.23, its recording schedules are removed and what it records stops, keeping what was recorded. Its recordings stay until you delete them.
 - Removing your only subscription returns to the Connect screen.
 
 ## Going back to an older version

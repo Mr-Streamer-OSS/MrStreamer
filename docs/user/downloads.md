@@ -12,7 +12,7 @@ Download a movie, an episode or a whole series and watch it later on this comput
 
 A movie’s button then shows how the download stands: **Queued**, its progress, **Waiting for playback**, **Paused** with **Resume**, or what went wrong with **Retry**. Pressing it while it is queued or downloading cancels it, and while it is paused resumes it. Once it is on this computer it reads **Watch offline**, and on a movie the arrow beside it has **Delete download**.
 
-Supported are movies and episodes of Xtream subscriptions and of playlists whose groups you mapped to movies or series. Live TV can't be recorded.
+Supported are movies and episodes of Xtream subscriptions and of playlists whose groups you mapped to movies or series. Live channels aren't downloaded; from 0.0.23, now in Nightly, you can [record them](live-tv.md#recordings).
 
 ## The Downloads page
 
@@ -22,7 +22,7 @@ While a download runs, waits or is queued, the top bar shows it beside Search, o
 
 - One download runs at a time, in the queue's order: the order you added them, until you change it. The arrows on a waiting download move it one place up or down. The one running stays first.
 - **Pause** stops a download and keeps what it has downloaded. It keeps its place and stays paused, also after a restart and while something plays, until you press **Resume**. **Pause all**, at the top of the page, pauses everything that can be; once everything is paused it reads **Resume all**.
-- **Waiting while … plays**: something from the same subscription is playing, a channel, Home's preview or a title, here or on a TV. Many subscriptions allow one connection, and playback always gets it. The download stops and goes on by itself once that subscription plays nothing. A download from another subscription goes on meanwhile.
+- **Waiting while … plays**: something from the same subscription is playing, a channel, Home's preview or a title, here or on a TV, or, from 0.0.23, [recording](live-tv.md#recordings). Many subscriptions allow one connection, and playback always gets it. The download stops and goes on by itself once that subscription plays and records nothing. A download from another subscription goes on meanwhile.
 - **Cancel** stops a download and deletes what it had downloaded.
 - A failed download says why: the disk is full and how much to free, the downloads folder can't be written, or what the provider answered. **Retry** queues it again; **Delete** removes it.
 - **Watch offline** plays a copy. **Delete** removes it from this computer, after you press it a second time.
@@ -49,7 +49,7 @@ Playing a copy makes no request to your provider. Its details and pictures were 
 
 Copies don't depend on a subscription. When a subscription expires or you remove it, its copies stay and still play; the page says "Subscription removed, copy kept". Removing a subscription cancels its unfinished downloads.
 
-With no subscription saved, the Connect screen shows **Downloads** at the top when there is something to watch. **Add subscription** goes back to the form.
+With no subscription saved, the Connect screen shows **Downloads** at the top when there is something to watch, and from 0.0.23 **Recordings** when any are kept. **Add subscription** goes back to the form.
 
 ## When a download is interrupted
 
