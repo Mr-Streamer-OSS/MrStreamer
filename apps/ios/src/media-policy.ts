@@ -1,4 +1,5 @@
 import type { AppError } from "@mrstreamer/contracts/errors";
+import { QUALITIES, type Quality } from "@mrstreamer/contracts/library";
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import type { FilterFile } from "@mrstreamer/core/ondemand/filters";
 import { TITLE_LANGUAGES, type TitleLanguage } from "@mrstreamer/core/ondemand/languages";
@@ -300,12 +301,17 @@ export interface Recovery {
   /** Streams to try: core's Automatic up to three, or the one chosen. */
   readonly candidates: number;
   readonly candidate: number;
-  /** The candidate that reached playing since the choice, or Try again, began; null if none. */
+  /** The candidate that last reached playing since the choice, or Try again, began; null if none. */
   readonly playedOn: number | null;
   /** Reconnects used since playing last earned them back. */
   readonly reconnects: number;
   /** How long the failed attempt played, without pause, waiting or backoff. */
   readonly playedMs: number;
+  /**
+   * Each candidate's quality, null where unknown, when Automatic chose them; null when the viewer
+   * chose the stream, which then never changes.
+   */
+  readonly qualities: readonly (Quality | null)[] | null;
 }
 
 export type Step =
@@ -318,14 +324,16 @@ export type Step =
       readonly reconnects: number;
     };
 
-type FailureClass = "refusal" | "missing" | "transient" | "no-start" | "media" | "terminal";
+/** "slow" is what a connection too weak for the stream gives: it lost the connection or stalled. */
+type FailureClass =
+  "refusal" | "missing" | "transient" | "slow" | "no-start" | "media" | "terminal";
 
 /** Native failure kinds as recovery treats them. Unknown is a budget class, never a cause. */
 const NATIVE: Readonly<Record<ObservedFailure["kind"], FailureClass>> = {
   auth: "refusal",
   "rate-limit": "refusal",
   missing: "missing",
-  network: "transient",
+  network: "slow",
   unknown: "transient",
   http: "transient",
   decode: "media",
@@ -339,18 +347,37 @@ function classOf(failure: PlaybackFailure): FailureClass {
     case "format":
       return failure.failure.kind === "refused" ? "refusal" : "terminal";
     case "deadline":
-      return failure.stage === "stall" ? "transient" : "no-start";
+      return failure.stage === "stall" ? "slow" : "no-start";
     default:
       return "terminal";
   }
 }
 
 /**
+ * Automatic's candidate a step below `failed`'s quality: of those whose quality is known and
+ * lower, the best, the provider's first among equals. Null when there is none.
+ */
+function lower(qualities: readonly (Quality | null)[], failed: number): number | null {
+  const rank = (quality?: Quality | null) => (quality ? QUALITIES.indexOf(quality) : -1);
+  const from = rank(qualities[failed]);
+  if (from < 0) return null;
+  let best: number | null = null;
+  for (const [index, quality] of qualities.entries()) {
+    const at = rank(quality);
+    if (at > from && (best === null || at < rank(qualities[best]))) best = index;
+  }
+  return best;
+}
+
+/**
  * What a failed attempt leads to. Only a Live stream someone watches, not paused by the viewer,
  * under the login it began with, tries again. Before the choice played, the next candidate; once
- * it played, the candidate that played after 1, 2, 4 and 8 seconds, earned back by playing
- * STABLE_PLAYBACK_MS. That is at most 3 + 4 opens until a stream plays that long, and 4 after.
- * Refusals and app failures stop at once.
+ * it played, a reconnect after 1, 2, 4 and 8 seconds, earned back by playing STABLE_PLAYBACK_MS.
+ * That is at most 3 + 4 opens until a stream plays that long, and 4 after. A reconnect opens the
+ * candidate that played last, except when Automatic's stream stalled, lost its connection or
+ * didn't start: then the candidate a quality below it, when the channel has one. A lower stream
+ * that fails before it plays goes back to the one that played. Refusals and app failures stop at
+ * once.
  */
 export function nextStep(
   failure: PlaybackFailure,
@@ -370,10 +397,19 @@ export function nextStep(
     const next = recovery.candidate + 1;
     return next < recovery.candidates ? { kind: "candidate", candidate: next } : failed;
   }
-  if (kind !== "transient" && kind !== "no-start") return failed;
+  const steppedDown = recovery.candidate !== recovery.playedOn;
+  if (!steppedDown && kind !== "transient" && kind !== "slow" && kind !== "no-start") return failed;
   const used = recovery.playedMs >= STABLE_PLAYBACK_MS ? 0 : recovery.reconnects;
   const delayMs = RECONNECT_DELAYS_MS[used];
-  return delayMs === undefined
-    ? failed
-    : { kind: "reconnect", candidate: recovery.playedOn, delayMs, reconnects: used + 1 };
+  if (delayMs === undefined) return failed;
+  const below =
+    recovery.qualities && (kind === "slow" || kind === "no-start")
+      ? lower(recovery.qualities, recovery.candidate)
+      : null;
+  return {
+    kind: "reconnect",
+    candidate: below ?? recovery.playedOn,
+    delayMs,
+    reconnects: used + 1,
+  };
 }

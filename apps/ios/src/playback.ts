@@ -1,5 +1,6 @@
 import { appFailure, type AnalyticsFailure } from "@mrstreamer/contracts/analytics";
 import type { AppError } from "@mrstreamer/contracts/errors";
+import type { Quality } from "@mrstreamer/contracts/library";
 import { DEFAULT_NEXT_EPISODE_DELAY } from "@mrstreamer/contracts/preferences";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import {
@@ -170,6 +171,8 @@ type Open = (signal: AbortSignal) => Promise<Source>;
 
 export interface LiveCandidate {
   readonly variantId: string;
+  /** The quality its name says; absent or null when unknown, which Automatic never steps from. */
+  readonly quality?: Quality | null;
   readonly open: Open;
 }
 
@@ -765,6 +768,10 @@ function fail(failure: PlaybackFailure): void {
       playedOn: epoch.playedOn,
       reconnects: epoch.reconnects,
       playedMs: epoch.playedMs,
+      qualities:
+        choice.plan.kind === "live" && !choice.plan.explicit
+          ? choice.plan.candidates.map((candidate) => candidate.quality ?? null)
+          : null,
     },
     {
       live: choice.plan.kind === "live",
@@ -1307,7 +1314,7 @@ function observe(event: PlaybackObservation) {
       }
       if (playing && !current.loaded) {
         current.loaded = true;
-        current.epoch.playedOn ??= current.epoch.candidate;
+        current.epoch.playedOn = current.epoch.candidate;
         if (!current.epoch.played) {
           current.epoch.played = true;
           current.options.outcome?.(true);

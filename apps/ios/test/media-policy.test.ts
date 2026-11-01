@@ -498,6 +498,7 @@ describe("Live recovery", () => {
     playedOn: null,
     reconnects: 0,
     playedMs: 0,
+    qualities: null,
   };
 
   it("keeps the desktop's reconnect waits and stable time", () => {
@@ -566,6 +567,52 @@ describe("Live recovery", () => {
     for (const failure of [native("missing"), native("decode"), native("auth")]) {
       expect(nextStep(failure, played, watched)).toEqual({ kind: "fail" });
     }
+  });
+
+  it("reconnects Automatic a quality lower after a stall or lost connection, never a chosen stream", () => {
+    const automatic: Recovery = {
+      ...starting,
+      playedOn: 0,
+      playedMs: 5000,
+      qualities: ["fhd", "hd", "sd"],
+    };
+    const stall: PlaybackFailure = { kind: "deadline", stage: "stall" };
+    const noStart: PlaybackFailure = { kind: "deadline", stage: "startup" };
+    for (const failure of [network, stall, noStart]) {
+      expect(nextStep(failure, automatic, watched)).toEqual({
+        kind: "reconnect",
+        candidate: 1,
+        delayMs: 1000,
+        reconnects: 1,
+      });
+    }
+    // A provider error isn't a weak connection; nothing is lower than the lowest; unknown stays.
+    expect(nextStep(native("unknown"), automatic, watched)).toMatchObject({ candidate: 0 });
+    const lowest: Recovery = { ...automatic, candidate: 2, playedOn: 2 };
+    expect(nextStep(stall, lowest, watched)).toMatchObject({ candidate: 2 });
+    const unknown: Recovery = { ...automatic, qualities: [null, "hd", "sd"] };
+    expect(nextStep(stall, unknown, watched)).toMatchObject({ candidate: 0 });
+    // The best lower quality, wherever the order put it.
+    const preferredSd: Recovery = { ...automatic, qualities: ["sd", "uhd", "hd"], candidate: 1 };
+    expect(nextStep(stall, { ...preferredSd, playedOn: 1 }, watched)).toMatchObject({
+      candidate: 2,
+    });
+    // A chosen stream reconnects as it is.
+    expect(nextStep(stall, { ...automatic, qualities: null }, watched)).toMatchObject({
+      candidate: 0,
+    });
+    // The lower stream failing before it plays goes back to the one that played.
+    const stepped: Recovery = { ...automatic, candidate: 1, reconnects: 1, playedMs: 0 };
+    expect(nextStep(native("missing"), stepped, watched)).toEqual({
+      kind: "reconnect",
+      candidate: 0,
+      delayMs: 2000,
+      reconnects: 2,
+    });
+    expect(nextStep(noStart, stepped, watched)).toMatchObject({ candidate: 2 });
+    expect(nextStep(native("auth"), stepped, watched)).toEqual({ kind: "fail" });
+    // Stepping down spends the same four reconnects.
+    expect(nextStep(stall, { ...automatic, reconnects: 4 }, watched)).toEqual({ kind: "fail" });
   });
 
   it("opens at most 3 + 4 streams until one plays 30 seconds, and 4 after", () => {

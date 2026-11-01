@@ -1526,6 +1526,7 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
   const [first, ...rest] = streamsToPlay(kept, { liveQuality, channelVariants: picks }, pick).map(
     (variant) => ({
       variantId: variant.id,
+      quality: variant.quality,
       open: async (signal: AbortSignal) => {
         if (!permitted())
           throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
