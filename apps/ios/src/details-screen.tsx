@@ -160,6 +160,7 @@ function usePressed(key: string): () => Request {
 }
 
 function Details({ title, opened, asked }: { title: Title; opened: OwnedId; asked: boolean }) {
+  const locale = useLocale();
   const viewing = useViewing();
   const watchlist = useWatchlist();
   const state = useSavedState();
@@ -312,7 +313,8 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
           .filter(Boolean)
           .join(" · ")
       : "";
-  }, [title, version, providers]);
+    // Core names each version in the interface language.
+  }, [title, version, providers, locale]);
 
   const facts = details.kind === "ready" ? details.value : null;
   const movieProgress =

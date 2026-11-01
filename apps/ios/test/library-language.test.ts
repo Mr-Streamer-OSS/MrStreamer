@@ -27,6 +27,14 @@ const scenario = vi.hoisted(() => ({
   } | null,
   played: [] as OwnedId[],
 }));
+/** One answer per source, as the app's stores give: a new render alone makes nothing new. */
+const stable = vi.hoisted(() => {
+  const made = new Map<unknown, unknown>();
+  return <T>(source: unknown, make: () => T): T => {
+    if (!made.has(source)) made.set(source, make());
+    return made.get(source) as T;
+  };
+});
 
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
@@ -101,7 +109,7 @@ vi.mock("../src/account.ts", () => ({
   members: () => scenario.members,
   reloadTitles: () => undefined,
   retryTitles: () => undefined,
-  useRoster: () => ({ kind: "ready", members: scenario.members }),
+  useRoster: () => stable(scenario.members, () => ({ kind: "ready", members: scenario.members })),
 }));
 vi.mock("../src/resume.ts", () => ({
   detailsHref: () => "/",
@@ -114,7 +122,7 @@ vi.mock("../src/resume.ts", () => ({
   },
 }));
 vi.mock("../src/titles.ts", () => ({
-  useTitleLists: () => ({ kind: "ready", index: scenario.index }),
+  useTitleLists: () => stable(scenario.index, () => ({ kind: "ready", index: scenario.index })),
   useCollections: (kind: string) => (kind === "movie" ? scenario.made : null),
   useMetadataVersion: () => 0,
   useFileFacts: () => 0,
@@ -265,11 +273,14 @@ it("shows a title's details in the language, keeping the version picked for Play
   // The second provider's version, named by its provider as given.
   const cabin = scenario.menu!.options.findIndex((option) => option.startsWith("Cabin"));
   React.act(() => scenario.menu!.pick(cabin));
+  expect(version()?.getAttribute("aria-label")).toContain("Audio English");
 
   speak("nl-NL");
   expect(text()).toContain("Same movie");
   expect(button("Bewaren")).toBeTruthy();
   expect(version()?.getAttribute("aria-label")).toMatch(/^Versie, Cabin/);
+  // Core's name for the version's sound follows the language too.
+  expect(version()?.getAttribute("aria-label")).toContain("Geluid English");
   press("Afspelen");
   expect(scenario.played).toEqual([{ subscriptionId: "b", id: "1" }]);
 });
