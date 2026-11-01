@@ -1,7 +1,7 @@
 import { keychain as keychainStore } from "./keychain.ts";
 import { createRoot, document } from "./dom.ts";
 import * as React from "react";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { ArchiveWindow } from "@mrstreamer/contracts/playback";
@@ -11,6 +11,8 @@ import { finish } from "@mrstreamer/core/steps";
 import { partSteps } from "../src/library.ts";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { nativePlayer } from "./native-player.ts";
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
 // A programme from a channel's catch-up through the real account, playback and Watch: only the
 // native player, files, secrets and the provider adapter are ports. It plays the channel's
@@ -112,6 +114,28 @@ let unshown: { named: Unshown[]; more: number } = { named: [], more: 0 };
 const closeSession = new Map<string, () => void>();
 // The keyboard's shortcuts Watch offers, pressed by their key.
 const keys = { offered: [] as { id: string; input: string }[], press: (_id: string) => {} };
+// The system's Now Playing as the native media controls module holds it, and its commands.
+type NowPlaying = {
+  session: number;
+  title: string;
+  subtitle: string;
+  live: boolean;
+  duration: number | null;
+  elapsed: number;
+  rate: number;
+  speed: number;
+  seekable: boolean;
+  next: boolean;
+};
+type MediaCommand = { session: number } & (
+  | { command: "play" | "pause" | "toggle" | "next" }
+  | { command: "skip"; seconds: number }
+  | { command: "seek"; position: number }
+);
+const system = {
+  shown: null as NowPlaying | null,
+  command: (_command: MediaCommand) => {},
+};
 Object.assign(globalThis, {
   expo: {
     modules: {
@@ -122,6 +146,18 @@ Object.assign(globalThis, {
         addListener: (_event: "command", listener: (event: { id: string }) => void) => {
           keys.press = (id) => listener({ id });
           return { remove: () => (keys.press = () => {}) };
+        },
+      },
+      MediaControls: {
+        set: (info: NowPlaying) => {
+          system.shown = info;
+        },
+        clear: () => {
+          system.shown = null;
+        },
+        addListener: (_event: "command", listener: (command: MediaCommand) => void) => {
+          system.command = listener;
+          return { remove: () => (system.command = () => {}) };
         },
       },
       TitleFormats: {
@@ -1084,6 +1120,31 @@ describe("an episode's end in Watch", () => {
     expect(played).toEqual(["S1 E3"]);
   });
 
+  it("plays the episode counted down to at once on the system's next track", async () => {
+    await ends();
+    await until(() => byTestId("watch-up-next") !== null);
+    await React.act(async () => {
+      system.command({ command: "next", session: system.shown!.session });
+      await tick();
+    });
+    expect(played).toEqual(["S1 E3"]);
+    expect(byTestId("watch-up-next")).toBeNull();
+  });
+
+  it("only ends the countdown on the system's Play/Pause, as Space does", async () => {
+    await ends();
+    await until(() => byTestId("watch-up-next") !== null);
+    port.play.mockClear();
+    await React.act(async () => {
+      system.command({ command: "toggle", session: system.shown!.session });
+      await tick();
+    });
+    await seconds(20_000);
+    expect(byTestId("watch-up-next")).toBeNull();
+    expect(port.play).not.toHaveBeenCalled();
+    expect(played).toEqual([]);
+  });
+
   it("returns today's row on Cancel, where Next episode still plays the next", async () => {
     await ends();
     await until(() => byTestId("watch-up-next") !== null);
@@ -1161,5 +1222,293 @@ describe("an episode's end in Watch", () => {
     });
     await seconds(20_000);
     expect(played).toEqual([]);
+  });
+});
+
+describe("the system's Now Playing and remote commands", () => {
+  const nexts: string[] = [];
+  const movie = {
+    id: "sub-1:m1",
+    subscriptionId: null,
+    title: "Harbour Lights",
+    place: "S1 E2 · The Quiet Ferry",
+    live: false,
+    next: true,
+    versions: false,
+  };
+  /** Sends `command` for what the system shows, or for `session` when given. */
+  const send = (command: DistributiveOmit<MediaCommand, "session">, session?: number) =>
+    React.act(async () => {
+      system.command({ ...command, session: session ?? system.shown!.session });
+      await tick();
+    });
+  /** An episode with one after it plays in Watch, or in Home's preview when `watch` is false. */
+  async function watchEpisode(watch = true) {
+    await React.act(async () => {
+      await playback.play(
+        { ...movie },
+        {
+          kind: "file",
+          originalLanguage: null,
+          open: async () => ({ url: "file:e2.mp4", container: "mp4" }),
+        },
+        { watch, login: [], next: () => nexts.push("Next episode") },
+      );
+      port.ready();
+      port.currentTime = 30;
+      port.state(true);
+      await tick();
+    });
+  }
+  beforeEach(() => {
+    nexts.length = 0;
+  });
+  /** Forgets what the player was asked so far, as playing asks it to pause and play. */
+  const asked = () => {
+    port.play.mockClear();
+    port.pause.mockClear();
+    port.seekBy.mockClear();
+  };
+
+  it("shows an episode in Watch by its name, line, length, place and rate, and clears at Stop", async () => {
+    await watchEpisode();
+    expect(system.shown).toEqual({
+      session: expect.any(Number),
+      title: "Harbour Lights",
+      subtitle: "S1 E2 · The Quiet Ferry",
+      live: false,
+      duration: 600,
+      elapsed: 30,
+      rate: 1,
+      speed: 1,
+      seekable: true,
+      next: true,
+    });
+    expect(port.ownsNowPlaying).toBe(true);
+    await React.act(async () => {
+      port.state(false);
+      await tick();
+    });
+    expect(system.shown?.rate).toBe(0);
+    await React.act(async () => {
+      await playback.stop();
+    });
+    expect(system.shown).toBeNull();
+    expect(port.ownsNowPlaying).toBe(false);
+  });
+
+  it("leaves the system alone for Home's preview and once Close paused what played", async () => {
+    await watchEpisode(false);
+    expect(system.shown).toBeNull();
+    await React.act(async () => {
+      playback.openWatch();
+      await tick();
+    });
+    expect(system.shown?.title).toBe("Harbour Lights");
+    await React.act(async () => {
+      await playback.closeWatch();
+    });
+    expect(system.shown).toBeNull();
+  });
+
+  it("pauses, plays, skips, seeks and plays the next episode as Watch's buttons do", async () => {
+    await watchEpisode();
+    asked();
+    await send({ command: "play" });
+    expect(port.pause).not.toHaveBeenCalled();
+    expect(port.play).not.toHaveBeenCalled();
+    await send({ command: "pause" });
+    expect(port.pause).toHaveBeenCalledTimes(1);
+    await React.act(async () => {
+      port.state(false);
+      await tick();
+    });
+    expect(playback.playbackState.get().phase.kind).toBe("paused");
+    await send({ command: "toggle" });
+    expect(port.play).toHaveBeenCalledTimes(1);
+    await send({ command: "skip", seconds: -10 });
+    expect(port.seekBy).toHaveBeenCalledWith(-10);
+    await send({ command: "seek", position: 120 });
+    expect(port.currentTime).toBe(120);
+    await send({ command: "next" });
+    expect(nexts).toEqual(["Next episode"]);
+  });
+
+  it("clears Now Playing and its commands when the stream fails", async () => {
+    await watchEpisode();
+    await React.act(async () => {
+      port.failure();
+      await tick();
+    });
+    expect(system.shown).toBeNull();
+    expect(port.ownsNowPlaying).toBe(false);
+  });
+
+  it("offers next only while Watch shows, as Watch's Next episode", async () => {
+    await watchEpisode();
+    await React.act(async () => {
+      playback.setAside();
+      await tick();
+    });
+    expect(system.shown?.next).toBe(false);
+    await send({ command: "next" });
+    expect(nexts).toEqual([]);
+  });
+
+  it("drops a command sent for what showed before", async () => {
+    await watchEpisode();
+    const before = system.shown!.session;
+    await watchEpisode();
+    asked();
+    await send({ command: "pause" }, before);
+    await send({ command: "next" }, before);
+    expect(port.pause).not.toHaveBeenCalled();
+    expect(nexts).toEqual([]);
+  });
+
+  it("keeps a Pause sent while Watch is set aside when Watch comes back", async () => {
+    await watchEpisode();
+    await React.act(async () => {
+      playback.setAside();
+      port.state(false);
+      await tick();
+    });
+    expect(system.shown?.rate).toBe(0);
+    asked();
+    await send({ command: "pause" });
+    await React.act(async () => {
+      playback.openWatch();
+      await tick();
+    });
+    expect(port.play).not.toHaveBeenCalled();
+  });
+
+  it("takes only play and pause for a live channel", async () => {
+    await connect([null, null, null]);
+    await React.act(async () => {
+      account.playChannel(channel, "News", { watch: true });
+      await tick();
+    });
+    await until(() => opened.length === 1);
+    await React.act(async () => {
+      port.ready();
+      port.state(true);
+      await tick();
+    });
+    asked();
+    // A channel's line can name its provider, so only its name and that it is live show.
+    expect(system.shown).toMatchObject({
+      title: "News",
+      subtitle: "",
+      live: true,
+      duration: null,
+      seekable: false,
+      next: false,
+    });
+    await send({ command: "skip", seconds: 10 });
+    await send({ command: "seek", position: 60 });
+    expect(port.seekBy).not.toHaveBeenCalled();
+    await send({ command: "pause" });
+    expect(port.pause).toHaveBeenCalled();
+  });
+});
+
+describe("speed in Watch", () => {
+  const button = (id: string) =>
+    [...container.querySelectorAll("button")].find(
+      (each) => each.getAttribute("data-testid") === id,
+    ) ?? null;
+  async function watchMovie() {
+    await React.act(async () => {
+      await playback.play(
+        {
+          id: "sub-1:m1",
+          subscriptionId: null,
+          title: "Harbour Lights",
+          place: "Movie",
+          live: false,
+          next: false,
+          versions: false,
+        },
+        {
+          kind: "file",
+          originalLanguage: null,
+          open: async () => ({ url: "file:m1.mp4", container: "mp4" }),
+        },
+        { watch: true, login: [] },
+      );
+      port.ready();
+      port.state(true);
+      await tick();
+    });
+  }
+  async function openSpeed() {
+    const before = sheets.length;
+    await React.act(async () => {
+      button("watch-speed")?.click();
+      await tick();
+    });
+    await until(() => sheets.length > before);
+    return sheets.at(-1)!;
+  }
+  afterEach(() => {
+    for (const sheet of sheets) sheet.pick(sheet.options.length - 1);
+    preferences.updateMediaPreferences("titleSpeed", 1);
+  });
+
+  it("plays at the speed picked, saves it for the next title, and ticks what the player reports", async () => {
+    await watchMovie();
+    const sheet = await openSpeed();
+    expect(sheet.options).toEqual(["0.5×", "0.75×", "✓ 1×", "1.25×", "1.5×", "2×", "Cancel"]);
+    await React.act(async () => {
+      sheet.pick(4);
+      await tick();
+    });
+    expect(port.playbackRate).toBe(1.5);
+    const saved = JSON.parse(
+      readFileSync(join(native.root, "documents/media-preferences.json"), "utf8"),
+    );
+    expect(saved.titleSpeed).toBe(1.5);
+    // Until the player reports it, the tick stays on what it last said it plays at.
+    expect((await openSpeed()).options[2]).toBe("✓ 1×");
+    await React.act(async () => {
+      port.state(true);
+      await tick();
+    });
+    expect(button("watch-speed")?.textContent).toBe("Speed 1.5×");
+    expect((await openSpeed()).options[4]).toBe("✓ 1.5×");
+
+    port.playbackRate = 1;
+    await watchMovie();
+    expect(port.playbackRate).toBe(1.5);
+  });
+
+  it("plays a live channel and a programme from its catch-up at their own speed, offering none", async () => {
+    preferences.updateMediaPreferences("titleSpeed", 2);
+    port.playbackRate = 2;
+    await connect([3, 3, 3]);
+    await React.act(async () => {
+      account.playChannel(channel, "News", { watch: true });
+      await tick();
+    });
+    await until(() => port.playbackRate === 1);
+    expect(button("watch-speed")).toBeNull();
+
+    port.playbackRate = 2;
+    await play(aired(2 * HOUR));
+    await until(() => port.playbackRate === 1);
+    await React.act(async () => {
+      port.ready();
+      port.state(true);
+      await tick();
+    });
+    expect(button("watch-audio")).not.toBeNull();
+    expect(button("watch-speed")).toBeNull();
+    // The programme and that it is catch-up, never the channel's line, which can name its provider.
+    expect(system.shown).toMatchObject({
+      title: "Morning Tide",
+      subtitle: "Catch-up",
+      live: false,
+    });
   });
 });

@@ -275,6 +275,29 @@ Release/UI acceptance. Scoped producer fixtures remain in
 `test/native-player-r24`; `managed-playback.test.ts` and the existing caller suites exercise the
 app through native-port stand-ins. Actual consumer Release/UI verification remains required.
 
+## Speed and Now Playing
+
+Watch's Speed plays movies and episodes at 0.5× to 2×, saved in `media-preferences.json` for
+every later title; channels and catch-up always play at 1×. A paused player stays paused when the
+speed changes. The checkmark is the rate the patched player reports in each state observation
+(AVPlayer's rate while it plays, else its default rate), never the request.
+
+`src/media-controls.ts` and `modules/media-controls` publish Now Playing while Watch, Picture in
+Picture, AirPlay or a Watch set aside shows the player, never Home's silent preview: a title's
+name, line, length when known and position; a channel's name and Live; a programme from
+catch-up its own name, Catch-up, length when known and position. Every kind also publishes its
+reported speed and current playback rate, zero while paused. No address, provider, login or artwork goes there (a
+channel's line in the app can name its provider). Stop and failure clear it and its commands.
+Close pauses and clears them only when neither AirPlay nor Picture in Picture retains playback;
+while either remains, Now Playing and its supported commands remain. The player's `ownsNowPlaying` keeps the audio session unmixed so iOS shows it,
+without expo-video's own command targets. Play, pause, ±10 s, a position and next go through the
+same calls as Watch's buttons; next only while Watch shows, and a channel takes play and pause
+only. During a countdown, play and
+pause only end it, as Space does, and Pause holds a Watch set aside paused. Each command names the
+item it was sent for and is dropped once another shows. These are source and service checks; the real lock
+screen, Control Center, headphones and background behavior still need native acceptance, including
+where iOS shows next beside the ±10 s skips.
+
 ## How it is built
 
 Each responsibility has one owner, a plain module with a store the screens read:
