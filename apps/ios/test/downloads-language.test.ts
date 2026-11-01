@@ -158,6 +158,10 @@ const stopped = movie("f", "Kettle Run", {
   kind: "failed",
   failure: { kind: "app", error: { kind: "unexpected", detail: "This download stopped." } },
 });
+const offline = movie("o", "Salt Meridian", {
+  kind: "failed",
+  failure: { kind: "stream", failure: { kind: "network", detail: "You seem to be offline." } },
+});
 const copy = movie("c", "North of Quiet", { kind: "complete" });
 const transferring = movie("t", "Paper Harbor", {
   kind: "transferring",
@@ -190,12 +194,21 @@ const actions = (id: string) => row(id).accessibilityActions?.slice();
 
 it("shows Downloads in the language picked and redraws it in a new one, the queue untouched", () => {
   speak("nl-NL");
-  const screen = show(React.createElement(DownloadsScreen), [paused, queued, stopped, copy]);
+  const screen = show(React.createElement(DownloadsScreen), [
+    paused,
+    queued,
+    stopped,
+    offline,
+    copy,
+  ]);
   expect(screen.textContent).toContain("Wachtrij");
   expect(screen.textContent).toContain("Op deze iPhone");
   expect(screen.textContent).toContain("Gepauzeerd");
   // A reason downloads.ts keeps in English reads in the language.
   expect(screen.textContent).toContain("Deze download is gestopt.");
+  expect(screen.textContent).toContain(
+    "De verbinding met de provider is mislukt. Je lijkt offline te zijn.",
+  );
   expect(row("p").accessibilityLabel).toBe("Iron Bay, 2024, Gepauzeerd");
   expect(actions("p")).toEqual([
     { name: "Resume", label: "Hervatten" },
@@ -209,12 +222,18 @@ it("shows Downloads in the language picked and redraws it in a new one, the queu
     "Annuleren",
   ]);
 
-  const order = () => [...scenario.pressables.keys()].filter((id) => /^download-\w$/.test(id));
+  // The rows' order as drawn.
+  const names = [paused, queued, stopped, offline, copy].map(({ name }) => name);
+  const text = () => screen.textContent ?? "";
+  const order = () => names.toSorted((a, b) => text().indexOf(a) - text().indexOf(b));
   const before = order();
   speak("de-DE");
   expect(screen.textContent).toContain("Warteschlange");
   expect(screen.textContent).toContain("Auf diesem iPhone");
   expect(screen.textContent).toContain("Dieser Download wurde angehalten.");
+  expect(screen.textContent).toContain(
+    "Die Verbindung zum Anbieter ist fehlgeschlagen. Du scheinst offline zu sein.",
+  );
   expect(screen.textContent).not.toContain("Wachtrij");
   expect(row("q").accessibilityLabel).toBe("Glass Orchard, 2024, In der Warteschlange");
   expect(actions("p")).toEqual([

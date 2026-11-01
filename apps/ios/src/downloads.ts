@@ -735,9 +735,9 @@ async function apply(record: Stored, outcome: OutcomeV2, inFront: boolean, bound
       // of the viewer, it fails, and its Retry goes on.
       if (!inFront) requeue();
       else {
-        const detail = OFFLINE.has(outcome.code)
-          ? t("You seem to be offline.")
-          : t("The connection to the provider failed.");
+        // Saved in English, which every version reads; Downloads says it in the language. The
+        // generic case adds nothing to describeError's own "The connection to the provider failed."
+        const detail = OFFLINE.has(outcome.code) ? "You seem to be offline." : "";
         fail({ kind: "stream", failure: { kind: "network", detail } });
       }
       break;

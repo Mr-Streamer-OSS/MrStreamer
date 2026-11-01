@@ -83,6 +83,7 @@ export const t = catalogue(
     "Couldn't retry {name}": "Couldn't retry {name}",
     // Reasons downloads.ts keeps in English (`inLanguage`).
     "This download stopped.": "This download stopped.",
+    "You seem to be offline.": "You seem to be offline.",
     "The download couldn't go on from where it stopped.":
       "The download couldn't go on from where it stopped.",
     "The file arrived incomplete.": "The file arrived incomplete.",
@@ -228,6 +229,7 @@ export const t = catalogue(
       "Couldn't move {name}": "{name} kon niet worden verplaatst",
       "Couldn't retry {name}": "{name} kon niet opnieuw worden geprobeerd",
       "This download stopped.": "Deze download is gestopt.",
+      "You seem to be offline.": "Je lijkt offline te zijn.",
       "The download couldn't go on from where it stopped.":
         "De download kon niet verder waar hij was gestopt.",
       "The file arrived incomplete.": "Het bestand kwam onvolledig binnen.",
@@ -381,6 +383,7 @@ export const t = catalogue(
       "Couldn't move {name}": "Impossible de déplacer {name}",
       "Couldn't retry {name}": "Impossible de réessayer {name}",
       "This download stopped.": "Ce téléchargement s'est arrêté.",
+      "You seem to be offline.": "Vous semblez hors ligne.",
       "The download couldn't go on from where it stopped.":
         "Le téléchargement n'a pas pu reprendre là où il s'était arrêté.",
       "The file arrived incomplete.": "Le fichier est arrivé incomplet.",
@@ -534,6 +537,7 @@ export const t = catalogue(
       "Couldn't move {name}": "{name} konnte nicht verschoben werden",
       "Couldn't retry {name}": "{name} konnte nicht erneut versucht werden",
       "This download stopped.": "Dieser Download wurde angehalten.",
+      "You seem to be offline.": "Du scheinst offline zu sein.",
       "The download couldn't go on from where it stopped.":
         "Der Download konnte nicht dort weitermachen, wo er aufgehört hat.",
       "The file arrived incomplete.": "Die Datei kam unvollständig an.",
@@ -681,6 +685,7 @@ export const t = catalogue(
       "Couldn't move {name}": "No se pudo mover {name}",
       "Couldn't retry {name}": "No se pudo reintentar {name}",
       "This download stopped.": "Esta descarga se detuvo.",
+      "You seem to be offline.": "Parece que no tienes conexión.",
       "The download couldn't go on from where it stopped.":
         "La descarga no pudo seguir desde donde se detuvo.",
       "The file arrived incomplete.": "El archivo llegó incompleto.",
@@ -764,6 +769,7 @@ export const t = catalogue(
 /** The English reasons downloads.ts keeps with a failed download, said here in the language. */
 const KEPT = [
   "This download stopped.",
+  "You seem to be offline.",
   "The download couldn't go on from where it stopped.",
   "The file arrived incomplete.",
   "This download's record is damaged, so it can't be removed safely yet.",

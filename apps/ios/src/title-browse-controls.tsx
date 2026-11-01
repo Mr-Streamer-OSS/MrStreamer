@@ -1,5 +1,6 @@
 import { COLLECTION_SORTS, type TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { QualityHint } from "@mrstreamer/contracts/title-filters";
+import { formatNumber } from "@mrstreamer/core/i18n";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
 import { languageName as trackLanguageName } from "@mrstreamer/core/ondemand/tracks";
 import { useState } from "react";
@@ -115,7 +116,7 @@ export function BrowseControls({
               {result?.qualities.map(({ value, count }) => (
                 <Choice
                   key={value}
-                  label={`${qualityName(value)} · ${count}`}
+                  label={`${qualityName(value)} · ${formatNumber(count)}`}
                   selected={choices.filters.quality === value}
                   onPress={() =>
                     onChange({ ...choices, filters: { ...choices.filters, quality: value } })
@@ -147,7 +148,7 @@ export function BrowseControls({
               {result?.languages.map(({ value, count }) => (
                 <Choice
                   key={value}
-                  label={`${languageName(value)} · ${count}`}
+                  label={`${languageName(value)} · ${formatNumber(count)}`}
                   selected={choices.filters.language === value}
                   onPress={() =>
                     onChange({ ...choices, filters: { ...choices.filters, language: value } })
@@ -178,7 +179,7 @@ export function BrowseControls({
                   {result.verified.map(({ value, count }) => (
                     <Choice
                       key={`${value.kind}:${value.language}`}
-                      label={`${trackLabel(value.kind, value.language)} · ${count}`}
+                      label={`${trackLabel(value.kind, value.language)} · ${formatNumber(count)}`}
                       selected={
                         verified?.kind === value.kind && verified.language === value.language
                       }

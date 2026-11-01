@@ -71,7 +71,10 @@ function describeStreamFailure(failure: StreamFailure): string {
         status: String(failure.status),
       });
     case "network":
-      return `${t("The connection to the provider failed.")} ${failure.detail}`;
+      // A download's generic network failure saves no detail of its own.
+      return [t("The connection to the provider failed."), failure.detail]
+        .filter(Boolean)
+        .join(" ");
     case "unsupported":
       return `${t("Mr. Streamer can't play this file.")} ${failure.detail}`;
   }

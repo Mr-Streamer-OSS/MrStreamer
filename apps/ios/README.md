@@ -608,9 +608,10 @@ compiles only with every language's text. Guide days and times, counts, sizes, s
 providers are written in the language too. A new pick redraws the screens already open where they
 stand, keeping Live's tab, country and scroll, the browse row, filters, Search query and results,
 and Watch's stream, position, speed and tracks, and schedules each reminder's notification again in
-its words. A playback failure already on screen, a sheet already open and a download failure saved
-with a provider's reason keep the language they were made in. Provider, channel, category, list,
-programme, title, collection, genre and service names are never translated, nor the catalogue's
+its words. A playback failure already on screen, a system sheet or alert already open, and a
+download failure saved with a provider's reason or a title that was gone keep the language they were
+made in. Provider, channel, category, list, programme, title, genre and service names and the
+provider's collection names are never translated, nor the catalogue's
 English country names, which Live's saved place is kept by, nor the shared Diagnostics text, which
 stays English for support. VoiceOver action names stay English identities while their labels are
 translated.
