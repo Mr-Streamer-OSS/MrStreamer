@@ -28,6 +28,10 @@ const memory = vi.hoisted(() => ({
   panelDown: false,
   /** The viewer's TMDB key won't be read, as before the first unlock. */
   locked: false,
+  /** A Keychain read that waits for the device to answer. */
+  readKey: null as (() => Promise<void>) | null,
+  /** A replacement password the fake panel accepts as its original one. */
+  password: "",
   /** TMDB's answers for `key`, to details or to the catalogue, wait for `until` (`hold`). */
   holds: [] as {
     readonly key: string;
@@ -55,6 +59,7 @@ vi.mock("expo-secure-store", () => {
   return {
     ...items,
     getItemAsync: async (key: string) => {
+      if (key === "s.metadata.tmdb") await memory.readKey?.();
       if (memory.locked && key === "s.metadata.tmdb")
         throw new Error("User interaction is not allowed.");
       return items.getItemAsync(key);
@@ -73,7 +78,10 @@ const passThrough = globalThis.fetch;
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   if (!memory.tmdb || !input.startsWith(memory.tmdb)) {
     if (memory.panelDown) throw new TypeError(`Network request to ${input} failed`);
-    return passThrough(input, init);
+    const url = new URL(input);
+    if (memory.password && url.searchParams.get("password") === memory.password)
+      url.searchParams.set("password", LOGIN.password);
+    return passThrough(url, init);
   }
   const url = new URL(input);
   const key = url.searchParams.get("api_key") ?? "";
@@ -144,6 +152,8 @@ beforeEach(async () => {
   memory.unknown.clear();
   memory.panelDown = false;
   memory.locked = false;
+  memory.readKey = null;
+  memory.password = "";
   memory.holds.length = 0;
   memory.indexFails = false;
 });
@@ -335,6 +345,49 @@ it("finds the viewer's saved key once a locked Keychain answers, without a relau
   }, "the viewer's key");
   await settled(app, "answered");
   expect(new Set(memory.keys)).toContain("viewer-key");
+});
+
+it("shows no old season when its login changes while the Keychain answers", async () => {
+  memory.locked = true;
+  const app = await launch({ appKey: "app-key" });
+  await added(app);
+  await settled(app, "answered");
+  const lists = app.titleLists();
+  if (lists.kind !== "ready") throw new Error("No lists");
+  const series = kindOf(lists.index, "series").titles.find((title) => title.tmdbId && !title.adult);
+  if (!series) throw new Error("No series");
+  const details = await app.detailsOf(series);
+  if (details.kind !== "series") throw new Error("Not a series");
+  const [season] = details.seasons;
+  if (!season) throw new Error("No season");
+  expect(season.episodes.length).toBeGreaterThan(0);
+
+  let release = () => {};
+  let held = false;
+  const untilReleased = new Promise<void>((done) => (release = done));
+  memory.locked = false;
+  memory.readKey = async () => {
+    held = true;
+    await untilReleased;
+  };
+  const shown: unknown[] = [];
+  const reading = app.episodesOf(series, season, (episodes) => shown.push(episodes));
+  const result = reading.catch((cause: unknown) => cause);
+  try {
+    await until(() => held, "the Keychain read");
+    memory.password = "changed-password";
+    await app.update(series.subscriptionId, { password: memory.password });
+    await until(() => app.titleLists().kind === "ready", "the new login's lists");
+  } finally {
+    memory.readKey = null;
+    release();
+  }
+  expect(await result).toMatchObject({ error: { kind: "no-subscription" } });
+  expect(shown).toEqual([]);
+
+  const current = await app.detailsOf(series);
+  if (current.kind !== "series" || !current.seasons[0]) throw new Error("No current season");
+  expect((await app.episodesOf(series, current.seasons[0])).length).toBeGreaterThan(0);
 });
 
 it("lets go of details asked with a key that was replaced", async () => {

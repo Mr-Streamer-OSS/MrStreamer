@@ -1239,12 +1239,12 @@ export async function episodesOf(
   const reading = readingLanguage();
   const { language } = reading;
   const { tmdbId } = title;
-  if (tmdbId) await readKey();
-  if (!tmdbId) return seasonEpisodes(season, []);
-  const asking = client;
   const id = title.subscriptionId;
   const source = currentSource(id);
   const stands = () => source !== undefined && savable(id, source);
+  if (tmdbId) await readKey();
+  if (!tmdbId) return seasonEpisodes(season, []);
+  const asking = client;
   const { number } = season;
   const answers = (language === "en" ? [language] : [language, "en"]).map((asked) =>
     tmdbAnswer(
