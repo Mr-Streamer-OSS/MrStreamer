@@ -436,7 +436,7 @@ describe("an episode's end", () => {
 
   /** `number` of `details` plays in Watch to its end, and the record answers with `standing`. */
   async function ends(details: SeriesDetails, number: number, standing = nothingPlayed) {
-    playEpisode(details, episode("s1", number), 0, () => undefined);
+    playEpisode(details, details.seasons[0]!.episodes[number - 1]!, 0, () => undefined);
     await settle();
     startsAt();
     fakePlayer.state(true);
@@ -462,6 +462,21 @@ describe("an episode's end", () => {
     expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e3"]);
     // Resumed a few seconds before where it got to, as every resume is.
     expect(startsAt()).toBe(115);
+  });
+
+  it("skips an episode marked watched", async () => {
+    const mark = { season: 1, episode: 2, watched: true, at: 1, revision: 1 };
+    await ends(threeEpisodes(), 1, { ...nothingPlayed, marks: [mark] });
+    vi.advanceTimersByTime(10_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e3"]);
+  });
+
+  it("plays the next episode of the version that ended", async () => {
+    await ends(seriesDetails("s2", ["s1", "s2"]), 1);
+    vi.advanceTimersByTime(10_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s2e1", "file:episode:s2e2"]);
   });
 
   it("plays it at once on Play next", async () => {
