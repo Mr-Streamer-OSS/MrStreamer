@@ -286,8 +286,9 @@ speed changes. The checkmark is the rate the patched player reports in each stat
 Picture, AirPlay or a Watch set aside shows the player, never Home's silent preview: a title's
 name, line, length, position and reported rate; a channel's name and Live; a programme from
 catch-up its own name and Catch-up. No address, provider, login or artwork goes there (a
-channel's line in the app can name its provider). Stop, a failure and Close (which pauses) clear it
-and its commands. The player's `ownsNowPlaying` keeps the audio session unmixed so iOS shows it,
+channel's line in the app can name its provider). Stop and failure clear it and its commands.
+Close pauses and clears them only when neither AirPlay nor Picture in Picture retains playback;
+while either remains, Now Playing and its supported commands remain. The player's `ownsNowPlaying` keeps the audio session unmixed so iOS shows it,
 without expo-video's own command targets. Play, pause, ±10 s, a position and next go through the
 same calls as Watch's buttons; next only while Watch shows, and a channel takes play and pause
 only. During a countdown, play and
