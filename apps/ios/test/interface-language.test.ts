@@ -51,34 +51,37 @@ vi.mock("react-native-safe-area-context", async () => ({
   SafeAreaView: (await import("./react-native.ts")).reactNative.View,
 }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
-vi.mock("expo-router", () => ({
-  router: { push: () => undefined },
-  useLocalSearchParams: () => ({}),
-  useRootNavigationState: () => ({ index: 0, routes: [{ name: "(tabs)" }] }),
-  useNavigation: () => ({
+vi.mock("expo-router", () => {
+  const navigation = {
     setOptions: ({ title }: { title: string }) => {
       scenario.title = title;
       scenario.titles.push(title);
     },
-  }),
-  // A tab's stack, as far as its first screen's options and its top bar go.
-  Stack: Object.assign(
-    ({ children, screenOptions }: { children: unknown; screenOptions: ScreenOptions }) => {
-      const items = screenOptions({ route: { name: "index" } }).unstable_headerRightItems?.({});
-      scenario.stack = {
-        title: scenario.stack?.title ?? "",
-        buttons: (items ?? []).flatMap((item) => ("label" in item ? [item.label] : [])),
-      };
-      return children;
-    },
-    {
-      Screen: ({ name, options }: { name: string; options: { title: string } }) => {
-        if (name === "index" && scenario.stack) scenario.stack.title = options.title;
-        return null;
+  };
+  return {
+    router: { push: () => undefined },
+    useLocalSearchParams: () => ({}),
+    useRootNavigationState: () => ({ index: 0, routes: [{ name: "(tabs)" }] }),
+    useNavigation: () => navigation,
+    // A tab's stack, as far as its first screen's options and its top bar go.
+    Stack: Object.assign(
+      ({ children, screenOptions }: { children: unknown; screenOptions: ScreenOptions }) => {
+        const items = screenOptions({ route: { name: "index" } }).unstable_headerRightItems?.({});
+        scenario.stack = {
+          title: scenario.stack?.title ?? "",
+          buttons: (items ?? []).flatMap((item) => ("label" in item ? [item.label] : [])),
+        };
+        return children;
       },
-    },
-  ),
-}));
+      {
+        Screen: ({ name, options }: { name: string; options: { title: string } }) => {
+          if (name === "index" && scenario.stack) scenario.stack.title = options.title;
+          return null;
+        },
+      },
+    ),
+  };
+});
 vi.mock("expo-video", () => ({ isPictureInPictureSupported: () => true }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("../src/downloads-screen.tsx", () => ({ DownloadsLink: () => null }));
