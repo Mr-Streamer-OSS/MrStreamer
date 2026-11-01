@@ -19,7 +19,7 @@ function systemTags(): readonly string[] {
   const tags = Array.isArray(preferred)
     ? preferred.filter((tag): tag is string => typeof tag === "string")
     : [];
-  return tags.length > 0 ? tags : [Intl.DateTimeFormat().resolvedOptions().locale];
+  return tags;
 }
 
 /** What Settings saved: a locale, "system", or a later release's value, which shows English. */

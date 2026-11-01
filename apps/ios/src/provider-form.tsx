@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { add, update, type Member } from "./account.ts";
-import { appError, failureOf, hostOf, type Failure } from "./errors.ts";
+import { appError, failureOf, hostOf } from "./errors.ts";
+import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/onboarding.ts";
 import { colors, TextButton } from "./ui.tsx";
 
@@ -44,6 +45,7 @@ export function ProviderForm({
   onDone?: () => void;
   footnote?: (kind: LoginKind) => ReactNode;
 }) {
+  useLocale();
   const saved = mode.kind === "edit" ? mode.member.entry : null;
   const [kind, setKind] = useState<LoginKind>(saved?.kind === "m3u" ? "m3u" : "xtream");
   const [name, setName] = useState(saved?.name ?? "");
@@ -52,8 +54,11 @@ export function ProviderForm({
   const [password, setPassword] = useState("");
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
-  // The line under the fields, when it is the failure of the details as they stand.
-  const [failure, setFailure] = useState<Failure | null>(null);
+  // Keep the failed request's inputs so its message follows the interface language.
+  const [failed, setFailed] = useState<{
+    readonly error: ReturnType<typeof appError>;
+    readonly server: string;
+  } | null>(null);
   // Counts edits, so a sign-in that fails after the fields changed says nothing about them.
   const edits = useRef(0);
   // The keyboard's Go submits too, and can before `busy` renders: one sign-in at a time.
@@ -70,7 +75,7 @@ export function ProviderForm({
     (value: A) => {
       set(value);
       edits.current += 1;
-      setFailure(null);
+      setFailed(null);
     };
 
   const submit = () => {
@@ -79,7 +84,7 @@ export function ProviderForm({
     const submitted = edits.current;
     const { signal } = leaving.current;
     setBusy(true);
-    setFailure(null);
+    setFailed(null);
     // A playlist's link goes where a login's server goes, and as the password of an edit.
     const secret = kind === "m3u" ? link : password;
     const named = mode.kind === "add" ? { name } : {};
@@ -98,15 +103,17 @@ export function ProviderForm({
         if (signal.aborted) return;
         setBusy(false);
         if (edits.current !== submitted) return;
-        setFailure(
-          failureOf(appError(cause), kind === "m3u" && link ? link : (saved?.server ?? server)),
-        );
+        setFailed({
+          error: appError(cause),
+          server: kind === "m3u" && link ? link : (saved?.server ?? server),
+        });
       },
     );
   };
 
   const prefix = mode.kind === "connect" ? "connect" : "provider";
   const label = LABELS[mode.kind];
+  const failure = failed ? failureOf(failed.error, failed.server) : null;
   const unchanged = mode.kind === "edit" && !mode.member.needsSecret ? t("Unchanged") : undefined;
   return (
     <>

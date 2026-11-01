@@ -4,6 +4,7 @@ import type { HTMLInputElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Member } from "../src/account.ts";
 import { AppFailure } from "@mrstreamer/contracts/errors";
+import { resolveLanguage, setLanguage } from "@mrstreamer/core/i18n";
 
 // Settings' provider form: Add saves the name with the login, Edit changes the name and only a
 // password that was typed, and leaving the form before the provider answers cancels what it
@@ -53,6 +54,7 @@ const saved: Member = {
 let unmount = () => {};
 afterEach(() => {
   unmount();
+  setLanguage(resolveLanguage("en-US", []));
   asked.length = 0;
 });
 
@@ -87,6 +89,20 @@ function mount(mode: Parameters<typeof ProviderForm>[0]["mode"]) {
 }
 
 describe("adding a provider in Settings", () => {
+  it("keeps a refused form's error in the selected language without submitting again", async () => {
+    const form = mount({ kind: "add" });
+    form.type("server", "http://b.example:8080");
+    form.press();
+    await form.answer(() =>
+      asked[0]!.fail(new AppFailure({ kind: "provider-error", status: 503 })),
+    );
+    expect(form.text()).toContain("b.example isn't answering");
+    React.act(() => setLanguage(resolveLanguage("nl-NL", [])));
+    expect(form.text()).toContain("b.example antwoordt niet");
+    expect(form.text()).not.toContain("b.example isn't answering");
+    expect(asked).toHaveLength(1);
+  });
+
   it("adds the login with its name, then goes back", async () => {
     const form = mount({ kind: "add" });
     form.type("name", "Cabin");

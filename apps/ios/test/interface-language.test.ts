@@ -66,7 +66,10 @@ vi.mock("expo-router", () => {
     // A tab's stack, as far as its first screen's options and its top bar go.
     Stack: Object.assign(
       ({ children, screenOptions }: { children: unknown; screenOptions: ScreenOptions }) => {
-        const items = screenOptions({ route: { name: "index" } }).unstable_headerRightItems?.({});
+        const items = React.useMemo(
+          () => screenOptions({ route: { name: "index" } }).unstable_headerRightItems?.({}),
+          [screenOptions],
+        );
         scenario.stack = {
           title: scenario.stack?.title ?? "",
           buttons: (items ?? []).flatMap((item) => ("label" in item ? [item.label] : [])),
@@ -188,6 +191,22 @@ it("shows English when the iPhone speaks none of the app's languages", async () 
   const settings = await launch("settings");
   expect(settings.language()).toBe("Interface language, System default (English)");
   expect(scenario.title).toBe("Settings");
+});
+
+it("falls back to English when the preferred language list is empty", async () => {
+  scenario.phone = [];
+  const resolved = new Intl.DateTimeFormat().resolvedOptions();
+  const regional = vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
+    ...resolved,
+    locale: "nl-NL",
+  });
+  try {
+    const settings = await launch("settings");
+    expect(settings.language()).toBe("Interface language, System default (English)");
+    expect(scenario.title).toBe("Settings");
+  } finally {
+    regional.mockRestore();
+  }
 });
 
 it("shows a picked language at once and opens in it after a relaunch", async () => {
