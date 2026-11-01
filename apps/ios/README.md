@@ -98,7 +98,7 @@ channels or the guide change, each reminder is checked: another programme at its
 takes its notification down and says so in the list, and it comes back if the programme does. A
 guide that can't be read changes nothing. Nothing runs in the background, so a schedule changed
 while the app is closed is seen at the next check. iOS holds 64, so a 65th to notify is refused, as
-is one iOS won't schedule. A reminder goes when
+is one iOS won't schedule; one a guide brings back past 64 says it isn't scheduled. A reminder goes when
 its programme ends or its provider is removed. Permission, delivery, tap routing and the lock
 screen need a native run. Search finds
 movies, series and channels: 20 movies and 20 series at first, each kind with its own Show more

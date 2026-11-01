@@ -119,6 +119,8 @@ function statusOf({ status, title }: Reminder): string | null {
       return `Changed to ${title} · won't notify`;
     case "gone":
       return "No longer in the guide · won't notify";
+    case "unscheduled":
+      return "Not scheduled by iOS · won't notify";
   }
 }
 

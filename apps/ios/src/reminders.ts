@@ -180,7 +180,9 @@ export type ReminderStatus =
   /** Nothing starts then on its channel now, or Live doesn't list the channel. */
   | { readonly kind: "gone" }
   /** Its programme is on. */
-  | { readonly kind: "on" };
+  | { readonly kind: "on" }
+  /** It would notify, but iOS hasn't it scheduled: past the 64 it holds, or refused. */
+  | { readonly kind: "unscheduled" };
 
 export interface Reminder {
   readonly id: string;
@@ -194,7 +196,12 @@ export interface Reminder {
   readonly status: ReminderStatus;
 }
 
-const shownAs = (reminder: KeptReminder, library: Library | null, now: number): Reminder => ({
+const shownAs = (
+  reminder: KeptReminder,
+  library: Library | null,
+  now: number,
+  unscheduled: ReadonlySet<string>,
+): Reminder => ({
   id: reminder.id,
   key:
     channelOf(reminder, library)?.key ??
@@ -210,7 +217,9 @@ const shownAs = (reminder: KeptReminder, library: Library | null, now: number): 
         ? { kind: "changed", was: reminder.set }
         : now >= reminder.start
           ? { kind: "on" }
-          : { kind: "upcoming" },
+          : unscheduled.has(reminder.id)
+            ? { kind: "unscheduled" }
+            : { kind: "upcoming" },
 });
 
 /** Whether `reminder` notifies at its start: still to come, for the programme set, not adult. */
@@ -236,8 +245,10 @@ const sameNotice = (a: Notice, b: Notice) =>
   a.body === b.body &&
   a.channel === b.channel;
 
-/** The reminders iOS refused to schedule at the last check, which don't notify. */
-let refused: ReadonlySet<string> = new Set();
+/** The reminders iOS has scheduled, as the last check left them. */
+let scheduledIds: ReadonlySet<string> = new Set();
+/** Those that would notify while iOS allows it, but aren't scheduled: past 64, or refused. */
+const unscheduled = store<ReadonlySet<string>>(new Set());
 
 /**
  * Makes iOS's scheduled notifications those of `reminders` that notify, the soonest 64, while iOS
@@ -250,14 +261,11 @@ async function sync(reminders: readonly KeptReminder[], gone: readonly string[])
   const allowed = await module.permission();
   permission.set(allowed);
   const now = Date.now();
-  const wanted =
+  const notifying =
     allowed === "granted"
-      ? reminders
-          .filter((each) => notifies(each, now))
-          .toSorted((a, b) => a.start - b.start)
-          .slice(0, SCHEDULED)
-          .map(noticeOf)
+      ? reminders.filter((each) => notifies(each, now)).toSorted((a, b) => a.start - b.start)
       : [];
+  const wanted = notifying.slice(0, SCHEDULED).map(noticeOf);
   const scheduled = await module.scheduled();
   const down = [
     ...new Set([
@@ -269,7 +277,18 @@ async function sync(reminders: readonly KeptReminder[], gone: readonly string[])
   ];
   if (down.length) await module.cancel(down);
   const missing = wanted.filter((want) => !scheduled.some((each) => sameNotice(want, each)));
-  refused = new Set(missing.length ? await module.schedule(missing) : []);
+  let refused: readonly string[] = [];
+  try {
+    if (missing.length) refused = await module.schedule(missing);
+  } catch {
+    // As iOS refusing each: none of them is claimed to notify.
+    refused = missing.map((each) => each.id);
+  }
+  scheduledIds = new Set(wanted.map((each) => each.id).filter((id) => !refused.includes(id)));
+  const left = notifying.filter((each) => !scheduledIds.has(each.id)).map((each) => each.id);
+  unscheduled.set((before) =>
+    before.size === left.length && left.every((id) => before.has(id)) ? before : new Set(left),
+  );
 }
 
 /**
@@ -350,7 +369,7 @@ export function checkReminders(): Promise<void> {
  * asking the viewer the first time: `denied`, saving nothing, where it doesn't, and `full` while
  * 64 are to notify already, all iOS holds. One already set for that channel at that start stays as
  * it is. Throws, changing nothing, while the programme has started, the file can't be used or
- * written, or iOS refused to schedule it.
+ * written, or iOS didn't schedule it.
  */
 export async function setReminder(
   channel: Channel,
@@ -366,7 +385,7 @@ export async function setReminder(
     let allowed = await module.permission();
     if (allowed === "undetermined") allowed = await module.ask();
     permission.set(allowed);
-    if (allowed === "denied") return "denied";
+    if (allowed !== "granted") return "denied";
   }
   // The viewer may have taken a while with iOS's prompt.
   if (started()) throw new AppFailure({ kind: "reminder", reason: "started" });
@@ -398,7 +417,10 @@ export async function setReminder(
     },
   ]);
   await checkReminders();
-  if (!refused.has(id)) return "set";
+  // One the check found changed or gone notifies for nothing, as the list says.
+  const checked = keptNow();
+  const after = checked.kind === "read" ? checked.reminders.find((each) => each.id === id) : null;
+  if (!module || !after || !notifies(after, Date.now()) || scheduledIds.has(id)) return "set";
   // One iOS won't notify for isn't kept, so no bell claims it will.
   await cancelReminder(id);
   throw new AppFailure({ kind: "unexpected", detail: "iOS didn't schedule the reminder." });
@@ -426,7 +448,7 @@ export type ReminderList =
 /** Calls `listener` as the reminders or the channels change, and each minute, as time moves rows on. */
 const subscribeAll = (listener: () => void) => {
   const clock = setInterval(listener, 60_000);
-  const stops = [kept.subscribe(listener), onCatalogue(listener)];
+  const stops = [kept.subscribe(listener), unscheduled.subscribe(listener), onCatalogue(listener)];
   return () => {
     clearInterval(clock);
     for (const stop of stops) stop();
@@ -435,6 +457,7 @@ const subscribeAll = (listener: () => void) => {
 
 let listed: {
   readonly from: Kept;
+  readonly unscheduled: ReadonlySet<string>;
   readonly catalogue: Catalogue;
   readonly minute: number;
   readonly list: ReminderList;
@@ -445,7 +468,13 @@ function currentList(): ReminderList {
   const catalogue = currentCatalogue();
   const now = Date.now();
   const minute = Math.floor(now / 60_000);
-  if (listed?.from === from && listed.catalogue === catalogue && listed.minute === minute)
+  const left = unscheduled.get();
+  if (
+    listed?.from === from &&
+    listed.unscheduled === left &&
+    listed.catalogue === catalogue &&
+    listed.minute === minute
+  )
     return listed.list;
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const list: ReminderList =
@@ -455,10 +484,10 @@ function currentList(): ReminderList {
           reminders: from.reminders
             .filter((each) => now < each.stop && !each.adult)
             .toSorted((a, b) => a.start - b.start || a.channelName.localeCompare(b.channelName))
-            .map((each) => shownAs(each, library, now)),
+            .map((each) => shownAs(each, library, now, left)),
         }
       : from;
-  listed = { from, catalogue, minute, list };
+  listed = { from, unscheduled: left, catalogue, minute, list };
   return list;
 }
 

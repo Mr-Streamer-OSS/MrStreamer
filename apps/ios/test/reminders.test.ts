@@ -22,6 +22,8 @@ const scenario = vi.hoisted(() => ({
   members: [] as Member[],
   catalogue: { kind: "loading" } as Catalogue,
   owner: null as ReturnType<typeof createGuide> | null,
+  /** What the owner tells the app's modules as its listings change, ended at each launch. */
+  revisionStops: [] as (() => void)[],
   /** The programmes guide id `trusted-1` lists. */
   programmes: [] as Programme[],
   rosterChanged: new Set<() => void>(),
@@ -84,8 +86,20 @@ vi.mock("../src/playback.ts", () => ({
 }));
 vi.mock("../src/guide.ts", async (original) => {
   const actual = await original<typeof import("../src/guide.ts")>();
-  // One owner across launches, as the guide's own files outlive the app's modules.
-  if (scenario.owner) return { ...actual, guide: scenario.owner };
+  // One owner across launches, as the guide's own files outlive the app's modules. Each launch's
+  // modules hear its listings; the last launch's hear no more.
+  const heard = (owner: ReturnType<typeof createGuide>) => ({
+    ...owner,
+    listingRevision: {
+      get: owner.listingRevision.get,
+      subscribe: (listener: () => void) => {
+        const stop = owner.listingRevision.subscribe(listener);
+        scenario.revisionStops.push(stop);
+        return stop;
+      },
+    },
+  });
+  if (scenario.owner) return { ...actual, guide: heard(scenario.owner) };
   const { guideFixture } = await import("./native-guide.ts");
   const fixture = guideFixture();
   fixture.native.query = async (_lease, _generation, _job, ids, at, mode, _from, _until, after) => {
@@ -101,7 +115,7 @@ vi.mock("../src/guide.ts", async (original) => {
     generation: { id: "db-a", fetchedAt: Date.now(), until: Date.now() + 7 * 86400_000 },
   });
   scenario.owner = actual.createGuide(() => fixture.native);
-  return { ...actual, guide: scenario.owner };
+  return { ...actual, guide: heard(scenario.owner) };
 });
 
 /** iOS's notification centre, as the native module shows it to the app. */
@@ -224,6 +238,7 @@ async function launch() {
   scenario.catalogueChanged.clear();
   scenario.appState.clear();
   ios.listeners.clear();
+  for (const stop of scenario.revisionStops.splice(0)) stop();
   vi.resetModules();
   reminders = await import("../src/reminders.ts");
   reminders.startReminders();
@@ -395,6 +410,51 @@ describe("programme reminders", () => {
       error: { kind: "unexpected", detail: "iOS didn't schedule the reminder." },
     });
     expect(remindersShown()).toHaveLength(63);
+  });
+
+  it("says which it can't notify for once a guide brings a 65th back", async () => {
+    const programmes = Array.from({ length: 65 }, (_, at) => ({
+      title: `Programme ${at}`,
+      start: now + (at + 1) * HOUR,
+      stop: now + (at + 2) * HOUR,
+      description: null,
+    }));
+    scenario.programmes = [on, ...programmes];
+    for (const programme of programmes.slice(0, 64))
+      await reminders.setReminder(channel(), programme);
+    // One changes, so another can be set, then the guide has the first back.
+    scenario.programmes = [on, { ...programmes[0]!, title: "Football" }, ...programmes.slice(1)];
+    shows();
+    await settled();
+    expect(await reminders.setReminder(channel(), programmes[64]!)).toBe("set");
+    scenario.programmes = [on, ...programmes];
+    shows();
+    await settled();
+    expect(notices()).toHaveLength(64);
+    const rows = remindersShown();
+    expect(rows.filter((row) => row.status.kind === "upcoming")).toHaveLength(64);
+    expect(rows.find((row) => row.status.kind === "unscheduled")?.title).toBe("Programme 64");
+  });
+
+  it("keeps none iOS failed to schedule, or didn't allow", async () => {
+    const schedule = module.schedule;
+    module.schedule = async () => {
+      throw new Error("native");
+    };
+    try {
+      await expect(reminders.setReminder(channel(), later)).rejects.toMatchObject({
+        error: { detail: "iOS didn't schedule the reminder." },
+      });
+    } finally {
+      module.schedule = schedule;
+    }
+    expect(shown()).toEqual([]);
+
+    // The prompt went without an answer, as when the app was sent away.
+    ios.permission = "undetermined";
+    ios.answer = "undetermined";
+    expect(await reminders.setReminder(channel(), later)).toBe("denied");
+    expect(shown()).toEqual([]);
   });
 
   it("keeps a reminder while its guide can't be read, and drops one its provider stopped listing", async () => {
