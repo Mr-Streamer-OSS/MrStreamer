@@ -284,7 +284,7 @@ speed changes. The checkmark is the rate the patched player reports in each stat
 
 `src/media-controls.ts` and `modules/media-controls` publish Now Playing while Watch, Picture in
 Picture, AirPlay or a Watch set aside shows the player, never Home's silent preview: a title's
-name, line, length, position and reported rate; a channel's name and Live; a programme from
+name, line, length when known, position and reported rate; a channel's name and Live; a programme from
 catch-up its own name and Catch-up. No address, provider, login or artwork goes there (a
 channel's line in the app can name its provider). Stop and failure clear it and its commands.
 Close pauses and clears them only when neither AirPlay nor Picture in Picture retains playback;
