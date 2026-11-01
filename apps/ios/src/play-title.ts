@@ -157,11 +157,18 @@ export function playEpisode(
     const episode = nextUnwatched(details, at, progress, marks) ?? after;
     if (!episode || !stands()) return null;
     const state = episodeStates(progress, marks)(episode);
-    const found =
-      state.kind === "partial" && sameOwned(state.progress.title, episode)
-        ? state.progress
-        : undefined;
-    return { episode, from: resumePoint(found) };
+    // The logical episode can stand by another file; resume this file's own checkpoint.
+    const selected =
+      state.kind === "partial"
+        ? episodeStates(
+            progress.filter(({ title }) => sameOwned(title, episode)),
+            marks,
+          )(episode)
+        : state;
+    return {
+      episode,
+      from: resumePoint(selected.kind === "partial" ? selected.progress : undefined),
+    };
   };
   const item: Playing = {
     id: key,

@@ -499,6 +499,39 @@ describe("an episode's end", () => {
     expect(startsAt()).toBe(0);
   });
 
+  it.each([
+    ["saved position", false, 115],
+    ["unwatched state", true, 0],
+  ] as const)(
+    "keeps the selected file's %s when another file was played later",
+    async (_, marked, from) => {
+      const details = seriesDetails("s1");
+      const next: Episode = {
+        ...episode("s1", 2),
+        exactVersion: true,
+        versions: ["s1e2", "another-file"].map((id) => ({ id, name: id, tags: [], duration: 600 })),
+      };
+      const own = progressAt("episode", "s1e2", 120);
+      await ends(
+        { ...details, seasons: [{ ...details.seasons[0]!, episodes: [episode("s1", 1), next] }] },
+        1,
+        {
+          ...nothingPlayed,
+          progress: [
+            own,
+            { ...own, title: { ...own.title, id: "another-file" }, position: 240, at: 3, since: 3 },
+          ],
+          marks: marked ? [{ season: 1, episode: 2, watched: false, at: 2, revision: 1 }] : [],
+        },
+      );
+      vi.advanceTimersByTime(10_000);
+      await settle();
+      expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
+      fakePlayer.currentTime = 0;
+      expect(startsAt()).toBe(from);
+    },
+  );
+
   it("plays the next episode of the version that ended", async () => {
     await ends(seriesDetails("s2", ["s1", "s2"]), 1);
     vi.advanceTimersByTime(10_000);
