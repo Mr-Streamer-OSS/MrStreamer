@@ -1,11 +1,12 @@
-// The link scripts/fixture-server.ts sends live segments over, for measuring how Live plays on a
-// weak connection the same way every time. Its control, on the control port beside the others:
+// Paces the fixture server's numbered, single-rendition live segments for matched quality runs.
+// Its control is on the control port beside the others:
 //
-//   POST /live-link?kbps=<n>   each live segment is sent at n kilobits a second; 0 at once
-//   GET  /live-link            the pace now
+//   POST /live-link?kbps=<n>   new segment responses send at n kilobits a second; 0 at once
+//   GET  /live-link            the pace for new responses
 //
-// The pace holds until it is changed or the server restarts. Playlists, catch-up and titles are
-// sent as before: only the bytes of live pictures and sound wait, as on a slow connection.
+// Each response keeps the pace it started with. This is a per-response cap, not a shared link
+// emulator: changes do not retime a response already under way. Playlists, catch-up, titles and
+// the multitrack channel's picture/sound renditions keep their ordinary, unpaced serving paths.
 import type { ServerResponse } from "node:http";
 
 /** How often the pace is kept to. */
@@ -14,7 +15,7 @@ const TICK_MS = 100;
 export function liveLink() {
   let kbps = 0;
   return {
-    /** Sends a live segment's `body` at the pace now. */
+    /** Sends this single-rendition segment at the pace sampled when its response begins. */
     send(response: ServerResponse, body: Buffer) {
       response.writeHead(200, {
         "Content-Type": "video/mp2t",
