@@ -224,12 +224,14 @@ export function Programme({
   detail,
   origin,
   onBack,
+  onSettings,
   back = "Back to Schedule",
 }: {
   channel: string;
   detail: string;
   origin: GuideOrigin;
   onBack?: () => void;
+  onSettings?: () => void;
   back?: string;
 }) {
   const catalogue = useCatalogue();
@@ -295,6 +297,7 @@ export function Programme({
       <GuideNotice
         message={guideMessage(read.snapshot.get(channel.subscriptionId))}
         origin={origin}
+        {...(onSettings ? { onSettings } : {})}
       />
       <View style={styles.actions}>
         {read.value && catchUp.kind === "past" ? (
@@ -379,14 +382,25 @@ function useAnnounced(announce: boolean) {
   return heading;
 }
 
-function GuideNotice({ message, origin }: { message: string | null; origin: GuideOrigin }) {
+function GuideNotice({
+  message,
+  origin,
+  onSettings,
+}: {
+  message: string | null;
+  origin: GuideOrigin;
+  onSettings?: () => void;
+}) {
   return message ? (
     <View>
       <Text style={styles.copy}>{message}</Text>
       {message === "Guide unavailable" ? (
         <TextButton
           label="Provider settings"
-          onPress={() => router.push(tabHref(origin === "home" ? "(home)" : "live", "settings"))}
+          onPress={
+            onSettings ??
+            (() => router.push(tabHref(origin === "home" ? "(home)" : "live", "settings")))
+          }
         />
       ) : null}
     </View>

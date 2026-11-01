@@ -148,4 +148,97 @@ final class GuideIndex {
     if try JSONSerialization.data(withJSONObject: result).count > 1024 * 1024 { throw GuideFailure("reply") }
     return result
   }
+  /// The guide ids with a programme not ended at `at`: at most `GuideBudget.channels`.
+  func current(at: Double) throws -> [String: Any] {
+    let started = ProcessInfo.processInfo.systemUptime
+    guard at.isFinite else { throw GuideFailure("reply") }
+    let statement = try prepare("SELECT DISTINCT channel FROM programmes WHERE stop>?"); defer { sqlite3_finalize(statement) }
+    sqlite3_bind_double(statement, 1, at)
+    var ids = [String]()
+    while true {
+      try job.check()
+      if ProcessInfo.processInfo.systemUptime - started > 2 { throw GuideFailure("time") }
+      let code = sqlite3_step(statement)
+      if code == SQLITE_DONE { break }
+      if code != SQLITE_ROW { try job.check(); throw GuideFailure("disk") }
+      guard let channel = sqlite3_column_text(statement, 0) else { throw GuideFailure("disk") }
+      ids.append(String(cString: channel))
+    }
+    let result: [String: Any] = ["ids": ids]
+    if try JSONSerialization.data(withJSONObject: result).count > 1024 * 1024 { throw GuideFailure("reply") }
+    return result
+  }
+  /// The first `limit` programmes on `ids`, not ended at `at`, whose title `guideFold` folds to
+  /// hold each of `words`: on now first, then by start. Titles programmes repeat are folded once.
+  func search(ids: [String], words: [String], at: Double, limit: Int) throws -> [String: Any] {
+    let started = ProcessInfo.processInfo.systemUptime
+    guard ids.count <= 65536, ids.allSatisfy({ $0.utf8.count <= 512 }), (1...160).contains(words.count), words.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 32768 }), (1...50).contains(limit), at.isFinite else { throw GuideFailure("reply") }
+    typealias Found = (channel: String, start: Double, stop: Double, title: String)
+    let wanted = Set(ids)
+    let needles = words.map { Array(guideFold($0).unicodeScalars) }
+    var folded = [String: Bool]()
+    var best = [Found]()
+    let before = { (a: Found, b: Found) -> Bool in
+      let early = a.start <= at, late = b.start <= at
+      return early != late ? early : a.start != b.start ? a.start < b.start : a.channel < b.channel
+    }
+    let statement = try prepare("SELECT channel,start,stop,title FROM programmes WHERE stop>?"); defer { sqlite3_finalize(statement) }
+    sqlite3_bind_double(statement, 1, at)
+    while true {
+      try job.check()
+      if ProcessInfo.processInfo.systemUptime - started > 2 { throw GuideFailure("time") }
+      let code = sqlite3_step(statement)
+      if code == SQLITE_DONE { break }
+      if code != SQLITE_ROW { try job.check(); throw GuideFailure("disk") }
+      guard let channel = sqlite3_column_text(statement, 0), let text = sqlite3_column_text(statement, 3) else { throw GuideFailure("disk") }
+      let id = String(cString: channel)
+      guard wanted.contains(id) else { continue }
+      let title = String(cString: text)
+      let matches = folded[title] ?? { let value = Array(guideFold(title).unicodeScalars); return needles.allSatisfy { guideHolds(value, $0) } }()
+      folded[title] = matches
+      guard matches else { continue }
+      let found: Found = (id, sqlite3_column_double(statement, 1), sqlite3_column_double(statement, 2), title)
+      if best.count == limit, let last = best.last, !before(found, last) { continue }
+      best.insert(found, at: best.firstIndex(where: { before(found, $0) }) ?? best.count)
+      if best.count > limit { best.removeLast() }
+    }
+    let result: [String: Any] = ["rows": best.map { ["guideId": $0.channel, "start": $0.start, "stop": $0.stop, "title": $0.title] as [String: Any] }]
+    if try JSONSerialization.data(withJSONObject: result).count > 1024 * 1024 { throw GuideFailure("reply") }
+    return result
+  }
+}
+
+/// `text` as core text.ts `normalize` folds it for search: compatibility-decomposed without
+/// marks, lowercase, and each run of what is no letter or digit one space, none at either end.
+/// Foundation's contextual lowercase keeps a word-final sigma, as JavaScript does.
+func guideFold(_ text: String) -> String {
+  var bare = String.UnicodeScalarView()
+  for scalar in text.decomposedStringWithCompatibilityMapping.unicodeScalars {
+    switch scalar.properties.generalCategory {
+    case .nonspacingMark, .spacingMark, .enclosingMark: continue
+    default: bare.append(scalar)
+    }
+  }
+  var folded = String.UnicodeScalarView()
+  var gap = false
+  for scalar in (String(bare) as NSString).lowercased.unicodeScalars {
+    switch scalar.properties.generalCategory {
+    case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter, .decimalNumber, .letterNumber, .otherNumber:
+      if gap && !folded.isEmpty { folded.append(" ") }
+      gap = false
+      folded.append(scalar)
+    default: gap = true
+    }
+  }
+  return String(folded)
+}
+
+/// Whether `text` holds `word` scalar by scalar, as JS `includes` finds part of a syllable too.
+func guideHolds(_ text: [Unicode.Scalar], _ word: [Unicode.Scalar]) -> Bool {
+  guard let head = word.first else { return true }
+  guard word.count <= text.count else { return false }
+  for start in 0...(text.count - word.count) where text[start] == head {
+    if text[start..<start + word.count].elementsEqual(word) { return true }
+  }
+  return false
 }

@@ -35,6 +35,9 @@ import {
 import { useReduceMotion } from "../glass.tsx";
 import { openOnTabs, useTabs } from "../header.tsx";
 import { DownloadStatusButton } from "../download-status.tsx";
+import { guide, type FoundProgramme } from "../guide.ts";
+import { Programme } from "../guide-screen.tsx";
+import { dayLabel, localDay, programmeRange, useGuideRead } from "../guide-ui.tsx";
 import { inTasks, searchChannelsSteps, type Channel, type Library } from "../library.ts";
 import {
   libraryStatus,
@@ -56,16 +59,30 @@ import {
   type TitleLists,
 } from "../titles.ts";
 import { Artwork } from "../titles-ui.tsx";
-import { ChannelRow, colors, TextButton, useRowHeight } from "../ui.tsx";
+import { ChannelLogo, ChannelRow, colors, TextButton, useRowHeight } from "../ui.tsx";
 
 /** Movies and series each show this many at first, and this many more at each Show more. */
 const PAGE = 20;
 
 type Row =
   | { readonly kind: "title"; readonly title: Title }
-  | { readonly kind: "channel"; readonly channel: Channel };
+  | { readonly kind: "channel"; readonly channel: Channel }
+  | {
+      readonly kind: "programme";
+      readonly found: FoundProgramme;
+      readonly channel: Channel;
+      /** The channel's provider, where several are signed in. */
+      readonly provider: string | undefined;
+    };
 
-/** Movies, series or channels found, and how many of them there are in all. */
+const rowKey = (row: Row) =>
+  row.kind === "title"
+    ? row.title.key
+    : row.kind === "channel"
+      ? row.channel.key
+      : row.found.programme.detail;
+
+/** Movies, series, channels or programmes found, and how many of them there are in all. */
 interface Found {
   readonly title: string;
   readonly total: number;
@@ -116,6 +133,19 @@ function* foundChannels(library: Library, query: string): Steps<Found | null> {
     data.push({ kind: "channel", channel });
   }
   return { title: "Channels", total: channels.length, data, more: null };
+}
+
+/** The guide's programmes found on `library`'s channels, as rows; null for none. */
+function foundProgrammes(found: readonly FoundProgramme[], library: Library): Found | null {
+  const data: Row[] = [];
+  for (const programme of found) {
+    const channel = library.byKey.get(programme.key);
+    if (!channel) continue;
+    const provider =
+      library.labels.size > 1 ? library.labels.get(channel.subscriptionId) : undefined;
+    data.push({ kind: "programme", found: programme, channel, provider });
+  }
+  return data.length > 0 ? { title: "Programmes", total: data.length, data, more: null } : null;
 }
 
 /** Text changes and dismissal invalidate every section before React schedules its next render. */
@@ -242,15 +272,17 @@ let kept = "";
 
 /**
  * Search, over the tab it opened from, which stays as it was under it: movies, series
- * and live channels by name, matched as the desktop's search matches words, titles by any of
- * their names, TMDB's translations included, the best first. Movies and series show 20 each, and
+ * and live channels by name, and the guide's programmes on now or later by title, matched as the
+ * desktop's search matches words, titles by any of their names, TMDB's translations included, the
+ * best first. Movies and series show 20 each, and
  * each has its own Show more for the next 20, or the few left, until every match shows; new text
  * starts both at 20 again. It comes down a little as it fades in, or only fades under Reduce
  * Motion, with the keyboard up. Cancel or a swipe back closes it onto that screen. A title closes
  * it and opens its details in Movies or Series; a channel closes it and plays in Watch, which
- * closes onto that screen too. Searching, and what hasn't loaded or failed, is the status line at
- * the bottom, above the keyboard, or at the top of the results where the bottom has too little
- * room for a line of it.
+ * closes onto that screen too. A programme opens its detail inside Search, over the results, whose
+ * Back shows them again as they were, scrolled where they were. Searching, and what hasn't loaded
+ * or failed, is the status line at the bottom, above the keyboard, or at the top of the results
+ * where the bottom has too little room for a line of it.
  */
 export default function Search() {
   const tabs = useTabs();
@@ -260,7 +292,7 @@ export default function Search() {
   const lists = useTitleLists();
   const hasTitles = useHasTitles("movie", "series");
   const metadata = useMetadataVersion();
-  const { phase } = usePlayback();
+  const { phase, watch: watching } = usePlayback();
   const height = useRowHeight();
   const [entry, setEntry] = useState(() => ({ text: kept, generation: 0 }));
   const query = entry.text;
@@ -320,10 +352,50 @@ export default function Search() {
   const movies = useSection(movieRequest, session);
   const series = useSection(seriesRequest, session);
   const channels = useSection(channelRequest, session);
-  const sections = useMemo(
-    () => [movies.found, series.found, channels.found].filter((found) => found != null),
-    [movies.found, series.found, channels.found],
+  // The guide is searched over every channel, in Search's order, and again whenever a guide or
+  // provider changes; an answer read under a provider since replaced never shows.
+  const channelKeys = useMemo(
+    () => library?.channels.map((channel) => channel.key) ?? [],
+    [library],
   );
+  const guideIds = useMemo(
+    () => [...new Set(library?.channels.map((channel) => channel.subscriptionId))],
+    [library],
+  );
+  const loadProgrammes = useCallback(
+    (signal: AbortSignal) =>
+      searched && channelKeys.length > 0
+        ? guide.search(query, channelKeys, { signal })
+        : Promise.resolve({ found: [], unsearched: false }),
+    [query, searched, channelKeys],
+  );
+  const programmeRead = useGuideRead(loadProgrammes, guideIds);
+  const programmes = useMemo(
+    () =>
+      !session.current.closed && library && programmeRead.value
+        ? foundProgrammes(programmeRead.value.found, library)
+        : null,
+    [programmeRead.value, library, entry.generation],
+  );
+  const sections = useMemo(
+    () => [movies.found, series.found, channels.found, programmes].filter((found) => found != null),
+    [movies.found, series.found, channels.found, programmes],
+  );
+  // The programme whose detail shows, for the query and provider/catalogue it was found under.
+  const [detail, setDetail] = useState<{
+    found: FoundProgramme;
+    generation: number;
+    request: typeof programmeRead.request;
+  } | null>(null);
+  // As the guide is read again, as on return from the background, the same programme's newest
+  // token, so the detail reads on.
+  const shownDetail =
+    detail?.generation === entry.generation && detail.request === programmeRead.request
+      ? (programmeRead.value?.found.find(
+          ({ key, programme }) =>
+            key === detail.found.key && programme.start === detail.found.programme.start,
+        ) ?? detail.found)
+      : null;
   const showMore = useCallback(
     (section: Found) => {
       if (!section.more) return;
@@ -360,10 +432,21 @@ export default function Search() {
   const close = () => {
     if (dismiss()) back();
   };
+  // Watch live in a programme's detail closes Search under Watch, as a channel row does, so Watch
+  // closes onto the screen Search opened over.
+  useEffect(() => {
+    if (watching && shownDetail) close();
+  });
   const watch = (channel: Channel) => {
     if (!library || !channels.current()) return;
     close();
     playChannel(channel, library.placeOf.get(channel.key) ?? "", { watch: true });
+  };
+  const openProgramme = (found: FoundProgramme) => {
+    const { generation } = entry;
+    if (session.current.closed || session.current.generation !== generation) return;
+    Keyboard.dismiss();
+    setDetail({ found, generation, request: programmeRead.request });
   };
   const open = (title: Title) => {
     if (!(title.kind === "movie" ? movies : series).current()) return;
@@ -380,7 +463,18 @@ export default function Search() {
 
   const playing = channelStatus(phase);
   const searching = !session.current.closed && searched !== "";
-  const pending = movies.pending || series.pending || channels.pending;
+  const pending =
+    movies.pending ||
+    series.pending ||
+    channels.pending ||
+    // Only until the text's first answer: the guide reads again each minute, as programmes end.
+    (searched !== "" &&
+      channelKeys.length > 0 &&
+      programmeRead.pending &&
+      programmeRead.value === undefined);
+  // A guide that could not be searched is said, and not taken for one without the name.
+  const unsearched =
+    searched !== "" && (programmeRead.failed || programmeRead.value?.unsearched === true);
   const providers = libraryStatus(members, {
     channels: true,
     titles: true,
@@ -390,7 +484,12 @@ export default function Search() {
     settings,
   });
   const line = useProviderStatus(
-    searchLine(searching ? status : null, searching ? providers : null, pending),
+    searchLine(
+      searching ? status : null,
+      searching ? providers : null,
+      pending,
+      searching && unsearched,
+    ),
   );
   const keyboard = useKeyboardHeight();
   // The height under the search field, for results and the status line together; measured as
@@ -456,8 +555,11 @@ export default function Search() {
       <View style={styles.screen} onLayout={(event) => setArea(event.nativeEvent.layout.height)}>
         <SectionList
           style={styles.screen}
+          // Under a programme's detail, kept as it was for Back, but out of VoiceOver's reach.
+          accessibilityElementsHidden={shownDetail !== null}
+          importantForAccessibility={shownDetail ? "no-hide-descendants" : "auto"}
           sections={sections}
-          keyExtractor={(row) => (row.kind === "title" ? row.title.key : row.channel.key)}
+          keyExtractor={rowKey}
           extraData={playing && `${playing.id} ${playing.word}`}
           renderSectionHeader={({ section }) => (
             <Text style={styles.section} accessibilityRole="header">
@@ -476,6 +578,8 @@ export default function Search() {
           renderItem={({ item }) =>
             item.kind === "title" ? (
               <TitleRow title={item.title} height={height} onPress={open} />
+            ) : item.kind === "programme" ? (
+              <ProgrammeRow row={item} height={height} onPress={openProgramme} />
             ) : (
               <ChannelRow
                 channel={item.channel}
@@ -508,7 +612,7 @@ export default function Search() {
           ListEmptyComponent={
             // Nothing has the name only once the latest text was searched in every list. While one
             // loads or failed, the status line says what was searched instead.
-            searching && !pending && !status && !providers ? (
+            searching && !pending && !status && !providers && !unsearched ? (
               <Nothing query={searched} library={library} lists={lists} />
             ) : undefined
           }
@@ -516,6 +620,9 @@ export default function Search() {
         />
         {shown && place === "bottom" ? (
           <View
+            // Under a programme's detail, as the results are.
+            accessibilityElementsHidden={shownDetail !== null}
+            importantForAccessibility={shownDetail ? "no-hide-descendants" : "auto"}
             style={[
               styles.dock,
               {
@@ -528,6 +635,18 @@ export default function Search() {
             <StatusLine status={shown} space={room} />
           </View>
         ) : null}
+        {shownDetail ? (
+          <View style={styles.detailPane}>
+            <Programme
+              channel={shownDetail.key}
+              detail={shownDetail.programme.detail}
+              origin="live"
+              onSettings={settings}
+              onBack={() => setDetail(null)}
+              back="Back to Search"
+            />
+          </View>
+        ) : null}
       </View>
     </Animated.View>
   );
@@ -535,15 +654,17 @@ export default function Search() {
 
 /**
  * Search's status line: Searching while the latest text waits to be searched, then what hasn't
- * loaded or failed, with the shared provider notice or persistent recovery. The provider count
+ * loaded or failed, and programmes when a guide could not be searched (`unsearched`), with the
+ * shared provider notice or persistent recovery. The provider count
  * shows as a bar with two or more providers. Null with nothing to say.
  */
 function searchLine(
   status: SearchStatus | null,
   providers: Status | null,
   pending: boolean,
+  unsearched: boolean,
 ): Status | null {
-  if (!status && !providers && !pending) return null;
+  if (!status && !providers && !pending && !unsearched) return null;
   const actions = [...(providers?.actions ?? [])];
   if (status?.retry.length && !actions.some((action) => action.label === "Retry")) {
     actions.push({ label: "Retry", onPress: () => status.retry.forEach(retry) });
@@ -553,7 +674,9 @@ function searchLine(
   const text = providers?.inline ? providers.text : (status?.text ?? "");
   return {
     ...providers,
-    text: [pending ? "Searching." : "", text].filter(Boolean).join(" "),
+    text: [pending ? "Searching." : "", text, unsearched ? "Some programmes not searched." : ""]
+      .filter(Boolean)
+      .join(" "),
     actions,
     ...(status?.loading && status.loading.of > 1
       ? { progress: status.loading.settled / status.loading.of }
@@ -656,6 +779,51 @@ function TitleRow({
   );
 }
 
+/**
+ * A programme found: its title, then its day when not today, its time, channel and, with several
+ * providers, provider.
+ */
+function ProgrammeRow({
+  row: { found, channel, provider },
+  height,
+  onPress,
+}: {
+  row: Extract<Row, { kind: "programme" }>;
+  height: number;
+  onPress: (found: FoundProgramme) => void;
+}) {
+  const now = Date.now();
+  const day = localDay(found.programme.start);
+  const line = [
+    day.from === localDay(now).from ? null : dayLabel(day, now),
+    programmeRange(found.programme),
+    channel.title,
+    provider,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityHint="Shows details"
+      accessibilityLabel={`${found.programme.title}, ${line}`}
+      onPress={() => onPress(found)}
+      style={({ pressed }) => [styles.row, { minHeight: height }, pressed && styles.pressed]}
+      testID={`search-programme-${found.key}-${found.programme.start}`}
+    >
+      <ChannelLogo channel={channel} style={styles.logo} />
+      <View style={styles.names}>
+        <Text style={styles.title} numberOfLines={2}>
+          {found.programme.title}
+        </Text>
+        <Text style={styles.detail} numberOfLines={1}>
+          {line}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000000" },
   bar: { flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 8 },
@@ -687,6 +855,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, gap: 12 },
   pressed: { opacity: 0.5 },
   poster: { width: 32, height: 48, borderRadius: 4 },
+  logo: { width: 56, height: 36 },
+  detailPane: { ...StyleSheet.absoluteFill, backgroundColor: "#000000" },
   names: { flex: 1, minWidth: 0, paddingVertical: 6 },
   title: { color: colors.text, fontSize: 17 },
   detail: { color: colors.dim, fontSize: 13, marginTop: 2 },

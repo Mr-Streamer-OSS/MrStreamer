@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { xtreamProvider } from "@mrstreamer/core/xtream";
 import { finish } from "@mrstreamer/core/steps";
+import { normalize } from "@mrstreamer/core/text";
 import { createGuide } from "../src/guide.ts";
 import { ingest, type GuideNative } from "../src/guide-native.ts";
 import { partSteps } from "../src/library.ts";
@@ -1048,4 +1049,265 @@ describe("guide results after final asynchronous cleanup", () => {
       vi.useRealTimers();
     }
   });
+});
+
+describe("programme search", () => {
+  const external = { revision: 1, login: [], provider: {} };
+  const channel = (id: string, name: string, guideId: string) => ({
+    id,
+    name,
+    number: null,
+    logoUrl: null,
+    categoryIds: [],
+    guideId,
+    catchupDays: null,
+  });
+  /** News reads news.tv from its provider; Sport reads sport.tv, which only the external guide has. */
+  const channels = () =>
+    finish(
+      partSteps({
+        subscriptionId: "a",
+        catalogue: {
+          categories: [],
+          channels: [
+            channel("1", "News", "news.tv"),
+            channel("2", "Sport", "sport.tv"),
+            channel("4", "News 2", "news.tv"),
+            { ...channel("3", "Hidden", "late.tv"), adult: true },
+          ],
+        },
+      }),
+    );
+  const show = (title: string, start: number, stop = start + 3600_000) => ({
+    start,
+    stop,
+    title,
+    description: `About ${title}`,
+  });
+  /**
+   * Native search and reads over what each guide holds, by guide id: matches its words as the
+   * native reader folds titles, and reads a channel's programmes by the first id it holds.
+   */
+  async function searching() {
+    const { owner, native, control, sources } = setup();
+    control.activations.set("xmltv-1", {
+      lease: "external",
+      generation: { id: "db-x", fetchedAt: at, until: at + 86400_000 },
+    });
+    const held = new Map<string, Map<string, ReturnType<typeof show>[]>>([
+      ["a", new Map()],
+      ["xmltv-1", new Map()],
+    ]);
+    const ownerOf = (lease: string) =>
+      [...control.activations].find(([, value]) => value.lease === lease)?.[0] ?? "";
+    const searched: { owner: string; ids: readonly string[]; limit: number }[] = [];
+    native.search = async (lease, _generation, _job, ids, words, now, limit) => {
+      const guide = held.get(ownerOf(lease))!;
+      searched.push({ owner: ownerOf(lease), ids, limit });
+      const rows = ids
+        .flatMap((guideId) => (guide.get(guideId) ?? []).map((row) => ({ ...row, guideId })))
+        .filter(
+          (row) => row.stop > now && words.every((word) => normalize(row.title).includes(word)),
+        )
+        .sort((a, b) => Number(a.start > now) - Number(b.start > now) || a.start - b.start)
+        .slice(0, limit)
+        .map(({ guideId, start, stop, title }) => ({ guideId, start, stop, title }));
+      return { kind: "ok", value: { rows } };
+    };
+    native.current = async (lease, _generation, _job, now) => {
+      const guide = held.get(ownerOf(lease));
+      if (!guide) return { kind: "changed" };
+      const ids = [...guide].filter(([, rows]) => rows.some((row) => row.stop > now));
+      return { kind: "ok", value: { ids: ids.map(([id]) => id) } };
+    };
+    native.query = async (lease, _generation, _job, ids, now, mode, _from, _until, after) => {
+      const guide = held.get(ownerOf(lease))!;
+      const guideId = ids.find((id) => guide.get(id)?.some((row) => row.stop > now)) ?? null;
+      const rows = (guideId ? guide.get(guideId)! : []).filter((row) =>
+        mode === "detail" ? row.start === after : row.stop > now,
+      );
+      return { kind: "ok", value: { guideId, rows, more: false } };
+    };
+    await owner.restore(["a", "xmltv-1"]);
+    owner.setPart(channels());
+    owner.configure(new Map([["xmltv-1", external]]), new Map());
+    await owner.attach("xmltv-1");
+    return { owner, native, control, sources, held, searched };
+  }
+  const keys = ["a:1", "a:2"];
+
+  it("finds programmes on now first, each on the channel that reads it, and opens their details", async () => {
+    const { owner, held } = await searching();
+    const morning = show("Morning News", at - 600_000);
+    const evening = show("Evening news", at + 3600_000);
+    const match = show("Match of the Day: News", at + 1800_000);
+    held.get("a")!.set("news.tv", [evening, morning]);
+    // News reads its provider's guide, so the external guide's news.tv is on no channel.
+    held.get("xmltv-1")!.set("news.tv", [show("Other news", at)]);
+    held.get("xmltv-1")!.set("sport.tv", [match, show("Cup final", at)]);
+    held.get("a")!.set("late.tv", [show("Late news", at)]);
+    const found = (await owner.search("néws", [...keys, "a:3"])).found;
+    expect(found.map(({ key, programme }) => [key, programme.title])).toEqual([
+      ["a:1", "Morning News"],
+      ["a:2", "Match of the Day: News"],
+      ["a:1", "Evening news"],
+    ]);
+    expect(await owner.programme(found[1]!.programme.detail)).toEqual(match);
+    expect((await owner.search("  ", keys)).found).toEqual([]);
+  });
+
+  it("asks a guide only for the ids channels read from it", async () => {
+    const { owner, held } = await searching();
+    held.get("a")!.set("news.tv", [show("Headlines", at)]);
+    const shadowed = Array.from({ length: 20 }, (_, n) => show(`Early news ${n}`, at + n * 60_000));
+    held.get("xmltv-1")!.set("news.tv", shadowed);
+    held.get("xmltv-1")!.set("sport.tv", [show("Sport news", at + 7200_000)]);
+    const found = (await owner.search("news", keys)).found;
+    expect(found.map(({ key, programme }) => [key, programme.title])).toEqual([
+      ["a:2", "Sport news"],
+    ]);
+  });
+
+  it("finds a mapped channel's programmes by its mapped id first", async () => {
+    const { owner, held } = await searching();
+    held.get("xmltv-1")!.set("bbc-one", [show("Sport news", at)]);
+    held.get("xmltv-1")!.set("sport.tv", [show("Other news", at)]);
+    owner.configure(new Map([["xmltv-1", external]]), new Map([["a:2", "bbc-one"]]));
+    const found = (await owner.search("news", keys)).found;
+    expect(found.map(({ key, programme }) => [key, programme.title])).toEqual([
+      ["a:2", "Sport news"],
+    ]);
+  });
+
+  it("finds by every word of a long query, and by a long word", async () => {
+    const { owner, held } = await searching();
+    const words = "one two three four five six seven eight nine";
+    const partial = Array.from({ length: 20 }, (_, n) => show(words.replace("nine", `${n}`), at));
+    const long = "ㄱ".repeat(150);
+    held.get("a")!.set("news.tv", [...partial, show(words, at + 60_000), show(long, at)]);
+    expect((await owner.search(long, keys)).found.map(({ programme }) => programme.title)).toEqual([
+      long,
+    ]);
+    const found = (await owner.search(words, keys)).found;
+    expect(found.map(({ programme }) => programme.title)).toEqual([words]);
+  });
+
+  it("says a guide could not be searched, and finds what the others hold", async () => {
+    const { owner, native, held } = await searching();
+    held.get("a")!.set("news.tv", [show("News", at)]);
+    held.get("xmltv-1")!.set("sport.tv", [show("Sport news", at)]);
+    const answered = native.search;
+    native.search = async (...args) =>
+      args[1] === "db-x" ? answered(...args) : { kind: "failed", error: "time" };
+    const search = await owner.search("news", keys);
+    expect(search.unsearched).toBe(true);
+    // The guide that answered still finds what it holds.
+    expect(search.found.map(({ key }) => key)).toEqual(["a:2"]);
+  });
+
+  it("finds at most 20, asking each guide for no more", async () => {
+    const { owner, held, searched } = await searching();
+    const many = (title: string, from: number) =>
+      Array.from({ length: 20 }, (_, n) => show(`${title} ${n}`, from + n * 60_000));
+    held.get("a")!.set("news.tv", many("Weather", at + 60_000));
+    held.get("xmltv-1")!.set("sport.tv", many("Weather", at - 30_000));
+    const found = (await owner.search("weather", keys)).found;
+    expect(found).toHaveLength(20);
+    expect(found[0]).toMatchObject({ key: "a:2", programme: { title: "Weather 0" } });
+    expect(searched.map(({ limit }) => limit)).toEqual([20, 20]);
+  });
+
+  it("leaves out guides that are stale and channels no catalogue lists", async () => {
+    const { owner, held, control } = await searching();
+    held.get("a")!.set("news.tv", [show("News", at)]);
+    expect((await owner.search("news", keys)).found).toHaveLength(1);
+    expect((await owner.search("news", ["b:1"])).found).toEqual([]);
+    control.activations.set("a", {
+      lease: "old",
+      generation: { id: "db-old", fetchedAt: at - 8 * 86400_000, until: at + 86400_000 },
+    });
+    await owner.restore(["a", "xmltv-1"]);
+    owner.setPart(channels());
+    expect((await owner.search("news", keys)).found).toEqual([]);
+  });
+
+  it("finds nothing on a guide's channels while it can't say which ids it holds", async () => {
+    const { owner, native, held } = await searching();
+    held.get("a")!.set("news.tv", [show("News", at)]);
+    held.get("xmltv-1")!.set("news.tv", [show("Other news", at)]);
+    const listed = native.current;
+    native.current = async (...args) =>
+      args[1] === "db-x" ? listed(...args) : { kind: "failed", error: "disk" };
+    const search = await owner.search("news", keys);
+    expect(search).toEqual({ found: [], unsearched: true });
+  });
+
+  it("takes a search the background cancelled for no failure", async () => {
+    const { owner, native, held } = await searching();
+    held.get("a")!.set("news.tv", [show("News", at)]);
+    const reached = deferred<void>(),
+      release = deferred<void>();
+    native.search = async () => {
+      reached.resolve();
+      await release.promise;
+      return { kind: "cancelled" };
+    };
+    const pending = owner.search("news", keys);
+    await reached.promise;
+    owner.background();
+    release.resolve();
+    expect((await pending).unsearched).toBe(false);
+  });
+
+  it("finds a guide id two channels share once, on the first listed, ties in their order", async () => {
+    const { owner, held } = await searching();
+    held.get("a")!.set("news.tv", [show("News", at)]);
+    held.get("xmltv-1")!.set("sport.tv", [show("Sport news", at)]);
+    const keysOf = async (listed: string[]) =>
+      (await owner.search("news", listed)).found.map(({ key }) => key);
+    expect(await keysOf(["a:4", "a:2", "a:1"])).toEqual(["a:4", "a:2"]);
+    expect(await keysOf(["a:2", "a:1", "a:4"])).toEqual(["a:2", "a:1"]);
+  });
+
+  it.each(["removal", "replacement", "part", "mappings", "generation"] as const)(
+    "answers nothing for a search held across %s",
+    async (change) => {
+      const { owner, native, held, sources, control } = await searching();
+      held.get("a")!.set("news.tv", [show("News", at)]);
+      held.get("xmltv-1")!.set("sport.tv", [show("Sport news", at)]);
+      sources.set("a", source);
+      await owner.attach("a");
+      const answered = native.search;
+      const release = deferred<void>(),
+        reached = deferred<void>();
+      // The external guide, searched last, answers under the old provider, but late.
+      native.search = async (...args) => {
+        const answer = await answered(...args);
+        if (args[1] !== "db-x") return answer;
+        reached.resolve();
+        await release.promise;
+        return answer;
+      };
+      const pending = owner.search("news", keys);
+      await reached.promise;
+      if (change === "removal") await owner.forget("a");
+      if (change === "replacement") {
+        sources.set("a", { ...source, revision: 2 });
+        await owner.attach("a");
+      }
+      if (change === "part") owner.setPart(channels());
+      if (change === "mappings") owner.configure(new Map([["xmltv-1", external]]), new Map());
+      if (change === "generation") {
+        control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "new" } });
+        await owner.refresh("a");
+      }
+      release.resolve();
+      expect((await pending).found).toEqual([]);
+      if (change !== "removal")
+        expect((await owner.search("news", keys)).found.map(({ key }) => key)).toEqual([
+          "a:1",
+          "a:2",
+        ]);
+    },
+  );
 });
