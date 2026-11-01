@@ -310,7 +310,7 @@ export function WatchLayer() {
           accessibilityLabel={controls ? "Hide controls" : "Show controls"}
           // Hiding the panel would hide the countdown in it too, so a tap ends that first.
           onPress={() => {
-            cancelUpNext();
+            if (controls) cancelUpNext();
             setControls((shown) => !shown);
           }}
         />
@@ -817,7 +817,8 @@ function TextButtons({ item }: { item: Playing }) {
  * the count changing is never spoken, and Play next reads the seconds left when focused. Its
  * order is meant to be the next line, Play next, Cancel, though Cancel shows first (unproven on a
  * device, where VoiceOver may follow the screen's order instead). At large text the row
- * wraps as the text buttons do: the next line, then Cancel and Play next under it.
+ * wraps as the text buttons do: the next line, then Cancel and Play next under it, and at the
+ * largest those two stack as well, Play next first.
  */
 function UpNextRow({ place, seconds }: UpNext) {
   const playButton = useRef<ComponentRef<typeof Pressable>>(null);

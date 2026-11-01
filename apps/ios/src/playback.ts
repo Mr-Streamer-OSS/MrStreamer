@@ -1885,7 +1885,8 @@ export function cancelUpNext() {
 function countDown(owned: NonNullable<typeof current>, saved: Promise<Saved>) {
   const find = owned.options.upNext;
   if (!find) return;
-  supersede();
+  // A request still waiting, such as Next episode pressed just before the end, goes on.
+  cancelUpNext();
   const mine: NonNullable<typeof counting> = {
     stands: () =>
       counting === mine &&

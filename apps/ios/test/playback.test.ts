@@ -1123,6 +1123,19 @@ describe("an episode's end in Watch", () => {
     expect(played).toEqual([]);
   });
 
+  it("counts nothing down for an end that comes while the app is away", async () => {
+    const { AppState } = await import("react-native");
+    AppState.currentState = "background";
+    try {
+      await ends();
+      await seconds(20_000);
+    } finally {
+      AppState.currentState = "active";
+    }
+    expect(byTestId("watch-up-next")).toBeNull();
+    expect(played).toEqual([]);
+  });
+
   it("counts nothing down once the app left while it asked which episode goes on", async () => {
     let answer = () => {};
     await ends(() => new Promise((resolve) => (answer = () => resolve(third))));
