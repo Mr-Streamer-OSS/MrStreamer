@@ -44,7 +44,7 @@ import { openOnTabs, useTabs, type TabScreen } from "./header.tsx";
 import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
 import { startMediaControls } from "./media-controls.ts";
 import type { Channel } from "./library.ts";
-import { useMediaPreferences, type SubtitleSize } from "./media-preferences.ts";
+import { SPEEDS, useMediaPreferences, type SubtitleSize } from "./media-preferences.ts";
 import {
   cuesAt,
   hideSubtitle,
@@ -66,6 +66,7 @@ import {
 import {
   cancelUpNext,
   closeWatch,
+  playbackSpeed,
   playbackState,
   request,
   onEndPictureInPicture,
@@ -83,6 +84,7 @@ import {
   seekBy,
   seekTo,
   setAside,
+  setSpeed,
   showVersions,
   stop,
   togglePause,
@@ -92,6 +94,7 @@ import {
   usePlayback,
   usePlaybackClock,
   usePlaybackLength,
+  usePlaybackSpeed,
   useUpNext,
 } from "./playback.ts";
 import type { UnshownSubtitles } from "./title-formats.ts";
@@ -131,9 +134,9 @@ const STILL = STREAMING.filter((shortcut) => shortcut.id === "close" || shortcut
  * panel, all showing and hiding together. Both a channel and a title add their sound and subtitle
  * tracks. A channel adds Quality, its star, which stars or unstars it and leaves what plays alone,
  * and Play from start while its catch-up keeps the programme on now.
- * A movie or an episode adds a scrubber and the next episode. It is the app's own layer rather
- * than a route, because the view that starts Picture in Picture has to stay while it plays: Watch
- * then hides, and the tabs and accessory take over. Closing it shows the screen under it, a
+ * A movie or an episode adds a scrubber, Speed and the next episode. It is the app's own layer
+ * rather than a route, because the view that starts Picture in Picture has to stay while it plays:
+ * Watch then hides, and the tabs and accessory take over. Closing it shows the screen under it, a
  * title's details among them. A movie or an episode turns Watch to landscape while it shows in a
  * window under 700 points on its short side, as on a phone; the screens under it turn as the phone
  * does again once it closes. A larger window, as an iPad's, shows the picture as the window stands.
@@ -343,6 +346,11 @@ function turn(change: () => Promise<void>) {
   turning = turning.then(change).catch(() => undefined);
 }
 
+/**
+ * Watch's controls: the top buttons and the panel with what plays, the transport, Quality and the
+ * star for a channel, the clock or scrubber, and the text-button row (Audio, Subtitles, Speed for
+ * a movie or an episode, and the rest, `TextButtons`).
+ */
 function Controls({
   onPictureInPicture,
   screens,
@@ -730,10 +738,10 @@ function Scrubber() {
 }
 
 /**
- * Audio and Subtitles, then Play from start for a live channel or Next episode for a title: one
- * row of text controls that wraps when it runs out of width. For a movie or an episode, Subtitles
- * also lists the subtitle downloaded for its version, with Find online and, while that shows,
- * Adjust timing. Every sheet that follows acts only while the play it was opened for stands.
+ * Audio and Subtitles, then Play from start for a live channel, or Speed and Next episode for a
+ * movie or an episode: one row of text controls that wraps when it runs out of width. For a movie
+ * or an episode, Subtitles also lists the subtitle downloaded for its version, with Find online
+ * and, while that shows, Adjust timing. Every sheet that follows acts only while the play it was opened for stands.
  * While an ended episode counts down to the next, the row is that countdown instead (`UpNextRow`).
  */
 function TextButtons({ item }: { item: Playing }) {
@@ -805,12 +813,81 @@ function TextButtons({ item }: { item: Playing }) {
         onPress={() => void choose("subtitles")}
         testID="watch-subtitles"
       />
-      {item.live ? (
-        <StartOver item={item} />
-      ) : item.next ? (
+      {item.live ? <StartOver item={item} /> : null}
+      {item.live || item.past ? null : <TitleSpeed />}
+      {!item.live && item.next ? (
         <TextControl label="Next episode" onPress={playNext} testID="watch-next" />
       ) : null}
     </View>
+  );
+}
+
+/** "0.5×", "1×", "1.25×": a speed as the controls show it. */
+const speedLabel = (rate: number) => `${speedNumber(rate)}×`;
+/** A reported rate to two decimals at most, as 1.5 rather than 1.5000000596. */
+const speedNumber = (rate: number) => Number(rate.toFixed(2));
+
+/**
+ * Speed for a movie or an episode: "Speed", or "Speed 1.5×" while the player reports another
+ * speed than 1×, since a saved speed carries over to every title. Its sheet ticks the speed the
+ * player reports, never the one asked for, and picks act only while the same play stands.
+ */
+function TitleSpeed() {
+  const rate = usePlaybackSpeed();
+  const menu = useRef(0);
+  useEffect(
+    () => () => {
+      menu.current++;
+    },
+    [],
+  );
+  const choose = () => {
+    const mine = ++menu.current;
+    const asked = request();
+    const playing = playingItem(playbackState.get().phase);
+    const stands = () =>
+      menu.current === mine &&
+      asked.stands() &&
+      playbackState.get().watch &&
+      playingItem(playbackState.get().phase) === playing;
+    if (!playing || !stands()) return;
+    const now = playbackSpeed.get();
+    const message =
+      now === null
+        ? "Current speed not known yet."
+        : SPEEDS.some((speed) => speed === now)
+          ? null
+          : `Playing at ${speedLabel(now)}.`;
+    showSheet(
+      {
+        title: "Speed",
+        options: [
+          ...SPEEDS.map((speed) => `${speed === now ? "✓ " : ""}${speedLabel(speed)}`),
+          "Cancel",
+        ],
+        cancelButtonIndex: SPEEDS.length,
+        ...(message ? { message } : {}),
+      },
+      (index) => {
+        const picked = SPEEDS[index];
+        if (picked === undefined || !stands()) return;
+        if (!setSpeed(picked)) {
+          Alert.alert(
+            "Couldn't save media preference",
+            "Your previous choice is still saved. Try again.",
+          );
+        }
+      },
+    );
+  };
+  const other = rate !== null && rate !== 1 ? rate : null;
+  return (
+    <TextControl
+      label={other === null ? "Speed" : `Speed ${speedLabel(other)}`}
+      accessibilityLabel={other === null ? "Speed" : `Speed, ${speedNumber(other)} times`}
+      onPress={choose}
+      testID="watch-speed"
+    />
   );
 }
 

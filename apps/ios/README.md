@@ -275,6 +275,22 @@ Release/UI acceptance. Scoped producer fixtures remain in
 `test/native-player-r24`; `managed-playback.test.ts` and the existing caller suites exercise the
 app through native-port stand-ins. Actual consumer Release/UI verification remains required.
 
+## Speed and Now Playing
+
+Watch's Speed plays movies and episodes at 0.5× to 2×, saved in `media-preferences.json` for
+every later title; channels and catch-up play at their own. A paused player stays paused when the
+speed changes. The checkmark is the rate the patched player reports in each state observation
+(AVPlayer's rate while it plays, else its default rate), never the request.
+
+`src/media-controls.ts` and `modules/media-controls` publish Now Playing while Watch, Picture in
+Picture, AirPlay or a Watch set aside shows the player, never Home's silent preview: the name, its
+line, the length, position and reported rate, or Live for a channel. No address, provider or
+artwork goes there. Stop, a failure and Close (which pauses) clear it and its commands. The
+player's `ownsNowPlaying` keeps the audio session unmixed so iOS shows it, without expo-video's own
+command targets. Play, pause, ±10 s, a position and next go through the same calls as Watch's
+buttons; a channel takes play and pause only. These are source and service checks; the real lock
+screen, Control Center, headphones and background behavior still need native acceptance.
+
 ## How it is built
 
 Each responsibility has one owner, a plain module with a store the screens read:

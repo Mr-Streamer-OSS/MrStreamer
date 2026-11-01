@@ -34,11 +34,13 @@ describe("accepted media preferences", () => {
       subtitles: { kind: "forced-only" },
       liveQuality: "fhd",
       subtitleSize: "medium",
+      titleSpeed: 1,
     });
     expect(app.updateMediaPreferences("titleLanguage", "nl")).toBe(true);
     expect(app.updateMediaPreferences("audio", { kind: "original" })).toBe(true);
     expect(app.updateMediaPreferences("subtitles", { kind: "off" })).toBe(true);
     expect(app.updateMediaPreferences("liveQuality", "uhd")).toBe(true);
+    expect(app.updateMediaPreferences("titleSpeed", 1.25)).toBe(true);
     app = await restart();
     expect(app.getMediaPreferences()).toEqual({
       titleLanguage: "nl",
@@ -46,6 +48,7 @@ describe("accepted media preferences", () => {
       subtitles: { kind: "off" },
       liveQuality: "uhd",
       subtitleSize: "medium",
+      titleSpeed: 1.25,
     });
     app.updateMediaPreferences("audio", { kind: "language", language: "fr" });
     app.updateMediaPreferences("subtitles", { kind: "language", language: "de" });
@@ -66,6 +69,7 @@ describe("accepted media preferences", () => {
         audio: futureAudio,
         subtitles: { kind: "off" },
         liveQuality: "hd",
+        titleSpeed: 3,
         future: { keep: true },
       }),
     );
@@ -76,6 +80,7 @@ describe("accepted media preferences", () => {
       subtitles: { kind: "off" },
       liveQuality: "hd",
       subtitleSize: "medium",
+      titleSpeed: 1,
     });
     app.updateMediaPreferences("liveQuality", "sd");
     const disk: unknown = JSON.parse(bytes());
@@ -510,6 +515,7 @@ describe("per-channel quality picks", () => {
       subtitles: { kind: "off" },
       liveQuality: "fhd",
       subtitleSize: "medium",
+      titleSpeed: 1,
     });
     expect(app.channelPicks("s1")).toEqual({ "10": "11", "20": "20" });
   });
