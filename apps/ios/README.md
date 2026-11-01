@@ -810,8 +810,8 @@ fetched. Settings > TMDB shows the key, how TMDB stands and how many titles it h
 Try again to ask it again. Settings > About always shows TMDB's logo and notice, including after key removal,
 because cached TMDB facts can remain.
 
-Settings' Diagnostics shows what it would share first, how the app and each numbered provider
-stand as kinds and counts, with no address, login, name, history, path or device identity, and
+Settings' Diagnostics first shows what it would share: how the app and each numbered provider
+stand, as kinds and counts, with no address, login, name, history, path or device identity, and
 Share hands exactly that text to the system's share sheet; nothing is sent by the app itself
 (`src/diagnostics.ts`). Settings' Privacy opens the privacy policy, `https://mrstreamer.app/privacy`, in the browser, and
 About opens Licences: the app under GPL-3.0-only, then every component the build carries, each

@@ -112,7 +112,7 @@ A reminder belongs to its subscription, channel and start time. If the guide lat
 
 ## Recordings
 
-Recording is new in Mr. Streamer 0.0.23, which [Nightly](updates.md#stable-and-nightly) builds have now. Stable 0.0.22 and earlier can't record.
+Recording is new in Mr. Streamer 0.0.23, now in [Nightly](updates.md#stable-and-nightly). Stable 0.0.22 and earlier can't record.
 
 A recording is a copy of a live channel that Mr. Streamer saves on this computer while it plays out. It isn't catch-up, which your provider keeps and plays back, and it isn't a reminder, which only tells you a programme starts. Mr. Streamer records only while it's open and the computer is awake: it never wakes or starts your computer, and nothing records on a server.
 
@@ -120,7 +120,7 @@ A recording is a copy of a live channel that Mr. Streamer saves on this computer
 
 **Record**, beside **Watch** and **Guide** at the top of Live TV, records the channel shown there. Pick when it stops: **When it ends**, two minutes after the guide's end for the programme on now; **In 1 hour**; **In 2 hours**; or **At a time…**, within the next 12 hours. **Start recording** starts it. While the channel records, the button reads **Recording** and opens the Recordings page.
 
-A recording uses one of its subscription's connections until it ends. Mr. Streamer counts the connections an Xtream account allows and counts a playlist as one; it can't see other devices using the same account. When every connection is in use, Record says so. When only the channel playing here holds the last one, **Stop playing and record** stops it and records instead. While recordings hold all of a subscription's connections, playing from it says so. Downloads from a subscription wait while it records.
+A recording uses one of its subscription's connections until it ends. Mr. Streamer counts as many connections as an Xtream account allows, and one for a playlist; it can't see other devices using the same account. When every connection is in use, Record says so. When only the channel playing here holds the last one, **Stop playing and record** stops it and records instead. While recordings hold all of a subscription's connections, playing from it says so. Downloads from a subscription wait while it records.
 
 ### Schedule a programme
 

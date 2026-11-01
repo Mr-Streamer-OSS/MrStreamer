@@ -43,7 +43,7 @@ A movie starts about a second after you choose it. Skipping into what's already 
 
 ## Recordings
 
-From 0.0.23, now in Nightly, Mr. Streamer can [record live channels](live-tv.md#recordings). A recording keeps the channel's MPEG-TS stream as your provider sends it, with every picture, sound, subtitle and teletext track, and converts nothing while recording. It plays in the same player as a download, which converts only what it can't play as it is, as for movies and episodes. Recordings play on this computer only, not on a TV.
+From 0.0.23, now in Nightly, Mr. Streamer can [record live channels](live-tv.md#recordings). A recording keeps the channel's MPEG-TS stream as your provider sends it, with every picture, sound, subtitle and teletext track, and converts nothing while recording. It plays as a download does, converting only what Mr. Streamer can't play as it is. Recordings play on this computer only, not on a TV.
 
 An HLS channel can be recorded when its stream is plain MPEG-TS: its highest quality up to 1080p, one segment after another. Encrypted streams, fragmented MP4, byte-range and low-latency playlists, sound sent as a separate stream, and streams without an MPEG-TS programme table can't be. Record then says "This channel's stream can't be recorded." before anything is kept.
 
@@ -76,7 +76,7 @@ While the TV plays:
 - **Stop** ends the stream and keeps the TV, so the next thing you play goes there too. **Disconnect** in the bar then lets the TV go.
 - **Play here** ends playback on the TV and carries on in Mr. Streamer from where the TV was, with the same sound and subtitles.
 - Home and Live TV show no preview, since one thing plays at a time and the TV has it.
-- Closing the window on macOS leaves the TV playing. The next episode still starts by itself and the media keys still work the TV, and the Dock icon brings the window back. Quitting Mr. Streamer ends it. On Windows, closing the window quits, unless a [recording or schedule](live-tv.md#closing-quitting-and-updates) keeps Mr. Streamer running, from 0.0.23.
+- Closing the window on macOS leaves the TV playing. The next episode still starts by itself and the media keys still work the TV, and the Dock icon brings the window back. Quitting Mr. Streamer ends it. On Windows, closing the window quits, unless from 0.0.23 a [recording or schedule](live-tv.md#closing-quitting-and-updates) keeps Mr. Streamer running.
 - How far you got in a movie or episode is saved as it is on your computer.
 
 | What you play                                              | What the TV gets                                    |
