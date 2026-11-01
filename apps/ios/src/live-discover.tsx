@@ -1,3 +1,4 @@
+import { formatList, formatNumber } from "@mrstreamer/core/i18n";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useDeferredValue, useMemo, useState } from "react";
@@ -5,6 +6,8 @@ import { Pressable, SectionList, StyleSheet, Text, TextInput, View } from "react
 import { retry, retryChannels, useCatalogue, useRoster, type Member } from "./account.ts";
 import { failureOf } from "./errors.ts";
 import { tabHref } from "./header.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/live.ts";
 import { searchPlaces, type Library, type Place } from "./library.ts";
 import { categoryHref, chooseCountry } from "./live-screen.tsx";
 import { Docked, libraryStatus, useDockInset } from "./loading.tsx";
@@ -23,6 +26,7 @@ import { colors, Message, Notice, TextButton } from "./ui.tsx";
 
 /** Live's discovery screen. */
 export function DiscoverScreen() {
+  useLocale();
   const catalogue = useCatalogue();
   const roster = useRoster();
   const [query, setQuery] = useState("");
@@ -51,21 +55,21 @@ export function DiscoverScreen() {
               value={query}
               onChangeText={setQuery}
               autoFocus
-              placeholder="Countries or categories"
+              placeholder={t("Countries or categories")}
               placeholderTextColor={colors.dim}
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
               keyboardAppearance="dark"
               selectionColor="#FFFFFF"
-              accessibilityLabel="Find countries or categories"
+              accessibilityLabel={t("Find countries or categories")}
               style={styles.input}
               testID="discover-field"
             />
             {query ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Clear"
+                accessibilityLabel={t("Clear")}
                 onPress={() => setQuery("")}
                 style={styles.clear}
                 testID="discover-clear"
@@ -74,29 +78,25 @@ export function DiscoverScreen() {
               </Pressable>
             ) : null}
           </View>
-          <TextButton label="Cancel" onPress={() => router.back()} testID="discover-cancel" />
+          <TextButton label={t("Cancel")} onPress={() => router.back()} testID="discover-cancel" />
         </View>
         {catalogue.kind === "ready" ? (
           <Results library={catalogue.library} providers={providers} query={typed} />
         ) : catalogue.kind === "loading" ? (
-          <Message text="Channels are still loading." />
+          <Message text={t("Channels are still loading.")} />
         ) : (
           <Notice
             failure={{
-              headline: "Couldn't load channels",
+              headline: t("Couldn't load channels"),
               advice: [failure?.headline, failure?.advice].filter(Boolean).join(". "),
             }}
-            actions={[{ label: "Try again", onPress: retryChannels }]}
+            actions={[{ label: t("Try again"), onPress: retryChannels }]}
           />
         )}
       </View>
     </Docked>
   );
 }
-
-/** "Home", "Home and Cabin". */
-const named = (labels: readonly string[]) =>
-  new Intl.ListFormat("en", { type: "conjunction" }).format(labels);
 
 /**
  * The providers none of whose channels `library` holds, as sentences of why, as Search says them:
@@ -115,9 +115,15 @@ function missingFrom(library: Library, providers: readonly Member[]) {
     else pending.push(label);
   }
   const sentences = [
-    ...(pending.length > 0 ? [`Channels from ${named(pending)} are still loading.`] : []),
-    ...(failed.length > 0 ? [`Couldn't load channels from ${named(failed)}.`] : []),
-    ...(passwords.length > 0 ? [`Enter the password for ${named(passwords)} in Settings.`] : []),
+    ...(pending.length > 0
+      ? [t("Channels from {providers} are still loading.", { providers: formatList(pending) })]
+      : []),
+    ...(failed.length > 0
+      ? [t("Couldn't load channels from {providers}.", { providers: formatList(failed) })]
+      : []),
+    ...(passwords.length > 0
+      ? [t("Enter the password for {providers} in Settings.", { providers: formatList(passwords) })]
+      : []),
   ];
   return { pending: pending.length > 0, text: sentences.join(" ") };
 }
@@ -132,16 +138,18 @@ function Results({
   providers: readonly Member[];
   query: string;
 }) {
+  const locale = useLocale();
   const inset = useDockInset();
   const sections = useMemo(() => {
     const found = searchPlaces(library, query);
     const countries = found.filter((place) => place.kind === "country");
     const categories = found.filter((place) => place.kind === "category");
     return [
-      ...(countries.length > 0 ? [{ title: "Countries", data: countries }] : []),
-      ...(categories.length > 0 ? [{ title: "Categories", data: categories }] : []),
+      ...(countries.length > 0 ? [{ title: t("Countries"), data: countries }] : []),
+      ...(categories.length > 0 ? [{ title: t("Categories"), data: categories }] : []),
     ];
-  }, [library, query]);
+    // A new language titles the sections again.
+  }, [library, query, locale]);
   const missing = missingFrom(library, providers);
   const searched = query.trim();
   // Nothing anywhere only once every provider's channels are in.
@@ -150,24 +158,24 @@ function Results({
       <Message
         text={
           !missing.text
-            ? "Your providers list no channels."
+            ? t("Your providers list no channels.")
             : missing.pending
               ? missing.text
-              : `The providers that loaded list no channels. ${missing.text}`
+              : `${t("The providers that loaded list no channels.")} ${missing.text}`
         }
       />
     );
   }
   if (searched && sections.length === 0) {
-    const none = `No country or category is called “${searched}”`;
+    const query = { query: searched };
     return (
       <Message
         text={
           !missing.text
-            ? `${none}.`
+            ? t("No country or category is called “{query}”.", query)
             : missing.pending
-              ? `${none} yet. ${missing.text}`
-              : `${none} in the channels that loaded. ${missing.text}`
+              ? `${t("No country or category is called “{query}” yet.", query)} ${missing.text}`
+              : `${t("No country or category is called “{query}” in the channels that loaded.", query)} ${missing.text}`
         }
       />
     );
@@ -179,7 +187,7 @@ function Results({
       keyExtractor={keyOf}
       renderSectionHeader={({ section }) => (
         <Text style={styles.section} accessibilityRole="header">
-          {`${section.title} · ${section.data.length}`}
+          {`${section.title} · ${formatNumber(section.data.length)}`}
         </Text>
       )}
       renderItem={({ item }) => <Row place={item} />}
@@ -195,9 +203,6 @@ function Results({
 const keyOf = (place: Place) =>
   place.kind === "country" ? `country\n${place.region.name}` : `category\n${place.shelf.id}`;
 
-/** "42 channels", or "1 channel". */
-const channelCount = (count: number) => `${count} ${count === 1 ? "channel" : "channels"}`;
-
 /**
  * A country, with how many channels it has; or a category, with its country unless it stands
  * alone, so two of one name read apart.
@@ -208,7 +213,7 @@ function Row({ place }: { place: Place }) {
   const count = (place.kind === "country" ? region : place.shelf).channels.length;
   const context =
     place.kind === "category" && place.shelf.title !== region.name ? region.name : null;
-  const line = [context, channelCount(count)].filter(Boolean).join(" · ");
+  const line = [context, t("{count} channels", { count })].filter(Boolean).join(" · ");
   const open = () => {
     if (place.kind === "category") return router.push(categoryHref(place));
     chooseCountry(region);
@@ -217,7 +222,7 @@ function Row({ place }: { place: Place }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[name, place.kind, line].join(", ")}
+      accessibilityLabel={[name, t(place.kind), line].join(", ")}
       onPress={open}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
       testID={`discover-${keyOf(place).replace("\n", "-")}`}

@@ -2,6 +2,7 @@ import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
+import { onLanguageChange } from "@mrstreamer/core/i18n";
 import {
   relisted,
   sameReminder,
@@ -22,6 +23,7 @@ import {
 } from "./account.ts";
 import { readJsonStrictly, writeJson } from "./files.ts";
 import { guide } from "./guide.ts";
+import { t } from "./i18n/live.ts";
 import type { Channel, Library } from "./library.ts";
 import { store, useStore } from "./store.ts";
 
@@ -233,8 +235,8 @@ const noticeOf = (reminder: KeptReminder): Notice => ({
   id: reminder.id,
   at: reminder.start,
   title: reminder.title,
-  // Design A's words, which the Live and Guide translation slice translates.
-  body: `Starting now on ${reminder.channelName}`,
+  // In the interface language as each check finds it: a new one schedules them again.
+  body: t("Starting now on {channel}", { channel: reminder.channelName }),
   channel: ownedKey({ subscriptionId: reminder.subscriptionId, id: reminder.channel }),
 });
 
@@ -525,6 +527,8 @@ export function startReminders() {
   const check = () => void checkReminders();
   onRoster(check);
   onCatalogue(check);
+  // Notifications already scheduled say their words in the language they were set in.
+  onLanguageChange(check);
   // Once the guide's change is over: it tells before it withdraws what it handed out.
   guide.listingRevision.subscribe(() => queueMicrotask(check));
   AppState.addEventListener("change", (state) => {

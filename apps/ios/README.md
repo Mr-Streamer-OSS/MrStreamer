@@ -167,8 +167,17 @@ instead of the viewer's. It is the v4 backport of
 97ec4e250282bf4bdf376da9cd293ee9dfb385da, which applies to 4.29.0 byte for byte, then the
 follow-up [#4894](https://github.com/software-mansion/react-native-screens/pull/4894) (#4890),
 23127222c39b6d44aded6ef11130a7513dbb2735, both in react-native-screens 4.30.0
-([issue #4855](https://github.com/software-mansion/react-native-screens/issues/4855)). Drop it
-once the SDK's react-native-screens is 4.30.0 or later.
+([issue #4855](https://github.com/software-mansion/react-native-screens/issues/4855)). Drop that
+hunk once the SDK's react-native-screens is 4.30.0 or later.
+
+`patches/` also lets the native labels follow a new interface language without a relaunch,
+which react-native-screens doesn't do up to 4.30.1. A tab's title goes to its `UITab` before its
+tab bar item, as upstream already does for its image
+([#4813](https://github.com/software-mansion/react-native-screens/pull/4813)): on iOS 26.1 and
+later the item write repaints the bar from the tab, so the title showed one change late. And a
+screen under the visible one keeps its title and the back button above it current; upstream
+configures it again only when it shows, so Settings' back button kept the language it was opened
+in.
 
 SDK 58 links prebuilt modules, which a patch can't reach, so `package.json` has autolinking build
 ExpoFileSystem, ExpoVideo and RNScreens from their patched source.
@@ -590,9 +599,14 @@ languages (`AppleLanguages`): System default is the first the app speaks, else E
 layout applies it before any screen loads; a new pick shows at once, without a relaunch, in the tab
 bar and every tab's top bar too (`useTabScreenOptions`). The app's own text is in `src/i18n/`, one
 catalogue per feature area keyed by its English text (`onboarding.ts`, `navigation.ts`,
-`settings.ts`, and `failures.ts` for the provider failures `errors.ts` puts, so far), and an area
-compiles only with every language's text. Screens outside those areas still show English until their
-area gets its own catalogue; provider, channel, programme and title names are never translated.
+`settings.ts`, `failures.ts` for the provider failures `errors.ts` puts, `live.ts` for Live, Find,
+Favourites, lists, the Guide, Schedules, programmes and Reminders, and `status.ts` for the status
+line every tab shares, so far), and an area compiles only with every language's text. Guide days and
+times, counts and lists of providers are written in the language too. A new pick redraws the screens
+already open where they stand, keeping Live's tab, country and scroll, and schedules each reminder's
+notification again in its words. Screens outside those areas still show English until their area
+gets its own catalogue; provider, channel, category, list, programme and title names are never
+translated, nor the catalogue's English country names, which Live's saved place is kept by.
 iOS's own controls, such as text menus, follow the localizations the app bundle declares, which this
 leaves as they were.
 

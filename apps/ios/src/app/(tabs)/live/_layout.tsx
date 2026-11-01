@@ -1,5 +1,6 @@
 import { Stack } from "expo-router";
 import { useTabScreenOptions } from "../../../header.tsx";
+import { t as live } from "../../../i18n/live.ts";
 import { t } from "../../../i18n/navigation.ts";
 
 /**
@@ -12,11 +13,11 @@ export default function LiveLayout() {
     <Stack screenOptions={useTabScreenOptions("live")}>
       <Stack.Screen name="index" options={{ title: t("Live"), headerLargeTitle: true }} />
       <Stack.Screen name="category" options={{ title: "" }} />
-      <Stack.Screen name="favourites" options={{ title: "Favourites" }} />
+      <Stack.Screen name="favourites" options={{ title: live("Favourites") }} />
       <Stack.Screen name="list" options={{ title: "" }} />
       <Stack.Screen name="discover" options={{ title: "" }} />
-      <Stack.Screen name="schedule" options={{ title: "Schedule" }} />
-      <Stack.Screen name="programme" options={{ title: "Programme" }} />
+      <Stack.Screen name="schedule" options={{ title: live("Schedule") }} />
+      <Stack.Screen name="programme" options={{ title: live("Programme") }} />
       <Stack.Screen name="downloads" options={{ title: "Downloads" }} />
       <Stack.Screen name="settings" options={{ title: "Settings" }} />
       <Stack.Screen name="provider" options={{ title: "" }} />

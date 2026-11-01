@@ -15,6 +15,8 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useArtwork } from "./artwork-cache.ts";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/live.ts";
 import type { Failure } from "./errors.ts";
 
 // Plain true-black content: rows, logos, lines of text and the one text button. No glass here.
@@ -138,12 +140,14 @@ export const ChannelRow = memo(function ChannelRow({
   /** Opens the channel's lists, pointing at the row when held. */
   onLists?: ((channel: Channel, anchor?: number) => void) | undefined;
 }) {
+  // Memoised on its props, so the language reaches it here.
+  useLocale();
   const row = useRef<ComponentRef<typeof Pressable>>(null);
   const tags = channel.tags.join(" ");
-  const star = favourite ? "Remove from Favourites" : "Add to Favourites";
+  const star = favourite ? t("Remove from Favourites") : t("Add to Favourites");
   const actions = [
     ...(onFavourite ? [{ name: "favourite", label: star }] : []),
-    ...(onLists ? [{ name: "lists", label: "Lists" }] : []),
+    ...(onLists ? [{ name: "lists", label: t("Lists") }] : []),
   ];
   // At large text, the star goes under the lines, so the name keeps the row's width.
   const stacked = largeText(useWindowDimensions().fontScale) && Boolean(onFavourite);
@@ -157,7 +161,7 @@ export const ChannelRow = memo(function ChannelRow({
         accessibilityLabel={[
           channel.title,
           providerLabel,
-          favourite && "favourite",
+          favourite && t("favourite"),
           programmeHint,
           status?.toLowerCase(),
         ]

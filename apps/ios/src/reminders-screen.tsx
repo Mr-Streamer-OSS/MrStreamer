@@ -1,4 +1,3 @@
-import { t } from "@mrstreamer/core/i18n";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { memo, useMemo } from "react";
@@ -13,6 +12,8 @@ import {
   type AccessibilityActionEvent,
 } from "react-native";
 import { dayLabel, localDay, programmeRange } from "./guide-ui.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/live.ts";
 import { cancelReminder, usePermission, useReminders, type Reminder } from "./reminders.ts";
 import { Swipe } from "./swipe.tsx";
 import { colors, monogram, Notice } from "./ui.tsx";
@@ -32,10 +33,11 @@ interface Day {
 
 /** Today, Tomorrow, else the short date, as a day's heading. */
 function dayTitle(from: number, now: number) {
-  return from === localDay(now, 1).from ? "Tomorrow" : dayLabel({ from, until: from }, now);
+  return from === localDay(now, 1).from ? t("Tomorrow") : dayLabel({ from, until: from }, now);
 }
 
 export function RemindersScreen() {
+  const locale = useLocale();
   const list = useReminders();
   const permission = usePermission();
   const reminders = list.kind === "read" ? list.reminders : [];
@@ -49,7 +51,8 @@ export function RemindersScreen() {
       else grouped.push({ from, title: dayTitle(from, now), data: [reminder] });
     }
     return grouped;
-  }, [reminders]);
+    // A new language writes the days' headings again.
+  }, [reminders, locale]);
   if (list.kind !== "read") {
     return (
       <View style={styles.screen}>
@@ -71,6 +74,7 @@ export function RemindersScreen() {
       contentInsetAdjustmentBehavior="automatic"
       sections={days}
       keyExtractor={(item) => item.id}
+      extraData={locale}
       stickySectionHeadersEnabled={false}
       renderSectionHeader={({ section }) => (
         <Text style={styles.section} accessibilityRole="header">
@@ -82,10 +86,12 @@ export function RemindersScreen() {
         permission === "denied" && days.length > 0 ? (
           <Notice
             failure={{
-              headline: "Notifications are off.",
-              advice: "iOS won't show these until you turn them on.",
+              headline: t("Notifications are off."),
+              advice: t("iOS won't show these until you turn them on."),
             }}
-            actions={[{ label: "Open iOS Settings", onPress: () => void Linking.openSettings() }]}
+            actions={[
+              { label: t("Open iOS Settings"), onPress: () => void Linking.openSettings() },
+            ]}
           />
         ) : undefined
       }
@@ -93,13 +99,13 @@ export function RemindersScreen() {
         <Notice
           failure={{
             headline: t("No reminders yet."),
-            advice: "Set one from a later programme's details.",
+            advice: t("Set one from a later programme's details."),
           }}
         />
       }
       ListFooterComponent={
         <Text style={styles.note}>
-          iOS notifies you as each one starts. A reminder never records or plays.
+          {t("iOS notifies you as each one starts. A reminder never records or plays.")}
         </Text>
       }
       contentContainerStyle={styles.content}
@@ -116,11 +122,11 @@ function statusOf({ status, title }: Reminder): string | null {
     case "on":
       return t("On now");
     case "changed":
-      return `Changed to ${title} · won't notify`;
+      return t("Changed to {title} · won't notify", { title });
     case "gone":
-      return "No longer in the guide · won't notify";
+      return t("No longer in the guide · won't notify");
     case "unscheduled":
-      return "Not scheduled by iOS · won't notify";
+      return t("Not scheduled by iOS · won't notify");
   }
 }
 
@@ -134,6 +140,8 @@ const open = (reminder: Reminder) =>
   });
 
 const Row = memo(function Row({ reminder }: { reminder: Reminder }) {
+  // Memoised on its reminder, so the language reaches it here.
+  useLocale();
   // The programme set: one that changed shows what it was, and what took its start below.
   const title = reminder.status.kind === "changed" ? reminder.status.was : reminder.title;
   const facts = `${reminder.channelName} · ${programmeRange(reminder)}`;
@@ -144,7 +152,7 @@ const Row = memo(function Row({ reminder }: { reminder: Reminder }) {
   };
   return (
     <Swipe
-      label="Cancel"
+      label={t("reminder.cancel")}
       action={{ run: () => void cancel(reminder) }}
       testID={`reminder-${reminder.id}-swiped`}
     >
@@ -157,7 +165,7 @@ const Row = memo(function Row({ reminder }: { reminder: Reminder }) {
             .join(", ")}
           accessibilityActions={[
             { name: "activate" },
-            { name: "cancel", label: "Cancel reminder" },
+            { name: "cancel", label: t("Cancel reminder") },
           ]}
           onAccessibilityAction={act}
           onPress={() => open(reminder)}

@@ -1,7 +1,9 @@
+import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
+import { formatNumber } from "@mrstreamer/core/i18n";
 import { normalize } from "@mrstreamer/core/text";
 import { router, useIsFocused } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useRef, useState, type ComponentRef } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
 import {
   AccessibilityInfo,
   ActionSheetIOS,
@@ -32,6 +34,8 @@ import {
 import { appError, describeError } from "./errors.ts";
 import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
 import type { Unavailable } from "./favourites.ts";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/live.ts";
 import type { Channel } from "./library.ts";
 import { useDockInset } from "./loading.tsx";
 import { channelStatus, usePlayback } from "./playback.ts";
@@ -58,13 +62,15 @@ import {
 // the removals together, only while the list still shows the rows it was made from. A refused write
 // keeps the draft for Try again. Rename and Delete list write at once.
 
-/** What a saved channel that doesn't show says, after its provider's name, here and in Favourites. */
-export const WHY: Record<Unavailable, string> = {
+const WHY = {
   loading: "channels still loading",
   failed: "channels didn't load",
   "needs-secret": "password needed in Settings",
   "not-listed": "no longer listed",
-};
+} as const satisfies Record<Unavailable, string>;
+
+/** What a saved channel that doesn't show says, after its provider's name, here and in Favourites. */
+export const why = (reason: Unavailable) => t(WHY[reason]);
 
 /** Where list `id` opens, on Live's stack. */
 const listHref = (id: string) => `/live/list?id=${encodeURIComponent(id)}` as const;
@@ -77,13 +83,13 @@ const openCount = (list: ChannelList) =>
 function whyNot(error: AppError): string {
   switch (error.kind) {
     case "no-list":
-      return "It was deleted.";
+      return t("It was deleted.");
     case "list-changed":
-      return "Its provider lists the channel as more than one channel now.";
+      return t("Its provider lists the channel as more than one channel now.");
     case "no-subscription":
-      return "Its provider was removed.";
+      return t("Its provider was removed.");
     case "channel-not-found":
-      return "Its provider no longer lists the channel.";
+      return t("Its provider no longer lists the channel.");
     default:
       return describeError(error);
   }
@@ -95,7 +101,7 @@ function change(name: string, write: () => void): boolean {
     write();
     return true;
   } catch (cause) {
-    Alert.alert(`${name} wasn't changed`, whyNot(appError(cause)));
+    Alert.alert(t("{name} wasn't changed", { name }), whyNot(appError(cause)));
     return false;
   }
 }
@@ -120,7 +126,7 @@ function askName(naming: Naming) {
     naming.title,
     naming.message,
     [
-      { text: "Cancel", style: "cancel" },
+      { text: t("Cancel"), style: "cancel" },
       {
         text: naming.action,
         onPress: (typed = "") => {
@@ -130,8 +136,12 @@ function askName(naming: Naming) {
             naming.write(name);
           } catch (cause) {
             const error = appError(cause);
+            // The one name a list refuses as invalid: too long, as custom-lists.ts says.
             if (error.kind === "invalid-input") {
-              return askName({ ...naming, message: error.detail, typed });
+              const message = t("A list's name has 1 to {max} characters.", {
+                max: CUSTOM_LIST_NAME_MAX,
+              });
+              return askName({ ...naming, message, typed });
             }
             if (error.kind !== "list-name-taken") {
               return Alert.alert(naming.failed(name), whyNot(error));
@@ -140,7 +150,7 @@ function askName(naming: Naming) {
             const other = currentChannelLists().find((list) => normalize(list.name) === folded);
             askName({
               ...naming,
-              message: `There's already a list called ${other?.name ?? name}.`,
+              message: t("There's already a list called {name}.", { name: other?.name ?? name }),
               typed,
             });
           }
@@ -171,8 +181,8 @@ export function openListSheet(channel: Channel, anchor?: number) {
       title: named,
       options: [
         ...lists.map((list, at) => (holds[at] ? `✓ ${list.name}` : list.name)),
-        "New list…",
-        "Cancel",
+        t("New list…"),
+        t("Cancel"),
       ],
       cancelButtonIndex: lists.length + 1,
       anchor,
@@ -182,11 +192,11 @@ export function openListSheet(channel: Channel, anchor?: number) {
       if (list) return void change(list.name, () => setMember(list.id, channel, !holds[index]));
       if (index !== lists.length) return;
       askName({
-        title: "New list",
-        message: `${named} goes in it.`,
-        action: "Create",
+        title: t("New list"),
+        message: t("{name} goes in it.", { name: named }),
+        action: t("Create"),
         typed: "",
-        failed: (name) => `Couldn't make ${name}`,
+        failed: (name) => t("Couldn't make {name}", { name }),
         write: (name) => void createList(name, channel),
       });
     },
@@ -208,7 +218,7 @@ export function Entry({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={count > 0 ? `${name}, ${count}` : name}
+      accessibilityLabel={count > 0 ? `${name}, ${formatNumber(count)}` : name}
       onPress={onPress}
       style={({ pressed }) => [styles.entry, pressed && styles.pressed]}
       testID={testID}
@@ -216,7 +226,7 @@ export function Entry({
       <Text style={styles.entryName} numberOfLines={1}>
         {name}
       </Text>
-      {count > 0 ? <Text style={styles.entryCount}>{count}</Text> : null}
+      {count > 0 ? <Text style={styles.entryCount}>{formatNumber(count)}</Text> : null}
       <View style={styles.spacer} />
       <SymbolView name="chevron.right" size={13} tintColor={colors.text} weight="semibold" />
     </Pressable>
@@ -252,17 +262,19 @@ interface Draft {
 const rowId = (entry: ListEntry) => (entry.kind === "listed" ? entry.channel.key : entry.member);
 const titleOf = (entry: ListEntry) => (entry.kind === "listed" ? entry.channel.title : entry.name);
 
-/** Escape, which throws an edit away as Cancel does. */
-const CANCEL: readonly Shortcut<"cancel">[] = [
-  { id: "cancel", input: "escape", command: false, title: "Cancel" },
+/** Escape, which throws an edit away as Cancel does, titled in the interface language. */
+const cancelShortcut = (): readonly Shortcut<"cancel">[] => [
+  { id: "cancel", input: "escape", command: false, title: t("Cancel") },
 ];
 
 /** "2 kept for removed providers": the channels kept for subscriptions removed with their history. */
-const awayLine = (away: number) =>
-  away === 1 ? "1 kept for a removed provider" : `${away} kept for removed providers`;
+const awayLine = (away: number) => t("{count} kept for removed providers", { count: away });
 
 /** List `id`'s channels, pushed on Live; a list deleted meanwhile says so. */
 export function ChannelListScreen({ id }: { id: string }) {
+  const locale = useLocale();
+  // Made again for a new language only: the native module installs them whenever they change.
+  const shortcuts = useMemo(cancelShortcut, [locale]);
   const list = useChannelLists().find((each) => each.id === id);
   const catalogue = useCatalogue();
   const inset = useDockInset();
@@ -273,7 +285,7 @@ export function ChannelListScreen({ id }: { id: string }) {
   const focused = useIsFocused();
   const [draft, setDraft] = useState<Draft | null>(null);
   // Only while this edit shows: Watch, or a screen pushed over it, has its own Escape.
-  useShortcuts(draft && focused && !watch ? CANCEL : NO_SHORTCUTS, () => setDraft(null));
+  useShortcuts(draft && focused && !watch ? shortcuts : NO_SHORTCUTS, () => setDraft(null));
   // The draft on show, for a Try again that comes later; none once the list closed.
   const open = useRef<Draft | null>(null);
   useEffect(() => {
@@ -283,7 +295,7 @@ export function ChannelListScreen({ id }: { id: string }) {
   if (!list) {
     return (
       <View style={styles.screen}>
-        <Message text="This list was deleted." />
+        <Message text={t("This list was deleted.")} />
       </View>
     );
   }
@@ -292,9 +304,9 @@ export function ChannelListScreen({ id }: { id: string }) {
   const detailOf = (entry: ListEntry) =>
     entry.kind === "listed"
       ? entry.channel.key === playing?.id
-        ? playing.word
+        ? t(playing.word)
         : placeOf(entry.channel)
-      : `${entry.label}: ${WHY[entry.why]}`;
+      : t("{provider}: {why}", { provider: entry.label, why: why(entry.why) });
   const rows = draft?.order ?? list.entries;
   /** The list's name now, which Rename may have changed since a draft began. */
   const nameNow = () => currentChannelLists().find((each) => each.id === id)?.name ?? list.name;
@@ -308,8 +320,8 @@ export function ChannelListScreen({ id }: { id: string }) {
       return playChannel(now.channel, placeOf(now.channel), { watch: true });
     }
     Alert.alert(
-      `${entry.channel.title} didn't play`,
-      `${nameNow()} changed meanwhile: choose it again as it shows now.`,
+      t("{name} didn't play", { name: entry.channel.title }),
+      t("{list} changed meanwhile: choose it again as it shows now.", { list: nameNow() }),
     );
   };
   const remove = (entry: ListEntry) => change(list.name, () => removeMember(list.id, entry.member));
@@ -321,7 +333,13 @@ export function ChannelListScreen({ id }: { id: string }) {
     if (from < 0 || to === from) return;
     const order = draft.order.toSpliced(from, 1).toSpliced(to, 0, entry);
     setDraft({ ...draft, order });
-    AccessibilityInfo.announceForAccessibility(`${titleOf(entry)}, ${to + 1} of ${order.length}`);
+    AccessibilityInfo.announceForAccessibility(
+      t("{name}, {position} of {count}", {
+        name: titleOf(entry),
+        position: to + 1,
+        count: order.length,
+      }),
+    );
   };
   const drop = (entry: ListEntry) => {
     if (draft) setDraft({ ...draft, order: draft.order.filter((each) => each !== entry) });
@@ -329,7 +347,7 @@ export function ChannelListScreen({ id }: { id: string }) {
   const save = (sent: Draft) => {
     const name = nameNow();
     const closed = () =>
-      Alert.alert(`${name} wasn't saved`, "Nothing was moved: the list was closed.");
+      Alert.alert(t("{name} wasn't saved", { name }), t("Nothing was moved: the list was closed."));
     if (open.current !== sent) return closed();
     const order = sent.order.map((entry) => entry.member);
     const removed = sent.from.entries
@@ -347,30 +365,30 @@ export function ChannelListScreen({ id }: { id: string }) {
         setDraft(null);
         if (error.kind === "no-list") return closed();
         return Alert.alert(
-          `${name} changed`,
-          "Nothing was moved or removed. It changed while you edited it: edit it as it is now.",
+          t("{name} changed", { name }),
+          t("Nothing was moved or removed. It changed while you edited it: edit it as it is now."),
         );
       }
-      Alert.alert(`Couldn't save ${name}`, describeError(error), [
-        { text: "Cancel", style: "cancel" },
-        { text: "Try again", onPress: () => save(sent) },
+      Alert.alert(t("Couldn't save {name}", { name }), describeError(error), [
+        { text: t("Cancel"), style: "cancel" },
+        { text: t("Try again"), onPress: () => save(sent) },
       ]);
     }
   };
   const rename = () =>
     askName({
-      title: "Rename list",
-      action: "Rename",
+      title: t("Rename list"),
+      action: t("Rename"),
       typed: nameNow(),
-      failed: () => `${nameNow()} wasn't changed`,
+      failed: () => t("{name} wasn't changed", { name: nameNow() }),
       write: (name) => renameList(id, name),
     });
   const confirmDelete = () => {
     const name = nameNow();
-    Alert.alert(`Delete ${name}?`, "Its channels stay in Live.", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert(t("Delete {name}?", { name }), t("Its channels stay in Live."), [
+      { text: t("Cancel"), style: "cancel" },
       {
-        text: "Delete",
+        text: t("Delete"),
         style: "destructive",
         onPress: () => {
           if (!change(name, () => deleteList(id))) return;
@@ -387,8 +405,8 @@ export function ChannelListScreen({ id }: { id: string }) {
       contentInsetAdjustmentBehavior="automatic"
       data={rows}
       keyExtractor={(entry) => entry.member}
-      // Rows draw again as editing starts or ends, and as what plays changes.
-      extraData={`${draft ? "editing" : "list"} ${list.name} ${playing?.id ?? ""} ${playing?.word ?? ""}`}
+      // Rows draw again as editing starts or ends, as what plays changes, and in a new language.
+      extraData={`${draft ? "editing" : "list"} ${list.name} ${playing?.id ?? ""} ${playing?.word ?? ""} ${locale}`}
       renderItem={({ item, index }) =>
         draft ? (
           <ArrangedRow
@@ -418,14 +436,14 @@ export function ChannelListScreen({ id }: { id: string }) {
         <View style={styles.bar}>
           {draft ? (
             <>
-              <TextButton label="Cancel" onPress={() => setDraft(null)} testID="list-cancel" />
-              <TextButton label="Save" onPress={() => save(draft)} testID="list-save" />
+              <TextButton label={t("Cancel")} onPress={() => setDraft(null)} testID="list-cancel" />
+              <TextButton label={t("Save")} onPress={() => save(draft)} testID="list-save" />
             </>
           ) : (
             <>
               <View />
               <TextButton
-                label="Edit"
+                label={t("Edit")}
                 onPress={() => setDraft({ from: list, order: list.entries })}
                 testID="list-edit"
               />
@@ -436,9 +454,9 @@ export function ChannelListScreen({ id }: { id: string }) {
       ListFooterComponent={
         draft ? (
           <View style={styles.footer}>
-            <TextButton label="Rename" onPress={rename} testID="list-rename" />
+            <TextButton label={t("Rename")} onPress={rename} testID="list-rename" />
             <TextButton
-              label="Delete list"
+              label={t("Delete list")}
               destructive
               onPress={confirmDelete}
               testID="list-delete"
@@ -452,8 +470,8 @@ export function ChannelListScreen({ id }: { id: string }) {
         draft ? undefined : (
           <Notice
             failure={{
-              headline: `No channels in ${list.name}.`,
-              advice: "Hold a channel in Live to add it.",
+              headline: t("No channels in {name}.", { name: list.name }),
+              advice: t("Hold a channel in Live to add it."),
             }}
           />
         )
@@ -486,7 +504,7 @@ function ListRow({
   onRemove: (entry: ListEntry) => void;
 }) {
   const row = useRef<ComponentRef<typeof Pressable>>(null);
-  const removeAction = { name: "remove", label: `Remove from ${listName}` };
+  const removeAction = { name: "remove", label: t("Remove from {list}", { list: listName }) };
   if (entry.kind === "unavailable") {
     return (
       <View style={[styles.row, { minHeight: height }]}>
@@ -511,7 +529,7 @@ function ListRow({
             style={styles.remove}
           >
             <TextButton
-              label="Remove"
+              label={t("Remove")}
               onPress={() => onRemove(entry)}
               testID={`list-row-${rowId(entry)}-remove`}
             />
@@ -536,7 +554,7 @@ function ListRow({
           .join(", ")}
         accessibilityActions={[
           { name: "activate" },
-          { name: "lists", label: "Lists" },
+          { name: "lists", label: t("Lists") },
           removeAction,
         ]}
         onAccessibilityAction={act}
@@ -615,13 +633,17 @@ function ArrangedRow({
         />
         <View
           accessible
-          accessibilityLabel={[title, detail, `${position + 1} of ${count}`]
+          accessibilityLabel={[
+            title,
+            detail,
+            t("{position} of {count}", { position: position + 1, count }),
+          ]
             .filter(Boolean)
             .join(", ")}
           accessibilityActions={[
-            ...(first ? [] : [{ name: "up", label: "Move up" }]),
-            ...(last ? [] : [{ name: "down", label: "Move down" }]),
-            { name: "remove", label: `Remove from ${listName}` },
+            ...(first ? [] : [{ name: "up", label: t("Move up") }]),
+            ...(last ? [] : [{ name: "down", label: t("Move down") }]),
+            { name: "remove", label: t("Remove from {list}", { list: listName }) },
           ]}
           onAccessibilityAction={act}
           style={styles.main}

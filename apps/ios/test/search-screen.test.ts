@@ -3,6 +3,7 @@ import * as React from "react";
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
+import { setLanguage } from "@mrstreamer/core/i18n";
 import type { LiveCatalogue, OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider";
 import type { HTMLInputElement } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -804,6 +805,31 @@ describe("Search over the tabs", () => {
     expect(placed()).toBe("results");
     expect(container.querySelector('[data-testid="dismiss-provider-notice"]')).toBeNull();
     expect(text()).not.toContain("Nothing named");
+  });
+
+  it("offers one Retry for a failed provider in another language", async () => {
+    await subscriptions([
+      member("a", "Northwind", {
+        live: { kind: "failed", error: { kind: "unexpected", detail: "" }, last: null, since: 0 },
+      }),
+    ]);
+    scenario.catalogue = {
+      kind: "failed",
+      error: { kind: "unexpected", detail: "" },
+      member: scenario.members[0]!,
+    };
+    setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+    try {
+      await open();
+      await type("zzq");
+      expect(text()).toContain(
+        "Zenders van Northwind konden niet worden geladen.OpnieuwInstellingen",
+      );
+      expect(text().split("Opnieuw")).toHaveLength(2);
+      expect(text()).not.toContain("Retry");
+    } finally {
+      setLanguage({ locale: "en-US", formats: "en-US" });
+    }
   });
 
   const failure = { kind: "unexpected", detail: "" } as const;

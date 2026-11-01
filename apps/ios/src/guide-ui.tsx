@@ -1,4 +1,5 @@
 import type { Listing, Programme } from "@mrstreamer/contracts/guide";
+import { formatDate } from "@mrstreamer/core/i18n";
 import { router, useIsFocused } from "expo-router";
 import {
   useCallback,
@@ -11,6 +12,7 @@ import {
 } from "react";
 import { StyleSheet, Text, View, type StyleProp, type TextStyle } from "react-native";
 import { guide, type Day, type DayPage, type GuideStatus, type ScheduleItem } from "./guide.ts";
+import { t } from "./i18n/live.ts";
 import { usePlayback } from "./playback.ts";
 import type { Library } from "./library.ts";
 import { currentSource, onSignedIn } from "./sources.ts";
@@ -40,18 +42,12 @@ export function localDay(at: number, offset = 0): Day {
   return { from: from.getTime(), until: until.getTime() };
 }
 
-/** A day's heading over a Schedule or the Guide grid: Today, else its short date. */
+/** A day's heading over a Schedule or the Guide grid: Today, else its short date, as "Fri 2 Oct". */
 export const dayLabel = (day: Day, now: number) =>
-  day.from === localDay(now).from
-    ? "Today"
-    : new Date(day.from).toLocaleDateString(undefined, {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-      });
+  day.from === localDay(now).from ? t("Today") : formatDate(day.from, "weekdayDay");
 
-export const programmeTime = (at: number) =>
-  new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+/** A moment's time of day in the interface language: "21:00", "09:00 PM". */
+export const programmeTime = (at: number) => formatDate(at, "time");
 export const programmeRange = (programme: Pick<Programme, "start" | "stop">) =>
   `${programmeTime(programme.start)}–${programmeTime(programme.stop)}`;
 
@@ -474,8 +470,11 @@ export function useGuideSchedule(key: string, day: Day, catalogue: Library) {
   };
 }
 
-/** Safe, deliberately small status copy. Recovery uses the existing account/settings path. */
-export function guideMessage(status: GuideStatus | undefined): string | null {
+/**
+ * Safe, deliberately small status copy, as live.ts's key: callers compare the key and show its
+ * `t`. Recovery uses the existing account/settings path.
+ */
+export function guideMessage(status: GuideStatus | undefined) {
   if (!status) return null;
   if (status.availability === "available")
     return status.stale || status.error ? "Guide may be out of date" : null;
@@ -493,7 +492,10 @@ export function programmePresentation(listing: Listing | undefined, at: number) 
     line: ongoing ? `${ongoing.title} · ${programmeRange(ongoing)}` : null,
     next:
       listing?.next && listing.next.start > at
-        ? `Next ${programmeTime(listing.next.start)} · ${listing.next.title}`
+        ? t("Next {time} · {title}", {
+            time: programmeTime(listing.next.start),
+            title: listing.next.title,
+          })
         : null,
     progress: ongoing
       ? Math.max(0, Math.min(1, (at - ongoing.start) / (ongoing.stop - ongoing.start)))
@@ -505,7 +507,7 @@ export function ProgrammeProgress({ value }: { value: number | null }) {
   return value === null ? null : (
     <View
       accessibilityRole="progressbar"
-      accessibilityLabel="Programme progress"
+      accessibilityLabel={t("Programme progress")}
       accessibilityValue={{ min: 0, max: 100, now: Math.round(value * 100) }}
       style={styles.track}
     >

@@ -22,6 +22,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { formatList } from "@mrstreamer/core/i18n";
 import type { Loadable, Member } from "./account.ts";
 import { Glass, IconButton, useMotionAllowed } from "./glass.tsx";
 import { usePlayback } from "./playback.ts";
@@ -30,6 +31,7 @@ import {
   useProviderNotices,
   type ProviderFailureKind,
 } from "./provider-notice.ts";
+import { t } from "./i18n/status.ts";
 import { store, useStore } from "./store.ts";
 import { colors, TextButton } from "./ui.tsx";
 
@@ -79,16 +81,31 @@ type Verb = "stale" | "failed" | "loading";
 /** Failures first, so Retry sits beside what it retries. */
 const VERBS: readonly Verb[] = ["stale", "failed", "loading"];
 
-const sentence = (verb: Verb, what: string, from: readonly string[], several: boolean) => {
-  const providers = new Intl.ListFormat("en", { type: "conjunction" }).format(from);
-  switch (verb) {
-    case "stale":
-      return `Couldn't update ${what} from ${providers}. Showing the last ${several ? "lists" : "list"}.`;
-    case "failed":
-      return `Couldn't load ${what} from ${providers}.`;
-    case "loading":
-      return `Loading ${what} from ${providers}.`;
-  }
+/** What a provider's status line names: its channels, its titles, or both. */
+type Lists = "channels" | "movies and series" | "channels, movies and series";
+
+const SENTENCES = {
+  stale: {
+    channels: "Couldn't update channels from {providers}.",
+    "movies and series": "Couldn't update movies and series from {providers}.",
+    "channels, movies and series": "Couldn't update channels, movies and series from {providers}.",
+  },
+  failed: {
+    channels: "Couldn't load channels from {providers}.",
+    "movies and series": "Couldn't load movies and series from {providers}.",
+    "channels, movies and series": "Couldn't load channels, movies and series from {providers}.",
+  },
+  loading: {
+    channels: "Loading channels from {providers}.",
+    "movies and series": "Loading movies and series from {providers}.",
+    "channels, movies and series": "Loading channels, movies and series from {providers}.",
+  },
+} as const satisfies Record<Verb, Record<Lists, string>>;
+
+const sentence = (verb: Verb, what: Lists, from: readonly string[], several: boolean) => {
+  const said = t(SENTENCES[verb][what], { providers: formatList(from) });
+  if (verb !== "stale") return said;
+  return `${said} ${several ? t("Showing the last lists.") : t("Showing the last list.")}`;
 };
 
 /**
@@ -125,14 +142,16 @@ export function libraryStatus(
     readonly settings: () => void;
   },
 ): Status | null {
-  const groups = new Map<Verb, Map<string, string[]>>();
+  const groups = new Map<Verb, Map<Lists, string[]>>();
   const passwords: string[] = [];
   const failed: string[] = [];
   const failures: { id: string; label: string; kind: ProviderFailureKind }[] = [];
 
   for (const member of members) {
     if (member.needsSecret) {
-      passwords.push(`Enter the password for ${member.label} in Settings.`);
+      passwords.push(
+        t("Enter the password for {provider} in Settings.", { provider: member.label }),
+      );
       failures.push({ id: member.entry.id, label: member.label, kind: "password" });
       continue;
     }
@@ -140,7 +159,7 @@ export function libraryStatus(
       ...(shows.channels ? [["channels", member.live] as const] : []),
       ...(shows.titles ? [["movies and series", member.titles] as const] : []),
     ];
-    const byVerb = new Map<Verb, string[]>();
+    const byVerb = new Map<Verb, Lists[]>();
     for (const [noun, list] of lists) {
       const verb = verbOf(list);
       if (verb) byVerb.set(verb, [...(byVerb.get(verb) ?? []), noun]);
@@ -150,7 +169,7 @@ export function libraryStatus(
     }
     for (const [verb, nouns] of byVerb) {
       const what = nouns.length > 1 ? "channels, movies and series" : nouns[0]!;
-      const group = groups.get(verb) ?? new Map<string, string[]>();
+      const group = groups.get(verb) ?? new Map<Lists, string[]>();
       group.set(what, [...(group.get(what) ?? []), member.label]);
       groups.set(verb, group);
       if (verb === "stale" || verb === "failed") failed.push(member.entry.id);
@@ -180,8 +199,8 @@ export function libraryStatus(
     text: sentences.join(" "),
     inline: failures.length > 0,
     actions: [
-      ...(ids.length > 0 ? [{ label: "Retry", onPress: () => ids.forEach(shows.retry) }] : []),
-      ...(failures.length > 0 ? [{ label: "Settings", onPress: shows.settings }] : []),
+      ...(ids.length > 0 ? [{ label: t("Retry"), onPress: () => ids.forEach(shows.retry) }] : []),
+      ...(failures.length > 0 ? [{ label: t("Settings"), onPress: shows.settings }] : []),
     ],
   };
 }
@@ -205,23 +224,32 @@ export function useProviderStatus(status: Status | null): Status | null {
       .filter((failure) => failure.kind === kind)
       .map((failure) => failure.label);
     if (names.length === 0) return [];
+    const providers = formatList(names);
+    const count = names.length;
     return [
-      `${new Intl.ListFormat("en", { type: "conjunction" }).format(names)} ${kind === "password" ? (names.length === 1 ? "needs a password" : "need passwords") : "unavailable"}`,
+      kind === "password"
+        ? t("{providers} need passwords", { providers, count })
+        : t("{providers} unavailable", { providers, count }),
     ];
   });
   return {
     ...normal,
     text: [...words, normal.text].filter(Boolean).join(". "),
-    actions: [{ label: "Details", onPress: providerFailures.settings }, ...(normal.actions ?? [])],
+    actions: [
+      { label: t("Details"), onPress: providerFailures.settings },
+      ...(normal.actions ?? []),
+    ],
     dismiss: {
-      label: "Dismiss provider notice",
+      label: t("Dismiss provider notice"),
       onPress: () => visible.forEach(({ id, token }) => dismissProviderNotice(id, token)),
     },
   };
 }
 
 /** The status line while a screen's content is worked out with no provider's list to name. */
-export const loadingStatus = (what: string): Status => ({ text: `Loading ${what}.` });
+export const loadingStatus = (
+  what: "channels" | "movies" | "series" | "movies and series",
+): Status => ({ text: t(`Loading ${what}.`) });
 
 /** The room the status line takes over a screen's bottom edge, for its scrolling content. */
 const DockInset = createContext(0);

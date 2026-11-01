@@ -8,6 +8,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { reloadTitles, retryTitles, useRoster } from "./account.ts";
 import { describeError } from "./errors.ts";
 import { tabHref } from "./header.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
 import {
   Docked,
   libraryStatus,
@@ -79,6 +80,8 @@ export const collectionHref = (kind: TitleKind, id: CollectionId) =>
  * failed one's again, Settings on the kind's own tab.
  */
 function useTitlesStatus(kind: TitleKind, usableContent: boolean): Status | null {
+  // Its words are made here, so a new language makes them again.
+  useLocale();
   const roster = useRoster();
   return libraryStatus(roster.kind === "ready" ? roster.members : [], {
     titles: true,

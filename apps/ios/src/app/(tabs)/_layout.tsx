@@ -46,7 +46,8 @@ const shortcuts = (): readonly Shortcut<Tab | "search" | "settings" | "back">[] 
 // stays put. Selecting another tab closes the Downloads, Settings and provider form the last one
 // had open (`useCloseOnTabChange`). With a keyboard, ⌘1 to ⌘4 select the tabs, ⌘F opens Search,
 // ⌘, Settings and ⌘[ goes back, Live's detail column first (key-commands.ts). The labels and
-// shortcuts follow the interface language as Settings changes it.
+// shortcuts follow the interface language as Settings changes it. Each tab sets its spoken label
+// too, which otherwise kept the language the app launched in.
 export default function TabsLayout() {
   const { locale } = useInterfaceLanguage();
   // Made again for a new language only: the native module installs them whenever they change.
@@ -89,19 +90,19 @@ export default function TabsLayout() {
           <NowPlaying />
         </NativeTabs.BottomAccessory>
       ) : null}
-      <NativeTabs.Trigger name="(home)" testID="tab-home">
+      <NativeTabs.Trigger name="(home)" testID="tab-home" accessibilityLabel={t("Home")}>
         <NativeTabs.Trigger.Icon sf="house.fill" />
         <NativeTabs.Trigger.Label>{t("Home")}</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="live" testID="tab-live">
+      <NativeTabs.Trigger name="live" testID="tab-live" accessibilityLabel={t("Live")}>
         <NativeTabs.Trigger.Icon sf="play.tv" />
         <NativeTabs.Trigger.Label>{t("Live")}</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="films" testID="tab-films">
+      <NativeTabs.Trigger name="films" testID="tab-films" accessibilityLabel={t("Movies")}>
         <NativeTabs.Trigger.Icon sf="film" />
         <NativeTabs.Trigger.Label>{t("Movies")}</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="series" testID="tab-series">
+      <NativeTabs.Trigger name="series" testID="tab-series" accessibilityLabel={t("Series")}>
         <NativeTabs.Trigger.Icon sf="rectangle.stack" />
         <NativeTabs.Trigger.Label>{t("Series")}</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>

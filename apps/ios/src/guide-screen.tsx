@@ -1,6 +1,5 @@
 import type { Programme as Aired } from "@mrstreamer/contracts/guide";
 import { archiveHolds } from "@mrstreamer/core/catchup";
-import { t } from "@mrstreamer/core/i18n";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -30,6 +29,8 @@ import {
 } from "./guide-ui.tsx";
 import { appError, describeError } from "./errors.ts";
 import { tabHref } from "./header.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/live.ts";
 import type { Channel, Library } from "./library.ts";
 import { cancelReminder, setReminder, useReminder } from "./reminders.ts";
 import { colors, Message, ReminderBell, TextButton, useListWidth } from "./ui.tsx";
@@ -84,10 +85,11 @@ export function ChannelSchedule({
   column?: boolean;
   over?: boolean;
 }) {
+  useLocale();
   const catalogue = useCatalogue();
   const channel = catalogue.kind === "ready" ? catalogue.library.byKey.get(key) : undefined;
-  if (catalogue.kind === "loading") return <Message text="Loading channels…" />;
-  if (!channel || catalogue.kind !== "ready") return <Message text="Channel unavailable" />;
+  if (catalogue.kind === "loading") return <Message text={t("Loading channels…")} />;
+  if (!channel || catalogue.kind !== "ready") return <Message text={t("Channel unavailable")} />;
   return (
     <Schedule
       key={channel.key}
@@ -122,6 +124,7 @@ function Schedule({
   column: boolean;
   over: boolean;
 }) {
+  const locale = useLocale();
   const clock = useGuideOwner();
   // null follows Today across midnight; a chosen calendar date stays on that date.
   const [chosen, choose] = useState<number | null>(initialDay);
@@ -142,6 +145,8 @@ function Schedule({
       style={styles.screen}
       data={schedule.page?.programmes ?? []}
       keyExtractor={(item) => `${item.start}`}
+      // Rows write their times in the interface language.
+      extraData={locale}
       contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={content}
       initialNumToRender={16}
@@ -154,16 +159,19 @@ function Schedule({
           </Text>
           <View style={styles.days}>
             <TextButton
-              label="Previous day"
+              label={t("Previous day")}
               onPress={() => setChosen(localDay(day.from, -1).from)}
             />
             <Text accessibilityRole="header" style={styles.day}>
               {dayLabel(day, clock.now)}
             </Text>
-            <TextButton label="Next day" onPress={() => setChosen(localDay(day.from, 1).from)} />
+            <TextButton
+              label={t("Next day")}
+              onPress={() => setChosen(localDay(day.from, 1).from)}
+            />
           </View>
           {chosen !== null && day.from !== today ? (
-            <TextButton label="Today" onPress={() => setChosen(null)} />
+            <TextButton label={t("Today")} onPress={() => setChosen(null)} />
           ) : null}
           <GuideNotice message={message} origin={origin} />
         </>
@@ -172,10 +180,10 @@ function Schedule({
         <Message
           text={
             schedule.loading
-              ? "Loading schedule…"
+              ? t("Loading schedule…")
               : schedule.failed
-                ? "Guide unavailable"
-                : "No programme information for this day"
+                ? t("Guide unavailable")
+                : t("No programme information for this day")
           }
         />
       }
@@ -190,14 +198,14 @@ function Schedule({
         <>
           {schedule.page?.cursor ? (
             <TextButton
-              label={schedule.loading ? "Loading…" : "Show more"}
+              label={schedule.loading ? t("Loading…") : t("Show more")}
               disabled={!schedule.canLoadMore}
               onPress={schedule.more}
               testID="guide-more"
             />
           ) : null}
           {schedule.failed && (schedule.page?.programmes.length ?? 0) > 0 ? (
-            <Message text="Couldn't update schedule" />
+            <Message text={t("Couldn't update schedule")} />
           ) : null}
         </>
       }
@@ -235,7 +243,7 @@ export function Programme({
   origin,
   onBack,
   onSettings,
-  back = "Back to Schedule",
+  back = t("Back to Schedule"),
 }: {
   channel: string;
   detail: string;
@@ -245,6 +253,7 @@ export function Programme({
   onSettings?: () => void;
   back?: string;
 }) {
+  useLocale();
   const catalogue = useCatalogue();
   const content = useContent(onBack !== undefined);
   const library = catalogue.kind === "ready" ? catalogue.library : null;
@@ -269,7 +278,7 @@ export function Programme({
   if (!channel || !library) {
     return (
       <Message
-        text="Channel unavailable"
+        text={t("Channel unavailable")}
         {...(onBack ? { action: { label: back, onPress: onBack } } : {})}
       />
     );
@@ -295,7 +304,7 @@ export function Programme({
             accessible
             accessibilityLabel={
               kept
-                ? `${programmeRange(read.value)}, catch-up`
+                ? `${programmeRange(read.value)}, ${t("catch-up")}`
                 : belled
                   ? `${programmeRange(read.value)}, ${t("Reminder set")}`
                   : undefined
@@ -315,8 +324,8 @@ export function Programme({
         <Message
           text={
             read.pending
-              ? "Loading programme…"
-              : "Programme unavailable. Go Back and choose it again."
+              ? t("Loading programme…")
+              : t("Programme unavailable. Go Back and choose it again.")
           }
         />
       )}
@@ -330,7 +339,7 @@ export function Programme({
           <FromStart channel={channel} programme={read.value} />
         ) : null}
         <TextButton
-          label="Watch live"
+          label={t("Watch live")}
           onPress={() =>
             playChannel(channel, library.placeOf.get(channel.key) ?? "", { watch: true })
           }
@@ -394,7 +403,7 @@ function RemindMe({
     <>
       {reminder ? (
         <TextButton
-          label="Cancel reminder"
+          label={t("Cancel reminder")}
           disabled={busy}
           onPress={() => void run(() => cancelReminder(reminder))}
           testID="guide-cancel-reminder"
@@ -410,17 +419,17 @@ function RemindMe({
       {note === "refused" ? (
         <View style={styles.note}>
           <Text style={styles.copy}>
-            Notifications are off for Mr. Streamer, so no reminder was set.
+            {t("Notifications are off for Mr. Streamer, so no reminder was set.")}
           </Text>
           <TextButton
-            label="Open iOS Settings"
+            label={t("Open iOS Settings")}
             onPress={() => void Linking.openSettings()}
             testID="guide-open-settings"
           />
         </View>
       ) : note === "full" ? (
         <Text style={[styles.copy, styles.note]}>
-          iOS holds 64 reminders. Cancel one to set another.
+          {t("iOS holds 64 reminders. Cancel one to set another.")}
         </Text>
       ) : note === "started" ? (
         <Text style={[styles.copy, styles.note]}>{t("This programme has started.")}</Text>
@@ -435,8 +444,8 @@ function RemindMe({
 function FromStart({ channel, programme }: { channel: Channel; programme: Aired }) {
   return (
     <TextButton
-      label="Play from start"
-      accessibilityLabel={`Play ${programme.title} from start`}
+      label={t("Play from start")}
+      accessibilityLabel={t("Play {title} from start", { title: programme.title })}
       onPress={() => playChannel(channel, channel.title, { watch: true, programme })}
       testID="guide-play-from-start"
     />
@@ -492,16 +501,16 @@ function GuideNotice({
   origin,
   onSettings,
 }: {
-  message: string | null;
+  message: ReturnType<typeof guideMessage>;
   origin: GuideOrigin;
   onSettings?: () => void;
 }) {
   return message ? (
     <View>
-      <Text style={styles.copy}>{message}</Text>
+      <Text style={styles.copy}>{t(message)}</Text>
       {message === "Guide unavailable" ? (
         <TextButton
-          label="Provider settings"
+          label={t("Provider settings")}
           onPress={
             onSettings ??
             (() => router.push(tabHref(origin === "home" ? "(home)" : "live", "settings")))
