@@ -605,6 +605,11 @@ describe("version labels", () => {
     expect(suitability(tags, "de")).toBe(suitability(["NL"], "de"));
   });
 
+  it("rank an (AR) version first for Arabic viewers, and as subtitled, not dubbed, for others", () => {
+    expect(suitability(["AR"], "ar")).toBe(4);
+    expect(suitability(["AR"], "en")).toBe(suitability(["NL"], "en"));
+  });
+
   it("numbers versions that read the same", () => {
     expect(versionLabels([{ tags: ["DE"] }, { tags: ["DE"] }, { tags: [] }], "en")).toEqual([
       "Deutsch sound",
