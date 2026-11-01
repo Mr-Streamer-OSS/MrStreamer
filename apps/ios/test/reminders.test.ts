@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue, Member } from "../src/account.ts";
 import type { Query, Result } from "../src/guide-native.ts";
 import type { createGuide } from "../src/guide.ts";
-import { programmeRange } from "../src/guide-ui.tsx";
+import { dayLabel, localDay, programmeRange } from "../src/guide-ui.tsx";
 import { combine, partSteps, type Channel } from "../src/library.ts";
 import type { Notice, Permission, RemindersNative } from "../src/reminders.ts";
 import { native as files } from "./native-files.ts";
@@ -26,6 +26,8 @@ const scenario = vi.hoisted(() => ({
   revisionStops: [] as (() => void)[],
   /** The programmes guide id `trusted-1` lists. */
   programmes: [] as Programme[],
+  /** While set, the guide's reads wait for it. */
+  guideHolding: null as Promise<void> | null,
   rosterChanged: new Set<() => void>(),
   catalogueChanged: new Set<() => void>(),
   appState: new Set<(state: string) => void>(),
@@ -103,6 +105,7 @@ vi.mock("../src/guide.ts", async (original) => {
   const { guideFixture } = await import("./native-guide.ts");
   const fixture = guideFixture();
   fixture.native.query = async (_lease, _generation, _job, ids, at, mode, _from, _until, after) => {
+    await scenario.guideHolding;
     const listed = ids.includes("trusted-1") && scenario.programmes.some((p) => p.stop > at);
     const rows = mode === "detail" ? scenario.programmes.filter((p) => p.start === after) : [];
     return {
@@ -182,7 +185,7 @@ const member = (id: string): Member => ({
   titles: { kind: "idle" },
 });
 /** Subscription `a`'s channels: `a:1` on guide id `trusted-1` and `a:2` without a guide. */
-function lists(channels = ["1", "2"]) {
+function lists(channels = ["1", "2"], adult: readonly string[] = []) {
   return finish(
     partSteps({
       subscriptionId: "a",
@@ -194,7 +197,7 @@ function lists(channels = ["1", "2"]) {
           categoryIds: ["news"],
           guideId: id === "1" ? "trusted-1" : null,
           logoUrl: null,
-          adult: false,
+          adult: adult.includes(id),
           number: null,
           catchupDays: null,
         })),
@@ -203,8 +206,8 @@ function lists(channels = ["1", "2"]) {
   );
 }
 /** Live lists `channels` of `a`, and the guide reads them; everyone listening hears it. */
-function shows(channels?: string[]) {
-  const part = lists(channels);
+function shows(channels?: string[], adult?: readonly string[]) {
+  const part = lists(channels, adult);
   scenario.owner!.setPart(part);
   scenario.catalogue = { kind: "ready", failing: [], library: combine([{ label: "a", part }]) };
   for (const listener of scenario.catalogueChanged) listener();
@@ -228,6 +231,20 @@ const later: Programme = {
   start: now + 2 * HOUR,
   stop: now + 4 * HOUR,
   description: "A film",
+};
+
+/** `count` programmes an hour apart, the first in an hour. */
+const hourly = (count: number): Programme[] =>
+  Array.from({ length: count }, (_, at) => ({
+    title: `Programme ${at}`,
+    start: now + (at + 1) * HOUR,
+    stop: now + (at + 2) * HOUR,
+    description: null,
+  }));
+const failWrites = () => {
+  files.sync = (operation) => {
+    if (operation === "write") throw new Error("disk full");
+  };
 };
 
 type Reminders = typeof import("../src/reminders.ts");
@@ -279,6 +296,7 @@ beforeEach(async () => {
   ios.delivered.clear();
   ios.holding = null;
   files.sync = null;
+  scenario.guideHolding = null;
   scenario.members = [member("a")];
   scenario.programmes = [on, later];
   scenario.pushed = [];
@@ -448,6 +466,10 @@ describe("programme reminders", () => {
     const rows = remindersShown();
     expect(rows.filter((row) => row.status.kind === "upcoming")).toHaveLength(64);
     expect(rows.find((row) => row.status.kind === "unscheduled")?.title).toBe("Programme 64");
+    const screen = await list();
+    expect(screen.text()).toContain("Programme 64Channel 1");
+    expect(screen.text()).toContain("Not scheduled by iOS · won't notify");
+    screen.close();
   });
 
   it("keeps none iOS failed to schedule, or didn't allow", async () => {
@@ -469,6 +491,88 @@ describe("programme reminders", () => {
     ios.answer = "undetermined";
     expect(await reminders.setReminder(channel(), later)).toBe("denied");
     expect(shown()).toEqual([]);
+  });
+
+  it("goes once its programme ends, and a relaunch doesn't bring it back", async () => {
+    await reminders.setReminder(channel(), later);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(later.stop);
+      expect(shown()).toEqual([]);
+      await settled();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(readFileSync(file(), "utf8")).not.toContain("Late film");
+    await launch();
+    expect(shown()).toEqual([]);
+  });
+
+  it("never notifies for a channel its provider files for adults, which Live no longer lists", async () => {
+    await reminders.setReminder(channel(), later);
+    shows(["1", "2"], ["1"]);
+    await settled();
+    expect(shown()).toEqual(["Late film @ Channel 1: gone"]);
+    expect(notices()).toEqual([]);
+  });
+
+  it("keeps everything as it was when a save fails, and reads a file again once it reads", async () => {
+    failWrites();
+    await expect(reminders.setReminder(channel(), later)).rejects.toThrow("disk full");
+    files.sync = null;
+    expect(shown()).toEqual([]);
+    expect(notices()).toEqual([]);
+
+    await reminders.setReminder(channel(), later);
+    files.sync = (operation) => {
+      if (operation === "text") throw new Error("busy");
+    };
+    await launch();
+    expect(shown()).toBe("unreadable");
+    await expect(reminders.cancelReminder("any")).rejects.toMatchObject({
+      error: { kind: "reminder", reason: "unreadable" },
+    });
+    files.sync = null;
+    expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
+  });
+
+  it("saves nothing for a programme that began while iOS asked", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const ask = module.ask;
+    module.ask = async () => {
+      vi.setSystemTime(later.start + 1);
+      ios.permission = "granted";
+      return "granted";
+    };
+    try {
+      await expect(reminders.setReminder(channel(), later)).rejects.toMatchObject({
+        error: { kind: "reminder", reason: "started" },
+      });
+    } finally {
+      module.ask = ask;
+      vi.useRealTimers();
+    }
+    expect(shown()).toEqual([]);
+    expect(notices()).toEqual([]);
+  });
+
+  it("answers a guide read nothing is known of once aborted or withdrawn", async () => {
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(
+      await scenario.owner!.programmeAt("a:1", later.start, { signal: aborted.signal }),
+    ).toBeUndefined();
+
+    let answer = () => {};
+    scenario.guideHolding = new Promise((resolve) => (answer = resolve));
+    const reading = scenario.owner!.programmeAt("a:1", later.start);
+    await heard();
+    scenario.owner!.configure(new Map(), new Map());
+    scenario.guideHolding = null;
+    answer();
+    expect(await reading).toBeUndefined();
+    expect((await scenario.owner!.programmeAt("a:1", later.start))?.title).toBe("Late film");
+    expect(await scenario.owner!.programmeAt("a:1", later.start + 1)).toBeNull();
   });
 
   it("keeps a reminder while its guide can't be read, and drops one its provider stopped listing", async () => {
@@ -608,7 +712,70 @@ describe("programme details", () => {
   });
 });
 
+describe("programme details past the limit", () => {
+  it("says iOS holds 64, and sets nothing more", async () => {
+    const programmes = hourly(65);
+    scenario.programmes = [on, ...programmes];
+    for (const programme of programmes.slice(0, 64))
+      await reminders.setReminder(channel(), programme);
+    const screen = await details(programmes[64]!);
+    await screen.press("guide-remind-me");
+    expect(screen.text()).toContain("iOS holds 64 reminders. Cancel one to set another.");
+    expect(remindersShown()).toHaveLength(64);
+    screen.close();
+  });
+});
+
 describe("the reminders list", () => {
+  it("heads each day in order, keeping each notification at its start", async () => {
+    const tomorrow = {
+      ...later,
+      title: "Next film",
+      start: later.start + 24 * HOUR,
+      stop: later.stop + 24 * HOUR,
+    };
+    scenario.programmes = [on, later, tomorrow];
+    await reminders.setReminder(channel(), tomorrow);
+    await reminders.setReminder(channel(), later);
+    const screen = await list();
+    const text = screen.text();
+    const heading = (at: number) =>
+      localDay(at).from === localDay(now, 1).from ? "Tomorrow" : dayLabel(localDay(at), now);
+    expect(text.startsWith(heading(later.start))).toBe(true);
+    expect(text.indexOf("Late film")).toBeLessThan(text.indexOf("Next film"));
+    // The second day has a heading of its own, between them.
+    expect(text.slice(text.indexOf("Late film"), text.indexOf("Next film"))).toContain(
+      heading(tomorrow.start),
+    );
+    expect(notices().toSorted()).toEqual([
+      `Late film at ${2 * HOUR}: Starting now on Channel 1`,
+      `Next film at ${26 * HOUR}: Starting now on Channel 1`,
+    ]);
+    screen.close();
+  });
+
+  it("says one is no longer in the guide, a later build's file, and a cancel that failed", async () => {
+    await reminders.setReminder(channel(), later);
+    scenario.programmes = [on];
+    shows();
+    await settled();
+    const screen = await list();
+    expect(screen.text()).toContain("No longer in the guide · won't notify");
+    const [set] = remindersShown();
+    failWrites();
+    await screen.press(`reminder-${set!.id}-cancel`);
+    expect(scenario.alerts).toEqual(["Couldn't save. Try again."]);
+    expect(screen.text()).toContain("Late film");
+    files.sync = null;
+    screen.close();
+
+    writeFileSync(file(), JSON.stringify({ version: 2, reminders: [] }));
+    await launch();
+    const newer = await list();
+    expect(newer.text()).toContain("Your reminders were saved by a newer version of Mr. Streamer.");
+    newer.close();
+  });
+
   it("lists each by day, says what is off, opens and cancels", async () => {
     const film = await list();
     expect(film.text()).toContain("No reminders yet.");
