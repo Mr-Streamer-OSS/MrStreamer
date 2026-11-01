@@ -358,15 +358,13 @@ function classOf(failure: PlaybackFailure): FailureClass {
  * lower, the best, the provider's first among equals. Null when there is none.
  */
 function lower(qualities: readonly (Quality | null)[], failed: number): number | null {
-  const rank = (quality?: Quality | null) => (quality ? QUALITIES.indexOf(quality) : -1);
-  const from = rank(qualities[failed]);
-  if (from < 0) return null;
-  let best: number | null = null;
-  for (const [index, quality] of qualities.entries()) {
-    const at = rank(quality);
-    if (at > from && (best === null || at < rank(qualities[best]))) best = index;
+  const from = qualities[failed];
+  if (!from) return null;
+  for (const quality of QUALITIES.slice(QUALITIES.indexOf(from) + 1)) {
+    const index = qualities.indexOf(quality);
+    if (index >= 0) return index;
   }
-  return best;
+  return null;
 }
 
 /**
@@ -397,8 +395,9 @@ export function nextStep(
     const next = recovery.candidate + 1;
     return next < recovery.candidates ? { kind: "candidate", candidate: next } : failed;
   }
-  const steppedDown = recovery.candidate !== recovery.playedOn;
-  if (!steppedDown && kind !== "transient" && kind !== "slow" && kind !== "no-start") return failed;
+  // A missing or undecodable stream fails, unless it is the lower one: that goes back.
+  if ((kind === "missing" || kind === "media") && recovery.candidate === recovery.playedOn)
+    return failed;
   const used = recovery.playedMs >= STABLE_PLAYBACK_MS ? 0 : recovery.reconnects;
   const delayMs = RECONNECT_DELAYS_MS[used];
   if (delayMs === undefined) return failed;
