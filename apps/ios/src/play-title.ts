@@ -156,8 +156,8 @@ export function playEpisode(
     const { progress, marks } = await standing();
     const episode = nextUnwatched(details, at, progress, marks) ?? after;
     if (!episode || !stands()) return null;
-    const found = progress.find(({ title }) => title.kind === "episode" && title.id === episode.id);
-    return { episode, from: resumePoint(found) };
+    const state = episodeStates(progress, marks)(episode);
+    return { episode, from: resumePoint(state.kind === "partial" ? state.progress : undefined) };
   };
   const item: Playing = {
     id: key,

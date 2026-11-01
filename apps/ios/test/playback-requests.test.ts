@@ -472,6 +472,20 @@ describe("an episode's end", () => {
     expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e3"]);
   });
 
+  it("starts the next episode at zero after it was marked unwatched", async () => {
+    const partial = progressAt("episode", "s1e2", 120);
+    await ends(seriesDetails("s1"), 1, {
+      ...nothingPlayed,
+      progress: [partial],
+      marks: [{ season: 1, episode: 2, watched: false, at: partial.since + 1, revision: 1 }],
+    });
+    vi.advanceTimersByTime(10_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
+    fakePlayer.currentTime = 0; // The newly attached native item starts at zero.
+    expect(startsAt()).toBe(0);
+  });
+
   it("plays the next episode of the version that ended", async () => {
     await ends(seriesDetails("s2", ["s1", "s2"]), 1);
     vi.advanceTimersByTime(10_000);
@@ -544,6 +558,28 @@ describe("an episode's end", () => {
     fakePlayer.state(true);
     seekTo(590);
     vi.advanceTimersByTime(10_000);
+    fakePlayer.currentTime = 600;
+    fakePlayer.observation({ kind: "ended" });
+    fakePlayer.state(false);
+    await settle();
+    held.standing.shift()?.(nothingPlayed);
+    await settle();
+    vi.advanceTimersByTime(10_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
+  });
+
+  it("counts down when the viewer resumes just before the end", async () => {
+    playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
+    await settle();
+    startsAt();
+    fakePlayer.state(true);
+    fakePlayer.currentTime = 599;
+    togglePause();
+    fakePlayer.state(false);
+    vi.advanceTimersByTime(500);
+    togglePause();
+    fakePlayer.state(true);
     fakePlayer.currentTime = 600;
     fakePlayer.observation({ kind: "ended" });
     fakePlayer.state(false);

@@ -1722,6 +1722,7 @@ export function togglePause() {
   } else if (phase.kind === "paused") {
     held = null;
     pauseOnStart = false;
+    touched = -Infinity;
     if (soundOnPlay) setMuted(false);
     player().play();
   }
