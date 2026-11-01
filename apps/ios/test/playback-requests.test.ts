@@ -422,7 +422,7 @@ describe("Next episode", () => {
 });
 
 describe("an episode's end", () => {
-  beforeEach(() => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] }));
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] }));
   afterEach(() => vi.useRealTimers());
 
   /** Three episodes of s1, for a next one the record can skip past. */
@@ -508,6 +508,8 @@ describe("an episode's end", () => {
     fakePlayer.state(true);
     fakePlayer.currentTime = 600;
     act();
+    // The player still stands at the end: its seek lands after the end it sent before.
+    fakePlayer.currentTime = 600;
     fakePlayer.observation({ kind: "ended" });
     fakePlayer.state(false);
     await settle();
@@ -516,6 +518,24 @@ describe("an episode's end", () => {
     vi.advanceTimersByTime(20_000);
     await settle();
     expect(sources).toEqual(["file:episode:s1e1"]);
+  });
+
+  it("counts down for an end well after a seek", async () => {
+    playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
+    await settle();
+    startsAt();
+    fakePlayer.state(true);
+    seekTo(590);
+    vi.advanceTimersByTime(10_000);
+    fakePlayer.currentTime = 600;
+    fakePlayer.observation({ kind: "ended" });
+    fakePlayer.state(false);
+    await settle();
+    held.standing.shift()?.(nothingPlayed);
+    await settle();
+    vi.advanceTimersByTime(10_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
   });
 
   it("counts nothing down when the save at the end was refused", async () => {

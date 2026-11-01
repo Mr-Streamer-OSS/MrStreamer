@@ -254,16 +254,19 @@ export function WatchLayer() {
     // A search field left focused under Watch would keep its keyboard over the picture.
     Keyboard.dismiss();
   }, [watch]);
-  // The countdown to the next episode is in the panel, so the panel shows as it starts, and
-  // leaving the app ends it.
+  // The countdown to the next episode is in the panel, so the panel shows as it starts. Leaving
+  // the app ends it, or the ask for which episode it counts to.
   const counting = useUpNext() !== null;
   useEffect(() => {
     if (!counting) return;
-    setControls(true);
-    if (AppState.currentState !== "active") return cancelUpNext();
+    if (AppState.currentState === "active") setControls(true);
+    else cancelUpNext();
+  }, [counting]);
+  useEffect(() => {
+    if (!watch) return;
     const left = AppState.addEventListener("change", (now) => now !== "active" && cancelUpNext());
     return () => left.remove();
-  }, [counting]);
+  }, [watch]);
 
   const streaming = phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused";
   const sheetShown = useStore(sheet);

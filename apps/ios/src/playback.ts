@@ -285,6 +285,20 @@ let requests = 0;
 /** The screen the viewer is on, as navigation reports it. */
 let screen = "";
 
+/**
+ * When the viewer last paused or moved this play. An end the player sent before that is still on
+ * its way for a moment after, while the player's position may not yet be where the viewer moved
+ * it: one that arrives within `TOUCH_OVERTAKES` milliseconds is obsolete and starts no countdown.
+ */
+let touched = -Infinity;
+const TOUCH_OVERTAKES = 2000;
+
+/** The viewer paused or moved what plays, which ends any countdown. */
+function touch() {
+  touched = Date.now();
+  cancelUpNext();
+}
+
 /** Retires every waiting request, the countdown to a next episode with them. */
 function supersede() {
   requests++;
@@ -1242,9 +1256,7 @@ function observe(event: PlaybackObservation) {
       if (!pauseOnStart && !current.item.live) {
         const saved = report();
         current.options.ended?.();
-        // An end the viewer's Pause or seek back overtook on its way from the player is obsolete.
-        const atEnd = length.get() - (player().currentTime - current.offset) <= 2;
-        if (current.item.next && state.get().watch && atEnd && held?.by !== "viewer")
+        if (current.item.next && state.get().watch && Date.now() - touched > TOUCH_OVERTAKES)
           countDown(current, saved);
       }
       return;
@@ -1364,6 +1376,7 @@ export function play(item: Playing, plan: Plan, options: PlayOptions) {
 /** A new budget on the same frozen Choice, including explicit Try again. */
 async function start(choice: Choice, options: PlayOptions) {
   supersede();
+  touched = -Infinity;
   if (current) cancelEpoch(current.epoch);
   release();
   const signedIn =
@@ -1690,7 +1703,7 @@ export async function stop(): Promise<Saved> {
  */
 export function togglePause() {
   resumeOnReturn = false;
-  cancelUpNext();
+  touch();
   const { phase } = state.get();
   if (phase.kind === "playing" || phase.kind === "loading") {
     held = { by: "viewer", acknowledged: false };
@@ -1709,7 +1722,7 @@ export function togglePause() {
 
 /** Moves by `seconds`; a programme from catch-up, within the programme. */
 export function seekBy(seconds: number) {
-  cancelUpNext();
+  touch();
   if (!current?.item.past) return player().seekBy(seconds);
   const at = player().currentTime - current.offset + seconds;
   seekTo(Math.min(length.get(), at));
@@ -1717,7 +1730,7 @@ export function seekBy(seconds: number) {
 
 /** Moves a title to `seconds` from its start. */
 export function seekTo(seconds: number) {
-  cancelUpNext();
+  touch();
   const at = Math.max(0, seconds);
   player().currentTime = at + (current?.offset ?? 0);
   clock.set(at);

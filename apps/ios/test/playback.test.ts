@@ -1035,8 +1035,10 @@ describe("an episode's end in Watch", () => {
     announced.length = 0;
   });
 
-  /** S1 E2 plays in Watch to its end, and S1 E3 goes on after it. */
-  async function ends() {
+  const third = { place: "S1 E3 · The Long Table", play: () => played.push("S1 E3") };
+
+  /** S1 E2 plays in Watch to its end, and `upNext` says S1 E3 goes on after it. */
+  async function ends(upNext = async () => third) {
     await React.act(async () => {
       await playback.play(
         {
@@ -1057,10 +1059,7 @@ describe("an episode's end in Watch", () => {
           watch: true,
           login: [],
           next: () => played.push("Next episode"),
-          upNext: async () => ({
-            place: "S1 E3 · The Long Table",
-            play: () => played.push("S1 E3"),
-          }),
+          upNext,
         },
       );
       port.ready();
@@ -1070,11 +1069,11 @@ describe("an episode's end in Watch", () => {
       port.state(false);
       await tick();
     });
-    await until(() => byTestId("watch-up-next") !== null);
   }
 
   it("counts down in the text-button row, told to VoiceOver once, and plays on Play next", async () => {
     await ends();
+    await until(() => byTestId("watch-up-next") !== null);
     const row = byTestId("watch-up-next")!;
     expect(row.textContent).toBe("S1 E3 · The Long TablePlays in 10Play nextCancel");
     expect(byTestId("watch-next")).toBeNull();
@@ -1087,6 +1086,7 @@ describe("an episode's end in Watch", () => {
 
   it("returns today's row on Cancel, where Next episode still plays the next", async () => {
     await ends();
+    await until(() => byTestId("watch-up-next") !== null);
     await press("watch-up-next-cancel");
     expect(byTestId("watch-up-next")).toBeNull();
     await seconds(20_000);
@@ -1097,6 +1097,7 @@ describe("an episode's end in Watch", () => {
 
   it("cancels on Space without playing, and Escape closes Watch with nothing next", async () => {
     await ends();
+    await until(() => byTestId("watch-up-next") !== null);
     port.play.mockClear();
     await key(" ");
     expect(byTestId("watch-up-next")).toBeNull();
@@ -1104,6 +1105,7 @@ describe("an episode's end in Watch", () => {
     expect(port.play).not.toHaveBeenCalled();
 
     await ends();
+    await until(() => byTestId("watch-up-next") !== null);
     await key("escape");
     await seconds(20_000);
     expect(playback.playbackState.get().watch).toBe(false);
@@ -1112,6 +1114,7 @@ describe("an episode's end in Watch", () => {
 
   it("ends the countdown when the app leaves the foreground", async () => {
     await ends();
+    await until(() => byTestId("watch-up-next") !== null);
     await React.act(async () => {
       for (const listener of appState) listener("background");
       await tick();
@@ -1120,8 +1123,23 @@ describe("an episode's end in Watch", () => {
     expect(played).toEqual([]);
   });
 
+  it("counts nothing down once the app left while it asked which episode goes on", async () => {
+    let answer = () => {};
+    await ends(() => new Promise((resolve) => (answer = () => resolve(third))));
+    await React.act(async () => {
+      for (const listener of appState) listener("background");
+      for (const listener of appState) listener("active");
+      answer();
+      await tick();
+    });
+    await seconds(20_000);
+    expect(byTestId("watch-up-next")).toBeNull();
+    expect(played).toEqual([]);
+  });
+
   it("ends the countdown when a tap on the picture hides the panel", async () => {
     await ends();
+    await until(() => byTestId("watch-up-next") !== null);
     await React.act(async () => {
       [...container.querySelectorAll("button")]
         .find((button) => button.getAttribute("aria-label") === "Hide controls")!
