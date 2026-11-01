@@ -922,7 +922,8 @@ export function createGuide(
           { from: 0, until: 0 },
           options?.signal,
         );
-        if (!answer || options?.signal?.aborted || !validToken(captured)) return undefined;
+        // `ask` answers null for a read aborted, or withdrawn meanwhile.
+        if (!answer) return undefined;
         if (answer.guideId) return answer.rows[0] ?? null;
       }
       return undefined;
