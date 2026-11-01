@@ -28,7 +28,7 @@ import {
   useGuideSchedule,
   type GuideOrigin,
 } from "./guide-ui.tsx";
-import { describeError } from "./errors.ts";
+import { appError, describeError } from "./errors.ts";
 import { tabHref } from "./header.tsx";
 import type { Channel, Library } from "./library.ts";
 import { cancelReminder, setReminder, useReminder } from "./reminders.ts";
@@ -264,7 +264,7 @@ export function Programme({
   const catchUp: CatchUp =
     read.value && channel ? catchUpOf(channel, read.value, read.now) : { kind: "later" };
   const kept = catchUp.kind === "past" || catchUp.kind === "on";
-  const reminder = useReminder(key, read.value?.start);
+  const reminder = useReminder(channel?.key ?? key, read.value?.start);
   const belled = reminder?.status.kind === "upcoming";
   if (!channel || !library) {
     return (
@@ -376,14 +376,16 @@ function RemindMe({
   reminder: string | null;
 }) {
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<"refused" | "full" | "failed" | null>(null);
+  const [note, setNote] = useState<"refused" | "full" | "started" | "failed" | null>(null);
   const run = async (change: () => Promise<"set" | "denied" | "full" | void>) => {
     setBusy(true);
     try {
       const done = await change();
       setNote(done === "denied" ? "refused" : done === "full" ? "full" : null);
-    } catch {
-      setNote("failed");
+    } catch (cause) {
+      const error = appError(cause);
+      // The programme began while iOS asked: Try again can't set it.
+      setNote(error.kind === "reminder" && error.reason === "started" ? "started" : "failed");
     } finally {
       setBusy(false);
     }
@@ -420,6 +422,8 @@ function RemindMe({
         <Text style={[styles.copy, styles.note]}>
           iOS holds 64 reminders. Cancel one to set another.
         </Text>
+      ) : note === "started" ? (
+        <Text style={[styles.copy, styles.note]}>{t("This programme has started.")}</Text>
       ) : note === "failed" ? (
         <Text style={[styles.copy, styles.note]}>{t("Couldn't save. Try again.")}</Text>
       ) : null}

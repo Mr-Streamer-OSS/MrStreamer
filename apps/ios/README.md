@@ -90,9 +90,9 @@ length, never as Live, and says "Catch-up" and when it aired; an ended programme
 doesn't keep says why. A programme still to come offers Remind me after Watch live
 (`src/reminders.ts`, `modules/programme-reminders`): iOS asks once whether the app may notify,
 and a refusal saves nothing and offers Open iOS Settings. A set reminder shows a bell after the
-time and Cancel reminder, and is a local notification iOS shows at the programme's start, "{channel}
-· now", whether or not the app runs; tapping it opens the programme's details on Live, by its
-channel and start, and plays nothing. Live's reminders list (`src/reminders-screen.tsx`, `live/reminders`) groups
+time and Cancel reminder, and is a local notification iOS shows at the programme's start, "Starting now
+on {channel}", whether or not the app runs; tapping it opens the programme's details on Live, by its
+channel and start, in Live's detail column from the split width, and plays nothing. Live's reminders list (`src/reminders-screen.tsx`, `live/reminders`) groups
 them by day; a cross, a swipe to the left or VoiceOver's action cancels one. At launch, on return to the app and when a provider, its
 channels or the guide change, each reminder is checked: another programme at its start, or none,
 takes its notification down and says so in the list, and it comes back if the programme does. A

@@ -286,7 +286,7 @@ describe("programme reminders", () => {
   it("asks iOS once and notifies at the programme's start, for the programme set", async () => {
     await reminders.setReminder(channel(), later);
     expect(ios.asked).toBe(1);
-    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
+    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Starting now on Channel 1`]);
     expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
 
     // Set again: the same reminder, and iOS isn't asked again.
@@ -300,7 +300,7 @@ describe("programme reminders", () => {
     await reminders.setReminder(channel(), later);
     await launch();
     expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
-    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
+    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Starting now on Channel 1`]);
   });
 
   it("never notifies for another programme the guide lists at its start", async () => {
@@ -323,7 +323,7 @@ describe("programme reminders", () => {
     shows();
     await settled();
     expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
-    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
+    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Starting now on Channel 1`]);
   });
 
   it("follows a guide the app replaces, with no other change", async () => {
@@ -515,7 +515,7 @@ describe("programme details", () => {
     ios.permission = "granted";
     await screen.press("guide-remind-me");
     expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
-    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Channel 1 · now`]);
+    expect(notices()).toEqual([`Late film at ${2 * HOUR}: Starting now on Channel 1`]);
     screen.close();
   });
 

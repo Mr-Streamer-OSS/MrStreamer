@@ -1099,6 +1099,38 @@ describe("Live on iPad and Duo windows", () => {
     ]);
   });
 
+  it("takes a reminder's programme, opened by its start, into the column and back", async () => {
+    state.answer = async (mode, _ids, _from, _until, after) =>
+      mode === "detail" && after === next.start ? answer([next]) : answer([current, next]);
+    state.stack = {
+      key: "live-stack",
+      index: 1,
+      routes: [
+        { name: "index" },
+        { name: "programme", params: { channel: "a:1", start: String(next.start) } },
+      ],
+    };
+    state.window = { width: 951, height: 669, fontScale: 1 };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(pushes()).toEqual([{ type: "POP_TO_TOP", target: "live-stack" }]);
+    state.stack = { key: "live-stack", index: 0, routes: [{ name: "index" }] };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(detail()?.textContent).toContain(next.title);
+    state.did = [];
+    state.window = { width: 390, height: 844, fontScale: 1 };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(pushes()).toEqual([
+      {
+        type: "PUSH",
+        payload: { name: "programme", params: { channel: "a:1", start: String(next.start) } },
+        target: "live-stack",
+      },
+    ]);
+  });
+
   it("moves a pushed Schedule into the column as the window widens, and back as it narrows", async () => {
     const day = new Date(2026, 9, 25).getTime();
     state.answer = async (mode) => (mode === "detail" ? answer([current]) : answer([next]));

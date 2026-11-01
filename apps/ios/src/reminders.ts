@@ -2,7 +2,6 @@ import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
-import { t } from "@mrstreamer/core/i18n";
 import {
   relisted,
   sameReminder,
@@ -225,7 +224,8 @@ const noticeOf = (reminder: KeptReminder): Notice => ({
   id: reminder.id,
   at: reminder.start,
   title: reminder.title,
-  body: t("{channel} · now", { channel: reminder.channelName }),
+  // Design A's words, which the Live and Guide translation slice translates.
+  body: `Starting now on ${reminder.channelName}`,
   channel: ownedKey({ subscriptionId: reminder.subscriptionId, id: reminder.channel }),
 });
 
