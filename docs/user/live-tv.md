@@ -112,7 +112,7 @@ A reminder belongs to its subscription, channel and start time. If the guide lat
 
 ## Recordings
 
-Recording is new in Mr. Streamer 0.0.23, now in [Nightly](updates.md#stable-and-nightly). Stable 0.0.22 and earlier can't record. Going back to one of them leaves your recordings and schedules on this computer without showing them; 0.0.23 shows them again, and a scheduled time that passed meanwhile is listed as **Missed**.
+Recording is new in Mr. Streamer 0.0.23, now in [Nightly](updates.md#stable-and-nightly). Stable 0.0.22 and earlier can't record. Going back to one of them leaves your recordings and schedules on this computer without showing them; 0.0.23 shows them again, and a scheduled time that passed meanwhile, within the last week, is listed as **Missed**.
 
 A recording is a copy of a live channel that Mr. Streamer saves on this computer while it plays out. It isn't catch-up, which your provider keeps and plays back, and it isn't a reminder, which only tells you a programme starts. Mr. Streamer records only while it's open and the computer is awake: it never wakes or starts your computer, and nothing records on a server.
 
@@ -130,7 +130,7 @@ In the [guide grid](#the-guide), a programme that hasn't ended has **Record** in
 - **Start** and **End** each add 0 to 60 minutes, before and after, 2 and 5 minutes to begin with. One recording lasts at most 12 hours.
 - The panel says whether a connection is free then. When none is, **Schedule anyway** keeps the schedule, and it records from when one frees up.
 
-A scheduled programme has a ring in the grid, and its details read **Scheduled**, to change or cancel it. Nothing playing or downloading stops for a schedule. When its time comes while Mr. Streamer is closed, the computer sleeps or every connection is in use, it records the rest of its time and says how late it started. A time that passes with nothing recorded is listed as **Missed**. A once-only schedule waits while the guide lists another programme or none at that time, so it never records the wrong show.
+A scheduled programme has a ring in the grid, and its details read **Scheduled**, to change or cancel it. Nothing playing or downloading stops for a schedule. When its time comes while Mr. Streamer is closed, the computer sleeps or every connection is in use, it records the rest of its time and says how late it started. A time that passes with nothing recorded is listed as **Missed**; after a long absence, only the last week's are. A once-only schedule waits while the guide lists another programme or none at that time, so it never records the wrong show.
 
 ### The Recordings page
 
@@ -153,7 +153,7 @@ When the stream breaks, the disk fails or fills, a [storage limit](#where-record
 
 A recording you stopped never goes on by itself, and neither does one you quit while it recorded. One also ends for good when its stream says it's over, or keeps ending soon after it starts.
 
-When Mr. Streamer can't save a Stop or a recording's end, its row says **Not saved yet. Trying again.** until storage works again. If the disk refuses that save and the mark Mr. Streamer leaves in the recording's folder too, as a drive gone read-only does, the next start can go on with a recording you stopped or quit while its time remains.
+When Mr. Streamer can't save a Stop or a recording's end, its row says **Not saved yet. Trying again.** until storage works again. Until then, a recording that ended by itself goes on at the next start while its time remains. One you stopped or quit goes on only if the disk also refused the mark Mr. Streamer leaves in the recording's folder, as a drive gone read-only does.
 
 ### Closing, quitting and updates
 

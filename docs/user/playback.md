@@ -45,7 +45,7 @@ A movie starts about a second after you choose it. Skipping into what's already 
 
 From 0.0.23, now in Nightly, Mr. Streamer can [record live channels](live-tv.md#recordings). A recording keeps the channel's MPEG-TS stream as your provider sends it, with every picture, sound, subtitle and teletext track, and converts nothing while recording. It plays as a download does, converting only what Mr. Streamer can't play as it is. Recordings play on this computer only, not on a TV.
 
-An HLS channel can be recorded when its stream is plain MPEG-TS: its highest quality up to 1080p, one segment after another. Encrypted streams, fragmented MP4, byte-range and low-latency playlists, sound sent as a separate stream, and streams without an MPEG-TS programme table can't be. Record then says "This channel's stream can't be recorded." before anything is kept.
+An HLS channel can be recorded when its stream is plain MPEG-TS: its highest quality up to 1080p, one segment after another. Encrypted streams, fragmented MP4, byte-range and low-latency playlists, sound sent as a separate stream, and streams without an MPEG-TS programme table can't be. Record then says "This channel's stream can't be recorded." before anything is kept. After a gap, a recording of a live HLS channel goes on up to three segments before live, as playback starts, so after a shorter gap its first seconds can repeat what was recorded just before.
 
 <a id="online-subtitles-from-009"></a>
 
@@ -100,7 +100,6 @@ A movie or episode starts later on a TV than on your computer, and so does a ski
 - A damaged broadcast can take more than ten seconds to start, while Mr. Streamer retries it with the picture re-encoded.
 - Interlaced channels that play directly, common in European HD broadcasts, aren't deinterlaced; fast motion can show fine horizontal lines.
 - On a TV, a movie or episode plays at normal speed, subtitle timing can't be shifted, and the mini player is off, since it has no picture to show. Video the TV could play itself, such as HEVC, is still converted on your computer.
-- From 0.0.23, after a gap, a recording of a live HLS channel goes on up to three segments before live, as playback starts. After a gap shorter than that, its first seconds can repeat what was recorded just before.
 - If your TV doesn't show up or doesn't play, please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its make and model.
 
 ## When something won't play

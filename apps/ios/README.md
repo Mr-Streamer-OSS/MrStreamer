@@ -930,7 +930,9 @@ and needs ffmpeg and ffprobe.
 Agents open the simulator with T3's `device_open` and launch, relaunch and drive the app, with
 taps, typing, screenshots and recordings, through the AgentDevice command it returns, never through
 ssh or `simctl` (see the `mac-mini` skill). The commands below serve Metro and the fixtures, build
-and install; the last line launches the app only in a session without T3's device tools. A simulator run proves what that exact build did on that
+and install; `expo run:ios` also launches the app as it installs it. In a session with T3's device
+tools, relaunch the app through the AgentDevice command before driving it, and use the last line
+only in a session without them. A simulator run proves what that exact build did on that
 simulator. Physical iPhones, iPads and Duos, background transfers iOS defers, notifications iOS
 delivers and receivers are separate results: what runs goes on the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148), and the [owner's card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197485) the checks only the owner's hardware can make.
 
@@ -945,8 +947,8 @@ onmac run -- zsh -c 'cd apps/ios && pnpm install --frozen-lockfile && npx expo r
 ssh mac-mini xcrun simctl launch <udid> app.mrstreamer.player -RCT_jsLocation 127.0.0.1:8197
 ```
 
-The build has no development client, so a deep link doesn't tell it where Metro is: launch it,
-either way, with `-RCT_jsLocation`, at the port Metro advertises, which its lazy chunks use too. `app.json`
+The build has no development client, so a deep link doesn't tell it where Metro is: launch it
+with `-RCT_jsLocation`, at the port Metro advertises, which its lazy chunks use too. `app.json`
 turns off Expo's tsconfig `paths` support, which the app doesn't use: it followed `extends` above
 `apps/ios`, outside what Metro watches, and failed the first bundle after every start with
 "Failed to collapse". Metro on the workbench has served transforms of files as they were before
