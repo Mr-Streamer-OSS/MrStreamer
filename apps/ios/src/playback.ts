@@ -212,6 +212,8 @@ export interface PlayOptions {
 export interface Upcoming {
   readonly place: string;
   readonly play: () => void;
+  /** Whether it can still play, asked every second of the countdown; it ends once this is false. */
+  readonly stands?: () => boolean;
 }
 
 /** The countdown Watch shows over an episode that played to its end. */
@@ -1918,24 +1920,27 @@ export function cancelUpNext() {
  * `owned` played to its end in Watch: once its owner says which episode goes on, as the record
  * stands after `saved`, Watch counts down to it, for as long as the desktop app does by default,
  * and plays it at zero. It stands while nothing newer was asked (`supersede` ends it), the same
- * play shows in Watch, and its provider's login stands.
+ * play shows in Watch, its provider's login stands and the episode it counts to can still play.
  */
 function countDown(owned: NonNullable<typeof current>, saved: Promise<Saved>) {
   const find = owned.options.upNext;
   if (!find) return;
   // A request still waiting, such as Next episode pressed just before the end, goes on.
   cancelUpNext();
+  let found: Upcoming | null = null;
   const mine: NonNullable<typeof counting> = {
     stands: () =>
       counting === mine &&
       current === owned &&
       sourceStands(owned) &&
       state.get().watch &&
-      playingItem(state.get().phase) === owned.item,
+      playingItem(state.get().phase) === owned.item &&
+      (found?.stands?.() ?? true),
   };
   counting = mine;
   void find(saved).then(
     (next) => {
+      found = next;
       if (!next || !mine.stands()) return void (counting === mine && cancelUpNext());
       mine.play = next.play;
       let left = DEFAULT_NEXT_EPISODE_DELAY;
