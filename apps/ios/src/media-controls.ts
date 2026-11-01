@@ -16,8 +16,8 @@ import {
 // it, in Watch, Picture in Picture or on AirPlay, or set Watch aside for Downloads or Settings;
 // never Home's silent preview, and nothing once it stopped or failed. A title shows its name, its
 // line ("S1 E2 · Name" or its year), its length and where it is, at the rate the player says it
-// plays at; a channel shows its name and that it is live, and a programme from catch-up its
-// channel's name and Catch-up. No address, provider, login or artwork goes there: a channel's
+// plays at; a channel shows its name and that it is live, and a programme from catch-up its own
+// name and Catch-up. No address, provider, login or artwork goes there: a channel's
 // line in the app can name its provider.
 //
 // Each command does what Watch's own button does, through the same playback calls, so it keeps

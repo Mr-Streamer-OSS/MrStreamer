@@ -285,7 +285,7 @@ speed changes. The checkmark is the rate the patched player reports in each stat
 `src/media-controls.ts` and `modules/media-controls` publish Now Playing while Watch, Picture in
 Picture, AirPlay or a Watch set aside shows the player, never Home's silent preview: a title's
 name, line, length, position and reported rate; a channel's name and Live; a programme from
-catch-up its channel's name and Catch-up. No address, provider, login or artwork goes there (a
+catch-up its own name and Catch-up. No address, provider, login or artwork goes there (a
 channel's line in the app can name its provider). Stop, a failure and Close (which pauses) clear it
 and its commands. The player's `ownsNowPlaying` keeps the audio session unmixed so iOS shows it,
 without expo-video's own command targets. Play, pause, ±10 s, a position and next go through the

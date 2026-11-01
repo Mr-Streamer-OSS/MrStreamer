@@ -1504,5 +1504,11 @@ describe("speed in Watch", () => {
     });
     expect(button("watch-audio")).not.toBeNull();
     expect(button("watch-speed")).toBeNull();
+    // The programme and that it is catch-up, never the channel's line, which can name its provider.
+    expect(system.shown).toMatchObject({
+      title: "Morning Tide",
+      subtitle: "Catch-up",
+      live: false,
+    });
   });
 });
