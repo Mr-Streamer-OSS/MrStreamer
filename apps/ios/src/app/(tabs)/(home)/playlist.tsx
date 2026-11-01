@@ -1,5 +1,7 @@
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import { useLayoutEffect } from "react";
+import { useLocale } from "../../../i18n/catalogue.ts";
+import { t } from "../../../i18n/pages.ts";
 import { PlaylistScreen, type PlaylistView } from "../../../playlist-groups.tsx";
 
 /**
@@ -17,6 +19,7 @@ export default function Playlist() {
     left?: string;
   }>();
   const navigation = useNavigation();
+  const locale = useLocale();
   const view: PlaylistView = group
     ? { kind: "group", group }
     : left
@@ -24,7 +27,7 @@ export default function Playlist() {
       : { kind: "groups" };
   useLayoutEffect(() => {
     // One group and Left out carry their own large title.
-    navigation.setOptions({ title: view.kind === "groups" ? "Playlist groups" : "" });
-  }, [navigation, view.kind]);
+    navigation.setOptions({ title: view.kind === "groups" ? t("Playlist groups") : "" });
+  }, [navigation, view.kind, locale]);
   return <PlaylistScreen id={id} view={view} />;
 }

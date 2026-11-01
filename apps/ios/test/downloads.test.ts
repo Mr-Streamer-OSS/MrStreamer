@@ -1244,9 +1244,10 @@ describe("downloads", { timeout: 30_000 }, () => {
     await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
     await background.breakConnection();
     await until(() => statusOf(app, film.id)?.kind === "failed", "the failure");
+    // Saved with no words of its own: Downloads says the connection failed in the language.
     expect(statusOf(app, film.id)).toMatchObject({
       kind: "failed",
-      failure: { kind: "stream", failure: { kind: "network" } },
+      failure: { kind: "stream", failure: { kind: "network", detail: "" } },
     });
     expect(nativeSecrets()).toEqual([film.id]);
     one.stallMovieFile(movie().id, 40_000, 60_000);

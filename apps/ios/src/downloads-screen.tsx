@@ -1,5 +1,5 @@
 import type { Download } from "@mrstreamer/contracts/downloads";
-import { formatBytes, t } from "@mrstreamer/core/i18n";
+import { formatBytes } from "@mrstreamer/core/i18n";
 import { runtime, timeLeftOf } from "@mrstreamer/core/viewing/continue";
 import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { SymbolView, type SFSymbol } from "expo-symbols";
@@ -25,6 +25,8 @@ import {
 } from "./download-controls.tsx";
 import { playDownload, useDownloads } from "./downloads.ts";
 import { Glass } from "./glass.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/downloads.ts";
 import { Swipe } from "./swipe.tsx";
 import { Artwork } from "./titles-ui.tsx";
 import { colors, Notice } from "./ui.tsx";
@@ -44,18 +46,22 @@ const onPhone = (item: Download) =>
 
 interface Section {
   readonly key: "queue" | "copies";
-  readonly title: string;
   readonly data: readonly Download[];
 }
 
+/** A section's heading, said in the interface language as it draws. */
+const heading = (key: Section["key"]) => (key === "queue" ? t("Queue") : t("On this iPhone"));
+
 export function DownloadsScreen() {
+  // Drawn again in a new language where it stands; the queue and its order are left as they are.
+  const locale = useLocale();
   const list = useDownloads();
   const sections = useMemo(
     () =>
       (
         [
-          { key: "queue", title: "Queue", data: list.items.filter((item) => !onPhone(item)) },
-          { key: "copies", title: "On this iPhone", data: list.items.filter(onPhone) },
+          { key: "queue", data: list.items.filter((item) => !onPhone(item)) },
+          { key: "copies", data: list.items.filter(onPhone) },
         ] satisfies readonly Section[]
       ).filter((section) => section.data.length > 0),
     [list.items],
@@ -63,7 +69,7 @@ export function DownloadsScreen() {
   // Those waiting their turn, in order: Move leaves out the first's up and the last's down.
   const line = useMemo(() => list.items.filter(waitingTurn), [list.items]);
   const storage = [
-    list.bytes > 0 ? `${formatBytes(list.bytes)} on this iPhone` : null,
+    list.bytes > 0 ? t("{size} on this iPhone", { size: formatBytes(list.bytes) }) : null,
     list.free !== null ? t("{size} free", { size: formatBytes(list.free) }) : null,
   ]
     .filter(Boolean)
@@ -74,16 +80,17 @@ export function DownloadsScreen() {
       contentInsetAdjustmentBehavior="automatic"
       sections={sections}
       keyExtractor={(item) => item.id}
+      extraData={locale}
       stickySectionHeadersEnabled={false}
       renderSectionHeader={({ section }) => (
         <Text style={styles.section} accessibilityRole="header">
-          {section.title}
+          {heading(section.key)}
         </Text>
       )}
       renderSectionFooter={({ section }) =>
         section.key === "queue" ? (
           <Text style={styles.note}>
-            A download continues in the background; the next starts once the app is open.
+            {t("A download continues in the background; the next starts once the app is open.")}
           </Text>
         ) : null
       }
@@ -94,8 +101,8 @@ export function DownloadsScreen() {
       ListEmptyComponent={
         <Notice
           failure={{
-            headline: "Nothing downloaded yet.",
-            advice: "Download a movie or an episode from its details.",
+            headline: t("Nothing downloaded yet."),
+            advice: t("Download a movie or an episode from its details."),
           }}
         />
       }
@@ -112,7 +119,10 @@ function Separator() {
   return <View style={styles.separator} />;
 }
 
-/** The trailing button's symbol and label for the first action of each state. */
+/**
+ * The trailing button's symbol and its test id's English word for the first action of each
+ * state. VoiceOver leaves the button out: the row offers the same as its first action.
+ */
 const PRIMARY: Record<Download["status"]["kind"], { symbol: SFSymbol; label: string }> = {
   queued: { symbol: "pause.fill", label: "Pause" },
   waiting: { symbol: "pause.fill", label: "Pause" },
@@ -124,7 +134,7 @@ const PRIMARY: Record<Download["status"]["kind"], { symbol: SFSymbol; label: str
 };
 
 /** What a swipe to the left reveals: the state's destructive action, in a word. */
-const SWIPED: Record<Download["status"]["kind"], string> = {
+const SWIPED = {
   queued: "Cancel",
   waiting: "Cancel",
   paused: "Cancel",
@@ -132,7 +142,7 @@ const SWIPED: Record<Download["status"]["kind"], string> = {
   failed: "Remove",
   complete: "Delete",
   missing: "Delete",
-};
+} as const satisfies Record<Download["status"]["kind"], string>;
 
 const Row = memo(function Row({
   item,
@@ -145,6 +155,8 @@ const Row = memo(function Row({
   last: boolean;
 }) {
   const { fontScale } = useWindowDimensions();
+  // A row draws again by itself in a new language, as the list keeps its rows.
+  useLocale();
   const { status } = item;
   const copy = onPhone(item);
   const actions = actionsOf(item, { first, last });
@@ -164,7 +176,7 @@ const Row = memo(function Row({
       ? item.progress
       : null;
   const left = watched ? timeLeftOf({ ...watched, finished: false }) : null;
-  const kept = copy && !item.subscription ? "Provider removed, copy kept" : null;
+  const kept = copy && !item.subscription ? t("Provider removed, copy kept") : null;
   const red = status.kind === "failed" || status.kind === "missing";
   const primary = PRIMARY[status.kind];
   // One element for VoiceOver: "Paper Harbor, season 1 episode 3, The Tide Table, 42%, ...".
@@ -185,17 +197,17 @@ const Row = memo(function Row({
       if (status.kind === "complete") playDownload(item.id);
       return;
     }
-    actions.find((action) => action.label === actionName)?.run();
+    actions.find((action) => action.name === actionName)?.run();
   };
   return (
-    <Swipe label={SWIPED[status.kind]} action={destructive} testID="download-swiped">
+    <Swipe label={t(SWIPED[status.kind])} action={destructive} testID="download-swiped">
       <Pressable
         accessible
         accessibilityLabel={spoken}
         {...(status.kind === "complete" ? { accessibilityRole: "button" as const } : {})}
         accessibilityActions={[
           ...(status.kind === "complete" ? [{ name: "activate" }] : []),
-          ...actions.map((action) => ({ name: action.label, label: action.label })),
+          ...actions.map((action) => ({ name: action.name, label: action.label })),
         ]}
         onAccessibilityAction={act}
         // A queue row doesn't answer a tap: only its button and sheet change it.
@@ -259,8 +271,8 @@ const Row = memo(function Row({
 function spokenEpisode({ title }: Download): string | null {
   if (title.kind !== "episode") return null;
   return title.season === 0
-    ? `special ${title.episode}`
-    : `season ${title.season} episode ${title.episode}`;
+    ? t("special {episode}", { episode: title.episode })
+    : t("season {season} episode {episode}", { season: title.season, episode: title.episode });
 }
 
 /** A still line of how far something got. */
@@ -277,17 +289,18 @@ function Bar({ done, style }: { done: number; style?: StyleProp<ViewStyle> }) {
  * without any) and a chevron.
  */
 export function DownloadsLink({ onPress }: { onPress: () => void }) {
+  useLocale();
   const { bytes } = useDownloads();
-  const used = bytes > 0 ? formatBytes(bytes) : "None";
+  const used = bytes > 0 ? formatBytes(bytes) : t("None");
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Downloads, ${used}`}
+      accessibilityLabel={t("Downloads, {status}", { status: used })}
       onPress={onPress}
       style={({ pressed }) => [styles.link, pressed && styles.pressed]}
       testID="downloads-link"
     >
-      <Text style={styles.linkLabel}>Downloads</Text>
+      <Text style={styles.linkLabel}>{t("Downloads")}</Text>
       <View style={styles.linkValue}>
         <Text style={styles.linkUsed}>{used}</Text>
         <SymbolView name="chevron.right" size={14} tintColor={colors.dim} weight="semibold" />

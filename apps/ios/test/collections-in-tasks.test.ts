@@ -936,7 +936,7 @@ describe("the collections Movies, Series, Home and details show", () => {
         await click("English · 1");
         expect(showing("grid")).toBe("a:en-4k");
         expect(container.textContent).toContain("Show 1");
-        await click(`Show 1 ${kind === "movie" ? "movies" : "series"}`);
+        await click(`Show 1 ${kind === "movie" ? "movie" : "series"}`);
         await press("tile:en-4k");
         expect(edges.opened.at(-1)).toMatchObject({ title: { id: "en-4k" }, asked: true });
         await click("Sort & filter");
@@ -1127,7 +1127,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       await click("4K");
       await click("Sort & filter");
       await click("Nederlands · 1");
-      await click("Show 1 movies");
+      await click("Show 1 movie");
       const stale = edges.presses.get("tile:nl-4k")!;
       await React.act(async () => list([["a", { ...fixture.catalogue, movies: [] }]]));
       await settled(() => titles.titlesWorkedOut(), "empty 4K catalogue");

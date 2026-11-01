@@ -22,6 +22,8 @@ import {
 } from "../../../guide-ui.tsx";
 import { tabHref } from "../../../header.tsx";
 import { useLocale } from "../../../i18n/catalogue.ts";
+import { t } from "../../../i18n/library.ts";
+import { t as live } from "../../../i18n/live.ts";
 import type { Channel, Library } from "../../../library.ts";
 import { Docked, libraryStatus, Placeholders, Shape, useDockInset } from "../../../loading.tsx";
 import {
@@ -66,7 +68,8 @@ const MOVIES = 20;
  * or failed by provider is the status line at the bottom.
  */
 export default function Home() {
-  // The status line's words are made here, so a new language makes them again.
+  // The status line's words are made here, so a new language makes them again; Home's own words
+  // follow too, with what plays and where Home scrolled kept.
   useLocale();
   const catalogue = useCatalogue();
   const roster = useRoster();
@@ -127,7 +130,7 @@ export default function Home() {
             !suggested
               ? ""
               : recentChannels.length > 0
-                ? "Last watched"
+                ? live("Last watched")
                 : library
                   ? placeOf(library, suggested)
                   : ""
@@ -151,14 +154,14 @@ export default function Home() {
         {catalogue.kind === "failed" ? (
           <Notice
             failure={failureOf(catalogue.error, catalogue.member.entry.server)}
-            actions={[{ label: "Try again", onPress: retryChannels }]}
+            actions={[{ label: t("Try again"), onPress: retryChannels }]}
           />
         ) : null}
         <Favourites library={library} playing={playing} onPress={preview} />
         <TitleRows />
         <MoviesForYou />
         {library && onNow.length === 0 && playback.phase.kind === "idle" && !titlesShown ? (
-          <Message text="Pick a channel in Live, or a movie or series." />
+          <Message text={t("Pick a channel in Live, or a movie or series.")} />
         ) : null}
       </Content>
     </Docked>
@@ -210,7 +213,7 @@ function OnNow({
     <View style={styles.block}>
       <View style={styles.head}>
         <Text style={styles.section} accessibilityRole="header">
-          On now
+          {live("On now")}
         </Text>
         <Pressable
           accessibilityRole="button"
@@ -218,7 +221,7 @@ function OnNow({
           style={({ pressed }) => [styles.link, pressed && styles.pressed]}
           testID="home-all-channels"
         >
-          <Text style={styles.linkText}>All channels</Text>
+          <Text style={styles.linkText}>{t("All channels")}</Text>
         </Pressable>
       </View>
       <Tiles
@@ -252,7 +255,7 @@ function Favourites({
   return (
     <View style={styles.block}>
       <ShelfHead
-        name="Favourites"
+        name={live("Favourites")}
         // Every favourite the list holds, as the Watchlist's heading counts what it saved.
         total={favourites?.original.length ?? 0}
         onAll={openFavourites}
@@ -306,7 +309,7 @@ function Tiles({
           provider && place.endsWith(` · ${provider}`)
             ? place.slice(0, -provider.length - 3)
             : place;
-        const line = channel.key === playing?.id ? playing.word : shelfOf(fallback);
+        const line = channel.key === playing?.id ? live(playing.word) : shelfOf(fallback);
         const programme = programmePresentation(programmes?.get(channel.key), now);
         return (
           <View key={channel.key} style={styles.tile}>
@@ -338,8 +341,11 @@ function Tiles({
             </Pressable>
             {testID === "home-channel" ? (
               <TextButton
-                label="Schedule"
-                accessibilityLabel={[`Schedule for ${channel.title}`, provider]
+                label={live("Schedule")}
+                accessibilityLabel={[
+                  live("Schedule for {channel}", { channel: channel.title }),
+                  provider,
+                ]
                   .filter(Boolean)
                   .join(", ")}
                 onPress={() => openSchedule("home", channel.key)}
@@ -380,15 +386,17 @@ const shelfOf = (place: string) => place.split(" · ").at(-1) ?? place;
  * provider added lately, and failing that the provider's own list.
  */
 function MoviesForYou() {
+  const locale = useLocale();
   const made = useCollections("movie");
   const lists = useTitleLists();
   const shelf = useMemo(() => {
     if (!made) return null;
     const [row] = collectionRows(made, "for-you", null);
-    if (row) return { name: "Movies for you", titles: row.titles };
+    if (row) return { name: t("Movies for you"), titles: row.titles };
     const all = made.list("all").slice(0, MOVIES);
-    return all.length > 0 ? { name: "Movies", titles: all } : null;
-  }, [made]);
+    return all.length > 0 ? { name: t("Movies"), titles: all } : null;
+    // Its name is in the interface language; the posters stay.
+  }, [made, locale]);
   // Still posters until the first collections are made; a failure says so in the status line.
   if (!made) return lists.kind === "failed" ? null : <PlaceholderShelf />;
   if (!shelf) return null;
@@ -429,7 +437,7 @@ function TitleRows() {
     <>
       {continuing.length > 0 ? (
         <Shelf
-          name="Continue watching"
+          name={t("Continue watching")}
           titles={continuing.map((entry) => entry.title)}
           lines={(title) => entryOf(title.key)?.line}
           done={(title) => entryOf(title.key)?.done ?? null}
@@ -441,7 +449,7 @@ function TitleRows() {
             ActionSheetIOS.showActionSheetWithOptions(
               {
                 title: title.title,
-                options: ["Details", "Remove from Continue watching", "Cancel"],
+                options: [t("Details"), t("Remove from Continue watching"), t("Cancel")],
                 destructiveButtonIndex: 1,
                 cancelButtonIndex: 2,
               },
@@ -457,7 +465,7 @@ function TitleRows() {
       ) : null}
       {watchlist.length > 0 ? (
         <Shelf
-          name="Watchlist"
+          name={t("Watchlist")}
           titles={watchlist}
           total={saved.length}
           onAll={openWatchlist}
@@ -465,7 +473,7 @@ function TitleRows() {
         />
       ) : (
         <View style={styles.block}>
-          <ShelfHead name="Watchlist" total={saved.length} onAll={openWatchlist} />
+          <ShelfHead name={t("Watchlist")} total={saved.length} onAll={openWatchlist} />
         </View>
       )}
     </>
@@ -500,23 +508,23 @@ function Stage({
     (phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused") &&
     !watch &&
     !pip;
-  const title = phase.kind === "idle" ? (channel?.title ?? "Nothing playing") : phase.item.title;
+  const title = phase.kind === "idle" ? (channel?.title ?? t("Nothing playing")) : phase.item.title;
   const status =
     phase.kind === "idle"
       ? line
       : phase.kind === "failed"
         ? phase.error
         : external
-          ? "Playing on AirPlay"
+          ? t("Playing on AirPlay")
           : pip
-            ? "Picture in Picture"
+            ? t("Picture in Picture")
             : phase.kind === "loading"
-              ? "Connecting"
+              ? live("Connecting")
               : phase.kind === "paused"
-                ? "Paused"
+                ? live("Paused")
                 : muted
-                  ? "Muted"
-                  : "Live";
+                  ? t("Muted")
+                  : t("Live");
   const programmeShown = programmePresentation(programme, now);
   // The logo where the picture isn't: idle, connecting, failed, or shown elsewhere.
   const logo = channel && (phase.kind !== "playing" || !shows) ? channel : null;
@@ -554,14 +562,14 @@ function Stage({
           {phase.kind === "idle" ? (
             <IconButton
               symbol="play.fill"
-              label={`Play ${title}`}
+              label={t("Play {title}", { title })}
               onPress={onPlay}
               testID="home-play"
             />
           ) : phase.kind === "failed" ? (
             <IconButton
               symbol="arrow.clockwise"
-              label="Try again"
+              label={t("Try again")}
               onPress={retry}
               testID="home-retry"
             />
@@ -569,13 +577,13 @@ function Stage({
             <>
               <IconButton
                 symbol={muted ? "speaker.slash.fill" : "speaker.wave.2.fill"}
-                label={muted ? "Unmute" : "Mute"}
+                label={muted ? t("Unmute") : t("Mute")}
                 onPress={() => setMuted(!muted)}
                 testID="home-mute"
               />
               <IconButton
                 symbol="arrow.up.left.and.arrow.down.right"
-                label="Full screen"
+                label={t("Full screen")}
                 onPress={openWatch}
                 testID="home-watch"
               />

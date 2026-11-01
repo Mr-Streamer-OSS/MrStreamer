@@ -12,6 +12,7 @@ import {
   type VideoPlayer,
 } from "expo-video";
 import { appError, describeError, withoutLogin } from "./errors.ts";
+import { t } from "./i18n/watch.ts";
 import {
   confirms,
   decideAudio,
@@ -835,15 +836,17 @@ function terminal(owned: NonNullable<typeof current>): void {
       ? describeError(failure.error)
       : failure.kind === "deadline"
         ? failure.stage === "startup"
-          ? `No picture or sound within ${START_TIMEOUT_MS / 1000} s.`
-          : "The stream stopped delivering data."
-        : native?.kind === "network"
-          ? "The connection to the provider failed."
-          : native?.kind === "unsupported" || native?.kind === "decode"
-            ? "Mr. Streamer can't play this file."
-            : failure.kind === "detach-timeout"
-              ? "The previous stream is still closing. Try again."
-              : "The player stopped. Try again.";
+          ? t("No picture or sound within {seconds} s.", { seconds: START_TIMEOUT_MS / 1000 })
+          : t("The stream stopped delivering data.")
+        : t(
+            native?.kind === "network"
+              ? "The connection to the provider failed."
+              : native?.kind === "unsupported" || native?.kind === "decode"
+                ? "Mr. Streamer can't play this file."
+                : failure.kind === "detach-timeout"
+                  ? "The previous stream is still closing. Try again."
+                  : "The player stopped. Try again.",
+          );
   if (current !== owned) return;
   state.set((s) => ({
     ...s,
@@ -1858,7 +1861,7 @@ export async function trackChoices(
   if (of === "audio") {
     return labelled(
       tracks.audio.options.filter((track) => track.isPlayable),
-      "Sound",
+      t("Sound"),
     ).map(({ track, label }) => ({
       kind: "track" as const,
       label,
@@ -1871,7 +1874,7 @@ export async function trackChoices(
       ? [
           {
             kind: "off" as const,
-            label: "Off",
+            label: t("Off"),
             selected: tracks.selectedSubtitleId === null,
             choose: () => choose({ kind: "subtitles", track: null }),
           },
@@ -1879,7 +1882,7 @@ export async function trackChoices(
       : []),
     ...labelled(
       tracks.subtitles.options.filter((track) => track.isPlayable),
-      "Subtitles",
+      t("Subtitles"),
     ).map(({ track, label }) => ({
       kind: "track" as const,
       label,

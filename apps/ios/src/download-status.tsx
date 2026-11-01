@@ -1,13 +1,16 @@
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
-import { formatBytes, formatPercent } from "@mrstreamer/core/i18n";
+import { formatBytes, formatNumber, formatPercent } from "@mrstreamer/core/i18n";
 import { SymbolView } from "expo-symbols";
 import { Pressable, StyleSheet, Text } from "react-native";
 import { useDownloads } from "./downloads.ts";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/downloads.ts";
 
 /**
  * The queue's most immediate state, derived from the existing owner without another timer: the
  * transfer, else one waiting for playback, else how many are queued, else how many the viewer
- * paused, else how many failed where Retry can still reach their provider.
+ * paused, else how many failed where Retry can still reach their provider, in the interface
+ * language.
  */
 function downloadStatus({ items }: DownloadList): { short: string; text: string } | null {
   const transferring = items.find((item) => item.status.kind === "transferring");
@@ -19,22 +22,27 @@ function downloadStatus({ items }: DownloadList): { short: string; text: string 
         : received < 1000
           ? `${received} B`
           : formatBytes(received);
-    return { short: progress, text: `${transferring.name}, ${progress} downloaded` };
+    return {
+      short: progress,
+      text: t("{name}, {progress} downloaded", { name: transferring.name, progress }),
+    };
   }
   const waiting = items.find((item) => item.status.kind === "waiting");
   if (waiting)
     return {
-      short: "Wait",
+      short: t("Wait"),
       text: waiting.subscription
-        ? `Waiting while ${waiting.subscription.name} plays`
-        : "Waiting for playback",
+        ? t("Waiting while {subscription} plays", { subscription: waiting.subscription.name })
+        : t("Waiting for playback"),
     };
   const queued = items.filter((item) => item.status.kind === "queued").length;
-  if (queued) return { short: String(queued), text: `${queued} queued` };
+  if (queued) return { short: formatNumber(queued), text: t("{count} queued", { count: queued }) };
   const paused = items.filter((item) => item.status.kind === "paused").length;
-  if (paused) return { short: "Paused", text: `${paused} paused` };
+  if (paused) return { short: t("Paused"), text: t("{count} paused", { count: paused }) };
   const failed = items.filter((item) => item.status.kind === "failed" && item.subscription).length;
-  return failed ? { short: "!", text: `${failed} failed, open Downloads to retry` } : null;
+  return failed
+    ? { short: "!", text: t("{count} failed, open Downloads to retry", { count: failed }) }
+    : null;
 }
 
 /** One Downloads action on tab headers, Search and Watch. It never starts or changes a transfer. */
@@ -47,12 +55,15 @@ export function DownloadStatusButton({
   testID?: string;
   onlyActive?: boolean;
 }) {
+  useLocale();
   const status = downloadStatus(useDownloads());
   if (onlyActive && !status) return null;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={status ? `Downloads, ${status.text}` : "Downloads"}
+      accessibilityLabel={
+        status ? t("Downloads, {status}", { status: status.text }) : t("Downloads")
+      }
       onPress={onPress}
       style={styles.button}
       testID={testID}
