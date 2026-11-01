@@ -863,11 +863,13 @@ const styles = StyleSheet.create({
   failed: { color: "#FF453A" },
   name: { color: colors.text, fontSize: 17, fontWeight: "600" },
   plain: { color: colors.text, fontSize: 15 },
+  // Keep wrapped labels clear of the row's separators.
   line: {
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 16,
     minHeight: 44,
+    paddingVertical: 10,
     alignItems: "center",
     marginHorizontal: 16,
     borderBottomColor: colors.line,
@@ -879,6 +881,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 16,
     minHeight: 44,
+    paddingVertical: 10,
     marginHorizontal: 16,
   },
   label: { color: colors.text, fontSize: 17, flexShrink: 1 },
