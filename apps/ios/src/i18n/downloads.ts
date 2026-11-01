@@ -781,6 +781,22 @@ const KEPT = [
   "The new order couldn't be kept.",
 ] as const satisfies readonly Parameters<typeof t>[0][];
 
+/**
+ * A network failure's detail as earlier versions saved it, in the language of the day: the offline
+ * sentence, or the generic one, which describeError already says.
+ */
+const SAVED_TRANSLATED = new Map<string, (typeof KEPT)[number] | "">([
+  ["Je lijkt offline te zijn.", "You seem to be offline."],
+  ["Vous semblez hors ligne.", "You seem to be offline."],
+  ["Du scheinst offline zu sein.", "You seem to be offline."],
+  ["Parece que no tienes conexión.", "You seem to be offline."],
+  ["The connection to the provider failed.", ""],
+  ["De verbinding met de provider is mislukt.", ""],
+  ["La connexion au fournisseur a échoué.", ""],
+  ["Die Verbindung zum Anbieter ist fehlgeschlagen.", ""],
+  ["Falló la conexión con el proveedor.", ""],
+]);
+
 /** `detail` in the interface language when it is one of downloads.ts's own; else as it came. */
 function said(detail: string): string {
   const kept = KEPT.find((each) => each === detail);
@@ -794,7 +810,9 @@ function said(detail: string): string {
 export function inLanguage(error: AppError): AppError {
   if (error.kind === "unexpected") return { ...error, detail: said(error.detail) };
   if (error.kind === "stream" && "detail" in error.failure) {
-    return { ...error, failure: { ...error.failure, detail: said(error.failure.detail) } };
+    const { detail } = error.failure;
+    const saved = error.failure.kind === "network" ? SAVED_TRANSLATED.get(detail) : undefined;
+    return { ...error, failure: { ...error.failure, detail: said(saved ?? detail) } };
   }
   return error;
 }

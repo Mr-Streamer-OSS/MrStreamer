@@ -162,6 +162,18 @@ const offline = movie("o", "Salt Meridian", {
   kind: "failed",
   failure: { kind: "stream", failure: { kind: "network", detail: "You seem to be offline." } },
 });
+// Saved by an earlier version in Dutch: its offline sentence, and the generic one.
+const savedDutch = movie("d", "Lantern Weir", {
+  kind: "failed",
+  failure: { kind: "stream", failure: { kind: "network", detail: "Je lijkt offline te zijn." } },
+});
+const savedGeneric = movie("g", "Copper Fen", {
+  kind: "failed",
+  failure: {
+    kind: "stream",
+    failure: { kind: "network", detail: "De verbinding met de provider is mislukt." },
+  },
+});
 const copy = movie("c", "North of Quiet", { kind: "complete" });
 const transferring = movie("t", "Paper Harbor", {
   kind: "transferring",
@@ -199,6 +211,8 @@ it("shows Downloads in the language picked and redraws it in a new one, the queu
     queued,
     stopped,
     offline,
+    savedDutch,
+    savedGeneric,
     copy,
   ]);
   expect(screen.textContent).toContain("Wachtrij");
@@ -223,7 +237,9 @@ it("shows Downloads in the language picked and redraws it in a new one, the queu
   ]);
 
   // The rows' order as drawn.
-  const names = [paused, queued, stopped, offline, copy].map(({ name }) => name);
+  const names = [paused, queued, stopped, offline, savedDutch, savedGeneric, copy].map(
+    ({ name }) => name,
+  );
   const text = () => screen.textContent ?? "";
   const order = () => names.toSorted((a, b) => text().indexOf(a) - text().indexOf(b));
   const before = order();
@@ -233,6 +249,12 @@ it("shows Downloads in the language picked and redraws it in a new one, the queu
   expect(screen.textContent).toContain("Dieser Download wurde angehalten.");
   expect(screen.textContent).toContain(
     "Die Verbindung zum Anbieter ist fehlgeschlagen. Du scheinst offline zu sein.",
+  );
+  // Earlier versions' Dutch reads in German too, and the generic sentence is said once.
+  expect(screen.textContent).not.toContain("Je lijkt offline te zijn.");
+  expect(screen.textContent).not.toContain("De verbinding met de provider is mislukt.");
+  expect(screen.textContent?.split("Die Verbindung zum Anbieter ist fehlgeschlagen.")).toHaveLength(
+    4,
   );
   expect(screen.textContent).not.toContain("Wachtrij");
   expect(row("q").accessibilityLabel).toBe("Glass Orchard, 2024, In der Warteschlange");
