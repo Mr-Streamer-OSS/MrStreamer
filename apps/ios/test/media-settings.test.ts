@@ -1,3 +1,4 @@
+import "./native-assets.ts";
 import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import { mkdirSync, readdirSync, rmSync, readFileSync } from "node:fs";

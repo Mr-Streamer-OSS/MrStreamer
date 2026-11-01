@@ -1,6 +1,6 @@
+import "./native-assets.ts";
 import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
-import Module, { createRequire } from "node:module";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatDate } from "@mrstreamer/core/i18n";
 import { byIds, indexCatalogue, type IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
@@ -14,17 +14,6 @@ import type { AboutStanding, MetadataStanding } from "../src/titles.ts";
 // window over React Native stand-ins. TMDB's standing and a title's details answer as the test
 // says: metadata-recovery.test.ts drives the real owners that give them, and the real text.
 
-// Metro supplies native asset ids, as TMDB's logo in About, and picks its @2x file; Node has no
-// PNG loader and asks for the plain name.
-createRequire(import.meta.url).extensions[".png"] = (module) => {
-  module.exports = 1;
-};
-const resolving = Module as unknown as {
-  _resolveFilename(request: string, ...rest: unknown[]): string;
-};
-const resolve = resolving._resolveFilename.bind(resolving);
-resolving._resolveFilename = (request, ...rest) =>
-  resolve(request.endsWith("/tmdb.png") ? request.replace(/\.png$/, "@2x.png") : request, ...rest);
 vi.stubGlobal("__DEV__", false);
 
 const scenario = vi.hoisted(() => ({
@@ -248,6 +237,8 @@ describe("Settings' TMDB group", () => {
     render(React.createElement(Settings));
     expect(text("settings-tmdb-key")).toContain("Add");
     expect(text("settings-tmdb-status")).toBe("StatusNo key, provider facts only");
+    // TMDB's facts saved before stay without a key, and so does its notice in About.
+    expect(container.textContent).toContain("This application uses TMDB");
     expect(find("settings-tmdb-titles")).toBeNull();
     expect(find("settings-tmdb-retry")).toBeNull();
 

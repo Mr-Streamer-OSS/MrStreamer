@@ -351,8 +351,12 @@ function askWith(yours: string) {
     }
     client = key ? tmdb({ key, ...(TMDB_API ? { api: TMDB_API } : {}) }) : null;
     tmdbKey.set(yours ? "yours" : key ? "app" : "none");
-    // Details and collections are read again, for TMDB's part to follow the key.
-    if (fresh) metadataVersion.set((version) => version + 1);
+    // Details and collections are read again, for TMDB's part to follow the key, once the new
+    // store has read what was saved.
+    if (fresh) {
+      await metadata.flush().catch(() => undefined);
+      metadataVersion.set((version) => version + 1);
+    }
     wantMetadata();
   });
   return keying;

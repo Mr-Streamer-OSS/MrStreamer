@@ -249,25 +249,24 @@ export default function Settings() {
         onPress={() => router.push(tabHref(tab, "licences"))}
         testID="settings-licences"
       />
-      {tmdb.kind !== "no-key" ? (
-        <View style={styles.notice}>
-          <Pressable
-            accessibilityRole="link"
-            accessibilityLabel="TMDB"
-            onPress={() => void Linking.openURL("https://www.themoviedb.org")}
-          >
-            <Image
-              source={require("../../../../assets/tmdb.png") as number}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-          </Pressable>
-          <Text style={styles.noticeText}>
-            This application uses TMDB and the TMDB APIs but is not endorsed, certified, or
-            otherwise approved by TMDB. Where titles stream comes from JustWatch.
-          </Text>
-        </View>
-      ) : null}
+      {/* Always: TMDB facts saved before stay without a key. */}
+      <View style={styles.notice}>
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel="TMDB"
+          onPress={() => void Linking.openURL("https://www.themoviedb.org")}
+        >
+          <Image
+            source={require("../../../../assets/tmdb.png") as number}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </Pressable>
+        <Text style={styles.noticeText}>
+          This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise
+          approved by TMDB. Where titles stream comes from JustWatch.
+        </Text>
+      </View>
       {__DEV__ ? <Development /> : null}
       <View style={styles.end} />
     </ScrollView>
