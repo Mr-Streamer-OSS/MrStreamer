@@ -807,7 +807,7 @@ TMDB uses the viewer's own key from Settings > TMDB, kept in the Keychain, else
 `EXPO_PUBLIC_TMDB_KEY` (`EXPO_PUBLIC_TMDB_API` points at a test server). Without either key,
 provider facts and previously saved TMDB answers remain available; new TMDB facts cannot be
 fetched. Settings > TMDB shows the key, how TMDB stands and how many titles it has facts for, with
-Try again to ask it again. Settings > About always shows TMDB's logo and notice, including after key removal,
+Try again. Settings > About always shows TMDB's logo and notice, including after key removal,
 because cached TMDB facts can remain.
 
 Settings' Diagnostics first shows what it would share: how the app and each numbered provider
@@ -917,9 +917,10 @@ does, and lists them again (`scripts/live-lists.ts`); Reload in Settings then re
 out 100000, 100001 and 100002, the one channel in three qualities, takes Belgium's Kwaliteit, the
 only category it is in, away from Find countries or categories as well.
 
-The panel's media is lawful and generated: `scripts/native-fixtures/media.ts` makes it with ffmpeg
-from test sources or the desktop's synthetic clips, into `.local/ios-fixture` or `FIXTURE_OUT`, and
-the control port's `/provenance` and `provenance.json` say where each piece came from; no provider
+The panel combines FFmpeg-generated test media with synthetic repository clips served unchanged
+from `apps/desktop/test/fixtures`. Generated artifacts are kept under `.local/ios-fixture` or
+`FIXTURE_OUT`. `scripts/native-fixtures/media.ts` records both kinds in the provenance: the
+control port's `/provenance` and `provenance.json` say where each piece came from; no provider
 or broadcast media is served. Catch-up plays as HLS on channel 1000 for three days and 1006 for
 two (`catch-up.ts`). Stream 7999, "TEST | Live sound and subtitles (EN/NL)", has two sound and two
 subtitle renditions for Live tracks (`tracks.ts`). `/title-transfers` paces, breaks off or replaces
@@ -928,7 +929,7 @@ Automatic quality runs (`live-link.ts`). `test/native-fixtures.test.ts` checks t
 provenance, catch-up, the tracks and title transfers in the suite, and needs ffmpeg and ffprobe;
 `/live-link` pacing has no test of its own.
 
-Agents open the simulator with T3's `device_open` and launch, relaunch and drive the app, with
+In T3 sessions, agents open the simulator with `device_open` and launch, relaunch and drive the app, with
 taps, typing, screenshots and recordings, through the AgentDevice command it returns, never through
 ssh or `simctl` (see the `mac-mini` skill). The fixture, Metro and tunnel commands below can run
 in T3 sessions. Build and install the native app using the Xcode build/install-only steps in that

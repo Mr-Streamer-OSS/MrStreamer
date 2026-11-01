@@ -153,7 +153,7 @@ When the stream breaks, the disk fails or fills, a [storage limit](#where-record
 
 A recording you stopped never goes on by itself, and neither does one you quit while it recorded. One also ends for good when its stream says it's over, or keeps ending soon after it starts.
 
-When Mr. Streamer can't save a Stop or a recording's end, its row says **Not saved yet. Trying again.** until storage works again. Until then, a recording that ended by itself goes on at the next start while its time remains. One you stopped or quit goes on only if the disk also refused the mark Mr. Streamer leaves in the recording's folder, as a drive gone read-only does.
+When Mr. Streamer can't save a Stop or a recording's end, its row says **Not saved yet. Trying again.** until storage works again. Until then, a recording that ended by itself goes on at the next start while its time remains. A recording you stopped or quit goes on only if the disk also refused the mark Mr. Streamer leaves in the recording's folder, as a drive gone read-only does.
 
 ### Closing, quitting and updates
 
