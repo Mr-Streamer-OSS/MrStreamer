@@ -9,9 +9,11 @@ import { formatLanguageName } from "@mrstreamer/core/i18n";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ComponentRef } from "react";
 import {
+  AccessibilityInfo,
   ActionSheetIOS,
+  AppState,
   Alert,
   Keyboard,
   PanResponder,
@@ -61,6 +63,7 @@ import {
   type SubtitleFailureReason,
 } from "./online-subtitles.ts";
 import {
+  cancelUpNext,
   closeWatch,
   playbackState,
   request,
@@ -70,8 +73,10 @@ import {
   player,
   playingItem,
   playNext,
+  playUpNext,
   type Playing,
   type TrackChoice,
+  type UpNext,
   restoreFromPictureInPicture,
   retry,
   seekBy,
@@ -86,6 +91,7 @@ import {
   usePlayback,
   usePlaybackClock,
   usePlaybackLength,
+  useUpNext,
 } from "./playback.ts";
 import type { UnshownSubtitles } from "./title-formats.ts";
 import { colors } from "./ui.tsx";
@@ -248,11 +254,26 @@ export function WatchLayer() {
     // A search field left focused under Watch would keep its keyboard over the picture.
     Keyboard.dismiss();
   }, [watch]);
+  // The countdown to the next episode is in the panel, so the panel shows as it starts. Leaving
+  // the app ends it, or the ask for which episode it counts to.
+  const counting = useUpNext() !== null;
+  useEffect(() => {
+    if (!counting) return;
+    if (AppState.currentState === "active") setControls(true);
+    else cancelUpNext();
+  }, [counting]);
+  useEffect(() => {
+    if (!watch) return;
+    const left = AppState.addEventListener("change", (now) => now !== "active" && cancelUpNext());
+    return () => left.remove();
+  }, [watch]);
 
   const streaming = phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused";
   const sheetShown = useStore(sheet);
   useShortcuts(!watch || sheetShown ? NO_SHORTCUTS : streaming ? STREAMING : STILL, (id) => {
     if (id === "close" || id === "dismiss") void closeWatch();
+    // Space only cancels a countdown, leaving the ended episode where it ended.
+    else if (id === "pause" && counting) cancelUpNext();
     else if (id === "pause") togglePause();
     else seekBy(id === "rewind" ? -10 : 10);
   });
@@ -287,7 +308,11 @@ export function WatchLayer() {
         <Pressable
           style={StyleSheet.absoluteFill}
           accessibilityLabel={controls ? "Hide controls" : "Show controls"}
-          onPress={() => setControls((shown) => !shown)}
+          // Hiding the panel would hide the countdown in it too, so a tap ends that first.
+          onPress={() => {
+            if (controls) cancelUpNext();
+            setControls((shown) => !shown);
+          }}
         />
       ) : null}
       {watch && streaming && item && !item.live ? (
@@ -706,8 +731,10 @@ function Scrubber() {
  * row of text controls that wraps when it runs out of width. For a movie or an episode, Subtitles
  * also lists the subtitle downloaded for its version, with Find online and, while that shows,
  * Adjust timing. Every sheet that follows acts only while the play it was opened for stands.
+ * While an ended episode counts down to the next, the row is that countdown instead (`UpNextRow`).
  */
 function TextButtons({ item }: { item: Playing }) {
+  const upNext = useUpNext();
   const menu = useRef(0);
   useEffect(
     () => () => {
@@ -765,6 +792,8 @@ function TextButtons({ item }: { item: Playing }) {
       },
     );
   };
+  // Keyed by the episode, so each countdown moves VoiceOver and is announced once.
+  if (upNext) return <UpNextRow key={upNext.place} {...upNext} />;
   return (
     <View style={styles.textButtons}>
       <TextControl label="Audio" onPress={() => void choose("audio")} testID="watch-audio" />
@@ -778,6 +807,54 @@ function TextButtons({ item }: { item: Playing }) {
       ) : item.next ? (
         <TextControl label="Next episode" onPress={playNext} testID="watch-next" />
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * The countdown to the next episode in the text-button row: "S1 E3 · Name  Plays in 8", then
+ * Cancel and Play next. VoiceOver moves to Play next and hears the episode and the count once;
+ * the count changing is never spoken, and Play next reads the seconds left when focused. Its
+ * order is meant to be the next line, Play next, Cancel, though Cancel shows first (unproven on a
+ * device, where VoiceOver may follow the screen's order instead). At large text the row
+ * wraps as the text buttons do: the next line, then Cancel and Play next under it, and at the
+ * largest those two stack as well, Play next first.
+ */
+function UpNextRow({ place, seconds }: UpNext) {
+  const playButton = useRef<ComponentRef<typeof Pressable>>(null);
+  const from = useRef(seconds).current;
+  const spokenPlace = place.replaceAll(" · ", ", ");
+  useEffect(() => {
+    if (playButton.current) AccessibilityInfo.sendAccessibilityEvent(playButton.current, "focus");
+    // Said after the focus moves, so it is heard in place of Play next's own line.
+    AccessibilityInfo.announceForAccessibility(
+      `Next episode, ${spokenPlace}, plays in ${from} seconds.`,
+    );
+  }, [spokenPlace, from]);
+  return (
+    <View style={[styles.textButtons, styles.upNext]} testID="watch-up-next">
+      <View style={styles.nextLine} accessible accessibilityLabel={`Next episode, ${spokenPlace}`}>
+        <Text style={styles.nextPlace}>{place}</Text>
+        <Text style={styles.nextCount}>Plays in {seconds}</Text>
+      </View>
+      {/* Reversed, so VoiceOver can reach Play next before the Cancel shown first. */}
+      <View style={styles.nextActions}>
+        <Pressable
+          ref={playButton}
+          accessibilityRole="button"
+          accessibilityLabel="Play next"
+          accessibilityValue={{ text: `in ${seconds} seconds` }}
+          onPress={playUpNext}
+          style={({ pressed }) => [styles.playNext, pressed && styles.pressed]}
+          testID="watch-play-next"
+        >
+          <View style={styles.playCircle}>
+            <View style={styles.playTriangle} />
+          </View>
+          <Text style={styles.playNextLabel}>Play next</Text>
+        </Pressable>
+        <TextControl label="Cancel" onPress={cancelUpNext} testID="watch-up-next-cancel" />
+      </View>
     </View>
   );
 }
@@ -1137,6 +1214,44 @@ const styles = StyleSheet.create({
   textButtons: { flexDirection: "row", flexWrap: "wrap", gap: 18, marginTop: 4 },
   textControl: { minHeight: 44, justifyContent: "center" },
   textControlLabel: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  upNext: { alignItems: "center" },
+  nextLine: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "baseline",
+    columnGap: 12,
+  },
+  nextPlace: { flexShrink: 1, color: colors.text, fontSize: 15, fontWeight: "600" },
+  nextCount: { color: colors.text, fontSize: 15, fontVariant: ["tabular-nums"] },
+  // Wraps too, so Cancel and Play next stay inside a narrow panel at the largest text.
+  nextActions: {
+    flexShrink: 1,
+    flexDirection: "row-reverse",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 18,
+  },
+  playNext: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 10 },
+  playCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // Play's triangle, 12 by 14, drawn by its borders.
+  playTriangle: {
+    borderLeftWidth: 12,
+    borderLeftColor: "#000000",
+    borderTopWidth: 7,
+    borderTopColor: "transparent",
+    borderBottomWidth: 7,
+    borderBottomColor: "transparent",
+  },
+  playNextLabel: { color: colors.text, fontSize: 15, fontWeight: "700" },
   pressed: { opacity: 0.5 },
   spacer: { flex: 1 },
   cues: { position: "absolute", left: 24, right: 24, alignItems: "center" },

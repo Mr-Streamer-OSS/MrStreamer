@@ -21,7 +21,14 @@ import { isFinished } from "@mrstreamer/core/viewing/titles";
 import { members } from "./account.ts";
 import { DEMO_ID } from "./demo.ts";
 import { subtitleTitle } from "./downloaded-subtitles.ts";
-import { play, progressSettled, request, type Playing, type Request } from "./playback.ts";
+import {
+  play,
+  progressSettled,
+  request,
+  type Playing,
+  type Request,
+  type Saved,
+} from "./playback.ts";
 import { currentSource, loginOf } from "./sources.ts";
 import { store, useStore } from "./store.ts";
 import { titleFile } from "./titles.ts";
@@ -29,9 +36,10 @@ import { finishSeries, progressOf, recordProgress, seriesViewing } from "./viewi
 
 // Playing a movie or an episode in the one player, as the desktop's title player decides it:
 // from where it stopped, saving how far it got in the viewing record against when this play
-// began, the next episode not yet watched, and a series finished once its last episode ends with
-// none left. Any file is tried, whatever its name or type says. Resuming reads where a title got
-// to once every save asked before ended, so a position Close or Stop just saved counts.
+// began, the next episode not yet watched, which Watch counts down to once one ends, and a series
+// finished once its last episode ends with none left. Any file is tried, whatever its name or
+// type says. Resuming reads where a title got to once every save asked before ended, so a
+// position Close or Stop just saved counts.
 //
 // What didn't play is noted by the version the viewer chooses between, a movie's or a series',
 // for its details and version menu, until that version plays. For a series it says an episode of
@@ -108,6 +116,10 @@ export function playMovie(title: Title, version: OwnedId, from: number, versions
   );
 }
 
+/** An episode's line, "S1 E2 · Name". */
+const lineOf = (episode: Episode) =>
+  `${episodeLabel(episode.season, episode.number)} · ${episode.title}`;
+
 /** Plays an episode of `details`, a series version, in Watch, from `from` seconds. */
 export function playEpisode(
   details: SeriesDetails,
@@ -134,11 +146,35 @@ export function playEpisode(
   const after = nextEpisode(details, at) ?? null;
   let finishing = false;
   const standing = () => seriesViewing(series);
+  // The next one not yet watched, as the record stands once this one's progress is saved, else the
+  // next in order, while `stands`. A refused save was told (`onProgressRefused`), and an
+  // unreadable record can't say which episode goes on or from where: either way none does, and
+  // this one stays, for Next to be pressed again.
+  const upcoming = async (saved: Promise<Saved>, stands = () => true) => {
+    const { saved: kept } = await saved;
+    if (!kept || !stands()) return null;
+    const { progress, marks } = await standing();
+    const episode = nextUnwatched(details, at, progress, marks) ?? after;
+    if (!episode || !stands()) return null;
+    const state = episodeStates(progress, marks)(episode);
+    // The logical episode can stand by another file; resume this file's own checkpoint.
+    const selected =
+      state.kind === "watched"
+        ? state
+        : episodeStates(
+            progress.filter(({ title }) => sameOwned(title, episode)),
+            marks,
+          )(episode);
+    return {
+      episode,
+      from: resumePoint(selected.kind === "partial" ? selected.progress : undefined),
+    };
+  };
   const item: Playing = {
     id: key,
     subscriptionId: episode.subscriptionId,
     title: details.title.title,
-    place: `${episodeLabel(episode.season, episode.number)} · ${episode.title}`,
+    place: lineOf(episode),
     live: false,
     next: after !== null,
     versions: details.title.versions.length > 1,
@@ -176,25 +212,22 @@ export function playEpisode(
         return saved;
       },
       outcome: outcomeOf("series", series, "episode"),
-      // The next one not yet watched, as the record stands once this one's progress is saved, else
-      // the next in order, unless the viewer did something else while the record answered. A
-      // refused save was told (`onProgressRefused`), and an unreadable record can't say which
-      // episode goes on or from where: either way this one stays, for Next to be pressed again.
+      // Unless the viewer did something else while the record answered.
       next: (saved) => {
         const asked = request();
-        void saved
-          .then(async ({ saved: kept }) => {
-            if (!kept || !asked.stands()) return;
-            const { progress, marks } = await standing();
-            if (!asked.stands()) return;
-            const upcoming = nextUnwatched(details, at, progress, marks) ?? after;
-            if (!upcoming) return;
-            const found = progress.find(
-              ({ title }) => title.kind === "episode" && title.id === upcoming.id,
-            );
-            playEpisode(details, upcoming, resumePoint(found), versions);
-          })
+        void upcoming(saved, asked.stands)
+          .then((found) => found && playEpisode(details, found.episode, found.from, versions))
           .catch(() => undefined);
+      },
+      // Playback keeps its own word on whether the countdown still stands.
+      upNext: async (saved) => {
+        const found = await upcoming(saved).catch(() => null);
+        return (
+          found && {
+            place: lineOf(found.episode),
+            play: () => playEpisode(details, found.episode, found.from, versions),
+          }
+        );
       },
       versions,
     },

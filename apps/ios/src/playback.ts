@@ -1,5 +1,6 @@
 import { appFailure, type AnalyticsFailure } from "@mrstreamer/contracts/analytics";
 import type { AppError } from "@mrstreamer/contracts/errors";
+import { DEFAULT_NEXT_EPISODE_DELAY } from "@mrstreamer/contracts/preferences";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import {
   createVideoPlayer,
@@ -69,6 +70,10 @@ import { openFormat, type FormatSession, type UnshownSubtitles } from "./title-f
 // Closing Watch pauses what plays, saving where it got to, unless Picture in Picture or AirPlay
 // already shows it, where it plays on with its sound. Stop ends it and saves. Both resolve once
 // their save ended, saying whether it was kept.
+//
+// An episode that plays to its end in Watch counts down to the episode that goes on, once its
+// save ended and its owner said which (`upNext`), and plays it at zero. Anything the viewer does
+// first ends the countdown for good: Pause, a seek, Close, Stop, any other request or screen.
 
 /** What plays, as the screens name it. */
 export interface Playing {
@@ -190,8 +195,27 @@ export interface PlayOptions {
   readonly outcome?: (played: boolean) => void;
   /** Plays the episode after this one, once `saved`, this one's save before it, ended. */
   readonly next?: (saved: Promise<Saved>) => void;
+  /**
+   * The episode that goes on once this one played to its end, as the record stands once `saved`
+   * ended; null when none does, the save was refused or the record can't say.
+   */
+  readonly upNext?: (saved: Promise<Saved>) => Promise<Upcoming | null>;
   /** Shows the title's other versions, after this one failed. */
   readonly versions?: () => void;
+}
+
+/** An episode that goes on after the one playing: its line, "S1 E3 · Name", and how it plays. */
+export interface Upcoming {
+  readonly place: string;
+  readonly play: () => void;
+}
+
+/** The countdown Watch shows over an episode that played to its end. */
+export interface UpNext {
+  /** The episode it plays, "S1 E3 · Name". */
+  readonly place: string;
+  /** Whole seconds left. */
+  readonly seconds: number;
 }
 
 const state = store<Playback>({
@@ -214,6 +238,9 @@ export const playbackState: Pick<Store<Playback>, "get" | "subscribe"> = state;
 export const playbackClock: Pick<Store<number>, "get" | "subscribe"> = clock;
 export const usePlaybackClock = () => useStore(clock);
 export const usePlaybackLength = () => useStore(length);
+const upNext = store<UpNext | null>(null);
+/** The countdown to the next episode while Watch shows one; null otherwise. */
+export const useUpNext = () => useStore(upNext);
 
 /** A channel that plays or is about to, and how it stands, in the accessory's words. */
 export interface ChannelStatus {
@@ -258,9 +285,32 @@ let requests = 0;
 /** The screen the viewer is on, as navigation reports it. */
 let screen = "";
 
+/**
+ * When the viewer last sought a position short of this play's end. An end the player sent
+ * before that is still on its way for a moment after, while the player's position may not yet be
+ * where the viewer moved it: one that arrives within `SEEK_OVERTAKES` milliseconds is obsolete
+ * and starts no countdown. A seek to the end supersedes earlier seeks. Pauses are held separately.
+ */
+let seekAt = -Infinity;
+const SEEK_OVERTAKES = 2000;
+
+/** The viewer moved this play to `to` seconds, which ends any countdown. */
+function moved(to: number) {
+  cancelUpNext();
+  const end = length.get();
+  seekAt = !end || to < end - 1 ? Date.now() : -Infinity;
+}
+
+/** Retires every waiting request, the countdown to a next episode with them. */
+function supersede() {
+  requests++;
+  cancelUpNext();
+}
+
 /** Starts a request that has to wait, replacing any waiting before it. */
 export function request(): Request {
-  const mine = ++requests;
+  supersede();
+  const mine = requests;
   return { stands: () => mine === requests };
 }
 
@@ -271,7 +321,7 @@ export function request(): Request {
 export function onScreen(path: string) {
   if (path === screen) return;
   screen = path;
-  requests++;
+  supersede();
 }
 
 /** Whether setting Watch aside paused what played, so bringing Watch back plays it again. */
@@ -647,6 +697,7 @@ export function player(): VideoPlayer {
 /** Releases readers independently of the ordered progress-save result. */
 function release(): Promise<Saved> {
   const saved = report();
+  cancelUpNext();
   endAtLength(false);
   if (current) {
     clearWatchdog(current.epoch);
@@ -1205,8 +1256,15 @@ function observe(event: PlaybackObservation) {
       return;
     case "ended":
       if (!pauseOnStart && !current.item.live) {
-        report();
+        const saved = report();
         current.options.ended?.();
+        if (
+          current.item.next &&
+          state.get().watch &&
+          held?.by !== "viewer" &&
+          Date.now() - seekAt > SEEK_OVERTAKES
+        )
+          countDown(current, saved);
       }
       return;
     case "state": {
@@ -1324,7 +1382,8 @@ export function play(item: Playing, plan: Plan, options: PlayOptions) {
 
 /** A new budget on the same frozen Choice, including explicit Try again. */
 async function start(choice: Choice, options: PlayOptions) {
-  requests++;
+  supersede();
+  seekAt = -Infinity;
   if (current) cancelEpoch(current.epoch);
   release();
   const signedIn =
@@ -1617,7 +1676,7 @@ export function retry() {
  * and reports only the save outcome. Uncertain closure stays blocked in the resource ledger.
  */
 export async function stop(): Promise<Saved> {
-  requests++;
+  supersede();
   if (current) cancelEpoch(current.epoch);
   const saved = release();
   const readers = current?.resource.settlement;
@@ -1651,6 +1710,7 @@ export async function stop(): Promise<Saved> {
  */
 export function togglePause() {
   resumeOnReturn = false;
+  cancelUpNext();
   const { phase } = state.get();
   if (phase.kind === "playing" || phase.kind === "loading") {
     held = { by: "viewer", acknowledged: false };
@@ -1669,14 +1729,16 @@ export function togglePause() {
 
 /** Moves by `seconds`; a programme from catch-up, within the programme. */
 export function seekBy(seconds: number) {
-  if (!current?.item.past) return player().seekBy(seconds);
-  const at = player().currentTime - current.offset + seconds;
-  seekTo(Math.min(length.get(), at));
+  const at = player().currentTime - (current?.offset ?? 0) + seconds;
+  if (current?.item.past) return seekTo(Math.min(length.get(), at));
+  moved(at);
+  player().seekBy(seconds);
 }
 
 /** Moves a title to `seconds` from its start. */
 export function seekTo(seconds: number) {
   const at = Math.max(0, seconds);
+  moved(at);
   player().currentTime = at + (current?.offset ?? 0);
   clock.set(at);
   endAtLength(state.get().phase.kind === "playing", at);
@@ -1804,6 +1866,66 @@ export function playNext() {
   current?.options.next?.(saved);
 }
 
+/** The countdown under way, from asking which episode goes on until it plays or ends. */
+let counting: {
+  readonly stands: () => boolean;
+  play?: () => void;
+  timer?: ReturnType<typeof setInterval>;
+} | null = null;
+
+/**
+ * Ends the countdown, or the ask for which episode it counts to. An episode that ended stays where
+ * it ended, its Next episode still offered.
+ */
+export function cancelUpNext() {
+  clearInterval(counting?.timer);
+  counting = null;
+  upNext.set(null);
+}
+
+/**
+ * `owned` played to its end in Watch: once its owner says which episode goes on, as the record
+ * stands after `saved`, Watch counts down to it, for as long as the desktop app does by default,
+ * and plays it at zero. It stands while nothing newer was asked (`supersede` ends it), the same
+ * play shows in Watch, and its provider's login stands.
+ */
+function countDown(owned: NonNullable<typeof current>, saved: Promise<Saved>) {
+  const find = owned.options.upNext;
+  if (!find) return;
+  // A request still waiting, such as Next episode pressed just before the end, goes on.
+  cancelUpNext();
+  const mine: NonNullable<typeof counting> = {
+    stands: () =>
+      counting === mine &&
+      current === owned &&
+      sourceStands(owned) &&
+      state.get().watch &&
+      playingItem(state.get().phase) === owned.item,
+  };
+  counting = mine;
+  void find(saved).then(
+    (next) => {
+      if (!next || !mine.stands()) return void (counting === mine && cancelUpNext());
+      mine.play = next.play;
+      let left = DEFAULT_NEXT_EPISODE_DELAY;
+      upNext.set({ place: next.place, seconds: left });
+      mine.timer = setInterval(() => {
+        if (!mine.stands()) cancelUpNext();
+        else if (--left > 0) upNext.set({ place: next.place, seconds: left });
+        else playUpNext();
+      }, 1000);
+    },
+    () => counting === mine && cancelUpNext(),
+  );
+}
+
+/** Plays the episode Watch counts down to at once. */
+export function playUpNext() {
+  const play = counting?.stands() ? counting.play : null;
+  cancelUpNext();
+  play?.();
+}
+
 /** Shows the other versions of the title that failed. */
 export function showVersions() {
   current?.options.versions?.();
@@ -1842,7 +1964,7 @@ export function openWatch() {
  * it ended; a format session paused keeps its request open for Play.
  */
 export function closeWatch(): Promise<Saved> {
-  requests++;
+  supersede();
   const { pip, external, phase, muted } = state.get();
   const away = !pip && !external;
   if (away) {
@@ -1870,7 +1992,7 @@ export function closeWatch(): Promise<Saved> {
  * the tabs shows it as it is and brings Watch back (`openWatch`).
  */
 export function setAside() {
-  requests++;
+  supersede();
   const { phase, external } = state.get();
   if (phase.kind === "idle" || external) return void closeWatch();
   if (phase.kind === "playing" || phase.kind === "loading") {
@@ -1910,7 +2032,7 @@ export function unsetAside() {
  * accessory controls it; once it ends, Home's preview shows the player again.
  */
 export function pictureInPicture(active: boolean) {
-  requests++;
+  supersede();
   if (active) {
     state.set((s) => ({ ...s, pip: true, watch: false, aside: false }));
     attentionChanged();
