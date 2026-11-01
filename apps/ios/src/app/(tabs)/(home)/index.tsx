@@ -21,6 +21,7 @@ import {
   useGuideListings,
 } from "../../../guide-ui.tsx";
 import { tabHref } from "../../../header.tsx";
+import { useLocale } from "../../../i18n/catalogue.ts";
 import type { Channel, Library } from "../../../library.ts";
 import { Docked, libraryStatus, Placeholders, Shape, useDockInset } from "../../../loading.tsx";
 import {
@@ -65,6 +66,8 @@ const MOVIES = 20;
  * or failed by provider is the status line at the bottom.
  */
 export default function Home() {
+  // The status line's words are made here, so a new language makes them again.
+  useLocale();
   const catalogue = useCatalogue();
   const roster = useRoster();
   const hasMovies = useHasTitles("movie");

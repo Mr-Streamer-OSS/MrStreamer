@@ -1,3 +1,4 @@
+import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
 import { formatNumber } from "@mrstreamer/core/i18n";
 import { normalize } from "@mrstreamer/core/text";
 import { router, useIsFocused } from "expo-router";
@@ -135,8 +136,12 @@ function askName(naming: Naming) {
             naming.write(name);
           } catch (cause) {
             const error = appError(cause);
+            // The one name a list refuses as invalid: too long, as custom-lists.ts says.
             if (error.kind === "invalid-input") {
-              return askName({ ...naming, message: error.detail, typed });
+              const message = t("A list's name has 1 to {max} characters.", {
+                max: CUSTOM_LIST_NAME_MAX,
+              });
+              return askName({ ...naming, message, typed });
             }
             if (error.kind !== "list-name-taken") {
               return Alert.alert(naming.failed(name), whyNot(error));

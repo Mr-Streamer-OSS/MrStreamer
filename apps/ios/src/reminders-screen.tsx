@@ -152,7 +152,7 @@ const Row = memo(function Row({ reminder }: { reminder: Reminder }) {
   };
   return (
     <Swipe
-      label={t("Cancel")}
+      label={t("reminder.cancel")}
       action={{ run: () => void cancel(reminder) }}
       testID={`reminder-${reminder.id}-swiped`}
     >

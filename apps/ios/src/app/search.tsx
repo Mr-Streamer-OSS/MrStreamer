@@ -34,6 +34,7 @@ import {
 } from "../account.ts";
 import { useReduceMotion } from "../glass.tsx";
 import { openOnTabs, useTabs } from "../header.tsx";
+import { useLocale } from "../i18n/catalogue.ts";
 import { DownloadStatusButton } from "../download-status.tsx";
 import { guide, type FoundProgramme } from "../guide.ts";
 import { Programme } from "../guide-screen.tsx";
@@ -285,6 +286,8 @@ let kept = "";
  * where the bottom has too little room for a line of it.
  */
 export default function Search() {
+  // The status line's words are made here, so a new language makes them again.
+  useLocale();
   const tabs = useTabs();
   const insets = useSafeAreaInsets();
   const roster = useRoster();

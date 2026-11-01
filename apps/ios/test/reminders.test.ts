@@ -820,10 +820,12 @@ describe("the reminders list", () => {
       expect(notices()).toEqual([`Late film at ${2 * HOUR}: Beginnt jetzt auf Channel 1`]),
     );
     await idle();
-    expect(screen.text()).toMatch(/^(Heute|Morgen)AbbrechenC1Late film/);
+    expect(screen.text()).toMatch(/^(Heute|Morgen)LöschenC1Late film/);
     // Its times as German writes them, on a 24-hour clock.
     expect(screen.text()).toMatch(/Channel 1 · \d\d:\d\d–\d\d:\d\d/);
-    expect(screen.text()).toContain("iOS benachrichtigt dich, wenn jede beginnt.");
+    expect(screen.text()).toContain(
+      "iOS benachrichtigt dich, sobald die jeweilige Sendung beginnt.",
+    );
     screen.close();
   });
 

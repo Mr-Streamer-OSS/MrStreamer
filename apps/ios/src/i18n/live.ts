@@ -109,6 +109,7 @@ export const t = catalogue(
     "Its provider no longer lists the channel.": "Its provider no longer lists the channel.",
     "{name} wasn't changed": "{name} wasn't changed",
     "There's already a list called {name}.": "There's already a list called {name}.",
+    "A list's name has 1 to {max} characters.": "A list's name has 1 to {max} characters.",
     "New list…": "New list…",
     "New list": "New list",
     "{name} goes in it.": "{name} goes in it.",
@@ -162,6 +163,8 @@ export const t = catalogue(
     "Reminder set": "Reminder set",
     "Remind me": "Remind me",
     "Cancel reminder": "Cancel reminder",
+    // A reminder row's swipe, which takes the reminder out.
+    "reminder.cancel": "Cancel",
     "Loading programme…": "Loading programme…",
     "Programme unavailable. Go Back and choose it again.":
       "Programme unavailable. Go Back and choose it again.",
@@ -267,7 +270,7 @@ export const t = catalogue(
       "channels still loading": "zenders worden nog geladen",
       "channels didn't load": "zenders zijn niet geladen",
       "password needed in Settings": "wachtwoord nodig in Instellingen",
-      "no longer listed": "staat er niet meer in",
+      "no longer listed": "niet meer aanwezig",
       "Favourites changed": "Favorieten gewijzigd",
       "Nothing was moved. They changed while you arranged them: edit them as they are now.":
         "Er is niets verplaatst. Ze zijn gewijzigd terwijl je ze ordende: bewerk ze zoals ze nu zijn.",
@@ -291,6 +294,7 @@ export const t = catalogue(
       "Its provider no longer lists the channel.": "De provider heeft de zender niet meer.",
       "{name} wasn't changed": "{name} is niet gewijzigd",
       "There's already a list called {name}.": "Er is al een lijst met de naam {name}.",
+      "A list's name has 1 to {max} characters.": "De naam van een lijst heeft 1 tot {max} tekens.",
       "New list…": "Nieuwe lijst…",
       "New list": "Nieuwe lijst",
       "{name} goes in it.": "{name} komt erin.",
@@ -344,6 +348,7 @@ export const t = catalogue(
       "Reminder set": "Herinnering ingesteld",
       "Remind me": "Herinner me",
       "Cancel reminder": "Herinnering annuleren",
+      "reminder.cancel": "Annuleren",
       "Loading programme…": "Programma laden…",
       "Programme unavailable. Go Back and choose it again.":
         "Programma niet beschikbaar. Ga terug en kies het opnieuw.",
@@ -380,7 +385,7 @@ export const t = catalogue(
       Back: "Retour",
       "Find countries or categories": "Rechercher des pays ou des catégories",
       "This category isn't listed any more.": "Cette catégorie n’est plus proposée.",
-      "{name} isn't listed any more.": "{name} n’est plus proposé.",
+      "{name} isn't listed any more.": "Le pays {name} n’est plus proposé.",
       "Couldn't load channels": "Impossible de charger les chaînes",
       "Try again": "Réessayer",
       "Provider settings": "Réglages du fournisseur",
@@ -419,7 +424,7 @@ export const t = catalogue(
       "Add to Favourites": "Ajouter aux favoris",
       Lists: "Listes",
       favourite: "favori",
-      "{name}, all {total}": "{name}, les {total}",
+      "{name}, all {total}": "{name}, tout voir ({total})",
       "Countries or categories": "Pays ou catégories",
       Clear: "Effacer",
       "Channels are still loading.": "Les chaînes sont en cours de chargement.",
@@ -456,7 +461,7 @@ export const t = catalogue(
       "channels still loading": "chaînes en cours de chargement",
       "channels didn't load": "chaînes non chargées",
       "password needed in Settings": "mot de passe requis dans Réglages",
-      "no longer listed": "n’est plus proposée",
+      "no longer listed": "plus au catalogue",
       "Favourites changed": "Les favoris ont changé",
       "Nothing was moved. They changed while you arranged them: edit them as they are now.":
         "Rien n’a été déplacé. Ils ont changé pendant que vous les organisiez : modifiez-les tels qu’ils sont maintenant.",
@@ -480,6 +485,8 @@ export const t = catalogue(
       "Its provider no longer lists the channel.": "Son fournisseur ne propose plus la chaîne.",
       "{name} wasn't changed": "{name} n’a pas été modifiée",
       "There's already a list called {name}.": "Une liste s’appelle déjà {name}.",
+      "A list's name has 1 to {max} characters.":
+        "Le nom d’une liste compte de 1 à {max} caractères.",
       "New list…": "Nouvelle liste…",
       "New list": "Nouvelle liste",
       "{name} goes in it.": "{name} y sera ajoutée.",
@@ -533,6 +540,7 @@ export const t = catalogue(
       "Reminder set": "Rappel programmé",
       "Remind me": "Me le rappeler",
       "Cancel reminder": "Annuler le rappel",
+      "reminder.cancel": "Annuler",
       "Loading programme…": "Chargement de l’émission…",
       "Programme unavailable. Go Back and choose it again.":
         "Émission indisponible. Revenez en arrière et choisissez-la à nouveau.",
@@ -593,7 +601,7 @@ export const t = catalogue(
       shown: "angezeigt",
       now: "läuft",
       "Last watched": "Zuletzt gesehen",
-      Recent: "Zuletzt",
+      Recent: "Kürzlich",
       "Play {channel}": "{channel} abspielen",
       "All countries": "Alle Länder",
       Country: "Land",
@@ -601,7 +609,7 @@ export const t = catalogue(
       "Country, {name}": "Land, {name}",
       "Lists the countries": "Zeigt die Länder",
       "Clear {name}": "{name} entfernen",
-      Connecting: "Verbinde",
+      Connecting: "Verbindet",
       Paused: "Pausiert",
       Playing: "Läuft",
       "Remove from Favourites": "Aus Favoriten entfernen",
@@ -623,7 +631,7 @@ export const t = catalogue(
       "No country or category is called “{query}”.":
         "Kein Land und keine Kategorie heißt „{query}“.",
       "No country or category is called “{query}” yet.":
-        "Noch heißt kein Land und keine Kategorie „{query}“.",
+        "Bisher heißt kein Land und keine Kategorie „{query}“.",
       "No country or category is called “{query}” in the channels that loaded.":
         "In den geladenen Sendern heißt kein Land und keine Kategorie „{query}“.",
       "{count} channels": { one: "{count} Sender", other: "{count} Sender" },
@@ -663,6 +671,7 @@ export const t = catalogue(
       "Its provider no longer lists the channel.": "Sein Anbieter führt den Sender nicht mehr.",
       "{name} wasn't changed": "{name} wurde nicht geändert",
       "There's already a list called {name}.": "Es gibt schon eine Liste namens {name}.",
+      "A list's name has 1 to {max} characters.": "Der Name einer Liste hat 1 bis {max} Zeichen.",
       "New list…": "Neue Liste…",
       "New list": "Neue Liste",
       "{name} goes in it.": "{name} kommt hinein.",
@@ -715,7 +724,8 @@ export const t = catalogue(
       "catch-up": "Replay",
       "Reminder set": "Erinnerung gesetzt",
       "Remind me": "Erinnern",
-      "Cancel reminder": "Erinnerung abbrechen",
+      "Cancel reminder": "Erinnerung löschen",
+      "reminder.cancel": "Löschen",
       "Loading programme…": "Sendung wird geladen…",
       "Programme unavailable. Go Back and choose it again.":
         "Sendung nicht verfügbar. Geh zurück und wähle sie erneut.",
@@ -726,7 +736,7 @@ export const t = catalogue(
         "Mitteilungen sind für Mr. Streamer aus, daher wurde keine Erinnerung gesetzt.",
       "Open iOS Settings": "iOS-Einstellungen öffnen",
       "iOS holds 64 reminders. Cancel one to set another.":
-        "iOS hält 64 Erinnerungen. Brich eine ab, um eine andere zu setzen.",
+        "iOS speichert höchstens 64 Erinnerungen. Lösche eine, um eine neue zu setzen.",
       "This programme has started.": "Diese Sendung hat schon begonnen.",
       "Couldn't save. Try again.": "Speichern fehlgeschlagen. Versuch es erneut.",
       Reminders: "Erinnerungen",
@@ -740,7 +750,7 @@ export const t = catalogue(
       "Set one from a later programme's details.":
         "Setze eine in den Details einer späteren Sendung.",
       "iOS notifies you as each one starts. A reminder never records or plays.":
-        "iOS benachrichtigt dich, wenn jede beginnt. Eine Erinnerung nimmt nie auf und spielt nie ab.",
+        "iOS benachrichtigt dich, sobald die jeweilige Sendung beginnt. Eine Erinnerung nimmt nie auf und spielt nie ab.",
       "On now": "Läuft jetzt",
       "Changed to {title} · won't notify": "Geändert in {title} · keine Mitteilung",
       "No longer in the guide · won't notify": "Nicht mehr im Programmführer · keine Mitteilung",
@@ -791,7 +801,7 @@ export const t = catalogue(
       "Add to Favourites": "Añadir a favoritos",
       Lists: "Listas",
       favourite: "favorito",
-      "{name}, all {total}": "{name}, los {total}",
+      "{name}, all {total}": "{name}, ver todo ({total})",
       "Countries or categories": "Países o categorías",
       Clear: "Borrar",
       "Channels are still loading.": "Los canales aún se están cargando.",
@@ -807,7 +817,7 @@ export const t = catalogue(
         "Los proveedores que se cargaron no ofrecen canales.",
       "No country or category is called “{query}”.": "Ningún país ni categoría se llama «{query}».",
       "No country or category is called “{query}” yet.":
-        "Aún ningún país ni categoría se llama «{query}».",
+        "Todavía no hay ningún país ni categoría llamado «{query}».",
       "No country or category is called “{query}” in the channels that loaded.":
         "Ningún país ni categoría de los canales cargados se llama «{query}».",
       "{count} channels": { one: "{count} canal", other: "{count} canales" },
@@ -822,7 +832,7 @@ export const t = catalogue(
       "channels still loading": "canales aún cargando",
       "channels didn't load": "los canales no se cargaron",
       "password needed in Settings": "falta la contraseña en Ajustes",
-      "no longer listed": "ya no aparece",
+      "no longer listed": "ya no está en la lista",
       "Favourites changed": "Los favoritos cambiaron",
       "Nothing was moved. They changed while you arranged them: edit them as they are now.":
         "No se movió nada. Cambiaron mientras los ordenabas: edítalos como están ahora.",
@@ -846,6 +856,8 @@ export const t = catalogue(
       "Its provider no longer lists the channel.": "Su proveedor ya no ofrece el canal.",
       "{name} wasn't changed": "{name} no se cambió",
       "There's already a list called {name}.": "Ya hay una lista llamada {name}.",
+      "A list's name has 1 to {max} characters.":
+        "El nombre de una lista tiene de 1 a {max} caracteres.",
       "New list…": "Nueva lista…",
       "New list": "Nueva lista",
       "{name} goes in it.": "{name} se añadirá a ella.",
@@ -898,6 +910,7 @@ export const t = catalogue(
       "Reminder set": "Recordatorio puesto",
       "Remind me": "Recordármelo",
       "Cancel reminder": "Cancelar recordatorio",
+      "reminder.cancel": "Cancelar",
       "Loading programme…": "Cargando programa…",
       "Programme unavailable. Go Back and choose it again.":
         "Programa no disponible. Vuelve atrás y elígelo de nuevo.",

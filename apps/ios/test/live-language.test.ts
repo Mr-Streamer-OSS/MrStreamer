@@ -189,6 +189,13 @@ it("words Live in Dutch, leaving channel, category, country and provider names a
   expect(text("channel-a:10")).toContain("Speelt af");
   expect(text("channel-a:11")).toContain("Netherlands · Sport");
   expect(labels()).toContain("Land, Alle landen");
+  expect(labels()).toContain("Aan favorieten toevoegen");
+
+  // A new language reaches the rows already drawn, which are memoised on their channel.
+  speak("fr-FR");
+  expect(labels()).toContain("Ajouter aux favoris");
+  expect(labels()).not.toContain("Aan favorieten toevoegen");
+  speak("nl-NL");
 
   press("live-country");
   expect(scenario.sheet?.options).toEqual(["✓ Alle landen", "Netherlands", "Belgium", "Annuleren"]);
@@ -207,7 +214,7 @@ it("keeps the tab, the country and the screen it shows when the language changes
   expect(text("tab-categories")).toBe("Catégories");
   expect(text("live-country")).toBe("Netherlands");
   expect(labels()).toContain("Effacer Netherlands");
-  // The same grid, not one drawn afresh: its scroll and the tiles in view stay.
+  // The same grid, not one drawn afresh, so the tiles in view stay mounted.
   expect(find("live-categories")).toBe(grid);
   expect(text("live-categories")).toContain("Sport");
 });
