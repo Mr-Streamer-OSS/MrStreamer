@@ -1,5 +1,5 @@
 import type { Listing } from "@mrstreamer/contracts/guide";
-import { formatDate, formatNumber } from "@mrstreamer/core/i18n";
+import { formatDate } from "@mrstreamer/core/i18n";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -28,13 +28,16 @@ import {
 } from "./guide-sources.ts";
 import { guide, type GuideStatus } from "./guide.ts";
 import { tabHref, useTabs, type Tab } from "./header.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/pages.ts";
 import type { Library } from "./library.ts";
 import { colors, largeText, Notice, TextButton } from "./ui.tsx";
 
 // Settings > Guides: the XMLTV guides added apart from every provider's own (guide-sources.ts),
 // each with how its download stands, an add form, and Map channels, which reads a channel's
 // programmes by a guide id of the viewer's choosing. Nothing here shows a saved link: a guide is
-// named by its name or its link's host, and the link field is masked.
+// named by its name or its link's host, and the link field is masked. Words follow the interface
+// language (i18n/pages.ts); guide, channel and provider names and guide ids stay as they are.
 
 /** Where a Guides screen opens on `tab`, as the playlist's groups do: Home's at the root. */
 export const guidesHref = (tab: Tab, screen: "guides" | "guide-map") =>
@@ -45,8 +48,8 @@ const labelOf = (link: GuideLink) => link.name ?? hostOf(link.origin);
 
 const when = (at: number) => `${formatDate(at, "day")} ${formatDate(at, "time")}`;
 
-/** Each download failure in plain words. */
-const PROBLEMS: Record<GuideProblem, string> = {
+/** Each download failure in plain words, as its catalogue key. */
+const PROBLEMS = {
   login: "The guide's server refused the link",
   http: "The guide's server answered with an error",
   network: "The guide's server didn't answer",
@@ -64,16 +67,24 @@ const PROBLEMS: Record<GuideProblem, string> = {
   reply: "The guide couldn't be read",
   unavailable: "The guide couldn't be read on this iPhone",
   busy: "The guide was busy. Try again.",
-};
+} as const satisfies Record<GuideProblem, Parameters<typeof t>[0]>;
 
 /** Why an add, a new link or a mapping wasn't taken. */
-const REFUSALS: Record<GuideRefusal, string> = {
-  address: "That isn't a web link",
-  duplicate: "That guide is added already",
-  name: "A name can't be a link",
-  limit: `${GUIDE_LIMIT} guides is the most this iPhone reads`,
-  long: `A guide id is at most ${MAPPING_MAX} bytes`,
-  saving: "Couldn't save. Nothing changed.",
+const refusalText = (refusal: GuideRefusal): string => {
+  switch (refusal) {
+    case "address":
+      return t("That isn't a web link");
+    case "duplicate":
+      return t("That guide is added already");
+    case "name":
+      return t("A name can't be a link");
+    case "limit":
+      return t("{count} guides is the most this iPhone reads", { count: GUIDE_LIMIT });
+    case "long":
+      return t("A guide id is at most {count} bytes", { count: MAPPING_MAX });
+    case "saving":
+      return t("Couldn't save. Nothing changed.");
+  }
 };
 
 /** A guide's status as lines under its name, a failure first and marked so. */
@@ -83,13 +94,15 @@ function standing(
 ): readonly { readonly text: string; readonly failed?: true }[] {
   const kept =
     status.availability === "available" && status.fetchedAt !== null
-      ? [{ text: `Showing the guide from ${when(status.fetchedAt)}` }]
+      ? [{ text: t("Showing the guide from {time}", { time: when(status.fetchedAt) }) }]
       : [];
-  if (link.locked) return [{ text: "Enter the link again", failed: true }, ...kept];
-  if (status.activity === "loading") return [{ text: "Downloading" }];
-  if (status.error) return [{ text: PROBLEMS[status.error], failed: true }, ...kept];
-  if (status.fetchedAt !== null) return [{ text: `Updated ${when(status.fetchedAt)}` }];
-  return [{ text: "Not downloaded yet" }];
+  if (link.locked) return [{ text: t("Enter the link again"), failed: true }, ...kept];
+  if (status.activity === "loading") return [{ text: t("Downloading") }];
+  if (status.error) return [{ text: t(PROBLEMS[status.error]), failed: true }, ...kept];
+  if (status.fetchedAt !== null) {
+    return [{ text: t("Updated {time}", { time: when(status.fetchedAt) }) }];
+  }
+  return [{ text: t("Not downloaded yet") }];
 }
 
 /**
@@ -98,6 +111,7 @@ function standing(
  * form, which adds a guide or, after Replace link or Enter link, gives that one its new link.
  */
 export function GuidesScreen() {
+  useLocale();
   const links = guides.useLinks();
   const mappings = guides.useMappings();
   useSyncExternalStore(guide.subscribe, guide.getSnapshot);
@@ -107,17 +121,17 @@ export function GuidesScreen() {
     const label = labelOf(link);
     const actions = [
       ...(link.locked
-        ? [{ label: "Enter link", run: () => setReplacing(link) }]
+        ? [{ label: t("Enter link"), run: () => setReplacing(link) }]
         : [
-            { label: "Refresh", run: () => void guides.refresh(link.id) },
-            { label: "Replace link", run: () => setReplacing(link) },
+            { label: t("Refresh"), run: () => void guides.refresh(link.id) },
+            { label: t("Replace link"), run: () => setReplacing(link) },
           ]),
-      { label: "Remove", run: () => confirmRemove(link) },
+      { label: t("Remove"), run: () => confirmRemove(link) },
     ];
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: label,
-        options: [...actions.map((action) => action.label), "Cancel"],
+        options: [...actions.map((action) => action.label), t("Cancel")],
         destructiveButtonIndex: actions.length - 1,
         cancelButtonIndex: actions.length,
       },
@@ -126,17 +140,21 @@ export function GuidesScreen() {
   };
   const confirmRemove = (link: GuideLink) =>
     Alert.alert(
-      `Remove ${labelOf(link)}?`,
-      "Its programmes go from the guide and its link from this iPhone. Channels mapped to its ids keep their mapping.",
+      t("Remove {name}?", { name: labelOf(link) }),
+      t(
+        "Its programmes go from the guide and its link from this iPhone. Channels mapped to its ids keep their mapping.",
+      ),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("Cancel"), style: "cancel" },
         {
-          text: "Remove",
+          text: t("Remove"),
           style: "destructive",
           onPress: () => {
             setReplacing((now) => (now?.id === link.id ? null : now));
             void guides.remove(link.id).then((refused) => {
-              if (refused) Alert.alert(`Couldn't remove ${labelOf(link)}`, "Try again.");
+              if (refused) {
+                Alert.alert(t("Couldn't remove {name}", { name: labelOf(link) }), t("Try again."));
+              }
             });
           },
         },
@@ -172,16 +190,18 @@ export function GuidesScreen() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={
-          mappings.size ? `Map channels, ${formatNumber(mappings.size)} mapped` : "Map channels"
+          mappings.size
+            ? t("Map channels, {count} mapped", { count: mappings.size })
+            : t("Map channels")
         }
         onPress={() => router.push(guidesHref(tab, "guide-map"))}
         style={({ pressed }) => [styles.line, pressed && styles.pressed]}
         testID="guides-map"
       >
-        <Text style={styles.label}>Map channels</Text>
+        <Text style={styles.label}>{t("Map channels")}</Text>
         <View style={styles.opens}>
           {mappings.size ? (
-            <Text style={styles.value}>{formatNumber(mappings.size)} mapped</Text>
+            <Text style={styles.value}>{t("{count} mapped", { count: mappings.size })}</Text>
           ) : null}
           <SymbolView name="chevron.right" size={14} tintColor={colors.dim} weight="semibold" />
         </View>
@@ -193,8 +213,9 @@ export function GuidesScreen() {
         onDone={() => setReplacing(null)}
       />
       <Text style={styles.note}>
-        Channels use their provider's guide first, then these in order. Links stay in this iPhone's
-        Keychain.
+        {t(
+          "Channels use their provider's guide first, then these in order. Links stay in this iPhone's Keychain.",
+        )}
       </Text>
     </ScrollView>
   );
@@ -235,10 +256,10 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
   return (
     <View style={styles.form}>
       <Text style={styles.section} accessibilityRole="header">
-        {replacing ? `New link for ${labelOf(replacing)}` : "Add guide"}
+        {replacing ? t("New link for {name}", { name: labelOf(replacing) }) : t("Add guide")}
       </Text>
       <Field
-        label="XMLTV link"
+        label={t("XMLTV link")}
         value={link}
         onChangeText={edit(setLink)}
         placeholder="https://epg.example.com/guide.xml.gz"
@@ -255,10 +276,10 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
       />
       {replacing ? null : (
         <Field
-          label="Name"
+          label={t("Name")}
           value={name}
           onChangeText={edit(setName)}
-          placeholder="Optional"
+          placeholder={t("Optional")}
           textContentType="none"
           returnKeyType="go"
           onSubmitEditing={submit}
@@ -267,18 +288,18 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
       )}
       {refusal ? (
         <View accessible accessibilityLiveRegion="polite" testID="guides-refusal">
-          <Text style={styles.refusal}>{REFUSALS[refusal]}</Text>
+          <Text style={styles.refusal}>{refusalText(refusal)}</Text>
         </View>
       ) : null}
       <View style={styles.buttons}>
         <TextButton
-          label={replacing ? (busy ? "Saving" : "Save") : busy ? "Adding" : "Add"}
+          label={t(replacing ? (busy ? "Saving" : "Save") : busy ? "Adding" : "Add")}
           onPress={submit}
           disabled={busy || !link.trim()}
           testID="guides-submit"
         />
         {replacing ? (
-          <TextButton label="Cancel" onPress={onDone} disabled={busy} testID="guides-cancel" />
+          <TextButton label={t("Cancel")} onPress={onDone} disabled={busy} testID="guides-cancel" />
         ) : null}
       </View>
     </View>
@@ -318,9 +339,9 @@ function describe(key: string, library: Library | null): Omit<Mappable, "mapped"
   const provider = library?.labels.get(key.slice(0, at));
   return {
     key,
-    title: `Channel ${key.slice(at + 1)}`,
+    title: t("Channel {id}", { id: key.slice(at + 1) }),
     // Until the channels are read, nothing says it isn't listed.
-    line: library ? [provider, "No longer listed"].filter(Boolean).join(" · ") : null,
+    line: library ? [provider, t("No longer listed")].filter(Boolean).join(" · ") : null,
   };
 }
 
@@ -329,6 +350,7 @@ function describe(key: string, library: Library | null): Omit<Mappable, "mapped"
  * the catalogue lists, found by name or guide id. A row opens its channel's mapping.
  */
 export function GuideMapScreen() {
+  const locale = useLocale();
   const catalogue = useCatalogue();
   const roster = useRoster();
   const providers =
@@ -355,8 +377,8 @@ export function GuideMapScreen() {
     .map((channel) => ({ ...describe(channel.key, library), mapped: null }))
     .filter(found);
   const sections = [
-    { title: "Mapped", data: mapped },
-    { title: "Channels", data: others },
+    { title: t("Mapped"), data: mapped },
+    { title: t("Channels"), data: others },
   ].filter((section) => section.data.length);
   return (
     <SectionList
@@ -365,17 +387,22 @@ export function GuideMapScreen() {
       keyboardShouldPersistTaps="handled"
       sections={sections}
       keyExtractor={(row) => row.key}
+      // Rows draw again in a new language.
+      extraData={locale}
       stickySectionHeadersEnabled={false}
       ListHeaderComponent={
         <>
           {catalogue.kind === "failed" ? (
             <Notice
-              failure={{ headline: "Couldn't load channels", advice: null }}
+              failure={{ headline: t("Couldn't load channels"), advice: null }}
               actions={[
                 ...providers
                   .filter((member) => member.needsSecret)
                   .map((member) => ({
-                    label: `${member.entry.kind === "m3u" ? "Enter playlist link" : "Enter password"} for ${member.label}`,
+                    label:
+                      member.entry.kind === "m3u"
+                        ? t("Enter playlist link for {provider}", { provider: member.label })
+                        : t("Enter password for {provider}", { provider: member.label }),
                     onPress: () =>
                       router.push({
                         pathname: tabHref(tab, "provider"),
@@ -383,7 +410,7 @@ export function GuideMapScreen() {
                       }),
                   })),
                 ...(providers.some((member) => !member.needsSecret && member.live.kind === "failed")
-                  ? [{ label: "Try again", onPress: retryChannels }]
+                  ? [{ label: t("Try again"), onPress: retryChannels }]
                   : []),
               ]}
             />
@@ -391,10 +418,10 @@ export function GuideMapScreen() {
           <View style={styles.search}>
             <SymbolView name="magnifyingglass" size={15} tintColor={colors.dim} />
             <TextInput
-              accessibilityLabel="Search channels"
+              accessibilityLabel={t("Search channels")}
               value={query}
               onChangeText={setQuery}
-              placeholder={`Search ${formatNumber(library?.channels.length ?? 0)} channels`}
+              placeholder={t("Search {count} channels", { count: library?.channels.length ?? 0 })}
               placeholderTextColor={colors.dim}
               autoCapitalize="none"
               autoCorrect={false}
@@ -411,7 +438,7 @@ export function GuideMapScreen() {
       ListEmptyComponent={
         catalogue.kind === "failed" ? undefined : (
           <Text style={styles.none}>
-            {words ? "No channel by that name" : library ? "No channels" : "Loading channels"}
+            {t(words ? "No channel by that name" : library ? "No channels" : "Loading channels")}
           </Text>
         )
       }
@@ -423,7 +450,7 @@ export function GuideMapScreen() {
       renderItem={({ item }) => (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={[item.title, item.line, item.mapped ?? "Automatic"]
+          accessibilityLabel={[item.title, item.line, item.mapped ?? t("Automatic")]
             .filter(Boolean)
             .join(", ")}
           onPress={() =>
@@ -442,7 +469,7 @@ export function GuideMapScreen() {
           </View>
           <View style={styles.opens}>
             <Text style={item.mapped ? styles.mapped : styles.value}>
-              {item.mapped ?? "Automatic"}
+              {item.mapped ?? t("Automatic")}
             </Text>
             <SymbolView name="chevron.right" size={14} tintColor={colors.dim} weight="semibold" />
           </View>
@@ -465,6 +492,7 @@ interface Preview {
  * go back to the list.
  */
 export function GuideMapEditor({ channelKey }: { channelKey: string }) {
+  useLocale();
   const catalogue = useCatalogue();
   const links = guides.useLinks();
   const saved = guides.useMappings().get(channelKey) ?? null;
@@ -507,7 +535,8 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
   };
   const source = (owner: string) => {
     const link = links.find((each) => each.id === owner);
-    return link ? labelOf(link) : (library?.labels.get(owner) ?? "its provider's guide");
+    const name = link ? labelOf(link) : library?.labels.get(owner);
+    return name ? t("From {guide}", { guide: name }) : t("From its provider's guide");
   };
   return (
     <ScrollView
@@ -522,18 +551,18 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
         {channel.line ? <Text style={styles.subtitle}>{channel.line}</Text> : null}
       </View>
       <View style={styles.own} accessible testID="guide-map-own">
-        <Text style={styles.fieldLabel}>Its guide ids</Text>
-        <Text style={styles.text}>{own.length ? own.join(", ") : "None"}</Text>
+        <Text style={styles.fieldLabel}>{t("Its guide ids")}</Text>
+        <Text style={styles.text}>{own.length ? own.join(", ") : t("None")}</Text>
       </View>
       <View style={styles.form}>
         <Field
-          label="Guide id"
+          label={t("Guide id")}
           value={id}
           onChangeText={(value) => {
             setId(value);
             setRefusal(null);
           }}
-          placeholder={own[0] ?? "Automatic"}
+          placeholder={own[0] ?? t("Automatic")}
           autoCapitalize="none"
           returnKeyType="done"
           onSubmitEditing={() => change(id)}
@@ -543,38 +572,38 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
           <View accessible accessibilityLiveRegion="polite" testID="guide-map-preview">
             {read ? (
               <>
-                <Text style={styles.fieldLabel}>From {source(read.guide)}</Text>
+                <Text style={styles.fieldLabel}>{source(read.guide)}</Text>
                 {(["now", "next"] as const).map((at) => {
                   const programme = read.listing[at];
                   return programme ? (
                     <Text key={at} style={styles.text}>
-                      <Text style={styles.dim}>{at === "now" ? "Now" : "Next"}</Text>
+                      <Text style={styles.dim}>{t(at === "now" ? "Now" : "Next")}</Text>
                       {`  ${formatDate(programme.start, "time")}  ${programme.title}`}
                     </Text>
                   ) : null;
                 })}
                 {read.listing.now || read.listing.next ? null : (
-                  <Text style={styles.text}>Nothing now or next</Text>
+                  <Text style={styles.text}>{t("Nothing now or next")}</Text>
                 )}
               </>
             ) : (
-              <Text style={styles.text}>No guide has programmes for this id now</Text>
+              <Text style={styles.text}>{t("No guide has programmes for this id now")}</Text>
             )}
           </View>
         ) : null}
         {refusal ? (
           <View accessible accessibilityLiveRegion="polite" testID="guide-map-refusal">
-            <Text style={styles.refusal}>{REFUSALS[refusal]}</Text>
+            <Text style={styles.refusal}>{refusalText(refusal)}</Text>
           </View>
         ) : null}
         <View style={styles.buttons}>
-          <TextButton label="Save" onPress={() => change(id)} testID="guide-map-save" />
+          <TextButton label={t("Save")} onPress={() => change(id)} testID="guide-map-save" />
           {saved ? (
-            <TextButton label="Clear" onPress={() => change(null)} testID="guide-map-clear" />
+            <TextButton label={t("Clear")} onPress={() => change(null)} testID="guide-map-clear" />
           ) : null}
         </View>
         <Text style={styles.note}>
-          Clear goes back to Automatic: its own ids, in its provider's guide first.
+          {t("Clear goes back to Automatic: its own ids, in its provider's guide first.")}
         </Text>
       </View>
     </ScrollView>

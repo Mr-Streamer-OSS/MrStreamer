@@ -9,6 +9,7 @@ import { reloadTitles, retryTitles, useRoster } from "./account.ts";
 import { describeError } from "./errors.ts";
 import { tabHref } from "./header.tsx";
 import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/library.ts";
 import {
   Docked,
   libraryStatus,
@@ -114,9 +115,9 @@ export function TitlesHome({ kind }: { kind: TitleKind }) {
           header={
             <TextTabs
               tabs={[
-                { value: "for-you" as const, label: "For you" },
+                { value: "for-you" as const, label: t("For you") },
                 ...(chosen === "4k" ? [{ value: "4k" as const, label: "4K" }] : []),
-                { value: "all" as const, label: "All" },
+                { value: "all" as const, label: t("All") },
               ]}
               value={chosen}
               onChange={(next) => places.set((current) => ({ ...current, [kind]: next }))}
@@ -136,7 +137,7 @@ export function TitlesHome({ kind }: { kind: TitleKind }) {
       >
         <Message
           text={describeError(lists.error)}
-          action={{ label: "Try again", onPress: retryTitles }}
+          action={{ label: t("Try again"), onPress: retryTitles }}
         />
       </ScrollView>
     );
@@ -169,6 +170,8 @@ export function TitlesHome({ kind }: { kind: TitleKind }) {
 }
 
 function Browse({ made, kind }: { made: Collections; kind: TitleKind }) {
+  // Tab and row names follow the language; the tab, its rows and where they scrolled stay.
+  const locale = useLocale();
   const viewing = useViewing();
   const inset = useDockInset();
   const chosen = useStore(places)[kind];
@@ -194,12 +197,12 @@ function Browse({ made, kind }: { made: Collections; kind: TitleKind }) {
     [made],
   );
   const tabs = [
-    { value: "for-you" as const, label: "For you" },
-    ...(has.new ? [{ value: "new" as const, label: "New" }] : []),
-    ...(has.genres ? [{ value: "genres" as const, label: "Genres" }] : []),
-    ...(has.services ? [{ value: "services" as const, label: "Services" }] : []),
+    { value: "for-you" as const, label: t("For you") },
+    ...(has.new ? [{ value: "new" as const, label: t("New") }] : []),
+    ...(has.genres ? [{ value: "genres" as const, label: t("Genres") }] : []),
+    ...(has.services ? [{ value: "services" as const, label: t("Services") }] : []),
     ...(has.fourK || chosen === "4k" ? [{ value: "4k" as const, label: "4K" }] : []),
-    { value: "all" as const, label: "All" },
+    { value: "all" as const, label: t("All") },
   ];
   // Metadata-only tabs that emptied give way to For you; a chosen 4K grid keeps its controls.
   const tab = tabs.some((each) => each.value === chosen) ? chosen : "for-you";
@@ -209,7 +212,8 @@ function Browse({ made, kind }: { made: Collections; kind: TitleKind }) {
       tab === "for-you" || tab === "new"
         ? collectionRows(made, tab, tab === "for-you" ? like : null)
         : [],
-    [made, tab, like],
+    // Core names the rows in the interface language as they are made.
+    [made, tab, like, locale],
   );
   const tiles = useMemo(
     () => (tab === "genres" || tab === "services" ? tilesOf(made, tab) : []),
@@ -286,7 +290,7 @@ function ForYou({
       {featured ? <Featured title={featured} /> : null}
       {continuing.length > 0 ? (
         <Shelf
-          name="Continue watching"
+          name={t("Continue watching")}
           titles={continuing.map((entry) => entry.title)}
           onPress={(title) => {
             const entry = continuing.find((each) => each.title.key === title.key);
@@ -310,8 +314,8 @@ function ForYou({
         <Message
           text={
             kind === "movie"
-              ? "Nothing new or popular yet. All lists every movie."
-              : "Nothing new or popular yet. All lists every series."
+              ? t("Nothing new or popular yet. All lists every movie.")
+              : t("Nothing new or popular yet. All lists every series.")
           }
         />
       ) : null}
@@ -417,7 +421,7 @@ function CollectionGrid({
   );
   const heading = (
     <>
-      {header ?? <Text style={styles.collectionName}>{made?.name(id) ?? "Collection"}</Text>}
+      {header ?? <Text style={styles.collectionName}>{made?.name(id) ?? t("Collection")}</Text>}
       <BrowseControls kind={kind} choices={choices} result={result} onChange={change} />
     </>
   );
@@ -433,12 +437,14 @@ function CollectionGrid({
           {lists.kind === "failed" ? (
             <Message
               text={describeError(lists.error)}
-              action={{ label: "Try again", onPress: retryTitles }}
+              action={{ label: t("Try again"), onPress: retryTitles }}
             />
           ) : (
             <Message
               text={
-                kind === "movie" ? "No movies in this collection." : "No series in this collection."
+                kind === "movie"
+                  ? t("No movies in this collection.")
+                  : t("No series in this collection.")
               }
             />
           )}
@@ -455,13 +461,15 @@ function CollectionGrid({
       empty={
         result.total > 0 ? (
           <Message
-            text="No titles match these filters."
-            action={{ label: "Reset", onPress: () => change(DEFAULT_BROWSE) }}
+            text={t("No titles match these filters.")}
+            action={{ label: t("Reset"), onPress: () => change(DEFAULT_BROWSE) }}
           />
         ) : (
           <Message
             text={
-              kind === "movie" ? "No movies in this collection." : "No series in this collection."
+              kind === "movie"
+                ? t("No movies in this collection.")
+                : t("No series in this collection.")
             }
           />
         )

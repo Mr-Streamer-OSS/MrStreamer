@@ -5,11 +5,18 @@ import {
   DEFAULT_SUBTITLE_TIMING,
   type SubtitleTiming,
 } from "@mrstreamer/contracts/online-subtitles";
-import { formatLanguageName } from "@mrstreamer/core/i18n";
+import { formatDecimal, formatLanguageName, formatNumber } from "@mrstreamer/core/i18n";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
-import { useEffect, useRef, useState, useSyncExternalStore, type ComponentRef } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ComponentRef,
+} from "react";
 import {
   AccessibilityInfo,
   ActionSheetIOS,
@@ -42,6 +49,8 @@ import { guide } from "./guide.ts";
 import { catchUpOf } from "./guide-screen.tsx";
 import { dayLabel, localDay, programmeRange } from "./guide-ui.tsx";
 import { openOnTabs, useTabs, type TabScreen } from "./header.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/watch.ts";
 import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
 import { startMediaControls } from "./media-controls.ts";
 import type { Channel } from "./library.ts";
@@ -103,15 +112,27 @@ import { colors } from "./ui.tsx";
 import { currentSource } from "./sources.ts";
 import { store, useStore } from "./store.ts";
 
-/** Watch's keyboard shortcuts while it shows: Space, ← and → while a stream plays, Esc or ⌘. always. */
-const STREAMING: readonly Shortcut<"pause" | "rewind" | "skip" | "close" | "dismiss">[] = [
-  { id: "pause", input: " ", command: false, title: "Play or Pause" },
-  { id: "rewind", input: "leftArrow", command: false, title: "Back 10 seconds" },
-  { id: "skip", input: "rightArrow", command: false, title: "Forward 10 seconds" },
-  { id: "close", input: "escape", command: false, title: "Close" },
-  // Keyboards without Esc, as the iPad's Magic Keyboard, use ⌘. instead.
-  { id: "dismiss", input: ".", command: true, title: "Close" },
-];
+type WatchKey = "pause" | "rewind" | "skip" | "close" | "dismiss";
+
+/**
+ * Watch's keyboard shortcuts while it shows, titled in the interface language: Space, ← and →
+ * while a stream plays, Esc or ⌘. always (`still`). Made again only for a new language, which
+ * installs them again with their new titles; their ids and keys stay.
+ */
+function shortcuts() {
+  const streaming: readonly Shortcut<WatchKey>[] = [
+    { id: "pause", input: " ", command: false, title: t("Play or Pause") },
+    { id: "rewind", input: "leftArrow", command: false, title: t("Back 10 seconds") },
+    { id: "skip", input: "rightArrow", command: false, title: t("Forward 10 seconds") },
+    { id: "close", input: "escape", command: false, title: t("Close") },
+    // Keyboards without Esc, as the iPad's Magic Keyboard, use ⌘. instead.
+    { id: "dismiss", input: ".", command: true, title: t("Close") },
+  ];
+  const still = streaming.filter(
+    (shortcut) => shortcut.id === "close" || shortcut.id === "dismiss",
+  );
+  return { streaming, still };
+}
 /** Whether one of Watch's sheets is open: its keys are the sheet's then, Esc and arrows included. */
 const sheet = store(false);
 
@@ -126,8 +147,6 @@ function showSheet(
     chosen(index);
   });
 }
-
-const STILL = STREAMING.filter((shortcut) => shortcut.id === "close" || shortcut.id === "dismiss");
 
 /**
  * Watch: the player full screen, over the tabs, with A3's controls: a close button, AirPlay,
@@ -154,6 +173,9 @@ const STILL = STREAMING.filter((shortcut) => shortcut.id === "close" || shortcut
  * the panel while the controls show.
  */
 export function WatchLayer() {
+  // Everything Watch shows draws again in a new language, in place: the player and its view stay.
+  const locale = useLocale();
+  const keys = useMemo(shortcuts, [locale]);
   const { phase, watch, pip, external } = usePlayback();
   const view = useRef<VideoView>(null);
   const [controls, setControls] = useState(true);
@@ -219,7 +241,7 @@ export function WatchLayer() {
   // shows: Watch closed by then, or nothing playing after Stop. Once until a save is kept again.
   useEffect(() => {
     onProgressRefused(() =>
-      Alert.alert("Couldn't save progress", "Your latest position could not be saved."),
+      Alert.alert(t("Couldn't save progress"), t("Your latest position could not be saved.")),
     );
     return () => onProgressRefused(null);
   }, []);
@@ -277,13 +299,16 @@ export function WatchLayer() {
 
   const streaming = phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused";
   const sheetShown = useStore(sheet);
-  useShortcuts(!watch || sheetShown ? NO_SHORTCUTS : streaming ? STREAMING : STILL, (id) => {
-    if (id === "close" || id === "dismiss") void closeWatch();
-    // Space only cancels a countdown, leaving the ended episode where it ended.
-    else if (id === "pause" && counting) cancelUpNext();
-    else if (id === "pause") togglePause();
-    else seekBy(id === "rewind" ? -10 : 10);
-  });
+  useShortcuts(
+    !watch || sheetShown ? NO_SHORTCUTS : streaming ? keys.streaming : keys.still,
+    (id) => {
+      if (id === "close" || id === "dismiss") void closeWatch();
+      // Space only cancels a countdown, leaving the ended episode where it ended.
+      else if (id === "pause" && counting) cancelUpNext();
+      else if (id === "pause") togglePause();
+      else seekBy(id === "rewind" ? -10 : 10);
+    },
+  );
 
   if (!watch && !pip) return null;
   return (
@@ -314,7 +339,7 @@ export function WatchLayer() {
       {watch ? (
         <Pressable
           style={StyleSheet.absoluteFill}
-          accessibilityLabel={controls ? "Hide controls" : "Show controls"}
+          accessibilityLabel={t(controls ? "Hide controls" : "Show controls")}
           // Hiding the panel would hide the countdown in it too, so a tap ends that first.
           onPress={() => {
             if (controls) cancelUpNext();
@@ -375,7 +400,7 @@ function Controls({
   return (
     <>
       <Glass style={[styles.circle, { top: insets.top + 12, left: edge.left }]}>
-        <IconButton symbol="xmark" label="Close" onPress={closeWatch} testID="watch-close" />
+        <IconButton symbol="xmark" label={t("Close")} onPress={closeWatch} testID="watch-close" />
       </Glass>
       {streaming || screens.length > 0 ? (
         <Glass style={[styles.capsule, { top: insets.top + 12, right: edge.right }]}>
@@ -390,7 +415,7 @@ function Controls({
               {isPictureInPictureSupported() ? (
                 <IconButton
                   symbol="pip.enter"
-                  label="Picture in Picture"
+                  label={t("Picture in Picture")}
                   onPress={onPictureInPicture}
                   testID="watch-pip"
                 />
@@ -403,7 +428,7 @@ function Controls({
           {screens.includes("settings") ? (
             <IconButton
               symbol="gearshape"
-              label="Settings"
+              label={t("Settings")}
               onPress={() => onScreen("settings")}
               testID="watch-settings"
             />
@@ -425,7 +450,7 @@ function Controls({
               {phase.kind === "failed"
                 ? phase.error
                 : phase.kind === "loading"
-                  ? "Connecting"
+                  ? t("Connecting")
                   : placeOf(phase.item)}
             </Text>
           </View>
@@ -434,7 +459,7 @@ function Controls({
               <>
                 <IconButton
                   symbol="arrow.clockwise"
-                  label="Try again"
+                  label={t("Try again")}
                   onPress={retry}
                   size={26}
                   testID="watch-retry"
@@ -442,7 +467,7 @@ function Controls({
                 {phase.item.versions ? (
                   <IconButton
                     symbol="square.stack"
-                    label="Other versions"
+                    label={t("Other versions")}
                     onPress={() => {
                       closeWatch();
                       showVersions();
@@ -456,20 +481,20 @@ function Controls({
               <>
                 <IconButton
                   symbol="gobackward.10"
-                  label="Back 10 seconds"
+                  label={t("Back 10 seconds")}
                   onPress={() => seekBy(-10)}
                   size={24}
                 />
                 <IconButton
                   symbol={phase.kind === "paused" ? "play.fill" : "pause.fill"}
-                  label={phase.kind === "paused" ? "Play" : "Pause"}
+                  label={t(phase.kind === "paused" ? "Play" : "Pause")}
                   onPress={togglePause}
                   size={32}
                   testID="watch-pause"
                 />
                 <IconButton
                   symbol="goforward.10"
-                  label="Forward 10 seconds"
+                  label={t("Forward 10 seconds")}
                   onPress={() => seekBy(10)}
                   size={24}
                 />
@@ -483,7 +508,7 @@ function Controls({
             ) : null}
             <IconButton
               symbol="stop.fill"
-              label="Stop"
+              label={t("Stop")}
               onPress={stop}
               size={22}
               testID="watch-stop"
@@ -504,7 +529,7 @@ function Controls({
 function placeOf(item: Playing) {
   if (!item.past) return item.place;
   const day = dayLabel(localDay(item.past.start), Date.now());
-  return `${item.place} · Catch-up · ${day} ${programmeRange(item.past)}`;
+  return `${item.place} · ${t("Catch-up")} · ${day} ${programmeRange(item.past)}`;
 }
 
 /**
@@ -519,8 +544,8 @@ function StartOver({ item }: { item: Playing }) {
     return null;
   return (
     <TextControl
-      label="Play from start"
-      accessibilityLabel={`Play ${programme.title} from start`}
+      label={t("Play from start")}
+      accessibilityLabel={t("Play {programme} from start", { programme: programme.title })}
       onPress={() => playChannel(channel, channel.title, { watch: true, programme })}
       testID="watch-from-start"
     />
@@ -579,7 +604,7 @@ function Star({ item }: { item: Playing }) {
   return (
     <IconButton
       symbol={favourite ? "star.fill" : "star"}
-      label={favourite ? "Remove from Favourites" : "Add to Favourites"}
+      label={t(favourite ? "Remove from Favourites" : "Add to Favourites")}
       onPress={() => starChannel(channel, !favourite)}
       size={22}
       testID="watch-favourite"
@@ -628,15 +653,15 @@ function LiveQuality({ item }: { item: Playing }) {
     const choices = channelQuality(channel);
     showSheet(
       {
-        title: "Quality",
+        title: t("Quality"),
         options: [
           ...choices.map((choice) => {
             const name = choice.quality
               ? `${qualityNames[choice.quality]} · ${choice.name}`
               : choice.name;
-            return `${choice.saved ? "✓ " : ""}${name}${choice.playing ? " · Playing" : ""}`;
+            return `${choice.saved ? "✓ " : ""}${name}${choice.playing ? ` · ${t("Playing")}` : ""}`;
           }),
-          "Cancel",
+          t("Cancel"),
         ],
         cancelButtonIndex: choices.length,
       },
@@ -645,14 +670,14 @@ function LiveQuality({ item }: { item: Playing }) {
         if (!picked || !stands()) return;
         if (!chooseChannelQuality(channel, item.place, picked.variantId)) {
           Alert.alert(
-            "Couldn't save media preference",
-            "Your previous choice is still saved. Try again.",
+            t("Couldn't save media preference"),
+            t("Your previous choice is still saved. Try again."),
           );
         }
       },
     );
   };
-  return <TextControl label="Quality" onPress={choose} testID="watch-quality" />;
+  return <TextControl label={t("Quality")} onPress={choose} testID="watch-quality" />;
 }
 
 /** How long the stream has played, and that it is live. Only this redraws every second. */
@@ -665,7 +690,7 @@ function Clock() {
         {`${minutes}:${String(seconds % 60).padStart(2, "0")}`}
       </Text>
       <View style={styles.spacer} />
-      <Text style={styles.time}>Live</Text>
+      <Text style={styles.time}>{t("Live")}</Text>
     </View>
   );
 }
@@ -717,8 +742,10 @@ function Scrubber() {
         onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width || 1)}
         accessible
         accessibilityRole="adjustable"
-        accessibilityLabel="Position"
-        accessibilityValue={{ text: `${clockOf(at)} of ${clockOf(length)}` }}
+        accessibilityLabel={t("Position")}
+        accessibilityValue={{
+          text: t("{position} of {length}", { position: clockOf(at), length: clockOf(length) }),
+        }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={(event: AccessibilityActionEvent) =>
           seekBy(event.nativeEvent.actionName === "increment" ? 10 : -10)
@@ -781,24 +808,26 @@ function TextButtons({ item }: { item: Playing }) {
         }));
     const message = [
       known === null
-        ? "Not known yet. Try again in a moment."
+        ? t("Not known yet. Try again in a moment.")
         : unshown && unshown.named.length > 0
           ? cantShow(unshown)
           : none
-            ? item.live
-              ? "No choices on this channel."
-              : title
-                ? "No subtitles in this file."
-                : "No choices in this file."
+            ? t(
+                item.live
+                  ? "No choices on this channel."
+                  : title
+                    ? "No subtitles in this file."
+                    : "No choices in this file.",
+              )
             : null,
-      title && keptSubtitle(title) ? IN_PLAYER_ONLY : null,
+      title && keptSubtitle(title) ? t(IN_PLAYER_ONLY) : null,
     ]
       .filter(Boolean)
       .join("\n\n");
     showSheet(
       {
-        title: of === "audio" ? "Audio" : "Subtitles",
-        options: [...rows.map((row) => row.label), "Cancel"],
+        title: t(of === "audio" ? "Audio" : "Subtitles"),
+        options: [...rows.map((row) => row.label), t("Cancel")],
         cancelButtonIndex: rows.length,
         ...(message ? { message } : {}),
       },
@@ -811,9 +840,9 @@ function TextButtons({ item }: { item: Playing }) {
   if (upNext) return <UpNextRow key={upNext.place} {...upNext} />;
   return (
     <View style={styles.textButtons}>
-      <TextControl label="Audio" onPress={() => void choose("audio")} testID="watch-audio" />
+      <TextControl label={t("Audio")} onPress={() => void choose("audio")} testID="watch-audio" />
       <TextControl
-        label="Subtitles"
+        label={t("Subtitles")}
         onPress={() => void choose("subtitles")}
         testID="watch-subtitles"
       />
@@ -823,7 +852,7 @@ function TextButtons({ item }: { item: Playing }) {
         <>
           {item.past ? null : <TitleSpeed />}
           {item.next ? (
-            <TextControl label="Next episode" onPress={playNext} testID="watch-next" />
+            <TextControl label={t("Next episode")} onPress={playNext} testID="watch-next" />
           ) : null}
         </>
       )}
@@ -831,8 +860,8 @@ function TextButtons({ item }: { item: Playing }) {
   );
 }
 
-/** "0.5×", "1×", "1.25×": a speed as the controls show it. */
-const speedLabel = (rate: number) => `${speedNumber(rate)}×`;
+/** "0.5×", "1×", "1.25×": a speed as the controls show it, written as numbers are in the language. */
+const speedLabel = (rate: number) => `${formatNumber(speedNumber(rate))}×`;
 /** A reported rate to two decimals at most, as 1.5 rather than 1.5000000596. */
 const speedNumber = (rate: number) => Number(rate.toFixed(2));
 
@@ -863,16 +892,16 @@ function TitleSpeed() {
     const now = playbackSpeed.get();
     const message =
       now === null
-        ? "Current speed not known yet."
+        ? t("Current speed not known yet.")
         : SPEEDS.some((speed) => speed === now)
           ? null
-          : `Playing at ${speedLabel(now)}.`;
+          : t("Playing at {speed}.", { speed: speedLabel(now) });
     showSheet(
       {
-        title: "Speed",
+        title: t("Speed"),
         options: [
           ...SPEEDS.map((speed) => `${speed === now ? "✓ " : ""}${speedLabel(speed)}`),
-          "Cancel",
+          t("Cancel"),
         ],
         cancelButtonIndex: SPEEDS.length,
         ...(message ? { message } : {}),
@@ -882,8 +911,8 @@ function TitleSpeed() {
         if (picked === undefined || !stands()) return;
         if (!setSpeed(picked)) {
           Alert.alert(
-            "Couldn't save media preference",
-            "Your previous choice is still saved. Try again.",
+            t("Couldn't save media preference"),
+            t("Your previous choice is still saved. Try again."),
           );
         }
       },
@@ -892,8 +921,10 @@ function TitleSpeed() {
   const other = rate !== null && rate !== 1 ? rate : null;
   return (
     <TextControl
-      label={other === null ? "Speed" : `Speed ${speedLabel(other)}`}
-      accessibilityLabel={other === null ? "Speed" : `Speed, ${speedNumber(other)} times`}
+      label={other === null ? t("Speed") : t("Speed {speed}", { speed: speedLabel(other) })}
+      accessibilityLabel={
+        other === null ? t("Speed") : t("Speed, {speed} times", { speed: speedNumber(other) })
+      }
       onPress={choose}
       testID="watch-speed"
     />
@@ -917,22 +948,26 @@ function UpNextRow({ place, seconds }: UpNext) {
     if (playButton.current) AccessibilityInfo.sendAccessibilityEvent(playButton.current, "focus");
     // Said after the focus moves, so it is heard in place of Play next's own line.
     AccessibilityInfo.announceForAccessibility(
-      `Next episode, ${spokenPlace}, plays in ${from} seconds.`,
+      t("Next episode, {place}, plays in {count} seconds.", { place: spokenPlace, count: from }),
     );
   }, [spokenPlace, from]);
   return (
     <View style={[styles.textButtons, styles.upNext]} testID="watch-up-next">
-      <View style={styles.nextLine} accessible accessibilityLabel={`Next episode, ${spokenPlace}`}>
+      <View
+        style={styles.nextLine}
+        accessible
+        accessibilityLabel={t("Next episode, {place}", { place: spokenPlace })}
+      >
         <Text style={styles.nextPlace}>{place}</Text>
-        <Text style={styles.nextCount}>Plays in {seconds}</Text>
+        <Text style={styles.nextCount}>{t("Plays in {seconds}", { seconds })}</Text>
       </View>
       {/* Reversed, so VoiceOver can reach Play next before the Cancel shown first. */}
       <View style={styles.nextActions}>
         <Pressable
           ref={playButton}
           accessibilityRole="button"
-          accessibilityLabel="Play next"
-          accessibilityValue={{ text: `in ${seconds} seconds` }}
+          accessibilityLabel={t("Play next")}
+          accessibilityValue={{ text: t("in {count} seconds", { count: seconds }) }}
           onPress={playUpNext}
           style={({ pressed }) => [styles.playNext, pressed && styles.pressed]}
           testID="watch-play-next"
@@ -940,9 +975,9 @@ function UpNextRow({ place, seconds }: UpNext) {
           <View style={styles.playCircle}>
             <View style={styles.playTriangle} />
           </View>
-          <Text style={styles.playNextLabel}>Play next</Text>
+          <Text style={styles.playNextLabel}>{t("Play next")}</Text>
         </Pressable>
-        <TextControl label="Cancel" onPress={cancelUpNext} testID="watch-up-next-cancel" />
+        <TextControl label={t("Cancel")} onPress={cancelUpNext} testID="watch-up-next-cancel" />
       </View>
     </View>
   );
@@ -958,7 +993,7 @@ interface Row {
  * the file's own are off meanwhile, so Picture in Picture and AirPlay show none.
  */
 const IN_PLAYER_ONLY =
-  "Downloaded subtitles show in this player only. While one is on, Picture in Picture and AirPlay show no subtitles.";
+  "Downloaded subtitles show in this player only. While one is on, Picture in Picture and AirPlay show no subtitles." as const;
 
 /**
  * The Subtitles sheet's rows for a movie or an episode: the file's own tracks and Off, the
@@ -977,7 +1012,7 @@ function subtitleRows(
   const showing = shownSubtitle()?.title === title;
   return [
     ...(showing && !choices.some((choice) => choice.kind === "off")
-      ? [{ label: "Off", run: () => hideSubtitle(title) }]
+      ? [{ label: t("Off"), run: () => hideSubtitle(title) }]
       : []),
     ...choices.map((choice) => ({
       label: choice.selected && !showing ? `✓ ${choice.label}` : choice.label,
@@ -986,19 +1021,19 @@ function subtitleRows(
     ...(kept
       ? [
           {
-            label: `${showing ? "✓ " : ""}${spoken(kept.subtitle.language) || "Subtitles"} · ${kept.subtitle.release || "SubDL"}`,
+            label: `${showing ? "✓ " : ""}${spoken(kept.subtitle.language) || t("Subtitles")} · ${kept.subtitle.release || "SubDL"}`,
             run: () => {
               if (!showing && !showKeptSubtitle(title))
                 Alert.alert(
-                  "Couldn't show subtitles",
-                  "This iPhone refused the change. Try again.",
+                  t("Couldn't show subtitles"),
+                  t("This iPhone refused the change. Try again."),
                 );
             },
           },
         ]
       : []),
-    { label: "Find online", run: () => void findOnline(title, plays) },
-    ...(showing ? [{ label: "Adjust timing", run: () => adjustTiming(title, stands) }] : []),
+    { label: t("Find online"), run: () => void findOnline(title, plays) },
+    ...(showing ? [{ label: t("Adjust timing"), run: () => adjustTiming(title, stands) }] : []),
   ];
 }
 
@@ -1013,13 +1048,13 @@ async function findOnline(title: SubtitleTitle, plays: () => boolean) {
   if (found.kind === "failed") return serviceFailed(found.reason);
   const { results } = found;
   if (results.length === 0) {
-    return Alert.alert("No subtitles found", "SubDL has none for this in your languages.");
+    return Alert.alert(t("No subtitles found"), t("SubDL has none for this in your languages."));
   }
   showSheet(
     {
-      title: "Online subtitles",
-      message: IN_PLAYER_ONLY,
-      options: [...results.map(resultName), "Cancel"],
+      title: t("Online subtitles"),
+      message: t(IN_PLAYER_ONLY),
+      options: [...results.map(resultName), t("Cancel")],
       cancelButtonIndex: results.length,
     },
     (index) => {
@@ -1035,20 +1070,19 @@ async function findOnline(title: SubtitleTitle, plays: () => boolean) {
 /** "English · Hearing impaired · Movie.2024.1080p.WEB". */
 const resultName = ({ language, hearingImpaired, release }: FoundSubtitle) =>
   [
-    spoken(language) || "Unknown language",
-    ...(hearingImpaired ? ["Hearing impaired"] : []),
+    spoken(language) || t("Unknown language"),
+    ...(hearingImpaired ? [t("Hearing impaired")] : []),
     release,
   ]
     .filter(Boolean)
     .join(" · ");
 
 /** Steps the downloaded subtitle earlier or later by, in seconds. */
-const STEPS = [
-  { by: -1, label: "1 s earlier" },
-  { by: -0.1, label: "0.1 s earlier" },
-  { by: 0.1, label: "0.1 s later" },
-  { by: 1, label: "1 s later" },
-] as const;
+const STEPS = [-1, -0.1, 0.1, 1] as const;
+
+/** "1 s earlier", "0,1 s later": a step as Adjust timing offers it. */
+const stepLabel = (by: number) =>
+  t(by < 0 ? "{seconds} s earlier" : "{seconds} s later", { seconds: Math.abs(by) });
 
 const FPS = [
   { fps: 24000 / 1001, name: "23.976" },
@@ -1080,27 +1114,31 @@ function adjustTiming(title: SubtitleTitle, stands: () => boolean) {
     timing.offset !== DEFAULT_SUBTITLE_TIMING.offset ||
     timing.speed !== DEFAULT_SUBTITLE_TIMING.speed;
   const rows: readonly Row[] = [
-    ...STEPS.map(({ by, label }) => ({
-      label,
+    ...STEPS.map((by) => ({
+      label: stepLabel(by),
       // In tenths, so steps add up without float drift.
       run: () => retime({ ...timing, offset: Math.round((timing.offset + by) * 10) / 10 }),
     })),
-    { label: "Frame rate", run: () => frameRate(title, stands) },
-    ...(changed ? [{ label: "Reset", run: () => retime(DEFAULT_SUBTITLE_TIMING) }] : []),
+    { label: t("Frame rate"), run: () => frameRate(title, stands) },
+    ...(changed ? [{ label: t("Reset"), run: () => retime(DEFAULT_SUBTITLE_TIMING) }] : []),
   ];
-  const offset = Math.abs(timing.offset).toFixed(1);
+  const seconds = formatDecimal(Math.abs(timing.offset), 1);
   const rate = FRAME_RATES.find(({ speed }) => speed === timing.speed);
   const message = [
     ...(timing.offset === 0
       ? []
-      : [`Shown ${offset} s ${timing.offset > 0 ? "later" : "earlier"}`]),
-    ...(rate ? [`Frame rate ${rate.label}`] : []),
+      : [
+          t(timing.offset > 0 ? "Shown {seconds} s later" : "Shown {seconds} s earlier", {
+            seconds,
+          }),
+        ]),
+    ...(rate ? [t("Frame rate {rate}", { rate: rate.label })] : []),
   ].join(" · ");
   showSheet(
     {
-      title: "Adjust timing",
-      message: message || "Original timing",
-      options: [...rows.map((row) => row.label), "Done"],
+      title: t("Adjust timing"),
+      message: message || t("Original timing"),
+      options: [...rows.map((row) => row.label), t("Done")],
       cancelButtonIndex: rows.length,
     },
     (index) => {
@@ -1117,14 +1155,14 @@ function frameRate(title: SubtitleTitle, stands: () => boolean) {
   const showing = shownSubtitle();
   if (showing?.title !== title || !stands()) return;
   const { timing } = showing;
-  const choices = [{ label: "Original", speed: DEFAULT_SUBTITLE_TIMING.speed }, ...FRAME_RATES];
+  const choices = [{ label: t("Original"), speed: DEFAULT_SUBTITLE_TIMING.speed }, ...FRAME_RATES];
   showSheet(
     {
-      title: "Frame rate",
-      message: "Subtitle fps → video fps",
+      title: t("Frame rate"),
+      message: t("Subtitle fps → video fps"),
       options: [
         ...choices.map(({ label, speed }) => `${speed === timing.speed ? "✓ " : ""}${label}`),
-        "Cancel",
+        t("Cancel"),
       ],
       cancelButtonIndex: choices.length,
     },
@@ -1145,13 +1183,11 @@ function frameRate(title: SubtitleTitle, stands: () => boolean) {
 /** Retimes the subtitle showing, or tells the viewer it kept the previous timing. */
 function retimed(title: SubtitleTitle, timing: SubtitleTiming): boolean {
   if (retimeSubtitle(title, timing)) return true;
-  Alert.alert("Couldn't change timing", "The previous timing is kept.");
+  Alert.alert(t("Couldn't change timing"), t("The previous timing is kept."));
   return false;
 }
 
-const failures: Readonly<
-  Record<SubtitleFailureReason | "not-saved", readonly [title: string, message: string]>
-> = {
+const failures = {
   "not-configured": ["SubDL key needed", "Add your SubDL API key in Settings > Subtitles."],
   credentials: ["SubDL refused the key", "Check your SubDL API key in Settings > Subtitles."],
   quota: ["SubDL limit reached", "Your SubDL key has no requests left for now. Try again later."],
@@ -1159,10 +1195,12 @@ const failures: Readonly<
   unsupported: ["Can't use this subtitle", "It isn't text the app can read. Try another."],
   keychain: ["Couldn't read your SubDL key", "This iPhone didn't give it. Try again."],
   "not-saved": ["Couldn't keep this subtitle", "This iPhone refused to save it. Try again."],
-};
+} as const satisfies Record<SubtitleFailureReason | "not-saved", readonly [string, string]>;
 
-const serviceFailed = (reason: SubtitleFailureReason | "not-saved") =>
-  Alert.alert(...failures[reason]);
+const serviceFailed = (reason: SubtitleFailureReason | "not-saved") => {
+  const [title, message] = failures[reason];
+  Alert.alert(t(title), t(message));
+};
 
 /**
  * The downloaded subtitle showing over the movie or episode playing, drawn over the picture at
@@ -1244,10 +1282,12 @@ function spoken(code: string | null) {
  */
 function cantShow({ named, more }: UnshownSubtitles) {
   const tracks = named.map(({ language, format, forced }) => {
-    const details = [format ?? "unknown format", ...(forced ? ["forced"] : [])].join(", ");
-    return `${spoken(language) ?? "Unknown language"} (${details})`;
+    const details = [format ?? t("unknown format"), ...(forced ? [t("forced")] : [])].join(", ");
+    return `${spoken(language) ?? t("Unknown language")} (${details})`;
   });
-  return `Can't show here: ${tracks.join(", ")}${more > 0 ? ` and ${more} more` : ""}.`;
+  return more > 0
+    ? t("Can't show here: {tracks} and {more} more.", { tracks: tracks.join(", "), more })
+    : t("Can't show here: {tracks}.", { tracks: tracks.join(", ") });
 }
 
 function TextControl({

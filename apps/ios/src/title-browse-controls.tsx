@@ -5,23 +5,37 @@ import { languageName as trackLanguageName } from "@mrstreamer/core/ondemand/tra
 import { useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/library.ts";
 import { DEFAULT_BROWSE, type BrowseChoices, type BrowsedCollection } from "./title-browse.ts";
 
-const sorts = { added: "Recently added", popular: "Popular", rating: "Rating", title: "Title" };
-const qualities: Record<QualityHint, string> = {
+// Sort and filter values are ids; only their names are words of the interface language. File and
+// track language names stay as core gives them, apart from Unknown and Multiple languages.
+const sorts = {
+  added: "Recently added",
+  popular: "Popular",
+  rating: "Rating",
+  title: "Title",
+} as const;
+const qualities: Record<Exclude<QualityHint, "unknown">, string> = {
   "4k": "4K",
   "full-hd": "Full HD",
   hd: "HD",
   sd: "SD",
-  unknown: "Unknown",
 };
+const qualityName = (quality: QualityHint) =>
+  quality === "unknown" ? t("Unknown") : qualities[quality];
 const languageName = (code: string) =>
   TITLE_LANGUAGES.find((language) => language.code === code)?.name ??
-  (code === "multi" ? "Multiple languages" : "Unknown");
+  (code === "multi" ? t("Multiple languages") : t("Unknown"));
 // Observed languages are canonical codes, including those outside the offered hint languages.
 const knownLanguageName = (code: string) =>
-  code === "unknown" ? "Unknown" : (trackLanguageName(code) ?? code);
-const trackName = (kind: "audio" | "subtitles") => (kind === "audio" ? "Audio" : "Subtitles");
+  code === "unknown" ? t("Unknown") : (trackLanguageName(code) ?? code);
+/** "Audio: Dutch" or "Subtitles: Dutch", for a known track's choice. */
+const trackLabel = (kind: "audio" | "subtitles", code: string) =>
+  t(kind === "audio" ? "Audio: {language}" : "Subtitles: {language}", {
+    language: knownLanguageName(code),
+  });
 
 /** One native sheet, with scrollable choices that grow with the viewer's text size. */
 export function BrowseControls({
@@ -35,9 +49,14 @@ export function BrowseControls({
   result: BrowsedCollection | null;
   onChange: (choices: BrowseChoices) => void;
 }) {
+  useLocale();
   const [open, setOpen] = useState(false);
-  const noun = kind === "movie" ? "movies" : "series";
-  const count = result ? `${result.titles.length} of ${result.total} ${noun}` : null;
+  const count = result
+    ? t(kind === "movie" ? "{shown} of {count} movies" : "{shown} of {count} series", {
+        shown: result.titles.length,
+        count: result.total,
+      })
+    : null;
   const active = Boolean(
     choices.sort || choices.filters.quality || choices.filters.language || choices.filters.verified,
   );
@@ -50,7 +69,7 @@ export function BrowseControls({
             {count}
           </Text>
         ) : null}
-        <Choice label="Sort & filter" selected={active} onPress={() => setOpen(true)} />
+        <Choice label={t("Sort & filter")} selected={active} onPress={() => setOpen(true)} />
       </View>
       {open ? (
         <Modal
@@ -66,7 +85,7 @@ export function BrowseControls({
           >
             <ScrollView contentContainerStyle={styles.content}>
               <Text style={styles.heading} accessibilityRole="header">
-                Sort & filter
+                {t("Sort & filter")}
               </Text>
               {count ? (
                 <Text style={styles.text} accessibilityLiveRegion="polite">
@@ -74,21 +93,21 @@ export function BrowseControls({
                 </Text>
               ) : null}
               <Text style={styles.section} accessibilityRole="header">
-                Sort
+                {t("Sort")}
               </Text>
               {COLLECTION_SORTS.map((sort) => (
                 <Choice
                   key={sort}
-                  label={sorts[sort]}
+                  label={t(sorts[sort])}
                   selected={(choices.sort ?? result?.sort) === sort}
                   onPress={() => onChange({ ...choices, sort })}
                 />
               ))}
               <Text style={styles.section} accessibilityRole="header">
-                Quality
+                {t("Quality")}
               </Text>
               <Choice
-                label="Any quality"
+                label={t("Any quality")}
                 selected={!choices.filters.quality}
                 onPress={() => {
                   const { quality: _quality, ...filters } = choices.filters;
@@ -98,7 +117,7 @@ export function BrowseControls({
               {result?.qualities.map(({ value, count }) => (
                 <Choice
                   key={value}
-                  label={`${qualities[value]} · ${count}`}
+                  label={`${qualityName(value)} · ${count}`}
                   selected={choices.filters.quality === value}
                   onPress={() =>
                     onChange({ ...choices, filters: { ...choices.filters, quality: value } })
@@ -108,17 +127,19 @@ export function BrowseControls({
               {choices.filters.quality &&
               !result?.qualities.some(({ value }) => value === choices.filters.quality) ? (
                 <Text style={styles.text}>
-                  Selected quality: {qualities[choices.filters.quality]}. No matching files listed.
+                  {t("Selected quality: {quality}. No matching files listed.", {
+                    quality: qualityName(choices.filters.quality),
+                  })}
                 </Text>
               ) : null}
               <Text style={styles.section} accessibilityRole="header">
-                File language
+                {t("File language")}
               </Text>
               <Text style={styles.text}>
-                Quality and language are provider name hints, not verified tracks.
+                {t("Quality and language are provider name hints, not verified tracks.")}
               </Text>
               <Choice
-                label="Any file language"
+                label={t("Any file language")}
                 selected={!choices.filters.language}
                 onPress={() => {
                   const { language: _language, ...filters } = choices.filters;
@@ -138,17 +159,18 @@ export function BrowseControls({
               {choices.filters.language &&
               !result?.languages.some(({ value }) => value === choices.filters.language) ? (
                 <Text style={styles.text}>
-                  Selected file language: {languageName(choices.filters.language)}. No matching
-                  files listed.
+                  {t("Selected file language: {language}. No matching files listed.", {
+                    language: languageName(choices.filters.language),
+                  })}
                 </Text>
               ) : null}
               {result && result.files > 0 ? (
                 <>
                   <Text style={styles.section} accessibilityRole="header">
-                    Known audio/subtitles
+                    {t("Known audio/subtitles")}
                   </Text>
                   <Choice
-                    label="Any known track"
+                    label={t("Any known track")}
                     selected={!verified}
                     onPress={() => {
                       const { verified: _verified, ...filters } = choices.filters;
@@ -158,7 +180,7 @@ export function BrowseControls({
                   {result.verified.map(({ value, count }) => (
                     <Choice
                       key={`${value.kind}:${value.language}`}
-                      label={`${trackName(value.kind)}: ${knownLanguageName(value.language)} · ${count}`}
+                      label={`${trackLabel(value.kind, value.language)} · ${count}`}
                       selected={
                         verified?.kind === value.kind && verified.language === value.language
                       }
@@ -174,13 +196,23 @@ export function BrowseControls({
                 ({ value }) => value.kind === verified.kind && value.language === verified.language,
               ) ? (
                 <Text style={styles.text}>
-                  Selected {trackName(verified.kind).toLowerCase()}:{" "}
-                  {knownLanguageName(verified.language)}. No matching files listed.
+                  {t(
+                    verified.kind === "audio"
+                      ? "Selected audio: {language}. No matching files listed."
+                      : "Selected subtitles: {language}. No matching files listed.",
+                    { language: knownLanguageName(verified.language) },
+                  )}
                 </Text>
               ) : null}
-              <Choice label="Reset" onPress={() => onChange(DEFAULT_BROWSE)} />
+              <Choice label={t("Reset")} onPress={() => onChange(DEFAULT_BROWSE)} />
               <Choice
-                label={result ? `Show ${result.titles.length} ${noun}` : "Done"}
+                label={
+                  result
+                    ? t(kind === "movie" ? "Show {count} movies" : "Show {count} series", {
+                        count: result.titles.length,
+                      })
+                    : t("Done")
+                }
                 onPress={() => setOpen(false)}
               />
             </ScrollView>

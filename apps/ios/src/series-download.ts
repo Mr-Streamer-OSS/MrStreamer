@@ -4,6 +4,7 @@ import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { seriesEpisodeOrder } from "@mrstreamer/core/ondemand/details";
 import { addDownload, downloadOf, replaceMissingDownload, retryDownload } from "./downloads.ts";
 import { appError, describeError } from "./errors.ts";
+import { inLanguage } from "./i18n/downloads.ts";
 import { currentSource, type Source } from "./sources.ts";
 import { store, useStore } from "./store.ts";
 
@@ -229,7 +230,7 @@ export function startDownload(
       try {
         asked = statusOf(ref) === was ? await ask(was, ref, standing) : "unchanged";
       } catch (cause) {
-        failed.push({ ref, error: describeError(appError(cause)) });
+        failed.push({ ref, error: describeError(inLanguage(appError(cause))) });
         asked = "failed";
       }
       if (asked === "stopped" || asked === "removed") {

@@ -1,5 +1,6 @@
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
 import type { IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
+import { formatNumber } from "@mrstreamer/core/i18n";
 import { pacer, type Steps } from "@mrstreamer/core/steps";
 import { router } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -35,6 +36,8 @@ import {
 import { useReduceMotion } from "../glass.tsx";
 import { openOnTabs, useTabs } from "../header.tsx";
 import { useLocale } from "../i18n/catalogue.ts";
+import { t as words } from "../i18n/library.ts";
+import { t as live } from "../i18n/live.ts";
 import { t } from "../i18n/status.ts";
 import { DownloadStatusButton } from "../download-status.tsx";
 import { guide, type FoundProgramme } from "../guide.ts";
@@ -86,7 +89,8 @@ const rowKey = (row: Row) =>
 
 /** Movies, series, channels or programmes found, and how many of them there are in all. */
 interface Found {
-  readonly title: string;
+  /** Its heading's English, said in the interface language as it is drawn. */
+  readonly title: "Movies" | "Series" | "Channels" | "Programmes";
   readonly total: number;
   readonly data: readonly Row[];
   /** Movies or series with matches still to show: how many Show more adds. */
@@ -207,7 +211,7 @@ function useSection(request: Request | null, session: RefObject<SearchSession>) 
 
 /** "Show 20 more movies", "Show 1 more movie", "Show 5 more series". */
 const moreLabel = ({ kind, count }: NonNullable<Found["more"]>) =>
-  `Show ${count} more ${kind === "series" ? "series" : count === 1 ? "movie" : "movies"}`;
+  words(kind === "series" ? "Show {count} more series" : "Show {count} more movies", { count });
 
 /** Search's loading/indexing text, provider progress and retry targets. */
 interface SearchStatus {
@@ -221,9 +225,39 @@ interface SearchStatus {
 const unsettled = (member: Member, list: Pick<Member["live"] | Member["titles"], "kind">) =>
   !member.needsSecret && (list.kind === "loading" || list.kind === "idle");
 
-/** "Channels", "Movies and series", or both, to start a sentence. */
-const kinds = (channels: boolean, titles: boolean) =>
-  channels && titles ? "Movies, series and channels" : titles ? "Movies and series" : "Channels";
+/**
+ * That channels, movies and series, or some of them, still load: with how many providers are in,
+ * of all of them, while some of several still load.
+ */
+function stillLoading(
+  channels: boolean,
+  titles: boolean,
+  providers: { readonly settled: number; readonly count: number } | null,
+): string {
+  if (providers) {
+    return channels && titles
+      ? words(
+          "Movies, series and channels still loading, {settled} of {count} providers.",
+          providers,
+        )
+      : titles
+        ? words("Movies and series still loading, {settled} of {count} providers.", providers)
+        : words("Channels still loading, {settled} of {count} providers.", providers);
+  }
+  return channels && titles
+    ? words("Movies, series and channels still loading.")
+    : titles
+      ? words("Movies and series still loading.")
+      : words("Channels still loading.");
+}
+
+/** That channels, movies and series, or some of them, were searched. */
+const searchedWhat = (channels: boolean, titles: boolean) =>
+  channels && titles
+    ? words("Movies, series and channels searched.")
+    : titles
+      ? words("Movies and series searched.")
+      : words("Channels searched.");
 
 /**
  * How Search's sources stand, or null when every provider's channels, movies and series are in.
@@ -243,11 +277,9 @@ function searchStatus(
     (member) => !unsettled(member, member.live) && !unsettled(member, member.titles),
   ).length;
   if (channelsLoading || titlesLoading) {
-    const count =
-      members.length > 1 && settled < members.length
-        ? `, ${settled} of ${members.length} providers`
-        : "";
-    sentences.push(`${kinds(channelsLoading, titlesLoading)} still loading${count}.`);
+    const providers =
+      members.length > 1 && settled < members.length ? { settled, count: members.length } : null;
+    sentences.push(stillLoading(channelsLoading, titlesLoading, providers));
   }
   const failed = members.filter(
     (member) =>
@@ -261,7 +293,7 @@ function searchStatus(
     return null;
   const channels = catalogue.kind === "ready";
   const titles = lists.kind === "ready";
-  if (channels || titles) sentences.push(`${kinds(channels, titles)} searched.`);
+  if (channels || titles) sentences.push(searchedWhat(channels, titles));
   return {
     text: sentences.join(" "),
     loading: channelsLoading || titlesLoading ? { settled, of: Math.max(1, members.length) } : null,
@@ -287,8 +319,9 @@ let kept = "";
  * where the bottom has too little room for a line of it.
  */
 export default function Search() {
-  // The status line's words are made here, so a new language makes them again.
-  useLocale();
+  // The status line's words are made here, so a new language makes them again; the query, the
+  // results and where they scrolled stay.
+  const locale = useLocale();
   const tabs = useTabs();
   const insets = useSafeAreaInsets();
   const roster = useRoster();
@@ -530,7 +563,7 @@ export default function Search() {
             value={query}
             onChangeText={change}
             autoFocus
-            placeholder="Movies, series and channels"
+            placeholder={words("Movies, series and channels")}
             placeholderTextColor={colors.dim}
             autoCapitalize="none"
             autoCorrect={false}
@@ -539,7 +572,7 @@ export default function Search() {
             clearButtonMode="while-editing"
             keyboardAppearance="dark"
             selectionColor="#FFFFFF"
-            accessibilityLabel="Search"
+            accessibilityLabel={words("Search")}
             style={styles.input}
             testID="search-field"
           />
@@ -554,7 +587,7 @@ export default function Search() {
             }
           }}
         />
-        <TextButton label="Cancel" onPress={close} />
+        <TextButton label={words("Cancel")} onPress={close} />
       </View>
       <View style={styles.screen} onLayout={(event) => setArea(event.nativeEvent.layout.height)}>
         <SectionList
@@ -564,12 +597,18 @@ export default function Search() {
           importantForAccessibility={shownDetail ? "no-hide-descendants" : "auto"}
           sections={sections}
           keyExtractor={rowKey}
-          extraData={playing && `${playing.id} ${playing.word}`}
+          // Rows draw again as what plays changes, and in a new language, keeping the results.
+          extraData={`${playing ? `${playing.id} ${playing.word}` : ""} ${locale}`}
           renderSectionHeader={({ section }) => (
             <Text style={styles.section} accessibilityRole="header">
-              {section.total > section.data.length
-                ? `${section.title} · ${section.data.length} of ${section.total}`
-                : `${section.title} · ${section.total}`}
+              {`${words(section.title)} · ${
+                section.total > section.data.length
+                  ? words("{shown} of {total}", {
+                      shown: section.data.length,
+                      total: section.total,
+                    })
+                  : formatNumber(section.total)
+              }`}
             </Text>
           )}
           renderSectionFooter={({ section }) =>
@@ -588,7 +627,7 @@ export default function Search() {
               <ChannelRow
                 channel={item.channel}
                 detail={library?.placeOf.get(item.channel.key) ?? ""}
-                status={item.channel.key === playing?.id ? playing.word : null}
+                status={item.channel.key === playing?.id ? live(playing.word) : null}
                 height={height}
                 onPress={watch}
               />
@@ -647,7 +686,7 @@ export default function Search() {
               origin="live"
               onSettings={settings}
               onBack={() => setDetail(null)}
-              back="Back to Search"
+              back={words("Back to Search")}
             />
           </View>
         ) : null}
@@ -679,7 +718,11 @@ function searchLine(
   const text = providers?.inline ? providers.text : (status?.text ?? "");
   return {
     ...providers,
-    text: [pending ? "Searching." : "", text, unsearched ? "Some programmes not searched." : ""]
+    text: [
+      pending ? words("Searching.") : "",
+      text,
+      unsearched ? words("Some programmes not searched.") : "",
+    ]
       .filter(Boolean)
       .join(" "),
     actions,
@@ -731,21 +774,18 @@ function Nothing({
   library: Library | null;
   lists: TitleLists;
 }) {
+  const locale = useLocale();
   const searched = useMemo(() => {
     if (!library || lists.kind !== "ready") return null;
-    const channels = library.channels.length;
-    const number = new Intl.NumberFormat();
-    const counted = (count: number, one: string, many: string) =>
-      `${number.format(count)} ${count === 1 ? one : many}`;
-    return `Searched ${counted(channels, "channel", "channels")}, ${counted(
-      titleCount(lists.index, "movie"),
-      "movie",
-      "movies",
-    )} and ${counted(titleCount(lists.index, "series"), "series", "series")}.`;
-  }, [library, lists]);
+    return words("Searched {channels}, {movies} and {series}.", {
+      channels: words("{count} channels", { count: library.channels.length }),
+      movies: words("{count} movies", { count: titleCount(lists.index, "movie") }),
+      series: words("{count} series", { count: titleCount(lists.index, "series") }),
+    });
+  }, [library, lists, locale]);
   return (
     <View style={styles.nothing} accessible accessibilityLiveRegion="polite">
-      <Text style={styles.nothingText}>{`Nothing named "${query}".`}</Text>
+      <Text style={styles.nothingText}>{words('Nothing named "{query}".', { query })}</Text>
       {searched ? <Text style={styles.statusText}>{searched}</Text> : null}
     </View>
   );
@@ -760,7 +800,7 @@ function TitleRow({
   height: number;
   onPress: (title: Title) => void;
 }) {
-  const line = [title.kind === "movie" ? "Movie" : "Series", title.year]
+  const line = [words(title.kind === "movie" ? "kind.movie" : "kind.series"), title.year]
     .filter(Boolean)
     .join(" · ");
   return (
@@ -810,7 +850,7 @@ function ProgrammeRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityHint="Shows details"
+      accessibilityHint={words("Shows details")}
       accessibilityLabel={`${found.programme.title}, ${line}`}
       onPress={() => onPress(found)}
       style={({ pressed }) => [styles.row, { minHeight: height }, pressed && styles.pressed]}

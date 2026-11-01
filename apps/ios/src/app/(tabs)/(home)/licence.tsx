@@ -2,9 +2,28 @@ import { useLocalSearchParams, useNavigation } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useLayoutEffect } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useLocale } from "../../../i18n/catalogue.ts";
+import { t } from "../../../i18n/pages.ts";
 import { licenceOf, noticeText } from "../../../licences.ts";
 import { openLink } from "../../../open-link.ts";
 import { colors, Message } from "../../../ui.tsx";
+
+/**
+ * The facts' own words, which the build writes in English (scripts/licences.ts). Versions, names
+ * and paths stay as they are.
+ */
+const WORDS = [
+  "Version",
+  "Copyright",
+  "In the app",
+  "Built by",
+  "Changed by",
+  "Native code",
+  "JavaScript and native code",
+] as const;
+
+const known = (text: string): text is (typeof WORDS)[number] => WORDS.some((word) => word === text);
+const said = (text: string) => (known(text) ? t(text) : text);
 
 /**
  * One component of Licences, by `id`: its licence and facts, where its source is, then each of its
@@ -12,28 +31,29 @@ import { colors, Message } from "../../../ui.tsx";
  * network.
  */
 export default function Licence() {
+  useLocale();
   const { id = "" } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation();
   const component = licenceOf(id);
   useLayoutEffect(() => {
     navigation.setOptions({ title: component?.name ?? "" });
   }, [navigation, component]);
-  if (!component) return <Message text="This build has no such licence." />;
+  if (!component) return <Message text={t("This build has no such licence.")} />;
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
-      <Fact label="Licence" value={component.licence} />
+      <Fact label={t("Licence")} value={component.licence} />
       {component.facts.map((fact) => (
-        <Fact key={fact.label} {...fact} />
+        <Fact key={fact.label} label={said(fact.label)} value={said(fact.value)} />
       ))}
       <Pressable
         accessibilityRole="link"
-        accessibilityLabel="Source code"
+        accessibilityLabel={t("Source code")}
         accessibilityHint={component.source}
         onPress={() => openLink(component.source)}
         style={({ pressed }) => [styles.line, pressed && styles.pressed]}
         testID="licence-source"
       >
-        <Text style={styles.label}>Source code</Text>
+        <Text style={styles.label}>{t("Source code")}</Text>
         <Text style={styles.value} numberOfLines={2}>
           {component.source.replace(/^https:\/\//, "")}
         </Text>

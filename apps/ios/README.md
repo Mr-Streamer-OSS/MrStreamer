@@ -600,13 +600,20 @@ layout applies it before any screen loads; a new pick shows at once, without a r
 bar and every tab's top bar too (`useTabScreenOptions`). The app's own text is in `src/i18n/`, one
 catalogue per feature area keyed by its English text (`onboarding.ts`, `navigation.ts`,
 `settings.ts`, `failures.ts` for the provider failures `errors.ts` puts, `live.ts` for Live, Find,
-Favourites, lists, the Guide, Schedules, programmes and Reminders, and `status.ts` for the status
-line every tab shares, so far), and an area compiles only with every language's text. Guide days and
-times, counts and lists of providers are written in the language too. A new pick redraws the screens
-already open where they stand, keeping Live's tab, country and scroll, and schedules each reminder's
-notification again in its words. Screens outside those areas still show English until their area
-gets its own catalogue; provider, channel, category, list, programme and title names are never
-translated, nor the catalogue's English country names, which Live's saved place is kept by.
+Favourites, lists, the Guide, Schedules, programmes and Reminders, `status.ts` for the status line
+every tab shares, `watch.ts` for Watch, its sheets and the mini player, `library.ts` for Home,
+Search, Movies, Series, collections, details and Watchlist, `downloads.ts` for Downloads and the
+top bar's queue status, and `pages.ts` for Settings' own pages and stack titles), and an area
+compiles only with every language's text. Guide days and times, counts, sizes, speeds and lists of
+providers are written in the language too. A new pick redraws the screens already open where they
+stand, keeping Live's tab, country and scroll, the browse row, filters, Search query and results,
+and Watch's stream, position, speed and tracks, and schedules each reminder's notification again in
+its words. A playback failure already on screen, a sheet already open and a download failure saved
+with a provider's reason keep the language they were made in. Provider, channel, category, list,
+programme, title, collection, genre and service names are never translated, nor the catalogue's
+English country names, which Live's saved place is kept by, nor the shared Diagnostics text, which
+stays English for support. VoiceOver action names stay English identities while their labels are
+translated.
 iOS's own controls, such as text menus, follow the localizations the app bundle declares, which this
 leaves as they were.
 

@@ -13,6 +13,8 @@ import {
 } from "react-native";
 import { members, useRoster } from "./account.ts";
 import { appError, describeError } from "./errors.ts";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/library.ts";
 import { openDetails } from "./resume.ts";
 import { named, titleLists, titlesWorkedOut, useMetadataVersion, useTitleLists } from "./titles.ts";
 import { Artwork } from "./titles-ui.tsx";
@@ -33,26 +35,29 @@ import {
 // and VoiceOver's actions offer Details where there are any and Remove, as a system sheet. Which
 // entry a row is, where it stands and what Remove takes out are the watchlist's (watchlist.ts).
 
-const ORDERS: readonly { readonly order: WatchlistOrder; readonly label: string }[] = [
+const ORDERS = [
   { order: "newest", label: "Newest" },
   { order: "name", label: "A–Z" },
-];
-const labelOf = (order: WatchlistOrder) => ORDERS.find((each) => each.order === order)?.label ?? "";
+] as const satisfies readonly { readonly order: WatchlistOrder; readonly label: string }[];
+const labelOf = (order: WatchlistOrder) => {
+  const label = ORDERS.find((each) => each.order === order)?.label;
+  return label ? t(label) : "";
+};
 
 /** Why a row isn't in the lists, under its name. */
-const UNLISTED: Record<Unlisted, string> = {
+const UNLISTED = {
   loading: "Lists still loading",
   failed: "Lists didn't load",
   "needs-secret": "Password needed in Settings",
   "not-listed": "No longer listed",
-};
-
-const REMOVE = "Remove from Watchlist";
+} as const satisfies Record<Unlisted, string>;
 
 /** The order chosen, kept while the app runs. */
 let kept: WatchlistOrder = "newest";
 
 export function WatchlistScreen() {
+  // A new language redraws the rows where they stand, in the order chosen.
+  const locale = useLocale();
   const list = useWatchlist();
   const lists = useTitleLists();
   const roster = useRoster();
@@ -70,7 +75,7 @@ export function WatchlistScreen() {
   const choose = () =>
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        options: [...ORDERS.map((each) => each.label), "Cancel"],
+        options: [...ORDERS.map((each) => t(each.label)), t("Cancel")],
         cancelButtonIndex: ORDERS.length,
       },
       (at) => {
@@ -86,13 +91,14 @@ export function WatchlistScreen() {
       contentInsetAdjustmentBehavior="automatic"
       data={rows}
       keyExtractor={(row) => row.key}
+      extraData={locale}
       renderItem={({ item }) => <Row row={item} />}
       ItemSeparatorComponent={Separator}
       ListHeaderComponent={
         rows.length > 1 ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Sort, ${labelOf(order)}`}
+            accessibilityLabel={t("Sort, {order}", { order: labelOf(order) })}
             onPress={choose}
             style={({ pressed }) => [styles.sort, pressed && styles.pressed]}
             testID="watchlist-sort"
@@ -105,8 +111,8 @@ export function WatchlistScreen() {
       ListEmptyComponent={
         <Notice
           failure={{
-            headline: "Nothing saved yet.",
-            advice: "Save a movie or series from its details.",
+            headline: t("Nothing saved yet."),
+            advice: t("Save a movie or series from its details."),
           }}
         />
       }
@@ -121,9 +127,12 @@ function Separator() {
 }
 
 const Row = memo(function Row({ row }: { row: WatchlistRow }) {
+  useLocale();
   const { fontScale } = useWindowDimensions();
-  const facts = [row.kind === "movie" ? "Movie" : "Series", row.year].filter(Boolean).join(" · ");
-  const note = row.unlisted ? UNLISTED[row.unlisted] : null;
+  const facts = [t(row.kind === "movie" ? "kind.movie" : "kind.series"), row.year]
+    .filter(Boolean)
+    .join(" · ");
+  const note = row.unlisted ? t(UNLISTED[row.unlisted]) : null;
   const { title } = row;
   const act = ({ nativeEvent }: AccessibilityActionEvent) => {
     if (nativeEvent.actionName === "activate" && title) openDetails(title);
@@ -137,7 +146,7 @@ const Row = memo(function Row({ row }: { row: WatchlistRow }) {
         {...(title ? { accessibilityRole: "button" as const } : {})}
         accessibilityActions={[
           ...(title ? [{ name: "activate" }] : []),
-          { name: "remove", label: REMOVE },
+          { name: "remove", label: t("Remove from Watchlist") },
         ]}
         onAccessibilityAction={act}
         // A row the lists don't have opens nothing: only Remove applies to it.
@@ -173,19 +182,21 @@ const Row = memo(function Row({ row }: { row: WatchlistRow }) {
 /** Details where the lists have the row's title, and Remove, as a system sheet. */
 function showActions(row: WatchlistRow) {
   const { title } = row;
-  const options = [...(title ? ["Details"] : []), REMOVE, "Cancel"];
+  // Chosen by what each option does, which stays the same in any language.
+  const choices = [...(title ? (["details"] as const) : []), "remove", "cancel"] as const;
+  const words = { details: t("Details"), remove: t("Remove from Watchlist"), cancel: t("Cancel") };
   ActionSheetIOS.showActionSheetWithOptions(
     {
       title: row.name,
-      options,
-      destructiveButtonIndex: options.indexOf(REMOVE),
-      cancelButtonIndex: options.length - 1,
+      options: choices.map((choice) => words[choice]),
+      destructiveButtonIndex: choices.indexOf("remove"),
+      cancelButtonIndex: choices.length - 1,
     },
     (at) => {
       // Answered later: the row as it stands then, which may have lost its provider meanwhile.
-      const now = options[at] === "Details" ? rowNow(row.key)?.title : null;
+      const now = choices[at] === "details" ? rowNow(row.key)?.title : null;
       if (now) openDetails(now);
-      if (options[at] === REMOVE) remove(row);
+      if (choices[at] === "remove") remove(row);
     },
   );
 }
@@ -213,9 +224,9 @@ function remove(row: WatchlistRow) {
   try {
     removeEntry(row.entry);
   } catch (cause) {
-    Alert.alert(`Couldn't remove ${row.name}`, describeError(appError(cause)), [
-      { text: "Cancel", style: "cancel" },
-      { text: "Try again", onPress: () => remove(row) },
+    Alert.alert(t("Couldn't remove {name}", { name: row.name }), describeError(appError(cause)), [
+      { text: t("Cancel"), style: "cancel" },
+      { text: t("Try again"), onPress: () => remove(row) },
     ]);
   }
 }

@@ -1,6 +1,6 @@
 import type { Download, DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
-import { formatBytes, formatPercent, t } from "@mrstreamer/core/i18n";
+import { formatBytes, formatPercent } from "@mrstreamer/core/i18n";
 import { episodeLabel } from "@mrstreamer/core/ondemand/names";
 import { minutesLeft } from "@mrstreamer/core/viewing/continue";
 import { SymbolView, type SFSymbol } from "expo-symbols";
@@ -25,6 +25,8 @@ import {
   useDownloadOf,
 } from "./downloads.ts";
 import { appError, describeError } from "./errors.ts";
+import { useLocale } from "./i18n/catalogue.ts";
+import { inLanguage, t } from "./i18n/downloads.ts";
 
 // What a download says and what can be done with it, wherever one shows: Downloads' rows, the
 // details' capsule and episode rows. Each state offers its own actions, as the desktop's do:
@@ -35,11 +37,16 @@ import { appError, describeError } from "./errors.ts";
 // happens at once.
 // A sheet or a confirmation can stay open while the download moves on, so each action looks the
 // download up again when it runs, and again on confirming: it does what still applies, or nothing.
+// Everything here is said in the interface language as it is drawn or asked; an action keeps one
+// English name, so VoiceOver's action and the sheet's choice stay the same one in any language.
 
 const RED = "#FF453A";
 
 /** One thing to do with a download, as a menu, a button or a VoiceOver action offers it. */
 export interface DownloadAction {
+  /** Its English name, the same in every language: VoiceOver's action name. */
+  readonly name: string;
+  /** What the viewer reads and hears, in the interface language. */
   readonly label: string;
   readonly destructive: boolean;
   readonly run: () => void;
@@ -71,9 +78,9 @@ export function describeFailure(failure: DownloadFailure): string {
     case "folder":
       return t("The downloads folder can't be written. Retry, or check the disk.");
     case "stream":
-      return describeError({ kind: "stream", failure: failure.failure });
+      return describeError(inLanguage({ kind: "stream", failure: failure.failure }));
     case "app":
-      return describeError(failure.error);
+      return describeError(inLanguage(failure.error));
   }
 }
 
@@ -126,7 +133,7 @@ export function statusLine(download: Download): string {
     case "complete":
       return "";
     case "missing":
-      return "File missing";
+      return t("File missing");
   }
 }
 
@@ -135,53 +142,58 @@ export function stateWord(download: Download): string {
   const { status } = download;
   switch (status.kind) {
     case "queued":
-      return "Queued";
+      return t("Queued");
     case "waiting":
-      return "Waiting";
+      return t("Waiting");
     case "paused":
-      return "Paused";
+      return t("Paused");
     case "transferring": {
       const done = transferred(download);
-      return done === null ? "Downloading" : `Downloading ${percentOf(done)}`;
+      return done === null
+        ? t("Downloading")
+        : t("Downloading {percent}", { percent: percentOf(done) });
     }
     case "failed":
-      return "Download failed";
+      return t("Download failed");
     case "complete":
-      return "Downloaded";
+      return t("Downloaded");
     case "missing":
-      return "File missing";
+      return t("File missing");
   }
 }
 
 /** What VoiceOver says of the download button. */
 function buttonLabel(download: Download | undefined): string {
-  if (!download) return "Download";
+  if (!download) return t("Download");
   const { status } = download;
   switch (status.kind) {
     case "queued":
-      return "Queued, download";
+      return t("Queued, download");
     case "waiting":
-      return "Waiting for playback, download";
+      return t("Waiting for playback, download");
     case "paused":
-      return "Paused, download";
+      return t("Paused, download");
     case "transferring":
       return stateWord(download);
     case "failed":
-      return `Download failed, ${describeFailure(status.failure)}`;
+      return t("Download failed, {reason}", { reason: describeFailure(status.failure) });
     case "complete":
-      return "Downloaded";
+      return t("Downloaded");
     case "missing":
-      return "File missing, download";
+      return t("File missing, download");
   }
 }
 
-/** Shows why something couldn't be done, in the desktop's words. */
-function attempt(title: string, work: Promise<unknown>) {
-  void work.catch((cause: unknown) => Alert.alert(title, describeError(appError(cause))));
+/** Shows why something couldn't be done, in the desktop's words; `title` says it as it fails. */
+function attempt(title: () => string, work: Promise<unknown>) {
+  void work.catch((cause: unknown) =>
+    Alert.alert(title(), describeError(inLanguage(appError(cause)))),
+  );
 }
 
 function remove(download: Download) {
-  attempt(`Couldn't remove ${nameOf(download)}`, removeDownload(download.id));
+  const name = nameOf(download);
+  attempt(() => t("Couldn't remove {name}", { name }), removeDownload(download.id));
 }
 
 /** Asks first, then runs `run`: the sheet's red button is `confirm`. */
@@ -209,10 +221,16 @@ function cancel(id: string) {
   const download = current(id);
   if (!unfinished(download)) return;
   if (download.status.kind !== "transferring") return remove(download);
-  ask(`Cancel downloading ${nameOf(download)}?`, "Cancel download", "Keep downloading", () => {
-    const now = current(id);
-    if (unfinished(now)) remove(now);
-  });
+  const name = nameOf(download);
+  ask(
+    t("Cancel downloading {name}?", { name }),
+    t("Cancel download"),
+    t("Keep downloading"),
+    () => {
+      const now = current(id);
+      if (unfinished(now)) remove(now);
+    },
+  );
 }
 
 /** Deletes copy `id`: after asking while its file is there, at once when the file went. */
@@ -220,8 +238,11 @@ function deleteCopy(id: string) {
   const download = current(id);
   if (download?.status.kind === "missing") return remove(download);
   if (download?.status.kind !== "complete") return;
-  const size = download.size ? `${formatBytes(download.size)} ` : "";
-  ask(`Delete the ${size}copy of ${nameOf(download)}?`, "Delete download", "Cancel", () => {
+  const name = nameOf(download);
+  const title = download.size
+    ? t("Delete the {size} copy of {name}?", { size: formatBytes(download.size), name })
+    : t("Delete the copy of {name}?", { name });
+  ask(title, t("Delete download"), t("Cancel"), () => {
     const now = current(id);
     if (now && !unfinished(now)) remove(now);
   });
@@ -242,14 +263,17 @@ function hold(download: Download): DownloadAction {
   const name = nameOf(download);
   return download.status.kind === "paused"
     ? {
-        label: t("Resume download"),
+        name: "Resume",
+        label: t("Resume"),
         destructive: false,
-        run: () => attempt(`Couldn't resume ${name}`, resumeDownload(download.id)),
+        run: () =>
+          attempt(() => t("Couldn't resume {name}", { name }), resumeDownload(download.id)),
       }
     : {
-        label: t("Pause download"),
+        name: "Pause",
+        label: t("Pause"),
         destructive: false,
-        run: () => attempt(`Couldn't pause ${name}`, pauseDownload(download.id)),
+        run: () => attempt(() => t("Couldn't pause {name}", { name }), pauseDownload(download.id)),
       };
 }
 
@@ -257,9 +281,10 @@ function hold(download: Download): DownloadAction {
 function move(download: Download, by: -1 | 1): DownloadAction {
   const name = nameOf(download);
   return {
+    name: by < 0 ? `Move ${name} up` : `Move ${name} down`,
     label: by < 0 ? t("Move {name} up", { name }) : t("Move {name} down", { name }),
     destructive: false,
-    run: () => attempt(`Couldn't move ${name}`, moveDownload(download.id, by)),
+    run: () => attempt(() => t("Couldn't move {name}", { name }), moveDownload(download.id, by)),
   };
 }
 
@@ -271,7 +296,8 @@ function move(download: Download, by: -1 | 1): DownloadAction {
 export function actionsOf(download: Download, turn?: Turn): readonly DownloadAction[] {
   const { status } = download;
   const cancelling = {
-    label: "Cancel download",
+    name: "Cancel download",
+    label: t("Cancel download"),
     destructive: true,
     run: () => cancel(download.id),
   };
@@ -290,21 +316,38 @@ export function actionsOf(download: Download, turn?: Turn): readonly DownloadAct
     case "failed":
       return [
         {
-          label: "Retry",
+          name: "Retry",
+          label: t("Retry"),
           destructive: false,
-          run: () => attempt(`Couldn't retry ${nameOf(download)}`, retryDownload(download.id)),
+          run: () => {
+            const name = nameOf(download);
+            attempt(() => t("Couldn't retry {name}", { name }), retryDownload(download.id));
+          },
         },
-        { label: "Remove", destructive: true, run: () => cancel(download.id) },
+        { name: "Remove", label: t("Remove"), destructive: true, run: () => cancel(download.id) },
       ];
     case "complete":
       return [
-        { label: "Play offline", destructive: false, run: () => playDownload(download.id) },
-        { label: "Delete download", destructive: true, run: () => deleteCopy(download.id) },
+        {
+          name: "Play offline",
+          label: t("Play offline"),
+          destructive: false,
+          run: () => playDownload(download.id),
+        },
+        copyDeletion(download),
       ];
     case "missing":
-      return [{ label: "Delete download", destructive: true, run: () => deleteCopy(download.id) }];
+      return [copyDeletion(download)];
   }
 }
+
+/** Delete download, for a copy or one whose file went. */
+const copyDeletion = (download: Download): DownloadAction => ({
+  name: "Delete download",
+  label: t("Delete download"),
+  destructive: true,
+  run: () => deleteCopy(download.id),
+});
 
 /**
  * Offers `actions` in a system sheet, after any of the caller's own; a failed download's reason
@@ -321,7 +364,7 @@ export function showActions(
       ...(download?.status.kind === "failed"
         ? { title: describeFailure(download.status.failure) }
         : {}),
-      options: [...actions.map((action) => action.label), "Cancel"],
+      options: [...actions.map((action) => action.label), t("Cancel")],
       destructiveButtonIndex: destructive,
       cancelButtonIndex: actions.length,
     },
@@ -331,12 +374,13 @@ export function showActions(
 
 /** Queues `ref` at once, saying why when it can't be. */
 export function queue(ref: TitleRef, name: string): void {
-  attempt(`Couldn't download ${name}`, addDownload(ref));
+  attempt(() => t("Couldn't download {name}", { name }), addDownload(ref));
 }
 
 /** What a title without a download offers: Download. */
 export const downloadAction = (ref: TitleRef, name: string): DownloadAction => ({
-  label: "Download",
+  name: "Download",
+  label: t("Download"),
   destructive: false,
   run: () => queue(ref, name),
 });
@@ -432,6 +476,7 @@ export function DownloadButton({
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }) {
+  useLocale();
   const download = useDownloadOf(ref);
   const press = () => {
     if (!download) return queue(ref, name);

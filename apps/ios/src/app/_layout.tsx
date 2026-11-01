@@ -6,6 +6,8 @@ import { useEffect, useRef } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRoster } from "../account.ts";
 import { startDownloads } from "../downloads.ts";
+import { useLocale } from "../i18n/catalogue.ts";
+import { t } from "../i18n/navigation.ts";
 import { onScreen } from "../playback.ts";
 import { startReminders } from "../reminders.ts";
 import { holdLaunchScreen, StartupScreen } from "../startup-screen.tsx";
@@ -67,8 +69,9 @@ export default function RootLayout() {
   );
 }
 
-/** The screens, Connect's or the tabs', with Watch over them. */
+/** The screens, Connect's or the tabs', with Watch over them, titled in the interface language. */
 function App({ signedIn }: { readonly signedIn: boolean }) {
+  useLocale();
   return (
     <ThemeProvider value={theme}>
       <View style={styles.black}>
@@ -85,7 +88,7 @@ function App({ signedIn }: { readonly signedIn: boolean }) {
               name="offline"
               options={{
                 headerShown: true,
-                title: "Downloads",
+                title: t("Downloads"),
                 headerBackButtonDisplayMode: "minimal",
                 headerTintColor: "#FFFFFF",
                 headerTitleStyle: { color: "#FFFFFF" },

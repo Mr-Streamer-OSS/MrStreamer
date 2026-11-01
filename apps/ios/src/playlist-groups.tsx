@@ -9,7 +9,7 @@ import type {
 import { formatNumber } from "@mrstreamer/core/i18n";
 import { router, useIsFocused } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -29,6 +29,8 @@ import {
 } from "./account.ts";
 import { appError, failureOf, type Failure } from "./errors.ts";
 import { useTabs, type Tab } from "./header.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/pages.ts";
 import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
 import { usePlayback } from "./playback.ts";
 import { colors, largeText, Message, Notice, TextButton, useListWidth } from "./ui.tsx";
@@ -37,7 +39,8 @@ import { colors, largeText, Message, Notice, TextButton, useListWidth } from "./
 // and every entry left out with why. Names and reasons only: the link never shows. Compact
 // windows push each as a screen of its own; from 700 points (Live's rule, `splitAt`) the groups
 // list sits beside the selected group, which starts as the first needing mapping, and Left out
-// takes the group's place until a group is picked again or Escape closes it.
+// takes the group's place until a group is picked again or Escape closes it. Words follow the
+// interface language (i18n/pages.ts); group and entry names stay as the playlist gives them.
 
 const MODES = [
   { mode: "live", label: "Live TV" },
@@ -46,7 +49,7 @@ const MODES = [
   { mode: "skip", label: "Skip" },
 ] as const satisfies readonly { mode: PlaylistMode; label: string }[];
 
-/** Why an entry stays out of the lists, in the desktop's words. */
+/** Why an entry stays out of the lists, in the desktop's words, as catalogue keys. */
 const OMISSIONS = {
   unmapped: "Group needs mapping",
   "conflicting-groups": "Groups have different mappings",
@@ -59,8 +62,9 @@ const OMISSIONS = {
 /** Left out entries shown at a time; Show more adds as many again. */
 const PAGE = 50;
 
-const ESCAPE: readonly Shortcut<"playlist-back">[] = [
-  { id: "playlist-back", input: "escape", command: false, title: "Back to the group" },
+/** Escape back to the group, titled in the interface language. */
+const escape = (): readonly Shortcut<"playlist-back">[] => [
+  { id: "playlist-back", input: "escape", command: false, title: t("Back to the group") },
 ];
 
 /** Where the playlist screen opens on `tab`: Home's at the root, the others' under their tab. */
@@ -115,6 +119,7 @@ export function useUnmapped(member: Member): number | null {
  * modes. The report is read again as the playlist's lists land.
  */
 export function PlaylistScreen({ id, view }: { id: string; view: PlaylistView }) {
+  useLocale();
   const roster = useRoster();
   const member =
     roster.kind === "ready" ? roster.members.find((each) => each.entry.id === id) : undefined;
@@ -143,15 +148,17 @@ export function PlaylistScreen({ id, view }: { id: string; view: PlaylistView })
     return () => controller.abort();
   }, [id, read, asked]);
 
-  if (roster.kind === "ready" && !member) return <Message text="This provider was removed." />;
-  if (reading.kind === "loading") return <Message text="Reading playlist" />;
+  if (roster.kind === "ready" && !member) {
+    return <Message text={t("This provider was removed.")} />;
+  }
+  if (reading.kind === "loading") return <Message text={t("Reading playlist")} />;
   if (reading.kind === "failed") {
     return (
       <Notice
         failure={readFailure(reading.error)}
         actions={[
           {
-            label: "Try again",
+            label: t("Try again"),
             onPress: () => {
               setReading({ kind: "loading" });
               setAsked((count) => count + 1);
@@ -193,7 +200,9 @@ export function PlaylistScreen({ id, view }: { id: string; view: PlaylistView })
   // False for Left out; undefined when the group is gone.
   const group =
     view.kind === "group" && reading.report.groups.find((each) => each.group === view.group);
-  if (group === undefined) return <Message text="This group is no longer in the playlist." />;
+  if (group === undefined) {
+    return <Message text={t("This group is no longer in the playlist.")} />;
+  }
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
       {group ? (
@@ -211,11 +220,11 @@ export function PlaylistScreen({ id, view }: { id: string; view: PlaylistView })
 function readFailure(error: AppError): Failure {
   const advice =
     error.kind === "unreachable" || error.kind === "provider-error"
-      ? "Your provider didn't answer. Try again in a moment."
+      ? t("Your provider didn't answer. Try again in a moment.")
       : error.kind === "needs-secret"
-        ? "Enter the playlist link again in Settings."
+        ? t("Enter the playlist link again in Settings.")
         : failureOf(error, "").headline;
-  return { headline: "Couldn't read the playlist", advice };
+  return { headline: t("Couldn't read the playlist"), advice };
 }
 
 interface Detail {
@@ -231,6 +240,7 @@ interface Detail {
  */
 function Groups({ id, ...detail }: Detail & { id: string }) {
   const { report } = detail;
+  const locale = useLocale();
   const tab = useTabs()?.tab ?? "(home)";
   const { split, width, gutter } = useListWidth();
   const [query, setQuery] = useState("");
@@ -247,7 +257,8 @@ function Groups({ id, ...detail }: Detail & { id: string }) {
   // Not under Watch, whose Escape closes it, nor under a screen pushed over this one.
   const { watch } = usePlayback();
   const focused = useIsFocused();
-  useShortcuts(split && leftOut && focused && !watch ? ESCAPE : NO_SHORTCUTS, () =>
+  const shortcuts = useMemo(escape, [locale]);
+  useShortcuts(split && leftOut && focused && !watch ? shortcuts : NO_SHORTCUTS, () =>
     setLeftOut(false),
   );
 
@@ -260,33 +271,51 @@ function Groups({ id, ...detail }: Detail & { id: string }) {
       keyboardShouldPersistTaps="handled"
       data={shown}
       keyExtractor={(each) => each.group}
+      // Rows draw again in a new language.
+      extraData={locale}
       ListHeaderComponent={
         <View>
           <View style={styles.counts}>
-            <Count value={report.status.live} label="Channels" />
-            <Count value={report.status.movies} label="Movies" />
-            <Count value={report.status.series} label="Series" />
-            <Count value={report.status.episodes} label="Episodes" />
+            <Count
+              value={report.status.live}
+              label={t("Channels")}
+              spoken={t("{count} channels", { count: report.status.live })}
+            />
+            <Count
+              value={report.status.movies}
+              label={t("Movies")}
+              spoken={t("{count} movies", { count: report.status.movies })}
+            />
+            <Count
+              value={report.status.series}
+              label={t("Series")}
+              spoken={t("{count} series", { count: report.status.series })}
+            />
+            <Count
+              value={report.status.episodes}
+              label={t("Episodes")}
+              spoken={t("{count} episodes", { count: report.status.episodes })}
+            />
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Left out, ${formatNumber(report.omissions.length)}`}
+            accessibilityLabel={t("Left out, {count}", { count: report.omissions.length })}
             accessibilityState={{ selected: split && leftOut }}
             onPress={() => (split ? setLeftOut(true) : push({ left: "1" }))}
             style={({ pressed }) => [styles.leftOut, pressed && styles.pressed]}
             testID="playlist-left-out"
           >
-            <Text style={styles.label}>Left out</Text>
+            <Text style={styles.label}>{t("Left out")}</Text>
             <Text style={styles.value}>{formatNumber(report.omissions.length)}</Text>
             <SymbolView name="chevron.right" size={14} tintColor={colors.dim} weight="semibold" />
           </Pressable>
           <View style={styles.search}>
             <SymbolView name="magnifyingglass" size={15} tintColor={colors.dim} />
             <TextInput
-              accessibilityLabel="Search groups"
+              accessibilityLabel={t("Search groups")}
               value={query}
               onChangeText={setQuery}
-              placeholder={`Search ${formatNumber(report.groups.length)} groups`}
+              placeholder={t("Search {count} groups", { count: report.groups.length })}
               placeholderTextColor={colors.dim}
               autoCapitalize="none"
               autoCorrect={false}
@@ -312,7 +341,7 @@ function Groups({ id, ...detail }: Detail & { id: string }) {
           }}
         />
       )}
-      ListEmptyComponent={<Text style={styles.none}>No group matches.</Text>}
+      ListEmptyComponent={<Text style={styles.none}>{t("No group matches.")}</Text>}
     />
   );
   if (!split) return list;
@@ -335,9 +364,10 @@ function Groups({ id, ...detail }: Detail & { id: string }) {
   );
 }
 
-function Count({ value, label }: { value: number; label: string }) {
+/** A count over its label, spoken as one phrase: "12 channels". */
+function Count({ value, label, spoken }: { value: number; label: string; spoken: string }) {
   return (
-    <View accessible accessibilityLabel={`${formatNumber(value)} ${label}`}>
+    <View accessible accessibilityLabel={spoken}>
       <Text style={styles.count}>{formatNumber(value)}</Text>
       <Text style={styles.small}>{label}</Text>
     </View>
@@ -345,10 +375,12 @@ function Count({ value, label }: { value: number; label: string }) {
 }
 
 /** An entry's group as the report names it. */
-const groupName = (group: string) => group || "Ungrouped";
-const entries = (count: number) => `${formatNumber(count)} ${count === 1 ? "entry" : "entries"}`;
-const modeLabel = (mode: PlaylistMode | null) =>
-  MODES.find((each) => each.mode === mode)?.label ?? "Needs mapping";
+const groupName = (group: string) => group || t("Ungrouped");
+const entries = (count: number) => t("{count} entries", { count });
+const modeLabel = (mode: PlaylistMode | null) => {
+  const label = MODES.find((each) => each.mode === mode)?.label;
+  return label ? t(label) : t("Needs mapping");
+};
 
 /** A group as a row: its name and size, and what it imports as, or that it needs mapping. */
 function GroupRow({
@@ -407,7 +439,7 @@ function GroupDetail({ group, saving, refused, pick }: Detail & { group: Playlis
         <Text style={styles.subtitle}>{entries(group.entries)}</Text>
       </View>
       <Text style={styles.section} accessibilityRole="header">
-        Import as
+        {t("Import as")}
       </Text>
       {MODES.map(({ mode, label }) => {
         const current = here ? here.mode === mode : group.mode === mode;
@@ -422,10 +454,10 @@ function GroupDetail({ group, saving, refused, pick }: Detail & { group: Playlis
             style={({ pressed }) => [styles.mode, (waiting || pressed) && styles.pressed]}
             testID={`playlist-mode-${mode}`}
           >
-            <Text style={styles.label}>{label}</Text>
+            <Text style={styles.label}>{t(label)}</Text>
             <View style={styles.trailing}>
               {here?.mode === mode ? (
-                <Text style={styles.value}>Saving</Text>
+                <Text style={styles.value}>{t("Saving")}</Text>
               ) : current ? (
                 <SymbolView name="checkmark" size={17} tintColor={colors.text} weight="semibold" />
               ) : null}
@@ -442,12 +474,12 @@ function GroupDetail({ group, saving, refused, pick }: Detail & { group: Playlis
         </View>
       ) : null}
       <Text style={styles.note}>
-        New groups wait for mapping. Entries in groups with different mappings stay out.
+        {t("New groups wait for mapping. Entries in groups with different mappings stay out.")}
       </Text>
       {group.samples.length > 0 ? (
         <>
           <Text style={[styles.section, styles.samples]} accessibilityRole="header">
-            Sample entries
+            {t("Sample entries")}
           </Text>
           {group.samples.map((sample, index) => (
             <Entry key={index} name={sample.name} why={sampleReason(sample, group.name)} />
@@ -463,8 +495,8 @@ function sampleReason({ reason, groups }: PlaylistSample, here: string): string 
   if (!reason) return null;
   const others = groups.map(groupName).filter((name) => name !== here);
   return reason === "conflicting-groups" && others.length > 0
-    ? `${OMISSIONS[reason]} · also in ${others.join(", ")}`
-    : OMISSIONS[reason];
+    ? t("{reason} · also in {groups}", { reason: t(OMISSIONS[reason]), groups: others.join(", ") })
+    : t(OMISSIONS[reason]);
 }
 
 /** Every entry left out of the lists, a page at a time. */
@@ -474,7 +506,7 @@ function LeftOutEntries({ omissions }: { omissions: readonly PlaylistOmission[] 
     <>
       <View style={styles.heading}>
         <Text style={styles.title} accessibilityRole="header">
-          Left out
+          {t("Left out")}
         </Text>
         <Text style={styles.subtitle}>{entries(omissions.length)}</Text>
       </View>
@@ -483,7 +515,7 @@ function LeftOutEntries({ omissions }: { omissions: readonly PlaylistOmission[] 
           <Entry
             key={index}
             name={omission.name}
-            why={[OMISSIONS[omission.reason], omission.groups.map(groupName).join(", ")].join(
+            why={[t(OMISSIONS[omission.reason]), omission.groups.map(groupName).join(", ")].join(
               " · ",
             )}
           />
@@ -492,7 +524,7 @@ function LeftOutEntries({ omissions }: { omissions: readonly PlaylistOmission[] 
       {shown < omissions.length ? (
         <View style={styles.more}>
           <TextButton
-            label="Show more"
+            label={t("Show more")}
             onPress={() => setShown((count) => count + PAGE)}
             testID="playlist-show-more"
           />

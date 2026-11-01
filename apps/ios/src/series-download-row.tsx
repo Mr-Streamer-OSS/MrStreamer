@@ -5,6 +5,8 @@ import { ActionSheetIOS, Alert, Pressable, StyleSheet, Text, View } from "react-
 import { useDownloads } from "./downloads.ts";
 import { appError, describeError } from "./errors.ts";
 import { openOnTabs, useTabs, type TabsAt } from "./header.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { inLanguage, t } from "./i18n/downloads.ts";
 import {
   cancelRemaining,
   countDownload,
@@ -23,47 +25,61 @@ import { colors } from "./ui.tsx";
 // ("2 of 6 saved or queued", Download remaining) and the whole series' after the episodes (Review
 // series download). Each asks first in a system sheet with its exact counts, then queues the
 // version shown one episode at a time; its row says how far it got and offers Cancel remaining.
-// How it went comes in an alert, with Retry failed and Open Downloads.
+// How it went comes in an alert, with Retry failed and Open Downloads. All of it is said in the
+// interface language as it shows.
 
-const episodes = (count: number) => `${count} ${count === 1 ? "episode" : "episodes"}`;
+const episodes = (count: number) => t("{count} episodes", { count });
 
 /** "4 queued. 1 failed: …", what a finished run did. */
 function summary(result: Result): string {
   const failed = result.failed[0];
   const before = episodes(result.cancelled);
   const said = [
-    result.added > 0 ? `${result.added} queued.` : null,
-    result.retried > 0 ? `${result.retried} retried.` : null,
-    result.replaced > 0 ? `${result.replaced} replaced.` : null,
-    result.skipped > 0 ? `${result.skipped} changed meanwhile and stayed as they were.` : null,
+    result.added > 0 ? t("{count} queued.", { count: result.added }) : null,
+    result.retried > 0 ? t("{count} retried.", { count: result.retried }) : null,
+    result.replaced > 0 ? t("{count} replaced.", { count: result.replaced }) : null,
+    result.skipped > 0
+      ? t("{count} changed meanwhile and stayed as they were.", { count: result.skipped })
+      : null,
     result.removed > 0
-      ? `${result.removed} missing ${result.removed === 1 ? "copy" : "copies"} removed and not queued again.`
+      ? t("{count} missing copies removed and not queued again.", { count: result.removed })
       : null,
-    failed ? `${result.failed.length} failed: ${failed.error}` : null,
-    result.stopped === "cancelled" ? `Cancelled before ${before}.` : null,
+    failed
+      ? t("{count} failed: {error}", { count: result.failed.length, error: failed.error })
+      : null,
+    result.stopped === "cancelled" ? t("Cancelled before {episodes}.", { episodes: before }) : null,
     result.stopped === "login"
-      ? `Stopped before ${before}: the provider signed in anew or was removed.`
+      ? t("Stopped before {episodes}: the provider signed in anew or was removed.", {
+          episodes: before,
+        })
       : null,
-    result.stopped === "left" ? `Stopped before ${before}: a version was chosen meanwhile.` : null,
+    result.stopped === "left"
+      ? t("Stopped before {episodes}: a version was chosen meanwhile.", { episodes: before })
+      : null,
   ].filter(Boolean);
-  return said.length > 0 ? said.join(" ") : "Nothing was added.";
+  return said.length > 0 ? said.join(" ") : t("Nothing was added.");
 }
 
 /** The sheet's counts: what is there already, and what will be done. */
 function message(plan: Plan): string {
   const total =
     plan.scope.kind === "series" && plan.seasons > 1
-      ? `${episodes(plan.episodes.length)} in ${plan.seasons} seasons.`
+      ? t("{episodes} in {seasons} seasons.", {
+          episodes: episodes(plan.episodes.length),
+          seasons: plan.seasons,
+        })
       : `${episodes(plan.episodes.length)}.`;
   return [
     total,
-    plan.held > 0 ? `${plan.held} already saved or queued.` : null,
-    plan.retry.length > 0 ? `${plan.retry.length} failed and will be retried.` : null,
-    plan.missing.length > 0
-      ? `${plan.missing.length} saved ${plan.missing.length === 1 ? "file is" : "files are"} missing.`
+    plan.held > 0 ? t("{count} already saved or queued.", { count: plan.held }) : null,
+    plan.retry.length > 0
+      ? t("{count} failed and will be retried.", { count: plan.retry.length })
       : null,
-    "Size unavailable.",
-    "Uses the selected version.",
+    plan.missing.length > 0
+      ? t("{count} saved files are missing.", { count: plan.missing.length })
+      : null,
+    t("Size unavailable."),
+    t("Uses the selected version."),
   ]
     .filter(Boolean)
     .join(" ");
@@ -93,8 +109,9 @@ export function SeriesDownloadRow({
   action: string;
   stands: () => { stands(): boolean };
 }) {
-  // Counted again as downloads change.
+  // Counted again as downloads change, and said again in a new language.
   useDownloads();
+  useLocale();
   const run = useSeriesRun();
   const tabs = useTabs();
   // As they are when a sheet or an alert answers.
@@ -116,13 +133,13 @@ export function SeriesDownloadRow({
       ...(retry
         ? [
             {
-              text: "Retry failed",
+              text: t("Retry failed"),
               onPress: () => begin(retry, true, started.label, started.asked),
             },
           ]
         : []),
-      { text: "Open Downloads", onPress: () => openDownloads(tabsNow.current) },
-      { text: "OK", style: "cancel" as const },
+      { text: t("Open Downloads"), onPress: () => openDownloads(tabsNow.current) },
+      { text: t("OK"), style: "cancel" as const },
     ]);
   }, [mine, started]);
   // A season row counts its own; the series row every episode of the version.
@@ -133,10 +150,10 @@ export function SeriesDownloadRow({
     const id = startDownload(plan, { replace, stands: asked.stands });
     if (id === null) {
       Alert.alert(
-        `Couldn't download ${name}`,
+        t("Couldn't download {name}", { name }),
         seriesRun()?.phase === "running"
-          ? "Episodes of another download are still being added."
-          : "The version or its provider changed. Try again.",
+          ? t("Episodes of another download are still being added.")
+          : t("The version or its provider changed. Try again."),
       );
       return;
     }
@@ -150,27 +167,39 @@ export function SeriesDownloadRow({
     try {
       plan = planDownload(details, version, scope);
     } catch (cause) {
-      Alert.alert(`Couldn't download ${label}`, describeError(appError(cause)));
+      Alert.alert(
+        t("Couldn't download {name}", { name: label }),
+        describeError(inLanguage(appError(cause))),
+      );
       return;
     }
     const remaining = plan.add.length + plan.retry.length;
     const missing = plan.missing.length;
     if (remaining + missing === 0) {
-      Alert.alert(`All ${episodes(plan.episodes.length)} are saved or queued.`, undefined, [
-        { text: "Open Downloads", onPress: () => openDownloads(tabsNow.current) },
-        { text: "OK", style: "cancel" },
-      ]);
+      Alert.alert(
+        t("All {count} episodes are saved or queued.", { count: plan.episodes.length }),
+        undefined,
+        [
+          { text: t("Open Downloads"), onPress: () => openDownloads(tabsNow.current) },
+          { text: t("OK"), style: "cancel" },
+        ],
+      );
       return;
     }
     const choices = [
-      ...(remaining > 0 ? [{ label: `Download ${episodes(remaining)}`, replace: false }] : []),
+      ...(remaining > 0
+        ? [{ label: t("Download {episodes}", { episodes: episodes(remaining) }), replace: false }]
+        : []),
       ...(missing > 0
         ? [
             {
               label:
                 remaining > 0
-                  ? `Download ${remaining} and replace ${missing} missing`
-                  : `Replace ${missing} missing ${missing === 1 ? "file" : "files"}`,
+                  ? t("Download {remaining} and replace {count} missing", {
+                      remaining,
+                      count: missing,
+                    })
+                  : t("Replace {count} missing files", { count: missing }),
               replace: true,
             },
           ]
@@ -179,9 +208,12 @@ export function SeriesDownloadRow({
     let answered = false;
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        title: scope.kind === "season" ? `Download ${label}?` : `Download all of ${label}?`,
+        title:
+          scope.kind === "season"
+            ? t("Download {name}?", { name: label })
+            : t("Download all of {name}?", { name: label }),
         message: message(plan),
-        options: [...choices.map((choice) => choice.label), "Cancel"],
+        options: [...choices.map((choice) => choice.label), t("Cancel")],
         cancelButtonIndex: choices.length,
       },
       (index) => {
@@ -200,11 +232,17 @@ export function SeriesDownloadRow({
     <View style={styles.row} testID={`bulk-${scope.kind}`}>
       <Text style={styles.count} numberOfLines={2}>
         {going
-          ? `Adding ${Math.min(going.done + 1, going.total)} of ${going.total}`
+          ? t("Adding {done} of {total}", {
+              done: Math.min(going.done + 1, going.total),
+              total: going.total,
+            })
           : [
-              scope.kind === "series" ? "Whole series" : null,
+              scope.kind === "series" ? t("Whole series") : null,
               counts.held > 0
-                ? `${counts.held} of ${counts.total} saved or queued`
+                ? t("{held} of {total} saved or queued", {
+                    held: counts.held,
+                    total: counts.total,
+                  })
                 : episodes(counts.total),
             ]
               .filter(Boolean)
@@ -217,7 +255,7 @@ export function SeriesDownloadRow({
           style={({ pressed }) => [styles.button, pressed && styles.pressed]}
           testID={`bulk-${scope.kind}-cancel`}
         >
-          <Text style={styles.label}>Cancel remaining</Text>
+          <Text style={styles.label}>{t("Cancel remaining")}</Text>
         </Pressable>
       ) : (
         <Pressable

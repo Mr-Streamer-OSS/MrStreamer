@@ -370,7 +370,7 @@ describe("Known audio/subtitles on the real title grids", () => {
       expect(button("Sort & filter")?.getAttribute("aria-pressed")).toBe("true");
       expect(button("Audio: English · 1")?.getAttribute("aria-pressed")).toBe("true");
       expect(posters()).toEqual([`title-${id}`]);
-      await click(`Show 1 ${kind === "movie" ? "movies" : "series"}`);
+      await click(`Show 1 ${kind === "movie" ? "movie" : "series"}`);
       await React.act(async () => memory.presses.get(`title-${id}`)!());
       expect(memory.routes.at(-1)).toBe(
         `/${kind === "movie" ? "films" : "series"}/title/${encodeURIComponent(`${app.id}:${id}`)}?asked=1`,
@@ -424,7 +424,7 @@ describe("Known audio/subtitles on the real title grids", () => {
     await click("Sort & filter");
     await found(app, "movie", "91000", ["nl"]);
     await click("Audio: Nederlands · 1");
-    await click("Show 1 movies");
+    await click("Show 1 movie");
     await click("4K");
     await click("Sort & filter");
     expect(container.textContent).not.toContain("Known audio/subtitles");

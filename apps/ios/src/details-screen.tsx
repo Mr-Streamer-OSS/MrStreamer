@@ -35,6 +35,8 @@ import {
 } from "./download-controls.tsx";
 import { useDownloadOf } from "./downloads.ts";
 import { Glass } from "./glass.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
+import { t } from "./i18n/library.ts";
 import {
   failureOf,
   resumeEpisode,
@@ -80,9 +82,9 @@ const NONE: readonly TitleProgress[] = [];
 /** What the version menu says of a version that failed. */
 function failureNote(failure: Failure | undefined): string | null {
   return failure === "file"
-    ? "Didn't play here"
+    ? t("Didn't play here")
     : failure === "episode"
-      ? "An episode didn't play here"
+      ? t("An episode didn't play here")
       : null;
 }
 
@@ -100,6 +102,8 @@ export function DetailsScreen({
   version: string;
   asked?: boolean;
 }) {
+  // A new language redraws the details where they stand: the version, season and scroll stay.
+  useLocale();
   const lists = useTitleLists();
   const metadata = useMetadataVersion();
   const opened = useMemo(() => versionOf(version), [version]);
@@ -111,7 +115,7 @@ export function DetailsScreen({
     return (
       <Message
         text={describeError(lists.error)}
-        action={{ label: "Try again", onPress: retryTitles }}
+        action={{ label: t("Try again"), onPress: retryTitles }}
       />
     );
   }
@@ -128,7 +132,7 @@ export function DetailsScreen({
       </Docked>
     );
   }
-  if (!title || !opened) return <Message text="The provider no longer lists this title." />;
+  if (!title || !opened) return <Message text={t("The provider no longer lists this title.")} />;
   return <Details title={title} opened={opened} asked={asked} />;
 }
 
@@ -274,8 +278,8 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
     // forgets it.
     ActionSheetIOS.showActionSheetWithOptions(
       {
-        title: "Version",
-        options: ["Automatic", ...choices.map((choice) => choice.label), "Cancel"],
+        title: t("Version"),
+        options: [t("Automatic"), ...choices.map((choice) => choice.label), t("Cancel")],
         cancelButtonIndex: choices.length + 1,
       },
       (index) => {
@@ -332,7 +336,7 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
           {title.kind === "movie" ? (
             <CapsuleButton
               symbol="play.fill"
-              label={movieProgress && !movieProgress.finished ? "Resume" : "Play"}
+              label={movieProgress && !movieProgress.finished ? t("Resume") : t("Play")}
               onPress={() =>
                 // After a failure, Watch closes onto this page and its version menu opens.
                 resumeMovie(shownTitle, version, movieProgress, chooseVersion, pressed())
@@ -348,7 +352,7 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
           )}
           <CapsuleButton
             symbol={saved ? "bookmark.fill" : "bookmark"}
-            label={saved ? "Saved" : "Save"}
+            label={saved ? t("Saved") : t("Save")}
             compact
             onPress={() => (saved ? removeTitle(title) : saveTitle(title))}
             testID="details-save"
@@ -372,7 +376,7 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
             title.year,
             facts?.duration ? runtime(facts.duration) : null,
             title.kind === "series" && facts?.kind === "series"
-              ? `${facts.seasons.length} ${facts.seasons.length === 1 ? "season" : "seasons"}`
+              ? t("{count} seasons", { count: facts.seasons.length })
               : null,
             (facts?.genres ?? title.genres).slice(0, 2).join(", ") || null,
             title.rating?.toFixed(1),
@@ -384,22 +388,31 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
         {versionLabel || title.versions.length > 1 ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Version, ${versionLabel || "as listed"}`}
-            accessibilityHint={title.versions.length > 1 ? "Chooses another version" : undefined}
+            accessibilityLabel={
+              versionLabel
+                ? t("Version, {version}", { version: versionLabel })
+                : t("Version, as listed")
+            }
+            accessibilityHint={title.versions.length > 1 ? t("Chooses another version") : undefined}
             disabled={title.versions.length < 2}
             onPress={chooseVersion}
             style={styles.version}
             testID="details-version"
           >
             <Text style={styles.versionText}>
-              {versionLabel || "As listed"}
+              {versionLabel || t("As listed")}
               {title.versions.length > 1 ? "  ⌄" : ""}
             </Text>
           </Pressable>
         ) : null}
         {failedHere ? (
           <Text style={styles.failure} testID="details-failed">
-            {`${failedHere === "episode" ? `An episode of ${versionLabel || "this version"}` : versionLabel || "This version"} didn't play on this iPhone.${title.versions.length > 1 ? " Try another version." : ""}`}
+            {[
+              failedNote(failedHere, versionLabel),
+              title.versions.length > 1 ? t("Try another version.") : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}
           </Text>
         ) : null}
         {movieProgress ? <Text style={styles.left}>{timeLeftOf(movieProgress) ?? ""}</Text> : null}
@@ -407,7 +420,7 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
           <Message
             text={details.error}
             action={{
-              label: "Try again",
+              label: t("Try again"),
               onPress: () => {
                 setRetried(details);
                 setAgain((count) => count + 1);
@@ -435,6 +448,18 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
   );
 }
 
+/** That the version shown, or an episode of it, didn't play on this iPhone. */
+function failedNote(failed: Failure, version: string): string {
+  if (failed === "episode") {
+    return version
+      ? t("An episode of {version} didn't play on this iPhone.", { version })
+      : t("An episode of this version didn't play on this iPhone.");
+  }
+  return version
+    ? t("{version} didn't play on this iPhone.", { version })
+    : t("This version didn't play on this iPhone.");
+}
+
 /** " · Downloaded, 2.1 GB" or " · Downloading 42%": the facts line's word for a download. */
 function DownloadFact({ of: ref }: { of: TitleRef }) {
   const download = useDownloadOf(ref);
@@ -451,13 +476,17 @@ function DownloadFact({ of: ref }: { of: TitleRef }) {
 function About({ facts, onRetry }: { facts: ShownDetails; onRetry: () => void }) {
   const credits = [
     facts.directors.length > 0
-      ? `${facts.kind === "movie" ? "Directed by" : "Created by"} ${facts.directors.slice(0, 2).join(", ")}`
+      ? t(facts.kind === "movie" ? "Directed by {names}" : "Created by {names}", {
+          names: facts.directors.slice(0, 2).join(", "),
+        })
       : null,
     facts.cast.length > 0
-      ? `With ${facts.cast
-          .slice(0, 4)
-          .map((person) => person.name)
-          .join(", ")}`
+      ? t("With {names}", {
+          names: facts.cast
+            .slice(0, 4)
+            .map((person) => person.name)
+            .join(", "),
+        })
       : null,
   ].filter(Boolean);
   const why = aboutReason(facts.about);
@@ -468,8 +497,8 @@ function About({ facts, onRetry }: { facts: ShownDetails; onRetry: () => void })
       {why ? <Text style={styles.dim}>{why}</Text> : null}
       {facts.about?.kind === "unavailable" ? (
         <TextButton
-          label="Try again"
-          accessibilityLabel="Ask TMDB again for this title"
+          label={t("Try again")}
+          accessibilityLabel={t("Ask TMDB again for this title")}
           onPress={onRetry}
           testID="details-about-retry"
         />
@@ -495,9 +524,10 @@ function aboutReason(about: AboutStanding | undefined): string | null {
   const style = new Date(savedAt ?? 0).getFullYear() === new Date().getFullYear() ? "day" : "date";
   const shown =
     savedAt === null
-      ? "Provider details only."
-      : `Saved TMDB facts from ${formatDate(savedAt, style)}.`;
-  return [shown, REASONS[about.kind]].filter(Boolean).join(" ");
+      ? t("Provider details only.")
+      : t("Saved TMDB facts from {date}.", { date: formatDate(savedAt, style) });
+  const reason = REASONS[about.kind];
+  return reason ? `${shown} ${t(reason)}` : shown;
 }
 
 /** Play for a series: where its episodes say it goes on. */
@@ -522,10 +552,10 @@ function SeriesPlay({
       ? continuation(details, standing.value.progress, standing.value.marks)
       : null;
   const label = !goesOn
-    ? "Play"
-    : goesOn.resume
-      ? `Resume ${episodeLabel(goesOn.episode.season, goesOn.episode.number)}`
-      : `Play ${episodeLabel(goesOn.episode.season, goesOn.episode.number)}`;
+    ? t("Play")
+    : t(goesOn.resume ? "Resume {episode}" : "Play {episode}", {
+        episode: episodeLabel(goesOn.episode.season, goesOn.episode.number),
+      });
   return (
     <CapsuleButton
       symbol="play.fill"
@@ -570,7 +600,11 @@ function Seasons({
     sequence,
   );
   const [season, setSeason] = useState<number | null>(null);
-  const [undo, setUndo] = useState<{ mark: EpisodeMark; label: string } | null>(null);
+  const [undo, setUndo] = useState<{
+    mark: EpisodeMark;
+    episode: Episode;
+    watched: boolean;
+  } | null>(null);
   // The record goes by the episodes these details list.
   useEffect(() => {
     void relist(version, title).catch(() => undefined);
@@ -591,7 +625,7 @@ function Seasons({
       [title, shown],
     ),
   );
-  if (!shown) return <Message text="No episodes listed." />;
+  if (!shown) return <Message text={t("No episodes listed.")} />;
   const rows: readonly (Episode | EpisodeDetails)[] =
     episodes.kind === "ready" ? episodes.value : shown.episodes;
   const stateOf = value ? episodeStates(value.progress, value.marks) : null;
@@ -609,12 +643,7 @@ function Seasons({
       },
       watched,
     ).then(
-      (made) =>
-        made &&
-        setUndo({
-          mark: made,
-          label: `${episodeLabel(episode.season, episode.number)} marked ${watched ? "watched" : "unwatched"}`,
-        }),
+      (made) => made && setUndo({ mark: made, episode, watched }),
       () => undefined,
     );
 
@@ -634,12 +663,16 @@ function Seasons({
         version={version}
         scope={{ kind: "season", season: shown.number }}
         label={shown.name}
-        action="Download remaining"
+        action={t("Download remaining")}
         stands={bulk}
       />
       {undoable ? (
         <View style={styles.undo} accessibilityLiveRegion="polite">
-          <Text style={styles.undoText}>{undoable.label}</Text>
+          <Text style={styles.undoText}>
+            {t(undoable.watched ? "{episode} marked watched" : "{episode} marked unwatched", {
+              episode: episodeLabel(undoable.episode.season, undoable.episode.number),
+            })}
+          </Text>
           <Pressable
             accessibilityRole="button"
             onPress={() => {
@@ -649,7 +682,7 @@ function Seasons({
             style={styles.undoButton}
             testID="episode-undo"
           >
-            <Text style={styles.undoLabel}>Undo</Text>
+            <Text style={styles.undoLabel}>{t("Undo")}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -674,7 +707,7 @@ function Seasons({
           version={version}
           scope={{ kind: "series" }}
           label={title.title}
-          action="Review series download"
+          action={t("Review series download")}
           stands={bulk}
         />
       ) : null}
@@ -708,15 +741,26 @@ function EpisodeRow({
   };
   const download = useDownloadOf(ref);
   const named = `${name} · ${episodeLabel(episode.season, episode.number)}`;
-  const markLabel = watched ? "Mark unwatched" : "Mark watched";
   // Marking first, then what its download allows, as the sheet and VoiceOver offer them.
   const actions: readonly DownloadAction[] = [
-    { label: markLabel, destructive: false, run: () => onMark(!watched) },
+    watched
+      ? {
+          name: "Mark unwatched",
+          label: t("Mark unwatched"),
+          destructive: false,
+          run: () => onMark(false),
+        }
+      : {
+          name: "Mark watched",
+          label: t("Mark watched"),
+          destructive: false,
+          run: () => onMark(true),
+        },
     ...(download ? actionsOf(download) : [downloadAction(ref, named)]),
   ];
   const line = [
     episode.duration ? runtime(episode.duration) : null,
-    watched ? "Watched" : timeLeftOf(progress),
+    watched ? t("Watched") : timeLeftOf(progress),
     download ? stateWord(download) : null,
   ]
     .filter(Boolean)
@@ -725,14 +769,15 @@ function EpisodeRow({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${episode.number}, ${episode.title}${line ? `, ${line}` : ""}`}
+      // Each action keeps its English name in every language; VoiceOver reads its label.
       accessibilityActions={[
         { name: "activate" },
-        ...actions.map((action) => ({ name: action.label, label: action.label })),
+        ...actions.map((action) => ({ name: action.name, label: action.label })),
       ]}
       onAccessibilityAction={(event: AccessibilityActionEvent) => {
         const { actionName } = event.nativeEvent;
         if (actionName === "activate") onPlay();
-        else actions.find((action) => action.label === actionName)?.run();
+        else actions.find((action) => action.name === actionName)?.run();
       }}
       onPress={onPlay}
       onLongPress={() => showActions(download, actions)}
@@ -776,7 +821,7 @@ function Related({ title }: { title: Title }) {
     [made, title],
   );
   if (like.length === 0) return null;
-  return <Shelf name="More like this" titles={like} onPress={(each) => openDetails(each)} />;
+  return <Shelf name={t("More like this")} titles={like} onPress={(each) => openDetails(each)} />;
 }
 
 /** A button in the details' glass capsule: a symbol, with its label where there's room. */

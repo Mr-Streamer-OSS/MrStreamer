@@ -1230,6 +1230,26 @@ describe("Every movie and series that matches", () => {
     expect(scenario.did).toEqual(["back"]);
   });
 
+  it("says what it found in a new language, keeping the text, what shows and Show more", async () => {
+    await searchOcean();
+    await press(moreOf("movie", 20));
+    try {
+      React.act(() => setLanguage({ locale: "fr-FR", formats: "fr-FR" }));
+      await settled();
+      expect(field().value).toBe("ocean");
+      expect(shownIds("movie")).toEqual(ids("m", 40));
+      expect(shownIds("series")).toEqual(ids("s", 20));
+      expect(text()).toContain("Films · 40 sur 125");
+      expect(text()).toContain("Séries · 20 sur 125");
+      expect(text()).not.toMatch(/Movies|Show \d+ more/);
+      await press("text-Afficher 20 films de plus");
+      expect(shownIds("movie")).toEqual(ids("m", 60));
+      expect(scenario.did).toEqual([]);
+    } finally {
+      setLanguage({ locale: "en-US", formats: "en-US" });
+    }
+  });
+
   it("finds them again in new lists and names, keeping how many show, never twice", async () => {
     // Northwind lists 125 movies; Southwind 30 newer than all of them, ranked first.
     const northwind = titled("movie", "m", "Ocean", 125);
