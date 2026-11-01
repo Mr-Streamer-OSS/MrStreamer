@@ -904,6 +904,30 @@ export function createGuide(
       const answer = await query(captured, "detail", { from: 0, until: 0 }, options?.signal);
       return !options?.signal?.aborted && validToken(captured) ? (answer?.rows[0] ?? null) : null;
     },
+    /**
+     * The programme channel `key` (`Channel.key`) has starting exactly at `start`, from the
+     * first guide with current programmes for it, as `listings` reads it: null where that guide
+     * lists nothing starting then, undefined where no guide answers for the channel now or one
+     * that stands couldn't be read, so nothing is known.
+     */
+    async programmeAt(
+      key: string,
+      start: number,
+      options?: { readonly signal?: AbortSignal },
+    ): Promise<Programme | null | undefined> {
+      for (const captured of candidates(key)) {
+        const answer = await query(
+          { ...captured, start },
+          "detail",
+          { from: 0, until: 0 },
+          options?.signal,
+        );
+        // `ask` answers null for a read aborted, or withdrawn meanwhile.
+        if (!answer) return undefined;
+        if (answer.guideId) return answer.rows[0] ?? null;
+      }
+      return undefined;
+    },
   };
   return service;
 }

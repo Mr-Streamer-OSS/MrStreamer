@@ -1,10 +1,12 @@
 import type { Programme as Aired } from "@mrstreamer/contracts/guide";
 import { archiveHolds } from "@mrstreamer/core/catchup";
+import { t } from "@mrstreamer/core/i18n";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   FlatList,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,10 +28,11 @@ import {
   useGuideSchedule,
   type GuideOrigin,
 } from "./guide-ui.tsx";
-import { describeError } from "./errors.ts";
+import { appError, describeError } from "./errors.ts";
 import { tabHref } from "./header.tsx";
 import type { Channel, Library } from "./library.ts";
-import { colors, Message, TextButton, useListWidth } from "./ui.tsx";
+import { cancelReminder, setReminder, useReminder } from "./reminders.ts";
+import { colors, Message, ReminderBell, TextButton, useListWidth } from "./ui.tsx";
 
 const parameter = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : "";
@@ -203,25 +206,32 @@ function Schedule({
   );
 }
 
+/**
+ * A programme by the owner's `detail` token, or, from a reminder's notification, by its channel
+ * and `start`, which no token outlives.
+ */
 export function ProgrammeScreen({ origin }: { origin: GuideOrigin }) {
-  const params = useLocalSearchParams<{ channel?: string; detail?: string }>();
+  const params = useLocalSearchParams<{ channel?: string; detail?: string; start?: string }>();
+  const start = Number(parameter(params.start));
   return (
     <Programme
       channel={parameter(params.channel)}
       detail={parameter(params.detail)}
+      {...(Number.isFinite(start) && start > 0 ? { start } : {})}
       origin={origin}
     />
   );
 }
 
 /**
- * One programme of a channel's Schedule, by the owner's detail token: a pushed screen, or Live's
- * detail column, which passes `onBack` for the Back a pushed screen has in its top bar, named
- * `back` for where it returns.
+ * One programme of a channel's Schedule, by the owner's detail token, else the one starting at
+ * `start`: a pushed screen, or Live's detail column, which passes `onBack` for the Back a pushed
+ * screen has in its top bar, named `back` for where it returns.
  */
 export function Programme({
   channel: key,
   detail,
+  start,
   origin,
   onBack,
   onSettings,
@@ -229,6 +239,7 @@ export function Programme({
 }: {
   channel: string;
   detail: string;
+  start?: number;
   origin: GuideOrigin;
   onBack?: () => void;
   onSettings?: () => void;
@@ -240,9 +251,12 @@ export function Programme({
   const channel = library?.byKey.get(key);
   const heading = useAnnounced(onBack !== undefined && channel !== undefined);
   const load = useCallback(
-    (signal: AbortSignal) =>
-      channel && library ? guide.programme(detail, { signal }) : Promise.resolve(null),
-    [channel, library, detail],
+    async (signal: AbortSignal) => {
+      if (!channel || !library) return null;
+      if (detail || start === undefined) return guide.programme(detail, { signal });
+      return (await guide.programmeAt(channel.key, start, { signal })) ?? null;
+    },
+    [channel, library, detail, start],
   );
   const read = useGuideRead(load, channel ? [channel.subscriptionId] : []);
   const listing = useMemo(() => ({ now: read.value ?? null, next: null }), [read.value]);
@@ -250,6 +264,8 @@ export function Programme({
   const catchUp: CatchUp =
     read.value && channel ? catchUpOf(channel, read.value, read.now) : { kind: "later" };
   const kept = catchUp.kind === "past" || catchUp.kind === "on";
+  const reminder = useReminder(channel?.key ?? key, read.value?.start);
+  const belled = reminder?.status.kind === "upcoming";
   if (!channel || !library) {
     return (
       <Message
@@ -274,12 +290,22 @@ export function Programme({
           <Text accessibilityRole="header" style={styles.title}>
             {read.value.title}
           </Text>
-          <Text
-            style={styles.copy}
-            accessibilityLabel={kept ? `${programmeRange(read.value)}, catch-up` : undefined}
+          <View
+            style={styles.time}
+            accessible
+            accessibilityLabel={
+              kept
+                ? `${programmeRange(read.value)}, catch-up`
+                : belled
+                  ? `${programmeRange(read.value)}, ${t("Reminder set")}`
+                  : undefined
+            }
           >
-            {kept ? `${programmeRange(read.value)} ↺` : programmeRange(read.value)}
-          </Text>
+            <Text style={styles.copy}>
+              {kept ? `${programmeRange(read.value)} ↺` : programmeRange(read.value)}
+            </Text>
+            {belled ? <ReminderBell /> : null}
+          </View>
           <ProgrammeProgress value={progress} />
           {read.value.description ? (
             <Text style={styles.copy}>{read.value.description}</Text>
@@ -313,6 +339,14 @@ export function Programme({
         {read.value && catchUp.kind === "on" ? (
           <FromStart channel={channel} programme={read.value} />
         ) : null}
+        {read.value && read.value.start > read.now && !channel.adult ? (
+          <RemindMe
+            key={`${channel.key}@${read.value.start}`}
+            channel={channel}
+            programme={read.value}
+            reminder={reminder?.id ?? null}
+          />
+        ) : null}
       </View>
       {read.value && read.value.stop <= read.now && catchUp.kind === "none" ? (
         <Text style={styles.copy}>{describeError({ kind: "catch-up", reason: "none" })}</Text>
@@ -323,6 +357,77 @@ export function Programme({
         </Text>
       ) : null}
     </ScrollView>
+  );
+}
+
+/**
+ * Remind me on a programme still to come, or Cancel reminder once one is set (`reminder`, its id).
+ * Where iOS refuses notifications nothing is saved, and a line under the actions offers iOS
+ * Settings; one past the 64 iOS holds, one whose programme began meanwhile, or a save or
+ * cancel that failed, says so there. Keyed by programme, so that line goes with it.
+ */
+function RemindMe({
+  channel,
+  programme,
+  reminder,
+}: {
+  channel: Channel;
+  programme: Aired;
+  reminder: string | null;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<"refused" | "full" | "started" | "failed" | null>(null);
+  const run = async (change: () => Promise<"set" | "denied" | "full" | void>) => {
+    setBusy(true);
+    try {
+      const done = await change();
+      setNote(done === "denied" ? "refused" : done === "full" ? "full" : null);
+    } catch (cause) {
+      const error = appError(cause);
+      // The programme began while iOS asked: Try again can't set it.
+      setNote(error.kind === "reminder" && error.reason === "started" ? "started" : "failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      {reminder ? (
+        <TextButton
+          label="Cancel reminder"
+          disabled={busy}
+          onPress={() => void run(() => cancelReminder(reminder))}
+          testID="guide-cancel-reminder"
+        />
+      ) : (
+        <TextButton
+          label={t("Remind me")}
+          disabled={busy}
+          onPress={() => void run(() => setReminder(channel, programme))}
+          testID="guide-remind-me"
+        />
+      )}
+      {note === "refused" ? (
+        <View style={styles.note}>
+          <Text style={styles.copy}>
+            Notifications are off for Mr. Streamer, so no reminder was set.
+          </Text>
+          <TextButton
+            label="Open iOS Settings"
+            onPress={() => void Linking.openSettings()}
+            testID="guide-open-settings"
+          />
+        </View>
+      ) : note === "full" ? (
+        <Text style={[styles.copy, styles.note]}>
+          iOS holds 64 reminders. Cancel one to set another.
+        </Text>
+      ) : note === "started" ? (
+        <Text style={[styles.copy, styles.note]}>{t("This programme has started.")}</Text>
+      ) : note === "failed" ? (
+        <Text style={[styles.copy, styles.note]}>{t("Couldn't save. Try again.")}</Text>
+      ) : null}
+    </>
   );
 }
 
@@ -412,7 +517,9 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 24, fontWeight: "700", marginVertical: 12 },
   channel: { color: colors.text, fontSize: 17, marginTop: 12 },
   copy: { color: colors.text, fontSize: 15, marginVertical: 8 },
+  time: { flexDirection: "row", alignItems: "center", gap: 6 },
   actions: { flexDirection: "row", flexWrap: "wrap", columnGap: 22 },
+  note: { flexBasis: "100%" },
   days: {
     flexDirection: "row",
     flexWrap: "wrap",

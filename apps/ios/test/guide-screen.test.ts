@@ -95,6 +95,7 @@ vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: [] }),
   onRoster: () => () => {},
   onCatalogue: () => () => {},
+  currentCatalogue: () => state.catalogue,
   useCatalogue: () => state.catalogue,
   useRoster: () => ({ kind: "ready", members: [] }),
   playChannel: (channel: Channel, _place: string, options: { watch: boolean }) =>
@@ -1008,8 +1009,12 @@ describe("a programme's catch-up", () => {
     expect(state.did.at(-1)).toMatchObject({ programme: { start: current.start } });
   });
 
+  it("offers one still to come a reminder after Watch live, and no catch-up", async () => {
+    expect(await actions(next, 3)).toEqual(["Watch live", "Remind me"]);
+    expect(container.textContent).not.toContain("↺");
+  });
+
   it.each([
-    { days: 3, programme: next, says: null },
     { days: null, programme: current, says: null },
     { days: null, programme: ended, says: "This channel has no catch-up." },
     {
@@ -1089,6 +1094,38 @@ describe("Live on iPad and Duo windows", () => {
           name: "schedule",
           params: { channel: "a:1", day: String(new Date(2026, 9, 25).getTime()) },
         },
+        target: "live-stack",
+      },
+    ]);
+  });
+
+  it("takes a reminder's programme, opened by its start, into the column and back", async () => {
+    state.answer = async (mode, _ids, _from, _until, after) =>
+      mode === "detail" && after === next.start ? answer([next]) : answer([current, next]);
+    state.stack = {
+      key: "live-stack",
+      index: 1,
+      routes: [
+        { name: "index" },
+        { name: "programme", params: { channel: "a:1", start: String(next.start) } },
+      ],
+    };
+    state.window = { width: 951, height: 669, fontScale: 1 };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(pushes()).toEqual([{ type: "POP_TO_TOP", target: "live-stack" }]);
+    state.stack = { key: "live-stack", index: 0, routes: [{ name: "index" }] };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(detail()?.textContent).toContain(next.title);
+    state.did = [];
+    state.window = { width: 390, height: 844, fontScale: 1 };
+    await draw(React.createElement(LiveTab));
+    await settle();
+    expect(pushes()).toEqual([
+      {
+        type: "PUSH",
+        payload: { name: "programme", params: { channel: "a:1", start: String(next.start) } },
         target: "live-stack",
       },
     ]);

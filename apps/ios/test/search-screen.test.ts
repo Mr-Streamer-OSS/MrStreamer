@@ -152,6 +152,9 @@ vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   useCatalogue: () => scenario.catalogue,
+  // What reminders.ts reads beside the programme details.
+  currentCatalogue: () => scenario.catalogue,
+  onCatalogue: () => () => {},
   playChannel: (channel: Channel, _place: string, options: { watch: boolean }) => {
     scenario.did.push(`play ${channel.key}${options.watch ? " in Watch" : ""}`);
     scenario.watching ||= options.watch;

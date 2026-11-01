@@ -1,3 +1,4 @@
+import { t } from "@mrstreamer/core/i18n";
 import { router, useNavigation, useRootNavigationState } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -22,7 +23,8 @@ import {
 import { failureOf } from "./errors.ts";
 import { starChannel, useFavouriteKeys } from "./favourites.ts";
 import { FavouritesEntry } from "./favourites-screen.tsx";
-import { ListEntries, openListSheet } from "./custom-lists-screen.tsx";
+import { Entry, ListEntries, openListSheet } from "./custom-lists-screen.tsx";
+import { useReminders } from "./reminders.ts";
 import { Glass, IconButton } from "./glass.tsx";
 import type { ScheduleItem } from "./guide.ts";
 import {
@@ -125,13 +127,15 @@ const watch = (library: Library, channel: Channel) =>
 /**
  * What Live's detail column shows, beside the list from the split width (`splitAt` in ui.tsx): a
  * channel's Schedule on a day (null for Today), with one of its programmes over it, or, `alone`,
- * a programme chosen in the Guide grid with no Schedule under it. Below that width the same
- * Schedule and Programme are screens pushed on Live's stack instead.
+ * a programme chosen in the Guide grid, or a reminder's opened by its `start`, with no Schedule
+ * under it. Below that width the same Schedule and Programme are screens pushed on Live's stack
+ * instead.
  */
 interface Detail {
   readonly channel: string;
   readonly day: number | null;
   readonly programme: string | null;
+  readonly start?: number;
   readonly alone?: true;
 }
 
@@ -185,12 +189,20 @@ function useHandover(split: boolean) {
   useEffect(() => {
     if (!split || !stack || !target) return;
     const [, schedule, programme, ...rest] = stack.routes;
-    // A programme pushed from the Guide grid, with no Schedule under it.
+    // A programme pushed from the Guide grid, or a reminder's notification, with no Schedule
+    // under it.
     const chosen = schedule?.name === "programme" && !programme ? schedule : null;
     const alone = text(chosen?.params, "channel");
     const token = text(chosen?.params, "detail");
-    if (alone && token) {
-      detail.set({ channel: alone, day: null, programme: token, alone: true });
+    const start = Number(text(chosen?.params, "start"));
+    if (alone && (token || start > 0)) {
+      detail.set({
+        channel: alone,
+        day: null,
+        programme: token,
+        ...(token ? {} : { start }),
+        alone: true,
+      });
       navigation.dispatch({ type: "POP_TO_TOP", target });
       return;
     }
@@ -214,8 +226,13 @@ function useHandover(split: boolean) {
     const day = shown.day === null ? {} : { day: String(shown.day) };
     const push = (name: string, params: object) =>
       navigation.dispatch({ type: "PUSH", payload: { name, params }, target });
-    if (shown.alone && shown.programme) {
-      push("programme", { channel: shown.channel, detail: shown.programme });
+    if (shown.alone) {
+      push(
+        "programme",
+        shown.programme
+          ? { channel: shown.channel, detail: shown.programme }
+          : { channel: shown.channel, start: String(shown.start) },
+      );
       return;
     }
     push("schedule", { channel: shown.channel, ...day });
@@ -244,16 +261,17 @@ function LiveDetail() {
       </ScrollView>
     );
   }
-  if (shown.alone && shown.programme) {
+  if (shown.alone) {
     return (
       <View style={styles.detail} testID="live-detail">
         <Programme
-          key={shown.programme}
+          key={shown.programme ?? shown.start}
           channel={shown.channel}
-          detail={shown.programme}
+          detail={shown.programme ?? ""}
+          {...(shown.start === undefined ? {} : { start: shown.start })}
           origin="live"
           onBack={closeDetail}
-          back="Back to Guide"
+          back={shown.programme ? "Back to Guide" : "Back"}
         />
       </View>
     );
@@ -324,15 +342,29 @@ export function LiveHome() {
   return <Channels lead={<Entries />}>{(library) => <Browse library={library} />}</Channels>;
 }
 
+/** Live's Reminders row, after Favourites and the viewer's lists, with how many are set. */
+function RemindersEntry() {
+  const list = useReminders();
+  return (
+    <Entry
+      name={t("Reminders")}
+      count={list.kind === "read" ? list.reminders.length : 0}
+      onPress={() => router.push("/live/reminders")}
+      testID="live-reminders"
+    />
+  );
+}
+
 /**
- * Live's own rows, before its tabs: Favourites, the viewer's lists, and Find countries or
- * categories. A category's screen has none of these rows.
+ * Live's own rows, before its tabs: Favourites, the viewer's lists, Reminders, and Find countries
+ * or categories. A category's screen has none of these rows.
  */
 function Entries() {
   return (
     <>
       <FavouritesEntry />
       <ListEntries />
+      <RemindersEntry />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Find countries or categories"
