@@ -5,7 +5,6 @@ import { ActionSheetIOS, Alert, Pressable, StyleSheet, Text, View } from "react-
 import { useDownloads } from "./downloads.ts";
 import { appError, describeError } from "./errors.ts";
 import { openOnTabs, useTabs, type TabsAt } from "./header.tsx";
-import { useLocale } from "./i18n/catalogue.ts";
 import { inLanguage, t } from "./i18n/downloads.ts";
 import {
   cancelRemaining,
@@ -109,9 +108,8 @@ export function SeriesDownloadRow({
   action: string;
   stands: () => { stands(): boolean };
 }) {
-  // Counted again as downloads change, and said again in a new language.
+  // Counted again as downloads change; the details around it draw it again in a new language.
   useDownloads();
-  useLocale();
   const run = useSeriesRun();
   const tabs = useTabs();
   // As they are when a sheet or an alert answers.

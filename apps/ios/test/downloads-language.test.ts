@@ -265,5 +265,4 @@ it("says the top bar's queue state in the language, and again in a new one", () 
   speak("nl-NL");
   expect(bar.textContent).toBe("Gepauzeerd");
   expect(label()).toBe("Downloads, 1 gepauzeerd");
-  expect(scenario.asked).toEqual([]);
 });

@@ -993,7 +993,7 @@ interface Row {
  * the file's own are off meanwhile, so Picture in Picture and AirPlay show none.
  */
 const IN_PLAYER_ONLY =
-  "Downloaded subtitles show in this player only. While one is on, Picture in Picture and AirPlay show no subtitles." as const;
+  "Downloaded subtitles show in this player only. While one is on, Picture in Picture and AirPlay show no subtitles.";
 
 /**
  * The Subtitles sheet's rows for a movie or an episode: the file's own tracks and Off, the

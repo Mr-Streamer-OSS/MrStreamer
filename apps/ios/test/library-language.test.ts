@@ -182,8 +182,12 @@ const button = (label: string) => {
     (each) => each.getAttribute("aria-label") === label,
   );
   if (!found) throw new Error(`No button labelled ${label}`);
-  return found as unknown as { click(): void; getAttribute(name: string): string | null };
+  return found;
 };
+const version = () =>
+  [...container.querySelectorAll("button")].find(
+    (each) => each.getAttribute("data-testid") === "details-version",
+  );
 const press = (label: string) => React.act(() => button(label).click());
 const grid = () => container.querySelector('[data-testid="grid"]')?.textContent;
 
@@ -254,13 +258,7 @@ it("shows a title's details in the language, keeping the version picked for Play
   mount(React.createElement(DetailsScreen, { kind: "movie", version: "a:1" }));
   expect(button("Reproducir")).toBeTruthy();
   expect(button("Guardar")).toBeTruthy();
-  React.act(() =>
-    (
-      container.querySelector('[data-testid="details-version"]') as never as {
-        click(): void;
-      }
-    ).click(),
-  );
+  React.act(() => version()!.click());
   expect(scenario.menu?.title).toBe("Versión");
   expect(scenario.menu?.options[0]).toBe("Automática");
   expect(scenario.menu?.options.at(-1)).toBe("Cancelar");
@@ -271,9 +269,7 @@ it("shows a title's details in the language, keeping the version picked for Play
   speak("nl-NL");
   expect(text()).toContain("Same movie");
   expect(button("Bewaren")).toBeTruthy();
-  expect(
-    container.querySelector('[data-testid="details-version"]')?.getAttribute("aria-label"),
-  ).toMatch(/^Versie, Cabin/);
+  expect(version()?.getAttribute("aria-label")).toMatch(/^Versie, Cabin/);
   press("Afspelen");
   expect(scenario.played).toEqual([{ subscriptionId: "b", id: "1" }]);
 });

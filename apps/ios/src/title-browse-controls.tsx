@@ -5,7 +5,6 @@ import { languageName as trackLanguageName } from "@mrstreamer/core/ondemand/tra
 import { useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/library.ts";
 import { DEFAULT_BROWSE, type BrowseChoices, type BrowsedCollection } from "./title-browse.ts";
 
@@ -49,7 +48,6 @@ export function BrowseControls({
   result: BrowsedCollection | null;
   onChange: (choices: BrowseChoices) => void;
 }) {
-  useLocale();
   const [open, setOpen] = useState(false);
   const count = result
     ? t(kind === "movie" ? "{shown} of {count} movies" : "{shown} of {count} series", {

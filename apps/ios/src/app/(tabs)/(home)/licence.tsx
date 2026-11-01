@@ -22,8 +22,11 @@ const WORDS = [
   "JavaScript and native code",
 ] as const;
 
-const known = (text: string): text is (typeof WORDS)[number] => WORDS.some((word) => word === text);
-const said = (text: string) => (known(text) ? t(text) : text);
+/** `text` in the interface language when it is one of the build's own words; else as it came. */
+function said(text: string): string {
+  const word = WORDS.find((each) => each === text);
+  return word ? t(word) : text;
+}
 
 /**
  * One component of Licences, by `id`: its licence and facts, where its source is, then each of its

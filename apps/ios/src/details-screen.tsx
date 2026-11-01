@@ -742,20 +742,9 @@ function EpisodeRow({
   const download = useDownloadOf(ref);
   const named = `${name} · ${episodeLabel(episode.season, episode.number)}`;
   // Marking first, then what its download allows, as the sheet and VoiceOver offer them.
+  const mark = watched ? "Mark unwatched" : "Mark watched";
   const actions: readonly DownloadAction[] = [
-    watched
-      ? {
-          name: "Mark unwatched",
-          label: t("Mark unwatched"),
-          destructive: false,
-          run: () => onMark(false),
-        }
-      : {
-          name: "Mark watched",
-          label: t("Mark watched"),
-          destructive: false,
-          run: () => onMark(true),
-        },
+    { name: mark, label: t(mark), destructive: false, run: () => onMark(!watched) },
     ...(download ? actionsOf(download) : [downloadAction(ref, named)]),
   ];
   const line = [

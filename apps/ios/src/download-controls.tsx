@@ -25,7 +25,6 @@ import {
   useDownloadOf,
 } from "./downloads.ts";
 import { appError, describeError } from "./errors.ts";
-import { useLocale } from "./i18n/catalogue.ts";
 import { inLanguage, t } from "./i18n/downloads.ts";
 
 // What a download says and what can be done with it, wherever one shows: Downloads' rows, the
@@ -476,7 +475,6 @@ export function DownloadButton({
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }) {
-  useLocale();
   const download = useDownloadOf(ref);
   const press = () => {
     if (!download) return queue(ref, name);
