@@ -2599,16 +2599,29 @@ describe("offline Next", { timeout: 30_000 }, () => {
     await app.stop();
   });
 
-  for (const change of ["removed during the countdown", "lost before the end"] as const) {
+  for (const change of [
+    "removed during the countdown",
+    "lost before the end",
+    "truncated before the end",
+    "truncated at countdown completion",
+  ] as const) {
     it(`plays and streams nothing when the next copy is ${change}`, async () => {
       const { app, from, to } = await pair();
       const requests = one.fileRequests();
       await ends(app, from.id, () => {
         if (change === "lost before the end") mediaFile(to.id)!.delete();
+        if (change === "truncated before the end") mediaFile(to.id)!.writeSync("x");
       });
       if (change === "removed during the countdown") {
         expect(app.upNextState.get()).not.toBeNull();
         await app.removeDownload(to.id);
+        vi.advanceTimersByTime(1_000);
+      }
+      if (change === "truncated at countdown completion") {
+        expect(app.upNextState.get()).toMatchObject({ seconds: 10 });
+        vi.advanceTimersByTime(9_000);
+        expect(app.upNextState.get()).toMatchObject({ seconds: 1 });
+        mediaFile(to.id)!.writeSync("x");
         vi.advanceTimersByTime(1_000);
       }
       expect(app.upNextState.get()).toBeNull();

@@ -2046,7 +2046,8 @@ function nextCopy(record: Stored): Stored | undefined {
     copy.title.episode === edge.title.episode
   ) {
     try {
-      if (mediaOf(copy).exists) return copy;
+      const media = mediaOf(copy);
+      if (media.exists && media.size === copy.size) return copy;
     } catch {
       // An unreadable successor cannot prevent this copy from playing.
     }
