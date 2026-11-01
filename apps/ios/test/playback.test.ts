@@ -55,8 +55,15 @@ const sheets: Array<{
   options: readonly string[];
   pick: (index: number) => void;
 }> = [];
+// What VoiceOver was told, in order.
+const announced: string[] = [];
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
+  AccessibilityInfo: {
+    ...(await import("./react-native.ts")).reactNative.AccessibilityInfo,
+    announceForAccessibility: (text: string) => announced.push(text),
+    sendAccessibilityEvent: () => undefined,
+  },
   ActionSheetIOS: {
     showActionSheetWithOptions: (
       options: { title?: string; message?: string; options: readonly string[] },
@@ -94,9 +101,20 @@ vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } })
 type Unshown = { language: string | null; format: string | null; forced: boolean };
 let unshown: { named: Unshown[]; more: number } = { named: [], more: 0 };
 const closeSession = new Map<string, () => void>();
+// The keyboard's shortcuts Watch offers, pressed by their key.
+const keys = { offered: [] as { id: string; input: string }[], press: (_id: string) => {} };
 Object.assign(globalThis, {
   expo: {
     modules: {
+      KeyCommands: {
+        set: (shortcuts: { id: string; input: string }[]) => {
+          keys.offered = shortcuts;
+        },
+        addListener: (_event: "command", listener: (event: { id: string }) => void) => {
+          keys.press = (id) => listener({ id });
+          return { remove: () => (keys.press = () => {}) };
+        },
+      },
       TitleFormats: {
         create: () => undefined,
         open: async (id: string) => ({
@@ -246,7 +264,8 @@ afterEach(async () => {
   unmount();
   await playback.stop();
   await tick();
-  await account.remove(channel.subscriptionId, { keepHistory: true });
+  // Cases that play no channel connect none.
+  if (channel) await account.remove(channel.subscriptionId, { keepHistory: true });
 });
 
 describe("a programme from catch-up", () => {
@@ -975,5 +994,110 @@ describe("sound and subtitles in Watch", () => {
       expect.anything(),
       expect.objectContaining({ track: expect.objectContaining({ id: "ad" }) }),
     );
+  });
+});
+
+describe("an episode's end in Watch", () => {
+  /** What the countdown or Next episode played. */
+  const played: string[] = [];
+  const byTestId = (id: string) => container.querySelector(`[data-testid="${id}"]`);
+  const press = (id: string) =>
+    React.act(async () => {
+      [...container.querySelectorAll("button")]
+        .find((button) => button.getAttribute("data-testid") === id)
+        ?.click();
+      await tick();
+    });
+  const key = (input: string) =>
+    React.act(async () => {
+      const shortcut = keys.offered.find((each) => each.input === input);
+      if (!shortcut) throw new Error(`No ${input} offered`);
+      keys.press(shortcut.id);
+      await tick();
+    });
+  const seconds = (ms: number) =>
+    React.act(async () => {
+      vi.advanceTimersByTime(ms);
+      await tick();
+    });
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    played.length = 0;
+    announced.length = 0;
+  });
+
+  /** S1 E2 plays in Watch to its end, and S1 E3 goes on after it. */
+  async function ends() {
+    await React.act(async () => {
+      await playback.play(
+        {
+          id: "sub-1:e2",
+          subscriptionId: null,
+          title: "Harbour Lights",
+          place: "S1 E2 · The Quiet Ferry",
+          live: false,
+          next: true,
+          versions: false,
+        },
+        {
+          kind: "file",
+          originalLanguage: null,
+          open: async () => ({ url: "file:e2.mp4", container: "mp4" }),
+        },
+        {
+          watch: true,
+          login: [],
+          next: () => played.push("Next episode"),
+          upNext: async () => ({
+            place: "S1 E3 · The Long Table",
+            play: () => played.push("S1 E3"),
+          }),
+        },
+      );
+      port.ready();
+      port.state(true);
+      port.currentTime = 600;
+      port.observation({ kind: "ended" });
+      port.state(false);
+      await tick();
+    });
+    await until(() => byTestId("watch-up-next") !== null);
+  }
+
+  it("counts down in the text-button row, told to VoiceOver once, and plays on Play next", async () => {
+    await ends();
+    const row = byTestId("watch-up-next")!;
+    expect(row.textContent).toBe("S1 E3 · The Long TablePlays in 10Play nextCancel");
+    expect(byTestId("watch-next")).toBeNull();
+    await seconds(3000);
+    expect(row.textContent).toContain("Plays in 7");
+    expect(announced).toEqual(["Next episode, S1 E3, The Long Table, plays in 10 seconds."]);
+    await press("watch-play-next");
+    expect(played).toEqual(["S1 E3"]);
+  });
+
+  it("returns today's row on Cancel, where Next episode still plays the next", async () => {
+    await ends();
+    await press("watch-up-next-cancel");
+    expect(byTestId("watch-up-next")).toBeNull();
+    await seconds(20_000);
+    expect(played).toEqual([]);
+    await press("watch-next");
+    expect(played).toEqual(["Next episode"]);
+  });
+
+  it("cancels on Space without playing, and Escape closes Watch with nothing next", async () => {
+    await ends();
+    port.play.mockClear();
+    await key(" ");
+    expect(byTestId("watch-up-next")).toBeNull();
+    expect(byTestId("watch-next")).not.toBeNull();
+    expect(port.play).not.toHaveBeenCalled();
+
+    await ends();
+    await key("escape");
+    await seconds(20_000);
+    expect(playback.playbackState.get().watch).toBe(false);
+    expect(played).toEqual([]);
   });
 });
