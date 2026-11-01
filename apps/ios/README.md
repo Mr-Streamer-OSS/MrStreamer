@@ -699,9 +699,11 @@ against the picture, VoiceOver and large text in Watch still need a native run.
 a Matroska file with H.264 and AAC played, over the network and as a copy, from where it stopped
 and after seeks; the test AVI (MPEG-4 Part 2, MP3) ran to its end without a picture.
 
-TMDB's key is built in from `EXPO_PUBLIC_TMDB_KEY` (`EXPO_PUBLIC_TMDB_API` points at a test
-server). Without one, collections that need TMDB are left out, details show the provider's
-facts, and Settings shows no attribution.
+TMDB uses the viewer's own key from Settings > TMDB, kept in the Keychain, else
+`EXPO_PUBLIC_TMDB_KEY` (`EXPO_PUBLIC_TMDB_API` points at a test server). Without either key,
+provider facts and previously saved TMDB answers remain available; new TMDB facts cannot be
+fetched. Settings > About always shows TMDB's logo and notice, including after key removal,
+because cached TMDB facts can remain.
 
 Settings' Privacy opens the privacy policy, `https://mrstreamer.app/privacy`, in the browser, and
 About opens Licences: the app under GPL-3.0-only, then every component the build carries, each

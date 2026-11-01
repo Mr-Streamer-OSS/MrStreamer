@@ -1,3 +1,4 @@
+import "./native-assets.ts";
 import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -47,8 +48,7 @@ vi.mock("../src/ui.tsx", () => ({
   TextButton: () => null,
 }));
 vi.mock("../src/titles.ts", () => ({
-  hasTmdb: false,
-  useMetadataStatus: () => null,
+  useMetadataStanding: () => ({ kind: "no-key" }),
   useTitleTimings: () => null,
 }));
 vi.mock("../src/telemetry/index.ts", () => ({

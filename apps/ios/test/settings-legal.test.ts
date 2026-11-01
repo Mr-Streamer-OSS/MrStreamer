@@ -1,3 +1,4 @@
+import "./native-assets.ts";
 import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
 import { readFileSync, readdirSync } from "node:fs";
@@ -73,8 +74,7 @@ vi.mock("../src/ui.tsx", async () => {
   };
 });
 vi.mock("../src/titles.ts", () => ({
-  hasTmdb: false,
-  useMetadataStatus: () => null,
+  useMetadataStanding: () => ({ kind: "no-key" }),
   useTitleTimings: () => null,
 }));
 vi.mock("../src/telemetry/index.ts", () => ({
