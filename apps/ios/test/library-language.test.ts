@@ -4,7 +4,8 @@ import type { Locale } from "@mrstreamer/contracts/language";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { byIds, indexCatalogue, type IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
 import { setLanguage } from "@mrstreamer/core/i18n";
-import type { OnDemandCatalogue, ProviderTitle } from "@mrstreamer/core/provider";
+import type { Title } from "@mrstreamer/contracts/ondemand";
+import type { OnDemandCatalogue, ProviderDetails, ProviderTitle } from "@mrstreamer/core/provider";
 import { afterEach, expect, it, vi } from "vitest";
 import { browseFixture } from "./title-browse-fixture.ts";
 import { browseCollection, DEFAULT_BROWSE } from "../src/title-browse.ts";
@@ -26,6 +27,8 @@ const scenario = vi.hoisted(() => ({
     pick: (at: number) => void;
   } | null,
   played: [] as OwnedId[],
+  /** The provider's answer for a title's details; unanswered when null. */
+  provided: null as ProviderDetails | null,
 }));
 /** One answer per source, as the app's stores give: a new render alone makes nothing new. */
 const stable = vi.hoisted(() => {
@@ -89,7 +92,32 @@ vi.mock("../src/titles-ui.tsx", async () => {
     Artwork: () => null,
     ProgressLine: () => null,
     Shelf: () => null,
-    TextTabs: () => null,
+    // Each tab a button named by its label, pressed when it is the one chosen.
+    TextTabs: ({
+      tabs,
+      value,
+      onChange,
+    }: {
+      tabs: readonly { value: string; label: string }[];
+      value: string;
+      onChange: (value: string) => void;
+    }) =>
+      createElement(
+        Fragment,
+        null,
+        ...tabs.map((tab) =>
+          createElement(
+            "button",
+            {
+              key: tab.value,
+              "aria-label": tab.label,
+              "aria-pressed": String(tab.value === value),
+              onClick: () => onChange(tab.value),
+            },
+            tab.label,
+          ),
+        ),
+      ),
     PlaceholderGrid: () => null,
     PlaceholderShelf: () => null,
     CollectionTileView: () => null,
@@ -132,7 +160,13 @@ vi.mock("../src/titles.ts", () => ({
   tilesOf: () => [],
   titleOf: (index: IndexedCatalogue, kind: "movie" | "series", version: OwnedId) =>
     byIds(index, kind, [version])[0],
-  detailsOf: () => new Promise(() => undefined),
+  // As the app reads them: core makes the details of the provider's answer at each read.
+  detailsOf: async (title: Title) => {
+    const { seriesDetails } = await import("@mrstreamer/core/ondemand/details");
+    return scenario.provided
+      ? seriesDetails(title, scenario.provided, null, "en")
+      : new Promise(() => undefined);
+  },
   episodesOf: async () => [],
 }));
 vi.mock("../src/viewing.ts", () => ({
@@ -204,6 +238,7 @@ afterEach(() => {
   setLanguage({ locale: "en-US", formats: "en-US" });
   scenario.menu = null;
   scenario.played = [];
+  scenario.provided = null;
 });
 
 it("counts and sorts a collection in the language, keeping the sort and the open sheet", () => {
@@ -283,4 +318,69 @@ it("shows a title's details in the language, keeping the version picked for Play
   expect(version()?.getAttribute("aria-label")).toContain("Geluid English");
   press("Afspelen");
   expect(scenario.played).toEqual([{ subscriptionId: "b", id: "1" }]);
+});
+
+it("names the app's own season headings in a new language, keeping the provider's and the season chosen", async () => {
+  const series: ProviderTitle = {
+    id: "2",
+    name: "Same series",
+    container: null,
+    categoryIds: [],
+    posterUrl: null,
+    backdropUrl: null,
+    releaseDate: null,
+    rating: null,
+    addedAt: 1,
+    adult: false,
+  };
+  scenario.members = [{ entry: { id: "a" }, label: "Home" }];
+  scenario.index = indexCatalogue(
+    [
+      {
+        subscriptionId: "a",
+        catalogue: { movieCategories: [], seriesCategories: [], movies: [], series: [series] },
+      },
+    ],
+    "en",
+  );
+  const episode = (id: string, season: number) => ({
+    id,
+    season,
+    number: 1,
+    name: `Episode ${id}`,
+    plot: null,
+    duration: null,
+    stillUrl: null,
+    airDate: null,
+    addedAt: null,
+    container: "mkv",
+  });
+  // The provider names season 1 itself; season 2 and the specials it leaves to the app.
+  scenario.provided = {
+    originalName: null,
+    plot: null,
+    genres: [],
+    cast: [],
+    directors: [],
+    releaseDate: null,
+    duration: null,
+    posterUrl: null,
+    backdropUrl: null,
+    seasons: [{ number: 1, name: "Seizoen 1", posterUrl: null }],
+    episodes: [episode("101", 1), episode("201", 2), episode("901", 0)],
+    container: null,
+  };
+  speak("fr-FR");
+  mount(React.createElement(DetailsScreen, { kind: "series", version: "a:2" }));
+  await React.act(async () => await new Promise((done) => setTimeout(done, 0)));
+  press("Saison 2");
+  expect(button("Saison 2").getAttribute("aria-pressed")).toBe("true");
+  expect(button("Épisodes spéciaux")).toBeTruthy();
+
+  speak("de-DE");
+  await React.act(async () => await new Promise((done) => setTimeout(done, 0)));
+  expect(button("Staffel 2").getAttribute("aria-pressed")).toBe("true");
+  expect(button("Specials")).toBeTruthy();
+  expect(button("Seizoen 1")).toBeTruthy();
+  expect(text()).not.toMatch(/Saison|spéciaux/);
 });

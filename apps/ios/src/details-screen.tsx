@@ -235,7 +235,9 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
   const pressed = usePressed(`${title.key}|${ownedKey(version)}`);
   // Details answer only the version they were read for: another version shows loading at once.
   // Try again reads the same version anew; until that answers, its facts show as loading. New
-  // metadata, a changed TMDB key too, reads them again, the facts shown meanwhile.
+  // metadata, a changed TMDB key too, reads them again, the facts shown meanwhile. So does a new
+  // interface language, for core to name the seasons the provider left unnamed in it; a new
+  // title language reads them again through `detailsOf`.
   const [again, setAgain] = useState(0);
   const metadata = useMetadataVersion();
   const [retried, setRetried] = useState<Loaded<TitleDetails> | null>(null);
@@ -245,7 +247,7 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
       (show: (details: TitleDetails) => void) => detailsOf(shownTitle, show),
       [shownTitle],
     ),
-    `${again}|${metadata}`,
+    `${again}|${metadata}|${locale}`,
   );
   const failedHere = useFailure(title.kind, version);
   // Versions from several subscriptions say which each is from, in the order they were added.
