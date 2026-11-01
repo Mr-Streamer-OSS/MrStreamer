@@ -57,8 +57,17 @@ const sheets: Array<{
 }> = [];
 // What VoiceOver was told, in order.
 const announced: string[] = [];
+// Who listens for the app leaving the foreground.
+const appState = vi.hoisted(() => new Set<(state: string) => void>());
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
+  AppState: {
+    currentState: "active",
+    addEventListener: (_: "change", listener: (state: string) => void) => {
+      appState.add(listener);
+      return { remove: () => appState.delete(listener) };
+    },
+  },
   AccessibilityInfo: {
     ...(await import("./react-native.ts")).reactNative.AccessibilityInfo,
     announceForAccessibility: (text: string) => announced.push(text),
@@ -1098,6 +1107,28 @@ describe("an episode's end in Watch", () => {
     await key("escape");
     await seconds(20_000);
     expect(playback.playbackState.get().watch).toBe(false);
+    expect(played).toEqual([]);
+  });
+
+  it("ends the countdown when the app leaves the foreground", async () => {
+    await ends();
+    await React.act(async () => {
+      for (const listener of appState) listener("background");
+      await tick();
+    });
+    await seconds(20_000);
+    expect(played).toEqual([]);
+  });
+
+  it("ends the countdown when a tap on the picture hides the panel", async () => {
+    await ends();
+    await React.act(async () => {
+      [...container.querySelectorAll("button")]
+        .find((button) => button.getAttribute("aria-label") === "Hide controls")!
+        .click();
+      await tick();
+    });
+    await seconds(20_000);
     expect(played).toEqual([]);
   });
 });

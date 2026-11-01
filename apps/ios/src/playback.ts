@@ -1242,7 +1242,10 @@ function observe(event: PlaybackObservation) {
       if (!pauseOnStart && !current.item.live) {
         const saved = report();
         current.options.ended?.();
-        if (current.item.next && state.get().watch) countDown(current, saved);
+        // An end the viewer's Pause or seek back overtook on its way from the player is obsolete.
+        const atEnd = length.get() - (player().currentTime - current.offset) <= 2;
+        if (current.item.next && state.get().watch && atEnd && held?.by !== "viewer")
+          countDown(current, saved);
       }
       return;
     case "state": {

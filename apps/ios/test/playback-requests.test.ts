@@ -84,6 +84,7 @@ const {
   playNext,
   playUpNext,
   seekBy,
+  seekTo,
   showVersions,
   stop,
   togglePause,
@@ -492,6 +493,26 @@ describe("an episode's end", () => {
   ])("plays nothing after %s during the countdown", async (_, act) => {
     await ends(seriesDetails("s1"), 1);
     act();
+    vi.advanceTimersByTime(20_000);
+    await settle();
+    expect(sources).toEqual(["file:episode:s1e1"]);
+  });
+
+  it.each([
+    ["Pause", () => togglePause()],
+    ["a seek back", () => seekTo(300)],
+  ])("counts nothing down for an end that arrives after %s", async (_, act) => {
+    playEpisode(seriesDetails("s1"), episode("s1", 1), 0, () => undefined);
+    await settle();
+    startsAt();
+    fakePlayer.state(true);
+    fakePlayer.currentTime = 600;
+    act();
+    fakePlayer.observation({ kind: "ended" });
+    fakePlayer.state(false);
+    await settle();
+    held.standing.shift()?.(nothingPlayed);
+    await settle();
     vi.advanceTimersByTime(20_000);
     await settle();
     expect(sources).toEqual(["file:episode:s1e1"]);
