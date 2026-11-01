@@ -28,8 +28,12 @@ const memory = vi.hoisted(() => ({
   panelDown: false,
   /** The viewer's TMDB key won't be read, as before the first unlock. */
   locked: false,
-  /** TMDB's answers for `key` wait for `until`, while set. */
-  held: null as { readonly key: string; readonly until: Promise<void> } | null,
+  /** TMDB's answers for `key`, to details or to the catalogue, wait for `until` (`hold`). */
+  holds: [] as {
+    readonly key: string;
+    readonly to: "details" | "catalogue";
+    readonly until: Promise<void>;
+  }[],
   /** The Keychain won't write its index of ids, as when it fails partway through a change. */
   indexFails: false,
 }));
@@ -74,9 +78,11 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   const url = new URL(input);
   const key = url.searchParams.get("api_key") ?? "";
   memory.keys.push(key);
-  if (url.searchParams.has("append_to_response")) memory.abouts.push(key);
+  // Only details ask for a title's credits with it.
+  const to = url.searchParams.has("append_to_response") ? "details" : "catalogue";
+  if (to === "details") memory.abouts.push(key);
   if (memory.offline) throw new TypeError("Network request failed");
-  if (memory.held?.key === key) await memory.held.until;
+  for (const held of memory.holds) if (held.key === key && held.to === to) await held.until;
   if (key === REFUSED_KEY) return Response.json({ status_code: 7 }, { status: 401 });
   const id = /^\/3\/(?:movie|tv)\/(\d+)$/.exec(url.pathname)?.[1];
   if (id && memory.unknown.has(id)) return Response.json({ status_code: 34 }, { status: 404 });
@@ -138,7 +144,7 @@ beforeEach(async () => {
   memory.unknown.clear();
   memory.panelDown = false;
   memory.locked = false;
-  memory.held = null;
+  memory.holds.length = 0;
   memory.indexFails = false;
 });
 afterEach(async () => {
@@ -146,6 +152,13 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
 });
+
+/** Holds TMDB's answers for `key`, to details or to the catalogue, until the returned release. */
+function hold(key: string, to: "details" | "catalogue") {
+  let release = () => {};
+  memory.holds.push({ key, to, until: new Promise<void>((done) => (release = done)) });
+  return () => release();
+}
 
 /** Resolves once `ready` holds; fails the test when it doesn't within a few seconds. */
 async function until(ready: () => boolean, what = "the condition", limit = 8_000) {
@@ -328,8 +341,7 @@ it("lets go of details asked with a key that was replaced", async () => {
   const app = await launch({ appKey: REFUSED_KEY });
   await added(app);
   await settled(app, "refused");
-  let release = () => {};
-  memory.held = { key: REFUSED_KEY, until: new Promise((done) => (release = done)) };
+  const release = hold(REFUSED_KEY, "details");
   const before = memory.keys.length;
   const asked = app.detailsOf(firstMovie(app));
   await until(() => memory.keys.length > before, "the held ask");
@@ -344,8 +356,7 @@ it("asks details with the new key, an answer still asked with the replaced one k
   const app = await launch({ appKey: "app-key" });
   await added(app);
   await settled(app, "answered");
-  let release = () => {};
-  memory.held = { key: "app-key", until: new Promise((done) => (release = done)) };
+  const release = hold("app-key", "details");
   const movie = firstMovie(app);
   const asked = app.detailsOf(movie);
   await until(() => memory.abouts.includes("app-key"), "the held ask");
@@ -353,6 +364,27 @@ it("asks details with the new key, an answer still asked with the replaced one k
   await app.saveTmdbKey("viewer-key");
   release();
   expect((await asked).about).toEqual({ kind: "tmdb" });
+  expect((await app.detailsOf(movie)).about).toEqual({ kind: "tmdb" });
+  expect(memory.abouts).toEqual(["app-key", "viewer-key"]);
+});
+
+it("saves no details answer that arrives while a key change waits for the old store", async () => {
+  const releaseCatalogue = hold("app-key", "catalogue");
+  const app = await launch({ appKey: "app-key" });
+  await added(app);
+  await settled(app, "fetching");
+  const releaseDetails = hold("app-key", "details");
+  const movie = firstMovie(app);
+  const asked = app.detailsOf(movie);
+  await until(() => memory.abouts.includes("app-key"), "the held ask");
+
+  // The old store closes once its held catalogue answers come, the key change waiting for it.
+  const saving = app.saveTmdbKey("viewer-key");
+  await until(() => [...memory.keychain.values()].includes("viewer-key"), "the saved key");
+  releaseDetails();
+  expect((await asked).about).toEqual({ kind: "tmdb" });
+  releaseCatalogue();
+  await saving;
   expect((await app.detailsOf(movie)).about).toEqual({ kind: "tmdb" });
   expect(memory.abouts).toEqual(["app-key", "viewer-key"]);
 });

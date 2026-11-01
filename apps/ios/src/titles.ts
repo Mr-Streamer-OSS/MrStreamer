@@ -331,19 +331,25 @@ function wantMetadata() {
 let keying: Promise<void> = Promise.resolve();
 /** Whether TMDB was given its first key, or none: each later one starts metadata again. */
 let keyed = false;
-/** Key changes begun so far: a details answer asked before the latest is never saved. */
+/** Key changes asked for, and the last whose client asks TMDB now: they differ during one. */
 let keyChanges = 0;
+let keyInstalled = 0;
+/**
+ * Whether a details answer asked with `asking` may be saved: it is still the client and no key
+ * change is under way, so none asked with a key on its way out is kept.
+ */
+const savesWith = (asking: Tmdb | null) => client === asking && keyInstalled === keyChanges;
 
 /**
  * Asks TMDB with the viewer's key `yours` from now on, else the app's when it is empty. After the
  * first, a store that may have stopped on a refused key is closed, after its answers are written,
  * and a new one starts with the key; details' answers asked with the old key are let go, and those
- * still on their way are never saved (`aboutOf`, `episodesOf`).
+ * still on their way are never saved (`savesWith`).
  */
 function askWith(yours: string) {
   const key = yours || BUILT_IN_KEY;
   const fresh = keyed;
-  keyChanges++;
+  const change = ++keyChanges;
   keyed = true;
   // One change that failed doesn't stop the next.
   keying = keying
@@ -355,6 +361,7 @@ function askWith(yours: string) {
         metadata = metadataOf();
       }
       client = key ? tmdb({ key, ...(TMDB_API ? { api: TMDB_API } : {}) }) : null;
+      keyInstalled = change;
       // Only now, so details asked with the old client while the store closed are let go too.
       if (fresh) {
         abouts.clear();
@@ -1193,7 +1200,6 @@ function aboutOf(title: Title, reading: ReadingLanguage): Answer<TitleAbout> | A
   const { kind, tmdbId } = title;
   if (!tmdbId || title.adult) return { kind: "unlinked" };
   const asking = client;
-  const changes = keyChanges;
   return tmdbAnswer(
     abouts,
     `${kind}|${tmdbId}|${language}`,
@@ -1204,7 +1210,7 @@ function aboutOf(title: Title, reading: ReadingLanguage): Answer<TitleAbout> | A
       return asking.about(tmdbKind(kind), tmdbId, language, signal);
     },
     (saved) =>
-      currentLanguage(reading) && client === asking && keyChanges === changes
+      currentLanguage(reading) && savesWith(asking)
         ? writeAbout(kind, tmdbId, language, saved)
         : Promise.resolve(),
   );
@@ -1236,7 +1242,6 @@ export async function episodesOf(
   if (tmdbId) await readKey();
   if (!tmdbId) return seasonEpisodes(season, []);
   const asking = client;
-  const changes = keyChanges;
   const id = title.subscriptionId;
   const source = currentSource(id);
   const stands = () => source !== undefined && savable(id, source);
@@ -1252,7 +1257,7 @@ export async function episodesOf(
         return asking.season(tmdbId, number, asked, signal);
       },
       (saved) =>
-        currentLanguage(reading) && client === asking && keyChanges === changes
+        currentLanguage(reading) && savesWith(asking)
           ? writeSeason(tmdbId, number, asked, saved)
           : Promise.resolve(),
     ),
