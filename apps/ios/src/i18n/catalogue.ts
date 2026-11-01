@@ -2,12 +2,14 @@ import type { Locale } from "@mrstreamer/contracts/language";
 import {
   currentLanguage,
   formatNumber,
+  onLanguageChange,
   type Placeholder,
   type Plural,
 } from "@mrstreamer/core/i18n";
+import { useSyncExternalStore } from "react";
 
 // The iOS app's own text, one catalogue per feature area (onboarding.ts, navigation.ts,
-// settings.ts), so a later area adds its own file without touching these. Each is keyed by its
+// settings.ts, failures.ts), so a later area adds its own file without touching these. Each is keyed by its
 // English text, as core's catalogue is, in the language core's `setLanguage` made the active
 // one (language.ts sets it at launch and when Settings changes it; a screen renders again for it
 // with language.ts's `useInterfaceLanguage`):
@@ -59,4 +61,12 @@ export function catalogue<const E extends English>(
       return typeof value === "number" ? formatNumber(value) : value;
     });
   };
+}
+
+/**
+ * The interface language's locale, rendering again when it changes, for code that can't load
+ * language.ts's native reads (the shared top bar, whose tests run without them).
+ */
+export function useLocale(): Locale {
+  return useSyncExternalStore(onLanguageChange, () => currentLanguage().locale);
 }

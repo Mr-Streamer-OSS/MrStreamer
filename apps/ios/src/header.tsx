@@ -6,9 +6,10 @@ import {
   type NativeStackNavigationOptions,
 } from "expo-router";
 import type { SFSymbol } from "expo-symbols";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import { DownloadStatusButton } from "./download-status.tsx";
+import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/navigation.ts";
 import { colors } from "./ui.tsx";
 
@@ -178,6 +179,16 @@ export function tabScreenOptions(tab: Tab) {
     ],
     unstable_headerRightItems: () => actions(tab, route.name),
   });
+}
+
+/**
+ * `tabScreenOptions(tab)` for a tab's stack layout, made again when the interface language
+ * changes: React Navigation keeps the other tabs' stacks from rendering again on their own, so
+ * their buttons' labels would keep the language they were made in.
+ */
+export function useTabScreenOptions(tab: Tab) {
+  const locale = useLocale();
+  return useMemo(() => tabScreenOptions(tab), [tab, locale]);
 }
 
 /**

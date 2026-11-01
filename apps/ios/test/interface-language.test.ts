@@ -171,6 +171,37 @@ it("shows a picked language at once and opens in it after a relaunch", async () 
   expect(scenario.alerts[0]?.title).toBe("Gebruiksstatistieken delen?");
 });
 
+it("words a provider's failure in the language, keeping its address as it is", async () => {
+  scenario.phone = ["nl-NL"];
+  const failed = { kind: "unreachable", server: "http://tv.example.com:8080", detail: "refused" };
+  scenario.members = [{ ...livingRoom, live: { kind: "failed", error: failed } } as Member];
+  const settings = await launch("settings");
+  expect(settings.text()).toContain("Kan tv.example.com niet bereiken");
+});
+
+it("labels every tab's top bar buttons in a new language at once", async () => {
+  const labels: string[][] = [];
+  function LiveStack() {
+    const options = useTabScreenOptions("live")({ route: { name: "index" } });
+    labels.push(
+      (options.unstable_headerRightItems?.({}) ?? []).flatMap((item) =>
+        "label" in item && typeof item.label === "string" ? [item.label] : [],
+      ),
+    );
+    return null;
+  }
+  const settings = await launch("settings");
+  // From the launch's own modules, which share its language.
+  const { useTabScreenOptions } = await import("../src/header.tsx");
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  React.act(() => root.render(React.createElement(LiveStack)));
+  settings.choose("Español");
+  React.act(() => root.unmount());
+  expect(labels.at(0)).toEqual(["Search", "Settings"]);
+  expect(labels.at(-1)).toEqual(["Buscar", "Ajustes"]);
+});
+
 it("returns to the iPhone's language when System default is picked again", async () => {
   scenario.phone = ["fr-CA"];
   const settings = await launch("settings");

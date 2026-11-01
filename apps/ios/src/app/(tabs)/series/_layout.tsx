@@ -1,5 +1,5 @@
 import { Stack } from "expo-router";
-import { tabScreenOptions } from "../../../header.tsx";
+import { useTabScreenOptions } from "../../../header.tsx";
 
 /**
  * Series: its tabs of shelves and grids, with collections and details pushed over them, and the
@@ -8,7 +8,7 @@ import { tabScreenOptions } from "../../../header.tsx";
  */
 export default function SeriesLayout() {
   return (
-    <Stack screenOptions={tabScreenOptions("series")}>
+    <Stack screenOptions={useTabScreenOptions("series")}>
       <Stack.Screen name="index" options={{ title: "Series", headerLargeTitle: true }} />
       <Stack.Screen name="collection/[id]" options={{ title: "" }} />
       <Stack.Screen name="title/[id]" options={{ title: "", headerTransparent: true }} />

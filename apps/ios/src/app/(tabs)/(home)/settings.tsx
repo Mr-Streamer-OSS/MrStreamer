@@ -883,7 +883,8 @@ const styles = StyleSheet.create({
   },
   label: { color: colors.text, fontSize: 17, flexShrink: 1 },
   value: { color: colors.dim, fontSize: 17, flexShrink: 1, textAlign: "right" },
-  opens: { flexDirection: "row", alignItems: "center", gap: 8 },
+  // Shrinks with the label, so a long value at large text wraps rather than crushing it.
+  opens: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
   paragraph: {
     color: colors.dim,
     fontSize: 13,
