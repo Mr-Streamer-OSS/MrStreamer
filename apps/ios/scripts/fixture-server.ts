@@ -18,7 +18,9 @@
 // Every channel is a live loop: the TEST channels loop their recording from
 // apps/desktop/test/fixtures, codecs as they are, so the ones AVPlayer can't decode fail as they
 // would; every other channel loops a 720p H.264 + AAC test picture made here with ffmpeg, light
-// for even ids and dark for odd ones. Each request is logged without the login, to
+// for even ids and dark for odd ones, apart from "BE | KWALITEIT 1": its HD stream is a heavier
+// 720p picture (about 2.6 Mbit/s) and its SD one a light 360p one (about 0.5 Mbit/s), so a paced
+// link (`/live-link`) carries one and not the other. Each request is logged without the login, to
 // .local/ios-fixture/requests.jsonl. Stream 7999, "TEST | Live sound and subtitles (EN/NL)",
 // declares sound and subtitle renditions instead (scripts/native-fixtures/tracks.ts). The
 // channels with catch-up answer their timeshift addresses with `.m3u8` as HLS recordings
@@ -66,6 +68,8 @@
 //   GET  /live-lists                   the streams left out
 //   POST, GET /title-transfers         how title files are sent; see scripts/native-fixtures/transfers.ts
 //   GET  /provenance                   where the media served came from, as provenance.json says
+//   POST, GET /live-link               the pace live segments are sent at; see
+//                                      scripts/native-fixtures/live-link.ts
 import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
@@ -78,6 +82,7 @@ import { basename, join, resolve } from "node:path";
 import {
   measurementTitles,
   pngLogo,
+  QUALITY_STREAM_IDS,
   startFakeProvider,
   TITLES_ADDED,
   type FakeChannel,
@@ -87,6 +92,7 @@ import { startFakeTmdb } from "../../desktop/test/fake-tmdb.ts";
 import { browseControls, browseTitles } from "./browse-profile.ts";
 import { liveLists } from "./live-lists.ts";
 import { catchUpPlaylist } from "./native-fixtures/catch-up.ts";
+import { liveLink } from "./native-fixtures/live-link.ts";
 import { livePlaylist, mediaMaker, type Media } from "./native-fixtures/media.ts";
 import { liveTracks, tracksChannel, TRACKS_STREAM_ID } from "./native-fixtures/tracks.ts";
 import { titleTransfers } from "./native-fixtures/transfers.ts";
@@ -114,20 +120,33 @@ const log = join(out, second ? `requests-${port}.jsonl` : "requests.jsonl");
 
 const maker = mediaMaker(root, out, second ? `provenance-${port}.json` : "provenance.json");
 
-/** A minute of test picture with its clock, inset on a light or a dark field, and a tone. */
-function picture(name: string, field: string): Media {
+/**
+ * A minute of test picture with its clock, inset on a light or a dark field, and a tone: 720p at
+ * about 1.5 Mbit/s, or with `capped`, that size at that constant video rate.
+ */
+function picture(name: string, field: string, capped?: { size: string; rate: string }): Media {
+  const { size, rate } = capped ?? { size: "1280x720", rate: "1500k" };
   return maker.make(name, [
-    ...["-f", "lavfi", "-i", `color=c=${field}:s=1280x720:r=30:d=60`],
+    ...["-f", "lavfi", "-i", `color=c=${field}:s=${size}:r=30:d=60`],
     ...["-f", "lavfi", "-i", "testsrc=s=480x270:r=30:d=60"],
     ...["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:d=60"],
     ...["-filter_complex", "[0][1]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]"],
     ...["-map", "[v]", "-map", "2"],
-    ...["-c:v", "libx264", "-profile:v", "high", "-g", "60", "-sc_threshold", "0", "-b:v", "1500k"],
+    ...["-c:v", "libx264", "-profile:v", "high", "-g", "60", "-sc_threshold", "0", "-b:v", rate],
+    // Constant rate, padded, since a test picture alone compresses to a fraction of it.
+    ...(capped
+      ? ["-minrate", rate, "-maxrate", rate, "-bufsize", rate, "-x264-params", "nal-hrd=cbr"]
+      : []),
     ...["-c:a", "aac", "-b:a", "128k"],
   ]);
 }
 
 const light = picture("light", "0xF2F2F2");
+/** "BE | KWALITEIT 1"'s HD and SD streams, by stream id: Full HD is off air. */
+const qualities = new Map([
+  [QUALITY_STREAM_IDS + 1, picture("quality-hd", "0x203040", { size: "1280x720", rate: "2500k" })],
+  [QUALITY_STREAM_IDS + 2, picture("quality-sd", "0x402030", { size: "640x360", rate: "400k" })],
+]);
 /**
  * What catch-up channels recorded: ten minutes of test picture whose counter shows the seconds
  * since the programme's start, and a 550 Hz tone, apart from any channel's live picture.
@@ -225,6 +244,7 @@ for (const file of new Set(titleFiles.values())) {
   if (file && file !== feature) maker.served(basename(file), file);
 }
 const transfers = titleTransfers((title) => titleFiles.has(title));
+const link = liveLink();
 /** Title file requests left to answer with a failure, and its status. */
 let titleFailure: number | null = null;
 /** How long movie and series details wait before the panel is asked. */
@@ -238,9 +258,7 @@ const mediaOf = (channel: FakeChannel): Media | null =>
     ? null
     : channel.fixture
       ? recording(channel.fixture)
-      : channel.streamId % 2 === 0
-        ? light
-        : dark;
+      : (qualities.get(channel.streamId) ?? (channel.streamId % 2 === 0 ? light : dark));
 
 const started = Date.now();
 const tracks = liveTracks(maker, started);
@@ -350,7 +368,8 @@ createServer((request, response) => {
       const kind = n[1] ? "archive" : "segment";
       record({ at: Date.now(), kind, channel: id, status: found && file ? 200 : 404, path });
       if (!found || !file) return answer(response, 404, "text/plain", "");
-      return answer(response, 200, "video/mp2t", readFileSync(join(found.dir, file)));
+      const body = readFileSync(join(found.dir, file));
+      return n[1] ? answer(response, 200, "video/mp2t", body) : link.send(response, body);
     }
     const served = channel?.streamId === TRACKS_STREAM_ID ? tracks.serve(rest) : undefined;
     const kind = rest.endsWith(".m3u8") ? "playlist" : "segment";
@@ -437,7 +456,10 @@ createServer((request, response) => {
   const json = (body: unknown) => answer(response, 200, "application/json", JSON.stringify(body));
   const method = request.method ?? "GET";
   const browsed =
-    browse?.control(method, url) ?? lists.control(method, url) ?? transfers.control(method, url);
+    browse?.control(method, url) ??
+    lists.control(method, url) ??
+    transfers.control(method, url) ??
+    link.control(method, url);
   if (browsed)
     return answer(response, browsed.status, "application/json", JSON.stringify(browsed.body));
   if (request.method === "POST" && url.pathname === "/fail-catalogue") {
