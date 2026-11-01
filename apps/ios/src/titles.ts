@@ -241,27 +241,33 @@ const tmdbKey = store<TmdbKeyOwner | null>(null);
 /**
  * How TMDB stands, for Settings and diagnostics: whose key it is asked with, and whether it
  * refused that key, stopped answering before every listed title had an answer, is still asking,
- * or answered them all. `known` counts the titles TMDB answered for, those it doesn't know too.
+ * or answered them all; `unlinked` once the lists show and none of their titles has a TMDB id. `known` counts the titles TMDB answered for, those it doesn't know too.
  */
 export type MetadataStanding =
   /** The Keychain hasn't said yet whether the viewer saved a key. */
   | { readonly kind: "reading" }
   | { readonly kind: "no-key" }
   | {
-      readonly kind: "waiting" | "refused" | "unavailable" | "fetching" | "answered";
+      readonly kind: "waiting" | "unlinked" | "refused" | "unavailable" | "fetching" | "answered";
       readonly key: Exclude<TmdbKeyOwner, "none">;
       readonly known: number;
       readonly wanted: number;
     };
 
-function standingOf(key: TmdbKeyOwner | null, status: MetadataStatus | null): MetadataStanding {
+function standingOf(
+  key: TmdbKeyOwner | null,
+  status: MetadataStatus | null,
+  listed: boolean,
+): MetadataStanding {
   if (key === null) return { kind: "reading" };
   if (key === "none") return { kind: "no-key" };
   const known = status?.known ?? 0;
   const wanted = status?.wanted ?? 0;
   const kind =
     !status || wanted === 0
-      ? "waiting"
+      ? listed && status
+        ? "unlinked"
+        : "waiting"
       : status.refused
         ? "refused"
         : status.fetching
@@ -272,10 +278,12 @@ function standingOf(key: TmdbKeyOwner | null, status: MetadataStatus | null): Me
   return { kind, key, known, wanted };
 }
 
-export const metadataStanding = () => standingOf(tmdbKey.get(), metadataStatus.get());
+export const metadataStanding = () =>
+  standingOf(tmdbKey.get(), metadataStatus.get(), titleLists().kind === "ready");
 export function useMetadataStanding(): MetadataStanding {
   void readKey();
-  return standingOf(useStore(tmdbKey), useStore(metadataStatus));
+  const listed = useTitleLists().kind === "ready";
+  return standingOf(useStore(tmdbKey), useStore(metadataStatus), listed);
 }
 
 /** Null while the Keychain is read, and without any key: metadata answers from disk alone. */
@@ -343,6 +351,8 @@ function askWith(yours: string) {
     }
     client = key ? tmdb({ key, ...(TMDB_API ? { api: TMDB_API } : {}) }) : null;
     tmdbKey.set(yours ? "yours" : key ? "app" : "none");
+    // Details and collections are read again, for TMDB's part to follow the key.
+    if (fresh) metadataVersion.set((version) => version + 1);
     wantMetadata();
   });
   return keying;
@@ -554,6 +564,8 @@ async function index(listed: readonly Listed[], signal: AbortSignal, reading: Re
     const titles = wantedOf(index);
     if (titles.length > 0) void readKey();
     metadata.want(titles, reading.language);
+    // Wanting nothing starts no run that would say so: the status says it here.
+    metadataStatus.set(metadata.status());
   }, 0);
 }
 
@@ -949,7 +961,7 @@ async function underLogin<A>(id: string, read: (source: Source) => Promise<A>): 
 async function detailsUnder(
   title: Title,
   source: Source,
-  show: ((details: TitleDetails) => void) | undefined,
+  show: ((details: ShownDetails) => void) | undefined,
   reading: ReadingLanguage,
 ): Promise<ShownDetails> {
   if (!currentLanguage(reading)) throw retiredLanguage;
@@ -967,7 +979,13 @@ async function detailsUnder(
       : seriesDetails(title, raw, known, reading.language);
   const early = async (raw: ProviderDetails) => {
     const known = "now" in about ? await about.now : null;
-    if (show && stands() && currentLanguage(reading)) show(shown(raw, known));
+    const since = "now" in about ? await about.asking : null;
+    if (show && stands() && currentLanguage(reading)) {
+      show({
+        ...shown(raw, known),
+        ...(since === null ? {} : { about: { kind: "asking", savedAt: since } }),
+      });
+    }
   };
   const fresh = saved && Date.now() - saved.at < PROVIDER_FRESH && saved.listedAt === listedAt(id);
   const refresh =
@@ -996,7 +1014,7 @@ async function detailsUnder(
  */
 export async function detailsOf(
   title: Title,
-  show?: (details: TitleDetails) => void,
+  show?: (details: ShownDetails) => void,
 ): Promise<ShownDetails> {
   if (title.adult) throw new AppFailure({ kind: "title-not-found", titleId: title.id });
   const check = () => admitTitle({ kind: title.kind, ...ownedId(title) });
@@ -1038,7 +1056,9 @@ export type AboutStanding =
   /** TMDB doesn't know the title. */
   | { readonly kind: "missing" }
   /** Neither the viewer nor the app has a TMDB key (`no-key`), TMDB refused it or didn't answer. */
-  | { readonly kind: "no-key" | "refused" | "unavailable"; readonly savedAt: number | null };
+  | { readonly kind: "no-key" | "refused" | "unavailable"; readonly savedAt: number | null }
+  /** TMDB is asked again for an answer saved at `savedAt`, which shows meanwhile. */
+  | { readonly kind: "asking"; readonly savedAt: number };
 
 /** A title's details, and where TMDB's part of them stands once TMDB was waited for. */
 export type ShownDetails = TitleDetails & { readonly about?: AboutStanding };
@@ -1055,6 +1075,8 @@ interface Told<A> {
  */
 interface Answer<A> {
   now: Promise<A | null>;
+  /** When `now` was saved while it is too old and TMDB is asked again, else null. */
+  asking: Promise<number | null>;
   readonly final: Promise<Told<A>>;
 }
 
@@ -1113,11 +1135,18 @@ function tmdbAnswer<A>(
   const kept = saved();
   const entry: Answer<A> = {
     now: kept.then((record) => record?.value ?? null),
+    asking: kept.then((record) =>
+      record && record.value !== null && Date.now() - record.at >= TMDB_REFRESH_MS
+        ? record.at
+        : null,
+    ),
     final: kept
       .then((record) => fromTmdb(record, answer, write))
       .then(({ final, ...told }) => {
-        if (final) entry.now = Promise.resolve(told.value);
-        else if (map.get(key) === entry) map.delete(key);
+        if (final) {
+          entry.now = Promise.resolve(told.value);
+          entry.asking = Promise.resolve(null);
+        } else if (map.get(key) === entry) map.delete(key);
         return told;
       }),
   };

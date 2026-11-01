@@ -1,4 +1,5 @@
 import type { AppError } from "@mrstreamer/contracts/errors";
+import { formatDate, formatNumber } from "@mrstreamer/core/i18n";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { members, type Loadable, type Member } from "./account.ts";
@@ -42,25 +43,47 @@ function account({ entry, account, needsSecret }: Member): string {
   return checked(account.state, /^(active|expired|banned|disabled|unknown)$/);
 }
 
-const PROVIDER_KINDS = { xtream: "Xtream", m3u: "M3U playlist", demo: "Demo" } as const;
+const PROVIDER_KINDS = { xtream: "Xtream", m3u: "M3U", demo: "Demo" } as const;
 
-function tmdb(standing: MetadataStanding): string {
-  if (standing.kind === "reading") return "checking the key";
-  if (standing.kind === "no-key") return "no key";
-  const key = standing.key === "yours" ? "your key" : "the app's key";
-  const count = `${standing.known} of ${standing.wanted} titles answered`;
-  switch (standing.kind) {
-    case "waiting":
-      return `${key}, waiting for the lists`;
-    case "refused":
-      return `${key}, refused by TMDB`;
-    case "unavailable":
-      return `${key}, not answering, ${count}`;
-    case "fetching":
-      return `${key}, asking, ${count}`;
-    case "answered":
-      return `${key}, ${count}`;
-  }
+/** "2 Xtream, 1 M3U", in the order of the kinds above. */
+function providerCount(all: readonly Member[]): string {
+  const counted = Object.entries(PROVIDER_KINDS).flatMap(([kind, name]) => {
+    const count = all.filter((member) => member.entry.kind === kind).length;
+    return count > 0 ? [`${count} ${name}`] : [];
+  });
+  return counted.join(", ") || "none";
+}
+
+function provider(member: Member, at: number): string[] {
+  return [
+    `Provider ${at + 1}, ${PROVIDER_KINDS[member.entry.kind]}`,
+    `  Channels: ${loaded(member.live)}`,
+    `  Movies and series: ${loaded(member.titles)}`,
+    `  Account: ${account(member)}`,
+  ];
+}
+
+const KEYS = { yours: "yours, in the Keychain", app: "the app's" } as const;
+
+function tmdb(standing: MetadataStanding): string[] {
+  if (standing.kind === "reading") return ["TMDB", "  Key: checking"];
+  if (standing.kind === "no-key") return ["TMDB", "  Key: none"];
+  const status = {
+    waiting: "waiting for the lists",
+    unlinked: "no titles with a TMDB id",
+    refused: "refused the key",
+    unavailable: "not answering",
+    fetching: "asking",
+    answered: "answered",
+  }[standing.kind];
+  return [
+    "TMDB",
+    `  Key: ${KEYS[standing.key]}`,
+    `  Status: ${status}`,
+    ...(standing.wanted > 0
+      ? [`  Titles: ${formatNumber(standing.known)} of ${formatNumber(standing.wanted)}`]
+      : []),
+  ];
 }
 
 /** The diagnostics as the viewer previews and shares them, read now. */
@@ -69,14 +92,17 @@ export function diagnosticsText(): string {
   const build = checked(Constants.platform?.ios?.buildNumber, /^\d{1,9}$/);
   const system = checked(String(Platform.Version), /^\d{1,3}(\.\d{1,3}){0,2}$/);
   const all = members();
+  const now = Date.now();
   return [
-    `Mr. Streamer ${version} (${build}) · iOS ${system}`,
-    `Providers: ${all.length}`,
-    ...all.map(
-      (member, at) =>
-        `Provider ${at + 1}: ${PROVIDER_KINDS[member.entry.kind]} · account ${account(member)} · channels ${loaded(member.live)} · movies and series ${loaded(member.titles)}`,
-    ),
-    `TMDB: ${tmdb(metadataStanding())}`,
+    `Mr. Streamer ${version} (${build})`,
+    `iOS ${system}`,
+    `Providers: ${providerCount(all)}`,
+    "",
+    ...all.flatMap(provider),
+    ...(all.length > 0 ? [""] : []),
+    ...tmdb(metadataStanding()),
+    "",
+    `Made ${formatDate(now, "date")}, ${formatDate(now, "time")}`,
     "",
     OMITTED,
     "",

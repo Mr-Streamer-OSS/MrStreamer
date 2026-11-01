@@ -45,7 +45,7 @@ const scenario = vi.hoisted(() => ({
   alerts: [] as string[],
   lists: { kind: "idle" } as { kind: "idle" } | { kind: "ready"; index: unknown },
   /** Each read of the film's details, answered in turn; the last answers every later read. */
-  details: [] as (() => Promise<unknown>)[],
+  details: [] as ((show: (details: unknown) => void) => Promise<unknown>)[],
   /** The providers saved: Settings' tests leave them out, the film's details list one. */
   members: [] as { entry: { id: string }; label: string }[],
   reads: 0,
@@ -115,9 +115,9 @@ vi.mock("../src/titles.ts", () => ({
     byIds(index, kind, [version])[0],
   useCollections: () => null,
   episodesOf: async () => [],
-  detailsOf: () => {
+  detailsOf: (_title: unknown, show: (details: unknown) => void) => {
     const read = scenario.details[Math.min(scenario.reads++, scenario.details.length - 1)];
-    return read ? read() : new Promise(() => undefined);
+    return read ? read(show) : new Promise(() => undefined);
   },
 }));
 vi.mock("../src/diagnostics.ts", () => ({ diagnosticsText: () => scenario.diagnostics }));
@@ -400,17 +400,26 @@ describe("a title's details", () => {
 
   it("date TMDB's saved answer while it isn't answering, and Try again reads them anew", async () => {
     const savedAt = new Date(new Date().getFullYear(), 0, 12).getTime();
+    const saved = `Saved TMDB facts from ${formatDate(savedAt, "day")}.`;
+    let answer = () => {};
     scenario.details = [
       async () => facts({ kind: "unavailable", savedAt }),
-      async () => facts({ kind: "tmdb" }),
+      async (show) => {
+        show(facts({ kind: "asking", savedAt }));
+        await new Promise<void>((done) => (answer = done));
+        return facts({ kind: "tmdb" });
+      },
     ];
     await open();
-    expect(container.textContent).toContain(
-      `Saved TMDB facts from ${formatDate(savedAt, "day")}. TMDB isn't answering.`,
-    );
+    expect(container.textContent).toContain(`${saved} TMDB isn't answering.`);
     press("details-about-retry");
     await settled();
-    expect(container.textContent).not.toContain("TMDB isn't answering");
+    // While TMDB is asked again, the saved answer stays dated.
+    expect(container.textContent).toContain(`${saved} Asking TMDB again.`);
+    expect(find("details-about-retry")).toBeNull();
+    React.act(() => answer());
+    await settled();
+    expect(container.textContent).not.toContain("Saved TMDB facts");
     expect(find("details-about-retry")).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import { keychain } from "./keychain.ts";
 import type { Title } from "@mrstreamer/contracts/ondemand";
+import type { AboutStanding } from "../src/titles.ts";
 import { kindOf } from "@mrstreamer/core/ondemand/catalogue";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
@@ -92,6 +93,11 @@ const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
     readonly password: string;
     readonly channels: number;
     readonly titles: number;
+    readonly titlesOf?: <
+      T extends { readonly movies: readonly object[]; readonly series: readonly object[] },
+    >(
+      built: T,
+    ) => T;
   }): Promise<FakeProvider>;
 };
 const { startFakeTmdb } = (await import(FAKE_TMDB)) as { startFakeTmdb(): Promise<FakeTmdb> };
@@ -240,8 +246,14 @@ it(
     memory.offline = true;
     app = await launch({ appKey: "app-key" });
     await until(() => app.titleLists().kind === "ready", "the lists");
-    const stale = await app.detailsOf(firstMovie(app));
+    const early: (AboutStanding | undefined)[] = [];
+    const stale = await app.detailsOf(firstMovie(app), ({ about }) => early.push(about));
     expect(stale.about).toEqual({ kind: "unavailable", savedAt: expect.any(Number) });
+    // While TMDB is asked, the saved answer shows dated from the first.
+    expect(early[0]).toEqual({
+      kind: "asking",
+      savedAt: (stale.about as { savedAt: number }).savedAt,
+    });
     expect((stale.about as { savedAt: number }).savedAt).toBeLessThanOrEqual(savedAt);
     expect(stale.plot).toBe(answered.plot);
     // Browsing goes on without it, and Settings says TMDB isn't answering.
@@ -305,6 +317,32 @@ it("lets go of details asked with a key that was replaced", async () => {
   expect((await asked).about).toEqual({ kind: "refused", savedAt: null });
 });
 
+it("says when no listed title has a TMDB id", { timeout: 20_000 }, async () => {
+  // A TMDB id of "0" is none, as panels list it.
+  const unlinked = <A extends object>(titles: readonly A[]) =>
+    titles.map((title) => ({ ...title, tmdb: "0" }));
+  const bare = await startFakeProvider({
+    ...LOGIN,
+    channels: 2,
+    titles: 6,
+    titlesOf: (built) => ({
+      ...built,
+      movies: unlinked(built.movies),
+      series: unlinked(built.series),
+    }),
+  });
+  try {
+    const app = await launch({ appKey: "app-key" });
+    await app.add({ server: bare.url, ...LOGIN });
+    await until(() => app.titleLists().kind === "ready", "the lists");
+    await app.saveTmdbKey("viewer-key");
+    await settled(app, "unlinked");
+    expect(app.diagnosticsText()).toContain("  Status: no titles with a TMDB id\n");
+  } finally {
+    await bare.close();
+  }
+});
+
 it("says when TMDB doesn't know a title", async () => {
   const app = await launch({ appKey: "app-key" });
   await added(app);
@@ -325,11 +363,17 @@ it("shares diagnostics of kinds and counts alone: no address, login, name or fai
   await until(() => app.members()[0]?.live.kind === "failed", "the failed reload");
   const text = app.diagnosticsText();
 
-  expect(text).toContain("Mr. Streamer 0.2.0 (21) · iOS 26.1");
+  expect(text).toContain("Mr. Streamer 0.2.0 (21)\niOS 26.1\nProviders: 1 Xtream\n");
   expect(text).toContain(
-    "Provider 1: Xtream · account active · channels failed (unreachable), saved copy shown",
+    [
+      "Provider 1, Xtream",
+      "  Channels: failed (unreachable), saved copy shown",
+      "  Movies and series: loaded",
+      "  Account: active",
+    ].join("\n"),
   );
-  expect(text).toContain("TMDB: the app's key, refused by TMDB");
+  expect(text).toContain("TMDB\n  Key: the app's\n  Status: refused the key\n  Titles: 0 of ");
+  expect(text).toMatch(/\nMade .+, .+\n/);
   expect(text).toContain(
     "Addresses, logins, provider and title names, viewing history and file paths are left out.",
   );

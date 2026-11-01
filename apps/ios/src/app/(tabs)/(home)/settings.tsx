@@ -585,7 +585,12 @@ function Tmdb({ tmdb }: { tmdb: MetadataStanding }) {
       ) : null}
       {tmdb.kind === "unavailable" ? (
         <View style={styles.retry}>
-          <TextButton label="Try again" onPress={retryMetadata} testID="settings-tmdb-retry" />
+          <TextButton
+            label="Try again"
+            accessibilityLabel="Ask TMDB again"
+            onPress={retryMetadata}
+            testID="settings-tmdb-retry"
+          />
         </View>
       ) : null}
       <Text style={styles.paragraph}>
@@ -605,6 +610,8 @@ function tmdbStatus(tmdb: MetadataStanding): string {
       return "No key, provider facts only";
     case "waiting":
       return "Waiting for the lists";
+    case "unlinked":
+      return "No title has a TMDB id";
     case "refused":
       return "Refused the key";
     case "unavailable":

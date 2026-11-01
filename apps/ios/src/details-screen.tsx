@@ -465,7 +465,12 @@ function About({ facts, onRetry }: { facts: ShownDetails; onRetry: () => void })
       {credits.length > 0 ? <Text style={styles.dim}>{credits.join(" · ")}</Text> : null}
       {why ? <Text style={styles.dim}>{why}</Text> : null}
       {facts.about?.kind === "unavailable" ? (
-        <TextButton label="Try again" onPress={onRetry} testID="details-about-retry" />
+        <TextButton
+          label="Try again"
+          accessibilityLabel="Ask TMDB again for this title"
+          onPress={onRetry}
+          testID="details-about-retry"
+        />
       ) : null}
     </>
   );
@@ -477,6 +482,7 @@ const REASONS = {
   missing: "TMDB doesn't know this title.",
   refused: "TMDB refused the key in Settings.",
   unavailable: "TMDB isn't answering.",
+  asking: "Asking TMDB again.",
 } as const;
 
 /** Why TMDB's part shows as it does, or null when TMDB answered or isn't known yet. */
