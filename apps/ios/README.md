@@ -167,8 +167,17 @@ instead of the viewer's. It is the v4 backport of
 97ec4e250282bf4bdf376da9cd293ee9dfb385da, which applies to 4.29.0 byte for byte, then the
 follow-up [#4894](https://github.com/software-mansion/react-native-screens/pull/4894) (#4890),
 23127222c39b6d44aded6ef11130a7513dbb2735, both in react-native-screens 4.30.0
-([issue #4855](https://github.com/software-mansion/react-native-screens/issues/4855)). Drop it
-once the SDK's react-native-screens is 4.30.0 or later.
+([issue #4855](https://github.com/software-mansion/react-native-screens/issues/4855)). Drop that
+hunk once the SDK's react-native-screens is 4.30.0 or later.
+
+`patches/` also lets the native labels follow a new interface language without a relaunch,
+which react-native-screens doesn't do up to 4.30.1. On iOS 26.1 and later a tab's title goes to
+its `UITab` before its tab bar item, as upstream already writes its image
+([#4813](https://github.com/software-mansion/react-native-screens/pull/4813)): the item write
+repaints the bar from the tab, so a title written to the tab after it showed one change late. And
+a screen under the visible one keeps its title current, with the back button of the screen above
+it, which upstream configures again only when it shows: Settings' back button kept the language
+it was opened in.
 
 SDK 58 links prebuilt modules, which a patch can't reach, so `package.json` has autolinking build
 ExpoFileSystem, ExpoVideo and RNScreens from their patched source.
