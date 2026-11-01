@@ -22,6 +22,8 @@ const memory = vi.hoisted(() => ({
   abouts: [] as string[],
   /** No TMDB request reaches it, as when it is down or the iPhone is offline. */
   offline: false,
+  /** Keep the catalogue empty while a detail answer is saved. */
+  catalogueRefused: false,
   /** TMDB doesn't know these ids. */
   unknown: new Set<string>(),
   /** No provider request reaches its panel. */
@@ -89,6 +91,8 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   // Only details ask for a title's credits with it.
   const to = url.searchParams.has("append_to_response") ? "details" : "catalogue";
   if (to === "details") memory.abouts.push(key);
+  if (to === "catalogue" && memory.catalogueRefused)
+    return Response.json({ status_code: 7 }, { status: 401 });
   if (memory.offline) throw new TypeError("Network request failed");
   for (const held of memory.holds) if (held.key === key && held.to === to) await held.until;
   if (key === REFUSED_KEY) return Response.json({ status_code: 7 }, { status: 401 });
@@ -149,6 +153,7 @@ beforeEach(async () => {
   memory.keys.length = 0;
   memory.abouts.length = 0;
   memory.offline = false;
+  memory.catalogueRefused = false;
   memory.unknown.clear();
   memory.panelDown = false;
   memory.locked = false;
@@ -268,11 +273,15 @@ it(
   { timeout: 30_000 },
   async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
+    // A full catalogue cache still counts as answered offline; this case needs missing answers.
+    memory.catalogueRefused = true;
     let app = await launch({ appKey: "app-key" });
     await added(app);
     const movie = firstMovie(app);
     const answered = await app.detailsOf(movie);
     expect(answered.about).toEqual({ kind: "tmdb" });
+    await settled(app, "refused");
+    memory.catalogueRefused = false;
     const savedAt = Date.now();
 
     // 151 days on, past TMDB's refresh but within what may be kept, and TMDB doesn't answer.

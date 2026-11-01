@@ -1585,7 +1585,7 @@ describe("Programmes in Search", () => {
     expect(text()).toContain("News at Seven");
   });
 
-  it.each(["renewed token", "outside the search results"] as const)(
+  it.each(["renewed token", "valid token outside the search results"] as const)(
     "keeps an open detail reading as the guide reads again with %s",
     async (change) => {
       const news = {
