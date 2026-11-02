@@ -13,7 +13,8 @@
 // again, as AVPlayer does, must hold the same lines, with the same CHECK_UNCUED exception. Each
 // picture segment, with its sound, is then asked of a title just opened with one of its reads
 // failing in turn and the rest read, as a downloaded copy can: it must be the same bytes, or fail
-// and be the same bytes when asked again.
+// and be the same bytes when asked again, and the subtitle segments before it, asked between, the
+// same lines.
 //
 //   check <file> <folder> [start-seconds [interrupt-after-reads]]
 #define _FILE_OFFSET_BITS 64
@@ -142,11 +143,21 @@ done:
   return status;
 }
 
+/** 1, printed, when `name`'s `size` bytes at `data` aren't `made`'s; else 0. */
+static int differs(const char *name, int fault, const uint8_t *data, size_t size,
+                   const uint8_t *made, size_t made_size) {
+  if (size == made_size && memcmp(data, made, size) == 0) return 0;
+  printf("%s differs after read %d failed once: %zu vs %zu bytes\n", name, fault, size,
+         made_size);
+  return 1;
+}
+
 /**
  * Asks a title just opened from the start for picture segment `index` with only its `fault`th
- * read failing, and again if it failed for it, then the segment's sound renditions. 1 when any
- * differs from `made`, -1 on any other failure; `*faulted` says whether the segment had that
- * many reads.
+ * read failing, after the segment two before it. Then that one's subtitle segments, whose lines
+ * from earlier clusters are read again, then the picture again if it failed for the read, and its
+ * sound renditions. 1 when any differs from `made`, -1 on any other failure; `*faulted` says
+ * whether the segment had that many reads.
  */
 static int once(TitleHlsSource *source, int index, int fault, char renditions[][16],
                 const char **ext, int count, uint8_t **made, size_t *sizes, int *faulted) {
@@ -163,6 +174,11 @@ static int once(TitleHlsSource *source, int index, int fault, char renditions[][
   int status = -1;
   if (get(title, "main.m3u8", &data, &size) < 0) goto done;
   free(data);
+  // Two before, so the faulted request seeks.
+  int before = index - 2;
+  snprintf(name, sizeof(name), "v%d.m4s", before);
+  if (before >= 0 && get(title, name, &data, &size) < 0) goto done;
+  if (before >= 0) free(data);
   snprintf(name, sizeof(name), "v%d.m4s", index);
   file->fail_once = file->reads + fault;
   const uint8_t *served;
@@ -175,23 +191,22 @@ static int once(TitleHlsSource *source, int index, int fault, char renditions[][
     goto done;
   }
   status = 0;
-  for (int r = 0; r < count; r++) {
-    if (renditions[r][0] == 's') continue;
-    if (r) snprintf(name, sizeof(name), "%s-%d.%s", renditions[r], index, ext[r]);
-    data = NULL;
-    if (r || result != TITLE_HLS_OK) {
+  if (result == TITLE_HLS_OK)
+    status |= differs(name, fault, served, size, made[index * count], sizes[index * count]);
+  // The subtitle segments first, before asking the picture again can clear the failed read.
+  for (int pass = 0; pass < 2; pass++) {
+    for (int r = 0; r < count; r++) {
+      int text = renditions[r][0] == 's', at = text ? before : index;
+      if (text != !pass || at < 0 || (r == 0 && result == TITLE_HLS_OK)) continue;
+      if (r) snprintf(name, sizeof(name), "%s-%d.%s", renditions[r], at, ext[r]);
+      else snprintf(name, sizeof(name), "v%d.m4s", at);
       if (get(title, name, &data, &size) < 0) {
         status = -1;
         goto done;
       }
-      served = data;
+      status |= differs(name, fault, data, size, made[at * count + r], sizes[at * count + r]);
+      free(data);
     }
-    if (size != sizes[index * count + r] || memcmp(served, made[index * count + r], size) != 0) {
-      printf("%s differs after read %d failed once: %zu vs %zu bytes\n", name, fault, size,
-             sizes[index * count + r]);
-      status = 1;
-    }
-    free(data);
   }
 done:
   title_hls_close(title);
