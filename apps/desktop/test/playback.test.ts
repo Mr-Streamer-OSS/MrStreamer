@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { Codec } from "@mrstreamer/contracts/playback";
@@ -752,6 +752,8 @@ async function capturing(
     silenceMs?: number;
     /** Pieces each request sends before it falls silent; without end unless given. */
     pieces?: number;
+    /** How long the provider takes to close a request once it is aborted. */
+    closeMs?: number;
   } = {},
 ) {
   const folder = options.folder ?? join(await tempDir(), "live-history");
@@ -789,10 +791,12 @@ async function capturing(
           offset = offset + step >= recording.length ? 0 : offset + step;
           controller.enqueue(new Uint8Array(piece));
         }, 10);
-        signal.addEventListener("abort", () => {
-          closed();
-          controller.error(signal.reason);
-        });
+        signal.addEventListener("abort", () =>
+          setTimeout(() => {
+            closed();
+            controller.error(signal.reason);
+          }, options.closeMs ?? 0),
+        );
       },
       cancel: closed,
     });
@@ -807,6 +811,7 @@ async function capturing(
   return {
     captures,
     folder,
+    source,
     key: captureKey(source),
     otherKey: captureKey({ ...source, revision: 2 }),
     provider,
@@ -886,6 +891,58 @@ describe("live captures", () => {
     await captures.idle("record");
     expect(open()).toBe(0);
     expect(captures.reading(key)).toBe(false);
+  });
+
+  it("shares only the exact source: subscription, address and headers, whatever their case or order", async () => {
+    const { captures, source, provider, requests } = await capturing();
+    const headers = { "User-Agent": "Box", Referer: "http://panel/" };
+    const keys = [
+      captureKey({ ...source, headers }),
+      captureKey({ ...source, headers: { referer: "http://panel/", "user-agent": "Box" } }),
+      captureKey({ ...source, headers: { ...headers, "User-Agent": "Other" } }),
+      captureKey({ ...source, headers, subscriptionId: "other" }),
+      captureKey({ ...source, headers, url: "http://provider/live/2.ts" }),
+    ];
+    const reading = new AbortController();
+    for (const [index, key] of keys.entries())
+      await take(
+        (
+          await captures.request(key, `reader ${index}`, provider, reading.signal)
+        ).body!.getReader(),
+        188,
+      );
+    // The second asks for the first's source, its headers written otherwise.
+    expect(requests()).toBe(4);
+    reading.abort();
+    await Promise.all(keys.map((_key, index) => captures.idle(`reader ${index}`)));
+  });
+
+  it("counts the connection free only once the provider's request closed", async () => {
+    const { captures, key, provider, open } = await capturing({ closeMs: 200 });
+    const watch = new AbortController();
+    await take(
+      (await captures.request(key, "watch", provider, watch.signal)).body!.getReader(),
+      188,
+    );
+    watch.abort();
+    expect(open()).toBe(1);
+    await captures.idle("watch");
+    expect(open()).toBe(0);
+  });
+
+  it("empties what a run before left in its folder", async () => {
+    const folder = join(await tempDir(), "live-history");
+    await mkdir(join(folder, "1"), { recursive: true });
+    await writeFile(join(folder, "1", "0.ts"), new Uint8Array(188 * 100));
+    const { captures, key, provider } = await capturing({ folder });
+    const watch = new AbortController();
+    await take(
+      (await captures.request(key, "watch", provider, watch.signal)).body!.getReader(),
+      188,
+    );
+    await vi.waitFor(async () => expect(await bytesIn(folder)).toBe(0));
+    watch.abort();
+    await captures.idle("watch");
   });
 
   it("keeps its files within the budget, and fails only the reader that fell behind", async () => {

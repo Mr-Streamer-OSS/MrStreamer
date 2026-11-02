@@ -25,7 +25,7 @@ const channel: LiveChannel = {
   catchupDays: null,
 };
 
-const recording: Recording = {
+const noon: Recording = {
   id: "r1",
   channel: { subscriptionId: SUBSCRIPTION, id: "11" },
   channelName: "Eurosport 1",
@@ -41,7 +41,7 @@ const button = (name: string) =>
   [...document.querySelectorAll("button")].find((each) => each.textContent?.trim() === name);
 
 /** The strip's control while `recording` records, its popover opened. */
-async function opened() {
+async function opened(recording: Recording = noon) {
   ipc.reset();
   ipc.always("recordings.list", [recording]);
   const client = new QueryClient();
@@ -55,7 +55,7 @@ async function opened() {
   const trigger = await vi.waitFor(() => button("Recording") ?? Promise.reject(new Error("none")));
   await act(async () => trigger.click());
   const popup = document.querySelector<HTMLElement>("[role=dialog][aria-label=Recording]");
-  expect(popup?.textContent).toContain("Noon News");
+  expect(popup?.textContent).toContain(recording.title);
   return { trigger, popup: popup! };
 }
 
@@ -65,9 +65,7 @@ it("stops the recording in place and gives the keys to Record", async () => {
   expect(ipc.argsOf("recordings.stop")).toEqual([{ id: "r1" }]);
   // Main says it stopped: Recording gives way to Record, which takes the keys.
   await act(async () =>
-    ipc.emit("recordings.changed", [
-      { ...recording, ended: Date.now(), status: { kind: "stopped" } },
-    ]),
+    ipc.emit("recordings.changed", [{ ...noon, ended: Date.now(), status: { kind: "stopped" } }]),
   );
   await vi.waitFor(() => expect(document.activeElement).toBe(button("Record")));
   expect(button("Recording")).toBeUndefined();
@@ -88,4 +86,26 @@ it("says why a refused Stop failed, and Escape gives the keys back to Recording"
   });
   await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
   expect(document.querySelector("[aria-label=Recording][role=dialog]")).toBeNull();
+});
+
+it("says Tomorrow for a stop past midnight", async () => {
+  const stop = new Date();
+  stop.setDate(stop.getDate() + 1);
+  stop.setHours(3, 0, 0, 0);
+  const { popup } = await opened({ ...noon, stop: stop.getTime() });
+  expect(popup.textContent).toContain("Tomorrow");
+});
+
+it("asks to stop once, though its popover closes and opens again while it stops", async () => {
+  const { trigger, popup } = await opened();
+  const held = ipc.hold("recordings.stop");
+  await act(async () => button("Stop recording")?.click());
+  await act(async () => {
+    popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  await act(async () => trigger.click());
+  expect(button("Stop recording")?.disabled).toBe(true);
+  await act(async () => button("Stop recording")?.click());
+  expect(ipc.argsOf("recordings.stop")).toEqual([{ id: "r1" }]);
+  held.resolve(null);
 });
