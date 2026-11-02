@@ -194,7 +194,9 @@ export function DetailsView({
   }, [held]);
   const [season, setSeason] = useState(returned?.season ?? held);
   const seasonNow = useRef(season);
-  seasonNow.current = season;
+  useEffect(() => {
+    seasonNow.current = season;
+  }, [season]);
   useEffect(
     () => () => {
       const { settings, visit } = useUi.getState();
