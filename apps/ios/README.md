@@ -917,8 +917,9 @@ does, and lists them again (`scripts/live-lists.ts`); Reload in Settings then re
 out 100000, 100001 and 100002, the one channel in three qualities, takes Belgium's Kwaliteit, the
 only category it is in, away from Find countries or categories as well.
 
-The panel combines FFmpeg-generated test media with synthetic repository clips served unchanged
-from `apps/desktop/test/fixtures`. Generated artifacts are kept under `.local/ios-fixture` or
+The panel combines FFmpeg-generated test media with synthetic repository clips from
+`apps/desktop/test/fixtures`, silent unless `FIXTURE_SOUND=1`: a clip with sound is served as a
+copy whose sound is silent in the same streams and codecs ([testing](../../docs/contributing/testing.md#sound)). Generated artifacts are kept under `.local/ios-fixture` or
 `FIXTURE_OUT`. `scripts/native-fixtures/media.ts` records both kinds in the provenance: the
 control port's `/provenance` and `provenance.json` say where each piece came from; no provider
 or broadcast media is served. Catch-up plays as HLS on channel 1000 for three days and 1006 for

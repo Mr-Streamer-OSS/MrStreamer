@@ -246,7 +246,9 @@ const feature = maker.file(
 const clips = new Map<string, string>();
 /**
  * A TEST title's clip as the repository has it, or, when it has sound to silence, a copy of every
- * stream with its sound silenced, its container and codecs as they were.
+ * stream with its sound silenced, its container, codecs and dispositions as they were. The copy's
+ * start times move by tens of milliseconds, and an MPEG-TS clip's teletext is re-timed by ffmpeg's
+ * muxer, which no iOS path reads.
  */
 function clipOf(fixture: string) {
   let found = clips.get(fixture);
