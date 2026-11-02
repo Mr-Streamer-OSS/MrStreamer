@@ -61,6 +61,7 @@ runs:
       if: inputs.part == 'test'
       run: |
         setup=$RUNNER_TEMP/ffmpeg-setup
+        rm -f "$setup.status"
         (
           set +e
           bash apps/desktop/scripts/ci-ffmpeg.sh "$RUNNER_TEMP/ffmpeg-packages"
