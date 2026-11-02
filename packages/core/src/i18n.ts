@@ -278,10 +278,9 @@ const DATE_STYLES = {
 export type DateStyle = keyof typeof DATE_STYLES;
 
 /**
- * A moment in the interface language, in one of the app's few date styles, on the system's clock
- * as it is now. A formatter keeps the time zone it was made in, and the system's can change while
- * the app runs, so every kept formatter writes UTC and a local moment first moves by the offset
- * Date reads at that moment. That holds while no style names its time zone.
+ * A moment in the interface language, in one of the app's few date styles, in the system's time
+ * zone as it is now. The zone can change while the app runs and a kept formatter would keep the
+ * old one, so kept formatters write UTC and a local moment first moves by Date's offset for it.
  */
 export function formatDate(at: number | Date, style: DateStyle): string {
   const tag = active.formats;

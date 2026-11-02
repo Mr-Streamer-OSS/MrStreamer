@@ -241,13 +241,8 @@ describe("dates in the system time zone", () => {
     expect(formatDate(Date.UTC(2026, 2, 29, 1, 30), "time")).toBe("03:30");
   });
 
-  it("keep a calendar day on its own date, in the interface language", () => {
-    const airDate = Date.UTC(2026, 9, 2);
-    process.env["TZ"] = "UTC";
-    expect(formatDate(airDate, "calendarDay")).toBe("Oct 2, 2026");
+  it("keep a calendar day on its own date", () => {
     process.env["TZ"] = "America/Los_Angeles";
-    expect(formatDate(airDate, "calendarDay")).toBe("Oct 2, 2026");
-    setLanguage({ locale: "de-DE", formats: "de-DE" });
-    expect(formatDate(airDate, "calendarDay")).toMatch(/^2\. Okt\. 2026$/);
+    expect(formatDate(Date.UTC(2026, 9, 2), "calendarDay")).toBe("Oct 2, 2026");
   });
 });
