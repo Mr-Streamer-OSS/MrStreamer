@@ -9,9 +9,10 @@
 // The provenance the server declares (its control port's /provenance and provenance.json) names
 // the commit and whether the fixture sources differ from it, the ffmpeg that made the media, and
 // per piece its command, its inputs (a lavfi graph, or a repository file and its SHA-256) and the
-// SHA-256 of every file served from it. Repository clips the server sends as they are, the TEST
-// titles' files, are declared too. A made piece's files are named from `out`, a served clip's from
-// the repository's root, as its input is.
+// SHA-256 of every file served from it. TEST titles' clips the server sends as they are, those
+// with no sound to silence or all of them with FIXTURE_SOUND=1, are declared too; one with sound
+// is a made piece. A made piece's files are named from `out`, a served clip's from the
+// repository's root, as its input is.
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -39,7 +40,7 @@ const sha256 = (bytes: Buffer | string) => createHash("sha256").update(bytes).di
 /**
  * Whether the media keeps its sound. It is silent unless FIXTURE_SOUND=1, which a test about sound
  * itself sets: a track switch heard, volume, or captions in step with speech. Silent media keeps
- * its tracks, codecs and timing; only what they carry is quiet.
+ * its tracks and codecs; a silenced clip's start times move by tens of milliseconds (`clipOf`).
  */
 const SOUND = process.env.FIXTURE_SOUND === "1";
 
