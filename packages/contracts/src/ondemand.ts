@@ -159,7 +159,7 @@ export type TitleDetails = MovieDetails | SeriesDetails;
 
 export interface Season {
   readonly number: number;
-  /** "Season 2", or the provider's own name for it. */
+  /** "Season 2" or "Specials" in the interface language, from its number. */
   readonly name: string;
   readonly posterUrl: string | null;
   readonly episodes: readonly Episode[];

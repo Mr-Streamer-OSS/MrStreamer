@@ -9,6 +9,7 @@ import {
 } from "../src/ondemand/details.ts";
 import { suitability, versionLabels } from "../src/ondemand/languages.ts";
 import { episodeName, titleName } from "../src/ondemand/names.ts";
+import { setLanguage } from "../src/i18n.ts";
 import {
   audioTracks,
   channelSubtitle,
@@ -769,6 +770,7 @@ function seriesOf(
   ])[],
   language = "en",
   sourceOrder = false,
+  seasons: readonly { number: number; name: string | null; posterUrl: string | null }[] = [],
 ) {
   return seriesDetails(
     {
@@ -801,7 +803,7 @@ function seriesOf(
       duration: null,
       posterUrl: null,
       backdropUrl: null,
-      seasons: [],
+      seasons,
       episodes: files.map(([id, season, number, name, addedAt]) => ({
         id,
         season,
@@ -878,6 +880,49 @@ describe("a series' episodes", () => {
     expect(
       series.seasons.flatMap((season) => season.episodes).every((episode) => !episode.versions),
     ).toBe(true);
+  });
+});
+
+describe("a series' seasons", () => {
+  it.each([
+    ["en-US", ["Season 1", "Season 12", "Specials"]],
+    ["nl-NL", ["Seizoen 1", "Seizoen 12", "Specials"]],
+    ["fr-FR", ["Saison 1", "Saison 12", "Épisodes spéciaux"]],
+    ["de-DE", ["Staffel 1", "Staffel 12", "Specials"]],
+    ["es-ES", ["Temporada 1", "Temporada 12", "Especiales"]],
+  ] as const)("are named in %s whatever the provider calls them", (locale, names) => {
+    setLanguage({ locale, formats: locale });
+    try {
+      const series = seriesOf(
+        [
+          ["101", 1, 1, "Harbour Lights - S01E01"],
+          ["1201", 12, 1, "Harbour Lights - S12E01"],
+          ["901", 0, 1, "Harbour Lights - S00E01"],
+        ],
+        "en",
+        false,
+        [
+          { number: 1, name: "Temporada 1", posterUrl: "https://image.test/s1.jpg" },
+          { number: 12, name: "Kerstseizoen", posterUrl: null },
+          { number: 0, name: "Especiales", posterUrl: null },
+        ],
+      );
+      expect(series.seasons.map((season) => season.name)).toEqual(names);
+      // The provider's numbers, episodes and artwork stand.
+      expect(
+        series.seasons.map((season) => [
+          season.number,
+          season.posterUrl,
+          season.episodes.map((episode) => episode.id),
+        ]),
+      ).toEqual([
+        [1, "https://image.test/s1.jpg", ["101"]],
+        [12, null, ["1201"]],
+        [0, null, ["901"]],
+      ]);
+    } finally {
+      setLanguage({ locale: "en-US", formats: "en-US" });
+    }
   });
 });
 

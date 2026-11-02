@@ -138,11 +138,8 @@ export async function nextEpisodeScenario(
       `[...document.querySelectorAll('[role=menuitemradio]')].find(e => e.getAttribute('aria-label')?.includes('Formats (NL)'))`,
     );
     const season = Number(/^S(\d+)/.exec(episode)?.[1]);
-    // The provider supplies season one's Dutch name and omits season two's name.
-    await d.click(
-      `Open season ${season}`,
-      named("[role=dialog] button", season === 1 ? "Seizoen 1" : `Season ${season}`),
-    );
+    // The provider names season one in Dutch; the app names every season by its number.
+    await d.click(`Open season ${season}`, named("[role=dialog] button", `Season ${season}`));
     await d.click(
       `Play ${episode}`,
       `document.querySelector('[aria-label="More for ${episode}"]')?.closest('.group')?.querySelector('button')`,

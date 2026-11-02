@@ -4,7 +4,7 @@ import type { Locale } from "@mrstreamer/contracts/language";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { byIds, indexCatalogue, type IndexedCatalogue } from "@mrstreamer/core/ondemand/catalogue";
 import { setLanguage } from "@mrstreamer/core/i18n";
-import type { Title } from "@mrstreamer/contracts/ondemand";
+import type { Season, Title } from "@mrstreamer/contracts/ondemand";
 import type { OnDemandCatalogue, ProviderDetails, ProviderTitle } from "@mrstreamer/core/provider";
 import { afterEach, expect, it, vi } from "vitest";
 import { browseFixture } from "./title-browse-fixture.ts";
@@ -167,7 +167,8 @@ vi.mock("../src/titles.ts", () => ({
       ? seriesDetails(title, scenario.provided, null, "en")
       : new Promise(() => undefined);
   },
-  episodesOf: async () => [],
+  // Without TMDB, a season's episodes are the provider's.
+  episodesOf: async (_title: Title, season: Season) => season.episodes,
 }));
 vi.mock("../src/viewing.ts", () => ({
   useViewing: () => null,
@@ -320,7 +321,7 @@ it("shows a title's details in the language, keeping the version picked for Play
   expect(scenario.played).toEqual([{ subscriptionId: "b", id: "1" }]);
 });
 
-it("names the app's own season headings in a new language, keeping the provider's and the season chosen", async () => {
+it("names every numbered season in a new language, whatever the provider calls it, keeping the season chosen", async () => {
   const series: ProviderTitle = {
     id: "2",
     name: "Same series",
@@ -347,7 +348,7 @@ it("names the app's own season headings in a new language, keeping the provider'
     id,
     season,
     number: 1,
-    name: `Episode ${id}`,
+    name: `S0${season}E01 - Part ${id}`,
     plot: null,
     duration: null,
     stillUrl: null,
@@ -355,7 +356,7 @@ it("names the app's own season headings in a new language, keeping the provider'
     addedAt: null,
     container: "mkv",
   });
-  // The provider names season 1 itself; season 2 and the specials it leaves to the app.
+  // The provider names season 1 and the specials in Spanish and leaves season 2 to the app.
   scenario.provided = {
     originalName: null,
     plot: null,
@@ -366,21 +367,27 @@ it("names the app's own season headings in a new language, keeping the provider'
     duration: null,
     posterUrl: null,
     backdropUrl: null,
-    seasons: [{ number: 1, name: "Seizoen 1", posterUrl: null }],
+    seasons: [
+      { number: 1, name: "Temporada 1", posterUrl: null },
+      { number: 0, name: "Especiales", posterUrl: null },
+    ],
     episodes: [episode("101", 1), episode("201", 2), episode("901", 0)],
     container: null,
   };
   speak("fr-FR");
   mount(React.createElement(DetailsScreen, { kind: "series", version: "a:2" }));
   await React.act(async () => await new Promise((done) => setTimeout(done, 0)));
+  expect(button("Saison 1")).toBeTruthy();
   press("Saison 2");
   expect(button("Saison 2").getAttribute("aria-pressed")).toBe("true");
   expect(button("Épisodes spéciaux")).toBeTruthy();
+  expect(text()).toContain("Part 201");
 
   speak("de-DE");
   await React.act(async () => await new Promise((done) => setTimeout(done, 0)));
   expect(button("Staffel 2").getAttribute("aria-pressed")).toBe("true");
   expect(button("Specials")).toBeTruthy();
-  expect(button("Seizoen 1")).toBeTruthy();
-  expect(text()).not.toMatch(/Saison|spéciaux/);
+  expect(button("Staffel 1")).toBeTruthy();
+  expect(text()).toContain("Part 201");
+  expect(text()).not.toMatch(/Saison|spéciaux|Temporada|Especiales/);
 });
