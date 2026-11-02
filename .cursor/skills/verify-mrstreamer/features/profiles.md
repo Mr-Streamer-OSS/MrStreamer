@@ -10,7 +10,7 @@ Nothing new is visible. An upgraded installation shows the same favourites and t
 
 ## Public seam
 
-`profiles.active` (main `handlers/profiles.ts`) answers `{ id: "default", revision: 1 }`. The registry lives in `mrstreamer.db` (`platform/profile-store.ts`): the first start writes it in one transaction, never replaces rows already there, and older builds never read it. Until the registry has been read once, a locked or unwritable database fails the call rather than guess a profile, and a later call or start retries; after that the profile is answered from memory for the runtime's life. A database that can't open fails every call until a restart. A registry a later release left with another profile active fails the call and is left unchanged, because this release shows Default's viewing alone. The existing legacy `preferences.json` list import keeps its own import marker.
+`profiles.active` (main `handlers/profiles.ts`) answers Default with the registry's revision, `{ id: "default", revision: 1 }` when this release wrote it. The registry lives in `mrstreamer.db` (`platform/profile-store.ts`): the first start writes it in one transaction, never replaces rows already there, and older builds never read it. Until the registry has been read once, a locked or unwritable database fails the call rather than guess a profile, and a later call or start retries; after that the profile is answered from memory for the runtime's life. A database that can't open fails every call until a restart. A registry a later release left with another profile active fails the call and is left unchanged, because this release shows Default's viewing alone. The existing legacy `preferences.json` list import keeps its own import marker.
 
 ## Verification
 

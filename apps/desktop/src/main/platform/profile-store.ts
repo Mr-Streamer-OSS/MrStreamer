@@ -60,10 +60,7 @@ export const profilesLayer: Layer.Layer<Profiles, never, Database> = Layer.effec
           );
     yield* active.pipe(
       Effect.catch((failure) =>
-        Effect.logWarning(
-          "[profiles] the profiles can't be read; trying again on the next read or start",
-          failure.error,
-        ),
+        Effect.logWarning("[profiles] the active profile can't be read", failure.error),
       ),
     );
     return { active };
