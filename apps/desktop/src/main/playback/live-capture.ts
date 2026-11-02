@@ -253,11 +253,14 @@ function make(options: LiveCapturesOptions) {
       return new Response(body, { status: capture.status, headers: capture.headers });
     };
 
-    /** Where a reader joining now begins: the packet boundary at or before the live edge. */
+    /**
+     * Where a reader joining now begins: the first packet boundary at or after the live edge, so
+     * nothing before it, which may already be gone, is ever asked for.
+     */
     const edge = (capture: Capture) => {
       const end = capture.history.end();
       if (capture.origin === null) return end;
-      return capture.origin + Math.floor((end - capture.origin) / PACKET) * PACKET;
+      return capture.origin + Math.ceil((end - capture.origin) / PACKET) * PACKET;
     };
 
     const request = (
@@ -292,8 +295,9 @@ function make(options: LiveCapturesOptions) {
         }
         if (entry?.kind === "opening") {
           const capture = await entry.opened;
-          // It failed, or its reader left as it opened: this request asks the provider itself.
-          if (!capture || capture.closing) {
+          // It failed, its reader left as it opened, or the provider ended it at once: this request
+          // asks the provider itself.
+          if (!capture || capture.closing || capture.history.finished()) {
             if (entries.get(key) === entry) entries.delete(key);
             continue;
           }

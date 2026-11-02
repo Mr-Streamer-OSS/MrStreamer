@@ -219,6 +219,7 @@ function RecordingPopover({
   onStopping: (stopping: boolean) => void;
 }) {
   const popup = useRef<HTMLDivElement>(null);
+  const now = useNow();
   const stop = useMutation({
     mutationFn: () => {
       onStopping(true);
@@ -227,7 +228,8 @@ function RecordingPopover({
     onError: () => onStopping(false),
   });
   return (
-    <Popover.Root onOpenChange={(open) => open && stop.reset()}>
+    // A stop still under way stays so as it opens again: it isn't asked twice.
+    <Popover.Root onOpenChange={(open) => open && !stop.isPending && stop.reset()}>
       <Popover.Trigger
         render={
           <Button ref={triggerRef} variant="secondary" className={triggerClass}>
@@ -252,7 +254,8 @@ function RecordingPopover({
               <p className="truncate text-[0.8125rem] text-muted-foreground">
                 {t("{channel} · to {time}", {
                   channel: recording.channelName,
-                  time: formatDate(recording.stop, "time"),
+                  // Past midnight, as Record's own times say: "Tomorrow 03:00".
+                  time: clockTime(recording.stop, now),
                 })}
               </p>
             </div>

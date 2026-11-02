@@ -75,8 +75,11 @@ export interface History {
 export function historyStore(budget: HistoryBudget) {
   const histories = new Set<HistoryState>();
   let made = 0;
-  /** Bytes of evicted files the system wouldn't remove: they still take the disk. */
-  let stuck = 0;
+  /**
+   * Bytes of evicted files not removed yet, or that the system wouldn't remove: they still take
+   * the disk, also once their history closed.
+   */
+  let leaving = 0;
   // A crash leaves the last run's pieces behind: they belong to no capture now.
   const ready = rm(budget.folder, { recursive: true, force: true })
     .then(() => mkdir(budget.folder, { recursive: true }))
@@ -85,7 +88,7 @@ export function historyStore(budget: HistoryBudget) {
       () => false,
     );
 
-  const used = () => [...histories].reduce((sum, each) => sum + each.disk, stuck);
+  const used = () => [...histories].reduce((sum, each) => sum + each.disk, leaving);
   /**
    * Evicts the oldest piece on disk among every history, settling once its file is gone; null
    * when there is none.
@@ -169,7 +172,7 @@ export function historyStore(budget: HistoryBudget) {
     const state = new HistoryState(
       join(budget.folder, String(++made)),
       budget.pieceBytes,
-      (bytes) => (stuck += bytes),
+      (bytes) => (leaving += bytes),
       needed,
     );
     histories.add(state);
@@ -214,19 +217,19 @@ class HistoryState {
   private waiters = new Set<() => void>();
   readonly folder: string;
   readonly pieceBytes: number;
-  /** Hears of bytes an evicted file still takes, as its removal failed. */
-  private readonly stuck: (bytes: number) => void;
+  /** Hears of bytes evicted files take until they are removed: more, then fewer once gone. */
+  private readonly leaving: (bytes: number) => void;
   private readonly needed: () => number;
 
   constructor(
     folder: string,
     pieceBytes: number,
-    stuck: (bytes: number) => void,
+    leaving: (bytes: number) => void,
     needed: () => number,
   ) {
     this.folder = folder;
     this.pieceBytes = pieceBytes;
-    this.stuck = stuck;
+    this.leaving = leaving;
     this.needed = needed;
   }
 
@@ -287,11 +290,13 @@ class HistoryState {
       if (gone.file) {
         const { bytes } = gone;
         this.disk -= bytes;
+        // Counted until it is gone, so nothing is written in its place before.
+        this.leaving(bytes);
         removals.push(
-          remove(gone.file).catch(() => {
-            this.stuck(bytes);
-            this.broken = true;
-          }),
+          remove(gone.file).then(
+            () => this.leaving(-bytes),
+            () => void (this.broken = true),
+          ),
         );
         gone.file = null;
       }

@@ -770,8 +770,12 @@ function make(deps: PlaybackDeps) {
         const streams = yield* Effect.forEach(variants, (id) =>
           Effect.promise(() => source.provider.liveStream(id).catch(() => null)),
         );
-        // The session plays the first stream's format only: an HLS one reads no capture.
-        if (streams[0]?.format !== "mpegts") return [];
+        // The session plays the format of the first stream it tries, as `liveSession` orders
+        // them, recently failed ones last: when that is HLS it reads no capture.
+        const first = streams
+          .flatMap((stream) => stream ?? [])
+          .toSorted((a, b) => Number(failedAt.has(a.url)) - Number(failedAt.has(b.url)))[0];
+        if (first?.format !== "mpegts") return [];
         return streams.flatMap((stream) => {
           const key = streamKey(channel.subscriptionId, source.revision, stream);
           return key !== null && captures.reading(key) ? [key] : [];
