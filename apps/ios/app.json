@@ -3,7 +3,7 @@
     "name": "Mr. Streamer",
     "slug": "mrstreamer",
     "scheme": "mrstreamer",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "platforms": ["ios"],
     "orientation": "default",
     "userInterfaceStyle": "dark",
@@ -14,7 +14,7 @@
     },
     "ios": {
       "bundleIdentifier": "app.mrstreamer.player",
-      "buildNumber": "17",
+      "buildNumber": "18",
       "supportsTablet": true,
       "config": {
         "usesNonExemptEncryption": false
