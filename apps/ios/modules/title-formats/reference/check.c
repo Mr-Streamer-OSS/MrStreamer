@@ -144,9 +144,9 @@ done:
 
 /**
  * Asks a title just opened from the start for picture segment `index` with only its `fault`th
- * read failing, then the segment's sound renditions; a picture segment that failed for the read
- * is asked again. 1 when any differs from what `made` holds, -1 on any other failure; `*faulted`
- * says whether the segment had that many reads.
+ * read failing, and again if it failed for it, then the segment's sound renditions. 1 when any
+ * differs from `made`, -1 on any other failure; `*faulted` says whether the segment had that
+ * many reads.
  */
 static int once(TitleHlsSource *source, int index, int fault, char renditions[][16],
                 const char **ext, int count, uint8_t **made, size_t *sizes, int *faulted) {
@@ -178,12 +178,15 @@ static int once(TitleHlsSource *source, int index, int fault, char renditions[][
   for (int r = 0; r < count; r++) {
     if (renditions[r][0] == 's') continue;
     if (r) snprintf(name, sizeof(name), "%s-%d.%s", renditions[r], index, ext[r]);
-    int got = get(title, name, &data, &size);
-    if (got < 0) {
-      status = -1;
-      goto done;
+    data = NULL;
+    if (r || result != TITLE_HLS_OK) {
+      if (get(title, name, &data, &size) < 0) {
+        status = -1;
+        goto done;
+      }
+      served = data;
     }
-    if (size != sizes[index * count + r] || memcmp(data, made[index * count + r], size) != 0) {
+    if (size != sizes[index * count + r] || memcmp(served, made[index * count + r], size) != 0) {
       printf("%s differs after read %d failed once: %zu vs %zu bytes\n", name, fault, size,
              sizes[index * count + r]);
       status = 1;
