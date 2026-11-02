@@ -3,8 +3,8 @@ import { cn } from "../../lib/utils.ts";
 
 /**
  * A native select drawn as a compact field: the control radius, the row height and the app's
- * chevron, which styles.css draws for `data-slot="select"`. The list it opens and its keys stay
- * the system's.
+ * chevron, which styles.css draws for `data-slot="select"` along with the true-black options of
+ * the list it opens. That list and its keys stay the system's.
  */
 export function NativeSelect({ className, ...props }: ComponentProps<"select">) {
   return (
