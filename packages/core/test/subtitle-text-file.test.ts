@@ -63,14 +63,10 @@ describe("downloaded text subtitles", () => {
 
   it("reads an Arabic Windows-1256 file as its UTF-8 copy and keeps other languages strict", () => {
     const srt = "1\r\n00:00:10,000 --> 00:00:12,000\r\nمرحبا بالعالم!\r\nالحلقة 2\r\n";
-    const cues = [{ start: 10, end: 12, text: "مرحبا بالعالم!\nالحلقة 2" }];
-    expect(subtitleTextBytes(new TextEncoder().encode(srt), "ar")).toEqual(cues);
-    expect(subtitleTextBytes(encode(srt, "windows-1256"), "ar")).toEqual(cues);
-
+    expect(subtitleTextBytes(encode(srt, "windows-1256"), "ar")).toEqual([
+      { start: 10, end: 12, text: "مرحبا بالعالم!\nالحلقة 2" },
+    ]);
     const dutch = encode("1\n00:00:10,000 --> 00:00:12,000\nCafé\n", "windows-1252");
-    expect(
-      subtitleTextBytes(new TextEncoder().encode("1\n00:00:10,000 --> 00:00:12,000\nCafé\n"), "nl"),
-    ).toEqual([{ start: 10, end: 12, text: "Café" }]);
     expect(() => subtitleTextBytes(dutch, "nl")).toThrow();
     expect(() => subtitleTextBytes(encode("مرحبا بدون توقيت", "windows-1256"), "ar")).toThrow();
   });

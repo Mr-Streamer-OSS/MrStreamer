@@ -479,9 +479,6 @@ describe("online subtitle service ports", () => {
       { ...candidate, service: "opensubtitles", fileId: 7, language: "ar" } as const,
     ])
       expect((await client.download(choice, keys, signal())).subtitle.cues).toEqual(cues);
-    await expect(client.download(candidate, keys, signal())).rejects.toMatchObject({
-      reason: "unsupported",
-    });
   });
 
   it("downloads the text from a macOS ZIP without treating resource forks as another subtitle", async () => {

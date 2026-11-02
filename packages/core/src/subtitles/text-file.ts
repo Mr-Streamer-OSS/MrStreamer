@@ -6,21 +6,17 @@ import { t } from "../i18n.ts";
 
 export const SUBTITLE_TEXT_LIMIT = 10 * 1024 * 1024;
 
-// Older subtitle files are often saved in their language's legacy code page instead of UTF-8.
-const LEGACY_ENCODINGS: Partial<Record<string, string>> = { ar: "windows-1256" };
-
 /**
- * Reads downloaded subtitle bytes in the given language as strict UTF-8 first. Bytes that are not
- * UTF-8 are read in that language's legacy encoding when it has one, and refused otherwise.
+ * Reads downloaded subtitle bytes as strict UTF-8. An Arabic file that is not UTF-8 is read as
+ * Windows-1256, the code page older Arabic subtitles are saved in.
  */
 export function subtitleTextBytes(bytes: Uint8Array, language: string): readonly Cue[] {
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    const legacy = LEGACY_ENCODINGS[language.toLowerCase().split("-")[0] ?? ""];
-    if (!legacy) throw new Error(t("Subtitle file has no supported, valid cues."));
-    text = new TextDecoder(legacy).decode(bytes);
+  } catch (error) {
+    if (language.toLowerCase() !== "ar") throw error;
+    text = new TextDecoder("windows-1256").decode(bytes);
   }
   return subtitleTextFile(text);
 }
