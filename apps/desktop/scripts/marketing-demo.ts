@@ -48,10 +48,10 @@ const ffprobe = override ? join(dirname(override), "ffprobe") : "ffprobe";
 
 const { featured, shelf } = manifest;
 const titles = [featured, ...shelf];
-/** Thirty minutes, the length of every programme. */
-const SLOT_MS = 30 * 60 * 1000;
-/** How far into its programme every channel is when the subscription starts. */
-const INTO_PROGRAMME_MS = 10 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+/** How far the guide reaches before and after the subscription starts. */
+const GUIDE_BEFORE_MS = 2 * 60 * MINUTE_MS;
+const GUIDE_AFTER_MS = 24 * 60 * MINUTE_MS;
 /** Where the lists say their pictures are. Nothing answers there: the capture fills them in. */
 const ARTWORK = "https://image.example";
 
@@ -449,29 +449,49 @@ function guideId(channel: { readonly streamId: number }): string {
   return `channel${channel.streamId}.demo`;
 }
 
+/** A programme's length: each title keeps the one the manifest gives it, from 15 minutes to 2 hours. */
+function lengthOf(title: string): number {
+  const minutes = (manifest.programmeMinutes as Readonly<Record<string, number>>)[title];
+  if (!minutes) throw new Error(`The demo manifest gives "${title}" no length.`);
+  return minutes * MINUTE_MS;
+}
+
 /**
- * An XMLTV guide for the manifest's channels: half-hour programmes from two hours before `started`
- * to a day after it, every channel ten minutes into the first programme the manifest lists for it.
+ * An XMLTV guide for the manifest's channels, from two hours before `started` to a day after it.
+ * Each channel cycles through its programmes at their own lengths and is part way into the first
+ * one it lists, a different way in for each channel, so the grid's edges don't line up.
  */
 function guide(started: number): string {
-  const first = started - INTO_PROGRAMME_MS;
   const parts = ['<?xml version="1.0" encoding="utf-8" ?><tv generator-info-name="marketing">'];
   for (const channel of manifest.channels) {
     parts.push(
       `<channel id="${guideId(channel)}"><display-name>${guideId(channel)}</display-name></channel>`,
     );
   }
-  for (const channel of manifest.channels) {
+  manifest.channels.forEach((channel, index) => {
     const { programmes } = channel;
-    for (let slot = -4; slot < 48; slot++) {
-      const start = first + slot * SLOT_MS;
-      const title = programmes.at(slot % programmes.length) ?? "";
+    const titleAt = (slot: number): string => programmes.at(slot % programmes.length) ?? "";
+    const opening = lengthOf(titleAt(0));
+    // 3 to 27 minutes in, always with at least 4 minutes of the programme left.
+    const into = Math.min(((index * 11) % 25) + 3, opening / MINUTE_MS - 4) * MINUTE_MS;
+    const shown: { title: string; start: number; stop: number }[] = [];
+    for (let slot = 0, start = started - into; start < started + GUIDE_AFTER_MS; slot++) {
+      const stop = start + lengthOf(titleAt(slot));
+      shown.push({ title: titleAt(slot), start, stop });
+      start = stop;
+    }
+    for (let slot = -1, stop = started - into; stop > started - GUIDE_BEFORE_MS; slot--) {
+      const start = stop - lengthOf(titleAt(slot));
+      shown.unshift({ title: titleAt(slot), start, stop });
+      stop = start;
+    }
+    for (const { title, start, stop } of shown) {
       parts.push(
-        `<programme start="${xmltvTime(start)}" stop="${xmltvTime(start + SLOT_MS)}" channel="${guideId(channel)}">` +
+        `<programme start="${xmltvTime(start)}" stop="${xmltvTime(stop)}" channel="${guideId(channel)}">` +
           `<title lang="en">${title}</title></programme>`,
       );
     }
-  }
+  });
   parts.push("</tv>");
   return parts.join("\n");
 }

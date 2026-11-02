@@ -487,7 +487,7 @@ app.on('window-all-closed', () => app.quit());
     const os = await evaluate<string>("document.documentElement.dataset.os ?? 'any'");
     observed["detectedSystem"] = os;
     await scrollToEnd();
-    const homeSections = ["movies-and-series", "sound-and-subtitles", "what-you-need", "downloads"];
+    const homeSections = ["tricks", "screens", "what-you-need", "faq", "downloads"];
     const reachedSections = () =>
       captures
         .filter((c) => c.raw.includes('"feature_section_viewed"'))

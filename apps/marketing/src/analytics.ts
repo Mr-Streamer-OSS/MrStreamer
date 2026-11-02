@@ -47,12 +47,7 @@ type Choice = "on" | "off";
 type Status = Choice | "refused" | "unavailable";
 
 /** The home page's parts, by the ids index.html gives its sections. */
-const HOME_SECTIONS = [
-  "movies-and-series",
-  "sound-and-subtitles",
-  "what-you-need",
-  "downloads",
-] as const;
+const HOME_SECTIONS = ["tricks", "screens", "what-you-need", "faq", "downloads"] as const;
 type HomeSection = (typeof HOME_SECTIONS)[number];
 
 interface Download {

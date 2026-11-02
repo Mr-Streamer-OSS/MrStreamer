@@ -15,7 +15,8 @@
 //   doesn't list it
 // - the home or download page lacks the script that names the visitor's system, a page links
 //   an installer anywhere but this repository's releases, or the home page describes the app to
-//   search engines in data that doesn't read or shows a picture the package lacks
+//   search engines in data that doesn't read or shows a picture the package lacks, or its FAQ
+//   data asks other questions than the page shows
 // - a Markdown page lacks source headings, or a public link or fragment is missing
 // - search engines could list 404.html
 // - robots.txt doesn't name the sitemap, or a route answers with a missing page
@@ -180,6 +181,36 @@ try {
   }
 } catch {
   problems.push(`${LISTED["/"]} holds structured data that doesn't read.`);
+}
+// Search engines show FAQ answers only when the page shows the same questions: Home's FAQPage
+// data asks exactly the questions of its visible <summary> lines.
+const faq = [...home.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/gs)]
+  .map(([, json = ""]): unknown => {
+    try {
+      return JSON.parse(json);
+    } catch {
+      return undefined;
+    }
+  })
+  .find(
+    (data): data is Record<string, unknown> =>
+      typeof data === "object" && data !== null && "@type" in data && data["@type"] === "FAQPage",
+  );
+if (!faq) {
+  problems.push(`${LISTED["/"]} holds no FAQPage data that reads.`);
+} else {
+  const asked = (Array.isArray(faq["mainEntity"]) ? faq["mainEntity"] : []).map(
+    (question: unknown) =>
+      typeof question === "object" && question !== null && "name" in question
+        ? question.name
+        : undefined,
+  );
+  const shown = [...home.matchAll(/<summary>(.*?)<\/summary>/gs)].map(([, text = ""]) =>
+    text.replace(/\s+/g, " ").trim(),
+  );
+  if (asked.length !== shown.length || shown.some((question) => !asked.includes(question))) {
+    problems.push(`${LISTED["/"]} asks other questions in its FAQ data than the page shows.`);
+  }
 }
 
 // Every Markdown page holds its source's headings, even without JavaScript.

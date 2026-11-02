@@ -7,8 +7,9 @@
 //
 // - <name>-<width>.webp: the whole window, at the widths the page asks for.
 // - <name>-cut-<width>.webp: the part of a window a section is about, at one and two pixels a
-//   point. The four feature cuts share one shape, 6:5, so the gallery lines up; the stack of
-//   windows uses two of them, and a phone shows the Home stage cut above the fold.
+//   point. The five tricks show them beside their rows.
+// - iphone-<screen>-<width>.webp: the iPhone captures docs/assets/marketing-iphone-*.png, the
+//   whole screen at the widths the page asks for.
 // - mark.svg, favicon.svg, favicon-48.png, apple-touch-icon.png: the mark, alone and on black.
 // - social.png: 1200 × 630, the Home window on black, for links shared elsewhere.
 // - With --readme, in docs/assets: readme-poster.webp, the Home window with the Live TV and TV
@@ -35,6 +36,24 @@ const WIDTHS = [960, 1440, 1920, 2560];
 const SCALE = 2;
 /** The five captures, each the whole window in points (1280 × 800). */
 const MASTERS = ["home", "live-tv", "tv-guide", "library", "watching"] as const;
+/**
+ * The iPhone captures, each the whole screen at the simulator's own pixels, held the way index.html
+ * shows it: Watching sideways, the rest upright.
+ */
+const IPHONES = {
+  "iphone-home": "portrait",
+  "iphone-live": "portrait",
+  "iphone-guide": "portrait",
+  "iphone-library": "portrait",
+  "iphone-watching": "landscape",
+} as const;
+/**
+ * The iPhone screen the page is laid out for, in points: index.html gives every iPhone picture
+ * this shape (804 × 1748, or 1608 × 740 for landscape Watching), so a capture must have it too.
+ */
+const IPHONE_SCREEN = { width: 402, height: 874 };
+/** Widths of an iPhone screen: as wide as it shows beside the window, and twice that. */
+const IPHONE_WIDTHS = [402, 804];
 type Master = (typeof MASTERS)[number];
 interface Cut {
   readonly master: Master;
@@ -48,12 +67,12 @@ interface Cut {
  * size that stays readable in a narrow column.
  */
 const CUTS: Readonly<Record<string, Cut>> = {
-  // What a phone shows of Home above the fold: the stage preview, favourites and the rows' start.
+  // Home's stage preview, favourites and the rows' start.
   "home-stage": { master: "home", left: 16, top: 56, width: 574, height: 540 },
   // The playing preview and the channel list with what's on.
   "live-tv": { master: "live-tv", left: 236, top: 56, width: 600, height: 500 },
   // The catch-up signs, the open programme's Play from start and the now line.
-  "tv-guide": { master: "tv-guide", left: 246, top: 236, width: 600, height: 500 },
+  "tv-guide": { master: "tv-guide", left: 266, top: 236, width: 600, height: 500 },
   // The story, cast, Play and Save.
   library: { master: "library", left: 174, top: 60, width: 600, height: 500 },
   // The subtitle on the picture beside the subtitle panel.
@@ -64,9 +83,9 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
 const webp = { quality: 88, effort: 5 };
-/** A capture, checked against its manifest entry, as sharp reads it. */
-const captures = new Map<Master, Sharp>();
-for (const name of MASTERS) {
+
+/** A committed capture's bytes, once they match its manifest entry. */
+function checkedCapture(name: string): Buffer {
   const file = `marketing-${name}.png`;
   const bytes = readFileSync(join(assets, file));
   const recorded = manifest.captures.find((capture) => capture.file === file);
@@ -76,12 +95,37 @@ for (const name of MASTERS) {
     recorded.sha256 !== createHash("sha256").update(bytes).digest("hex")
   )
     throw new Error(`${file} differs from its capture manifest; regenerate captures together.`);
-  const capture = sharp(bytes);
+  return bytes;
+}
+
+/** A capture, checked against its manifest entry, as sharp reads it. */
+const captures = new Map<Master, Sharp>();
+for (const name of MASTERS) {
+  const capture = sharp(checkedCapture(name));
   const size = await capture.metadata();
   if (size.width !== 2560 || size.height !== 1600 || size.format !== "png")
     throw new Error(`${name} must be the lossless 2560 × 1600 PNG master.`);
   captures.set(name, capture);
   for (const width of WIDTHS) {
+    await capture
+      .clone()
+      .resize({ width })
+      .webp(webp)
+      .toFile(join(out, `${name}-${width}.webp`));
+  }
+}
+for (const [name, held] of Object.entries(IPHONES)) {
+  const capture = sharp(checkedCapture(name));
+  const size = await capture.metadata();
+  const { format, width = 0, height = 0 } = size;
+  const landscape = held === "landscape";
+  const [long, short] = landscape ? [width, height] : [height, width];
+  if (format !== "png" || long * IPHONE_SCREEN.width !== short * IPHONE_SCREEN.height)
+    throw new Error(
+      `${name} must be a lossless ${held} PNG of the whole ${IPHONE_SCREEN.width} × ${IPHONE_SCREEN.height}-point iPhone screen.`,
+    );
+  // A landscape screen is as tall as a portrait one is wide, so it is twice as wide again.
+  for (const width of landscape ? IPHONE_WIDTHS.map((each) => each * 2) : IPHONE_WIDTHS) {
     await capture
       .clone()
       .resize({ width })

@@ -27,7 +27,7 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="Mr. Streamer Home with Watchlist, Customize, a live preview, Continue watching and recommendations"
+      content="Mr. Streamer Home: a live preview, favourites, Continue watching and a recommendation"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <script type="application/ld+json">
@@ -58,6 +58,54 @@
         ]
       }
     </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Does Mr. Streamer come with channels?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Mr. Streamer includes no channels and sells none. You connect the subscription you already have."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does it work with M3U playlists and Xtream Codes?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Sign in with an Xtream Codes login or add an M3U playlist link. Live TV works straight away; for a playlist's movies and series, map its groups in Settings."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is it really free?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. It is open source under GPL-3.0, with no ads and no account."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I watch on my TV?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "On a Mac, with AirPlay. On Windows, with Google Cast. On Linux it plays on the computer only."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is there an iPhone app?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Mr. Streamer for iPhone is on its way to the App Store."
+            }
+          }
+        ]
+      }
+    </script>
     <!-- system -->
     <link rel="stylesheet" href="/src/styles.css" />
     <script type="module" src="/src/main.ts"></script>
@@ -80,132 +128,285 @@
       </header>
 
       <main id="main">
+        <!-- The big line is the voice; the h1 under it says what the page is about, for readers and search. -->
         <section class="hero">
-          <img class="mark" src="/generated/mark.svg" alt="" width="100" height="100" />
-          <h1>Mr. Streamer</h1>
-          <p class="line">Live TV, movies and series.</p>
-          <p class="lead">An open source IPTV player for Mac, Windows and Linux.</p>
+          <p class="tagline">
+            <span class="hatted"
+              >N<img src="/generated/mark.svg" alt="" width="100" height="100" /></span
+            >othing up<br />our sleeve.
+          </p>
+          <h1>The free, open source IPTV player for Mac, Windows and Linux.</h1>
+          <p class="lead">
+            Live TV, movies and series from your Xtream Codes login or M3U playlist.
+          </p>
           <!-- Every download action on this page is a link to /download, where the installers are. -->
           <p class="actions">
             <a class="cta button primary" href="/download">Download</a>
+            <a class="source" href="https://github.com/Mr-Streamer-OSS/MrStreamer"
+              >Read the source</a
+            >
           </p>
         </section>
 
-        <figure class="showcase">
-          <div class="stack" aria-label="Home, Live TV and the TV Guide" data-reveal>
-            <picture class="layer">
-              <source
-                media="(max-width: 43.74em)"
-                srcset="
-                  /generated/home-stage-cut-574.webp   574w,
-                  /generated/home-stage-cut-1148.webp 1148w
-                "
-                sizes="84vw"
-                width="1148"
-                height="1080"
-              />
-              <img
-                src="/generated/home-1440.webp"
-                srcset="
-                  /generated/home-960.webp   960w,
-                  /generated/home-1440.webp 1440w,
-                  /generated/home-1920.webp 1920w
-                "
-                sizes="(min-width: 80em) 850px, (min-width: 70em) 66vw, 84vw"
-                width="2560"
-                height="1600"
-                alt="Home with a live preview and Continue watching"
-                fetchpriority="high"
-                decoding="async"
-              />
-            </picture>
+        <!-- The desktop window with the iPhone in front of it, lit from behind by the picture it plays. -->
+        <figure class="stage" aria-label="Mr. Streamer on a computer and on iPhone">
+          <picture class="window">
             <img
-              class="layer"
-              src="/generated/live-tv-cut-600.webp"
-              srcset="/generated/live-tv-cut-600.webp 600w, /generated/live-tv-cut-1200.webp 1200w"
-              sizes="(min-width: 80em) 370px, (min-width: 70em) 29vw, 48vw"
-              width="1200"
-              height="1000"
-              alt="Live TV with a playing preview and the channel list, in front"
-              loading="lazy"
+              src="/generated/home-1440.webp"
+              srcset="
+                /generated/home-960.webp   960w,
+                /generated/home-1440.webp 1440w,
+                /generated/home-1920.webp 1920w
+              "
+              sizes="(min-width: 70em) 1060px, 115vw"
+              width="2560"
+              height="1600"
+              alt="Mr. Streamer Home on a computer: a live preview, favourites, Continue watching and a recommendation"
+              fetchpriority="high"
               decoding="async"
             />
+          </picture>
+          <div class="phone">
             <img
-              class="layer"
-              src="/generated/tv-guide-cut-600.webp"
-              srcset="
-                /generated/tv-guide-cut-600.webp   600w,
-                /generated/tv-guide-cut-1200.webp 1200w
-              "
-              sizes="(min-width: 80em) 370px, (min-width: 70em) 29vw, 48vw"
-              width="1200"
-              height="1000"
-              alt="The TV Guide grid with an aired programme open, in front"
-              loading="lazy"
+              src="/generated/iphone-home-402.webp"
+              srcset="/generated/iphone-home-402.webp 402w, /generated/iphone-home-804.webp 804w"
+              sizes="(min-width: 70em) 282px, 40vw"
+              width="804"
+              height="1748"
+              alt="Mr. Streamer Home on iPhone: a playing channel, what's on now, favourites and Continue watching"
               decoding="async"
             />
           </div>
-
-          <figcaption class="legend">
-            <div>
-              <b>Home</b>
-              <p>Continue watching, a muted live preview and what to watch next.</p>
-            </div>
-            <div>
-              <b>Live TV</b>
-              <p>See what's on, keep favourites and switch channels.</p>
-            </div>
-            <div>
-              <b>TV Guide</b>
-              <p>
-                Browse the schedule and watch earlier programmes when your provider supports
-                catch-up.
-              </p>
-            </div>
-          </figcaption>
         </figure>
 
-        <div class="gallery">
-          <section class="feature" id="movies-and-series" data-reveal>
-            <picture class="frame">
+        <section class="tricks" id="tricks" data-reveal>
+          <div class="label">
+            <h2>Five tricks</h2>
+            <p>On Mac, Windows and Linux, and soon iPhone</p>
+          </div>
+          <ol>
+            <li class="trick">
+              <span class="nth">01</span>
+              <h3>Play from start</h3>
+              <p>Rewind live TV with catch-up.</p>
               <img
-                src="/generated/library-cut-600.webp"
-                srcset="
-                  /generated/library-cut-600.webp   600w,
-                  /generated/library-cut-1200.webp 1200w
-                "
-                sizes="(min-width: 80em) 540px, (min-width: 43.75em) 45vw, 95vw"
+                class="peek"
+                src="/generated/tv-guide-cut-600.webp"
                 width="1200"
                 height="1000"
-                alt="Canyon Hours details with its story, cast, Play and Save"
+                alt=""
                 loading="lazy"
                 decoding="async"
               />
-            </picture>
-            <h2>Movies and series</h2>
-            <p>Continue where you left off. Save a watchlist and download for offline viewing.</p>
-          </section>
-
-          <section class="feature" id="sound-and-subtitles" data-reveal>
-            <picture class="frame">
+            </li>
+            <li class="trick">
+              <span class="nth">02</span>
+              <h3>Your own guide</h3>
+              <p>Add XMLTV guides beside your provider's.</p>
               <img
+                class="peek"
+                src="/generated/live-tv-cut-600.webp"
+                width="1200"
+                height="1000"
+                alt=""
+                loading="lazy"
+                decoding="async"
+              />
+            </li>
+            <li class="trick">
+              <span class="nth">03</span>
+              <h3>Watch offline</h3>
+              <p>Download movies and series for later.</p>
+              <img
+                class="peek"
+                src="/generated/library-cut-600.webp"
+                width="1200"
+                height="1000"
+                alt=""
+                loading="lazy"
+                decoding="async"
+              />
+            </li>
+            <li class="trick">
+              <span class="nth">04</span>
+              <h3>Subtitles your way</h3>
+              <p>Any track, any size, in sync.</p>
+              <img
+                class="peek"
                 src="/generated/watching-cut-884.webp"
-                srcset="
-                  /generated/watching-cut-884.webp   884w,
-                  /generated/watching-cut-1768.webp 1768w
-                "
-                sizes="(min-width: 80em) 540px, (min-width: 43.75em) 45vw, 95vw"
                 width="1768"
                 height="1474"
-                alt="An episode playing with English subtitles beside the subtitle panel's track, timing and appearance controls"
+                alt=""
+                loading="lazy"
+                decoding="async"
+              />
+            </li>
+            <li class="trick">
+              <span class="nth">05</span>
+              <h3>Lists of your own</h3>
+              <p>Favourites, lists and reminders.</p>
+              <img
+                class="peek"
+                src="/generated/home-stage-cut-574.webp"
+                width="1148"
+                height="1080"
+                alt=""
+                loading="lazy"
+                decoding="async"
+              />
+            </li>
+          </ol>
+        </section>
+
+        <!-- Tabs once main.ts runs; without it every screen shows, one under the other. -->
+        <section class="screens" id="screens" data-reveal>
+          <div class="screens-head">
+            <h2>Same guide on the desk and on the couch.</h2>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Screens" hidden>
+            <button type="button" role="tab" aria-controls="screen-guide" aria-selected="true">
+              TV Guide
+            </button>
+            <button type="button" role="tab" aria-controls="screen-live" aria-selected="false">
+              Live TV
+            </button>
+            <button type="button" role="tab" aria-controls="screen-library" aria-selected="false">
+              Movies and series
+            </button>
+            <button type="button" role="tab" aria-controls="screen-watching" aria-selected="false">
+              Watching
+            </button>
+          </div>
+          <figure class="screen" id="screen-guide" aria-label="TV Guide">
+            <picture class="window">
+              <img
+                src="/generated/tv-guide-1440.webp"
+                srcset="
+                  /generated/tv-guide-960.webp   960w,
+                  /generated/tv-guide-1440.webp 1440w,
+                  /generated/tv-guide-1920.webp 1920w
+                "
+                sizes="(min-width: 70em) 1080px, 100vw"
+                width="2560"
+                height="1600"
+                alt="The TV Guide grid on a computer, with an aired programme open and Play from start"
                 loading="lazy"
                 decoding="async"
               />
             </picture>
-            <h2>Sound and subtitles</h2>
-            <p>Choose audio and subtitle tracks. Search online subtitles with your own API key.</p>
-          </section>
-        </div>
+            <div class="phone">
+              <img
+                src="/generated/iphone-guide-402.webp"
+                srcset="
+                  /generated/iphone-guide-402.webp 402w,
+                  /generated/iphone-guide-804.webp 804w
+                "
+                sizes="(min-width: 70em) 282px, 40vw"
+                width="804"
+                height="1748"
+                alt="The Guide on iPhone, channels down the side and programmes by time"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </figure>
+          <figure class="screen" id="screen-live" aria-label="Live TV">
+            <picture class="window">
+              <img
+                src="/generated/live-tv-1440.webp"
+                srcset="
+                  /generated/live-tv-960.webp   960w,
+                  /generated/live-tv-1440.webp 1440w,
+                  /generated/live-tv-1920.webp 1920w
+                "
+                sizes="(min-width: 70em) 1080px, 100vw"
+                width="2560"
+                height="1600"
+                alt="Live TV on a computer: a playing preview and every channel with what's on now and next"
+                loading="lazy"
+                decoding="async"
+              />
+            </picture>
+            <div class="phone">
+              <img
+                src="/generated/iphone-live-402.webp"
+                srcset="/generated/iphone-live-402.webp 402w, /generated/iphone-live-804.webp 804w"
+                sizes="(min-width: 70em) 282px, 40vw"
+                width="804"
+                height="1748"
+                alt="Live TV on iPhone: every channel with what's on now and next, the playing channel in a bar above the tabs"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </figure>
+          <figure class="screen" id="screen-library" aria-label="Movies and series">
+            <picture class="window">
+              <img
+                src="/generated/library-1440.webp"
+                srcset="
+                  /generated/library-960.webp   960w,
+                  /generated/library-1440.webp 1440w,
+                  /generated/library-1920.webp 1920w
+                "
+                sizes="(min-width: 70em) 1080px, 100vw"
+                width="2560"
+                height="1600"
+                alt="A series' details: its story, cast, Play and Save"
+                loading="lazy"
+                decoding="async"
+              />
+            </picture>
+            <div class="phone">
+              <img
+                src="/generated/iphone-library-402.webp"
+                srcset="
+                  /generated/iphone-library-402.webp 402w,
+                  /generated/iphone-library-804.webp 804w
+                "
+                sizes="(min-width: 70em) 282px, 40vw"
+                width="804"
+                height="1748"
+                alt="Canyon Hours on iPhone: its story, cast, seasons, Play and Save"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </figure>
+          <figure class="screen watching" id="screen-watching" aria-label="Watching">
+            <picture class="window">
+              <img
+                src="/generated/watching-1440.webp"
+                srcset="
+                  /generated/watching-960.webp   960w,
+                  /generated/watching-1440.webp 1440w,
+                  /generated/watching-1920.webp 1920w
+                "
+                sizes="(min-width: 70em) 1080px, 100vw"
+                width="2560"
+                height="1600"
+                alt="An episode playing with English subtitles beside the subtitle panel's track, timing and look controls"
+                loading="lazy"
+                decoding="async"
+              />
+            </picture>
+            <div class="phone landscape">
+              <img
+                src="/generated/iphone-watching-804.webp"
+                srcset="
+                  /generated/iphone-watching-804.webp   804w,
+                  /generated/iphone-watching-1608.webp 1608w
+                "
+                sizes="(min-width: 70em) 560px, 70vw"
+                width="1608"
+                height="740"
+                alt="A live channel playing full screen on iPhone, turned sideways, with its controls showing"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </figure>
+        </section>
 
         <!-- Each "also" names only players whose own pages document that need, as the README's sources show. -->
         <section class="need" id="what-you-need" data-reveal>
@@ -267,8 +468,48 @@
           </div>
         </section>
 
+        <!-- The questions people search for, readable without scripts. The FAQPage data in the head says the same. -->
+        <section class="questions" id="faq" data-reveal>
+          <div>
+            <h2>Questions</h2>
+            <p>More in the <a href="/faq">FAQ</a> and the <a href="/docs">guides</a>.</p>
+          </div>
+          <div class="asked">
+            <details open>
+              <summary>Does Mr. Streamer come with channels?</summary>
+              <p>
+                No. Mr. Streamer includes no channels and sells none. You connect the subscription
+                you already have.
+              </p>
+            </details>
+            <details>
+              <summary>Does it work with M3U playlists and Xtream Codes?</summary>
+              <p>
+                Yes. Sign in with an Xtream Codes login or add an M3U playlist link. Live TV works
+                straight away; for a playlist's movies and series, map its groups in Settings.
+                <a href="/docs/subscriptions">Subscriptions</a>
+              </p>
+            </details>
+            <details>
+              <summary>Is it really free?</summary>
+              <p>Yes. It is open source under GPL-3.0, with no ads and no account.</p>
+            </details>
+            <details>
+              <summary>Can I watch on my TV?</summary>
+              <p>
+                On a Mac, with AirPlay. On Windows, with Google Cast. On Linux it plays on the
+                computer only. <a href="/docs/playback#playing-on-a-tv">What plays</a>
+              </p>
+            </details>
+            <details>
+              <summary>Is there an iPhone app?</summary>
+              <p>Mr. Streamer for iPhone is on its way to the App Store.</p>
+            </details>
+          </div>
+        </section>
+
         <section class="downloads" id="downloads" data-reveal>
-          <h2>Get Mr. Streamer</h2>
+          <h2>Free. That's the whole trick.</h2>
           <!-- The formats are words; the button goes to them. Homebrew and AUR are written by the build. -->
           <dl>
             <div>
@@ -285,6 +526,11 @@
               <dt>Linux</dt>
               <dd>64-bit. The AppImage needs FUSE 2.</dd>
               <dd>AppImage <span>·</span> .deb<!-- package:aur:lane --></dd>
+            </div>
+            <div>
+              <dt>iPhone</dt>
+              <dd>Coming to the App Store</dd>
+              <dd><a href="https://discord.gg/sR4tjEw6bQ">Hear first on Discord</a></dd>
             </div>
           </dl>
           <a class="button primary" href="/download">Download</a>
