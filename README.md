@@ -6,7 +6,7 @@
 
 <p align="center"><strong><a href="https://mrstreamer.app/download">Download</a></strong> · <a href="https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge">Microsoft Store</a> · <a href="https://discord.gg/sR4tjEw6bQ">Discord</a></p>
 
-<img src="docs/assets/readme-poster.webp" alt="Home with a live preview, favourites and Continue watching, with Live TV and the TV Guide in front of it" width="100%">
+<img src="docs/assets/readme-poster.webp" alt="Mr. Streamer Home on a computer, with the iPhone app's Home screen in front of it" width="100%">
 
 - Live TV with favourites, [your own channel lists, programme reminders](docs/user/live-tv.md#your-lists) and a [guide grid](docs/user/live-tv.md#the-guide). Aired programmes play from their start when your provider keeps catch-up.
 - Movies and series with resume, a [watchlist](docs/user/movies-and-series.md#watchlist) and [offline downloads](docs/user/downloads.md) you can pause and reorder, whole series included.
