@@ -10,7 +10,10 @@
 // runs of reading the file asks for, which is how many requests a provider would see, and the
 // bytes read before the first segment is ready. With CHECK_FAULTS set, the reads such a subtitle
 // segment makes fail from each in turn on, as when the provider drops, and the segment asked
-// again, as AVPlayer does, must hold the same lines, with the same CHECK_UNCUED exception.
+// again, as AVPlayer does, must hold the same lines, with the same CHECK_UNCUED exception. Each
+// picture segment, with its sound, is then asked of a title just opened with one of its reads
+// failing in turn and the rest read, as a downloaded copy can: it must be the same bytes, or fail
+// and be the same bytes when asked again.
 //
 //   check <file> <folder> [start-seconds [interrupt-after-reads]]
 #define _FILE_OFFSET_BITS 64
@@ -26,7 +29,7 @@ typedef struct File {
   int64_t next; /* where the last read ended: a read elsewhere is a new request */
   int runs;
   int64_t bytes;
-  int reads, interrupt_after, fail_at;
+  int reads, interrupt_after, fail_at, fail_once;
   TitleHls *title;
 } File;
 
@@ -36,6 +39,7 @@ static int read_at(void *opaque, int64_t offset, uint8_t *buffer, int size) {
   if (file->interrupt_after && file->reads == file->interrupt_after && file->title)
     title_hls_interrupt(file->title);
   if (file->fail_at && file->reads >= file->fail_at) return -1;
+  if (file->reads == file->fail_once) return -1;
   if (offset != file->next) file->runs++;
   if (fseeko(file->file, offset, SEEK_SET) != 0) return -1;
   size_t read = fread(buffer, 1, (size_t)size, file->file);
@@ -133,6 +137,59 @@ static int fresh(TitleHlsSource *source, int track, int index, int chosen, const
   free(data);
 compared:
   *listed = title_hls_subtitle_listed(title, track);
+done:
+  title_hls_close(title);
+  return status;
+}
+
+/**
+ * Asks a title just opened from the start for picture segment `index` with only its `fault`th
+ * read failing, then the segment's sound renditions; a picture segment that failed for the read
+ * is asked again. 1 when any differs from what `made` holds, -1 on any other failure; `*faulted`
+ * says whether the segment had that many reads.
+ */
+static int once(TitleHlsSource *source, int index, int fault, char renditions[][16],
+                const char **ext, int count, uint8_t **made, size_t *sizes, int *faulted) {
+  File *file = source->opaque;
+  TitleHls *title = NULL;
+  char detail[256] = "", name[64];
+  TitleHlsResult opened = title_hls_open(source, 0, &title, detail, sizeof(detail));
+  if (opened != TITLE_HLS_OK) {
+    printf("once v%d.m4s open result=%d detail=%s\n", index, opened, detail);
+    return -1;
+  }
+  uint8_t *data = NULL;
+  size_t size = 0;
+  int status = -1;
+  if (get(title, "main.m3u8", &data, &size) < 0) goto done;
+  free(data);
+  snprintf(name, sizeof(name), "v%d.m4s", index);
+  file->fail_once = file->reads + fault;
+  const uint8_t *served;
+  const char *type;
+  TitleHlsResult result = title_hls_get(title, name, &served, &size, &type, detail, sizeof(detail));
+  *faulted = file->reads >= file->fail_once;
+  file->fail_once = 0;
+  if (result != TITLE_HLS_OK && result != TITLE_HLS_READ_FAILED) {
+    printf("once %s result=%d detail=%s\n", name, result, detail);
+    goto done;
+  }
+  status = 0;
+  for (int r = 0; r < count; r++) {
+    if (renditions[r][0] == 's') continue;
+    if (r) snprintf(name, sizeof(name), "%s-%d.%s", renditions[r], index, ext[r]);
+    int got = get(title, name, &data, &size);
+    if (got < 0) {
+      status = -1;
+      goto done;
+    }
+    if (size != sizes[index * count + r] || memcmp(data, made[index * count + r], size) != 0) {
+      printf("%s differs after read %d failed once: %zu vs %zu bytes\n", name, fault, size,
+             sizes[index * count + r]);
+      status = 1;
+    }
+    free(data);
+  }
 done:
   title_hls_close(title);
   return status;
@@ -325,6 +382,18 @@ int main(int argc, char **argv) {
     if (uncued)
       printf("%d fault retries differ in a file whose index leaves lines out\n", apart);
     else differ += apart;
+    int once_faults = 0, once_apart = 0;
+    for (int i = 0; i < segments; i++) {
+      for (int fault = 1, faulted = 1; faulted; fault++) {
+        int got = once(&source, i, fault, renditions, ext, count, made, sizes, &faulted);
+        if (got < 0) goto done;
+        once_faults += faulted;
+        once_apart += got;
+      }
+    }
+    printf("single faults: %d reads failed once, %d segments differ after one\n", once_faults,
+           once_apart);
+    differ += once_apart;
   }
   status = differ ? 1 : 0;
 done:
