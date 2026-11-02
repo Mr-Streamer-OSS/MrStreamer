@@ -4,7 +4,11 @@ After checking out the exact candidate and trusted validation tools, call this c
 with `part: check`, `test`, or `website`, and a unique `report-name` when calling more than once.
 Run Check and Test in separate jobs, bounded at 10 and 15 minutes; Checks bounds each test shard at
 15 minutes and its merging Test at 10. Check includes the production desktop build and workflow validation.
-Test preserves the full suite, multimedia setup, JSON artifact and completeness gate. Website
+Test preserves the full suite, multimedia setup, JSON artifact and completeness gate. It restores
+the native fixture's encoded media from an Actions cache keyed by the ffmpeg package set and the
+fixture's sources, and saves it after a passing run that encoded it; each piece's name hashes its
+ffmpeg command, inputs and version, so the fixture copies only a piece made by the same command
+and encodes any other. Website
 requires only a read-only `GH_TOKEN` for release history. There are no signing or publishing steps.
 
 Checks splits Test across runners. `part: test` with `shard: <index>` and `shards: <count>` runs

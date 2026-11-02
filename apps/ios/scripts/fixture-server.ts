@@ -13,7 +13,8 @@
 // under ids of its own. Its requests are logged to requests-<port>.jsonl, and it says where it runs in server-<port>.json.
 // Everything it writes goes to .local/ios-fixture, or to FIXTURE_OUT, a directory of a session's
 // own, where it also makes its media and declares, in provenance.json (provenance-<port>.json for
-// a second provider), where each piece came from (scripts/native-fixtures/media.ts).
+// a second provider), where each piece came from (scripts/native-fixtures/media.ts). FIXTURE_MEDIA_CACHE,
+// a directory, keeps each piece it makes for later sessions to copy rather than encode again.
 //
 // Every channel is a live loop: the TEST channels loop their recording from
 // apps/desktop/test/fixtures, codecs as they are, so the ones AVPlayer can't decode fail as they
@@ -132,7 +133,13 @@ const artLogin =
     : "";
 const log = join(out, second ? `requests-${port}.jsonl` : "requests.jsonl");
 
-const maker = mediaMaker(root, out, second ? `provenance-${port}.json` : "provenance.json");
+const cache = process.env.FIXTURE_MEDIA_CACHE;
+const maker = mediaMaker(
+  root,
+  out,
+  second ? `provenance-${port}.json` : "provenance.json",
+  cache ? resolve(cache) : undefined,
+);
 
 /**
  * A minute of test picture with its clock, inset on a light or a dark field, and a `tone`: 720p at
