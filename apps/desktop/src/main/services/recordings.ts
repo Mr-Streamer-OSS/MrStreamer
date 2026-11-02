@@ -171,11 +171,12 @@ export class Recordings extends Context.Service<
     readonly list: Effect.Effect<readonly Recording[], Failed>;
     /**
      * What holds the subscription's connections now, against the account's limit, and with
-     * `variants`, a channel's streams to try, whether recording them would share what plays.
+     * `of`, a channel by its own id and its streams to try, whether recording them would share
+     * what plays.
      */
     connections(
       subscriptionId: string,
-      variants?: readonly string[],
+      of?: { readonly channel: string; readonly variants: readonly string[] },
     ): Effect.Effect<RecordingConnections, Failed>;
     /**
      * Records `channel` from now until `stop`, through the first of its streams to try whose
@@ -937,7 +938,7 @@ function make(deps: RecordingsDeps) {
         // reads: that stream alone, on the connection it holds.
         const keyed = streams.map((each) => ({
           ...each,
-          key: streamKey(subscriptionId, source.revision, each.stream),
+          key: streamKey(subscriptionId, source.revision, listed.id, each.id, each.stream),
         }));
         const shared = keyed.find((each) => each.key !== null && captures.reading(each.key));
         const tried = shared ? [shared] : keyed;
@@ -1010,7 +1011,11 @@ function make(deps: RecordingsDeps) {
               fileOf(record),
               {
                 request: source.provider.request,
-                captures: { request: captures.request, owner: held.id },
+                captures: {
+                  request: captures.request,
+                  resource: captures.resource,
+                  owner: held.id,
+                },
                 userAgent: deps.userAgent,
                 until: stop,
                 signal: controller.signal,
@@ -1966,17 +1971,23 @@ function make(deps: RecordingsDeps) {
 
     return {
       list: usable.pipe(Effect.andThen(look), Effect.andThen(shown)),
-      connections: (subscriptionId: string, variants?: readonly string[]) =>
+      connections: (
+        subscriptionId: string,
+        of?: { readonly channel: string; readonly variants: readonly string[] },
+      ) =>
         Effect.gen(function* () {
           const limit = yield* limitOf(subscriptionId);
           const uses = yield* coordination.uses(subscriptionId);
-          if (!variants?.length) return { limit, uses };
+          if (!of?.variants.length) return { limit, uses };
           const source = yield* subscriptions.sourceOf(subscriptionId);
-          const streams = yield* Effect.forEach(variants, (id) =>
-            Effect.promise(() => source.provider.liveStream(id).catch(() => null)),
+          const streams = yield* Effect.forEach(of.variants, (id) =>
+            Effect.promise(async () => ({
+              id,
+              stream: await source.provider.liveStream(id).catch(() => null),
+            })),
           );
-          const shares = streams.some((stream) => {
-            const key = streamKey(subscriptionId, source.revision, stream);
+          const shares = streams.some(({ id, stream }) => {
+            const key = streamKey(subscriptionId, source.revision, of.channel, id, stream);
             return key !== null && captures.reading(key);
           });
           return { limit, uses, shares };

@@ -42,7 +42,7 @@ import { nextEpisodeScenario } from "./next-episode.ts";
 import { posterGridScenario } from "./poster-grid.ts";
 import { B_SERIES, detailsBackScenario, withSecondSeason } from "./details-back.ts";
 import { removeDuringGuideScenario } from "./remove-during-guide.ts";
-import { longStreams, recordingsScenario } from "./recordings.ts";
+import { longStreams, recordingsHlsScenario, recordingsScenario } from "./recordings.ts";
 import { schedulesScenario } from "./schedules.ts";
 import { remindersScenario } from "./reminders.ts";
 import {
@@ -88,6 +88,7 @@ const scenarios = [
   "guide-grid-scroll",
   "reminders",
   "recordings",
+  "recordings-hls",
   "schedules",
   "titles",
   "details-back",
@@ -347,6 +348,8 @@ async function run(scenario: Scenario, prior?: string) {
       );
     if (scenario === "live-categories") other!.serveCategories(browseFixtureLanguages);
     if (scenario.startsWith("hls-compatibility")) playlist = await startFakeHls({ realtime: true });
+    // A live playlist, whose address sends on to one under a token.
+    if (scenario === "recordings-hls") playlist = await startFakeHls({ live: {}, tokens: true });
     if (scenario === "home-stage-live-only") playlist = await startFakePlaylist();
     if (scenario === "catch-up-hls") {
       playlist = await startFakePlaylist({ catchup: true });
@@ -1136,6 +1139,24 @@ async function run(scenario: Scenario, prior?: string) {
             active: provider!.activeStreams(),
           }),
         },
+      );
+    } else if (scenario === "recordings-hls") {
+      await recordingsHlsScenario(
+        {
+          profile,
+          observed,
+          evaluate: livePage.evaluate,
+          send,
+          wait,
+          exists,
+          click,
+          key,
+          capture,
+          action,
+          launch,
+          quit,
+        },
+        { requests: () => playlist!.requests() },
       );
     } else if (scenario === "reminders") {
       await remindersScenario(

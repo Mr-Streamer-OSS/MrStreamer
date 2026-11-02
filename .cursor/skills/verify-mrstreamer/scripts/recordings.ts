@@ -4,7 +4,8 @@
 // preview, shows it under Now still recording; back in Live TV Watch joins it again, and a Stop of
 // the recording leaves Watch playing, all on that one request. A second recording takes Now
 // again, and the stopped one plays from this computer. Its menu deletes it. Each state is captured at 1280 × 800 and the
-// Recordings page also at 960 × 600.
+// Recordings page also at 960 × 600. `recordingsHlsScenario` does the same for a live HLS channel
+// of one quality, Watch on hls.js, the provider asked once for each segment.
 import { spawnSync } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -278,4 +279,88 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
   await d.wait(async () => fixture.streams().active === 0);
   d.observed["end"] = { list: await listed(d), streams: fixture.streams() };
   await d.capture("recordings-end");
+}
+
+/** What the fake HLS host was asked for, by path. */
+interface HlsFixture {
+  requests(): readonly string[];
+}
+
+/**
+ * The sequence numbers of the live HLS channel's segments the host sent, in order: each once
+ * while Watch and its recording share them.
+ */
+const segmentsSent = (fixture: HlsFixture) =>
+  fixture
+    .requests()
+    .flatMap((path) => /^\/media\/(?:t\d+\/)?compatible-(\d+)\.ts$/.exec(path)?.[1] ?? []);
+
+export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture) {
+  await size(d, 1280, 800);
+  await d.click("Open global Search", "document.querySelector('button[aria-label=Search]')");
+  d.action("Search TEST | HLS compatible");
+  await d.send("Input.insertText", { text: "TEST | HLS compatible" });
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      "document.querySelector('[aria-label=\"Search results\"] [aria-selected=true]')?.textContent.includes('HLS compatible') ?? false",
+    ),
+  );
+  await d.key("Enter", 13);
+  await d.wait(
+    () =>
+      d.evaluate<boolean>(
+        "!!document.querySelector('[data-view=watch]') && (document.querySelector('video')?.currentTime ?? 0) >= 1",
+      ),
+    60_000,
+  );
+  await d.key("Escape", 27);
+  await d.wait(async () => !(await d.exists("document.querySelector('[data-view=watch]')")));
+  await d.click("Open Live TV", named("header button", "Live TV"));
+  const record = named("button", "Record");
+  await d.wait(() => d.exists(record));
+  await playsOn(d);
+
+  await d.click("Open Record", record);
+  await d.wait(() => d.exists(POPUP));
+  // The playlist names one stream, which plays here: recording it shares that connection.
+  await d.wait(() =>
+    d.evaluate<boolean>(`${POPUP}.innerText.includes("Shares the connection playing here.")`),
+  );
+  d.observed["hlsPopover"] = await d.evaluate<string>(`${POPUP}.innerText`);
+  await d.capture("hls-record-popover");
+  await d.click("Start recording", named("button", "Start recording", POPUP));
+  const recordingButton = named("button", "Recording");
+  await d.wait(() => d.exists(recordingButton), 60_000);
+  const first = await listed(d);
+  expect(first.length === 1 && first[0]!.status.kind === "recording", "Not recording", first);
+  // Watch plays on through two segments more, as the recording grows.
+  await playsOn(d);
+  await playsOn(d);
+  await playsOn(d);
+  const grown = await listed(d);
+  expect(grown[0]!.bytes > 0, "The recording took nothing", grown);
+  d.observed["hlsRecording"] = { list: grown, segments: segmentsSent(fixture) };
+  await d.capture("hls-live-recording");
+
+  // The recording stops from the strip's Recording, by keyboard: Watch plays on.
+  const RECORDING = "document.querySelector('[role=dialog][aria-label=Recording]')";
+  await d.click("Open Recording", recordingButton);
+  await d.wait(() => d.exists(RECORDING));
+  await d.key("Tab", 9);
+  await d.key("Tab", 9);
+  await d.wait(() =>
+    d.evaluate<boolean>("document.activeElement?.textContent.trim() === 'Stop recording'"),
+  );
+  await d.key("Enter", 13);
+  await d.wait(() => d.evaluate<boolean>(`document.activeElement === ${record}`));
+  await d.wait(async () => (await listed(d))[0]?.status.kind === "stopped");
+  await playsOn(d);
+  await playsOn(d);
+  d.observed["hlsStopped"] = { list: await listed(d), segments: segmentsSent(fixture) };
+  await d.capture("hls-watch-after-recording");
+
+  // The host sent each segment once, Watch and the recording reading the same ones.
+  const sent = segmentsSent(fixture);
+  expect(sent.length > 4, "Too few segments were sent", sent);
+  expect(new Set(sent).size === sent.length, "A segment was sent twice", sent);
 }

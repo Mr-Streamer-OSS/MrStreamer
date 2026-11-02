@@ -2,7 +2,19 @@
 import { createServer } from "node:http";
 import { fixture } from "./fake-provider.ts";
 
-export async function startFakeHls(options: { readonly realtime?: boolean } = {}) {
+export async function startFakeHls(
+  options: {
+    readonly realtime?: boolean;
+    /**
+     * Its playlists go on without end, a segment every `segmentMs` (3000 unless given), listing
+     * the last four, each after a discontinuity.
+     */
+    readonly live?: { readonly segmentMs?: number };
+    /** A playlist's address sends on to the same one under a token, as a panel's session. */
+    readonly tokens?: boolean;
+  } = {},
+) {
+  const began = Date.now();
   let origin = "";
   let active = 0;
   let peak = 0;
@@ -19,19 +31,38 @@ export async function startFakeHls(options: { readonly realtime?: boolean } = {}
       readonly body?: string | Buffer | (() => string | Buffer);
     }
   >();
-  const media = (kind: string) =>
-    [
+  const live = (kind: string, segmentMs: number) => {
+    // Four segments in from the start, as a stream already running.
+    const last = Math.floor((Date.now() - began) / segmentMs) + 3;
+    const first = Math.max(0, last - 3);
+    return [
       "#EXTM3U",
-      "#EXT-X-TARGETDURATION:6",
-      "#EXT-X-MEDIA-SEQUENCE:0",
-      ...Array.from({ length: kind === "archive" ? 40 : 4 }, (_, index) => [
-        ...(index % 2 ? ["#EXT-X-DISCONTINUITY"] : []),
-        "#EXTINF:6,",
-        `${kind}-${index}.ts`,
+      `#EXT-X-TARGETDURATION:${Math.ceil(segmentMs / 1000)}`,
+      `#EXT-X-MEDIA-SEQUENCE:${first}`,
+      `#EXT-X-DISCONTINUITY-SEQUENCE:${first}`,
+      ...Array.from({ length: last - first + 1 }, (_, index) => [
+        ...(index > 0 ? ["#EXT-X-DISCONTINUITY"] : []),
+        `#EXTINF:${(segmentMs / 1000).toFixed(3)},`,
+        `${kind}-${first + index}.ts`,
       ]).flat(),
-      "#EXT-X-ENDLIST",
       "",
     ].join("\n");
+  };
+  const media = (kind: string) =>
+    options.live
+      ? live(kind, options.live.segmentMs ?? 3000)
+      : [
+          "#EXTM3U",
+          "#EXT-X-TARGETDURATION:6",
+          "#EXT-X-MEDIA-SEQUENCE:0",
+          ...Array.from({ length: kind === "archive" ? 40 : 4 }, (_, index) => [
+            ...(index % 2 ? ["#EXT-X-DISCONTINUITY"] : []),
+            "#EXTINF:6,",
+            `${kind}-${index}.ts`,
+          ]).flat(),
+          "#EXT-X-ENDLIST",
+          "",
+        ].join("\n");
   const names = ["compatible", "ac3", "epochs", "archive", "excluded"];
   const server = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://fixture").pathname;
@@ -68,7 +99,9 @@ export async function startFakeHls(options: { readonly realtime?: boolean } = {}
         `<tv>${names.map((name) => `<programme channel="${name}.test" start="${time(start)}" stop="${time(start + 60000)}"><title>HLS recording</title></programme><programme channel="${name}.test" start="${time(start + 60000)}" stop="${time(start + 3600000)}"><title>Test card</title></programme>`).join("")}</tv>`,
       );
     }
-    const name = /^\/media\/([\w-]+)\.m3u8$/.exec(path)?.[1];
+    if (options.tokens && /^\/media\/[\w-]+\.m3u8$/.test(path))
+      return response.writeHead(302, { Location: path.replace("/media/", "/media/t1/") }).end();
+    const name = /^\/media\/(?:t\d+\/)?([\w-]+)\.m3u8$/.exec(path)?.[1];
     if (name)
       return response
         .writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" })
@@ -79,7 +112,7 @@ export async function startFakeHls(options: { readonly realtime?: boolean } = {}
               ? '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="English",URI="audio.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=100000,AUDIO="a"\nac3.m3u8\n'
               : media(name.replace("-selected", "")),
         );
-    const segment = /^\/media\/([\w-]+)-(\d+)\.ts$/.exec(path);
+    const segment = /^\/media\/(?:t\d+\/)?([\w-]+)-(\d+)\.ts$/.exec(path);
     if (!segment) return response.writeHead(404).end();
     const kind = segment[1];
     const body = fixture(

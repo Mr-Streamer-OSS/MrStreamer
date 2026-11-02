@@ -1,9 +1,10 @@
-// One provider request per live MPEG-TS source, however many read it. Watch and a recording of
-// the same channel ask for the same address under the same login: the first request opens the
+// One provider request per live source, however many read it. Watch and a recording of the same
+// channel's stream ask for the same address under the same login: the first request opens the
 // provider's stream, and each later one, while it runs, reads the same bytes from its live edge
 // instead of asking the provider again. Only the exact source is shared: the subscription, the
-// login revision it was looked up under, the address and the headers sent with it. Another
-// channel, stream, login or header set opens its own request.
+// login revision it was looked up under, the channel, which of its streams, that stream's format,
+// the address and the headers sent with it. Another channel, stream, login or header set opens
+// its own request, also where two channels of a playlist name one address.
 //
 // The provider's bytes go into the capture's history (./live-history.ts), and each reader reads
 // them from there at its own pace, so a slow or stopped reader never holds the others or the
@@ -13,13 +14,19 @@
 // waits for that before it asks the provider again. A stream the provider ends, or leaves silent
 // for SILENCE_MS, ends every reader once each has read the rest, and the next request opens a new
 // one: bytes from two requests never meet in one reader.
+//
+// An HLS stream is many requests, not one: its playlist, read again and again, and its segments.
+// Those of a clear media playlist are shared through `resource` (./hls-capture.ts), so Watch and a
+// recording ask the provider for each once.
 import { join } from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { DEFAULT_KEEP_FREE } from "@mrstreamer/contracts/recordings";
+import type { StreamFormat } from "@mrstreamer/contracts/playback";
 import type { LiveStream } from "@mrstreamer/core/provider";
 import { PlaybackCoordination } from "../services/playback-coordination.ts";
+import { hlsShares } from "./hls-capture.ts";
 import { historyStore, PIECE_BYTES, TEMPORARY_BYTES, type History } from "./live-history.ts";
 
 const PACKET = 188;
@@ -32,22 +39,48 @@ export interface CaptureSource {
   readonly subscriptionId: string;
   /** The login revision its address was looked up under. */
   readonly revision: number;
+  /** The channel as the library names it, never another of its streams' ids. */
+  readonly channelId: string;
+  /** Which of the channel's streams. */
+  readonly variantId: string;
+  readonly format: StreamFormat;
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
 }
 
-/** Names a source for `request` and `reading`, and its connection for PlaybackCoordination. */
+/** Names a source for `request`, `resource` and `reading`, and its connection for coordination. */
 export function captureKey(source: CaptureSource): string {
   const headers = Object.entries(source.headers)
     .map(([name, value]) => [name.toLowerCase(), value])
     .toSorted(([a = ""], [b = ""]) => a.localeCompare(b));
-  return JSON.stringify(["live", source.subscriptionId, source.revision, source.url, headers]);
+  const { subscriptionId, revision, channelId, variantId, format, url } = source;
+  return JSON.stringify([
+    "live",
+    subscriptionId,
+    revision,
+    channelId,
+    variantId,
+    format,
+    url,
+    headers,
+  ]);
 }
 
-/** The key of a channel's live stream looked up under `revision`; null unless it is MPEG-TS. */
-export function streamKey(subscriptionId: string, revision: number, stream: LiveStream | null) {
-  if (stream?.format !== "mpegts") return null;
-  return captureKey({ subscriptionId, revision, url: stream.url, headers: stream.headers ?? {} });
+/**
+ * The key of the channel's stream `variantId`, looked up under `revision`; null without one.
+ * `channelId` is the channel's own id, as the library lists it.
+ */
+export function streamKey(
+  subscriptionId: string,
+  revision: number,
+  channelId: string,
+  variantId: string,
+  stream: LiveStream | null,
+) {
+  if (!stream) return null;
+  const { format, url } = stream;
+  const headers = stream.headers ?? {};
+  return captureKey({ subscriptionId, revision, channelId, variantId, format, url, headers });
 }
 
 /** The provider sent nothing for SILENCE_MS: what reads it ends, and the next request asks anew. */
@@ -112,12 +145,25 @@ export class LiveCaptures extends Context.Service<
       open: (signal: AbortSignal) => Promise<Response>,
       signal: AbortSignal,
     ): Promise<Response>;
-    /** Whether a capture reads `key` now, so a request for it asks the provider nothing. */
+    /**
+     * Answers `address` of the HLS stream `key` names, the playlist or one of its segments: from
+     * what the provider answered another reader of that stream, else through `open`, as
+     * ./hls-capture.ts says. `owner` names the play or recording that reads it, and `signal`
+     * ends this answer.
+     */
+    resource(
+      key: string,
+      owner: string,
+      address: string,
+      open: (signal: AbortSignal) => Promise<Response>,
+      signal: AbortSignal,
+    ): Promise<Response>;
+    /** Whether something reads `key` now, so reading it too asks the provider nothing more. */
     reading(key: string): boolean;
     /**
      * Settles once each request `owner` still had opening has settled, and each capture it was
-     * the last reader of has ended its request and removed its history. Asked after the owner's
-     * reading ended.
+     * the last reader of has ended its request and removed its history, and each HLS stream its
+     * requests. Asked after the owner's reading ended.
      */
     idle(owner: string): Promise<void>;
   }
@@ -139,6 +185,7 @@ function make(options: LiveCapturesOptions) {
       keepFree: options.keepFree ?? DEFAULT_KEEP_FREE,
     });
     const entries = new Map<string, Entry>();
+    const hls = hlsShares(coordination.connected);
     /** What each owner's leaving closed, and its requests still under way, for `idle`. */
     const closings = new Map<string, Set<Promise<void>>>();
     const asking = new Map<string, Set<Promise<void>>>();
@@ -355,17 +402,19 @@ function make(options: LiveCapturesOptions) {
         const open = [...entries.values()].flatMap((entry) =>
           entry.kind === "open" ? [entry.capture] : [],
         );
-        await Promise.all(open.map(close));
+        await Promise.all([...open.map(close), hls.close()]);
       }),
     );
 
     return {
       request,
+      resource: hls.resource,
       reading: (key: string) => {
         const entry = entries.get(key);
-        return entry?.kind === "open" || entry?.kind === "opening";
+        return entry?.kind === "open" || entry?.kind === "opening" || hls.reading(key);
       },
       idle: async (owner: string) => {
+        await hls.leave(owner);
         // A request still opening may yet attach and leave, closing what it read last.
         await Promise.all(asking.get(owner) ?? []);
         asking.delete(owner);

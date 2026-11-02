@@ -51,7 +51,7 @@ interface Segment {
   readonly epoch: number;
   readonly duration: number;
 }
-interface Media {
+export interface Media {
   readonly segments: readonly Segment[];
   readonly ended: boolean;
   readonly target: number;
@@ -184,6 +184,20 @@ function media(text: string, base: string): Media {
   }
   if (!segments.length || !Number.isFinite(target) || target <= 0 || target > 120) malformed();
   return { segments, target, ended: /^#EXT-X-ENDLIST\s*$/m.test(text) };
+}
+
+/**
+ * The media playlist `text` is, read from `base`, when it names its clear segments itself as this
+ * reader takes them; null for a multivariant playlist, any other, and what is no playlist.
+ */
+export function clearMedia(text: string, base: string): Media | null {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("#EXTM3U") || /^#EXT-X-STREAM-INF:/m.test(trimmed)) return null;
+  try {
+    return media(trimmed, base);
+  } catch {
+    return null;
+  }
 }
 
 /** Resolve one media rendition and inspect its first segment without starting a second reader. */

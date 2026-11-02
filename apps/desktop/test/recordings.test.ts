@@ -221,6 +221,41 @@ function reading(answer: Response) {
   };
 }
 
+/**
+ * Plays an HLS session's playlist as hls.js does near the live edge: reads it every half second
+ * and each of its last three segments not read yet, whole. `segments` counts those read.
+ */
+function playing(url: string) {
+  const read = new Set<number>();
+  const stopped = new AbortController();
+  const run = (async () => {
+    while (!stopped.signal.aborted) {
+      const answer = await fetch(url, { signal: stopped.signal }).catch(() => null);
+      const text = answer?.ok ? await answer.text().catch(() => "") : "";
+      const lines = text.split("\n");
+      const sequence = Number(/#EXT-X-MEDIA-SEQUENCE:(\d+)/.exec(text)?.[1] ?? 0);
+      const segments = lines
+        .filter((line) => line && !line.startsWith("#"))
+        .map((address, index) => ({ address, sequence: sequence + index }));
+      for (const segment of segments.slice(-3)) {
+        if (read.has(segment.sequence) || stopped.signal.aborted) continue;
+        const media = await fetch(new URL(segment.address, url), { signal: stopped.signal })
+          .then((each) => each.arrayBuffer())
+          .catch(() => null);
+        if (media && media.byteLength > 0) read.add(segment.sequence);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  })();
+  return {
+    segments: () => read.size,
+    stop: async () => {
+      stopped.abort();
+      await run;
+    },
+  };
+}
+
 describe.skipIf(!hasTools)("recordings", () => {
   it("records a live channel to its stop time with every track, and plays it back here", async () => {
     const { provider, dataDir, channel, recordings, playback } = await connected();
@@ -262,7 +297,8 @@ describe.skipIf(!hasTools)("recordings", () => {
     const player = reading(await fetch(watching.url));
     await player.next(16 * 1024);
     const asked = provider.streamRequests();
-    expect(await recordings.connections(subscriptionId, [channel(TRACKS).id])).toEqual({
+    const of = { channel: channel(TRACKS).id, variants: [channel(TRACKS).id] };
+    expect(await recordings.connections(subscriptionId, of)).toEqual({
       limit: 1,
       uses: ["watch"],
       shares: true,
@@ -1354,6 +1390,167 @@ describe.skipIf(!hasTools)("recordings", () => {
       recordings.start(channel("excluded"), Date.now() + 60_000, {}),
     ).rejects.toMatchObject({ error: { kind: "stream", failure: { kind: "unsupported" } } });
     expect(await recordings.list()).toHaveLength(1);
+  });
+
+  it("records the HLS channel Watch plays from Watch's own playlist and segments, and either stops without the other", async () => {
+    // A new segment each second, its playlist's address sending on to one under a token.
+    const host = await startFakeHls({ live: { segmentMs: 1000 }, tokens: true });
+    onTestFinished(() => host.close());
+    const dataDir = await tempDir();
+    const { recordings, subscriptions, library, playback } = await app(dataDir);
+    const { id: subscriptionId } = await subscriptions.add({
+      server: host.link,
+      username: "",
+      password: "",
+    });
+    await library.refresh(subscriptionId);
+    const channel = { subscriptionId, id: "compatible.test" };
+    const of = { channel: channel.id, variants: [channel.id] };
+
+    const watching = await playback.open(channel, ["h264", "aac"]);
+    expect(watching.format).toBe("hls");
+    const player = playing(watching.url);
+    await until(
+      async () => player.segments(),
+      (count) => count >= 2,
+    );
+    expect(await recordings.connections(subscriptionId, of)).toEqual({
+      limit: 1,
+      uses: ["watch"],
+      shares: true,
+    });
+
+    // The playlist names one stream: recording it takes no connection more.
+    const answer = await recordings.start(channel, Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: ["recording"] });
+    const growing = async () => (await recordings.list())[0]?.bytes ?? 0;
+    await until(growing, (bytes) => bytes > 0);
+    const watched = player.segments();
+    await until(
+      async () => player.segments(),
+      (count) => count >= watched + 2,
+    );
+
+    // Watch stops: the recording goes on. Watch again joins it.
+    await player.stop();
+    await playback.close(watching.sessionId);
+    const before = await growing();
+    expect(await until(growing, (bytes) => bytes > before)).toBeGreaterThan(before);
+    const again = await playback.open(channel, ["h264", "aac"]);
+    const second = playing(again.url);
+    await until(
+      async () => second.segments(),
+      (count) => count >= 2,
+    );
+
+    // The recording stops: Watch plays on.
+    await recordings.stop(answer.recording.id);
+    const then = second.segments();
+    expect(
+      await until(
+        async () => second.segments(),
+        (count) => count >= then + 2,
+      ),
+    ).toBeGreaterThan(then + 1);
+    await second.stop();
+    await playback.close(again.sessionId);
+
+    // The provider sent each segment once, whoever read it.
+    const sequences = host
+      .requests()
+      .flatMap((path) => /^\/media\/t\d+\/compatible-(\d+)\.ts$/.exec(path)?.[1] ?? []);
+    expect(sequences.length).toBeGreaterThan(4);
+    expect(new Set(sequences).size).toBe(sequences.length);
+    // And nothing more once the last reader left.
+    const asked = host.requests().length;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(host.requests().length).toBe(asked);
+    expect(host.stats().active).toBe(0);
+
+    const [done] = await recordings.list();
+    expect(done?.status).toEqual({ kind: "stopped" });
+    const file = await fileOf(dataDir, done!);
+    expect(probe(file.path)).toEqual(["h264", "aac"]);
+    expect(decodes(file.path)).toBe(true);
+  }, 30_000);
+
+  it("takes a connection of its own for an HLS channel whose playlist lists qualities to choose from", async () => {
+    const host = await startFakeHls({ live: { segmentMs: 1000 } });
+    onTestFinished(() => host.close());
+    const { recordings, subscriptions, library, playback } = await app(await tempDir());
+    const { id: subscriptionId } = await subscriptions.add({
+      server: host.link,
+      username: "",
+      password: "",
+    });
+    await library.refresh(subscriptionId);
+    const channel = { subscriptionId, id: "epochs.test" };
+    const watching = await playback.open(channel, ["h264", "aac"]);
+    const player = playing(watching.url);
+    await until(
+      async () => player.segments(),
+      (count) => count >= 1,
+    );
+    expect(
+      await recordings.connections(subscriptionId, { channel: channel.id, variants: [channel.id] }),
+    ).toEqual({ limit: 1, uses: ["watch"], shares: false });
+    expect(await recordings.start(channel, Date.now() + 60_000, {})).toEqual({
+      kind: "busy",
+      connections: { limit: 1, uses: ["watch"] },
+    });
+    await player.stop();
+    await playback.close(watching.sessionId);
+  }, 20_000);
+
+  it("takes a connection of its own for another of a playlist's channels at the same address", async () => {
+    const provider = await fakeProvider({ live: true, maxConnections: 1, streams: looping });
+    const listed = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
+    const address = `${provider.url}/live/demo/demo/${listed.streamId}.ts`;
+    const host = createServer((_request, response) =>
+      response.end(
+        `#EXTM3U\n#EXTINF:-1 tvg-id="a",Logical A\n${address}\n#EXTINF:-1 tvg-id="b",Logical B\n${address}\n`,
+      ),
+    );
+    await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
+    onTestFinished(() => {
+      host.closeAllConnections();
+      host.close();
+    });
+    const port = (host.address() as { port: number }).port;
+    const { recordings, subscriptions, library, playback } = await app(await tempDir());
+    const { id: subscriptionId } = await subscriptions.add({
+      server: `http://127.0.0.1:${port}/list.m3u`,
+      username: "",
+      password: "",
+    });
+    await library.refresh(subscriptionId);
+    const channels = await library.channels({});
+    const [a, b] = ["Logical A", "Logical B"].map((title) => {
+      const found = channels.find((each) => each.title === title);
+      if (!found) throw new Error(`No channel ${title}`);
+      return { subscriptionId, id: found.id };
+    });
+
+    const started = await recordings.start(a!, Date.now() + 60_000, {});
+    expect(started.kind).toBe("started");
+    const asked = provider.streamRequests();
+    const ofChannel = (channel: { id: string }) => ({
+      channel: channel.id,
+      variants: [channel.id],
+    });
+    expect((await recordings.connections(subscriptionId, ofChannel(b!))).shares).toBe(false);
+    await expect(playback.open(b!, ["h264", "aac"])).rejects.toMatchObject({
+      error: { kind: "recording-holds" },
+    });
+    expect(provider.streamRequests()).toBe(asked);
+
+    // The channel it records is shared.
+    expect((await recordings.connections(subscriptionId, ofChannel(a!))).shares).toBe(true);
+    const watching = await playback.open(a!, ["h264", "aac"]);
+    await reading(await fetch(watching.url)).next(16 * 1024);
+    expect(provider.streamRequests()).toBe(asked);
+    await playback.close(watching.sessionId);
   });
 
   it("records from a channel's next stream when its playlist no longer names the one Auto tries first", async () => {

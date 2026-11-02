@@ -342,9 +342,9 @@ interface LiveSession extends SessionBase {
    */
   readonly archive: ArchiveWindow | null;
   /**
-   * The login revision its streams were looked up under, when it reads a live MPEG-TS stream
-   * through a capture another reader of the same source shares (../playback/live-capture.ts);
-   * null for a recording from the archive and a receiver's stream.
+   * The login revision its streams were looked up under, when it reads a live stream through a
+   * capture another reader of the same source shares (../playback/live-capture.ts); null for a
+   * recording from the archive, a receiver's stream and HLS it converts.
    */
   readonly shares: number | null;
   /** Which stream plays, and those that failed before it: see `Playback.playing`. */
@@ -747,37 +747,44 @@ function make(deps: PlaybackDeps) {
       coordination.opened(session.id, subscriptionOf(session), joining);
     };
     /** The capture a live session's stream is read through: see LiveSession.shares. */
-    const keyOf = (
-      session: LiveSession,
-      variant: { readonly url: string; readonly headers: Readonly<Record<string, string>> },
-    ) =>
+    const keyOf = (session: LiveSession, variant: LiveSession["variants"][number]) =>
       session.shares === null || !captures
         ? null
         : captureKey({
             subscriptionId: session.channel.subscriptionId,
             revision: session.shares,
+            channelId: session.channel.id,
+            variantId: variant.id,
+            format: session.format,
             url: variant.url,
             headers: variant.headers,
           });
+    /** Whether a live session of `format` reads through captures: see LiveSession.shares. */
+    const shareable = (format: StreamFormat, repair: boolean) => format === "mpegts" || !repair;
     /**
-     * Captures that read one of the channel's live MPEG-TS streams now, under the login it has:
-     * what playing them would read too, asking the provider nothing more.
+     * Captures that read one of the channel's live streams now, under the login it has: what
+     * playing them would read too, asking the provider nothing more. `channel` is the channel's
+     * own id, as the library lists it.
      */
-    const readingOf = (channel: OwnedId, variants: readonly string[]) =>
+    const readingOf = (channel: OwnedId, variants: readonly string[], repair: boolean) =>
       Effect.gen(function* () {
         if (!captures) return [];
         const source = yield* subscriptions.sourceOf(channel.subscriptionId);
         const streams = yield* Effect.forEach(variants, (id) =>
-          Effect.promise(() => source.provider.liveStream(id).catch(() => null)),
+          Effect.promise(async () => ({
+            id,
+            stream: await source.provider.liveStream(id).catch(() => null),
+          })),
         );
         // The session plays the format of the first stream it tries, as `liveSession` orders
-        // them, recently failed ones last: when that is HLS it reads no capture.
-        const first = streams
-          .flatMap((stream) => stream ?? [])
-          .toSorted((a, b) => Number(failedAt.has(a.url)) - Number(failedAt.has(b.url)))[0];
-        if (first?.format !== "mpegts") return [];
-        return streams.flatMap((stream) => {
-          const key = streamKey(channel.subscriptionId, source.revision, stream);
+        // them, recently failed ones last, and only streams of that format.
+        const format = streams
+          .flatMap(({ stream }) => stream ?? [])
+          .toSorted((a, b) => Number(failedAt.has(a.url)) - Number(failedAt.has(b.url)))[0]?.format;
+        if (!format || !shareable(format, repair)) return [];
+        return streams.flatMap(({ id, stream }) => {
+          if (stream?.format !== format) return [];
+          const key = streamKey(channel.subscriptionId, source.revision, channel.id, id, stream);
           return key !== null && captures.reading(key) ? [key] : [];
         });
       });
@@ -1543,7 +1550,8 @@ function make(deps: PlaybackDeps) {
         ? { Range: request.headers.range }
         : {};
       // With what the player adds: delivery directives (_HLS_msn) to a low-latency playlist. Every
-      // address the stream's playlists name is held to the stream's own, `variant.url`.
+      // address the stream's playlists name is held to the stream's own, `variant.url`. A part of
+      // a file, as a byte range, is the player's alone.
       const requestFor = (address: string, variant: LiveSession["variants"][number]) => {
         const upstreamUrl = new URL(address);
         for (const [name, value] of url.searchParams) upstreamUrl.searchParams.set(name, value);
@@ -1554,6 +1562,7 @@ function make(deps: PlaybackDeps) {
           signal,
           [],
           variant.url,
+          request.headers.range ? null : keyOf(session, variant),
         );
       };
 
@@ -1588,9 +1597,15 @@ function make(deps: PlaybackDeps) {
         }
 
         const kept = session.delivered.variantId;
-        const variants = kept
+        const listed = kept
           ? session.variants.filter((each) => each.id === kept)
           : session.variants;
+        // A stream something else reads now goes first, as `openVariant` takes it.
+        const read = (variant: LiveSession["variants"][number]) => {
+          const key = keyOf(session, variant);
+          return key !== null && captures?.reading(key) === true;
+        };
+        const variants = listed.toSorted((a, b) => Number(read(b)) - Number(read(a)));
         let failure: StreamFailure = noStream;
         for (const variant of variants) {
           const upstream = await requestFor(variant.url, variant);
@@ -3203,15 +3218,14 @@ function make(deps: PlaybackDeps) {
             session.headers.forEach((value, name) => requested.set(name, value));
           new Headers(headers).forEach((value, name) => requested.set(name, value));
           const asking = AbortSignal.any([signal, timeout.signal]);
+          const open = (opened: AbortSignal) =>
+            session.request(url, { headers: requested, signal: opened }, from);
           response =
-            shared && captures
-              ? await captures.request(
-                  shared,
-                  session.id,
-                  (opened) => session.request(url, { headers: requested, signal: opened }, from),
-                  asking,
-                )
-              : await session.request(url, { headers: requested, signal: asking }, from);
+            !shared || !captures
+              ? await session.request(url, { headers: requested, signal: asking }, from)
+              : session.kind === "live" && session.format === "hls"
+                ? await captures.resource(shared, session.id, url, open, asking)
+                : await captures.request(shared, session.id, open, asking);
         } catch (cause) {
           return {
             ok: false,
@@ -3396,7 +3410,10 @@ function make(deps: PlaybackDeps) {
           channel,
           variants,
           archive: recording,
-          shares: archive || receiver || format !== "mpegts" ? null : source.revision,
+          shares:
+            archive || receiver || !shareable(format, options.repair ?? false)
+              ? null
+              : source.revision,
           delivered: { variantId: null, failed: [] },
           request: source.provider.request,
           format,
@@ -3733,6 +3750,7 @@ function make(deps: PlaybackDeps) {
               : yield* readingOf(
                   channel,
                   options.variants?.length ? options.variants : [channel.id],
+                  options.repair ?? false,
                 );
             yield* coordination.reclaim(channel.subscriptionId, joining);
             const session = yield* liveSession(

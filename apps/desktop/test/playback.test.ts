@@ -805,6 +805,9 @@ async function capturing(
   const source = {
     subscriptionId: "s",
     revision: 1,
+    channelId: "1",
+    variantId: "1",
+    format: "mpegts" as const,
     url: "http://provider/live/1.ts",
     headers: {},
   };
@@ -893,7 +896,7 @@ describe("live captures", () => {
     expect(captures.reading(key)).toBe(false);
   });
 
-  it("shares only the exact source: subscription, address and headers, whatever their case or order", async () => {
+  it("shares only the exact source: subscription, channel, stream, address and headers, whatever their case or order", async () => {
     const { captures, source, provider, requests } = await capturing();
     const headers = { "User-Agent": "Box", Referer: "http://panel/" };
     const keys = [
@@ -902,6 +905,9 @@ describe("live captures", () => {
       captureKey({ ...source, headers: { ...headers, "User-Agent": "Other" } }),
       captureKey({ ...source, headers, subscriptionId: "other" }),
       captureKey({ ...source, headers, url: "http://provider/live/2.ts" }),
+      // Two channels of a playlist, or two streams of one, at one address.
+      captureKey({ ...source, headers, channelId: "2" }),
+      captureKey({ ...source, headers, variantId: "2" }),
     ];
     const reading = new AbortController();
     for (const [index, key] of keys.entries())
@@ -912,7 +918,7 @@ describe("live captures", () => {
         188,
       );
     // The second asks for the first's source, its headers written otherwise.
-    expect(requests()).toBe(4);
+    expect(requests()).toBe(6);
     reading.abort();
     await Promise.all(keys.map((_key, index) => captures.idle(`reader ${index}`)));
   });
@@ -1080,6 +1086,99 @@ describe("live captures", () => {
     live.abort();
     await captures.idle("live");
     expect(open()).toBe(0);
+  });
+
+  it("asks once for an HLS media playlist and each segment its readers read, keeping the last four", async () => {
+    const { captures, source } = await capturing();
+    const key = captureKey({ ...source, format: "hls", url: "http://provider/live/1.m3u8" });
+    const asked: string[] = [];
+    let abandoned = 0;
+    const segments = [...Array.from({ length: 10 }, (_, at) => `${at}.ts`), "arriving.ts"];
+    const playlist = [
+      "#EXTM3U",
+      "#EXT-X-TARGETDURATION:2",
+      "#EXT-X-MEDIA-SEQUENCE:0",
+      ...segments.flatMap((name) => ["#EXTINF:2,", name]),
+      "",
+    ].join("\n");
+    const provider = (address: string) => (signal: AbortSignal) => {
+      asked.push(address);
+      if (address.endsWith(".m3u8")) return Promise.resolve(new Response(playlist));
+      const packet = new Uint8Array(188).fill(0x47);
+      if (!address.endsWith("arriving.ts")) return Promise.resolve(new Response(packet));
+      // One that keeps arriving until its request is aborted.
+      const body = new ReadableStream<Uint8Array>({
+        start: (controller) => {
+          controller.enqueue(packet);
+          signal.addEventListener("abort", () => {
+            abandoned++;
+            controller.error(signal.reason);
+          });
+        },
+      });
+      return Promise.resolve(new Response(body));
+    };
+    const read = async (owner: string, name: string) => {
+      const address = new URL(name, "http://provider/live/").href;
+      const answer = await captures.resource(
+        key,
+        owner,
+        address,
+        provider(address),
+        new AbortController().signal,
+      );
+      return (await answer.arrayBuffer()).byteLength;
+    };
+
+    expect(await read("watch", "1.m3u8")).toBe(playlist.length);
+    expect(await read("record", "1.m3u8")).toBe(playlist.length);
+    expect(asked).toHaveLength(1);
+    expect(captures.reading(key)).toBe(true);
+
+    for (const name of segments.slice(0, 10)) expect(await read("watch", name)).toBe(188);
+    for (const name of ["9.ts", "8.ts", "7.ts", "6.ts"]) await read("record", name);
+    expect(asked).toHaveLength(11);
+    // Older segments were let go: a reader that far behind asks the provider itself.
+    await read("record", "5.ts");
+    expect(asked).toHaveLength(12);
+
+    // Half the target duration later, the playlist is asked for again.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await read("record", "1.m3u8");
+    expect(asked).toHaveLength(13);
+
+    // A segment its only reader stops reading while it arrives isn't asked for any more.
+    const stop = new AbortController();
+    const address = "http://provider/live/arriving.ts";
+    const arriving = await captures.resource(key, "watch", address, provider(address), stop.signal);
+    await arriving.body!.getReader().read();
+    stop.abort();
+    await vi.waitFor(() => expect(abandoned).toBe(1));
+
+    await captures.idle("watch");
+    expect(captures.reading(key)).toBe(true);
+    await captures.idle("record");
+    expect(captures.reading(key)).toBe(false);
+  });
+
+  it("passes an HLS playlist that lists qualities through, sharing nothing", async () => {
+    const { captures, source } = await capturing();
+    const key = captureKey({ ...source, format: "hls", url: "http://provider/live/1.m3u8" });
+    let asked = 0;
+    const master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nhigh.m3u8\n";
+    const provider = () => {
+      asked++;
+      return Promise.resolve(new Response(master));
+    };
+    const read = async (owner: string) =>
+      (
+        await captures.resource(key, owner, source.url, provider, new AbortController().signal)
+      ).text();
+    expect(await read("watch")).toBe(master);
+    expect(await read("record")).toBe(master);
+    expect(asked).toBe(2);
+    expect(captures.reading(key)).toBe(false);
+    await Promise.all([captures.idle("watch"), captures.idle("record")]);
   });
 });
 

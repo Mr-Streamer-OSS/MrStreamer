@@ -4,9 +4,10 @@
 // subset playback reads (../playback/hls-ts-input.ts); a discontinuity stays in the file as the
 // provider sent it. Each read waits for the write before it, so no more than one piece of the
 // stream is ever held in memory. Capture that goes on after a gap appends to the file it wrote
-// before, starting again from a program table, as a discontinuity does. An MPEG-TS stream that
-// plays meanwhile is read from what Watch reads (../playback/live-capture.ts), not asked of the
-// provider again; a recording that reads too slowly to keep up with it ends as cut by the disk.
+// before, starting again from a program table, as a discontinuity does. A stream that plays
+// meanwhile is read from what Watch reads (../playback/live-capture.ts), not asked of the provider
+// again: an MPEG-TS stream's request, and an HLS stream's playlist and segments. A recording that
+// reads too slowly to keep up with an MPEG-TS stream it shares ends as cut by the disk.
 import { open, rm } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { StreamFailure, StreamFormat } from "@mrstreamer/contracts/playback";
@@ -33,13 +34,14 @@ export interface CaptureSource {
   readonly url: string;
   readonly format: StreamFormat;
   readonly headers: Readonly<Record<string, string>>;
-  /** The live capture an MPEG-TS stream is read through; null to ask the provider directly. */
+  /** The live capture the stream is read through; null to ask the provider directly. */
   readonly shared?: string | null;
 }
 
 /** Live captures and who the recording reads them as, for a source's `shared`. */
 interface Sharing {
   readonly request: LiveCaptures["Service"]["request"];
+  readonly resource: LiveCaptures["Service"]["resource"];
   readonly owner: string;
 }
 
@@ -204,22 +206,22 @@ async function openSource(
 ): Promise<Opened> {
   const ask = async (address: string, asked: AbortSignal) => {
     const headers = new Headers({ "User-Agent": options.userAgent, ...source.headers });
-    const shared = source.format === "mpegts" && address === source.url ? source.shared : null;
+    const key = source.shared;
+    const sharing = key ? options.captures : undefined;
     for (let attempt = 0; ; attempt++) {
       const waiting = new AbortController();
       const timeout = setTimeout(() => waiting.abort(), SILENCE_MS);
       let answer: Response;
       const reading = AbortSignal.any([asked, waiting.signal]);
+      const open = (opened: AbortSignal) =>
+        options.request(address, { headers, signal: opened }, source.url);
       try {
         answer =
-          shared && options.captures
-            ? await options.captures.request(
-                shared,
-                options.captures.owner,
-                (opened) => options.request(address, { headers, signal: opened }, source.url),
-                reading,
-              )
-            : await options.request(address, { headers, signal: reading }, source.url);
+          !key || !sharing
+            ? await options.request(address, { headers, signal: reading }, source.url)
+            : source.format === "hls"
+              ? await sharing.resource(key, sharing.owner, address, open, reading)
+              : await sharing.request(key, sharing.owner, open, reading);
       } catch (cause) {
         if (waiting.signal.aborted && !asked.aborted)
           throw new CaptureFailure({
