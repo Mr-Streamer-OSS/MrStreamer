@@ -6,8 +6,10 @@ import {
   useRootNavigationState,
   useSegments,
 } from "expo-router";
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NowPlaying } from "../../accessory.tsx";
+import { tabSides } from "../../content-width.ts";
 import {
   openOnTabs,
   openSearch,
@@ -53,6 +55,7 @@ export default function TabsLayout() {
   // Made again for a new language only: the native module installs them whenever they change.
   const titled = useMemo(shortcuts, [locale]);
   useCloseOnTabChange();
+  useTabSides();
   const { phase, watch, pip, external, aside } = usePlayback();
   const segments: readonly string[] = useSegments();
   const virtualised = useVirtualisedScreen();
@@ -108,4 +111,16 @@ export default function TabsLayout() {
       </NativeTabs.Trigger>
     </NativeTabs>
   );
+}
+
+/**
+ * Keeps `tabSides` at the window's left and right safe area while the tabs show, before the
+ * stacks under them paint, as a rotation, a fold or a resize changes it.
+ */
+function useTabSides() {
+  const { left, right } = useSafeAreaInsets();
+  useLayoutEffect(() => {
+    tabSides.set({ left, right });
+    return () => tabSides.set({ left: 0, right: 0 });
+  }, [left, right]);
 }

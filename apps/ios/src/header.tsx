@@ -11,6 +11,8 @@ import { Image, StyleSheet, Text, View } from "react-native";
 import { DownloadStatusButton } from "./download-status.tsx";
 import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/navigation.ts";
+import { tabSides } from "./content-width.ts";
+import { useStore } from "./store.ts";
 import { colors } from "./ui.tsx";
 
 // The top bar every tab's screens share, layout A: the brand on the left, after the system's back
@@ -166,10 +168,14 @@ function actions(tab: Tab, current: string): NativeStackHeaderItem[] {
 /**
  * The options every screen of `tab`'s stack starts from, as its layout's `screenOptions`: black,
  * white, the brand and the three buttons. Screens set their own title and transparency.
+ * Content stays inside the window's `left` and `right` safe-area insets (`tabSides`): the column
+ * where UIKit puts the status bar, the header's buttons and the tab bar on iPhone Duo's closed
+ * panel, and the sensor housing and corners in iPhone landscape. A screen that sets its own
+ * `contentStyle`, as Movies' and Series' details do, keeps inside them itself.
  */
-export function tabScreenOptions(tab: Tab) {
+export function tabScreenOptions(tab: Tab, { left, right } = { left: 0, right: 0 }) {
   return ({ route }: { route: { name: string } }): NativeStackNavigationOptions => ({
-    contentStyle: { backgroundColor: "#000000" },
+    contentStyle: { backgroundColor: "#000000", paddingLeft: left, paddingRight: right },
     headerTintColor: "#FFFFFF",
     headerTitleStyle: { color: "#FFFFFF" },
     // The brand takes the left side; a pushed screen keeps the system's back button beside it.
@@ -182,13 +188,15 @@ export function tabScreenOptions(tab: Tab) {
 }
 
 /**
- * `tabScreenOptions(tab)` for a tab's stack layout, made again when the interface language
- * changes: React Navigation keeps the other tabs' stacks from rendering again on their own, so
- * their buttons' labels would keep the language they were made in.
+ * `tabScreenOptions(tab)` for a tab's stack layout, with `tabSides`, made again when the
+ * interface language or those insets change: React Navigation keeps the other tabs'
+ * stacks from rendering again on their own, so their buttons' labels would keep the language
+ * they were made in.
  */
 export function useTabScreenOptions(tab: Tab) {
   const locale = useLocale();
-  return useMemo(() => tabScreenOptions(tab), [tab, locale]);
+  const sides = useStore(tabSides);
+  return useMemo(() => tabScreenOptions(tab, sides), [tab, locale, sides]);
 }
 
 /**

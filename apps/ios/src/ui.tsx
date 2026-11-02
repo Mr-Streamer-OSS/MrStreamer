@@ -18,6 +18,7 @@ import { useArtwork } from "./artwork-cache.ts";
 import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/live.ts";
 import type { Failure } from "./errors.ts";
+import { useContentWidth } from "./content-width.ts";
 
 // Plain true-black content: rows, logos, lines of text and the one text button. No glass here.
 
@@ -33,7 +34,7 @@ export function useRowHeight(): number {
 export const largeText = (fontScale: number) => fontScale >= 1.5;
 
 /**
- * Whether Live shows its list and a detail column side by side, from the window's width alone:
+ * Whether Live shows its list and a detail column side by side, from the content's width alone:
  * 700 points, or 1000 at accessibility text sizes. Never the device, screen or orientation, so an
  * iPhone, a Duo's outer display, its inner one in portrait and an iPad's half-width window keep
  * the iPhone's layout, and a resize or fold crosses it as the width does.
@@ -43,12 +44,14 @@ export function splitAt(width: number, fontScale: number): boolean {
 }
 
 /**
- * Live's list column, as wide as the window when compact. Beside the detail column it is 456
- * points in a Duo's inner landscape window (951), 468 in an iPad's portrait one (1032) and 520
- * from an iPad's landscape one (1376); `gutter` is the detail column's side margin there.
+ * Live's list column, as wide as the content (`useContentWidth`) when compact. Beside the detail
+ * column it is 456 points in a Duo's inner landscape window (951), 468 in an iPad's portrait one
+ * (1032) and 520 from an iPad's landscape one (1376); `gutter` is the detail column's side margin
+ * there.
  */
 export function useListWidth() {
-  const { width, fontScale } = useWindowDimensions();
+  const { fontScale } = useWindowDimensions();
+  const width = useContentWidth();
   const split = splitAt(width, fontScale);
   if (!split) return { split, width, gutter: 16 };
   const gutter = width >= 1200 ? 32 : width >= 1000 ? 24 : 20;

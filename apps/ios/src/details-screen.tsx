@@ -47,6 +47,8 @@ import {
 } from "./play-title.ts";
 import { request, type Request } from "./playback.ts";
 import { useRead, type Loaded } from "./read.ts";
+import { tabSides, useContentWidth } from "./content-width.ts";
+import { useStore } from "./store.ts";
 import { members, retryTitles, useRoster } from "./account.ts";
 import { describeError } from "./errors.ts";
 import { Docked, loadingStatus, PlaceholderLines, Placeholders, Shape } from "./loading.tsx";
@@ -111,20 +113,20 @@ export function DetailsScreen({
     () => (lists.kind === "ready" && opened ? titleOf(lists.index, kind, opened) : undefined),
     [lists, kind, opened, metadata],
   );
-  if (lists.kind === "failed") {
-    return (
-      <Message
-        text={describeError(lists.error)}
-        action={{ label: t("Try again"), onPress: retryTitles }}
-      />
-    );
+  // Its tab layout draws this route edge to edge (`title/[id]`'s `contentStyle`), so the backdrop
+  // runs under the side safe-area column; everything else keeps inside `tabSides` here.
+  const sides = useStore(tabSides);
+  if (lists.kind === "ready" && title && opened) {
+    return <Details title={title} opened={opened} asked={asked} sides={sides} />;
   }
-  if (lists.kind !== "ready") {
+  const inside = { paddingLeft: sides.left, paddingRight: sides.right };
+  if (lists.kind !== "ready" && lists.kind !== "failed") {
+    // The placeholder backdrop as wide as the one it stands for, so nothing jumps once it loads.
     return (
       <Docked status={loadingStatus("movies and series")}>
         <Placeholders testID="details-placeholder">
           <Shape style={[styles.backdrop, styles.stillBackdrop]} />
-          <View style={styles.facts}>
+          <View style={[styles.facts, inside]}>
             <Shape style={styles.nameShape} />
             <Shape style={styles.lineShape} />
           </View>
@@ -132,8 +134,18 @@ export function DetailsScreen({
       </Docked>
     );
   }
-  if (!title || !opened) return <Message text={t("The provider no longer lists this title.")} />;
-  return <Details title={title} opened={opened} asked={asked} />;
+  return (
+    <View style={[styles.screen, inside]}>
+      {lists.kind === "failed" ? (
+        <Message
+          text={describeError(lists.error)}
+          action={{ label: t("Try again"), onPress: retryTitles }}
+        />
+      ) : (
+        <Message text={t("The provider no longer lists this title.")} />
+      )}
+    </View>
+  );
 }
 
 /** The version menu's choice of Automatic: progress and the title's own choice decide. */
@@ -159,7 +171,18 @@ function usePressed(key: string): () => Request {
   };
 }
 
-function Details({ title, opened, asked }: { title: Title; opened: OwnedId; asked: boolean }) {
+function Details({
+  title,
+  opened,
+  asked,
+  sides,
+}: {
+  title: Title;
+  opened: OwnedId;
+  asked: boolean;
+  sides: { left: number; right: number };
+}) {
+  const width = useContentWidth();
   const locale = useLocale();
   const viewing = useViewing();
   const watchlist = useWatchlist();
@@ -336,7 +359,8 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
           width={780}
           style={StyleSheet.absoluteFill}
         />
-        <Glass style={styles.capsule}>
+        {/* Inside the content's width, so a long label shrinks rather than reach the column. */}
+        <Glass style={[styles.capsule, { left: 16 + sides.left, maxWidth: width - 32 }]}>
           {title.kind === "movie" ? (
             <CapsuleButton
               symbol="play.fill"
@@ -371,83 +395,89 @@ function Details({ title, opened, asked }: { title: Title; opened: OwnedId; aske
           ) : null}
         </Glass>
       </View>
-      <View style={styles.facts}>
-        <Text style={styles.name} accessibilityRole="header">
-          {title.title}
-        </Text>
-        <Text style={styles.line}>
-          {[
-            title.year,
-            facts?.duration ? runtime(facts.duration) : null,
-            title.kind === "series" && facts?.kind === "series"
-              ? t("{count} seasons", { count: facts.seasons.length })
-              : null,
-            (facts?.genres ?? title.genres).slice(0, 2).join(", ") || null,
-            title.rating?.toFixed(1),
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-          {title.kind === "movie" ? <DownloadFact of={{ kind: "movie", ...version }} /> : null}
-        </Text>
-        {versionLabel || title.versions.length > 1 ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              versionLabel
-                ? t("Version, {version}", { version: versionLabel })
-                : t("Version, as listed")
-            }
-            accessibilityHint={title.versions.length > 1 ? t("Chooses another version") : undefined}
-            disabled={title.versions.length < 2}
-            onPress={chooseVersion}
-            style={styles.version}
-            testID="details-version"
-          >
-            <Text style={styles.versionText}>
-              {versionLabel || t("As listed")}
-              {title.versions.length > 1 ? "  ⌄" : ""}
-            </Text>
-          </Pressable>
-        ) : null}
-        {failedHere ? (
-          <Text style={styles.failure} testID="details-failed">
+      <View style={{ paddingLeft: sides.left, paddingRight: sides.right }}>
+        <View style={styles.facts}>
+          <Text style={styles.name} accessibilityRole="header">
+            {title.title}
+          </Text>
+          <Text style={styles.line}>
             {[
-              failedNote(failedHere, versionLabel),
-              title.versions.length > 1 ? t("Try another version.") : null,
+              title.year,
+              facts?.duration ? runtime(facts.duration) : null,
+              title.kind === "series" && facts?.kind === "series"
+                ? t("{count} seasons", { count: facts.seasons.length })
+                : null,
+              (facts?.genres ?? title.genres).slice(0, 2).join(", ") || null,
+              title.rating?.toFixed(1),
             ]
               .filter(Boolean)
-              .join(" ")}
+              .join(" · ")}
+            {title.kind === "movie" ? <DownloadFact of={{ kind: "movie", ...version }} /> : null}
           </Text>
-        ) : null}
-        {movieProgress ? <Text style={styles.left}>{timeLeftOf(movieProgress) ?? ""}</Text> : null}
-        {details.kind === "failed" && details !== retried ? (
-          <Message
-            text={details.error}
-            action={{
-              label: t("Try again"),
-              onPress: () => {
-                setRetried(details);
-                setAgain((count) => count + 1);
-              },
-            }}
+          {versionLabel || title.versions.length > 1 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                versionLabel
+                  ? t("Version, {version}", { version: versionLabel })
+                  : t("Version, as listed")
+              }
+              accessibilityHint={
+                title.versions.length > 1 ? t("Chooses another version") : undefined
+              }
+              disabled={title.versions.length < 2}
+              onPress={chooseVersion}
+              style={styles.version}
+              testID="details-version"
+            >
+              <Text style={styles.versionText}>
+                {versionLabel || t("As listed")}
+                {title.versions.length > 1 ? "  ⌄" : ""}
+              </Text>
+            </Pressable>
+          ) : null}
+          {failedHere ? (
+            <Text style={styles.failure} testID="details-failed">
+              {[
+                failedNote(failedHere, versionLabel),
+                title.versions.length > 1 ? t("Try another version.") : null,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </Text>
+          ) : null}
+          {movieProgress ? (
+            <Text style={styles.left}>{timeLeftOf(movieProgress) ?? ""}</Text>
+          ) : null}
+          {details.kind === "failed" && details !== retried ? (
+            <Message
+              text={details.error}
+              action={{
+                label: t("Try again"),
+                onPress: () => {
+                  setRetried(details);
+                  setAgain((count) => count + 1);
+                },
+              }}
+            />
+          ) : facts ? (
+            <About facts={facts} onRetry={() => setAgain((count) => count + 1)} />
+          ) : (
+            <PlaceholderLines widths={["100%", "92%", "56%"]} />
+          )}
+        </View>
+        {facts?.kind === "series" ? (
+          <Seasons
+            details={facts}
+            title={shownTitle}
+            version={version}
+            sequence={sequence}
+            accepted={accepted}
+            onVersions={chooseVersion}
           />
-        ) : facts ? (
-          <About facts={facts} onRetry={() => setAgain((count) => count + 1)} />
-        ) : (
-          <PlaceholderLines widths={["100%", "92%", "56%"]} />
-        )}
+        ) : null}
+        <Related title={title} />
       </View>
-      {facts?.kind === "series" ? (
-        <Seasons
-          details={facts}
-          title={shownTitle}
-          version={version}
-          sequence={sequence}
-          accepted={accepted}
-          onVersions={chooseVersion}
-        />
-      ) : null}
-      <Related title={title} />
     </ScrollView>
   );
 }
@@ -868,7 +898,6 @@ const styles = StyleSheet.create({
   lineShape: { width: "40%", height: 14 },
   capsule: {
     position: "absolute",
-    left: 16,
     bottom: 14,
     flexDirection: "row",
     alignItems: "center",
@@ -876,6 +905,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   capsuleButton: {
+    flexShrink: 1,
     minWidth: 44,
     minHeight: 44,
     flexDirection: "row",
@@ -884,7 +914,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
   },
-  capsuleLabel: { color: "#FFFFFF", fontSize: 17, fontWeight: "600" },
+  capsuleLabel: { flexShrink: 1, color: "#FFFFFF", fontSize: 17, fontWeight: "600" },
   facts: { paddingHorizontal: 16, paddingTop: 14, gap: 6 },
   name: { color: colors.text, fontSize: 28, fontWeight: "700" },
   line: { color: colors.dim, fontSize: 15 },

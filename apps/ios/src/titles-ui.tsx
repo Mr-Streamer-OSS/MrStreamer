@@ -7,7 +7,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
   type StyleProp,
   type ViewStyle,
@@ -16,6 +15,7 @@ import { useArtwork } from "./artwork-cache.ts";
 import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/live.ts";
 import { Placeholders, Shape, useDockInset } from "./loading.tsx";
+import { useContentWidth } from "./content-width.ts";
 import { colors } from "./ui.tsx";
 
 // Movies and series as content: posters, shelves of them, text tabs and grids, on solid true
@@ -86,9 +86,9 @@ export function ProgressLine({ done }: { done: number | null }) {
   );
 }
 
-/** The poster width that fits three to a row at the phone's width, smaller on wide screens. */
+/** The poster width that fits three to a row in the content's width, smaller on wide screens. */
 export function usePosterWidth(columns = 3): number {
-  const { width } = useWindowDimensions();
+  const width = useContentWidth();
   const fit = Math.floor((width - 32 - (columns - 1) * 10) / columns);
   return Math.min(fit, 160);
 }
@@ -348,8 +348,7 @@ export function CollectionTileView({
   artworkUrl: string | null;
   onPress: () => void;
 }) {
-  const { width } = useWindowDimensions();
-  const tile = Math.floor((width - 42) / 2);
+  const tile = Math.floor((useContentWidth() - 42) / 2);
   return (
     <Pressable
       accessibilityRole="button"
