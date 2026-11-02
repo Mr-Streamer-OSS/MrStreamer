@@ -1197,8 +1197,90 @@ describe("live captures", () => {
     expect(closed).toBe(1);
     expect(asked).toHaveLength(19);
     await closing;
+    // Another reads that; once alone, it reads the playlist anew.
+    await read("other", "1.m3u8");
+    expect(asked).toHaveLength(19);
     await captures.idle("again");
+    await read("other", "1.m3u8");
+    expect(asked).toHaveLength(20);
+    await captures.idle("other");
     expect(captures.reading(key)).toBe(false);
+  });
+
+  it("never answers a segment from before the provider's numbering went back", async () => {
+    const { captures, source } = await capturing();
+    const key = captureKey({ ...source, format: "hls", url: "http://provider/live.m3u8" });
+    // A packager that names segments by number, started again: its bytes say which start.
+    let started = 1;
+    let from = 100;
+    let asked = 0;
+    const provider = (address: string) => () => {
+      asked++;
+      if (address.endsWith(".m3u8"))
+        return Promise.resolve(
+          new Response(
+            [
+              "#EXTM3U",
+              "#EXT-X-TARGETDURATION:2",
+              `#EXT-X-MEDIA-SEQUENCE:${from}`,
+              ...[0, 1, 2, 3].flatMap((at) => ["#EXTINF:2,", `stream${from + at}.ts`]),
+              "",
+            ].join("\n"),
+          ),
+        );
+      return Promise.resolve(new Response(new Uint8Array([started])));
+    };
+    const read = async (name: string) => {
+      const address = `http://provider/${name}`;
+      const answer = await captures.resource(
+        key,
+        "watch",
+        address,
+        provider(address),
+        new AbortController().signal,
+      );
+      return [...new Uint8Array(await answer.arrayBuffer())];
+    };
+    await read("live.m3u8");
+    for (const at of [100, 101, 102, 103]) expect(await read(`stream${at}.ts`)).toEqual([1]);
+
+    // Started again from 0, and later at 100 once more.
+    started = 2;
+    from = 0;
+    await read("live.m3u8");
+    for (const at of [0, 1, 2, 3]) await read(`stream${at}.ts`);
+    from = 100;
+    await read("live.m3u8");
+    const before = asked;
+    expect(await read("stream100.ts")).toEqual([2]);
+    expect(asked).toBe(before + 1);
+    await captures.idle("watch");
+  });
+
+  it("counts an HLS stream as read no more once its reader reads another of the channel's", async () => {
+    const { captures, source } = await capturing();
+    const [first, second] = ["1", "2"].map((variantId) =>
+      captureKey({ ...source, variantId, format: "hls", url: `http://provider/${variantId}.m3u8` }),
+    );
+    const playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\n0.ts\n";
+    const read = async (key: string, address: string) =>
+      (
+        await captures.resource(
+          key,
+          "record",
+          address,
+          () => Promise.resolve(new Response(playlist)),
+          new AbortController().signal,
+        )
+      ).text();
+    await read(first!, "http://provider/1.m3u8");
+    expect(captures.reading(first!)).toBe(true);
+    // Its first segment couldn't be read, say: the recording goes on to the next stream.
+    await read(second!, "http://provider/2.m3u8");
+    expect(captures.reading(first!)).toBe(false);
+    expect(captures.reading(second!)).toBe(true);
+    await captures.idle("record");
+    expect(captures.reading(second!)).toBe(false);
   });
 });
 
