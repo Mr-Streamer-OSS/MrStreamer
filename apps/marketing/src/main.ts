@@ -97,8 +97,9 @@ if (tricks) {
     if (!frame) frame = requestAnimationFrame(light);
   };
   light();
-  new IntersectionObserver(([entry]) => {
-    if (entry?.isIntersecting) {
+  // A batch can hold more than one change for the tricks; the last is where they are now.
+  new IntersectionObserver((entries) => {
+    if (entries.at(-1)?.isIntersecting) {
       addEventListener("scroll", schedule, { passive: true });
       addEventListener("resize", schedule);
       schedule();

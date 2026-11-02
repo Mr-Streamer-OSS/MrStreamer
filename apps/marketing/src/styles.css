@@ -417,7 +417,7 @@ h1 {
 .trick {
   position: relative;
   display: grid;
-  grid-template-columns: 2.4em 1fr;
+  grid-template-columns: 2.4em minmax(0, 1fr);
   align-items: baseline;
   gap: 0.25em 0;
   padding: 1.05em 0;
@@ -436,6 +436,7 @@ h1 {
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -0.045em;
+  overflow-wrap: break-word;
   transition: color 0.3s var(--ease);
 }
 
@@ -465,15 +466,13 @@ h1 {
   gap: 1em;
 }
 
-/* The strip scrolls on phones, which clips; its 5 px of padding keeps a tab's focus outline whole. */
+/* Tabs that don't fit wrap rather than scroll, so none hides and focus outlines stay whole. */
 .tabs {
   display: flex;
-  gap: 1.8em;
-  margin: calc(1.8em - 5px) -5px 0;
-  padding: 5px 5px 0;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  gap: 0.6em 1.8em;
+  margin-top: 1.8em;
   border-bottom: 1px solid var(--line);
-  scrollbar-width: none;
 }
 
 .tabs[hidden],
@@ -674,10 +673,9 @@ h1 {
     font-size: 1em;
   }
 
-  /* All four tabs fit on a 390 px phone; narrower, or with larger text, they wrap rather than hide. */
+  /* All four tabs fit on one line on a 390 px phone. */
   .tabs {
-    flex-wrap: wrap;
-    gap: 0.6em 1em;
+    column-gap: 1em;
   }
 
   .tabs button {
@@ -1148,8 +1146,8 @@ footer p {
   }
 
   .tabs {
-    gap: 2.2em;
-    margin-top: calc(2.2em - 5px);
+    column-gap: 2.2em;
+    margin-top: 2.2em;
   }
 
   .screen {
