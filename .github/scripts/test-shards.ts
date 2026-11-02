@@ -42,32 +42,22 @@ export function collectShards(
     : [];
   for (const name of names) {
     const dir = join(downloads, name);
-    let shard: unknown;
+    let shard: { shard?: unknown; identity?: unknown };
     try {
-      shard = JSON.parse(readFileSync(join(dir, "shard.json"), "utf8"));
+      shard = JSON.parse(readFileSync(join(dir, "shard.json"), "utf8")) ?? {};
     } catch {
       problems.push(`${name}: no readable shard.json.`);
       continue;
     }
-    const spec =
-      typeof shard === "object" &&
-      shard !== null &&
-      "shard" in shard &&
-      typeof shard.shard === "string"
-        ? /^(\d+)\/(\d+)$/.exec(shard.shard)
-        : null;
-    if (!spec || Number(spec[1]) !== Number(name.slice(prefix.length))) {
+    const spec = typeof shard.shard === "string" ? /^(\d+)\/(\d+)$/.exec(shard.shard) : null;
+    const [index, count] = [Number(spec?.[1]), Number(spec?.[2])];
+    if (!spec || index !== Number(name.slice(prefix.length))) {
       problems.push(`${name}: shard.json names no shard <index>/<count> matching its name.`);
       continue;
     }
-    const [index, count] = [Number(spec[1]), Number(spec[2])];
     indexes.push(index);
     counts.add(count);
-    identities.add(
-      typeof shard === "object" && shard !== null && "identity" in shard
-        ? String(shard.identity)
-        : "",
-    );
+    identities.add(String(shard.identity ?? ""));
     const blob = join(dir, "blob.json");
     if (!existsSync(blob) || statSync(blob).size === 0) {
       problems.push(`Shard ${index}/${count}: no Vitest blob report. Did its tests run?`);

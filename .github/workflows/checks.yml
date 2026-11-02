@@ -2,9 +2,10 @@
 # docs/maintainers/ci.md shows how the workflows fit together.
 #
 # Check always runs and reports. Test and Website run when their inputs changed, and whenever the
-# changed paths are unknown or couldn't be read. Test merges three test shards' reports. A release calls this with the commit it builds
-# (`sha`), which always checks and tests that commit. The validation evidence artifact records
-# what ran on the exact source; .github/actions/validation/README.md has its contract.
+# changed paths are unknown or couldn't be read. Test merges three test shards' reports. A release
+# calls this with the commit it builds (`sha`), which always checks and tests that commit. The
+# validation evidence artifact records what ran on the exact source;
+# .github/actions/validation/README.md has its contract.
 #
 # Website checks here are secretless; the independent Website workflow owns deployment.
 # No secrets, so pull requests from forks run all of it.

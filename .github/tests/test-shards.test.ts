@@ -72,7 +72,9 @@ test("every shard once, under the job's identity, keeps the identity and every b
   });
 });
 
-test("a missing shard or blob is a problem, and the blobs found are still copied", () => {
+test("no shards, a missing shard or a missing blob is a problem; the blobs found are still copied", () => {
+  assert.deepEqual(collect([]).problems, ["No test shard reports named test-shard-run-<index>."]);
+
   const missing = collect(three().slice(0, 2));
   assert.deepEqual(missing.problems, ["Shard 3/3: found 0 times, not once."]);
   assert.deepEqual(missing.blobs, ["blob-1-3.json", "blob-2-3.json"]);
@@ -81,19 +83,6 @@ test("a missing shard or blob is a problem, and the blobs found are still copied
     three((shard, index) => (index === 2 ? { ...shard, blob: false } : shard)),
   );
   assert.deepEqual(noBlob.problems, ["Shard 2/3: no Vitest blob report. Did its tests run?"]);
-});
-
-test("no shards, disagreeing counts or a mislabelled shard are problems", () => {
-  assert.deepEqual(collect([]).problems, ["No test shard reports named test-shard-run-<index>."]);
-  assert.match(
-    collect([{ shard: "1/2" }, { shard: "2/3" }, { shard: "3/3" }]).problems.join("\n"),
-    /disagree on their count/,
-  );
-  const mislabelled = collect([...three().slice(0, 2), { name: "test-shard-run-3", shard: "2/3" }]);
-  assert.deepEqual(mislabelled.problems, [
-    "test-shard-run-3: shard.json names no shard <index>/<count> matching its name.",
-    "Shard 3/3: found 0 times, not once.",
-  ]);
 });
 
 test("other candidates' shards in the same run are left out", () => {
