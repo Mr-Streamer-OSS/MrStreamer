@@ -1,9 +1,10 @@
 // Checks' Test job runs this on the downloaded test shard artifacts before Vitest merges their
-// reports. Each shard of one candidate, named test-shard-<report-name>-<index>, holds `shard.json`
-// ({ shard: "<index>/<count>", identity }) and Vitest's `blob.json`. This copies every shard's blob
-// into one folder for `vitest --merge-reports` and prints the GitHub output `identity=`: the
-// validation identity when every shard ran under the Test job's own (IDENTITY), empty otherwise,
-// so Release won't reuse a mixed run.
+// reports. Each shard artifact holds `shard.json` ({ report, shard: "<index>/<count>", identity })
+// and Vitest's `blob.json`. download-artifact puts each artifact in a folder of its name, or a lone
+// match straight into the download folder, so this reads both and goes by `shard.json` alone. It
+// copies every blob of the named report into one folder for `vitest --merge-reports` and prints
+// the GitHub output `identity=`: the validation identity when every shard ran under the Test
+// job's own (IDENTITY), empty otherwise, so Release won't reuse a mixed run.
 //
 //   IDENTITY=<this runner's identity> node .github/scripts/test-shards.ts <downloads> <report-name> <blobs>
 //
@@ -21,7 +22,7 @@ import {
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The shards found under `downloads` for `reportName`, and what keeps them from being complete. */
+/** The shards of `reportName` found in `downloads`, and what keeps them from being complete. */
 export function collectShards(
   downloads: string,
   reportName: string,
@@ -32,29 +33,32 @@ export function collectShards(
   const identities = new Set<string>();
   const indexes: number[] = [];
   const counts = new Set<number>();
-  const prefix = `test-shard-${reportName}-`;
   mkdirSync(blobs, { recursive: true });
-  // Other candidates' shards in the same run share the download pattern; only exact names count.
-  const names = existsSync(downloads)
-    ? readdirSync(downloads).filter(
-        (name) => name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length)),
-      )
+  const folders = existsSync(downloads)
+    ? [
+        downloads,
+        ...readdirSync(downloads, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => join(downloads, entry.name)),
+      ]
     : [];
-  for (const name of names) {
-    const dir = join(downloads, name);
-    let shard: { shard?: unknown; identity?: unknown };
+  for (const dir of folders) {
+    if (!existsSync(join(dir, "shard.json"))) continue;
+    let shard: { report?: unknown; shard?: unknown; identity?: unknown };
     try {
       shard = JSON.parse(readFileSync(join(dir, "shard.json"), "utf8")) ?? {};
     } catch {
-      problems.push(`${name}: no readable shard.json.`);
+      problems.push(`${dir}: unreadable shard.json.`);
       continue;
     }
+    // Other candidates' shards in the same run can match the download pattern.
+    if (shard.report !== reportName) continue;
     const spec = typeof shard.shard === "string" ? /^(\d+)\/(\d+)$/.exec(shard.shard) : null;
-    const [index, count] = [Number(spec?.[1]), Number(spec?.[2])];
-    if (!spec || index !== Number(name.slice(prefix.length))) {
-      problems.push(`${name}: shard.json names no shard <index>/<count> matching its name.`);
+    if (!spec) {
+      problems.push(`${dir}: shard.json names no shard <index>/<count>.`);
       continue;
     }
+    const [index, count] = [Number(spec[1]), Number(spec[2])];
     indexes.push(index);
     counts.add(count);
     identities.add(String(shard.identity ?? ""));
@@ -66,7 +70,7 @@ export function collectShards(
     copyFileSync(blob, join(blobs, `blob-${index}-${count}.json`));
   }
   const [count, ...otherCounts] = counts;
-  if (count === undefined) problems.push(`No test shard reports named ${prefix}<index>.`);
+  if (count === undefined) problems.push(`No test shard reports for ${reportName}.`);
   else if (otherCounts.length)
     problems.push(`The shards disagree on their count: ${[...counts].join(", ")}.`);
   else
@@ -76,7 +80,7 @@ export function collectShards(
     }
   const agreed =
     identities.size === 1 && identities.has(identity) && /^[a-f0-9]{64}$/.test(identity);
-  return { problems, identity: agreed ? identity : "" };
+  return { problems, identity: agreed ? identity : "", mixed: identities.size > 0 && !agreed };
 }
 
 if (
@@ -90,13 +94,13 @@ if (
     );
     process.exit(1);
   }
-  const { problems, identity } = collectShards(
+  const { problems, identity, mixed } = collectShards(
     downloads,
     reportName,
     blobs,
     process.env["IDENTITY"] ?? "",
   );
-  if (!identity)
+  if (mixed)
     console.error(
       "::warning::The test shards ran under different validation identities; Release won't reuse this run.",
     );

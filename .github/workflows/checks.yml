@@ -127,10 +127,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # A cancelled run has no report worth merging. A failed or timed-out shard still merges.
       - name: Require the shards to have run
-        env:
-          SHARDS_RESULT: ${{ needs.test-shard.result }}
-        run: test "$SHARDS_RESULT" = success || test "$SHARDS_RESULT" = failure
+        if: ${{ cancelled() || needs.test-shard.result == 'skipped' }}
+        run: |
+          echo "The test shards were cancelled or skipped, so Test can't pass." >&2
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
