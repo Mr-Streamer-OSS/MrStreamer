@@ -44,6 +44,11 @@ const IPHONES = [
   "iphone-library",
   "iphone-watching",
 ] as const;
+/**
+ * The iPhone screen the page is laid out for, in points: index.html gives every iPhone picture
+ * this shape (804 × 1748, or 1608 × 740 for landscape Watching), so a capture must have it too.
+ */
+const IPHONE_SCREEN = { width: 402, height: 874 };
 /** Widths of an iPhone screen: as wide as it shows beside the window, and twice that. */
 const IPHONE_WIDTHS = [402, 804];
 type Master = (typeof MASTERS)[number];
@@ -109,10 +114,14 @@ for (const name of MASTERS) {
 for (const name of IPHONES) {
   const capture = sharp(checkedCapture(name));
   const size = await capture.metadata();
-  if (size.format !== "png" || !size.width || !size.height)
-    throw new Error(`${name} must be a lossless PNG of the whole iPhone screen.`);
+  const { format, width = 0, height = 0 } = size;
+  const landscape = width > height;
+  const [long, short] = landscape ? [width, height] : [height, width];
+  if (format !== "png" || long * IPHONE_SCREEN.width !== short * IPHONE_SCREEN.height)
+    throw new Error(
+      `${name} must be a lossless PNG of the whole ${IPHONE_SCREEN.width} × ${IPHONE_SCREEN.height}-point iPhone screen.`,
+    );
   // A landscape screen is as tall as a portrait one is wide, so it is twice as wide again.
-  const landscape = size.width > size.height;
   for (const width of landscape ? IPHONE_WIDTHS.map((each) => each * 2) : IPHONE_WIDTHS) {
     await capture
       .clone()
