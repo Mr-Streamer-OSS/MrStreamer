@@ -34,7 +34,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { PAGE_ROUTES, PAGES, SITE } from "./pages.ts";
+import { MISSING, PAGE_ROUTES, PAGES, SITE } from "./pages.ts";
 import { INGEST_ROUTE } from "./site-analytics.ts";
 
 const LISTED = Object.fromEntries(PAGES.map(({ address, file }) => [address, file]));
@@ -48,7 +48,6 @@ mkdirSync(output, { recursive: true });
 cpSync(join(root, "dist"), files, { recursive: true });
 // Vercel matches src against the path without its query. The routes above "filesystem" answer
 // before the package's files, the one below it after them.
-const missing = { status: 404, dest: "/404.html" };
 const routes = [
   INGEST_ROUTE,
   {
@@ -68,7 +67,7 @@ const routes = [
   },
   ...PAGE_ROUTES,
   { handle: "filesystem" },
-  { src: "^/.*$", ...missing },
+  { src: "^/.*$", ...MISSING },
 ];
 writeFileSync(join(output, "config.json"), `${JSON.stringify({ version: 3, routes }, null, 2)}\n`);
 

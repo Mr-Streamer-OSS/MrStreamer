@@ -154,26 +154,26 @@ export const PAGES: readonly Page[] = [
   },
 ];
 
+/** Vercel's answer for an unknown address: the 404 page, with status 404. */
+export const MISSING = { status: 404, dest: "/404.html" } as const;
+
 /**
  * Vercel's routes for the pages, ahead of its filesystem: each page at its address, in its exact
  * case (Vercel ignores case unless told) and with or without a trailing slash, then the 404 page for
- * HTML aliases and every other address without a file extension. Vercel's filesystem decodes the
- * path and answers a folder with its index.html, so `/doc%73` or `/docs/index.html/` would
- * otherwise show a page at an address that isn't its own.
+ * HTML aliases, addresses without a file extension and percent-encoded addresses. Vercel matches
+ * the path as sent, but its filesystem decodes it and answers a folder with its index.html, so
+ * `/doc%73`, `/docs/index.htm%6c` or `/docs/index.html/` would otherwise show a page at an
+ * address that isn't its own.
  */
-export const PAGE_ROUTES: readonly {
-  readonly src: string;
-  readonly dest: string;
-  readonly status?: number;
-  readonly caseSensitive?: boolean;
-}[] = [
+export const PAGE_ROUTES = [
   ...PAGES.map(({ address, file }) => ({
     src: address === "/" ? "^/$" : `^${address}/?$`,
     dest: `/${file}`,
     caseSensitive: true,
   })),
-  { src: "^/.*\\.html/?$", status: 404, dest: "/404.html" },
-  { src: "^/[^.]*$", status: 404, dest: "/404.html" },
+  { src: "^/.*\\.html/?$", ...MISSING },
+  { src: "^/[^.]*$", ...MISSING },
+  { src: "^/.*%", ...MISSING },
 ];
 
 function escapeHtml(text: string): string {

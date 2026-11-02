@@ -163,11 +163,14 @@ const config = (analytics: SiteCapture | null): UserConfig => ({
       configurePreviewServer(server) {
         const answer = pages((file) => readFileSync(join(root, "dist", file), "utf8"));
         // Ahead of filesystem handling, as PAGE_ROUTES are on Vercel: the files serve folders and
-        // decoded paths, so only an address with a file extension reaches them.
+        // decoded paths, so only an unencoded address with a file extension reaches them.
         server.middlewares.use((req, res, next) => {
           const path = req.url?.split("?")[0] ?? "/";
           if (path === "/llms.txt") res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          return addresses.has(path) || HTML_ALIAS.test(path) || !path.includes(".")
+          return addresses.has(path) ||
+            HTML_ALIAS.test(path) ||
+            !path.includes(".") ||
+            path.includes("%")
             ? answer(req, res, next)
             : next();
         });

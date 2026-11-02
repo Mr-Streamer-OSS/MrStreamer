@@ -181,10 +181,10 @@ describe("Vercel page routes", () => {
   // Vercel takes the first route whose src matches the path as sent, ignoring case unless the
   // route says otherwise. An address no route takes goes on to the packaged files.
   const answer = (path: string) => {
-    const route = PAGE_ROUTES.find(({ src, caseSensitive }) =>
-      new RegExp(src, caseSensitive ? "" : "i").test(path),
+    const route = PAGE_ROUTES.find((route) =>
+      new RegExp(route.src, "caseSensitive" in route ? "" : "i").test(path),
     );
-    return route ? (route.status ?? route.dest) : "file";
+    return route ? ("status" in route ? route.status : route.dest) : "file";
   };
 
   it("answers each page at its own address, with or without a trailing slash", () => {
@@ -203,6 +203,8 @@ describe("Vercel page routes", () => {
     "/docs/index%2ehtml",
     "/doc%73",
     "/docs/live-tv%2F",
+    "/docs/index.htm%6c",
+    "/docs/index.html%2F",
     "/nothing/here",
   ])("answers %s with the 404 page", (path) => {
     expect(answer(path)).toBe(404);
