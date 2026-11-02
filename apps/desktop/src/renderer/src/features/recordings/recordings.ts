@@ -172,10 +172,10 @@ export function coverageStart(recording: Recording): number {
 
 /**
  * Captured and planned whole minutes, what "3 of 52 min" shows, and the coverage bar. All count
- * from where coverage starts. Planned minutes are whole ones to the stop, at least one. A complete
- * one captured all of them but those missed at the start, whole minutes as main counts a start
- * within one as on time; any other captured what it reached less its gaps, one still going on to
- * now, added up before it is rounded down to whole minutes, so it never claims more than it has.
+ * from where coverage starts. Planned minutes are whole ones to the stop, at least one. Captured
+ * is what it reached less its gaps, one still going on to now, added up before it is rounded down
+ * to whole minutes, so it never claims more than it has; a complete one shorter than a minute
+ * counts one, so its bar reads full.
  * The bar shows the same spans as they were, as fractions of the planned time: hatched at the
  * start up to `late`, a late schedule's from when it was owed to when it began, or all of a missed
  * one, and over each of the `gaps` since, white up to where it `reached`.
@@ -207,9 +207,10 @@ export function coverage(
     return to > gap.from ? [{ from: gap.from, to }] : [];
   });
   const lost = gaps.reduce((sum, gap) => sum + gap.to - gap.from, 0);
-  const captured = complete
-    ? planned - late
-    : Math.min(planned - late, minutes(reached - recording.start - lost));
+  const captured = Math.min(
+    planned - late,
+    Math.max(complete ? 1 : 0, minutes(reached - recording.start - lost)),
+  );
   return {
     captured,
     planned,
@@ -240,10 +241,13 @@ function gapText(why: RecordingGapReason): string {
  * together, rounded once so short ones aren't each counted as a minute. Under a minute says so.
  */
 function gapsText(gaps: readonly RecordingGap[]): string | null {
-  const settled = gaps.filter((gap) => gap.to !== null);
+  // Those that missed any time, as coverage counts them.
+  const settled = gaps.flatMap((gap) =>
+    gap.to !== null && gap.to > gap.from ? [{ ...gap, to: gap.to }] : [],
+  );
   const last = settled.at(-1);
   if (!last) return null;
-  const lost = settled.reduce((sum, gap) => sum + (gap.to ?? gap.from) - gap.from, 0);
+  const lost = settled.reduce((sum, gap) => sum + gap.to - gap.from, 0);
   const one = settled.length === 1;
   const missed =
     lost < MINUTE_MS
@@ -253,7 +257,7 @@ function gapsText(gaps: readonly RecordingGap[]): string | null {
       : one
         ? t("{from} to {to} missed.", {
             from: formatDate(last.from, "time"),
-            to: formatDate(last.to ?? last.from, "time"),
+            to: formatDate(last.to, "time"),
           })
         : t("{minutes} min missed in between.", { minutes: Math.round(lost / MINUTE_MS) });
   return `${missed} ${gapText(last.why)}`;

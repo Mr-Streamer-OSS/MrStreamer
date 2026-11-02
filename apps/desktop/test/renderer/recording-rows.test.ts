@@ -96,9 +96,19 @@ it("counts a late recording's minutes in whole minutes from when it was owed", a
   expect(row.text).toContain("5 of 10 min");
 });
 
-it("adds a complete late recording's missed and captured minutes up to those planned", async () => {
+it("counts a complete late recording's minutes from when it began", async () => {
   const row = await rowOf(late, { ...times, ended: times.stop });
   expect(row).toMatchObject({ captured: "8", planned: "10" });
+});
+
+it("rounds a complete late recording's captured time down, not its planned minutes less late", async () => {
+  // Begun at 12:02:50 and stopped at 12:10:10: 7 min 20 s captured.
+  const short = await rowOf(late, {
+    start: at("12:02") + 50_000,
+    stop: at("12:10") + 10_000,
+    ended: at("12:10") + 10_000,
+  });
+  expect(short).toMatchObject({ captured: "7", planned: "10" });
 });
 
 it("counts the minutes a gap missed out of what was captured, and says when and why", async () => {
@@ -141,6 +151,20 @@ it.each([
   expect(row.text).toMatch(/Less than a minute missed at 12:20\D*\. The stream stopped\./);
   expect(row.text).not.toMatch(/12:2\d\D* to 12:2\d/);
   expect(row).toMatchObject({ captured: "59", planned: "60" });
+});
+
+it("leaves out gaps an older version saved that missed no time", async () => {
+  const row = await rowOf(undefined, {
+    start: at("12:00"),
+    status: { kind: "partial", cut: "stream" },
+    gaps: [
+      { from: at("12:20"), to: at("12:22"), why: "stream" },
+      { from: at("12:40"), to: at("12:40"), why: "away" },
+      { from: at("12:50"), to: seconds("12:48", 30), why: "away" },
+    ],
+  });
+  expect(row.text).toMatch(/12:20\D* to 12:22\D* missed\. The stream stopped\./);
+  expect(row).toMatchObject({ captured: "58", planned: "60" });
 });
 
 it("says gaps that missed less than a minute together did so", async () => {
