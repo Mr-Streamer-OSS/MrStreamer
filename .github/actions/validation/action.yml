@@ -126,7 +126,7 @@ runs:
       if: inputs.part == 'test'
       with:
         path: .local/fixture-media
-        key: fixture-media-${{ steps.multimedia-key.outputs.key }}-${{ hashFiles('apps/desktop/scripts/ci-ffmpeg.sh', 'apps/ios/scripts/fixture-server.ts', 'apps/ios/scripts/native-fixtures/**', 'apps/desktop/test/fixtures/**') }}
+        key: fixture-media-${{ steps.multimedia-key.outputs.key }}-${{ hashFiles('apps/desktop/scripts/ci-ffmpeg.sh', 'apps/ios/scripts/fixture-server.ts', 'apps/ios/scripts/native-fixtures/**', 'apps/desktop/test/fake-provider.ts', 'apps/desktop/test/fixtures/**') }}
     - name: Test
       if: inputs.part == 'test' && !inputs.shard
       env:
