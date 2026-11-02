@@ -171,11 +171,12 @@ export function coverageStart(recording: Recording): number {
 }
 
 /**
- * Captured and planned whole minutes, what "3 of 52 min" shows, and the coverage bar. All count
- * from where coverage starts. Planned minutes are whole ones to the stop, at least one. Captured
- * is what it reached less its gaps, one still going on to now, added up before it is rounded down
- * to whole minutes, so it never claims more than it has; a complete one shorter than a minute
- * counts one, so its bar reads full.
+ * Captured and planned whole minutes, what "3 of 52 min" shows, and the coverage bar. Planned
+ * minutes and the bar count from where coverage starts, captured from when capture began. Planned
+ * minutes are whole ones to the stop, at least one. Captured is what it reached less its gaps,
+ * one still going on to now, added up before it is rounded down to whole minutes, so it never
+ * claims more than it has; a complete one shorter than a minute counts one, so its meter reads
+ * full.
  * The bar shows the same spans as they were, as fractions of the planned time: hatched at the
  * start up to `late`, a late schedule's from when it was owed to when it began, or all of a missed
  * one, and over each of the `gaps` since, white up to where it `reached`.
@@ -308,7 +309,7 @@ function missText(why: ScheduleMiss): string {
 export function outcome(recording: Recording, now: number): { word: string; reason: string } {
   const { word, reason: why } = ending(recording, now);
   const { scheduled } = recording;
-  // Whole minutes, as the coverage bar hatches them.
+  // Whole minutes, rounded down; main calls a start late only after a minute.
   const late =
     scheduled?.late && recording.status.kind !== "missed"
       ? `${t("Started {minutes} min late.", {
