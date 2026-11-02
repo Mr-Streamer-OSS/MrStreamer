@@ -5,7 +5,7 @@
 - [About Mr. Streamer](./about.md)
 - [Download and install](../README.md#download-and-set-up)
 - [Subscriptions](./user/subscriptions.md)
-- [Live TV](./user/live-tv.md)
+- [Live TV](./user/live-tv.md), and [recording it](./user/live-tv.md#recordings) from 0.0.23, now in Nightly
 - [Movies and series](./user/movies-and-series.md)
 - [Downloads](./user/downloads.md)
 - [Updates and channels](./user/updates.md)
@@ -20,7 +20,7 @@
 Start with the [contribution policy](../CONTRIBUTING.md).
 
 - [Development](./contributing/development.md): setup, running the app, installers, notices and artwork
-- [Testing](./contributing/testing.md): the suite, the fake provider, a real provider and measurements
+- [Testing](./contributing/testing.md): the suite, recordings, the iOS app's checks, the fake provider, a real provider and measurements
 - [CPU and profiling probes](./contributing/performance-probes.md): capture methods, attribution and limits
 - [Agent workflows](./contributing/agent-workflows.md): stack integration and player/website verification
 - [Architecture](./contributing/architecture.md)
@@ -41,6 +41,6 @@ Start with the [contribution policy](../CONTRIBUTING.md).
 - [Desktop component review](./maintainers/desktop-components.md): dependency selection and qualifications for the 0.0.21 freeze
 - [Public iPhone submission dossier](./maintainers/ios-public-submission-dossier.md): privacy, media rights, source obligations and unresolved public-release evidence
 - [The website](../apps/marketing/README.md): running it, publishing it and the one-time setup
-- [The iOS app](../apps/ios/README.md): its own install, what Hermes lacks, the runtime proof and TestFlight builds
+- [The iOS app](../apps/ios/README.md): where iOS 0.1.0 and 0.2.0 stand, its own install, what Hermes lacks, simulator fixtures, the runtime proof and TestFlight builds
 
 Priorities, status and acceptance live in the maintainers' [GitHub project](https://github.com/orgs/Mr-Streamer-OSS/projects/1).

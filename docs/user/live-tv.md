@@ -28,7 +28,7 @@ Under each channel's name, a smaller line tells it apart: the subscription it's 
 
 - Click a channel to watch it. **Back**, or Escape, returns to the same place in the list.
 - The arrow at the end of a row lists the rest of the day. Click a later programme to read about it.
-- On a channel your provider keeps recordings of (catch-up), the rest of the day starts with today's programmes that already aired. Click one to watch it from its start. Watch says when it aired, and at its end the channel stops; **Watch** then plays the channel live. A programme older than your provider keeps says how many days back catch-up goes. Catch-up plays on this computer, not on a TV.
+- On a channel whose aired programmes your provider keeps (catch-up), the rest of the day starts with today's programmes that already aired. Click one to watch it from its start. Watch says when it aired, and at its end the channel stops; **Watch** then plays the channel live. A programme older than your provider keeps says how many days back catch-up goes. Catch-up plays on this computer, not on a TV.
 - The star adds a channel to your favourites. A new favourite goes last, and **Reorder** puts them in the order you want.
 
 **Guide**, beside **Watch** at the top, or G, shows the same channels as a grid: channels down the side and time across, with a line at now. It goes ahead as far as your provider's guide reaches, and back a couple of hours, or as many days as the longest catch-up among the list's channels keeps, at most a week; hatched stretches are where the guide has nothing. Left and Right move between programmes, Up and Down between channels at the same time, and Page Up, Page Down, Home and End jump as in the list. Click a programme, or move to it, to see what it is under its channel. **Watch live**, Enter or a double click watches the channel; click a channel's name to watch it. Channels with catch-up have a clock sign beside their name. A programme that aired and that catch-up keeps plays from its start with Enter, a double click or **Play from start**, and one on now has **Play from start** after **Watch live**. Programmes that aired and can't be played again are dimmed. Wheels and trackpads scroll both ways, and **Now** comes back to now. **List**, G again or Escape goes back to the list, and Live TV opens in the view you left it in. A search shows each channel it finds once, as the list's shared rows do.
@@ -106,9 +106,71 @@ When the picture stands still for three seconds, "Waiting for data" shows at the
 
 A programme still to come has **Remind me** in its details: under its channel in the guide grid, under its description in the rest of a day, and in ⌘K's search. Once set it reads **Reminder set**, and the programme shows a bell. Press it again to cancel. The bell beside the list's name in Live TV counts the reminders still to come and lists them, with when and on which channel each is. The cross beside one takes it out. Tab reaches the buttons, and Enter presses them.
 
-When the programme starts, Mr. Streamer shows a notice at the top of its window, on any page, with **Watch** and **Dismiss**, and asks your system to show a notification with the programme and its channel. Nothing plays until you press Watch. Mr. Streamer has to be open to remind you: it doesn't wake or start your computer. After the computer slept or the app was closed, a programme that's still on reminds you once, saying how long ago it started; one that already ended is listed as Missed. The in-app notice does not depend on system notifications. System delivery is not guaranteed, and the app cannot tell whether you disabled notifications. If the system reports a delivery failure, the list says so. What a locked screen shows is your system's setting. Clicking a notification brings Mr. Streamer's window forward with its notice.
+When the programme starts, Mr. Streamer shows a notice at the top of its window, on any page, with **Watch** and **Dismiss**, and asks your system to show a notification with the programme and its channel. Nothing plays until you press Watch, and a reminder records nothing; from 0.0.23, now in Nightly, you can [record it](#recordings). Mr. Streamer has to be open to remind you: it doesn't wake or start your computer. After the computer slept or the app was closed, a programme that's still on reminds you once, saying how long ago it started; one that already ended is listed as Missed. The in-app notice does not depend on system notifications. System delivery is not guaranteed, and the app cannot tell whether you disabled notifications. If the system reports a delivery failure, the list says so. What a locked screen shows is your system's setting. Clicking a notification brings Mr. Streamer's window forward with its notice.
 
 A reminder belongs to its subscription, channel and start time. If the guide later lists another programme then, the reminder says what it was and reminds you of the new one. If it lists nothing then, or your provider stops listing the channel, it says it's not in the guide now and doesn't remind you, unless the programme comes back. It never moves to a programme of the same name at another time. Reminders are kept in a local `reminders.json` file and cleared when the app checks after the end of the day their programme ends. Removing a subscription removes its reminders. Reminders of adult channels show only in the app while **For adults** is on. A reminder due while they are hidden becomes Missed and does not notify when you show them again.
+
+## Recordings
+
+Recording is new in Mr. Streamer 0.0.23, now in [Nightly](updates.md#stable-and-nightly). Stable 0.0.22 and earlier can't record. Going back to one of them leaves your recordings and schedules on this computer without showing them; 0.0.23 shows them again, and a scheduled time that passed meanwhile, within the last week, is listed as **Missed**.
+
+A recording is a copy of a live channel that Mr. Streamer saves on this computer while it plays out. It isn't catch-up, which your provider keeps and plays back, and it isn't a reminder, which only tells you a programme starts. Mr. Streamer records only while it's open and the computer is awake: it never wakes or starts your computer, and nothing records on a server.
+
+### Record now
+
+**Record**, beside **Watch** and **Guide** at the top of Live TV, records the channel shown there. Pick when it stops: **When it ends**, two minutes after the guide's end for the programme on now; **In 1 hour**; **In 2 hours**; or **At a time…**, within the next 12 hours. **Start recording** starts it. While the channel records, the button reads **Recording** and opens the Recordings page.
+
+A recording uses one of its subscription's connections while it records. Mr. Streamer counts as many connections as an Xtream account allows, and one for a playlist; it can't see other devices using the same account. When every connection is in use, Record says so. When only the channel playing here holds the last one, **Stop playing and record** stops it and records instead. While recordings hold all of a subscription's connections, playing from it says so. Downloads from a subscription wait while it records.
+
+### Schedule a programme
+
+In the [guide grid](#the-guide), a programme that hasn't ended has **Record** in its details:
+
+- **Repeat**: **Once** records that programme and follows the guide if its end moves before recording starts; then it keeps that stop time. A weekday, or **Every day**, records the channel at that time of day, whatever is on then. Nothing follows a programme by its name.
+- **Start** and **End** each add 0 to 60 minutes, before and after, 2 and 5 minutes to begin with. One recording lasts at most 12 hours.
+- The panel says whether a connection is free then. When none is, **Schedule anyway** keeps the schedule, and it records from when one frees up.
+
+A scheduled programme has a ring in the grid, and its details read **Scheduled**, to change or cancel it. Nothing playing or downloading stops for a schedule. When its time comes while Mr. Streamer is closed, the computer sleeps or every connection is in use, it records the rest of its time and says how late it started. A time that passes with nothing recorded is listed as **Missed**; after a long absence, only the last week's are. A once-only schedule waits while the guide lists another programme or none at that time, so it never records the wrong show.
+
+### The Recordings page
+
+**Recordings**, in the top bar while anything is recorded or scheduled, lists **Now**, **Scheduled** and **Recorded**. Each row has the programme, the channel and its times, a bar of what was recorded against what was planned, and how it stands:
+
+- **Recording**, or **Paused** with why, while its time goes on. **Stop** ends it.
+- **Complete**: all of its time is there.
+- **Stopped**: you stopped it, at the time it shows.
+- **Partial**: part of its time is missing. The row says which minutes and why, and the bar hatches them.
+- **Missing**: its file is no longer on this computer.
+- **Missed**: a scheduled time passed with nothing recorded. **Remove** takes the row away.
+
+A schedule's row has **Edit** and, in its menu, **Cancel schedule**. A recording that is still running can't be played yet; watch the channel live instead. An ended recording plays on this computer, as a download does, and keeps how far you got. Partial ones play, skipping what was missed. Recordings don't play on a TV and aren't in Continue watching. The menu beside an ended recording has **Delete**. Recordings stay until you delete them, also after their subscription is removed.
+
+With no subscription saved, the Connect screen shows **Recordings** while any are kept.
+
+### When a recording is interrupted
+
+When the stream breaks, the disk fails or fills, a [storage limit](#where-recordings-are-kept) is reached, the computer sleeps, Mr. Streamer crashes, or the computer shuts down, the recording pauses. It goes on in the same file with the rest of its time once Mr. Streamer runs, the computer is awake, a connection is free and there's room. The time in between is a gap, listed on its row. Nothing fills a gap, from catch-up or anywhere else.
+
+A recording you stopped never goes on by itself, and neither does one you quit while it recorded. One also ends for good when its stream says it's over, or keeps ending soon after it starts.
+
+When Mr. Streamer can't save a Stop or a recording's end, its row says **Not saved yet. Trying again.** until storage works again. Until then, a recording that ended by itself goes on at the next start while its time remains. A recording you stopped or quit goes on only if the disk also refused the mark Mr. Streamer leaves in the recording's folder, as a drive gone read-only does.
+
+### Closing, quitting and updates
+
+Closing the window never asks. While a recording's time goes on or a schedule is kept, Mr. Streamer keeps running without its window, and opening it again shows the window. On Windows and Linux a tray icon then has **Open Mr. Streamer** and **Quit Mr. Streamer**, and Mr. Streamer quits by itself once nothing records, nothing is scheduled and what it had to save about them is saved.
+
+Quitting while something records, with ⌘Q, Ctrl+Q or the tray, asks first. **Quit while recording?** offers **Quit**, which stops the recordings and keeps what they recorded, and **Keep recording**. A schedule still to come doesn't record while Mr. Streamer is closed. A shutdown or logout doesn't ask: recordings whose time remains go on when Mr. Streamer starts again.
+
+A ready update offers **Update after recording** in Settings: choose it to install once nothing records. In the top-bar update panel, **OK** makes the same choice. **Restart now** stops the recordings first and keeps what they recorded.
+
+### Where recordings are kept
+
+Settings > **Recordings** shows the folder new recordings go to, with **Change** and **Open**. To begin with, that is the `recordings` folder in Mr. Streamer's data folder, listed in the [privacy policy](../privacy.md#on-your-computer). Recordings made before a change stay where they were made. Each recording is one `.ts` file in a folder of its own.
+
+- **Keep free on disk**, 5 GB to begin with, and **Space for recordings**, no limit to begin with, pause a recording when it reaches them. It goes on once there is room. Nothing is deleted to make room.
+- A chosen folder on a drive that isn't connected is never made on another disk. New recordings there refuse to start, and a paused one waits for its drive.
+
+Mr. Streamer manages these folders: use **Delete** rather than removing files by hand. What a recording keeps, and which channels can be recorded, is in [What plays](playback.md#recordings).
 
 ## Keys
 

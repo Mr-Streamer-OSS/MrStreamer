@@ -2,8 +2,10 @@
 
 React Native on Hermes (Expo SDK 58), building toward the desktop app's features. It shares
 `@mrstreamer/contracts` and the parts of `@mrstreamer/core` that run without Node, and brings its
-own native adapters: the Keychain, app storage and one native player so far. Nothing of it is in
-the desktop's install, build or packages.
+own native adapters: the Keychain, app storage, one managed native player and the modules in
+`modules/` (background downloads, the downloads folder, the guide, title formats, media controls,
+key commands, programme reminders and forgetting cached logins). Nothing of it is in the desktop's
+install, build or packages.
 
 The empty-roster Connect screen shows the selected welcome, Add provider, then a native statistics
 choice before the ordinary provider form. Both answers continue. Back cancels an unfinished login;
@@ -35,7 +37,10 @@ while the favourites still show the rows it was made of; a list or a password th
 meanwhile moves nothing and says so. A Live row's star, and Watch's for the channel playing, star
 or unstar the channel its provider lists now for the streams pressed, without playing anything, and
 change nothing when that is no single channel any more. Both rows lead Live whatever its channels'
-state: loading, failed or none. Under Favourites, Find
+state: loading, failed or none. The viewer's own lists follow Favourites, a row each in the order
+they were made (`src/custom-lists-screen.tsx`): holding a channel's row, or VoiceOver's Lists
+action, opens a sheet that adds it to a list, takes it out or makes a New list… holding it, and a
+list's Edit, Rename and Delete list work as Favourites' editor does. Under them, Find
 countries or categories (`src/live-discover.tsx`) finds them by name in every provider's
 channels, whatever country Live shows: a country goes back to Live showing it, on the same tab; a
 category opens all its channels, and Back finds the text and results again. Cancel leaves Live as
@@ -101,11 +106,14 @@ while the app is closed is seen at the next check. iOS holds 64, so a 65th to no
 is one iOS won't schedule; one a guide brings back past 64 says it isn't scheduled. A reminder goes when
 its programme ends or its provider is removed. Permission, delivery, tap routing and the lock
 screen need a native run. Search finds
-movies, series and channels: 20 movies and 20 series at first, each kind with its own Show more
-for the next 20 until every match shows. A movie's details and each episode row have a download button whose
+movies, series and channels by name, and the guide's programmes on now or later by title
+(`src/app/search.tsx`): 20 movies and 20 series at first, each kind with its own Show more
+for the next 20 until every match shows. A programme opens its detail inside Search, whose Back
+returns to the results. A movie's details and each episode row have a download button whose
 symbol is the download's state; Downloads lists the queue, then the copies on the phone, with
-Cancel, Retry, Remove, Play offline and Delete as each state allows (`src/downloads-screen.tsx`,
-`src/download-controls.tsx`). A series' details also offer Download remaining for the season shown
+Pause or Resume on each queue row, and Cancel, Retry, Remove, Play offline and Delete as each state
+allows; a download waiting its turn moves a place up or down from its sheet, a swipe or VoiceOver
+(`src/downloads-screen.tsx`, `src/download-controls.tsx`). A series' details also offer Download remaining for the season shown
 and Review series download for every season: after a system sheet with the exact counts, they queue
 that version's episodes one at a time in the series' own order, specials included, retry failed ones
 and replace a missing copy only when asked, never one Watch is playing. It goes on while Downloads
@@ -118,7 +126,26 @@ copy plays offline from Downloads,
 its menu and an episode's check. The native owner schedules the queue and hands the next background
 task to iOS before answering a background wake. iOS can defer starts, and force quit ends transfers.
 Actual background and physical-device acceptance remain separate from source and compilation checks.
-What the desktop does and iOS doesn't yet is tracked in the parity report on the iOS card.
+
+## Where it stands
+
+- **iOS 0.1.0**, build 17, went to Apple App Review on 27 October 2026 with manual release. It
+  isn't on the App Store, and none of the work below changes that build or its review
+  ([iOS app card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288133475)).
+- **iOS 0.2.0** is the parity wave on `main`: M3U playlists, XMLTV guides and channel mapping, the
+  guide grid, programme Search, catch-up, custom lists, reminders, Live audio and subtitle tracks,
+  embedded and online subtitles, the next-episode countdown, speed and Now Playing, the download
+  queue's pause and order, offline series, metadata and diagnostics recovery, interface language,
+  lighter launch and Automatic quality, and the adaptive iPad and Duo layouts below. It's source on
+  `main`: `app.json` still names 0.1.0, and there is no 0.2.0 TestFlight build or App Store release. Its simulator
+  results go on the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148), and the [release card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288153777)
+  holds what it still needs.
+- **Gated, not delivered:** more media formats and Google Cast each have a researched route that
+  hasn't been qualified on a device; their delivery cards are blocked
+  ([formats](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196422), [Cast](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196691)). AirPlay is the only TV output.
+- **Elsewhere:** the Mac App Store is a separate, planned desktop release whose sandbox feasibility comes first, with nothing submitted
+  ([card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=262337967)), and an
+  Apple TV app is a future plan. Full desktop parity isn't claimed.
 
 ## Its own install
 
@@ -232,7 +259,10 @@ A fresh nil-source player's fixed not-drained refusal permits one bootstrap retr
 player and attempt. Track policy uses the accepted pure decisions and native readback described below.
 An attended Live channel uses core's quality order and bounded recovery. Before the first playing,
 Automatic can try three candidates; an explicit channel pick plays alone. After playing, transient
-failures reconnect the candidate that played after 1, 2, 4 and 8 seconds. Thirty seconds of actual
+failures reconnect after 1, 2, 4 and 8 seconds: to the candidate that played, except when
+Automatic's stream stalled, lost its connection or didn't start, which opens the candidate a
+quality below it; a lower one that fails before playing steps lower again or goes back
+(`nextStep` in `src/media-policy.ts`). Thirty seconds of actual
 playing on one attempt earns those four reconnects back. This permits at most seven opens in the
 first unstable stretch and four after a stable reset, with no cross-provider fallback.
 
@@ -534,10 +564,10 @@ Each responsibility has one owner, a plain module with a store the screens read:
   `download:<id>`, is taken over by a later request of the very same address; going back to build
   14 is not supported.
   Each newly downloaded episode also keeps the exact immediate successor from its provider's
-  series order. Watch offers manual Next only when that successor is a complete local copy of
-  the same provider and series version. Next saves first, then rechecks the copies and uses the
-  target copy's own resume point. A missing copy stops continuation without skipping or
-  streaming; no episode autoplays. Older copies with no saved order still play normally.
+  series order. Watch offers manual Next, and the countdown once an episode played to its end,
+  only when that successor is a complete local copy of the same provider and series version.
+  Next saves first, then rechecks the copies and uses the target copy's own resume point. A
+  missing copy stops continuation without skipping or streaming. Older copies with no saved order still play normally.
   `modules/downloads-folder` makes `Documents/downloads` at launch and keeps it out of backups;
   `modules/background-downloads` keeps its queue and the one file it is finishing in Application
   Support, out of backups, and its request authority in the Keychain, both readable after the first
@@ -580,7 +610,8 @@ and Series. Every screen of theirs has one top bar (`src/header.tsx`): the brand
 the back button on a pushed screen, and Search, Settings and Downloads on the right, less the
 button of the screen it is on. The reactive Downloads item trails the system's Search and Settings
 buttons. Downloads, Settings and what Settings opens (`provider`, Add
-provider or a provider's Edit; `licences` and a component's `licence`) are Home's screens, pushed
+provider or a provider's Edit; `playlist`; `guides` and `guide-map`; `diagnostics`; `licences` and a
+component's `licence`) are Home's screens, pushed
 on the tab they were asked from (the other tabs' route files re-export them), and close as the viewer leaves that tab; Movies' and Series'
 details under them stay. `search` opens over the tabs, fading in, and closes back onto the screen
 it opened over; it keeps its text until the app ends, and says, above the keyboard (or atop the
@@ -638,7 +669,8 @@ brought back to the app, which its own view never forwarded, and hold AVKit's an
 has shown the player again, so the picture returns into Watch rather than Home.
 Watch's Live Quality sheet reads accepted channel picks at opening and fences its native callback
 by item, source, request and menu generation, including when the same item failed. Its playing row
-is marked only while playing or paused. Watch's Audio and Subtitles query observed native tracks and select the exact record with its
+is marked only while playing or paused. Watch offers Audio and Subtitles for a live channel too
+(`TextButtons` in `src/watch.tsx`; the fixtures' stream 7999 declares both). Watch's Audio and Subtitles query observed native tracks and select the exact record with its
 item, attempt and revision. Duplicate display labels stay distinct by native ID and optional name;
 checkmarks follow actual readback. Requests share one queue with automatic policy; an acknowledgement
 does not confirm a hold or remember a preference. Later selection-only snapshots can confirm it.
@@ -665,7 +697,8 @@ status text, actions and progress.
 Live channels are asked for as HLS, which AVPlayer plays and panels serve beside MPEG-TS. On the
 simulator the fixture channels showed what that covers: H.264 with AAC or AC-3 plays; MPEG-2 fails
 with "Cannot Decode"; HEVC in MPEG-TS segments plays its sound without a picture. The formats the
-desktop converts with ffmpeg don't play yet.
+desktop converts with ffmpeg don't play yet. A route to more of them is researched on Linux, not
+qualified on a device, and its delivery card is blocked ([formats](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196422)).
 
 Titles are tried whatever their file type: a version that fails says so in Watch and in its
 details, and the version menu marks it and offers the others. Matroska (`.mkv`) goes through a
@@ -773,10 +806,14 @@ and after seeks; the test AVI (MPEG-4 Part 2, MP3) ran to its end without a pict
 TMDB uses the viewer's own key from Settings > TMDB, kept in the Keychain, else
 `EXPO_PUBLIC_TMDB_KEY` (`EXPO_PUBLIC_TMDB_API` points at a test server). Without either key,
 provider facts and previously saved TMDB answers remain available; new TMDB facts cannot be
-fetched. Settings > About always shows TMDB's logo and notice, including after key removal,
+fetched. Settings > TMDB shows the key, how TMDB stands and how many titles it has facts for, with
+Try again. Settings > About always shows TMDB's logo and notice, including after key removal,
 because cached TMDB facts can remain.
 
-Settings' Privacy opens the privacy policy, `https://mrstreamer.app/privacy`, in the browser, and
+Settings' Diagnostics first shows what it would share: how the app and each numbered provider
+stand, as kinds and counts, with no address, login, name, history, path or device identity, and
+Share hands exactly that text to the system's share sheet; nothing is sent by the app itself
+(`src/diagnostics.ts`). Settings' Privacy opens the privacy policy, `https://mrstreamer.app/privacy`, in the browser, and
 About opens Licences: the app under GPL-3.0-only, then every component the build carries, each
 with its licence, its exact source and its notices in full, read from `src/licences.json` with no
 network. `scripts/licences.ts` generates that file from the release bundle's source map (the
@@ -850,7 +887,10 @@ Guide grid's scroll, window, cells and programme crossing it with Back to Guide,
 and Picture in Picture surviving a fold with no second stream, the key commands reaching the app
 and listed while ⌘ is held, also with no text field focused, keyboard focus and VoiceOver reaching
 every Guide grid cell, VoiceOver moving to the column's channel, large text, and safe areas and bar
-placement.
+placement. Results on the managed iPad and Duo simulators go on the
+[native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148)
+as they run, with the build they ran on. It already records what those tools couldn't reach: the
+Duo's hinge and notification permission.
 
 ## On the simulator
 
@@ -876,6 +916,28 @@ the panel listed out of its later channel lists, as a provider dropping a qualit
 does, and lists them again (`scripts/live-lists.ts`); Reload in Settings then reads it. Leaving
 out 100000, 100001 and 100002, the one channel in three qualities, takes Belgium's Kwaliteit, the
 only category it is in, away from Find countries or categories as well.
+
+The panel combines FFmpeg-generated test media with synthetic repository clips served unchanged
+from `apps/desktop/test/fixtures`. Generated artifacts are kept under `.local/ios-fixture` or
+`FIXTURE_OUT`. `scripts/native-fixtures/media.ts` records both kinds in the provenance: the
+control port's `/provenance` and `provenance.json` say where each piece came from; no provider
+or broadcast media is served. Catch-up plays as HLS on channel 1000 for three days and 1006 for
+two (`catch-up.ts`). Stream 7999, "TEST | Live sound and subtitles (EN/NL)", has two sound and two
+subtitle renditions for Live tracks (`tracks.ts`). `/title-transfers` paces, breaks off or replaces
+title files for the download queue (`transfers.ts`), and `/live-link` paces live segments for
+Automatic quality runs (`live-link.ts`). `test/native-fixtures.test.ts` checks the media's
+provenance, catch-up, the tracks and title transfers in the suite, and needs ffmpeg and ffprobe;
+`/live-link` pacing has no test of its own.
+
+In T3 sessions, agents open the simulator with `device_open` and launch, relaunch and drive the app, with
+taps, typing, screenshots and recordings, through the AgentDevice command it returns, never through
+ssh or `simctl` (see the `mac-mini` skill). The fixture, Metro and tunnel commands below can run
+in T3 sessions. Build and install the native app using the Xcode build/install-only steps in that
+skill, then launch it with the bound AgentDevice command. Do not run the `expo run:ios` or
+`simctl launch` lines below in T3: both launch outside its managed device session. Those two
+lines are for sessions without T3's device tools. A simulator run proves what that exact build did on that
+simulator. Physical iPhones, iPads and Duos, background transfers iOS defers, notifications iOS
+delivers and receivers are separate results: what runs goes on the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148), and the [owner's card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197485) the checks only the owner's hardware can make.
 
 ```sh
 node scripts/fixture-server.ts 8791 8792
@@ -920,7 +982,9 @@ proof out: `src/app/proof.tsx` loads it only in development.
 
 The app installs as `app.mrstreamer.player`, the desktop's `appId`, in development and release
 builds alike. Its version is its own, not the desktop's: `version` in `app.json` is `0.1.0` for
-the public candidate as well as the private beta. Read the current App Store Connect build and
+the public candidate as well as the private beta, and `main` hasn't moved it to 0.2.0. Build 17
+of 0.1.0 went to App Review on 27 October 2026 with manual release; leave that build and its review
+as they are. Read the current App Store Connect build and
 version inventory before allocating an unused `ios.buildNumber`; record the dated readback and
 allocation on the candidate's project card.
 The submitted 0.1.0 candidate used `supportsTablet: false`, requesting iPhone device family 1
