@@ -1591,10 +1591,10 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
       plan.kind === "file" && !item.live && item.subscriptionId !== null
         ? (source.observed ?? null)
         : null;
-    let playable = {
+    let playable: Parameters<typeof attach>[1] = {
       uri: source.url,
       ...(source.headers ? { headers: { ...source.headers } } : {}),
-      contentType: source.container === "m3u8" ? ("hls" as const) : ("auto" as const),
+      contentType: source.container === "m3u8" ? "hls" : "auto",
     };
     if (!item.live && THROUGH_SESSION.has(source.container.toLowerCase())) {
       resource.submitted = true;
@@ -1616,6 +1616,11 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
       } else {
         await opening.closed;
         if (!attemptStands(owned, resource)) return;
+        // MP4 or MOV after all, which AVFoundation refuses on the phone under a name such as
+        // .mkv, or a file the session can't read. As `progressive`, modules/title-formats opens
+        // it as MP4 only when it is one.
+        if (source.url.startsWith("file:"))
+          playable = { uri: source.url, contentType: "progressive" };
       }
     }
     stage = "native";

@@ -93,7 +93,11 @@ export interface FormatSession {
 
 export type Opened =
   | { readonly kind: "session"; readonly session: FormatSession }
-  /** An MP4 or MOV, whatever its name said: AVPlayer opens the address itself. */
+  /**
+   * An MP4 or MOV whatever its name said, or a file that is neither Matroska nor MP4: AVPlayer
+   * opens the address itself. A copy's goes as `progressive`, which the native module opens as
+   * MP4 when its bytes are (`MisnamedCopy.swift`).
+   */
   | { readonly kind: "direct" };
 
 let made = 0;

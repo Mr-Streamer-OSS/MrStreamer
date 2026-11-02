@@ -1,6 +1,8 @@
 import ExpoModulesCore
+import ExpoVideo
 
-/// Plays files AVPlayer can't open by serving them as loopback HLS (`modules/title-formats`).
+/// Plays files AVPlayer can't open by serving them as loopback HLS (`modules/title-formats`), and
+/// has it open a copy that is MP4 or MOV under another name (`MisnamedCopy`).
 /// The JavaScript names each session, so it can close one that is still opening.
 public class TitleFormatsModule: Module {
   private let lock = NSLock()
@@ -14,6 +16,10 @@ public class TitleFormatsModule: Module {
 
   public func definition() -> ModuleDefinition {
     Name("TitleFormats")
+
+    OnCreate {
+      VideoAssetTransportRegistry.registerProvider(MisnamedCopy())
+    }
 
     /// `{ id, failure }` when session `id`, once open, stops serving: the same failure
     /// `failure` answers from then on.
