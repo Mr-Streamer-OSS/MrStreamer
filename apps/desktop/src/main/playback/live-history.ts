@@ -1,8 +1,9 @@
 // What a live capture keeps of its stream for the readers it serves: the bytes as the provider
-// sent them, from the first packet boundary, in pieces of PIECE_BYTES. The piece being filled
-// and at most MEMORY_PIECES full ones waiting for the disk stay in memory; each full piece is
-// then written to a file of its own in the capture's folder, so a reader behind the live edge
-// reads it from there. Every capture's files share one byte budget: the oldest piece of any of
+// sent them, in pieces of PIECE_BYTES. The piece being filled and at most MEMORY_PIECES full
+// ones waiting for the disk stay in memory. A full piece every reader has read goes at once; one
+// a reader behind the live edge still needs is written to a file of its own in the capture's
+// folder, and that reader reads it from there. Without a reader to ask, as for rewind later,
+// every piece is kept. Every capture's files share one byte budget: the oldest piece of any of
 // them goes first when a new one would exceed it, also when a paused reader still needs it, and
 // so does a piece the disk doesn't take in time. A reader that asks for evicted bytes hears so;
 // none pins anything. A disk that fails a write keeps memory only from then on, so what reads
@@ -67,10 +68,15 @@ export interface History {
   close(): Promise<void>;
 }
 
-/** The histories one budget serves, so the oldest piece among them can be evicted. */
+/**
+ * The histories one budget serves. One writer takes their full pieces in turn, so the budget is
+ * checked and the oldest piece among them evicted before each write, never by two at once.
+ */
 export function historyStore(budget: HistoryBudget) {
   const histories = new Set<HistoryState>();
   let made = 0;
+  /** Bytes of evicted files the system wouldn't remove: they still take the disk. */
+  let stuck = 0;
   // A crash leaves the last run's pieces behind: they belong to no capture now.
   const ready = rm(budget.folder, { recursive: true, force: true })
     .then(() => mkdir(budget.folder, { recursive: true }))
@@ -79,7 +85,7 @@ export function historyStore(budget: HistoryBudget) {
       () => false,
     );
 
-  const used = () => [...histories].reduce((sum, each) => sum + each.disk, 0);
+  const used = () => [...histories].reduce((sum, each) => sum + each.disk, stuck);
   /**
    * Evicts the oldest piece on disk among every history, settling once its file is gone; null
    * when there is none.
@@ -93,53 +99,84 @@ export function historyStore(budget: HistoryBudget) {
     return oldest ? oldest.history.evictThrough(oldest.piece) : null;
   };
 
-  /** A new capture's history, in a folder of its own. */
-  function create(): History {
-    const folder = join(budget.folder, String(++made));
-    const state = new HistoryState(budget.pieceBytes);
+  /**
+   * Full pieces waiting for the writer, oldest first. One evicted from memory meanwhile leaves
+   * the queue as the next one joins it, so it holds a few per history at most.
+   */
+  let queue: { readonly state: HistoryState; readonly piece: Piece }[] = [];
+  /** The write under way, by whose history it is. */
+  let current: { readonly state: HistoryState; readonly done: Promise<void> } | null = null;
+
+  /** Writes one piece; a failure keeps that history in memory only from then on. */
+  const write = async (state: HistoryState, piece: Piece) => {
+    if (!(await ready)) state.broken = true;
+    if (state.broken || state.closed || !piece.chunks || state.passed(piece)) return;
+    if (!state.made) {
+      state.made = await mkdir(state.folder).then(
+        () => true,
+        () => false,
+      );
+      if (!state.made) return state.dropDisk();
+    }
+    const free = await statfs(state.folder).then(
+      (stats) => stats.bavail * stats.bsize,
+      () => null,
+    );
+    // Kept free for recordings and the system: this piece stays in memory until it goes.
+    if (free !== null && free - piece.bytes < budget.keepFree) return;
+    // The files it evicts are gone before this one is written: the disk never holds more.
+    while (used() + piece.bytes > budget.bytes) {
+      const evicted = evictOldest();
+      if (!evicted) break;
+      await evicted;
+    }
+    // Read by every reader meanwhile, it needs no file.
+    if (used() + piece.bytes > budget.bytes || !piece.chunks || state.closed || state.passed(piece))
+      return;
+    const file = join(state.folder, `${piece.offset}.ts`);
+    try {
+      const handle = await open(file, "wx");
+      try {
+        await handle.writev(piece.chunks);
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      await remove(file).catch(() => {});
+      return state.dropDisk();
+    }
+    // Evicted or closed while it was written.
+    if (!piece.chunks || state.closed) return void (await remove(file).catch(() => {}));
+    piece.chunks = null;
+    piece.file = file;
+    state.disk += piece.bytes;
+  };
+
+  const drain = async () => {
+    for (let next = queue.shift(); next; next = queue.shift()) {
+      const done = write(next.state, next.piece);
+      current = { state: next.state, done };
+      await done;
+    }
+    current = null;
+  };
+
+  /**
+   * A new capture's history, in a folder of its own. `needed` answers the lowest offset a reader
+   * still needs; without it every piece is kept.
+   */
+  function create(needed: () => number = () => 0): History {
+    const state = new HistoryState(
+      join(budget.folder, String(++made)),
+      budget.pieceBytes,
+      (bytes) => (stuck += bytes),
+      needed,
+    );
     histories.add(state);
-    let writing: Promise<void> = ready.then((usable) => {
-      if (!usable) state.broken = true;
-      else return mkdir(folder).then(undefined, () => void (state.broken = true));
-    });
-    /** Writes sealed pieces in order; a failure keeps memory only from then on. */
-    const write = (piece: Piece) => {
-      writing = writing.then(async () => {
-        if (state.broken || state.closed || !piece.chunks) return;
-        const free = await statfs(folder).then(
-          (stats) => stats.bavail * stats.bsize,
-          () => null,
-        );
-        // Kept free for recordings and the system: this piece stays in memory until it goes.
-        if (free !== null && free - piece.bytes < budget.keepFree) return;
-        // The files it evicts are gone before this one is written: the disk never holds more.
-        while (used() + piece.bytes > budget.bytes) {
-          const evicted = evictOldest();
-          if (!evicted) break;
-          await evicted;
-        }
-        const file = join(folder, `${piece.offset}.ts`);
-        try {
-          const handle = await open(file, "wx");
-          try {
-            await handle.writev(piece.chunks);
-          } finally {
-            await handle.close();
-          }
-        } catch {
-          state.broken = true;
-          await rm(file, { force: true }).catch(() => {});
-          state.dropDisk();
-          return;
-        }
-        // Evicted or closed while it was written.
-        if (!piece.chunks || state.closed) return void (await rm(file, { force: true }));
-        piece.chunks = null;
-        piece.file = file;
-        state.disk += piece.bytes;
-      });
+    state.sealed = (piece) => {
+      queue = [...queue.filter((each) => each.piece.chunks), { state, piece }];
+      if (!current) void drain();
     };
-    state.sealed = write;
     return {
       end: () => state.end,
       append: (chunk) => state.append(chunk),
@@ -149,16 +186,20 @@ export function historyStore(budget: HistoryBudget) {
       finish: () => state.finish(),
       finished: () => state.done,
       close: async () => {
-        state.close();
+        await state.close();
         histories.delete(state);
-        await writing;
-        await rm(folder, { recursive: true, force: true }).catch(() => {});
+        queue = queue.filter((each) => each.state !== state);
+        if (current?.state === state) await current.done;
+        if (state.made) await rm(state.folder, { recursive: true, force: true }).catch(() => {});
       },
     };
   }
 
   return { create };
 }
+
+/** Removes a file, trying again a moment later while the system holds it, as Windows can. */
+const remove = (file: string) => rm(file, { force: true, maxRetries: 3, retryDelay: 100 });
 
 class HistoryState {
   readonly pieces: Piece[] = [];
@@ -167,12 +208,33 @@ class HistoryState {
   broken = false;
   closed = false;
   done = false;
+  /** Its folder exists. */
+  made = false;
   sealed: (piece: Piece) => void = () => {};
   private waiters = new Set<() => void>();
+  readonly folder: string;
   readonly pieceBytes: number;
+  /** Hears of bytes an evicted file still takes, as its removal failed. */
+  private readonly stuck: (bytes: number) => void;
+  private readonly needed: () => number;
 
-  constructor(pieceBytes: number) {
+  constructor(
+    folder: string,
+    pieceBytes: number,
+    stuck: (bytes: number) => void,
+    needed: () => number,
+  ) {
+    this.folder = folder;
     this.pieceBytes = pieceBytes;
+    this.stuck = stuck;
+    this.needed = needed;
+  }
+
+  /** Whether every reader has read past `piece`, which then goes. */
+  passed(piece: Piece): boolean {
+    if (this.needed() < piece.offset + piece.bytes) return false;
+    void this.evictThrough(piece);
+    return true;
   }
 
   start() {
@@ -198,22 +260,39 @@ class HistoryState {
     this.wake();
   }
 
-  /** A full piece: written to disk, while no more than MEMORY_PIECES wait in memory. */
+  /**
+   * A full piece: gone with those before it once every reader read it, else written to disk,
+   * while no more than MEMORY_PIECES wait in memory.
+   */
   private seal(piece: Piece) {
+    if (this.passed(piece)) return;
+    const passed = this.pieces.findLast(
+      (each) => each !== piece && each.offset + each.bytes <= this.needed(),
+    );
+    if (passed) void this.evictThrough(passed);
     const waiting = this.pieces.filter((each) => each.chunks && each.bytes >= this.pieceBytes);
     if (waiting.length > MEMORY_PIECES) void this.evictThrough(waiting[0]!);
     if (!this.broken) this.sealed(piece);
   }
 
-  /** Evicts `piece` and every piece before it, settling once their files are gone. */
+  /**
+   * Evicts `piece` and every piece before it, settling once their files are gone. A file the
+   * system won't remove still counts against the budget, and its history writes no more.
+   */
   evictThrough(piece: Piece): Promise<void> {
     const index = this.pieces.indexOf(piece);
     const removals: Promise<void>[] = [];
     for (const gone of this.pieces.splice(0, index + 1)) {
       gone.chunks = null;
       if (gone.file) {
-        this.disk -= gone.bytes;
-        removals.push(rm(gone.file, { force: true }).catch(() => {}));
+        const { bytes } = gone;
+        this.disk -= bytes;
+        removals.push(
+          remove(gone.file).catch(() => {
+            this.stuck(bytes);
+            this.broken = true;
+          }),
+        );
         gone.file = null;
       }
     }
@@ -222,6 +301,7 @@ class HistoryState {
 
   /** The disk failed: what it holds goes, and so do full pieces beyond memory's few. */
   dropDisk() {
+    this.broken = true;
     const kept = this.pieces.filter((each) => each.chunks);
     const last = this.pieces.findLast((each) => !each.chunks);
     if (last) void this.evictThrough(last);
@@ -286,8 +366,8 @@ class HistoryState {
   close() {
     this.closed = true;
     const last = this.pieces.at(-1);
-    if (last) void this.evictThrough(last);
     this.wake();
+    return last ? this.evictThrough(last) : Promise.resolve();
   }
 
   private wake() {

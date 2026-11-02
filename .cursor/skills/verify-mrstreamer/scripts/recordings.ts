@@ -6,7 +6,7 @@
 // again, and the stopped one plays from this computer. Its menu deletes it. Each state is captured at 1280 × 800 and the
 // Recordings page also at 960 × 600.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
@@ -46,8 +46,15 @@ function longStream(): Buffer {
     "mpegts",
     path,
   ]);
-  if (made.status !== 0) throw new Error(`ffmpeg made no long stream: ${String(made.stderr)}`);
-  long = readFileSync(path);
+  if (made.status !== 0) {
+    rmSync(path, { force: true });
+    throw new Error(`ffmpeg made no long stream: ${String(made.stderr)}`);
+  }
+  try {
+    long = readFileSync(path);
+  } finally {
+    rmSync(path, { force: true });
+  }
   return long;
 }
 

@@ -10,9 +10,9 @@
 // provider back: it falls behind, and once what it needs is evicted its stream fails with
 // `FellBehind`. A reader leaves when its signal aborts or its body is cancelled; the last one
 // aborts the provider's request and removes the history, and the next request for that source
-// waits for that before it asks the provider again. A stream the provider ends ends every
-// reader once each has read the rest, and the next request opens a new one: bytes from two
-// requests never meet in one reader.
+// waits for that before it asks the provider again. A stream the provider ends, or leaves silent
+// for SILENCE_MS, ends every reader once each has read the rest, and the next request opens a new
+// one: bytes from two requests never meet in one reader.
 import { join } from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -24,6 +24,8 @@ import { historyStore, PIECE_BYTES, TEMPORARY_BYTES, type History } from "./live
 
 const PACKET = 188;
 const SYNC = 0x47;
+/** How long the provider may send nothing before its stream counts as broken, as a recording's. */
+const SILENCE_MS = 15_000;
 
 /** What a live source is, exactly: what must match for two readers to share its request. */
 export interface CaptureSource {
@@ -48,6 +50,13 @@ export function streamKey(subscriptionId: string, revision: number, stream: Live
   return captureKey({ subscriptionId, revision, url: stream.url, headers: stream.headers ?? {} });
 }
 
+/** The provider sent nothing for SILENCE_MS: what reads it ends, and the next request asks anew. */
+class Silent extends Error {
+  constructor() {
+    super("The provider stopped sending.");
+  }
+}
+
 /** A reader whose bytes were evicted before it read them: it read too slowly. */
 export class FellBehind extends Error {
   constructor() {
@@ -64,8 +73,8 @@ interface Capture {
   /** Where the stream's packets begin: the first sync byte. */
   origin: number | null;
   failure: unknown;
-  /** How many read it now. */
-  readers: number;
+  /** Where each reader is in the stream. */
+  readonly readers: Set<{ cursor: number }>;
   /** Settles once the provider's request ended. */
   readonly pumped: Promise<void>;
   /** Settles once the request ended and the history is gone; set by the last reader leaving. */
@@ -84,6 +93,8 @@ export interface LiveCapturesOptions {
   readonly bytes?: number;
   readonly pieceBytes?: number;
   readonly keepFree?: number;
+  /** SILENCE_MS unless given. */
+  readonly silenceMs?: number;
 }
 
 export class LiveCaptures extends Context.Service<
@@ -104,8 +115,9 @@ export class LiveCaptures extends Context.Service<
     /** Whether a capture reads `key` now, so a request for it asks the provider nothing. */
     reading(key: string): boolean;
     /**
-     * Settles once each capture `owner` was the last reader of has ended its request and
-     * removed its history. Asked after the owner's reading ended.
+     * Settles once each request `owner` still had opening has settled, and each capture it was
+     * the last reader of has ended its request and removed its history. Asked after the owner's
+     * reading ended.
      */
     idle(owner: string): Promise<void>;
   }
@@ -127,8 +139,14 @@ function make(options: LiveCapturesOptions) {
       keepFree: options.keepFree ?? DEFAULT_KEEP_FREE,
     });
     const entries = new Map<string, Entry>();
-    /** What each owner's leaving closed, for `idle`. */
+    /** What each owner's leaving closed, and its requests still under way, for `idle`. */
     const closings = new Map<string, Set<Promise<void>>>();
+    const asking = new Map<string, Set<Promise<void>>>();
+    const own = (owners: Map<string, Set<Promise<void>>>, owner: string, work: Promise<void>) => {
+      const set = owners.get(owner) ?? new Set();
+      set.add(work);
+      owners.set(owner, set);
+    };
 
     const close = (capture: Capture) => {
       if (capture.closing) return capture.closing;
@@ -148,9 +166,16 @@ function make(options: LiveCapturesOptions) {
     /** Reads the provider's stream into the history until it ends or the last reader left. */
     const pump = async (capture: Capture, body: ReadableStream<Uint8Array>) => {
       const reader = body.getReader();
+      const silenceMs = options.silenceMs ?? SILENCE_MS;
       try {
         for (;;) {
-          const { done, value } = await reader.read();
+          let timer: NodeJS.Timeout | undefined;
+          const silent = new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Silent()), silenceMs);
+          });
+          const { done, value } = await Promise.race([reader.read(), silent]).finally(() =>
+            clearTimeout(timer),
+          );
           if (done) break;
           if (capture.origin === null) {
             const at = value.indexOf(SYNC);
@@ -171,9 +196,9 @@ function make(options: LiveCapturesOptions) {
 
     /** A reader's answer, from `offset`. */
     const attach = (capture: Capture, owner: string, offset: number, signal: AbortSignal) => {
-      capture.readers++;
+      const reading = { cursor: offset };
+      capture.readers.add(reading);
       coordination.connected(owner, capture.key);
-      let cursor = offset;
       let left = false;
       let stream: ReadableStreamDefaultController<Uint8Array> | null = null;
       const stop = new AbortController();
@@ -182,11 +207,9 @@ function make(options: LiveCapturesOptions) {
         left = true;
         signal.removeEventListener("abort", aborted);
         stop.abort();
-        if (--capture.readers > 0) return;
-        const closing = close(capture);
-        const own = closings.get(owner) ?? new Set();
-        own.add(closing);
-        closings.set(owner, own);
+        capture.readers.delete(reading);
+        if (capture.readers.size > 0) return;
+        own(closings, owner, close(capture));
       };
       const aborted = () => {
         leave();
@@ -206,10 +229,10 @@ function make(options: LiveCapturesOptions) {
           pull: async (controller) => {
             for (;;) {
               if (left) return;
-              const read = await capture.history.read(cursor);
+              const read = await capture.history.read(reading.cursor);
               if (left) return;
               if (read instanceof Uint8Array) {
-                cursor += read.length;
+                reading.cursor += read.length;
                 return controller.enqueue(read);
               }
               if (read === "evicted") {
@@ -220,7 +243,7 @@ function make(options: LiveCapturesOptions) {
                 leave();
                 return capture.failure ? controller.error(capture.failure) : controller.close();
               }
-              await capture.history.arrived(cursor, stop.signal);
+              await capture.history.arrived(reading.cursor, stop.signal);
             }
           },
           cancel: leave,
@@ -237,7 +260,24 @@ function make(options: LiveCapturesOptions) {
       return capture.origin + Math.floor((end - capture.origin) / PACKET) * PACKET;
     };
 
-    const request = async (
+    const request = (
+      key: string,
+      owner: string,
+      open: (signal: AbortSignal) => Promise<Response>,
+      signal: AbortSignal,
+    ): Promise<Response> => {
+      const answer = ask(key, owner, open, signal);
+      // Until it settles, `idle` waits for it: a request abandoned while it opens still ends.
+      const settled = answer.then(
+        () => {},
+        () => {},
+      );
+      own(asking, owner, settled);
+      void settled.then(() => asking.get(owner)?.delete(settled));
+      return answer;
+    };
+
+    const ask = async (
       key: string,
       owner: string,
       open: (signal: AbortSignal) => Promise<Response>,
@@ -252,8 +292,8 @@ function make(options: LiveCapturesOptions) {
         }
         if (entry?.kind === "opening") {
           const capture = await entry.opened;
-          // It failed: this request asks the provider itself.
-          if (!capture) {
+          // It failed, or its reader left as it opened: this request asks the provider itself.
+          if (!capture || capture.closing) {
             if (entries.get(key) === entry) entries.delete(key);
             continue;
           }
@@ -273,15 +313,19 @@ function make(options: LiveCapturesOptions) {
         const started = answered.then((response): Capture | null => {
           if (!response.ok || !response.body) return null;
           const { promise: pumped, resolve } = Promise.withResolvers<void>();
+          const readers = new Set<{ cursor: number }>();
           const capture: Capture = {
             key,
-            history: store.create(),
+            // Only what a reader hasn't read yet is kept.
+            history: store.create(() =>
+              Math.min(Infinity, ...[...readers].map((each) => each.cursor)),
+            ),
             controller,
             status: response.status,
             headers: new Headers(response.headers),
             origin: null,
             failure: null,
-            readers: 0,
+            readers,
             pumped,
             closing: null,
           };
@@ -318,9 +362,12 @@ function make(options: LiveCapturesOptions) {
         return entry?.kind === "open" || entry?.kind === "opening";
       },
       idle: async (owner: string) => {
-        const own = closings.get(owner);
+        // A request still opening may yet attach and leave, closing what it read last.
+        await Promise.all(asking.get(owner) ?? []);
+        asking.delete(owner);
+        const closed = closings.get(owner);
         closings.delete(owner);
-        if (own) await Promise.all(own);
+        if (closed) await Promise.all(closed);
       },
     };
   });

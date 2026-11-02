@@ -744,7 +744,16 @@ describe("one stream across several subscriptions", () => {
  * Live captures on their own: a provider stream of the fixture sent again and again, two packets
  * short of `piece` bytes every 10 ms, its requests and their closing counted.
  */
-async function capturing(options: { bytes?: number; pieceBytes?: number; folder?: string } = {}) {
+async function capturing(
+  options: {
+    bytes?: number;
+    pieceBytes?: number;
+    folder?: string;
+    silenceMs?: number;
+    /** Pieces each request sends before it falls silent; without end unless given. */
+    pieces?: number;
+  } = {},
+) {
   const folder = options.folder ?? join(await tempDir(), "live-history");
   const runtime = runtimeFor(
     LiveCaptures.layer({
@@ -752,6 +761,7 @@ async function capturing(options: { bytes?: number; pieceBytes?: number; folder?
       bytes: options.bytes ?? 64 * 188 * 100,
       pieceBytes: options.pieceBytes ?? 188 * 100,
       keepFree: 0,
+      ...(options.silenceMs && { silenceMs: options.silenceMs }),
     }).pipe(Layer.provideMerge(PlaybackCoordination.layer)),
   );
   const captures = await runtime.runPromise(LiveCaptures);
@@ -763,13 +773,17 @@ async function capturing(options: { bytes?: number; pieceBytes?: number; folder?
     open++;
     let offset = 0;
     let timer: NodeJS.Timeout | undefined;
+    let ended = false;
     const closed = () => {
       clearInterval(timer);
-      open--;
+      if (!ended) open--;
+      ended = true;
     };
     const body = new ReadableStream<Uint8Array>({
       start: (controller) => {
+        let sent = 0;
         timer = setInterval(() => {
+          if (options.pieces !== undefined && sent++ >= options.pieces) return;
           const step = 188 * 98;
           const piece = recording.subarray(offset, offset + step);
           offset = offset + step >= recording.length ? 0 : offset + step;
@@ -813,6 +827,18 @@ async function bytesIn(folder: string) {
     ),
   );
   return sizes.reduce((sum, size) => sum + size, 0);
+}
+
+/** The most bytes the files under `folder` took, sampled until `until` settles. */
+async function mostIn(folder: string, until: Promise<unknown>) {
+  let most = 0;
+  let done = false;
+  void until.finally(() => (done = true));
+  while (!done) {
+    most = Math.max(most, await bytesIn(folder));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  return most;
 }
 
 /** Reads `bytes` or more of a reader's answer. */
@@ -889,6 +915,102 @@ describe("live captures", () => {
     await captures.idle("live");
     expect(open()).toBe(0);
     expect(await bytesIn(folder)).toBe(0);
+  });
+
+  it("keeps two captures' files within one budget together", async () => {
+    // One piece: two captures filling theirs at once can't both write.
+    const budget = 188 * 100;
+    const { captures, folder, key, otherKey, provider } = await capturing({ bytes: budget });
+    const first = new AbortController();
+    const second = new AbortController();
+    // A reader of each that reads nothing: what it hasn't read goes to disk.
+    for (const each of [key, otherKey])
+      await take(
+        (await captures.request(each, "paused", provider, first.signal)).body!.getReader(),
+        188,
+      );
+    const readers = [
+      (await captures.request(key, "first", provider, first.signal)).body!.getReader(),
+      (await captures.request(otherKey, "second", provider, second.signal)).body!.getReader(),
+    ];
+    const most = await mostIn(
+      folder,
+      Promise.all(readers.map((reader) => take(reader, 188 * 200 * 40))),
+    );
+    expect(most).toBeGreaterThan(0);
+    expect(most).toBeLessThanOrEqual(budget);
+    first.abort();
+    second.abort();
+    await Promise.all([captures.idle("first"), captures.idle("second")]);
+  });
+
+  it("waits for a request abandoned while it opens to end before the connection counts free", async () => {
+    const { captures, key } = await capturing();
+    let ended = false;
+    const opening = (signal: AbortSignal) =>
+      new Promise<Response>((_resolve, reject) =>
+        signal.addEventListener("abort", () =>
+          setTimeout(() => {
+            ended = true;
+            reject(signal.reason);
+          }, 200),
+        ),
+      );
+    const watch = new AbortController();
+    const asked = captures.request(key, "watch", opening, watch.signal).catch(() => null);
+    watch.abort();
+    await captures.idle("watch");
+    expect(ended).toBe(true);
+    await asked;
+  });
+
+  it("writes nothing to disk while every reader keeps up", async () => {
+    const { captures, folder, key, provider } = await capturing({ pieceBytes: 188 * 1000 });
+    const watch = new AbortController();
+    const record = new AbortController();
+    const readers = [
+      (await captures.request(key, "watch", provider, watch.signal)).body!.getReader(),
+      (await captures.request(key, "record", provider, record.signal)).body!.getReader(),
+    ];
+    // Twenty pieces' worth, read as it comes.
+    const most = await mostIn(
+      folder,
+      Promise.all(readers.map((reader) => take(reader, 20 * 188 * 1000))),
+    );
+    expect(most).toBe(0);
+    watch.abort();
+    record.abort();
+    await Promise.all([captures.idle("watch"), captures.idle("record")]);
+  });
+
+  it("ends every reader of a stream the provider leaves silent, and asks anew for the next", async () => {
+    const { captures, key, provider, requests, open } = await capturing({
+      silenceMs: 300,
+      pieces: 5,
+    });
+    const watch = new AbortController();
+    const record = new AbortController();
+    const readers = [
+      (await captures.request(key, "watch", provider, watch.signal)).body!.getReader(),
+      (await captures.request(key, "record", provider, record.signal)).body!.getReader(),
+    ];
+    for (const reader of readers) {
+      await expect(
+        (async () => {
+          for (;;) if ((await reader.read()).done) return;
+        })(),
+      ).rejects.toThrow("The provider stopped sending.");
+    }
+    await Promise.all([captures.idle("watch"), captures.idle("record")]);
+    expect(open()).toBe(0);
+    const again = new AbortController();
+    await take(
+      (await captures.request(key, "again", provider, again.signal)).body!.getReader(),
+      188,
+    );
+    expect(requests()).toBe(2);
+    again.abort();
+    await captures.idle("again");
   });
 
   it("serves the live edge from memory when its folder can't be written", async () => {
