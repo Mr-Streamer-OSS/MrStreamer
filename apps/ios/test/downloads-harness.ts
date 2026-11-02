@@ -209,6 +209,8 @@ interface FakeTitle {
 interface FakeSeries {
   readonly id: number;
   readonly seasons: readonly (readonly (FakeTitle & { readonly number?: number })[])[];
+  /** The TMDB id it shares with another version of the series, when it is one. */
+  readonly tmdb?: string;
 }
 interface FakeProvider {
   readonly url: string;

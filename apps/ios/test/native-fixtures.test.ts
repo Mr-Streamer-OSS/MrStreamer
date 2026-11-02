@@ -83,7 +83,8 @@ describe("the native verification fixture", () => {
       process.execPath,
       [join(root, "apps/ios/scripts/fixture-server.ts"), String(port), String(controlPort)],
       {
-        env: { ...env, FIXTURE_OUT: out, FIXTURE_TITLES: "30" },
+        // Filtering drops the NODE_ENV type the app's ProcessEnv requires, though not its value.
+        env: { ...env, NODE_ENV: process.env.NODE_ENV, FIXTURE_OUT: out, FIXTURE_TITLES: "30" },
         stdio: ["ignore", "pipe", "inherit"],
       },
     );
