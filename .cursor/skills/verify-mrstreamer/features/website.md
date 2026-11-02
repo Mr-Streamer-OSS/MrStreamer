@@ -51,6 +51,8 @@ Vite generates the canonical sitemap, UTF-8 root ownership file and unique `inde
 
 Run `pnpm vitest run apps/marketing/test/indexnow.test.ts` and `pnpm actionlint`, then `pnpm build:marketing`. Inspect the actual packaged ownership file, marker/revision, sitemap and Vercel filesystem routes. Retain local fixture request counts, outcomes and original exits. Tests use loopback public/API fixtures only. Do not submit to IndexNow during verification. Actual production propagation, search-engine receipt and indexing require separately authorized deployment and observed results. See `apps/marketing/README.md` for stable public-key rotation and bounded failure behavior.
 
+For route or indexing changes, read the built `apps/marketing/.vercel/output/config.json`: each `PAGES` route is `caseSensitive` and takes an optional trailing slash. Against the owned preview, every sitemap address and its trailing-slash form answer 200 with the canonical link and `og:url` of the address without a slash or query and no robots `noindex`; `/DOCS`, `/index.html` and an unknown address answer the `noindex` 404 page. Read-only requests to the public domain may compare statuses, redirects and canonicals; Vercel's case handling there changes only after publication. Search Console URL examples and Google's indexing outcomes are account-only and belong on their own evidence card.
+
 ## Gotchas
 
 The Linux row on `/download` links to `/docs/updates#installed-through-the-aur`. Verify the guide's helper and manual install/update commands, package-managed update explanation and retained-data uninstall guidance at wide and 390px widths, including navigation with scripts disabled. This documentation link does not change the package registry's publication state.

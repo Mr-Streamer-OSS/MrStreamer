@@ -4,7 +4,8 @@
 //   node scripts/package-vercel.ts    (after `vite build`)
 //
 // - static/: everything in dist/.
-// - config.json: each page answers its canonical address, with or without a trailing slash. A POST
+// - config.json: each page answers its canonical address, with or without a trailing slash, in
+//   that case only: Vercel matches routes case-insensitively unless told, local servers don't. A POST
 //   to /ingest/i/v0/e/ goes on to PostHog's EU capture, the only route that leaves the site.
 //   An unknown address or an HTML alias answers 404.html with status 404. No builds.json: without one the CLI deploys to the target it is told,
 //   where a builds.json naming a preview would win.
@@ -68,6 +69,7 @@ const routes = [
   ...PAGES.map(({ address, file }) => ({
     src: address === "/" ? "^/$" : `^${address}/?$`,
     dest: `/${file}`,
+    caseSensitive: true,
   })),
   { src: "^/.*\\.html$", ...missing },
   { handle: "filesystem" },

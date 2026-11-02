@@ -46,20 +46,21 @@ pnpm preview:marketing   # the built site, on http://localhost:4173
 
 Both local servers and Vercel answer the same addresses, with or without a query:
 
-| Address                                                                                                                       | Answers                                                               |
-| ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `/`                                                                                                                           | Homepage                                                              |
-| `/privacy`                                                                                                                    | Privacy policy from `docs/privacy.md`                                 |
-| `/docs`                                                                                                                       | Most asked tasks, then the seven guides with their index summaries    |
-| `/docs/subscriptions`, `/docs/live-tv`, `/docs/movies-and-series`, `/docs/updates`, `/docs/playback`, `/docs/troubleshooting` | The corresponding `docs/user/<slug>.md`                               |
-| `/about`                                                                                                                      | Product facts from `docs/about.md`, with the verified stable version  |
-| `/security`                                                                                                                   | Login storage, signing and checksums from `docs/security.md`          |
-| `/download`                                                                                                                   | Current stable installers, requirements, checksums, notes and sources |
-| `/releases`                                                                                                                   | Every published stable release and its date and notes, newest first   |
-| Public files such as `/robots.txt` or `/sitemap.xml`                                                                          | The file                                                              |
-| Any other address, including HTML aliases such as `/404.html`                                                                 | The 404 page, with status 404                                         |
+| Address                                                                                                                                          | Answers                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `/`                                                                                                                                              | Homepage                                                              |
+| `/faq`                                                                                                                                           | Grouped questions from `src/faq.html`                                 |
+| `/privacy`                                                                                                                                       | Privacy policy from `docs/privacy.md`                                 |
+| `/docs`                                                                                                                                          | Most asked tasks, then the seven guides with their index summaries    |
+| `/docs/subscriptions`, `/docs/live-tv`, `/docs/movies-and-series`, `/docs/downloads`, `/docs/updates`, `/docs/playback`, `/docs/troubleshooting` | The corresponding `docs/user/<slug>.md`                               |
+| `/about`                                                                                                                                         | Product facts from `docs/about.md`, with the verified stable version  |
+| `/security`                                                                                                                                      | Login storage, signing and checksums from `docs/security.md`          |
+| `/download`                                                                                                                                      | Current stable installers, requirements, checksums, notes and sources |
+| `/releases`                                                                                                                                      | Every published stable release and its date and notes, newest first   |
+| Files such as `/robots.txt`, `/sitemap.xml` or `/llms.txt`                                                                                       | The file                                                              |
+| Any other address, including HTML aliases such as `/404.html`                                                                                    | The 404 page, with status 404                                         |
 
-Every document address also accepts a trailing slash. `scripts/pages.ts` is the address registry used by both local servers and Vercel packaging. Update `public/sitemap.xml` when adding a page; the build checks it against that registry.
+Every document address also accepts a trailing slash. Each page's canonical link and sitemap entry name its address without a slash or query. Page addresses match only in their exact case, so `/DOCS` answers 404. Vercel's domain settings, not this package, redirect `http://` and `www.mrstreamer.app` to `https://mrstreamer.app` with a 308. `scripts/pages.ts` is the address registry used by both local servers, Vercel packaging and the sitemap: add a page there and the build writes its sitemap entry.
 
 `/llms.txt` answers `public/llms.txt`, a short Markdown overview for agents, as UTF-8 plain text. Keep its claims true to the public guides and link stable pages rather than versioned installers; the build checks its site links. It informs agents; it is not a robots policy or an indexing promise.
 
