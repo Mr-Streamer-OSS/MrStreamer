@@ -199,13 +199,20 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
     "Watch asked the provider again",
     fixture.streams(),
   );
-  // The recording stops, through the same call its Stop makes: Watch plays on.
-  const id = grown[0]!.id;
-  d.action("Stop the recording while Watch plays");
-  await d.evaluate(`(async () => {
-    const stopped = await window.mrStreamer.invoke('recordings.stop', { id: ${JSON.stringify(id)} });
-    if (!stopped.ok) throw new Error(stopped.error.kind);
-  })()`);
+  // The recording stops from the strip's Recording, by keyboard: Watch plays on.
+  const RECORDING = "document.querySelector('[role=dialog][aria-label=Recording]')";
+  await d.click("Open Recording", named("button", "Recording"));
+  await d.wait(() => d.exists(RECORDING));
+  d.observed["recordingPopover"] = await d.evaluate<string>(`${RECORDING}.innerText`);
+  await d.capture("recording-popover");
+  await d.key("Tab", 9);
+  await d.key("Tab", 9);
+  await d.wait(() =>
+    d.evaluate<boolean>("document.activeElement?.textContent.trim() === 'Stop recording'"),
+  );
+  await d.key("Enter", 13);
+  // The keys go on from Record, which took Recording's place.
+  await d.wait(() => d.evaluate<boolean>(`document.activeElement === ${record}`));
   await d.wait(async () => (await listed(d))[0]?.status.kind === "stopped");
   await playsOn(d);
   const after = fixture.streams();
@@ -229,7 +236,11 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
   await size(d, 960, 600);
   await d.capture("recordings-960");
   await d.click("Back to Live TV at 960", named("header button", "Live TV"));
-  await d.click("Open Record at 960", named("button", "Recording"));
+  // The strip's Recording opens its popover, whose Recordings opens the page.
+  await d.click("Open Recording at 960", named("button", "Recording"));
+  await d.wait(() => d.exists(RECORDING));
+  await d.capture("recording-popover-960");
+  await d.click("Open Recordings from it", named("button", "Recordings", RECORDING));
   await d.wait(() => d.exists(named("h1", "Recordings")));
   await size(d, 1280, 800);
 
