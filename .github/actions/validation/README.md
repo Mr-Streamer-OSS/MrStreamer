@@ -4,7 +4,8 @@ After checking out the exact candidate and trusted validation tools, call this c
 with `part: check`, `test`, or `website`, and a unique `report-name` when calling more than once.
 Run Check and Test in separate jobs, bounded at 10 and 15 minutes; Checks bounds each test shard at
 15 minutes and its merging Test at 10. Check includes the production desktop build and workflow validation.
-Test preserves the full suite, multimedia setup, JSON artifact and completeness gate. It restores
+Test preserves the full suite, multimedia setup, JSON artifact and completeness gate; it installs
+ffmpeg in the background while Node and the dependencies install. It restores
 the native fixture's encoded media from an Actions cache keyed by the ffmpeg package set and the
 fixture's sources, and saves it after a passing run that encoded it; each piece's name hashes its
 ffmpeg command, inputs and version, so the fixture copies only a piece made by the same command
@@ -16,7 +17,7 @@ one Vitest shard (`--shard`) with the same multimedia setup, and uploads its blo
 report name and validation identity as `test-shard-<report-name>-<index>`, replaced by a rerun of
 that shard. The job named Test then calls `part: test-shards`: `.github/scripts/test-shards.ts`
 requires each shard 1 to `<count>` of its report name exactly once, with a blob, Vitest merges the
-blobs into the usual `test-results-<report-name>-<attempt>` report, with each file's seconds beside
+blobs, with only the root's dependencies installed, into the usual `test-results-<report-name>-<attempt>` report, with each file's seconds beside
 it as `test-durations.json` for the shard split, and the same completeness gate judges the union.
 Its identity output is the shared identity of every shard and its own runner, or empty when they
 differ, which refuses reuse without failing Test. The caller must also fail Test unless every
