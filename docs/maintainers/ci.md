@@ -4,7 +4,7 @@
 
 The operational workflow set is Checks, Release and Website.
 
-- `checks.yml` validates every PR and push to main. Check always reports and includes the desktop production build. Test and Website use conservative input selection; unknown inputs run both. Main validates its actual merged source. PR evidence is diagnostic only.
+- `checks.yml` validates every PR and push to main. Check always reports and includes the desktop production build. Test and Website use conservative input selection; unknown inputs run both. Main validates its actual merged source. PR evidence is diagnostic only. Test runs as three shards merged into the one Test status, described [below](#test-shards).
 - `release.yml` plans one candidate, authenticates prior Checks evidence or runs secretless fallback, builds one versioned shared JS bundle, packages native targets and sources, performs installed checks, then publishes when authorized by the selected operation. Dry runs publish nothing.
 - `website.yml` owns website builds and publication. A workflow-only merge cannot deploy the production website. A stable version commit receives an explicit Website handoff after finalization because workflow-token pushes start no new workflow.
 
@@ -17,6 +17,14 @@ Release's validation job searches exact-source main push Checks runs. It waits a
 Fallback runs the shared validation action with separate Check and Test jobs and their existing 10/15-minute bounds. Only the Check production build is omitted: Release's required final versioned bundle supplies that build. PR/main Check keeps its default build. Test retains default discovery, workers, retries, timeouts, multimedia setup, JSON report and candidate completeness gate. See the [shared action contract](../../.github/actions/validation/README.md).
 
 The bundle is built once per candidate. macOS/Linux and Windows package independently after it. MSIX begins after Windows, without waiting for the other platforms. Stable installed-upgrade proof runs beside packaging and gates publication. Source archives, receipts, checksums, native integrity, signatures, app and DMG notarizations, installed checks and their historical version guards remain mandatory as documented in [releasing](releasing.md).
+
+## Test shards
+
+Checks runs the unchanged suite as three `Test shard <n>` jobs, each a standard runner with the same setup, multimedia tools and Vitest settings, running `pnpm test --shard=<n>/3`. Vitest assigns each test file to one shard by a hash of its path, so files never repeat and the split stays put as files are added. Every shard runs to the end even when another fails, and uploads its Vitest blob report.
+
+Test, the required merge status, then merges the blobs into the same `test-results-<run id>-<attempt>` JSON report a whole run writes and holds that union to `scripts/ci-test-results.ts`: every test file once, with tests, each passed. Test fails when any shard failed, timed out, was cancelled or skipped, when a shard's report is missing or doubled, or when the union misses a file. It still merges and uploads what the shards reported, so a failure keeps its report. When the inputs leave desktop out, the shards and Test skip together, as Test did before. Test's validation identity is recorded only when every shard and the merge ran under the same one; otherwise Test can still pass but Release won't reuse that run.
+
+A shard that failed can be rerun alone with "Re-run failed jobs": it replaces its own blob, and Test merges it with the other shards' earlier results from the same run and commit. Release fallback runs the whole suite in one Test job, unsharded.
 
 ## Operations
 

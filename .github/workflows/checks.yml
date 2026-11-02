@@ -2,7 +2,7 @@
 # docs/maintainers/ci.md shows how the workflows fit together.
 #
 # Check always runs and reports. Test and Website run when their inputs changed, and whenever the
-# changed paths are unknown or couldn't be read. A release calls this with the commit it builds
+# changed paths are unknown or couldn't be read. Test merges three test shards' reports. A release calls this with the commit it builds
 # (`sha`), which always checks and tests that commit. The validation evidence artifact records
 # what ran on the exact source; .github/actions/validation/README.md has its contract.
 #
@@ -86,15 +86,50 @@ jobs:
           INPUT_RESULT: ${{ needs.inputs.result }}
         run: test "$INPUT_RESULT" = success
 
-  test:
-    name: Test
+  # The suite runs in three shards side by side, each on its own runner as the whole suite ran.
+  test-shard:
+    name: Test shard ${{ matrix.shard }}
     needs: inputs
-    outputs:
-      identity: ${{ steps.validate.outputs.identity }}
     if: ${{ !cancelled() && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      # Every shard finishes, so a failure's report is complete.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .local/validation-tools
+          persist-credentials: false
+      - uses: ./.local/validation-tools/.github/actions/validation
+        with:
+          part: test
+          shard: ${{ matrix.shard }}
+          shards: ${{ strategy.job-total }}
+          report-name: ${{ inputs.report-name || github.run_id }}
+
+  # The required Test status: the shards' reports merged into one, held to the completeness gate.
+  # It runs after a cancelled or failed shard too, so neither leaves Test skipped or green.
+  test:
+    name: Test
+    needs: [inputs, test-shard]
+    outputs:
+      identity: ${{ steps.validate.outputs.identity }}
+    if: ${{ always() && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop != 'false') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Require the shards to have run
+        env:
+          SHARDS_RESULT: ${{ needs.test-shard.result }}
+        run: test "$SHARDS_RESULT" = success || test "$SHARDS_RESULT" = failure
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
@@ -107,8 +142,12 @@ jobs:
       - id: validate
         uses: ./.local/validation-tools/.github/actions/validation
         with:
-          part: test
+          part: test-shards
           report-name: ${{ inputs.report-name || github.run_id }}
+      - name: Require every shard to pass
+        env:
+          SHARDS_RESULT: ${{ needs.test-shard.result }}
+        run: test "$SHARDS_RESULT" = success
 
   website:
     name: Website
