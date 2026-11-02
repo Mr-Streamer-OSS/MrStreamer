@@ -353,7 +353,8 @@ const HATCHED =
 
 /**
  * Minutes captured against those planned: a white line on a faint track, hatched where `bar` says
- * the start and each gap since were missed, as they were rather than rounded to minutes.
+ * the start and each gap since were missed, as they were rather than rounded to minutes. A gap is
+ * at least a pixel, so one of seconds in a long recording still shows.
  */
 function Coverage({
   captured,
@@ -366,11 +367,13 @@ function Coverage({
   bar: ReturnType<typeof coverage>["bar"];
   faint: boolean;
 }) {
-  const spans: { hatched: boolean; width: number }[] = [{ hatched: true, width: bar.late }];
+  const spans: { hatched: boolean; gap?: boolean; width: number }[] = [
+    { hatched: true, width: bar.late },
+  ];
   let at = bar.late;
   for (const gap of bar.gaps) {
     spans.push({ hatched: false, width: gap.from - at });
-    spans.push({ hatched: true, width: gap.to - Math.max(at, gap.from) });
+    spans.push({ hatched: true, gap: true, width: gap.to - Math.max(at, gap.from) });
     at = Math.max(at, gap.to);
   }
   spans.push({ hatched: false, width: bar.reached - at });
@@ -388,7 +391,9 @@ function Coverage({
           span.width > 0 && (
             <span
               key={index}
-              className={span.hatched ? HATCHED : "h-full bg-foreground"}
+              className={
+                span.hatched ? cn(HATCHED, span.gap && "min-w-px") : "h-full bg-foreground"
+              }
               style={{ width: `${span.width * 100}%` }}
             />
           ),
