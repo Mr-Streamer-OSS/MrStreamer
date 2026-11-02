@@ -1,7 +1,9 @@
 // A Vitest reporter that writes the seconds each test file took, by its path from the root, in
 // the form test/durations.json keeps for test/sequencer.ts. A file's seconds cover its import,
 // setup, hooks and tests, which the JSON report's times leave out. CI's Test job adds it to the
-// merge of its shards, so every run's test-results artifact carries a fresh table:
+// merge of its shards from the trusted validation tools' checkout, whatever the candidate has, so
+// a change here changes how older candidates merge too, and every run's test-results artifact
+// carries a fresh table:
 //
 //   vitest run --merge-reports=<blobs> --reporter=./scripts/test-durations.ts --outputFile.durations=<file>
 import { writeFileSync } from "node:fs";

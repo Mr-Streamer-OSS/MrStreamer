@@ -24,7 +24,8 @@ shard job succeeded, and when the run was cancelled. Release fallback keeps the 
 `part: test` in one job.
 
 The caller must execute trusted action code: for an older candidate, check out the workflow's
-reviewed tools separately with a full checkout, including `.github/scripts` and `.github/tests`,
+reviewed tools separately with a full checkout, including `.github/scripts`, `.github/tests` and
+`scripts/test-durations.ts`, the reporter Test's merge loads from those tools,
 and refer to that action path. A sparse checkout of actions alone is insufficient. Run from the
 candidate workspace.
 Do not load validation code from arbitrary forks in a privileged release workflow.

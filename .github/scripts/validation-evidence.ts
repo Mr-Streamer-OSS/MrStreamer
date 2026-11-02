@@ -45,6 +45,8 @@ export function validationIdentity() {
       ".github/tests/test-shards.test.ts",
       ".github/tests/validation-evidence.test.ts",
       ".github/workflows/checks.yml",
+      // The merge's reporter runs from these tools, whatever the candidate has.
+      "scripts/test-durations.ts",
     ],
     {
       cwd: resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), "../.."),
