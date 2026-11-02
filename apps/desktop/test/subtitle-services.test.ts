@@ -449,6 +449,37 @@ describe("online subtitle service ports", () => {
     });
   });
 
+  it("reads a Windows-1256 Arabic download from either service as its UTF-8 copy", async () => {
+    const arabic = "مرحبا بالعالم!\nالحلقة 2 من Night Harbour";
+    // Fixed Windows-1256 bytes generated with iconv, independently of the decoder under test.
+    const legacy = Buffer.from(
+      "310d0a30303a30303a31302c303030202d2d3e2030303a30303a31322c3030300d0ae3d1cdc8c720c8c7e1dac7e1e3210ac7e1cde1dec9203220e3e4204e6967687420486172626f75720d0a",
+      "hex",
+    );
+    const request = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/v1/login")
+        return json({ token: "private-token", base_url: "api.opensubtitles.com" });
+      if (url.pathname === "/api/v1/download")
+        return json({
+          link: "https://www.opensubtitles.com/download/arabic",
+          remaining: 3,
+          reset_time_utc: "2026-10-09T00:00:00Z",
+        });
+      return new Response(
+        url.hostname === "dl.subdl.com" ? zipSync({ "movie.ar.srt": legacy }) : legacy,
+      );
+    });
+    const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
+    const cues = [{ start: 10, end: 12, text: arabic }];
+
+    for (const choice of [
+      { ...candidate, language: "ar" },
+      { ...candidate, service: "opensubtitles", fileId: 7, language: "ar" } as const,
+    ])
+      expect((await client.download(choice, keys, signal())).subtitle.cues).toEqual(cues);
+  });
+
   it("downloads the text from a macOS ZIP without treating resource forks as another subtitle", async () => {
     const request = vi.fn<typeof fetch>(
       async () =>

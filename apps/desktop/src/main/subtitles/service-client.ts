@@ -8,7 +8,7 @@ import type {
   SubtitleService,
   SubtitleServiceFailure,
 } from "@mrstreamer/contracts/online-subtitles";
-import { subtitleTextFile, SUBTITLE_TEXT_LIMIT } from "@mrstreamer/core/subtitles/text-file";
+import { subtitleTextBytes, SUBTITLE_TEXT_LIMIT } from "@mrstreamer/core/subtitles/text-file";
 import { type } from "arktype";
 import { Unzip, type UnzipDecoder, type UnzipFile } from "fflate";
 import { lazy } from "@mrstreamer/contracts/lazy";
@@ -393,9 +393,9 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
       const data = await readBody(response, SUBTITLE_TEXT_LIMIT, timeout);
       const bytes =
         data[0] === 0x50 && data[1] === 0x4b ? await subtitleArchive(data, timeout) : data;
-      let cues: ReturnType<typeof subtitleTextFile>;
+      let cues: ReturnType<typeof subtitleTextBytes>;
       try {
-        cues = subtitleTextFile(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+        cues = subtitleTextBytes(bytes, candidate.language);
       } catch {
         throw new SubtitleRequestFailure("unsupported");
       }
