@@ -152,13 +152,16 @@ const text = (params: object | undefined, name: string) => {
 /**
  * The Live tab's root screen: the list alone below the split width, the list beside the detail
  * column from it. The list keeps its place in the tree either way, so a resize or a fold keeps
- * its tab, country and scroll position, and the one player under Watch never sees it.
+ * its tab, country and scroll position, and the one player under Watch never sees it. The list
+ * takes its width in both layouts, never `flex: 1`: Fabric dirties a reused view without clearing
+ * Yoga's cached flex basis, so after landscape the iPhone's list stayed 426 points in a 402 point
+ * window.
  */
 export function LiveTab() {
   const { split, width } = useListWidth();
   return (
     <View style={styles.split}>
-      <View style={split ? { width } : styles.screen}>
+      <View style={{ width }}>
         <LiveHome />
       </View>
       {split ? <LiveDetail /> : null}
