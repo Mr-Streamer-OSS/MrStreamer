@@ -216,7 +216,7 @@ it("shows Downloads in the language picked and redraws it in a new one, the queu
     copy,
   ]);
   expect(screen.textContent).toContain("Wachtrij");
-  expect(screen.textContent).toContain("Op deze iPhone");
+  expect(screen.textContent).toContain("Op dit apparaat");
   expect(screen.textContent).toContain("Gepauzeerd");
   // A reason downloads.ts keeps in English reads in the language.
   expect(screen.textContent).toContain("Deze download is gestopt.");
@@ -245,7 +245,7 @@ it("shows Downloads in the language picked and redraws it in a new one, the queu
   const before = order();
   speak("de-DE");
   expect(screen.textContent).toContain("Warteschlange");
-  expect(screen.textContent).toContain("Auf diesem iPhone");
+  expect(screen.textContent).toContain("Auf diesem Gerät");
   expect(screen.textContent).toContain("Dieser Download wurde angehalten.");
   expect(screen.textContent).toContain(
     "Die Verbindung zum Anbieter ist fehlgeschlagen. Du scheinst offline zu sein.",

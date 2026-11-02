@@ -240,11 +240,11 @@ describe("Downloads", () => {
       "Queued",
       "Disk full. Free 1.2 GB, then retry.",
       "A download continues in the background; the next starts once the app is open.",
-      "On this iPhone",
+      "On this device",
       "2024 · 1 h 52 min · 2.1 GB",
       "38 min left",
       "Provider removed, copy kept",
-      "3.7 GB on this iPhone · 61 GB free",
+      "3.7 GB on this device · 61 GB free",
     ];
     const at = order.map((text) => shown.indexOf(text));
     expect(at).not.toContain(-1);

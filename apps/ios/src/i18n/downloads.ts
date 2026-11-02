@@ -22,8 +22,8 @@ export const t = catalogue(
     },
     // The screen.
     Queue: "Queue",
-    "On this iPhone": "On this iPhone",
-    "{size} on this iPhone": "{size} on this iPhone",
+    "On this device": "On this device",
+    "{size} on this device": "{size} on this device",
     "{size} free": "{size} free",
     "A download continues in the background; the next starts once the app is open.":
       "A download continues in the background; the next starts once the app is open.",
@@ -171,8 +171,8 @@ export const t = catalogue(
         other: "{count} mislukt, open Downloads om opnieuw te proberen",
       },
       Queue: "Wachtrij",
-      "On this iPhone": "Op deze iPhone",
-      "{size} on this iPhone": "{size} op deze iPhone",
+      "On this device": "Op dit apparaat",
+      "{size} on this device": "{size} op dit apparaat",
       "{size} free": "{size} vrij",
       "A download continues in the background; the next starts once the app is open.":
         "Een download gaat op de achtergrond door; de volgende begint zodra de app open is.",
@@ -325,8 +325,8 @@ export const t = catalogue(
         other: "{count} en échec, ouvrez Téléchargements pour réessayer",
       },
       Queue: "File d'attente",
-      "On this iPhone": "Sur cet iPhone",
-      "{size} on this iPhone": "{size} sur cet iPhone",
+      "On this device": "Sur cet appareil",
+      "{size} on this device": "{size} sur cet appareil",
       "{size} free": "{size} libres",
       "A download continues in the background; the next starts once the app is open.":
         "Un téléchargement continue en arrière-plan ; le suivant commence dès que l'app est ouverte.",
@@ -478,8 +478,8 @@ export const t = catalogue(
         other: "{count} fehlgeschlagen, zum erneuten Versuch Downloads öffnen",
       },
       Queue: "Warteschlange",
-      "On this iPhone": "Auf diesem iPhone",
-      "{size} on this iPhone": "{size} auf diesem iPhone",
+      "On this device": "Auf diesem Gerät",
+      "{size} on this device": "{size} auf diesem Gerät",
       "{size} free": "{size} frei",
       "A download continues in the background; the next starts once the app is open.":
         "Ein Download läuft im Hintergrund weiter; der nächste beginnt, sobald die App geöffnet ist.",
@@ -627,8 +627,8 @@ export const t = catalogue(
         other: "{count} fallidas, abre Descargas para reintentar",
       },
       Queue: "Cola",
-      "On this iPhone": "En este iPhone",
-      "{size} on this iPhone": "{size} en este iPhone",
+      "On this device": "En este dispositivo",
+      "{size} on this device": "{size} en este dispositivo",
       "{size} free": "{size} libres",
       "A download continues in the background; the next starts once the app is open.":
         "Una descarga sigue en segundo plano; la siguiente empieza cuando la app está abierta.",
