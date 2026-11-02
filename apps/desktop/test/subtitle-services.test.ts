@@ -451,12 +451,11 @@ describe("online subtitle service ports", () => {
 
   it("reads a Windows-1256 Arabic download from either service as its UTF-8 copy", async () => {
     const arabic = "مرحبا بالعالم!\nالحلقة 2 من Night Harbour";
-    const file = `1\r\n00:00:10,000 --> 00:00:12,000\r\n${arabic}\r\n`;
-    const decoder = new TextDecoder("windows-1256");
-    const codePage = new Map(
-      Array.from({ length: 256 }, (_, byte) => [decoder.decode(Uint8Array.of(byte)), byte]),
+    // Fixed Windows-1256 bytes generated with iconv, independently of the decoder under test.
+    const legacy = Buffer.from(
+      "310d0a30303a30303a31302c303030202d2d3e2030303a30303a31322c3030300d0ae3d1cdc8c720c8c7e1dac7e1e3210ac7e1cde1dec9203220e3e4204e6967687420486172626f75720d0a",
+      "hex",
     );
-    const legacy = Uint8Array.from(file, (char) => codePage.get(char)!);
     const request = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input));
       if (url.pathname === "/api/v1/login")

@@ -1,15 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { subtitleTextBytes, subtitleTextFile } from "../src/subtitles/text-file.ts";
 
-// Encodes text in a single-byte code page by reversing the platform's own decoder.
-const encode = (text: string, encoding: string) => {
-  const decoder = new TextDecoder(encoding);
-  const bytes = new Map(
-    Array.from({ length: 256 }, (_, byte) => [decoder.decode(Uint8Array.of(byte)), byte]),
-  );
-  return Uint8Array.from(text, (char) => bytes.get(char)!);
-};
-
 describe("downloaded text subtitles", () => {
   it("reads BOM/CRLF SubRip as original cue times and preserves punctuation and supported cue markup", () => {
     expect(
@@ -62,12 +53,18 @@ describe("downloaded text subtitles", () => {
   });
 
   it("reads an Arabic Windows-1256 file as its UTF-8 copy and keeps other languages strict", () => {
-    const srt = "1\r\n00:00:10,000 --> 00:00:12,000\r\nمرحبا بالعالم!\r\nالحلقة 2\r\n";
-    expect(subtitleTextBytes(encode(srt, "windows-1256"), "ar")).toEqual([
+    // Fixed Windows-1256 bytes generated with iconv, independently of the decoder under test.
+    const legacy = Buffer.from(
+      "310d0a30303a30303a31302c303030202d2d3e2030303a30303a31322c3030300d0ae3d1cdc8c720c8c7e1dac7e1e3210d0ac7e1cde1dec920320d0a",
+      "hex",
+    );
+    expect(subtitleTextBytes(legacy, "ar")).toEqual([
       { start: 10, end: 12, text: "مرحبا بالعالم!\nالحلقة 2" },
     ]);
-    const dutch = encode("1\n00:00:10,000 --> 00:00:12,000\nCafé\n", "windows-1252");
+    const dutch = Buffer.from("1\n00:00:10,000 --> 00:00:12,000\nCaf\xe9\n", "latin1");
     expect(() => subtitleTextBytes(dutch, "nl")).toThrow();
-    expect(() => subtitleTextBytes(encode("مرحبا بدون توقيت", "windows-1256"), "ar")).toThrow();
+    expect(() =>
+      subtitleTextBytes(Buffer.from("e3d1cdc8c720c8cfe6e420cae6deedca", "hex"), "ar"),
+    ).toThrow();
   });
 });
