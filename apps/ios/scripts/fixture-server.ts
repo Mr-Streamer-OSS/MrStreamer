@@ -243,15 +243,15 @@ const feature = maker.file(
   ],
   "feature.mp4",
 );
+const clips = new Map<string, string>();
 /**
  * A TEST title's clip as the repository has it, or, when it has sound to silence, a copy of every
  * stream with its sound silenced, its container and codecs as they were.
  */
-const clips = new Map<string, string>();
 function clipOf(fixture: string) {
-  const clip = join(fixtures, fixture);
-  let found = clips.get(clip);
+  let found = clips.get(fixture);
   if (!found) {
+    const clip = join(fixtures, fixture);
     const silenced = silencing(clip);
     if (silenced.length === 0) {
       maker.served(fixture, clip);
@@ -262,7 +262,7 @@ function clipOf(fixture: string) {
       const copy = ["-map", "0", "-c", "copy", ...silenced, ...dispositions(clip), ...format];
       found = maker.file(fixture.replace(/\W/g, "-"), ["-i", clip, ...copy], fixture);
     }
-    clips.set(clip, found);
+    clips.set(fixture, found);
   }
   return found;
 }

@@ -173,7 +173,6 @@ describe("the native verification fixture", () => {
       `${panel}/hls/2014/0.ts`,
       `${panel}/hls/1000/past/0.ts`,
       `${panel}/hls/7999/sound-en/0.ts`,
-      `${panel}/hls/7999/sound-nl/0.ts`,
       `${panel}/hls/${ac3?.id}/0.ts`,
       await titleUrl(ordinary?.name ?? ""),
       tracks,

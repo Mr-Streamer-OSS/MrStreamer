@@ -4,10 +4,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { FakeProvider } from "../fake-provider.ts";
 
 /**
- * Chromium's switch that keeps a test's playback off the speakers, for every launch of the app that
- * may play: it decodes and plays as ever, its own volume and mute untouched, but its sound output
- * is silent. FIXTURE_SOUND=1 leaves it out, for a test about sound itself
- * (docs/contributing/testing.md).
+ * Chromium's `--mute-audio`, for every launch of the app that may play: it decodes and plays as
+ * ever, its own volume and mute untouched, but nothing reaches the speakers. FIXTURE_SOUND=1 leaves
+ * it out, for a test about sound itself (docs/contributing/testing.md).
  */
 export const silent: readonly string[] =
   process.env["FIXTURE_SOUND"] === "1" ? [] : ["--mute-audio"];

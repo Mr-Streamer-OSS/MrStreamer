@@ -61,18 +61,9 @@ const ENCODERS: Readonly<Record<string, string>> = { mp3: "libmp3lame" };
  */
 export function silencing(clip: string): string[] {
   if (SOUND) return [];
-  // JSON, as CSV lists an MPEG-TS stream again under each program.
-  const { streams } = JSON.parse(
-    execFileSync(
-      "ffprobe",
-      [
-        ...["-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_name"],
-        ...["-of", "json", clip],
-      ],
-      { encoding: "utf8" },
-    ),
-  ) as { streams: { codec_name: string }[] };
-  const codecs = streams.map((stream) => stream.codec_name);
+  const codecs = probe<{ codec_name: string }>(clip, [
+    ...["-select_streams", "a", "-show_entries", "stream=codec_name"],
+  ]).map((stream) => stream.codec_name);
   if (codecs.length === 0 || peak(clip) <= -60) return [];
   return [
     ...codecs.flatMap((codec, index) => [`-c:a:${index}`, ENCODERS[codec] ?? codec]),
@@ -85,17 +76,22 @@ export function silencing(clip: string): string[] {
  * which ffmpeg would otherwise change, marking a track default where the clip marks none.
  */
 export function dispositions(clip: string): string[] {
-  const { streams } = JSON.parse(
-    execFileSync(
-      "ffprobe",
-      ["-v", "error", "-show_entries", "stream=index:stream_disposition", "-of", "json", clip],
-      { encoding: "utf8" },
-    ),
-  ) as { streams: { index: number; disposition: Record<string, number> }[] };
+  const streams = probe<{ index: number; disposition: Record<string, number> }>(clip, [
+    ...["-show_entries", "stream=index:stream_disposition"],
+  ]);
   return streams.flatMap(({ index, disposition }) => {
     const flags = Object.keys(disposition).filter((flag) => disposition[flag] === 1);
     return [`-disposition:${index}`, flags.join("+") || "0"];
   });
+}
+
+/** ffprobe's streams of `clip`, as `entries` chooses them and their fields. */
+function probe<Stream>(clip: string, entries: string[]): Stream[] {
+  // JSON, as CSV lists an MPEG-TS stream again under each program.
+  const json = execFileSync("ffprobe", ["-v", "error", ...entries, "-of", "json", clip], {
+    encoding: "utf8",
+  });
+  return (JSON.parse(json) as { streams: Stream[] }).streams;
 }
 
 /** The loudest sample of `file`'s sound, in dBFS. */
