@@ -2,17 +2,22 @@
 // asks for the playlist and its segments as it would alone, Watch through hls.js and a recording
 // through ./hls-ts-input.ts, and the provider is asked for each once:
 // - A playlist answered less than half its target duration ago is answered again from then, also
-//   when asked at the address the provider redirected it to.
-// - A segment is known by its media sequence number in the playlist, so the same segment under
-//   another address, as when a token changed between two reads of the playlist, is one segment.
-//   One under way is read by each who asks for it from its start, and the last KEPT_SEGMENTS
-//   complete ones, KEPT_BYTES at most, are kept in memory for one who comes later. One nobody
-//   reads any more while it arrives is abandoned.
+//   when asked at the address the provider redirected it to, or at the one that redirected there:
+//   the latest answer is the playlist at each of those addresses. Who asked for an answer is never
+//   given it again once complete, so a reader alone reads the playlist as it would without this.
+// - A segment is known by its media and discontinuity sequence numbers in the playlist and its
+//   address but for its query, so the same segment under another query token is one segment, and
+//   one of another host or path, as another packager's, is not.
+//   One under way is read by each who asks for it from its start, as fast as the fastest of them
+//   reads, and the last KEPT_SEGMENTS complete ones, KEPT_BYTES at most, are kept in memory for one
+//   who comes later. One nobody reads any more while it arrives is abandoned.
 // The segments are the provider's own bytes, and the playlists its own text, discontinuities and
 // all: nothing is converted. Only a playlist that names its segments itself, as clear MPEG-TS the
-// HLS reader takes, is shared. A multivariant playlist, whose leaf hls.js picks and changes, and
-// any other passes through to the provider as it would alone, and `reading` says nothing reads it.
-// The last owner leaving aborts what is under way and drops the rest.
+// HLS reader takes, is shared. The first playlist answered says so: a multivariant playlist, whose
+// leaf hls.js picks and changes, and any other passes through to the provider as it would alone,
+// and `reading` says nothing reads it. A later playlist that is no longer clear media is passed
+// on as it is but not kept; both readers still ask through here, and the HLS reader stops at it.
+// The last owner leaving aborts what is under way and waits for every request to end.
 import { clearMedia, PLAYLIST_BYTES } from "./hls-ts-input.ts";
 
 /** Complete segments kept for a reader still to come, the newest, and the most they may take. */
@@ -36,6 +41,8 @@ interface Answer {
   /** Its headers, or why it failed before them. */
   readonly head: Promise<Head>;
   readonly parts: Uint8Array[];
+  /** Where it came from, after redirects, once its headers came. */
+  url: string;
   size: number;
   done: boolean;
   failure: unknown;
@@ -45,8 +52,14 @@ interface Answer {
   readers: number;
   /** Settles as more arrives, or it ends. */
   arrived: PromiseWithResolvers<void>;
+  /** Settles once a reader read all that arrived, so more is read from the provider. */
+  wanted: PromiseWithResolvers<void>;
   /** Settles once its request ended. */
   settled: Promise<void>;
+  /** Who asked the provider for it. */
+  readonly by: string;
+  /** A segment's media sequence number; null for a playlist. */
+  readonly sequence: number | null;
 }
 
 interface Share {
@@ -57,15 +70,19 @@ interface Share {
   targetMs: number;
   /** Playlists by the address asked for, and by the address they came from. */
   readonly playlists: Map<string, Answer>;
-  /** Segments by media sequence number. */
-  readonly segments: Map<number, Answer>;
-  /** Each segment the playlist named last, by address. */
-  sequences: ReadonlyMap<string, number>;
+  /** Segments by `segmentOf`. */
+  readonly segments: Map<string, Answer>;
+  /** Its requests to the provider until each ended, kept or not. */
+  readonly requests: Set<Answer>;
+  /** Each segment the playlists named while it is listed, by address. */
+  names: ReadonlyMap<string, { readonly segment: string; readonly sequence: number }>;
   closing: Promise<void> | null;
 }
 
-/** Reads the provider's answer into `parts` as it arrives, for every reader. */
+/** Reads the provider's answer into `parts` as its fastest reader wants it, for every reader. */
 function start(
+  by: string,
+  sequence: number | null,
   open: (signal: AbortSignal) => Promise<Response>,
   finished: (answer: Answer, head: Head | null) => void,
 ): Answer {
@@ -77,19 +94,25 @@ function start(
     controller,
     head: head.promise,
     parts: [],
+    url: "",
     size: 0,
     done: false,
     failure: null,
     at: 0,
     readers: 0,
     arrived: Promise.withResolvers(),
+    wanted: Promise.withResolvers(),
     settled: Promise.resolve(),
+    by,
+    sequence,
   };
   const wake = () => {
     const { resolve } = answer.arrived;
     answer.arrived = Promise.withResolvers();
     resolve();
   };
+  // An abort ends the wait for a reader, so the request ends.
+  controller.signal.addEventListener("abort", () => answer.wanted.resolve(), { once: true });
   let headed: Head | null = null;
   answer.settled = (async () => {
     try {
@@ -99,12 +122,17 @@ function start(
         headers: new Headers(response.headers),
         url: response.url,
       };
+      answer.url = response.url;
       head.resolve(headed);
       const reader = response.body?.getReader();
       try {
-        for (;;) {
-          const next = await reader?.read();
-          if (!next || next.done) break;
+        // An empty answer, as a 204's, is complete at once.
+        while (reader) {
+          await answer.wanted.promise;
+          answer.wanted = Promise.withResolvers();
+          controller.signal.throwIfAborted();
+          const next = await reader.read();
+          if (next.done) break;
           answer.size += next.value.length;
           if (answer.size > ANSWER_BYTES) throw new Error("The provider's answer is too long.");
           answer.parts.push(next.value);
@@ -164,7 +192,9 @@ function serve(answer: Answer, head: Head, signal: AbortSignal, release: () => v
             leave();
             return answer.failure ? controller.error(answer.failure) : controller.close();
           }
-          await answer.arrived.promise;
+          const arrived = answer.arrived.promise;
+          answer.wanted.resolve();
+          await arrived;
         }
       },
       cancel: leave,
@@ -204,8 +234,8 @@ export function hlsShares(connected: (owner: string, key: string) => void) {
   const forget = (share: Share, answer: Answer) => {
     for (const [address, each] of share.playlists)
       if (each === answer) share.playlists.delete(address);
-    for (const [sequence, each] of share.segments)
-      if (each === answer) share.segments.delete(sequence);
+    for (const [segment, each] of share.segments)
+      if (each === answer) share.segments.delete(segment);
   };
 
   /** What a complete answer tells: a playlist's segments, or room made for a segment's. */
@@ -213,16 +243,15 @@ export function hlsShares(connected: (owner: string, key: string) => void) {
     share: Share,
     key: string,
     address: string,
-    sequence: number | undefined,
     answer: Answer,
     head: Head | null,
   ) => {
     if (!head || head.status < 200 || head.status >= 300) return forget(share, answer);
-    if (sequence !== undefined) {
+    if (answer.sequence !== null) {
       // Newest first: what is kept until it holds too many, or too much.
       const complete = [...share.segments]
         .filter(([, each]) => each.done)
-        .toSorted(([a], [b]) => b - a);
+        .toSorted(([, a], [, b]) => (b.sequence ?? 0) - (a.sequence ?? 0));
       let bytes = 0;
       for (const [at, [old, each]] of complete.entries()) {
         bytes += each.size;
@@ -231,6 +260,8 @@ export function hlsShares(connected: (owner: string, key: string) => void) {
       return;
     }
     const text = answer.size <= PLAYLIST_BYTES ? Buffer.concat(answer.parts).toString("utf8") : "";
+    // An empty answer, or what is no playlist, says nothing of the stream.
+    if (!text.trimStart().startsWith("#EXTM3U")) return forget(share, answer);
     const url = head.url || address;
     const media = clearMedia(text, url);
     if (share.media === null) {
@@ -242,11 +273,22 @@ export function hlsShares(connected: (owner: string, key: string) => void) {
     // Addresses an earlier read named stay known while their segments are listed: another
     // reader may have that read.
     const oldest = media.segments[0]!.sequence;
-    share.sequences = new Map([
-      ...[...share.sequences].filter(([, sequence]) => sequence >= oldest),
-      ...media.segments.map((each) => [each.address, each.sequence] as const),
+    share.names = new Map([
+      ...[...share.names].filter(([, name]) => name.sequence >= oldest),
+      ...media.segments.map((each) => {
+        const path = new URL(each.address);
+        path.search = "";
+        const segment = `${each.sequence} ${each.epoch} ${path.href}`;
+        return [each.address, { segment, sequence: each.sequence }] as const;
+      }),
     ]);
-    // Asked for at the address it came from, as the HLS reader reads it again, it is this one.
+    // It is the playlist now at the address it came from, as the HLS reader reads it again, and
+    // at each that named the one before it there. One from elsewhere, as an older token's, goes.
+    for (const [named, each] of share.playlists) {
+      if (each === answer || !each.done) continue;
+      if (each.url === answer.url) share.playlists.set(named, answer);
+      else share.playlists.delete(named);
+    }
     share.playlists.set(url, answer);
   };
 
@@ -273,24 +315,28 @@ export function hlsShares(connected: (owner: string, key: string) => void) {
         targetMs: 0,
         playlists: new Map(),
         segments: new Map(),
-        sequences: new Map(),
+        requests: new Set(),
+        names: new Map(),
         closing: null,
       };
       shares.set(key, share);
       share.owners.add(owner);
       if (share.media === false) return open(signal);
       if (share.media) connected(owner, key);
-      const sequence = share.sequences.get(address);
-      const found =
-        sequence === undefined ? share.playlists.get(address) : share.segments.get(sequence);
-      // A segment is kept while it is; a complete playlist only while it is fresh.
-      const kept = found && (!found.done || sequence !== undefined || fresh(share, found));
+      const name = share.names.get(address);
+      const found = name ? share.segments.get(name.segment) : share.playlists.get(address);
+      // A segment is kept while it is; a complete playlist only while it is fresh, for another.
+      const kept = found && (!found.done || name || (fresh(share, found) && found.by !== owner));
       const answer = kept
         ? found
-        : start(open, (done, head) => finish(share, key, address, sequence, done, head));
+        : start(owner, name?.sequence ?? null, open, (done, head) =>
+            finish(share, key, address, done, head),
+          );
       if (!kept) {
-        if (sequence === undefined) share.playlists.set(address, answer);
-        else share.segments.set(sequence, answer);
+        if (name) share.segments.set(name.segment, answer);
+        else share.playlists.set(address, answer);
+        share.requests.add(answer);
+        void answer.settled.then(() => share.requests.delete(answer));
       }
       answer.readers++;
       const release = () => {
@@ -316,9 +362,9 @@ export function hlsShares(connected: (owner: string, key: string) => void) {
     const closing: Promise<void>[] = [];
     for (const [key, share] of shares) {
       if (!share.owners.delete(owner) || share.owners.size > 0 || share.closing) continue;
-      const answers = new Set([...share.playlists.values(), ...share.segments.values()]);
-      for (const answer of answers) answer.controller.abort();
-      share.closing = Promise.all([...answers].map((answer) => answer.settled)).then(() => {
+      const requests = [...share.requests];
+      for (const answer of requests) answer.controller.abort();
+      share.closing = Promise.all(requests.map((answer) => answer.settled)).then(() => {
         if (shares.get(key) === share) shares.delete(key);
       });
       closing.push(share.closing);

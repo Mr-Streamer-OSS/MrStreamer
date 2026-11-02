@@ -3,7 +3,8 @@
 // channel's segments go into the file one after another, read through the same clear muxed MPEG-TS
 // subset playback reads (../playback/hls-ts-input.ts); a discontinuity stays in the file as the
 // provider sent it. Each read waits for the write before it, so no more than one piece of the
-// stream is ever held in memory. Capture that goes on after a gap appends to the file it wrote
+// stream is ever held here; an HLS stream it shares keeps its last few segments there too
+// (../playback/hls-capture.ts). Capture that goes on after a gap appends to the file it wrote
 // before, starting again from a program table, as a discontinuity does. A stream that plays
 // meanwhile is read from what Watch reads (../playback/live-capture.ts), not asked of the provider
 // again: an MPEG-TS stream's request, and an HLS stream's playlist and segments. A recording that

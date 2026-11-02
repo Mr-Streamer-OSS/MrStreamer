@@ -247,6 +247,12 @@ function playing(url: string) {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
   })();
+  const stop = async () => {
+    stopped.abort();
+    await run;
+  };
+  // Also when the test fails before it stops it.
+  onTestFinished(stop);
   return {
     segments: () => read.size,
     reaches: async (count: number) =>
@@ -256,10 +262,7 @@ function playing(url: string) {
           (size) => size >= count,
         ),
       ).toBeGreaterThanOrEqual(count),
-    stop: async () => {
-      stopped.abort();
-      await run;
-    },
+    stop,
   };
 }
 

@@ -1092,31 +1092,47 @@ describe("live captures", () => {
     const { captures, source } = await capturing();
     const key = captureKey({ ...source, format: "hls", url: "http://provider/live/1.m3u8" });
     const asked: string[] = [];
-    let abandoned = 0;
+    let closed = 0;
+    let empty = true;
     const segments = [...Array.from({ length: 10 }, (_, at) => `${at}.ts`), "arriving.ts"];
-    const playlist = [
-      "#EXTM3U",
-      "#EXT-X-TARGETDURATION:2",
-      "#EXT-X-MEDIA-SEQUENCE:0",
-      ...segments.flatMap((name) => ["#EXTINF:2,", name]),
-      "",
-    ].join("\n");
-    const provider = (address: string) => (signal: AbortSignal) => {
+    const listing = (query: string) =>
+      [
+        "#EXTM3U",
+        "#EXT-X-TARGETDURATION:2",
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        ...segments.flatMap((name) => ["#EXTINF:2,", `${name}${query}`]),
+        "",
+      ].join("\n");
+    const playlist = listing("");
+    /** What the provider answers, from where fetch says it came. */
+    const from = (body: ConstructorParameters<typeof Response>[0], url: string, status = 200) => {
+      const answer = new Response(body, { status });
+      Object.defineProperty(answer, "url", { value: url });
+      return Promise.resolve(answer);
+    };
+    const provider = (address: string) => () => {
       asked.push(address);
-      if (address.endsWith(".m3u8")) return Promise.resolve(new Response(playlist));
+      if (new URL(address).pathname.endsWith(".m3u8")) {
+        // The first answer is empty; "moved" sends on to a token, which its segments carry too.
+        if (empty) return ((empty = false), from(null, address, 204));
+        if (address.endsWith("moved.m3u8"))
+          return from(listing("?token=1"), "http://provider/live/1.m3u8?token=1");
+        return from(address.includes("token") ? listing("?token=1") : playlist, address);
+      }
       const packet = new Uint8Array(188).fill(0x47);
-      if (!address.endsWith("arriving.ts")) return Promise.resolve(new Response(packet));
-      // One that keeps arriving until its request is aborted.
+      if (!address.endsWith("arriving.ts")) return from(packet, address);
+      // One that keeps arriving, and takes a moment to close once it is let go.
       const body = new ReadableStream<Uint8Array>({
-        start: (controller) => {
-          controller.enqueue(packet);
-          signal.addEventListener("abort", () => {
-            abandoned++;
-            controller.error(signal.reason);
-          });
-        },
+        start: (controller) => controller.enqueue(packet),
+        cancel: () =>
+          new Promise<void>((resolve) =>
+            setTimeout(() => {
+              closed++;
+              resolve();
+            }, 200),
+          ),
       });
-      return Promise.resolve(new Response(body));
+      return from(body, address);
     };
     const read = async (owner: string, name: string) => {
       const address = new URL(name, "http://provider/live/").href;
@@ -1129,35 +1145,59 @@ describe("live captures", () => {
       );
       return (await answer.arrayBuffer()).byteLength;
     };
+    const later = () => new Promise((resolve) => setTimeout(resolve, 1100));
 
+    // An empty answer says nothing of the stream.
+    expect(await read("watch", "1.m3u8")).toBe(0);
+    expect(captures.reading(key)).toBe(false);
     expect(await read("watch", "1.m3u8")).toBe(playlist.length);
     expect(await read("record", "1.m3u8")).toBe(playlist.length);
-    expect(asked).toHaveLength(1);
+    expect(asked).toHaveLength(2);
     expect(captures.reading(key)).toBe(true);
+    // Who asked for it reads it anew, as alone; the other reads that.
+    await read("watch", "1.m3u8");
+    await read("record", "1.m3u8");
+    expect(asked).toHaveLength(3);
 
     for (const name of segments.slice(0, 10)) expect(await read("watch", name)).toBe(188);
     for (const name of ["9.ts", "8.ts", "7.ts", "6.ts"]) await read("record", name);
-    expect(asked).toHaveLength(11);
+    expect(asked).toHaveLength(13);
     // Older segments were let go: a reader that far behind asks the provider itself.
     await read("record", "5.ts");
-    expect(asked).toHaveLength(12);
+    expect(asked).toHaveLength(14);
 
     // Half the target duration later, the playlist is asked for again.
-    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await later();
     await read("record", "1.m3u8");
-    expect(asked).toHaveLength(13);
+    expect(asked).toHaveLength(15);
 
-    // A segment its only reader stops reading while it arrives isn't asked for any more.
+    // Read where it sends on to a token, it is the same playlist there and at its first address,
+    // read again at either, and its segments under the token are the same segments.
+    await read("watch", "moved.m3u8");
+    await read("record", "1.m3u8?token=1");
+    expect(await read("record", "9.ts?token=1")).toBe(188);
+    expect(asked).toHaveLength(16);
+    await later();
+    await read("record", "1.m3u8?token=1");
+    await read("watch", "moved.m3u8");
+    expect(asked).toHaveLength(17);
+
+    // A segment its only reader stops reading while it arrives isn't asked for any more, and the
+    // last owner leaving waits for its request to close.
     const stop = new AbortController();
     const address = "http://provider/live/arriving.ts";
     const arriving = await captures.resource(key, "watch", address, provider(address), stop.signal);
     await arriving.body!.getReader().read();
     stop.abort();
-    await vi.waitFor(() => expect(abandoned).toBe(1));
-
     await captures.idle("watch");
     expect(captures.reading(key)).toBe(true);
-    await captures.idle("record");
+    // One asking as it closes waits for that, and asks anew.
+    const closing = captures.idle("record");
+    expect(await read("again", "1.m3u8")).toBe(playlist.length);
+    expect(closed).toBe(1);
+    expect(asked).toHaveLength(19);
+    await closing;
+    await captures.idle("again");
     expect(captures.reading(key)).toBe(false);
   });
 });
