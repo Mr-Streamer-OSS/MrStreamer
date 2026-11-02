@@ -152,10 +152,9 @@ const text = (params: object | undefined, name: string) => {
 /**
  * The Live tab's root screen: the list alone below the split width, the list beside the detail
  * column from it. The list keeps its place in the tree either way, so a resize or a fold keeps
- * its tab, country and scroll position, and the one player under Watch never sees it. The list is
- * given its width in both, never `flex: 1` when alone: Fabric keeps a kept view's flex basis from
- * its last fixed width, so a landscape round trip left the iPhone's list 426 points wide in a 402
- * point window until a relaunch.
+ * its tab, country and scroll position, and the one player under Watch never sees it. The list
+ * takes its width in both layouts, never `flex: 1`: Fabric keeps a reused view's flex basis from
+ * its last fixed width, so after landscape the iPhone's list stayed 426 points in a 402 point window.
  */
 export function LiveTab() {
   const { split, width } = useListWidth();
