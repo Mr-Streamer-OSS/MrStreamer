@@ -95,29 +95,28 @@ describe("a tab's own stack", () => {
 });
 
 describe("a tab's screens", () => {
-  /** Where each tab's stack lays its screens' content, as the window's insets stand. */
-  function content(root: ReturnType<typeof createRoot>) {
-    const shown: unknown[] = [];
-    function Stacks() {
-      for (const tab of ["(home)", "live", "films", "series"] as const) {
-        shown.push(useTabScreenOptions(tab)({ route: { name: "index" } }).contentStyle);
-      }
-      return null;
+  /** Each tab stack's content style, as its layout last rendered. */
+  let shown: unknown[] = [];
+  function Stacks() {
+    shown = [];
+    for (const tab of ["(home)", "live", "films", "series"] as const) {
+      shown.push(useTabScreenOptions(tab)({ route: { name: "index" } }).contentStyle);
     }
-    React.act(() => root.render(React.createElement(Stacks)));
-    return shown.slice(-4);
+    return null;
   }
 
   it("keep their content out of the side column UIKit reserves, as iOS moves it", () => {
     const root = createRoot(document.createElement("div"));
     // iPhone Duo's closed panel: the status bar, top bar buttons and tab bar run down the right.
     insets.current = { top: 0, bottom: 34, left: 0, right: 84 };
-    for (const style of content(root)) {
+    React.act(() => root.render(React.createElement(Stacks)));
+    for (const style of shown) {
       expect(style).toEqual({ backgroundColor: "#000000", paddingLeft: 0, paddingRight: 84 });
     }
-    // iPhone in landscape, with the Dynamic Island on the left.
+    // Turned to landscape on iPhone, with the Dynamic Island on the left.
     insets.current = { top: 0, bottom: 21, left: 62, right: 62 };
-    for (const style of content(root)) {
+    React.act(() => root.render(React.createElement(Stacks)));
+    for (const style of shown) {
       expect(style).toEqual({ backgroundColor: "#000000", paddingLeft: 62, paddingRight: 62 });
     }
     React.act(() => root.unmount());
