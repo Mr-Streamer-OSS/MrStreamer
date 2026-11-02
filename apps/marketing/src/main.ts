@@ -136,6 +136,12 @@ if (tablist) {
     event.preventDefault();
     select(next, true);
   });
+  // Panels hold only pictures, so each takes focus itself, as a tab panel does.
+  for (const tab of tabs) {
+    const panel = document.getElementById(tab.getAttribute("aria-controls") ?? "");
+    panel?.setAttribute("role", "tabpanel");
+    if (panel) panel.tabIndex = 0;
+  }
   const [first] = tabs;
   if (first) select(first);
   tablist.hidden = false;

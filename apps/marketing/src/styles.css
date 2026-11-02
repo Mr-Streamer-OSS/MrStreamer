@@ -351,6 +351,8 @@ h1 {
   position: absolute;
   inset: -12% 0 -6%;
   z-index: -1;
+  /* It reaches up behind the hero's links; clicks go through it to them. */
+  pointer-events: none;
   background: radial-gradient(
     closest-side,
     rgb(60 149 210 / 0.5),
@@ -452,7 +454,8 @@ h1 {
 }
 
 .tricks.watching .trick.lit h3,
-.tricks .trick:hover h3 {
+.tricks .trick:hover h3,
+.tricks .trick:focus-within h3 {
   color: #fff;
 }
 
@@ -462,10 +465,12 @@ h1 {
   gap: 1em;
 }
 
+/* The strip scrolls on phones, which clips; its 5 px of padding keeps a tab's focus outline whole. */
 .tabs {
   display: flex;
   gap: 1.8em;
-  margin-top: 1.8em;
+  margin: calc(1.8em - 5px) -5px 0;
+  padding: 5px 5px 0;
   overflow-x: auto;
   border-bottom: 1px solid var(--line);
   scrollbar-width: none;
@@ -667,6 +672,16 @@ h1 {
 @media (max-width: 43.74em) {
   .need table {
     font-size: 1em;
+  }
+
+  /* All four tabs fit on a 390 px phone; narrower, or with larger text, they wrap rather than hide. */
+  .tabs {
+    flex-wrap: wrap;
+    gap: 0.6em 1em;
+  }
+
+  .tabs button {
+    font-size: 0.85em;
   }
 
   .need tr {
@@ -1134,7 +1149,7 @@ footer p {
 
   .tabs {
     gap: 2.2em;
-    margin-top: 2.2em;
+    margin-top: calc(2.2em - 5px);
   }
 
   .screen {
