@@ -1433,15 +1433,15 @@ describe.skipIf(!hasTools)("recordings", () => {
     const { id } = answer.recording;
     await until(recordings.list, ([first]) => first?.status.kind === "complete");
     const manifest = join(dataDir, "recordings", "recordings.json");
-    await rename(manifest, `${manifest}.saved`);
+    await rm(manifest);
     await mkdir(manifest);
     await expect(recordings.recordProgress(id, 42, 90)).rejects.toMatchObject({
       error: { kind: "unexpected", detail: "Recordings could not be saved." },
     });
     expect((await recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
-    // The next check writes it.
+    // The next check writes it, or the one the refused save woke, as soon as storage works: no
+    // older copy is put back, which would overwrite what that one wrote.
     await rm(manifest, { recursive: true });
-    await rename(`${manifest}.saved`, manifest);
     await recordings.check();
     await quit();
 
