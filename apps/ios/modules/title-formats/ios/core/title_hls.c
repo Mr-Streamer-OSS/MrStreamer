@@ -1181,9 +1181,17 @@ static void mark_read(Text *text, int64_t time) {
     text->listed[low].tried = 1;
 }
 
-/** Reads the next packet of the file, keeping a text track's line as it goes. */
+/**
+ * Reads the next packet of the file, keeping a text track's line as it goes. Once a read has
+ * failed it fails too, until `make` or `recall` clears the error for its seek: FFmpeg reads on
+ * past a failed read and may skip what that read held, and a seek alone doesn't clear it.
+ */
 static int read_frame(TitleHls *title, AVPacket *packet) {
   int error = av_read_frame(title->input, packet);
+  if (error >= 0 && title->io->error < 0) {
+    av_packet_unref(packet);
+    error = title->io->error;
+  }
   Text *text = error < 0 ? NULL : text_of(title, packet);
   if (text && (error = keep_cue(title, text, packet)) < 0) av_packet_unref(packet);
   else if (text && packet->pts != AV_NOPTS_VALUE) mark_read(text, packet->pts);
@@ -1489,6 +1497,9 @@ static int recall(TitleHls *title, Text *text, Listed *listed) {
   title->next = -1;
   clear(&title->ahead);
   title->budget = listed->cluster - from->pos + RECALL_BYTES_MOST;
+  // A read that failed before, such as a segment's, doesn't hold up this one.
+  title->io->error = 0;
+  title->io->eof_reached = 0;
   int error = av_seek_frame(title->input, title->video, from->timestamp, AVSEEK_FLAG_BACKWARD);
   int found = 0;
   for (int i = 0; error >= 0 && i < AHEAD_PACKETS_MOST; i++) {
