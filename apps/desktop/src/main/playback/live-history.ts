@@ -145,15 +145,19 @@ export function historyStore(budget: HistoryBudget) {
         await handle.close();
       }
     } catch {
-      await remove(file).catch(() => {});
+      await discard(file, piece.bytes);
       return state.dropDisk();
     }
     // Evicted or closed while it was written.
-    if (!piece.chunks || state.closed) return void (await remove(file).catch(() => {}));
+    if (!piece.chunks || state.closed) return discard(file, piece.bytes);
     piece.chunks = null;
     piece.file = file;
     state.disk += piece.bytes;
   };
+
+  /** Removes a file the writer gave up on; one the system keeps counts as its whole piece. */
+  const discard = (file: string, bytes: number) =>
+    remove(file).catch(() => void (leaving += bytes));
 
   const drain = async () => {
     for (let next = queue.shift(); next; next = queue.shift()) {
