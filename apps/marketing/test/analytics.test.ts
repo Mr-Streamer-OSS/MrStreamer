@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { renderPage } from "../scripts/pages.ts";
 import { INGEST_ROUTE, siteAnalyticsConfiguration } from "../scripts/site-analytics.ts";
 import { CHOICE, DEADLINE_MS, MAX_EVENTS, startSiteAnalytics } from "../src/analytics.ts";
@@ -484,6 +484,58 @@ describe("website analytics", () => {
     button()?.click();
     expect(sent()[0]?.init.signal?.aborted).toBe(true);
     expect(footer()).toBe("Site analytics: off. What's counted");
+  });
+
+  it("count a collapsed FAQ question once it is open and in view, and only once", () => {
+    // An observer that reports what the test says is in view, for the parts it watches.
+    const watched = new Set<Element>();
+    let inView = (_target: Element): void => {};
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          inView = (target) => {
+            if (watched.has(target))
+              callback(
+                [{ isIntersecting: true, target } as IntersectionObserverEntry],
+                this as unknown as IntersectionObserver,
+              );
+          };
+        }
+        observe(target: Element) {
+          watched.add(target);
+        }
+        unobserve(target: Element) {
+          watched.delete(target);
+        }
+        disconnect() {
+          watched.clear();
+        }
+      },
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    start(renderPage("faq/index.html", null, null), "/faq");
+    const question = document.querySelector<HTMLDetailsElement>("#free");
+    if (!question) throw new Error("No #free question");
+    const toggle = (open: boolean) => {
+      question.open = open;
+      question.dispatchEvent(new Event("toggle"));
+    };
+    const counted = () => events().filter(([event]) => event === "faq_question_viewed");
+
+    inView(question);
+    expect(counted()).toEqual([]);
+    toggle(true);
+    inView(question);
+    expect(counted()).toEqual([
+      ["faq_question_viewed", { faq_question: "free", via: "scroll", ...fixed("/faq") }],
+    ]);
+    toggle(false);
+    toggle(true);
+    inView(question);
+    expect(counted()).toHaveLength(1);
   });
 
   it("count an FAQ question opened by its address, and never an unknown fragment", () => {

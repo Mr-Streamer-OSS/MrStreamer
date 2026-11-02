@@ -7,6 +7,7 @@
 // - One request for the update feed points the download and about pages' links at a stable
 //   release published since the site was built (downloads.ts). Home links /download and holds no
 //   installer, so it doesn't ask. Without an answer the built links stand.
+// - A link into a document page's collapsed section opens that section.
 import { startSiteAnalytics, type SiteCapture } from "./analytics.ts";
 import { FEED, showFeedDownloads } from "./downloads.ts";
 
@@ -110,11 +111,15 @@ if (tricks) {
   }).observe(tricks);
 }
 
-// The screens as tabs: one shows at a time. Arrow keys move along the tabs, as tabs do.
+// The screens as tabs: one shows at a time. Arrow keys move along the tabs, as tabs do. The
+// heading's noun follows the tab ("Same guide…", "Same channels…"); without scripts every screen
+// shows and it says "Same app…".
 const tablist = document.querySelector<HTMLElement>(".tabs");
 if (tablist) {
   const tabs = [...tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  const noun = document.querySelector(".screens h2 .noun");
   const select = (chosen: HTMLButtonElement, focus = false): void => {
+    if (noun && chosen.dataset["noun"]) noun.textContent = chosen.dataset["noun"];
     for (const tab of tabs) {
       const on = tab === chosen;
       tab.setAttribute("aria-selected", String(on));
@@ -160,3 +165,25 @@ async function refreshDownloads(): Promise<void> {
 
 // Download and about refresh through the same feed contract. Home has neither mark, so it doesn't.
 if (document.querySelector("[data-installer], [data-release-version]")) void refreshDownloads();
+
+// Document pages keep their detail in collapsed sections. A link to a section, a question or
+// anything inside one opens it, also when the address changes on the same page. Without scripts
+// the link still lands on the section's heading, which opens with a click.
+function openLinked(): void {
+  let id = location.hash.slice(1);
+  try {
+    id = decodeURIComponent(id);
+  } catch {
+    // A malformed address names no section.
+  }
+  const target = id ? document.getElementById(id) : null;
+  // An old fragment's anchor sits in a run of anchors right above its section.
+  let next = target?.nextElementSibling;
+  while (next instanceof HTMLAnchorElement && !next.href) next = next.nextElementSibling;
+  const section = target?.closest("details") ?? (next instanceof HTMLDetailsElement ? next : null);
+  if (!target || !section || section.open) return;
+  section.open = true;
+  target.scrollIntoView();
+}
+openLinked();
+addEventListener("hashchange", openLinked);

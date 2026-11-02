@@ -1,5 +1,12 @@
 # Privacy policy
 
+Mr. Streamer has no account and no ads, and doesn't sell data. Your provider's streams go directly between your device and it, and the app's statistics never include what you watch.
+
+- **On your device.** Logins, lists, history and downloads stay on your device.
+- **App statistics.** On by default on a computer, off until you choose on iPhone. Never what you watch, your searches or your login.
+- **The website.** Counted without a cookie or an identifier in your browser, unless your browser asks sites not to track.
+- **Your choices.** Turn statistics off in Settings > Privacy, and write to [privacy@mrstreamer.app](mailto:privacy@mrstreamer.app).
+
 Last updated 31 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
 
 Mr. Streamer is a free, open-source IPTV player for your computer and iPhone. It has no Mr. Streamer account or in-app purchases, shows no ads and doesn't sell data. When you connect your own provider, its streams and requests go directly between your device and the services you connect. We also operate a restricted sample provider for app review, described below.
@@ -7,6 +14,8 @@ Mr. Streamer is a free, open-source IPTV player for your computer and iPhone. It
 Wout Stiens in Belgium, publishing as Mr Streamer OSS, is responsible for the data we receive. Contact [privacy@mrstreamer.app](mailto:privacy@mrstreamer.app).
 
 ## Information we collect
+
+_What stays on your device, the statistics each app sends and what the website counts._
 
 ### On your computer
 
@@ -96,6 +105,8 @@ Email to privacy@, hello@ or security@mrstreamer.app, and issues you open on Git
 
 ## How we use it
 
+_To know what to fix and support, and to answer you. Never for advertising._
+
 - **App statistics**, to understand which supported versions, systems and features are used, how much live TV and video plays, and which playback, download or update operations fail, so we know what to fix and support. Each app sends only the events described above for that app.
 - **Website analytics**, to understand visits, referral categories, pages and guides read, download choices, reading depth and page speed.
 - **Messages**, to answer you and fix what you report.
@@ -108,6 +119,8 @@ For **desktop statistics, website analytics and messages**, our basis is legitim
 We do not use app statistics or website analytics for advertising. They share a PostHog project but use separate events and identifiers, and we do not link them.
 
 ## Who receives what
+
+_Your provider and the services you use, and the services that work for us._
 
 ### Services you use through the app
 
@@ -151,6 +164,8 @@ An earlier private-beta installation can still retain a demo subscription or dow
 
 ## Your choices
 
+_Turn statistics and site analytics off, and delete your data._
+
 - **Statistics on desktop.** Turn off **Share basic usage statistics** in Settings > Privacy. Sending stops at once, events waiting to be sent are cleared, and it stays off after a restart. Turning it back on keeps the same identifier and sends nothing about the time it was off, including playback that continued meanwhile.
 - **Statistics on iPhone.** Statistics stay off until you choose to share them, except when an upgrade retains an earlier deliberate choice. Change **Share basic usage statistics** in Settings > Privacy. Turning it off stops sending at once. When the changed choice is saved successfully, waiting events are cleared and it stays off after the app restarts. If saving fails, a later launch can restore the earlier choice and queued statistics.
 - **Website analytics.** Turn off **Site analytics** at the foot of any page of mrstreamer.app. The choice applies to that browser only, and clearing the site's data from your browser turns them back on.
@@ -176,6 +191,8 @@ Removing a subscription or turning statistics off keeps an installation identifi
 
 ## Retention
 
+_How long each kind of data is kept._
+
 - **On your computer:** until you delete it. Uninstalling keeps it, except for the Microsoft Store copy, which Windows deletes with the app.
 - **On iPhone:** local data remains until the app, you or iOS removes it, depending on the kind of data. Provider removal, shared caches and separate download removal are described above. The iPhone statistics queue has no fixed age-based expiry; waiting work can remain until delivered, discarded under its queue or attempt limits, or cleared after Off is saved successfully. If saving Off fails, earlier work and the previous choice can return after relaunch. Removing the app is not a guarantee of erasure from Keychain, backups or services that already received data.
 - **App statistics:** our PostHog project is on the Free plan. PostHog describes a one-year event query window: older events are excluded from queries. That is not a guaranteed physical deletion date. We have no additional automatic statistics-deletion schedule configured and cannot promise a fixed erasure date for records or backups. Turning sharing off does not delete records already received; the request route is below.
@@ -185,11 +202,15 @@ Removing a subscription or turning statistics off keeps an installation identifi
 
 ## Security
 
+_How logins are stored and protected in requests._
+
 In the desktop app, passwords, playlist links, guide addresses and subtitle-service logins use Electron's system storage encryption: macOS Keychain, your Windows account, or GNOME Keyring or KWallet when selected on Linux. Linux can instead use `basic_text`, a fixed-key fallback that does not protect secrets from other programs running as you. Server addresses, subscription usernames and your own TMDB key aren't encrypted.
 
 The desktop app refuses HTTP redirects that it recognizes as carrying the known login of an HTTPS source. It also checks playlist addresses and removes recognized login-bearing headers when a request leaves that source's origin. HTTP addresses without a recognized login can still be used. This cannot identify every unknown token or encoding. An explicit `http://` address sends its login unencrypted. If HTTPS fails for an address entered without a scheme, the app asks before trying HTTP. Settings marks those logins "not encrypted". Statistics and website analytics go to PostHog over HTTPS.
 
 ## International transfers
+
+_Statistics are stored in PostHog's EU region, in Frankfurt._
 
 Our PostHog project stores statistics in its EU Cloud region in Frankfurt. EU hosting does not mean all associated processing or access remains in the EU. PostHog's [published data-processing terms](https://posthog.com/dpa) describe international processing, including in the United States, and transfer safeguards such as the EU-US Data Privacy Framework and European Commission Standard Contractual Clauses.
 
@@ -198,6 +219,8 @@ Our PostHog project stores statistics in its EU Cloud region in Frankfurt. EU ho
 Your device also contacts your provider, TMDB and image hosts directly. Their locations and terms govern those requests; our EU analytics setting does not apply to them.
 
 ## Your rights
+
+_Access, correction, deletion and more, by email to privacy@mrstreamer.app._
 
 For personal data we hold, you can request access, correction, restriction or deletion, object where the basis is legitimate interest, and withdraw consent for iPhone statistics. Other rights, including portability, apply where the law provides them. Email [privacy@mrstreamer.app](mailto:privacy@mrstreamer.app). We will respond within one month; if a lawful extension is needed, we will explain it within that first month.
 
@@ -208,5 +231,7 @@ If we cannot identify the records concerned, we will explain that limitation and
 For data held by your provider or another service acting under its own policy, contact that service. You can complain to the Belgian [Data Protection Authority](https://www.dataprotectionauthority.be/citizen/actions/lodge-a-complaint) or the authority where you live.
 
 ## Changes
+
+_This page changes when what Mr. Streamer stores or sends does._
 
 We update this page when what Mr. Streamer stores or sends changes. We may change it at any time without prior notice, except where the law requires notice or consent. This doesn't limit your rights under data protection law. The [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md) keeps every version.

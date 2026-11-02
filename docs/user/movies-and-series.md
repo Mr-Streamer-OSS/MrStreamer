@@ -1,10 +1,19 @@
 # Movies and series
 
+Every subscription's movies and series in one place, each film once, with details from TMDB.
+
+- **Find.** For you, filters for quality and language, genres and streaming services.
+- **Watchlist.** **Save** keeps a movie or a whole series for later.
+- **Continue.** Continue watching and the next episode pick up where you stopped.
+- **One connection.** Opening a movie or episode stops the live channel first.
+
 **Movies** and **Series** in the top bar list what your providers offer on demand, from [every subscription you added](subscriptions.md) together. Mr. Streamer loads both lists after connecting and keeps them on your computer, refreshing them twice a day; the first load can take a few seconds on a large subscription.
 
 Each film shows once, even when your provider lists it once per language or quality. Mr. Streamer picks the version in your language, then one with several languages, then one without a language mark. The arrow beside **Play** lets you pick another, as below.
 
 ## Finding something
+
+_The tabs under the top bar, starting with For you._
 
 Tabs under the top bar:
 
@@ -25,6 +34,8 @@ The field at the end of the tabs searches movies on Movies and series on Series.
 
 ## Filtering the current list
 
+_Quality and Language narrow an open grid and its search results._
+
 **Quality** and **Language** filter an open movie or series grid and its search results. They are compact menus on one line with **Verified**, after **Sort** where a list has one. Each menu lists every choice, with the current one checked, and **Any** clears that filter. Long menus scroll, and Escape closes an open menu before it leaves the list.
 
 Quality and Language are hints from the provider's names. **Unknown** means no hint, and **MULTI** means a mark for several languages. The count shows matches out of the current list, beside a collection's name; **Reset** clears every filter. Switching between Movies and Series clears them too. ⌘K's search stays unfiltered.
@@ -36,6 +47,8 @@ Quality and Language are hints from the provider's names. **Unknown** means no h
 Opening a filtered poster picks the matching version. The arrow beside **Play** still lets you choose another.
 
 ## Language
+
+_Settings keeps three languages for movies and series, each for its own task._
 
 Settings separates the three languages for movies and series by task:
 
@@ -49,11 +62,15 @@ Picking a sound track or subtitles in the player sets Audio in or Subtitles to i
 
 ## Genres and streaming services
 
+_Mr. Streamer asks TMDB, with its own key or yours._
+
 Your provider's lists don't say a film's genre or where else it streams, and name films their own way, so Mr. Streamer asks [TMDB](https://www.themoviedb.org), using the TMDB ids providers list. It asks about each title once, newest first, and fills in names, genres, popularity and services as answers come in: on a large subscription that takes about a quarter of an hour the first time, and again once after you choose another language. Titles take their usual name in your language from Settings, or the English one where TMDB has no translation, and their details show the original name. Search finds a title by any of these names and by your provider's. Meanwhile a ring beside search in the top bar fills up, and goes when the asking stops; hover it for how far it got, or click it for Settings. Which titles each service streams comes from [JustWatch](https://www.justwatch.com), for the country your computer is set to.
 
 Mr. Streamer has its own TMDB key. If TMDB stops accepting it, Settings > Movies and series says so beside TMDB, and **Own key…** takes a key of your own; a free TMDB account gets one.
 
 ## Details
+
+_A poster opens its artwork, story and cast, and how to play it._
 
 A poster opens its details over the list, which stays where it was: the artwork, the original title when it differs, the year, length, genres and rating, the story, the cast with their photos and parts, and who directed or created it. An episode you stopped in shows how much is left. They load when you open the title, never before: TMDB's story, artwork and cast in your language where it has them, your provider's otherwise. A title opened before opens at once. A film's details are those of the version that plays.
 
@@ -72,6 +89,8 @@ A tick names tracks actually read on this computer. A file with no subtitles say
 
 ## Marking episodes
 
+_Mark an episode watched or unwatched without playing it._
+
 The three dots at the end of an episode's row open **Mark watched** and **Mark unwatched**. They are for an episode you saw somewhere else, or one that played to its end after you fell asleep. Tab reaches the dots after the row, and Enter or Space opens them. Marking plays nothing, and whatever is playing carries on as it was.
 
 - **Mark watched** gives the episode its check mark, also when Mr. Streamer never learned how long it is. It no longer offers **Resume**, and the series moves on to the next episode you haven't watched.
@@ -88,6 +107,8 @@ If Mr. Streamer can't read what you watched, the details say so with **Try again
 Marks are for one episode at a time. There is none for a whole season or series.
 
 ## Watchlist
+
+_Save keeps a movie or a whole series for later._
 
 **Save** in a title's details keeps a movie or a whole series for later. It works as soon as the details open, before the story and the cast arrive. Episodes can't be saved on their own.
 
@@ -107,6 +128,8 @@ The watchlist is kept on your computer, with the subscription each title was sav
 
 ## Watching
 
+_The timeline, 10-second skips and the controls along the bottom._
+
 The picture fills the window below the top bar, with the title, a timeline and the controls along the bottom; they fade while you watch and come back when you move the pointer.
 
 - Drag the timeline, or skip back and forward 10 seconds. A skip into what's already loaded is instant; further away, the picture takes a second to catch up.
@@ -123,6 +146,8 @@ How far you got is saved as you go: every minute, and whenever you pause, skip, 
 
 ## The next episode
 
+_It plays after a delay you set, from 0 to 60 seconds._
+
 When an episode ends, the next one plays after the delay in **Settings > Playback > Next episode delay**. Choose any whole number from 0 to 60 seconds. The default is ten seconds; 0 is **Instant**. Autoplay stays a separate **Next episode** switch.
 
 The end screen names the next episode, and says when a new season starts, as in "Finished S1 E3 · Season 2 is next". **Play now**, or N, starts it straight away. **Cancel** keeps the end on screen, with **Next episode** and **Episodes**, which opens the series. Leaving, starting something else or removing its subscription stops the countdown too. Settings holds the remaining seconds, even Instant. Closing Settings resumes that remainder if autoplay is on, including after an off/on edit while Settings was open. Final Off cancels it. Enabling autoplay later does not restart a cancelled countdown, and changing the delay applies to the next countdown. A failed settings read leaves manual **Next episode** available.
@@ -133,9 +158,13 @@ With none left to watch after it, the screen says that this was the last episode
 
 ## Continue watching
 
+_Home's row of movies you started and the episode you're on in each series._
+
 Home's **Continue watching** row shows what you were watching: movies you started, and for each series the episode you're on. A title counts as started after two minutes, and as finished in its last few minutes, where the credits run. A finished movie leaves the row, and so does a series once you watched every numbered episode of it. A finished episode stays as **Next episode**, which plays the next episode you haven't watched, the first earlier one you skipped when none is left after it, or opens the series' details once you watched them all. A series you [marked an episode of](#marking-episodes) shows the episode it goes on with: the one you marked unwatched, or the next one you haven't watched after the one you marked watched. When none is left after that one, it is the first earlier episode you haven't watched, and once every numbered episode is watched the series leaves the row. Specials don't count towards that. The tile follows what you watch: when an episode that was playing as you marked another reaches its end, the series moves on past it. It goes by the episodes the series listed when you last marked one or opened it, so episodes your provider added or took away since show once you open the series. The row shows what you saved, so it asks your provider nothing until you press play. The × on a tile takes it off the row, as **Remove from Continue watching** does.
 
 ## Keys
+
+_The keys while watching._
 
 | Key         | While watching                        |
 | ----------- | ------------------------------------- |
@@ -151,6 +180,8 @@ Home's **Continue watching** row shows what you were watching: movies you starte
 | Escape      | Close a menu, leave full screen, back |
 
 ## One connection
+
+_One thing plays at a time, across every subscription._
 
 Many subscriptions allow one connection at a time, and Mr. Streamer plays one thing at a time across all of them. Opening a movie or episode stops the live channel first, whichever subscription each is from, and Movies and Series don't play the muted live preview Home shows; it starts again when you go back to Home. A pause of more than five minutes lets go of the connection, and playing again picks up where you were. A [download](downloads.md) from the same subscription waits while anything of it plays.
 

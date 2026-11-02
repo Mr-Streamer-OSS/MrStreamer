@@ -1,8 +1,15 @@
 # Subscriptions
 
-Mr. Streamer plays the subscriptions you add: Xtream Codes access, with a server address, username and password, or an M3U playlist link. Playlists start with live TV; [mapping their groups](#mapping-mixed-playlists) also imports movies and series. You can add several, and everything from all of them shows together. There is no subscription to switch to: Home, Live TV, Movies, Series and search always show every one.
+Add your Xtream Codes login or M3U playlist link, and as many more as you like. Everything from all of them shows together.
+
+- **Xtream Codes.** A server address, username and password. Live TV, movies and series.
+- **M3U playlist.** One link. Playlists start with live TV; [mapping their groups](#mapping-mixed-playlists) also imports movies and series.
+- **Together.** There is no subscription to switch to: Home, Live TV, Movies, Series and search always show every one.
+- **One stream.** Mr. Streamer plays one thing at a time, so playing never takes a second connection from a provider.
 
 ## Adding one
+
+_The first on the Connect screen, every next one in Settings > Subscriptions._
 
 The first one is added on the Connect screen. Every next one in Settings (⌘, or Ctrl ,) > **Subscriptions** > **Add subscription**:
 
@@ -13,6 +20,8 @@ The first one is added on the Connect screen. Every next one in Settings (⌘, o
 Its channels join the lists first, then its guide, movies and series. What you're watching plays on meanwhile. The same account can't be added twice: adding it again updates the one you have.
 
 ## Mapping mixed playlists
+
+_Choose Live TV, Movies, Series or Skip for each group of a playlist._
 
 Open a playlist subscription in Settings and choose **Map** beside **Groups**. Choose each group's use: **Live TV**, **Movies**, **Series** or **Skip**. Picks apply immediately. A playlist without mapping stays live TV only.
 
@@ -30,6 +39,8 @@ Movie and episode progress belongs to the exact source file, including its entry
 
 ## Everything together
 
+_One list each for channels, favourites, Continue watching and the watchlist, across them all._
+
 - **Live TV** lists the channels of every subscription, in the order you added the subscriptions. Categories that are named the same, in the same country, are one category.
 - **Movies** and **Series** show a film or series that two subscriptions offer once, when both give the same [TMDB](https://www.themoviedb.org) id for it. Mr. Streamer never joins two titles because their names match.
 - **Favourites**, recently watched channels and Continue watching are one list each. [Reorder](live-tv.md#the-guide) arranges favourites from different subscriptions among each other.
@@ -44,6 +55,8 @@ Channel numbers stay each provider's own. When two channels share a number, typi
 
 ## One stream at a time
 
+_Starting something from another subscription stops what was playing._
+
 Mr. Streamer plays one thing at a time, across all subscriptions. Starting a channel, movie or episode from another subscription stops what was playing first, so playing never takes a second connection from a provider.
 
 From 0.0.23, now in Nightly, a [recording](live-tv.md#recordings) uses a connection of its own, beside what plays. Mr. Streamer starts one only while the subscription has a connection free: as many as an Xtream account allows, and one for a playlist. It can't see other devices using the same account.
@@ -52,6 +65,8 @@ Nothing switches to another subscription by itself. When a channel or a film doe
 
 ## Picking which subscription plays a title
 
+_The arrow beside Play lists every version and where it comes from._
+
 When several subscriptions offer a film or series, the arrow beside **Play** lists every version with the subscription it comes from. **Automatic** plays the one that suits your language. Pick another and that title plays it from then on.
 
 - A series lists the seasons and episodes of the subscription that plays it. Another subscription may have more, or fewer.
@@ -59,6 +74,8 @@ When several subscriptions offer a film or series, the arrow beside **Play** lis
 - Continue watching carries on in the subscription you were watching.
 
 ## Looking after them
+
+_Settings > Subscriptions shows how each one stands, to edit, refresh or retry it._
 
 Settings > **Subscriptions** lists each one with its kind and how it stands: when it ends, or the days left in its last month, and what plays from it. Click a row to see its account, its login and what was loaded from it. Opening a row only shows it. It never changes what the rest of the app shows.
 
@@ -69,6 +86,8 @@ Settings > **Subscriptions** lists each one with its kind and how it stands: whe
 - **Enter password**, or **Enter link**, shows on a subscription whose saved password or link your system no longer gives back. What was loaded from it still shows; it plays again once you've entered it. See [troubleshooting](troubleshooting.md#mr-streamer-asks-for-my-password-or-playlist-link-again).
 
 ## Guides from other addresses
+
+_XMLTV guides of your own in Settings > Guides, and Map for channels without programmes._
 
 A subscription's programme guide comes from its provider, or from the guide its playlist names. Settings > **Guides** adds XMLTV guides of your own, such as a paid guide service's. Every subscription reads them after its own guide, in the order listed.
 
@@ -97,6 +116,8 @@ Mappings stay through restarts, new channel lists and a new order in Settings > 
 
 ## Removing one
 
+_Its login and lists go. Favourites, history and progress stay unless you tick Also delete._
+
 Open its row and choose **Remove**. Mr. Streamer asks first, and says what happens:
 
 - What plays from it stops. What plays from another subscription carries on.
@@ -107,6 +128,8 @@ Open its row and choose **Remove**. Mr. Streamer asks first, and says what happe
 - Removing your only subscription returns to the Connect screen.
 
 ## Going back to an older version
+
+_Older versions show the first subscription you added and leave the rest untouched._
 
 Versions before several subscriptions know one: the first you added. Going back to one of them shows that subscription alone and leaves the others on your computer untouched, so they are there again after updating. A version from before 0.0.13 shows each subscription's own guide and not those of Settings > Guides, which stay on your computer for when you update again. If you removed that first one since, the older version asks you to connect. An account you connect there that you had added here shows once after updating, with its favourites, watchlist, history and progress.
 

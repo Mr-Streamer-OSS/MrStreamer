@@ -261,19 +261,43 @@
         <!-- Tabs once main.ts runs; without it every screen shows, one under the other. -->
         <section class="screens" id="screens" data-reveal>
           <div class="screens-head">
-            <h2>Same guide on the desk and on the couch.</h2>
+            <h2>Same <span class="noun">app</span> on the desk and on the couch.</h2>
           </div>
           <div class="tabs" role="tablist" aria-label="Screens" hidden>
-            <button type="button" role="tab" aria-controls="screen-guide" aria-selected="true">
+            <button
+              type="button"
+              role="tab"
+              aria-controls="screen-guide"
+              data-noun="guide"
+              aria-selected="true"
+            >
               TV Guide
             </button>
-            <button type="button" role="tab" aria-controls="screen-live" aria-selected="false">
+            <button
+              type="button"
+              role="tab"
+              aria-controls="screen-live"
+              data-noun="channels"
+              aria-selected="false"
+            >
               Live TV
             </button>
-            <button type="button" role="tab" aria-controls="screen-library" aria-selected="false">
+            <button
+              type="button"
+              role="tab"
+              aria-controls="screen-library"
+              data-noun="library"
+              aria-selected="false"
+            >
               Movies and series
             </button>
-            <button type="button" role="tab" aria-controls="screen-watching" aria-selected="false">
+            <button
+              type="button"
+              role="tab"
+              aria-controls="screen-watching"
+              data-noun="show"
+              aria-selected="false"
+            >
               Watching
             </button>
           </div>

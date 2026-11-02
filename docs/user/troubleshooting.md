@@ -1,8 +1,17 @@
 # Troubleshooting
 
+Find what you see below. Your data stays in one folder on your computer through all of it.
+
+- **Password or link asked again.** Your system stopped giving back the saved password or playlist link: enter it again in Settings > Subscriptions.
+- **Windows warns.** The installer isn't signed yet: choose **More info**, then **Run anyway**.
+- **AppImage won't open.** It needs FUSE 2: on Ubuntu, `sudo apt install libfuse2t64`.
+- **Still stuck.** [Open an issue](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) without your login.
+
 This guide covers the latest desktop release. See [Updates and channels](updates.md) to update an older installation.
 
 ## Where your data is
+
+_One folder on your computer, by system._
 
 Mr. Streamer keeps everything on your computer, in one folder:
 
@@ -19,6 +28,8 @@ Your password, or a playlist's link, uses your system's storage encryption. Linu
 
 ## Mr. Streamer asks for my password or playlist link again
 
+_Your system no longer gives back the saved password or link. Enter it again._
+
 Your system no longer gives Mr. Streamer the key to your saved password. That happens after a keychain reset, when you deny access, or after replacing the app with a differently signed build. Mr. Streamer still opens, and shows the channels, movies and series it loaded before; they play again once the password is back. Settings > Subscriptions says which subscriptions need theirs, each with **Enter password**: type it there, and the rest of the login stays as it was.
 
 For a playlist, the whole link was encrypted, because a link can hold a token. Mr. Streamer can only say which host it came from, so paste the link again with **Enter link**. It stays the same subscription, with its favourites and watch history.
@@ -29,14 +40,20 @@ To reset it, quit Mr. Streamer, open Keychain Access, delete the item named **Mr
 
 ## Windows warns about the installer
 
+_It isn't code-signed yet: More info, then Run anyway._
+
 The Windows installer isn't code-signed yet, so SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**. Your antivirus may ask as well.
 
 ## Linux
+
+_FUSE 2 for the AppImage, and where logins are kept._
 
 - **The AppImage doesn't open:** it needs FUSE 2. On Ubuntu, run `sudo apt install libfuse2t64`. Without it, starting it from a terminal with `--appimage-extract-and-run` also works.
 - **The login doesn't stay saved:** Linux can use GNOME Keyring or KWallet, or the `basic_text` fixed-key fallback. The fallback lets the login save but does not protect it from other programs running as you.
 
 ## Channels or login stop working
+
+_Encryption warnings, rejected logins, refused channels and missing guides._
 
 - **"… has no encrypted connection":** the address you typed doesn't work over https, so Mr. Streamer stopped before sending your login. **Connect without encryption** connects over http instead: your username and password then travel as plain text, so anyone on your network or between you and your provider can read them. If your provider offers an https address, use that. An address you type with `http://` connects over http straight away; the line under the field says so, and Settings > Subscriptions marks the login "not encrypted".
 - **"The server doesn't offer an encrypted connection at this address":** you typed `https://`, and the server answered without encryption there. Mr. Streamer stops before trying HTTP. Check with your provider for a working HTTPS address. An address entered without a scheme asks for your consent before using HTTP; an explicit `http://` address sends the login unencrypted.
@@ -55,6 +72,8 @@ The Windows installer isn't code-signed yet, so SmartScreen shows "Windows prote
 
 ## Playing on a TV
 
+_No TV in the list, or a TV that doesn't play._
+
 - **No TV in the list on Windows:** the list shows Google Cast devices that answer on your network. The TV and your computer have to be on the same network, and guest and "isolated" Wi-Fi networks keep devices from seeing each other. A VPN on your computer hides the network from Mr. Streamer too.
 - **No TV in Apple's list on macOS:** the list is macOS's own, and Mr. Streamer can't see what is in it. Turn AirPlay on in the TV's settings and check that both are on the same network. If macOS asked whether Mr. Streamer may find devices on your local network and you declined, allow it in System Settings > Privacy & Security > Local Network.
 - **"… didn't answer":** the TV was found and didn't take the connection. Check that it's on, then **Try again**.
@@ -66,11 +85,15 @@ The Windows installer isn't code-signed yet, so SmartScreen shows "Windows prote
 
 ## Updates
 
+_What the update messages mean._
+
 - **"GitHub is limiting requests":** Mr. Streamer asked GitHub directly, because the update list it normally reads wasn't there, and GitHub allows only so many requests an hour from one network, shared by everyone on it. Mr. Streamer waits until GitHub allows requests again and tries by itself; nothing needs doing.
 - **"You seem to be offline":** check your connection; Mr. Streamer tries again later on its own.
 - **An update didn't install:** Settings shows why. **Try again** downloads it again, or install it by hand from the [Releases page](https://github.com/Mr-Streamer-OSS/MrStreamer/releases).
 
 ## Still stuck
+
+_Open an issue, and leave out your login._
 
 [Open an issue](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with your system, the Mr. Streamer version from Settings > About, and what happened. Leave out your server address, username and password.
 

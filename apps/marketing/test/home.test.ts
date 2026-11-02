@@ -105,55 +105,61 @@ describe("the home page", () => {
 });
 
 describe("the download page", () => {
-  /** The visitor's own block: its heading, read with its parts apart, its line and its links. */
+  /** The visitor's own block: its line and its links. */
   const mine = () =>
     shown(".mine").map((block) => ({
-      heading: [...(block.querySelector("h2")?.childNodes ?? [])]
-        .map((node) => node.textContent?.trim())
-        .join(" "),
       line: said(block.querySelector(".note") ?? block),
       links: [...block.querySelectorAll("a")].map((link) => [
         said(link) || link.querySelector("img")?.alt,
         link.getAttribute("href"),
       ]),
     }));
+  /** The systems the rows list. */
+  const rows = () => shown(".row").map((row) => said(row.querySelector("dt") ?? row));
 
-  it("shows no block for a visitor whose system is unknown", () => {
+  it("tells a visitor whose system is unknown to open it on a computer, and lists every system", () => {
     openDownload(undefined, RELEASED);
     expect(mine()).toEqual([]);
+    expect(said(shown(".opening .answer")[0] ?? document.body)).toContain(
+      "Open this page on your computer",
+    );
+    expect(rows()).toEqual(["Mac", "Windows", "Linux"]);
   });
 
   it("puts the Microsoft Store first on Windows, with the setup .exe beside it", () => {
     openDownload("windows", RELEASED);
     expect(mine()).toEqual([
       {
-        heading: "Windows your system",
-        line: "Windows 11, 64-bit.",
+        line: "Windows 11, 64-bit. The Store keeps it updated. The setup .exe installs for your user without administrator rights.",
         links: [
           ["Get it from Microsoft", STORE],
           ["Setup .exe", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-win-x64-setup.exe`],
         ],
       },
     ]);
+    expect(rows()).toEqual(["Mac", "Linux"]);
+    expect(shown(".opening .answer")).toEqual([]);
   });
 
-  it("puts the DMG first on a Mac", () => {
+  it("puts the DMG first on a Mac, with the Homebrew command beside it", () => {
     openDownload("mac", RELEASED);
     expect(mine()).toEqual([
       {
-        heading: "Mac your system",
-        line: "macOS 13 or later, Apple silicon.",
-        links: [["Download the DMG", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-mac-arm64.dmg`], HOMEBREW],
+        line: "macOS 13 or later, Apple silicon. Open it and drag Mr. Streamer to Applications. Signed and notarized.",
+        links: [["Download the DMG", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-mac-arm64.dmg`]],
       },
     ]);
+    expect(said(shown(".mine .command")[0] ?? document.body)).toBe(
+      "or brew install --cask mr-streamer-oss/tap/mr-streamer",
+    );
+    expect(rows()).toEqual(["Windows", "Linux"]);
   });
 
   it("puts the AppImage first on Linux, with the .deb beside it", () => {
     openDownload("linux", RELEASED);
     expect(mine()).toEqual([
       {
-        heading: "Linux your system",
-        line: "64-bit Linux. The AppImage needs FUSE 2.",
+        line: "64-bit Linux. The AppImage needs FUSE 2, which is libfuse2t64 on Ubuntu. The .deb is for Ubuntu and Debian. Neither is signed: check the checksum.",
         links: [
           ["Download the AppImage", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-x86_64.AppImage`],
           [".deb", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-amd64.deb`],
@@ -161,21 +167,15 @@ describe("the download page", () => {
         ],
       },
     ]);
+    expect(rows()).toEqual(["Mac", "Windows"]);
   });
 
   it("names no version, and sends the block's link to the Releases page, without a known installer", () => {
     openDownload("mac");
-    expect(mine()).toEqual([
-      {
-        heading: "Mac your system",
-        line: "macOS 13 or later, Apple silicon.",
-        links: [["Download the DMG", LATEST], HOMEBREW],
-      },
-    ]);
+    expect(mine()[0]?.links).toEqual([["Download the DMG", LATEST]]);
 
     // The release is out, without its AppImage.
     openDownload("linux", { version: "0.0.8", installers: ["dmg", "exe", "deb"] });
-    expect(mine()[0]?.line).toBe("64-bit Linux. The AppImage needs FUSE 2.");
     expect(mine()[0]?.links).toEqual([
       ["Download the AppImage", LATEST],
       [".deb", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-linux-amd64.deb`],
@@ -187,16 +187,15 @@ describe("the download page", () => {
     openDownload(undefined, RELEASED);
 
     expect(links(".rows a")).toEqual([
-      ["Download the DMG", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-mac-arm64.dmg`],
+      ["DMG", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-mac-arm64.dmg`],
       HOMEBREW,
-      BREW_UPDATES,
       ["Microsoft Store", STORE],
-      ["Download the setup .exe", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-win-x64-setup.exe`],
-      ["Download the AppImage", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-x86_64.AppImage`],
-      ["Download the .deb", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-amd64.deb`],
+      ["Setup .exe", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-win-x64-setup.exe`],
+      ["AppImage", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-x86_64.AppImage`],
+      [".deb", `${FILES}/v0.0.7/Mr-Streamer-0.0.7-linux-amd64.deb`],
       AUR,
-      AUR_UPDATES,
     ]);
+    expect(links(".fine-print a[href^='/docs/']")).toEqual([BREW_UPDATES, AUR_UPDATES]);
     expect(said(document.querySelector("[data-release-version]") ?? document.body)).toBe(
       "Version 0.0.7.",
     );
@@ -206,15 +205,13 @@ describe("the download page", () => {
     openDownload();
 
     expect(links(".rows a")).toEqual([
-      ["Download the DMG on GitHub Releases", LATEST],
+      ["DMG on GitHub Releases", LATEST],
       HOMEBREW,
-      BREW_UPDATES,
       ["Microsoft Store", STORE],
-      ["Download the setup .exe on GitHub Releases", LATEST],
-      ["Download the AppImage on GitHub Releases", LATEST],
-      ["Download the .deb on GitHub Releases", LATEST],
+      ["Setup .exe on GitHub Releases", LATEST],
+      ["AppImage on GitHub Releases", LATEST],
+      [".deb on GitHub Releases", LATEST],
       AUR,
-      AUR_UPDATES,
     ]);
     expect(said(document.querySelector("[data-release-version]") ?? document.body)).toBe(
       "Stable release on GitHub.",
@@ -225,15 +222,13 @@ describe("the download page", () => {
     openDownload(undefined, { version: "0.0.8", installers: ["dmg", "exe", "appImage"] });
 
     expect(links(".rows a")).toEqual([
-      ["Download the DMG", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-mac-arm64.dmg`],
+      ["DMG", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-mac-arm64.dmg`],
       HOMEBREW,
-      BREW_UPDATES,
       ["Microsoft Store", STORE],
-      ["Download the setup .exe", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-win-x64-setup.exe`],
-      ["Download the AppImage", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-linux-x86_64.AppImage`],
-      ["Download the .deb on GitHub Releases", LATEST],
+      ["Setup .exe", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-win-x64-setup.exe`],
+      ["AppImage", `${FILES}/v0.0.8/Mr-Streamer-0.0.8-linux-x86_64.AppImage`],
+      [".deb on GitHub Releases", LATEST],
       AUR,
-      AUR_UPDATES,
     ]);
   });
 });
