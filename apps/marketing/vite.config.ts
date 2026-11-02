@@ -156,7 +156,12 @@ const config = (analytics: SiteCapture | null): UserConfig => ({
         server.middlewares.use((req, res, next) => {
           const path = req.url?.split("?")[0] ?? "/";
           if (path === "/llms.txt") res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          return addresses.has(path) || HTML_ALIAS.test(path) ? answer(req, res, next) : next();
+          // Vite's own /@ paths may be encoded; any other encoded address answers 404, as on Vercel.
+          return addresses.has(path) ||
+            HTML_ALIAS.test(path) ||
+            (path.includes("%") && !path.startsWith("/@"))
+            ? answer(req, res, next)
+            : next();
         });
         return () => server.middlewares.use(answer);
       },
