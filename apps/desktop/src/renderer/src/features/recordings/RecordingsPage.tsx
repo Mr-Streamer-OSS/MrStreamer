@@ -205,7 +205,7 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
   // Missed by a schedule: no file, so nothing plays and there is no size.
   const missed = recording.status.kind === "missed";
   const missing = recording.status.kind === "missing" || missed;
-  const { captured, planned, missed: late, gaps } = coverage(recording, now);
+  const { captured, planned, bar } = coverage(recording, now);
   const minutes = t("{captured} of {planned} min", { captured, planned });
   const { word, reason } = outcome(recording, now);
   // Kept by the recording, not the row: a Stop moves it from Now to Recorded, into a new row, before
@@ -249,7 +249,7 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
         </span>
       </div>
       <div className="flex w-[23.5rem] flex-none flex-col gap-1.5 xl:w-[10.75rem]">
-        <Coverage captured={captured} planned={planned} missed={late} gaps={gaps} faint={missing} />
+        <Coverage captured={captured} planned={planned} bar={bar} faint={missing} />
         <span className="hidden text-xs text-muted-foreground tabular-nums xl:block">
           {minutes}
         </span>
@@ -352,32 +352,31 @@ const HATCHED =
   "h-full bg-[repeating-linear-gradient(135deg,rgb(255_255_255/55%)_0_1px,transparent_1px_4px)]";
 
 /**
- * Minutes captured against those planned: a white line on a faint track, hatched for the minutes
- * `missed` at the start and for each of the `gaps` it missed since, by minutes from its start.
+ * Minutes captured against those planned: a white line on a faint track, hatched where `bar` says
+ * the start and each gap since were missed, as they were rather than rounded to minutes. A gap is
+ * at least a pixel, so one of seconds in a long recording still shows.
  */
 function Coverage({
   captured,
   planned,
-  missed,
-  gaps,
+  bar,
   faint,
 }: {
   captured: number;
   planned: number;
-  missed: number;
-  gaps: readonly { readonly from: number; readonly to: number }[];
+  bar: ReturnType<typeof coverage>["bar"];
   faint: boolean;
 }) {
-  // Where coverage reached: what was missed at the start, captured and missed since.
-  const reached = gaps.reduce((sum, gap) => sum + gap.to - gap.from, missed + captured);
-  const spans: { hatched: boolean; minutes: number }[] = [{ hatched: true, minutes: missed }];
-  let at = missed;
-  for (const gap of gaps) {
-    spans.push({ hatched: false, minutes: gap.from - at });
-    spans.push({ hatched: true, minutes: gap.to - Math.max(at, gap.from) });
+  const spans: { hatched: boolean; gap?: boolean; width: number }[] = [
+    { hatched: true, width: bar.late },
+  ];
+  let at = bar.late;
+  for (const gap of bar.gaps) {
+    spans.push({ hatched: false, width: gap.from - at });
+    spans.push({ hatched: true, gap: true, width: gap.to - Math.max(at, gap.from) });
     at = Math.max(at, gap.to);
   }
-  spans.push({ hatched: false, minutes: reached - at });
+  spans.push({ hatched: false, width: bar.reached - at });
   return (
     <span
       role="meter"
@@ -389,11 +388,13 @@ function Coverage({
     >
       {spans.map(
         (span, index) =>
-          span.minutes > 0 && (
+          span.width > 0 && (
             <span
               key={index}
-              className={span.hatched ? HATCHED : "h-full bg-foreground"}
-              style={{ width: `${(span.minutes / planned) * 100}%` }}
+              className={
+                span.hatched ? cn(HATCHED, span.gap && "min-w-px") : "h-full bg-foreground"
+              }
+              style={{ width: `${span.width * 100}%` }}
             />
           ),
       )}

@@ -1361,6 +1361,8 @@ export const de: Translation = {
   "There wasn't enough free space.": "Es war nicht genug freier Speicher da.",
   "{from} to {to} missed.": "{from} bis {to} verpasst.",
   "{minutes} min missed in between.": "{minutes} Min. zwischendurch verpasst.",
+  "Less than a minute missed at {time}.": "Weniger als eine Minute um {time} verpasst.",
+  "Less than a minute missed in between.": "Weniger als eine Minute zwischendurch verpasst.",
   "Paused at {time} while Mr. Streamer was closed or the computer slept.":
     "Um {time} pausiert, während Mr. Streamer geschlossen war oder der Computer schlief.",
   "Paused at {time}. Every connection is in use.":

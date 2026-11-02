@@ -1348,6 +1348,8 @@ export const nl: Translation = {
   "There wasn't enough free space.": "Er was niet genoeg vrije ruimte.",
   "{from} to {to} missed.": "{from} tot {to} gemist.",
   "{minutes} min missed in between.": "{minutes} min tussendoor gemist.",
+  "Less than a minute missed at {time}.": "Minder dan een minuut gemist om {time}.",
+  "Less than a minute missed in between.": "Minder dan een minuut tussendoor gemist.",
   "Paused at {time} while Mr. Streamer was closed or the computer slept.":
     "Gepauzeerd om {time} terwijl Mr. Streamer dicht was of de computer sliep.",
   "Paused at {time}. Every connection is in use.":
