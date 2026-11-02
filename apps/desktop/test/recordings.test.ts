@@ -1448,6 +1448,9 @@ describe.skipIf(!hasTools)("recordings", () => {
     // older copy is put back, which would overwrite what that one wrote.
     await rm(manifest, { recursive: true });
     await recordings.check();
+    expect(JSON.parse(await readFile(manifest, "utf8"))).toMatchObject({
+      recordings: [expect.objectContaining({ id, progress: { position: 42, duration: 90 } })],
+    });
     await quit();
 
     const again = await app(dataDir);
