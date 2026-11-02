@@ -13,7 +13,15 @@ export default function SeriesLayout() {
     <Stack screenOptions={useTabScreenOptions("series")}>
       <Stack.Screen name="index" options={{ title: t("Series"), headerLargeTitle: true }} />
       <Stack.Screen name="collection/[id]" options={{ title: "" }} />
-      <Stack.Screen name="title/[id]" options={{ title: "", headerTransparent: true }} />
+      <Stack.Screen
+        name="title/[id]"
+        // Unpadded: the details keep their content inside the side safe area themselves.
+        options={{
+          title: "",
+          headerTransparent: true,
+          contentStyle: { backgroundColor: "#000000" },
+        }}
+      />
       <Stack.Screen name="downloads" options={{ title: t("Downloads") }} />
       <Stack.Screen name="settings" options={{ title: t("Settings") }} />
       <Stack.Screen name="provider" options={{ title: "" }} />
