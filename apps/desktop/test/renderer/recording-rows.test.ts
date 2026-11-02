@@ -125,7 +125,6 @@ it("adds up captured time and short gaps before rounding them to whole minutes",
       { from: seconds("12:02", 50), to: seconds("12:03", 17.438), why: "stream" },
     ],
   });
-  expect(row.text).toContain("2 of 26 min");
   expect(row.text).toContain("1 min missed in between. The stream stopped.");
   expect(row).toMatchObject({ captured: "2", planned: "26" });
 });

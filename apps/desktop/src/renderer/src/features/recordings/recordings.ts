@@ -193,12 +193,13 @@ export function coverage(
   };
 } {
   const from = coverageStart(recording);
-  const planned = Math.max(1, Math.floor((recording.stop - from) / MINUTE_MS));
+  const minutes = (ms: number) => Math.max(0, Math.floor(ms / MINUTE_MS));
+  const planned = Math.max(1, minutes(recording.stop - from));
   const share = (at: number) =>
     Math.min(1, Math.max(0, (at - from) / Math.max(1, recording.stop - from)));
   if (recording.status.kind === "missed")
     return { captured: 0, planned, bar: { late: 1, reached: 1, gaps: [] } };
-  const late = Math.min(planned, Math.max(0, Math.floor((recording.start - from) / MINUTE_MS)));
+  const late = Math.min(planned, minutes(recording.start - from));
   const complete = recording.status.kind === "complete";
   const reached = complete ? recording.stop : Math.min(recording.ended ?? now, recording.stop);
   const gaps = (recording.gaps ?? []).flatMap((gap) => {
@@ -208,10 +209,7 @@ export function coverage(
   const lost = gaps.reduce((sum, gap) => sum + gap.to - gap.from, 0);
   const captured = complete
     ? planned - late
-    : Math.min(
-        planned - late,
-        Math.max(0, Math.floor((reached - recording.start - lost) / MINUTE_MS)),
-      );
+    : Math.min(planned - late, minutes(reached - recording.start - lost));
   return {
     captured,
     planned,
