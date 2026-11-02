@@ -4,8 +4,8 @@ import { cn } from "../../lib/utils.ts";
 /**
  * A native select drawn as a compact field: the control radius, the row height and the app's
  * chevron, which styles.css draws for `data-slot="select"`. The list it opens and its keys stay
- * the system's, but its options are painted opaque: on Windows they would otherwise inherit the
- * field's translucent background and open a white list with near-white text.
+ * the system's. Its options get opaque colors for Chromium's Windows popup, which otherwise opens
+ * a white list under the translucent field, with near-white text.
  */
 export function NativeSelect({ className, ...props }: ComponentProps<"select">) {
   return (
