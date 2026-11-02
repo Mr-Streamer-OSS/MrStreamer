@@ -12,7 +12,6 @@
 //   `image.example` from its DevTools session; the simulator has none, so the lists name `/art/`
 //   here instead. React Native's Image draws no SVG, so the drawn logos come as PNG, rendered from
 //   the demo's SVG with rsvg-convert.
-//
 // - The demo's TMDB stand-in under `/tmdb/3`, without picture paths (see `tmdb`).
 //
 // Everything else, the API, the guide and the episode file, is the demo's adapter's answer.

@@ -31,7 +31,7 @@ const settle = (part: Element): void => {
 
 /**
  * Runs a part's animations once, from where their keyframes start to where the part rests, and
- * settles it once every one of them, the stack's windows included, has finished or was dropped.
+ * settles it once every one of them has finished or was dropped.
  * A run that was settled meanwhile, by leaving the screen or hiding the page, leaves it be.
  */
 async function play(part: Element): Promise<void> {
@@ -82,16 +82,11 @@ if (tricks) {
   let frame = 0;
   const light = (): void => {
     frame = 0;
-    const middle = innerHeight / 2;
-    const distance = (row: Element): number => {
+    const distances = rows.map((row) => {
       const { top, bottom } = row.getBoundingClientRect();
-      return Math.abs((top + bottom) / 2 - middle);
-    };
-    const nearest = rows.reduce<Element | undefined>(
-      (best, row) => (best && distance(best) <= distance(row) ? best : row),
-      undefined,
-    );
-    const at = nearest ? rows.indexOf(nearest) : 0;
+      return Math.abs((top + bottom) / 2 - innerHeight / 2);
+    });
+    const at = distances.indexOf(Math.min(...distances));
     rows.forEach((row, index) => {
       row.classList.toggle("lit", index === at);
       // Rows above the lit one: their cards leave upward and come back down from above.

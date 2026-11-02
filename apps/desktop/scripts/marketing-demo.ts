@@ -449,9 +449,12 @@ function guideId(channel: { readonly streamId: number }): string {
   return `channel${channel.streamId}.demo`;
 }
 
-/** A programme's length: each title keeps the one the manifest gives it, from 15 minutes to 2 hours. */
+/** Each programme's length in minutes, from 15 minutes to 2 hours, by its title. */
+const PROGRAMME_MINUTES = new Map(Object.entries(manifest.programmeMinutes));
+
+/** A programme's length: each title keeps the one the manifest gives it. */
 function lengthOf(title: string): number {
-  const minutes = (manifest.programmeMinutes as Readonly<Record<string, number>>)[title];
+  const minutes = PROGRAMME_MINUTES.get(title);
   if (!minutes) throw new Error(`The demo manifest gives "${title}" no length.`);
   return minutes * MINUTE_MS;
 }

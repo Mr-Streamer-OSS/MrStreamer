@@ -59,7 +59,7 @@ interface Cut {
  * size that stays readable in a narrow column.
  */
 const CUTS: Readonly<Record<string, Cut>> = {
-  // What a phone shows of Home above the fold: the stage preview, favourites and the rows' start.
+  // Home's stage preview, favourites and the rows' start.
   "home-stage": { master: "home", left: 16, top: 56, width: 574, height: 540 },
   // The playing preview and the channel list with what's on.
   "live-tv": { master: "live-tv", left: 236, top: 56, width: 600, height: 500 },
