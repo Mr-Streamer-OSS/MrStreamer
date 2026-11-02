@@ -464,8 +464,8 @@ function transferring(record: Stored): Live | null {
 
 /**
  * Authorizations whose viewer pause this process asked and the native side hasn't answered as
- * kept: in flight, timed out or refused. What a reconcile reports covers the rest, a relaunch's
- * included.
+ * kept or let go: in flight, timed out or refused. What a reconcile reports covers the rest, a
+ * relaunch's included.
  */
 const unkept = new Set<string>();
 
@@ -1941,6 +1941,12 @@ function ask(id: string): () => boolean {
 }
 
 /**
+ * Downloads whose pause the Pause that wrote it hasn't had answered: a Pause asked meanwhile
+ * stands in for it, and a refusal of either takes that pause back.
+ */
+const pausing = new Set<string>();
+
+/**
  * Pauses a queued or transferring download where it is, or asks again for a pause the native side
  * hasn't kept while it transfers: written on its record, then held on the native side, so neither
  * the queue nor a relaunch starts it again until it is resumed. Resolves once its request ended
@@ -1952,8 +1958,9 @@ export async function pauseDownload(id: string): Promise<Paused> {
   if (!unfinished(record) || pausedNow(record)) return "unchanged";
   const bound = boundOf(record);
   const latest = ask(id);
-  // Asked again for a pause not kept yet: a refusal leaves that pause to the refills.
-  const fresh = record.paused !== true;
+  // Asked again for a pause an earlier answer left standing: a refusal leaves it to the refills.
+  const fresh = record.paused !== true || pausing.has(id);
+  if (fresh) pausing.add(id);
   if (bound) unkept.add(bound.authorization);
   update(id, (stored) => ({ ...stored, paused: true }));
   tell();
@@ -1968,6 +1975,8 @@ export async function pauseDownload(id: string): Promise<Paused> {
       goOn();
       throw new AppFailure({ kind: "unexpected", detail: "The pause couldn't be kept." });
     }
+  } finally {
+    if (latest()) pausing.delete(id);
   }
   goOn();
   const closed = await transfers.drainDownload(id).then(
@@ -1987,6 +1996,7 @@ export async function resumeDownload(id: string): Promise<void> {
   const record = find(id);
   if (!unfinished(record) || !record.paused) return;
   const latest = ask(id);
+  pausing.delete(id);
   update(id, withoutPause);
   tell();
   const bound = boundOf(record);

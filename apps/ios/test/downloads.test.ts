@@ -1695,6 +1695,57 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
   });
 
+  it("keeps a Pause asked while an earlier Resume was refused", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    await app.addDownload(movieRef(a));
+    const next = await app.addDownload(movieRef(a, otherMovie().id));
+    await until(() => background.open(next.id).length === 1, "the next one authorized");
+    await app.pauseDownload(next.id);
+    expect(statusOf(app, next.id)?.kind).toBe("paused");
+    const { transfers } = await import("../src/download-task.ts");
+    const hold = vi.spyOn(transfers, "holdAuthorization");
+    onTestFinished(() => hold.mockRestore());
+    hold.mockImplementationOnce(async () => {
+      await sleep(300);
+      throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
+    });
+    const resuming = app.resumeDownload(next.id);
+    await sleep(50);
+    await app.pauseDownload(next.id);
+    // The Pause since decides: the Resume's refusal neither puts it back nor says so.
+    await expect(resuming).resolves.toBeUndefined();
+    expect(doc().items.find((item: { id: string }) => item.id === next.id).paused).toBe(true);
+    expect(statusOf(app, next.id)?.kind).toBe("paused");
+  });
+
+  it("reads Paused once a refill finds a hold whose answer was lost kept", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    const { transfers } = await import("../src/download-task.ts");
+    const command = transfers.holdAuthorization.bind(transfers);
+    const hold = vi.spyOn(transfers, "holdAuthorization");
+    onTestFinished(() => hold.mockRestore());
+    // Written natively, then answered past its deadline; URLSession hasn't ended the request.
+    native.held = [];
+    hold.mockImplementationOnce(async (...args) => {
+      await command(...args);
+      throw busy();
+    });
+    const pausing = app.pauseDownload(film.id);
+    await sleep(500);
+    expect(native.open).toBe(1);
+    expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+    const endings = native.held;
+    native.held = null;
+    for (const ending of endings) ending();
+    await expect(pausing).resolves.toBe("closed");
+  });
+
   it("reads a pause a relaunch interrupted as its transfer until the native side keeps it", async () => {
     let app = await installedApp();
     const { a } = await withProviders(app);
@@ -1715,6 +1766,29 @@ describe("downloads", { timeout: 30_000 }, () => {
     appGoes("active");
     await until(() => native.open === 0, "the pause to be kept");
     expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+  });
+
+  it("takes back a pause whose Pause and its double tap are both refused", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    const { transfers } = await import("../src/download-task.ts");
+    const hold = vi.spyOn(transfers, "holdAuthorization");
+    onTestFinished(() => hold.mockRestore());
+    // Each hold is refused a moment later, the refills' too.
+    hold.mockImplementation(async () => {
+      await sleep(200);
+      throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
+    });
+    const first = app.pauseDownload(film.id);
+    const second = app.pauseDownload(film.id);
+    await expect(second).rejects.toThrow();
+    await expect(first).resolves.not.toBe("unchanged");
+    expect(doc().items[0].paused).toBeUndefined();
+    expect(native.open).toBe(1);
+    expect(statusOf(app, film.id)?.kind).toBe("transferring");
   });
 
   it("keeps an earlier pause when Pause is asked again and refused", async () => {
