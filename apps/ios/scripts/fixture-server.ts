@@ -30,8 +30,15 @@
 // with their files served here, byte ranges and all, since the panel's own redirect names a port
 // the simulator can't reach, at a pace, breaking off or changing as the control port says
 // (scripts/native-fixtures/transfers.ts). The TEST titles stream their clips from apps/desktop/test/fixtures
-// as they are (MKV, AVI, MPEG-TS, MOV and MP4), so what AVPlayer can't open fails as it would;
-// every other title streams a ten-minute H.264 + AAC feature made here, long enough to resume.
+// in their own containers and codecs (MKV, AVI, MPEG-TS, MOV and MP4), so what AVPlayer can't open
+// fails as it would; every other title streams a ten-minute H.264 + AAC feature made here, long
+// enough to resume.
+//
+// Everything it serves is silent: its own media carries silence where a tone would be, and a TEST
+// clip with sound is served as a copy whose sound is silent in the same tracks and codecs (a clip
+// already silent goes as it is). FIXTURE_SOUND=1 serves the tones and the clips as they are, for a
+// test about sound itself; see docs/contributing/testing.md.
+//
 // A fake TMDB (apps/desktop/test/fake-tmdb.ts) answers under /tmdb/3. It answers TMDB's API only:
 // the app builds its pictures' addresses on image.tmdb.org whatever API it is given, and the
 // panel's posters are on image.example, so neither comes from here.
@@ -78,7 +85,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
   measurementTitles,
   pngLogo,
@@ -93,7 +100,14 @@ import { browseControls, browseTitles } from "./browse-profile.ts";
 import { liveLists } from "./live-lists.ts";
 import { catchUpPlaylist } from "./native-fixtures/catch-up.ts";
 import { liveLink } from "./native-fixtures/live-link.ts";
-import { livePlaylist, mediaMaker, type Media } from "./native-fixtures/media.ts";
+import {
+  dispositions,
+  livePlaylist,
+  mediaMaker,
+  silencing,
+  tone,
+  type Media,
+} from "./native-fixtures/media.ts";
 import { liveTracks, tracksChannel, TRACKS_STREAM_ID } from "./native-fixtures/tracks.ts";
 import { titleTransfers } from "./native-fixtures/transfers.ts";
 
@@ -121,7 +135,7 @@ const log = join(out, second ? `requests-${port}.jsonl` : "requests.jsonl");
 const maker = mediaMaker(root, out, second ? `provenance-${port}.json` : "provenance.json");
 
 /**
- * A minute of test picture with its clock, inset on a light or a dark field, and a tone: 720p at
+ * A minute of test picture with its clock, inset on a light or a dark field, and a `tone`: 720p at
  * about 1.5 Mbit/s, or with `capped`, that size at that constant video rate.
  */
 function picture(name: string, field: string, capped?: { size: string; rate: string }): Media {
@@ -129,7 +143,7 @@ function picture(name: string, field: string, capped?: { size: string; rate: str
   return maker.make(name, [
     ...["-f", "lavfi", "-i", `color=c=${field}:s=${size}:r=30:d=60`],
     ...["-f", "lavfi", "-i", "testsrc=s=480x270:r=30:d=60"],
-    ...["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:d=60"],
+    ...["-f", "lavfi", "-i", tone(440, 60)],
     ...["-filter_complex", "[0][1]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]"],
     ...["-map", "[v]", "-map", "2"],
     ...["-c:v", "libx264", "-profile:v", "high", "-g", "60", "-sc_threshold", "0", "-b:v", rate],
@@ -149,21 +163,22 @@ const qualities = new Map([
 ]);
 /**
  * What catch-up channels recorded: ten minutes of test picture whose counter shows the seconds
- * since the programme's start, and a 550 Hz tone, apart from any channel's live picture.
+ * since the programme's start, and a 550 Hz tone (`tone`), apart from any channel's live picture.
  */
 const past = maker.make("past", [
   ...["-f", "lavfi", "-i", "testsrc=s=640x360:r=25:d=600"],
-  ...["-f", "lavfi", "-i", "sine=frequency=550:sample_rate=48000:d=600"],
+  ...["-f", "lavfi", "-i", tone(550, 600)],
   ...["-c:v", "libx264", "-profile:v", "main", "-g", "50", "-sc_threshold", "0", "-b:v", "400k"],
   ...["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "64k"],
 ]);
 const dark = picture("dark", "0x050505");
 const recordings = new Map<string, Media>();
-/** A TEST channel's recording, its streams copied as they are. */
+/** A TEST channel's recording, its streams copied as they are, their sound silenced. */
 function recording(file: string): Media {
   let found = recordings.get(file);
   if (!found) {
-    found = maker.make(file.replace(/\W/g, "-"), ["-i", join(fixtures, file), "-c", "copy"]);
+    const clip = join(fixtures, file);
+    found = maker.make(file.replace(/\W/g, "-"), ["-i", clip, "-c", "copy", ...silencing(clip)]);
     recordings.set(file, found);
   }
   return found;
@@ -217,21 +232,46 @@ tmdb.stream(
   provider.titles.series.slice(0, 6).map((series) => series.tmdb ?? String(series.id + 10_000)),
 );
 
-/** Ten minutes of test picture with its clock and a tone, for titles to resume partway. */
+/** Ten minutes of test picture with its clock and a tone (`tone`), for titles to resume partway. */
 const feature = maker.file(
   "feature",
   [
     ...["-f", "lavfi", "-i", "testsrc2=s=640x360:r=25:d=600"],
-    ...["-f", "lavfi", "-i", "sine=frequency=330:sample_rate=48000:d=600"],
+    ...["-f", "lavfi", "-i", tone(330, 600)],
     ...["-c:v", "libx264", "-profile:v", "main", "-g", "50", "-b:v", "300k", "-pix_fmt", "yuv420p"],
     ...["-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart"],
   ],
   "feature.mp4",
 );
+const clips = new Map<string, string>();
+/**
+ * A TEST title's clip as the repository has it, or, when it has sound to silence, a copy of every
+ * stream with its sound silenced, its container, codecs and dispositions as they were. The copy's
+ * start times move by tens of milliseconds, and an MPEG-TS clip's teletext is re-timed by ffmpeg's
+ * muxer, which no iOS path reads.
+ */
+function clipOf(fixture: string) {
+  let found = clips.get(fixture);
+  if (!found) {
+    const clip = join(fixtures, fixture);
+    const silenced = silencing(clip);
+    if (silenced.length === 0) {
+      maker.served(fixture, clip);
+      found = clip;
+    } else {
+      // ffmpeg names no format by the .mpegts ending.
+      const format = fixture.endsWith(".mpegts") ? ["-f", "mpegts"] : [];
+      const copy = ["-map", "0", "-c", "copy", ...silenced, ...dispositions(clip), ...format];
+      found = maker.file(fixture.replace(/\W/g, "-"), ["-i", clip, ...copy], fixture);
+    }
+    clips.set(fixture, found);
+  }
+  return found;
+}
 /** What each movie's and episode's address streams: a file, or null for a missing one. */
 const titleFiles = new Map<string, string | null>();
 const fileOf = (name: string, fixture: string | null) =>
-  fixture === null ? null : name.startsWith("TEST") ? join(fixtures, fixture) : feature;
+  fixture === null ? null : name.startsWith("TEST") ? clipOf(fixture) : feature;
 for (const movie of provider.titles.movies) {
   titleFiles.set(`movie/${movie.id}`, fileOf(movie.name, movie.fixture));
 }
@@ -239,9 +279,6 @@ for (const series of provider.titles.series) {
   for (const episode of series.seasons.flat()) {
     titleFiles.set(`series/${episode.id}`, fileOf(series.name, episode.fixture));
   }
-}
-for (const file of new Set(titleFiles.values())) {
-  if (file && file !== feature) maker.served(basename(file), file);
 }
 const transfers = titleTransfers((title) => titleFiles.has(title));
 const link = liveLink();

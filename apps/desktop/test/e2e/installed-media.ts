@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { fixture, startFakeProvider } from "../fake-provider.ts";
 import { startFakeTmdb } from "../fake-tmdb.ts";
-import { connect, type Page } from "./app.ts";
+import { connect, silent, type Page } from "./app.ts";
 import { closeNative } from "./analytics-exit.ts";
 import { installedTelemetryPair } from "./analytics-installed-pair.ts";
 import { installCatalogueWorkerProbe, type Evidence } from "./installed-catalogue-worker.ts";
@@ -243,6 +243,7 @@ function launch(
     `--user-data-dir=${profile}`,
     "--enable-automation",
     "--lang=en-US",
+    ...silent,
     ...(process.platform === "linux" ? ["--no-sandbox"] : []),
     ...(process.platform === "darwin" ? ["--use-mock-keychain"] : []),
   ];

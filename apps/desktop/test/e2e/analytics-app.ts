@@ -33,7 +33,7 @@ import {
 } from "../../src/main/analytics/model.ts";
 import { startFakeProvider } from "../fake-provider.ts";
 import { startFakeTmdb } from "../fake-tmdb.ts";
-import { connect, delay, type Page } from "./app.ts";
+import { connect, delay, silent, type Page } from "./app.ts";
 import { analyticsOptions } from "./analytics-options.ts";
 import { boundary } from "./analytics-boundary.ts";
 import { closeNative } from "./analytics-exit.ts";
@@ -394,6 +394,7 @@ async function launch(readDelayMs = options.slowStartup ? 1700 : 0) {
       `--user-data-dir=${profile}`,
       "--enable-automation",
       "--use-mock-keychain",
+      ...silent,
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
       ...(target.executable ? packagedArgs : [desktop]),
     ],

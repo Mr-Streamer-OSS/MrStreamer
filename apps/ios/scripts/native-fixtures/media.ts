@@ -3,15 +3,17 @@
 // apps/desktop/test/fixtures, which apps/desktop/scripts writes; no provider or broadcast media.
 // Each piece is made once into `<out>/media/<name>-<hash>`, a hash of its command, its input files
 // and the ffmpeg making it, so a change to any of them makes it again instead of serving what was
-// made before. It is made in a directory of its own and moved there only once complete.
+// made before. It is made in a directory of its own and moved there only once complete. Its sound
+// is silence, in the same tracks and codecs, unless FIXTURE_SOUND=1 (`tone`, `silencing`).
 //
 // The provenance the server declares (its control port's /provenance and provenance.json) names
 // the commit and whether the fixture sources differ from it, the ffmpeg that made the media, and
 // per piece its command, its inputs (a lavfi graph, or a repository file and its SHA-256) and the
-// SHA-256 of every file served from it. Repository clips the server sends as they are, the TEST
-// titles' files, are declared too. A made piece's files are named from `out`, a served clip's from
-// the repository's root, as its input is.
-import { execFileSync } from "node:child_process";
+// SHA-256 of every file served from it. TEST titles' clips the server sends as they are, those
+// with no sound to silence or all of them with FIXTURE_SOUND=1, are declared too; one with sound
+// is a made piece. A made piece's files are named from `out`, a served clip's from the
+// repository's root, as its input is.
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -34,6 +36,79 @@ export interface Media {
 const WINDOW = 5;
 
 const sha256 = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * Whether the media keeps its sound. It is silent unless FIXTURE_SOUND=1, which a test about sound
+ * itself sets: a track switch heard, volume, or captions in step with speech. Silent media keeps
+ * its tracks and codecs; a silenced clip's start times move by tens of milliseconds (`clipOf`).
+ */
+const SOUND = process.env.FIXTURE_SOUND === "1";
+
+/** The lavfi source of a `frequency` Hz tone, mono at 48 kHz, or as long a silence without SOUND. */
+export const tone = (frequency: number, seconds?: number) => {
+  const length = seconds === undefined ? "" : `:d=${seconds}`;
+  return SOUND
+    ? `sine=frequency=${frequency}:sample_rate=48000${length}`
+    : `aevalsrc=0:s=48000${length}`;
+};
+
+/** ffmpeg's encoder for a codec ffprobe names, where the two differ. */
+const ENCODERS: Readonly<Record<string, string>> = { mp3: "libmp3lame" };
+
+/**
+ * The output options, after a `-c copy`, that silence repository `clip`'s sound in the codecs it
+ * has: audio stream n keeps codec n. None, leaving the clip as it is, with SOUND, or when it has no
+ * sound above -60 dBFS to hear, as clips whose indexes are the test keep theirs.
+ */
+export function silencing(clip: string): string[] {
+  if (SOUND) return [];
+  const codecs = probe<{ codec_name: string }>(clip, [
+    ...["-select_streams", "a", "-show_entries", "stream=codec_name"],
+  ]).map((stream) => stream.codec_name);
+  if (codecs.length === 0 || peak(clip) <= -60) return [];
+  return [
+    ...codecs.flatMap((codec, index) => [`-c:a:${index}`, ENCODERS[codec] ?? codec]),
+    ...["-af", "volume=0"],
+  ];
+}
+
+/**
+ * Options that keep the disposition of each stream of `clip` in a copy of all of them (`-map 0`),
+ * which ffmpeg would otherwise change, marking a track default where the clip marks none.
+ */
+export function dispositions(clip: string): string[] {
+  const streams = probe<{ index: number; disposition: Record<string, number> }>(clip, [
+    ...["-show_entries", "stream=index:stream_disposition"],
+  ]);
+  return streams.flatMap(({ index, disposition }) => {
+    const flags = Object.keys(disposition).filter((flag) => disposition[flag] === 1);
+    return [`-disposition:${index}`, flags.join("+") || "0"];
+  });
+}
+
+/** ffprobe's streams of `clip`, as `entries` chooses them and their fields. */
+function probe<Stream>(clip: string, entries: string[]): Stream[] {
+  // JSON, as CSV lists an MPEG-TS stream again under each program.
+  const json = execFileSync("ffprobe", ["-v", "error", ...entries, "-of", "json", clip], {
+    encoding: "utf8",
+  });
+  return (JSON.parse(json) as { streams: Stream[] }).streams;
+}
+
+/** The loudest sample of `file`'s sound, in dBFS. */
+export function peak(file: string): number {
+  // volumedetect reports on stderr, once for each audio stream.
+  const { stderr } = spawnSync(
+    "ffmpeg",
+    ["-nostdin", "-i", file, "-map", "0:a", "-af", "volumedetect", "-f", "null", "-"],
+    { encoding: "utf8" },
+  );
+  const peaks = [...stderr.matchAll(/max_volume: (\S+) dB/g)].map(([, level]) =>
+    level === "-inf" ? -Infinity : Number(level),
+  );
+  if (peaks.length === 0) throw new Error(`ffmpeg measured no sound in ${file}`);
+  return Math.max(...peaks);
+}
 
 /** Whether process `pid` is running. */
 function alive(pid: number) {

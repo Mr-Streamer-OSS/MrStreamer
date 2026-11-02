@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { tone } from "../../scripts/native-fixtures/media.ts";
 
 export function prepareMedia(directory: string) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -37,7 +38,7 @@ export function prepareMedia(directory: string) {
       "-f",
       "lavfi",
       "-i",
-      `sine=frequency=${frequency}:sample_rate=48000`,
+      tone(frequency),
       "-t",
       "6",
       "-ac",

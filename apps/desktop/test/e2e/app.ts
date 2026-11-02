@@ -3,7 +3,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import type { FakeProvider } from "../fake-provider.ts";
 
-/** Starts the app with remote debugging on `port` and its data in `profile`. */
+/**
+ * Chromium's `--mute-audio`, for every launch of the app that may play: it decodes and plays as
+ * ever, its own volume and mute untouched, but nothing reaches the speakers. FIXTURE_SOUND=1 leaves
+ * it out, for a test about sound itself (docs/contributing/testing.md).
+ */
+export const silent: readonly string[] =
+  process.env["FIXTURE_SOUND"] === "1" ? [] : ["--mute-audio"];
+
+/** Starts the app with remote debugging on `port`, its data in `profile` and its sound `silent`. */
 export function launch(
   executable: string,
   args: readonly string[],
@@ -11,7 +19,12 @@ export function launch(
 ): ChildProcess {
   return spawn(
     executable,
-    [`--remote-debugging-port=${options.port}`, `--user-data-dir=${options.profile}`, ...args],
+    [
+      `--remote-debugging-port=${options.port}`,
+      `--user-data-dir=${options.profile}`,
+      ...silent,
+      ...args,
+    ],
     // No automatic update checks and no TMDB, a closed port unless the caller serves one: both
     // would reach the network in the middle of a measurement.
     {
