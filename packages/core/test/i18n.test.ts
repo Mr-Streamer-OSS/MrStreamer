@@ -217,3 +217,32 @@ describe("dates, numbers and lists", () => {
     expect(formatDate(at, "date")).toBe("2 Oct 2026");
   });
 });
+
+describe("dates in the system time zone", () => {
+  const zone = process.env["TZ"];
+  afterEach(() => {
+    if (zone === undefined) delete process.env["TZ"];
+    else process.env["TZ"] = zone;
+  });
+
+  it("follow the system when its time zone changes while the app runs", () => {
+    const noon = Date.UTC(2026, 10, 1, 12);
+    process.env["TZ"] = "UTC";
+    expect(formatDate(noon, "time")).toBe("12:00 PM");
+    expect(formatDate(new Date(noon), "weekdayDay")).toBe("Sun, Nov 1");
+    process.env["TZ"] = "America/New_York";
+    expect(formatDate(noon, "time")).toBe("07:00 AM");
+    process.env["TZ"] = "Pacific/Kiritimati";
+    expect(formatDate(new Date(noon), "weekdayDay")).toBe("Mon, Nov 2");
+    // Across a daylight saving change, each moment keeps its own offset.
+    process.env["TZ"] = "Europe/Amsterdam";
+    setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+    expect(formatDate(Date.UTC(2026, 2, 29, 0, 30), "time")).toBe("01:30");
+    expect(formatDate(Date.UTC(2026, 2, 29, 1, 30), "time")).toBe("03:30");
+  });
+
+  it("keep a calendar day on its own date", () => {
+    process.env["TZ"] = "America/Los_Angeles";
+    expect(formatDate(Date.UTC(2026, 9, 2), "calendarDay")).toBe("Oct 2, 2026");
+  });
+});

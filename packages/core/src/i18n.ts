@@ -273,18 +273,32 @@ const DATE_STYLES = {
   medium: { dateStyle: "medium" },
   /** A calendar day with no time of its own, as TMDB gives air dates, read as UTC. */
   calendarDay: { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" },
-} as const satisfies Record<string, Intl.DateTimeFormatOptions>;
+  // Every style is written in UTC (see formatDate), so a style's own zone can only be UTC, and no
+  // style shows a zone name.
+} as const satisfies Record<
+  string,
+  Intl.DateTimeFormatOptions & { timeZone?: "UTC"; timeZoneName?: never }
+>;
 
 export type DateStyle = keyof typeof DATE_STYLES;
 
-/** A moment in the interface language, in one of the app's few date styles. */
+/**
+ * A moment in the interface language, in one of the app's few date styles. A UTC style writes it
+ * as is; every other style writes it in the system's time zone as it is now. The zone can change
+ * while the app runs and a kept formatter would keep the old one, so kept formatters write UTC
+ * and a local moment first moves by Date's offset for it.
+ */
 export function formatDate(at: number | Date, style: DateStyle): string {
   const tag = active.formats;
+  const options = DATE_STYLES[style];
+  const time = Number(at);
+  const wallClock =
+    "timeZone" in options ? time : time - new Date(time).getTimezoneOffset() * 60_000;
   return made(
     dateFormats,
     `${style} ${tag}`,
-    () => new Intl.DateTimeFormat(tag, DATE_STYLES[style]),
-  ).format(at);
+    () => new Intl.DateTimeFormat(tag, { ...options, timeZone: "UTC" }),
+  ).format(wallClock);
 }
 
 /** A language by its name in the interface language: "Dutch", "néerlandais". Null when unknown. */
