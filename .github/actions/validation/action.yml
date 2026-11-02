@@ -158,18 +158,21 @@ runs:
         REPORT_NAME: ${{ inputs.report-name }}
       run: node "$ACTION_PATH/../../scripts/test-shards.ts" "$RUNNER_TEMP/test-shards" "$REPORT_NAME" "$RUNNER_TEMP/test-blobs" >> "$GITHUB_OUTPUT"
       shell: bash
+    # Also each file's seconds, which test/sequencer.ts splits the shards by.
     - name: Merge test shards
       if: always() && inputs.part == 'test-shards'
-      run: pnpm test --merge-reports="$RUNNER_TEMP/test-blobs" --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/test-results.json"
+      run: pnpm test --merge-reports="$RUNNER_TEMP/test-blobs" --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/test-results.json" --reporter=./scripts/test-durations.ts --outputFile.durations="$RUNNER_TEMP/test-durations.json"
       shell: bash
 
-    # The report, to look into a failure or a slow file. Missing when the tests never ran, which
-    # the next step fails on.
+    # The report, to look into a failure or a slow file, and merged shards' durations. Missing
+    # when the tests never ran, which the next step fails on.
     - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       if: always() && (inputs.part == 'test' && !inputs.shard || inputs.part == 'test-shards')
       with:
         name: test-results-${{ inputs.report-name }}-${{ github.run_attempt }}
-        path: ${{ runner.temp }}/test-results.json
+        path: |
+          ${{ runner.temp }}/test-results.json
+          ${{ runner.temp }}/test-durations.json
         retention-days: 7
         if-no-files-found: warn
     # Every test file in the report, each test passed: a suite that skipped for want of ffmpeg

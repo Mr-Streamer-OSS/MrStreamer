@@ -12,7 +12,8 @@ one Vitest shard (`--shard`) with the same multimedia setup, and uploads its blo
 report name and validation identity as `test-shard-<report-name>-<index>`, replaced by a rerun of
 that shard. The job named Test then calls `part: test-shards`: `.github/scripts/test-shards.ts`
 requires each shard 1 to `<count>` of its report name exactly once, with a blob, Vitest merges the
-blobs into the usual `test-results-<report-name>-<attempt>` report, and the same completeness gate judges the union.
+blobs into the usual `test-results-<report-name>-<attempt>` report, with each file's seconds beside
+it as `test-durations.json` for the shard split, and the same completeness gate judges the union.
 Its identity output is the shared identity of every shard and its own runner, or empty when they
 differ, which refuses reuse without failing Test. The caller must also fail Test unless every
 shard job succeeded, and when the run was cancelled. Release fallback keeps the whole

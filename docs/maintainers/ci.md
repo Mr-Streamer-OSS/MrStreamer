@@ -20,7 +20,14 @@ The bundle is built once per candidate. macOS/Linux and Windows package independ
 
 ## Test shards
 
-Checks runs the unchanged suite as three `Test shard <n>` jobs, each a standard runner with the same setup, multimedia tools and Vitest settings, running `pnpm test --shard=<n>/3`. Vitest sorts the test files by a hash of their path and gives each shard a third of that list, so each file runs in exactly one shard; adding files can move others across the cut. Every shard runs to the end even when another fails, and uploads its Vitest blob report.
+Checks runs the unchanged suite as three `Test shard <n>` jobs, each a standard runner with the same setup, multimedia tools and Vitest settings, running `pnpm test --shard=<n>/3`. `test/sequencer.ts` splits the files by the seconds `test/durations.json` records for each: longest first, each to the shard with the fewest seconds so far, so every shard computes the same split and each file runs in exactly one. A file the table doesn't name counts as its median file. Each shard, and every other run, starts its longest files first. Every shard runs to the end even when another fails, and uploads its Vitest blob report.
+
+The table holds each file's import, setup, hooks and tests, from a hosted run's shards. Test writes a fresh one from every merge, `test-durations.json` in the `test-results-<run id>-<attempt>` artifact. Refresh the committed table from a green run when the shards drift apart, as new or grown test files shift the work:
+
+```sh
+gh run download <run id> -n test-results-<run id>-<attempt> -D .local/ci-report
+cp .local/ci-report/test-durations.json test/durations.json
+```
 
 Test, the required merge status, then merges the blobs into the same `test-results-<run id>-<attempt>` JSON report a whole run writes and holds that union to `scripts/ci-test-results.ts`: every test file once, with tests, each passed. Test fails when any shard failed, timed out, was cancelled or skipped, when a shard's report is missing or doubled, or when the union misses a file. After a failed shard it still merges and uploads what the shards reported, so the failure keeps its report. A cancelled run never passes Test: it fails at its first step or, when GitHub starts it after the cancellation, on the missing or unsuccessful shards. When the inputs leave desktop out, the shards and Test skip together, as Test did before. Test's validation identity is recorded only when every shard and the merge ran under the same one; otherwise Test can still pass but Release won't reuse that run.
 
