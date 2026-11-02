@@ -1338,6 +1338,7 @@ describe("Live's Guide grid", () => {
 
   it.each([
     ["default text", 390, 1, true],
+    ["one size above default", 402, 1.118, false],
     ["a larger text size on a narrow phone", 375, 1.353, false],
     ["a larger text size in a narrow window", 320, 1.235, false],
     ["large text", 390, 1.786, false],

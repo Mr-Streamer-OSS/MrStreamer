@@ -718,13 +718,19 @@ const NAMES = 104;
 const MINUTE = 60_000;
 
 /**
- * The narrowest Guide cell that shows its title and time, its title alone over two lines, or its
- * initials, in points at the default text size: a cell's width is divided by the text scale
- * first. Narrower cells show nothing but stay buttons. The grid's window and layout keep a
- * quarter hour at least 64 up to about twice the default text size, about 72 on an iPhone at
- * default text; above that, a quarter hour has room only for its initials.
+ * The least room (`room`) for words a Guide cell needs to show its title and time, its title alone
+ * over two lines, or its initials. Narrower cells show nothing but stay buttons. The title's 60
+ * holds "Weather" in semibold without breaking it. The grid's window and layout keep a quarter
+ * hour's room at least that up to about twice the default text size; above that, a quarter hour
+ * has room only for its initials.
  */
-const ROOM = { time: 120, title: 64, initials: 36 } as const;
+const ROOM = { time: 110, title: 60, initials: 26 } as const;
+
+/**
+ * The room for words in a cell `width` points wide, in points at the default text size: its
+ * padding, which doesn't grow with the text, taken off, then divided by the text scale.
+ */
+const room = (width: number, scale: number) => (width - 10) / scale;
 
 /**
  * Where the Guide grid is: its day (null follows Today), its window's start from that day's first
@@ -784,7 +790,7 @@ function GuideGrid({
   const { split, width } = useListWidth();
   // The name goes above the programmes at large text, or where beside them it would leave a
   // quarter hour of 45 minutes too narrow for its title.
-  const large = largeText(fontScale) || (width - NAMES) / 3 / fontScale < ROOM.title;
+  const large = largeText(fontScale) || room((width - NAMES) / 3, fontScale) < ROOM.title;
   const strip = large ? width - 16 : width - NAMES;
   const lineHeight = useRowHeight();
   const height = large ? 44 + lineHeight : lineHeight;
@@ -805,7 +811,7 @@ function GuideGrid({
     [],
   );
   // An hour, or 45 minutes where an hour leaves a quarter hour too narrow for its title.
-  const span = large || strip / 4 / fontScale < ROOM.title ? 45 : 60;
+  const span = large || room(strip / 4, fontScale) < ROOM.title ? 45 : 60;
   // The grid draws again on the owner's minute tick, which moves now and a window following it.
   // On the minute, so the rows' memo holds while the grid draws again as it scrolls.
   const now = Math.floor(Date.now() / MINUTE) * MINUTE;
@@ -1034,7 +1040,7 @@ function TimeAxis({
  * One channel of the Guide grid: its name, with its provider where another's channel shares it,
  * which opens its Schedule, and its programmes in the window, each a button VoiceOver reads with
  * the channel, times, title and whether it is on now. A cell shows as much as its width holds at
- * the text size (`ROOM`): title and time, title alone, initials or, for a sliver, nothing.
+ * the text size (`ROOM`, `room`): title and time, title alone, initials or, for a sliver, nothing.
  * Past programmes are grey, the one on now bold, and now a white line across.
  */
 const GridRow = memo(function GridRow({
@@ -1111,10 +1117,10 @@ const GridRow = memo(function GridRow({
           const span = across(Math.min(programme.stop, until), from, until, strip) - left;
           const airing = programme.start <= now && programme.stop > now;
           const time = programmeRange(programme);
-          const room = span / scale;
+          const words = room(span, scale);
           const title = [
             styles.cellTitle,
-            room < ROOM.title && styles.initials,
+            words < ROOM.title && styles.initials,
             airing && styles.airing,
             programme.stop <= now && styles.past,
           ];
@@ -1136,8 +1142,8 @@ const GridRow = memo(function GridRow({
               onPress={() => onProgramme(channel.key, programme)}
               style={({ pressed }) => [
                 styles.cell,
-                room < ROOM.time && styles.shortCell,
-                room < ROOM.title && styles.initialsCell,
+                words < ROOM.time && styles.shortCell,
+                words < ROOM.title && styles.initialsCell,
                 { left, width: span },
                 chosen === programme.start && styles.chosen,
                 pressed && styles.pressed,
@@ -1145,7 +1151,7 @@ const GridRow = memo(function GridRow({
               testID={`grid-${channel.key}-${programme.start}`}
             >
               {/* Too narrow for words, the cell is still a button with its whole label. */}
-              {room >= ROOM.time ? (
+              {words >= ROOM.time ? (
                 <>
                   <Text style={title} numberOfLines={1}>
                     {programme.title}
@@ -1154,11 +1160,11 @@ const GridRow = memo(function GridRow({
                     {time}
                   </Text>
                 </>
-              ) : room >= ROOM.title ? (
+              ) : words >= ROOM.title ? (
                 <Text style={title} numberOfLines={2}>
                   {programme.title}
                 </Text>
-              ) : room >= ROOM.initials ? (
+              ) : words >= ROOM.initials ? (
                 <Text style={title} numberOfLines={1} ellipsizeMode="clip">
                   {initials(programme.title)}
                 </Text>
