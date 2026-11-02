@@ -75,8 +75,9 @@ and Movies for you, which falls back to the provider's own list without TMDB. Ho
 Stage and Live's channel rows use the same guide owner for actual now/next, local times and static
 programme progress, retaining category fallback in gaps. Live adds Guide alongside For you,
 Categories and All, with the country filter preserved: a grid of the country's channels down the
-side and two hours of a day across (one hour at accessibility text sizes), moved with Previous
-day, Next day, Earlier, Later and Now. It reads the first two day pages of at most 24 channels
+side and an hour of a day across (45 minutes at accessibility text sizes, or where an hour would
+leave a quarter-hour programme too narrow for its title), moved with Previous day, Next day,
+Earlier and Later, half an hour at a time, and Now. It reads the first two day pages of at most 24 channels
 in view from the same guide owner, with no cache of its own: a row scrolled back into view, or
 whose provider's login or guide changed, is read again. A row whose detail tokens were evicted
 is read again straight away. An empty row, or one with a refused later page, is read again on

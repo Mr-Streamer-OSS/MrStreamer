@@ -1336,11 +1336,55 @@ describe("Live's Guide grid", () => {
     expect(read.has("trusted-30")).toBe(false);
   });
 
+  it.each([
+    ["default text", 390, 1, true],
+    ["one size above default", 402, 1.118, false],
+    ["a larger text size on a narrow phone", 375, 1.353, false],
+    ["a larger text size in a narrow window", 320, 1.235, false],
+    ["large text", 390, 1.786, false],
+  ])(
+    "titles each quarter-hour programme's cell at %s, in an hour's window or 45 minutes",
+    async (_size, width, fontScale, hour) => {
+      state.window = { width, height: 844, fontScale };
+      const short = ["Field Notes", "Weather Watch", "Tide Tables", "Kids Club"].map(
+        (title, i) => ({
+          title,
+          start: at + (i - 1) * 15 * 60_000,
+          stop: at + i * 15 * 60_000,
+          description: null,
+        }),
+      );
+      state.answer = async () => answer(short);
+      await guide();
+      // Around noon the window starts at 11:45, so Kids Club, 12:30 to 12:45, is in an hour only.
+      for (const programme of short.slice(0, 3))
+        expect(cell("a:1", programme)?.textContent).toContain(programme.title);
+      expect(cell("a:1", short[3]!) !== null).toBe(hour);
+    },
+  );
+
+  it("shows a programme too short for its title by the initials of its words, or its emoji", async () => {
+    const brief = (title: string, start: number) => ({
+      title,
+      start,
+      stop: start + 10 * 60_000,
+      description: null,
+    });
+    const words = brief("👩‍🚀 launch Night", at);
+    const emoji = brief("⚽️ 🏆", at + 10 * 60_000);
+    state.answer = async () => answer([words, emoji]);
+    await guide();
+    expect(cell("a:1", words)?.textContent).toBe("LN");
+    expect(cell("a:1", emoji)?.textContent).toBe("⚽️ 🏆");
+  });
+
   it("moves its window by Earlier and Later, and its day, back to now", async () => {
     await guide();
     await click("Later");
+    await click("Later");
     expect(cell("a:1", current)).toBeNull();
     expect(cell("a:1", next)).not.toBeNull();
+    await click("Earlier");
     await click("Earlier");
     await click("Earlier");
     expect(cell("a:1", current)).not.toBeNull();
@@ -1584,13 +1628,25 @@ describe("Live's Guide grid", () => {
     expect(cell("a:1", next)).not.toBeNull();
   });
 
-  it("moves an hour's window by half an hour at large text", async () => {
+  it("moves a 45-minute window by half an hour at large text", async () => {
     state.window = { width: 390, height: 844, fontScale: 1.786 };
+    const quarter = (minutes: number) => ({
+      title: `At ${minutes}`,
+      start: at + minutes * 60_000,
+      stop: at + (minutes + 15) * 60_000,
+      description: null,
+    });
+    const [noon, one] = [quarter(0), quarter(60)];
+    state.answer = async () => answer([noon, one]);
     await guide();
+    expect(cell("a:1", noon)).not.toBeNull();
+    // 12:15 to 13:00.
     await click("Later");
-    expect(cell("a:1", current)).not.toBeNull();
+    expect(cell("a:1", noon)).toBeNull();
+    expect(cell("a:1", one)).toBeNull();
+    // 12:45 to 13:30.
     await click("Later");
-    expect(cell("a:1", current)).toBeNull();
+    expect(cell("a:1", one)).not.toBeNull();
   });
 
   it("opens a programme on Live's stack and keeps the day, window and the programme marked when it returns", async () => {
@@ -1604,11 +1660,13 @@ describe("Live's Guide grid", () => {
       },
     ]);
     await click("Later");
+    await click("Later");
     // Another screen and back, as Back, a tab or a resize can remount it.
     await draw(React.createElement(Home));
     await draw(React.createElement(LiveTab));
     await settle();
     expect(cell("a:1", current)).toBeNull();
+    await click("Earlier");
     await click("Earlier");
     expect(cell("a:1", current)?.getAttribute("aria-pressed")).toBe("true");
   });
