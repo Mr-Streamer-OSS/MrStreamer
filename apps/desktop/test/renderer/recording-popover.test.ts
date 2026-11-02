@@ -96,7 +96,7 @@ it("says Tomorrow for a stop past midnight", async () => {
   expect(popup.textContent).toContain("Tomorrow");
 });
 
-it("asks to stop once, though its popover closes and opens again while it stops", async () => {
+it("asks to stop once while its popover reopens before and after the reply", async () => {
   const { trigger, popup } = await opened();
   const held = ipc.hold("recordings.stop");
   await act(async () => button("Stop recording")?.click());
@@ -107,5 +107,15 @@ it("asks to stop once, though its popover closes and opens again while it stops"
   expect(button("Stop recording")?.disabled).toBe(true);
   await act(async () => button("Stop recording")?.click());
   expect(ipc.argsOf("recordings.stop")).toEqual([{ id: "r1" }]);
-  held.resolve(null);
+  await act(async () => held.resolve(null));
+  // The reply arrived, but the recording-changed event has not replaced the strip's control.
+  await act(async () => {
+    document
+      .querySelector("[role=dialog][aria-label=Recording]")
+      ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  await act(async () => trigger.click());
+  expect(button("Stop recording")?.disabled).toBe(true);
+  await act(async () => button("Stop recording")?.click());
+  expect(ipc.argsOf("recordings.stop")).toEqual([{ id: "r1" }]);
 });

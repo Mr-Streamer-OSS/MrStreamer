@@ -229,7 +229,9 @@ function RecordingPopover({
   });
   return (
     // A stop still under way stays so as it opens again: it isn't asked twice.
-    <Popover.Root onOpenChange={(open) => open && !stop.isPending && stop.reset()}>
+    <Popover.Root
+      onOpenChange={(open) => open && !stop.isPending && !stop.isSuccess && stop.reset()}
+    >
       <Popover.Trigger
         render={
           <Button ref={triggerRef} variant="secondary" className={triggerClass}>

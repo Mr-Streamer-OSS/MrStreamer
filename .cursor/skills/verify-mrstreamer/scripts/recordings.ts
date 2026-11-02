@@ -18,7 +18,7 @@ let long: Buffer | null = null;
 function longStream(): Buffer {
   if (long) return long;
   const path = join(tmpdir(), `mrstreamer-verify-long-${process.pid}.ts`);
-  const made = spawnSync("ffmpeg", [
+  const made = spawnSync(process.env["MR_STREAMER_FFMPEG"] || "ffmpeg", [
     "-v",
     "error",
     "-y",
