@@ -89,12 +89,14 @@ async function run() {
     0,
     routes.findIndex((route) => route.handle === "filesystem"),
   );
-  /** Where the package's first matching route sends `method` `path`, or "site" for none. */
-  const routed = (method: string, path: string) =>
-    before.find(
+  /** Where the package's first matching route sends `method` `path` off the site, or "site". */
+  const routed = (method: string, path: string) => {
+    const dest = before.find(
       ({ src, methods }) =>
         src !== undefined && new RegExp(src).test(path) && (!methods || methods.includes(method)),
-    )?.dest ?? "site";
+    )?.dest;
+    return dest && URL.canParse(dest) ? dest : "site";
+  };
   const key = /"(phc_[A-Za-z0-9_-]+)"/.exec(bundle)?.[1] ?? "";
   await mkdir(join(root, ".local/verification"), { recursive: true });
   const evidence = await mkdtemp(join(root, ".local/verification/website-analytics-"));
