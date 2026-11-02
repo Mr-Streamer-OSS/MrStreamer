@@ -1,8 +1,9 @@
 # Secretless validation contract
 
 After checking out the exact candidate and trusted validation tools, call this composite action
-with `part: check`, `test`, or `website`, and a unique `report-name` when calling more than once. Run Check and Test in separate jobs, with the existing
-10/15-minute bounds. Check includes the production desktop build and workflow validation.
+with `part: check`, `test`, or `website`, and a unique `report-name` when calling more than once.
+Run Check and Test in separate jobs, bounded at 10 and 15 minutes; Checks bounds each test shard at
+15 minutes and its merging Test at 10. Check includes the production desktop build and workflow validation.
 Test preserves the full suite, multimedia setup, JSON artifact and completeness gate. Website
 requires only a read-only `GH_TOKEN` for release history. There are no signing or publishing steps.
 
@@ -10,8 +11,8 @@ Checks splits Test across runners. `part: test` with `shard: <index>` and `shard
 one Vitest shard (`--shard`) with the same multimedia setup, and uploads its blob report,
 report name and validation identity as `test-shard-<report-name>-<index>`, replaced by a rerun of
 that shard. The job named Test then calls `part: test-shards`: `.github/scripts/test-shards.ts`
-requires shards 1 to count of its report name each once with a blob, Vitest merges the blobs into the usual
-`test-results-<report-name>-<attempt>` report, and the same completeness gate judges the union.
+requires each shard 1 to `<count>` of its report name exactly once, with a blob, Vitest merges the
+blobs into the usual `test-results-<report-name>-<attempt>` report, and the same completeness gate judges the union.
 Its identity output is the shared identity of every shard and its own runner, or empty when they
 differ, which refuses reuse without failing Test. The caller must also fail Test unless every
 shard job succeeded, and when the run was cancelled. Release fallback keeps the whole
