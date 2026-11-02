@@ -31,7 +31,7 @@ import { Swipe } from "./swipe.tsx";
 import { Artwork } from "./titles-ui.tsx";
 import { colors, Notice } from "./ui.tsx";
 
-// Downloads as one list: the queue in its order, then the copies on this iPhone, newest
+// Downloads as one list: the queue in its order, then the copies on this device, newest
 // first, as the desktop's page. Empty sections are left out; how much the copies take and what is
 // free closes the list. Each row has one trailing glass button for what fits its state, Pause or
 // Resume in the queue, the rest in its long-press sheet, a swipe to the left and VoiceOver's
@@ -50,7 +50,7 @@ interface Section {
 }
 
 /** A section's heading, said in the interface language as it draws. */
-const heading = (key: Section["key"]) => (key === "queue" ? t("Queue") : t("On this iPhone"));
+const heading = (key: Section["key"]) => (key === "queue" ? t("Queue") : t("On this device"));
 
 export function DownloadsScreen() {
   // Drawn again in a new language where it stands; the queue and its order are left as they are.
@@ -69,7 +69,7 @@ export function DownloadsScreen() {
   // Those waiting their turn, in order: Move leaves out the first's up and the last's down.
   const line = useMemo(() => list.items.filter(waitingTurn), [list.items]);
   const storage = [
-    list.bytes > 0 ? t("{size} on this iPhone", { size: formatBytes(list.bytes) }) : null,
+    list.bytes > 0 ? t("{size} on this device", { size: formatBytes(list.bytes) }) : null,
     list.free !== null ? t("{size} free", { size: formatBytes(list.free) }) : null,
   ]
     .filter(Boolean)
