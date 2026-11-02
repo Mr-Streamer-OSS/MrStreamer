@@ -12,9 +12,9 @@
 //   whole screen at the widths the page asks for.
 // - mark.svg, favicon.svg, favicon-48.png, apple-touch-icon.png: the mark, alone and on black.
 // - social.png: 1200 × 630, the Home window on black, for links shared elsewhere.
-// - With --readme, in docs/assets: readme-poster.webp, the Home window with the Live TV and TV
-//   Guide cuts in front of it on black, and readme-mark.svg, the mark in a grey that reads on
-//   light and dark pages. README.md shows these, so they are committed.
+// - With --readme, in docs/assets: readme-poster.webp, the homepage's stage (the Home window
+//   with the iPhone's Home screen in front of it) on black, and readme-mark.svg, the mark in a
+//   grey that reads on light and dark pages. README.md shows these, so they are committed.
 //
 // public/generated/ is rebuilt on every run and is not committed. index.html names these files
 // and the cuts' sizes: change both together.
@@ -241,21 +241,44 @@ if (process.argv.includes("--readme")) {
     source.replace(white, white.replace("#fff", "#808080")),
   );
 
-  // The Home window with the Live TV and TV Guide cuts in front of it, lower right, on black. The
-  // windows are black too, so the poster reads the same on GitHub's light and dark themes.
-  const POSTER = { width: 1400, height: 900, window: 1120, cut: 460, radius: 10 };
-  const frame = "#3a3a3a";
-  const liveTv = CUTS["live-tv"];
-  const tvGuide = CUTS["tv-guide"];
-  if (!liveTv || !tvGuide) throw new Error("The poster needs the Live TV and TV Guide cuts.");
+  // The homepage's stage: the Home window with the iPhone's Home screen in front of its right
+  // edge, on black. The windows and the iPhone are black too, so the poster reads the same on
+  // GitHub's light and dark themes.
+  const POSTER = { width: 1400, height: 900, window: 1120, radius: 10 };
+  const PHONE = { width: 300, bezel: 9, left: 1060, top: 210 };
+  const screenWidth = PHONE.width - 2 * PHONE.bezel;
+  const screen = await sharp(checkedCapture("iphone-home"))
+    .resize({ width: screenWidth })
+    .png()
+    .toBuffer();
+  const { height: screenHeight = 0 } = await sharp(screen).metadata();
+  const phoneHeight = screenHeight + 2 * PHONE.bezel;
+  const rounded = (width: number, height: number, radius: number, fill: string) =>
+    Buffer.from(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+        `<rect width="${width}" height="${height}" rx="${radius}" fill="${fill}"/></svg>`,
+    );
+  // The screen with the iPhone's rounded corners, in a dark bezel the shape of the phone.
+  const phone = await sharp(rounded(PHONE.width, phoneHeight, 50, "#1c1c1e"))
+    .composite([
+      {
+        input: await sharp(screen)
+          .composite([{ input: rounded(screenWidth, screenHeight, 42, "#000"), blend: "dest-in" }])
+          .png()
+          .toBuffer(),
+        left: PHONE.bezel,
+        top: PHONE.bezel,
+      },
+    ])
+    .png()
+    .toBuffer();
   const layers = [
     {
-      ...(await framed(captureOf("home").clone(), POSTER.window, POSTER.radius, frame)),
+      ...(await framed(captureOf("home").clone(), POSTER.window, POSTER.radius, "#3a3a3a")),
       left: 40,
       top: 40,
     },
-    { ...(await framed(cutOf(liveTv), POSTER.cut, POSTER.radius, frame)), left: 560, top: 470 },
-    { ...(await framed(cutOf(tvGuide), POSTER.cut, POSTER.radius, frame)), left: 900, top: 500 },
+    { input: phone, left: PHONE.left, top: PHONE.top },
   ];
   await sharp({
     create: { width: POSTER.width, height: POSTER.height, channels: 3, background: "#000" },
