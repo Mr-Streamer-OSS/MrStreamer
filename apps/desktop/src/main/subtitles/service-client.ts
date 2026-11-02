@@ -208,7 +208,6 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
       type: query.kind === "movie" ? "movie" : "tv",
       languages: query.languages.join(",").toUpperCase(),
       subs_per_page: "30",
-      hi: "1",
       unpack: "1",
       client: "custom_integration",
       ...(query.kind === "episode"
