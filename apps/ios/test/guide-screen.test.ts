@@ -1341,17 +1341,12 @@ describe("Live's Guide grid", () => {
     ["large", 1.786],
   ])("titles each quarter-hour programme's cell at %s text", async (_size, fontScale) => {
     state.window = { width: 390, height: 844, fontScale };
-    const quarter = (title: string, start: number): Programme => ({
+    const short = ["Field Notes", "Weather Watch", "Tide Tables"].map((title, i) => ({
       title,
-      start,
-      stop: start + 15 * 60_000,
+      start: at + (i - 1) * 15 * 60_000,
+      stop: at + i * 15 * 60_000,
       description: null,
-    });
-    const short = [
-      quarter("Field Notes", at - 15 * 60_000),
-      quarter("Weather Watch", at),
-      quarter("Tide Tables", at + 15 * 60_000),
-    ];
+    }));
     state.answer = async () => answer(short);
     await guide();
     for (const programme of short)
