@@ -720,9 +720,9 @@ const MINUTE = 60_000;
 /**
  * The narrowest Guide cell that shows its title and time, its title alone over two lines, or its
  * initials, in points at the default text size: a cell's width is divided by the text scale
- * first. Narrower cells show nothing but stay buttons. On an iPhone a quarter hour is about 72 at
- * both window sizes, half an hour about 143; above about twice the default text size, a quarter
- * hour has room only for its initials.
+ * first. Narrower cells show nothing but stay buttons. The grid's window and layout keep a
+ * quarter hour at least 64 up to about twice the default text size, about 72 on an iPhone at
+ * default text; above that, a quarter hour has room only for its initials.
  */
 const ROOM = { time: 120, title: 64, initials: 36 } as const;
 
@@ -781,8 +781,10 @@ function GuideGrid({
   header: ReactNode;
 }) {
   const { fontScale } = useWindowDimensions();
-  const large = largeText(fontScale);
   const { split, width } = useListWidth();
+  // The name goes above the programmes at large text, or where beside them it would leave a
+  // quarter hour of 45 minutes too narrow for its title.
+  const large = largeText(fontScale) || (width - NAMES) / 3 / fontScale < ROOM.title;
   const strip = large ? width - 16 : width - NAMES;
   const lineHeight = useRowHeight();
   const height = large ? 44 + lineHeight : lineHeight;
@@ -957,7 +959,8 @@ const across = (at: number, from: number, until: number, strip: number) =>
 
 /**
  * The first letter or digit, with its accents, of a title's first two words that have one, which
- * a cell too narrow for the title shows: "👩‍🚀 Launch Night" as "LN".
+ * a cell too narrow for the title shows: "👩‍🚀 Launch Night" as "LN". A title of emoji or symbols
+ * alone stays whole, for the cell to clip.
  */
 const initials = (title: string) =>
   title
@@ -965,7 +968,7 @@ const initials = (title: string) =>
     .flatMap((word) => word.match(/[\p{L}\p{N}]\p{M}*/u) ?? [])
     .slice(0, 2)
     .join("")
-    .toLocaleUpperCase();
+    .toLocaleUpperCase() || title;
 
 /**
  * The half hours over the grid's programmes, and now in white where it falls, at the reader's text

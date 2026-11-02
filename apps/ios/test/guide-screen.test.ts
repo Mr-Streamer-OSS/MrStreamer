@@ -1339,6 +1339,7 @@ describe("Live's Guide grid", () => {
   it.each([
     ["default text", 390, 1, true],
     ["a larger text size on a narrow phone", 375, 1.353, false],
+    ["a larger text size in a narrow window", 320, 1.235, false],
     ["large text", 390, 1.786, false],
   ])(
     "titles each quarter-hour programme's cell at %s, in an hour's window or 45 minutes",
@@ -1361,16 +1362,19 @@ describe("Live's Guide grid", () => {
     },
   );
 
-  it("shows a programme too short for its title by the initials of its words", async () => {
-    const brief = {
-      title: "👩‍🚀 launch Night",
-      start: at,
-      stop: at + 10 * 60_000,
+  it("shows a programme too short for its title by the initials of its words, or its emoji", async () => {
+    const brief = (title: string, start: number) => ({
+      title,
+      start,
+      stop: start + 10 * 60_000,
       description: null,
-    };
-    state.answer = async () => answer([brief]);
+    });
+    const words = brief("👩‍🚀 launch Night", at);
+    const emoji = brief("⚽️ 🏆", at + 10 * 60_000);
+    state.answer = async () => answer([words, emoji]);
     await guide();
-    expect(cell("a:1", brief)?.textContent).toBe("LN");
+    expect(cell("a:1", words)?.textContent).toBe("LN");
+    expect(cell("a:1", emoji)?.textContent).toBe("⚽️ 🏆");
   });
 
   it("moves its window by Earlier and Later, and its day, back to now", async () => {
@@ -1625,11 +1629,23 @@ describe("Live's Guide grid", () => {
 
   it("moves a 45-minute window by half an hour at large text", async () => {
     state.window = { width: 390, height: 844, fontScale: 1.786 };
+    const quarter = (minutes: number) => ({
+      title: `At ${minutes}`,
+      start: at + minutes * 60_000,
+      stop: at + (minutes + 15) * 60_000,
+      description: null,
+    });
+    const [noon, one] = [quarter(0), quarter(60)];
+    state.answer = async () => answer([noon, one]);
     await guide();
+    expect(cell("a:1", noon)).not.toBeNull();
+    // 12:15 to 13:00.
     await click("Later");
-    expect(cell("a:1", current)).not.toBeNull();
+    expect(cell("a:1", noon)).toBeNull();
+    expect(cell("a:1", one)).toBeNull();
+    // 12:45 to 13:30.
     await click("Later");
-    expect(cell("a:1", current)).toBeNull();
+    expect(cell("a:1", one)).not.toBeNull();
   });
 
   it("opens a programme on Live's stack and keeps the day, window and the programme marked when it returns", async () => {
