@@ -38,6 +38,8 @@ import {
   type DetailsTarget,
 } from "../../src/renderer/src/app/ui-store.ts";
 import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
+import type { InterfaceLanguage } from "@mrstreamer/contracts/language";
+import { setLanguage, t } from "@mrstreamer/core/i18n";
 
 /** A second subscription beside the tests' own, as the main process lists it. */
 const OTHER = "9d2b7c41-6e0a-4f3b-8a15-c4e7f1d09b62";
@@ -122,7 +124,8 @@ function detailsOf(id: string): MovieDetails | SeriesDetails {
     title,
     seasons: [1, 2].map((number) => ({
       number,
-      name: `Season ${number}`,
+      // As the main process names it, in the interface language.
+      name: t("Season {number}", { number: String(number) }),
       posterUrl: null,
       episodes: [episode(number, 1), episode(number, 2)],
     })),
@@ -373,6 +376,67 @@ describe("Back over details", () => {
     await showing("Night Harbour");
     await press(back());
     expect(sheet()).toBeNull();
+  });
+
+  it("keeps the season picked through Settings, named in the interface language picked there", async () => {
+    const english: InterfaceLanguage = {
+      choice: "system",
+      system: "en-US",
+      locale: "en-US",
+      formats: "en-US",
+    };
+    ipc.always("language.get", english);
+    ipc.always("language.set", { ...english, choice: "de-DE", locale: "de-DE", formats: "de-DE" });
+    onTestFinished(() => setLanguage(english));
+    await window_();
+    await act(async () => openDetails({ kind: "series", ...ownedOf(canyon) }));
+    await showing("Canyon Hours");
+    await press(inSheet("Season 2"));
+
+    await key(",", { ctrlKey: true, metaKey: true });
+    await settle();
+    const language = document.querySelector<HTMLSelectElement>(
+      'select[aria-label="Interface language"]',
+    )!;
+    await act(async () => {
+      language.value = "de-DE";
+      language.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await settle();
+    await key("Escape");
+    await showing("Canyon Hours");
+
+    expect(inSheet("Staffel 2")?.getAttribute("aria-pressed")).toBe("true");
+    expect(sheet()?.textContent).toContain("Chapter 2.1");
+    expect(sheet()?.textContent).not.toContain("Season");
+  });
+
+  it("shows a season held through Settings once, not again after a title played", async () => {
+    await window_();
+    await act(async () => openDetails({ kind: "series", ...ownedOf(canyon) }));
+    await showing("Canyon Hours");
+    await press(inSheet("Season 2"));
+    await key(",", { ctrlKey: true, metaKey: true });
+    await settle();
+    await key("Escape");
+    await showing("Canyon Hours");
+    expect(inSheet("Season 2")?.getAttribute("aria-pressed")).toBe("true");
+
+    await press(inSheet("Season 1"));
+    ipc.hold("playback.openTitle");
+    await press(
+      [...(sheet()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((each) =>
+        each.textContent?.trim().startsWith("Play"),
+      ),
+    );
+    expect(sheet()).toBeNull();
+    await press(
+      [...document.querySelectorAll<HTMLButtonElement>("[data-view=title] header button")].find(
+        (each) => each.textContent?.trim() === "Back",
+      ),
+    );
+    await showing("Canyon Hours");
+    expect(inSheet("Season 2")?.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("gives the keyboard to the sheet when the title opened from it is no longer related", async () => {

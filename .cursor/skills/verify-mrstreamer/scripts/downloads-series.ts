@@ -267,7 +267,7 @@ export async function runDownloadsSeries(
           ),
         60_000,
       );
-    await online.click("Open season 1", button("[role=dialog] button", "Seizoen 1"));
+    await online.click("Open season 1", button("[role=dialog] button", "Season 1"));
     await downloadEpisode(1, 2);
     await downloadEpisode(1, 3);
     await downloaded(1, 2);
@@ -333,6 +333,7 @@ export async function runDownloadsSeries(
         "Choose the two-season Dutch version",
         `[...document.querySelectorAll('[role=menuitemradio]')].find(e => e.getAttribute('aria-label')?.includes('Formats (NL)'))`,
       );
+      // Earlier builds show the provider's Dutch name for season 1.
       await older.click("Open season 1", button("[role=dialog] button", "Seizoen 1"));
       await older.click(
         "Download S1 E1 in the earlier build",

@@ -1,6 +1,7 @@
 // A movie's or series' details as the UI shows them: TMDB's overview, artwork, genres, credits and
 // runtime where it has them, the provider's otherwise, and the provider's seasons and episodes,
-// which are what plays. A provider's length is only what its panel says of the file and can be far
+// which are what plays. A season is named by its number in the interface language, never by the
+// provider's name for it. A provider's length is only what its panel says of the file and can be far
 // off, so it fills in where TMDB has no runtime; playback measures the file itself. Seasons come
 // from the episodes themselves: panels list seasons incompletely, or not at all, and some episodes
 // twice. An episode gets TMDB's details once the viewer opens its season. The provider's numbers
@@ -95,9 +96,7 @@ export function seriesDetails(
       const known = provided.get(number);
       return {
         number,
-        name:
-          known?.name ??
-          (number === 0 ? t("Specials") : t("Season {number}", { number: String(number) })),
+        name: number === 0 ? t("Specials") : t("Season {number}", { number: String(number) }),
         posterUrl: known?.posterUrl ?? null,
         episodes: sourceOrder ? episodes : episodes.sort((a, b) => a.number - b.number),
       };

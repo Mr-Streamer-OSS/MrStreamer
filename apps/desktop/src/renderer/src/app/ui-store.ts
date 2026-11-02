@@ -101,6 +101,11 @@ interface UiState {
   /** Where Back found the details on screen, for them to show as they open, once. */
   readonly place: DetailsPlace | null;
   /**
+   * The season picked in the details Settings closed, by their `visit`, for them to show again as
+   * Settings closes, as after a change of interface language.
+   */
+  readonly heldSeason: { readonly visit: number; readonly season: number } | null;
+  /**
    * Rises as details open, as a related title opens over them and as Back returns to some: each
    * visit gets a sheet of its own, the same title's again too, so what Back restores applies as
    * that sheet opens, and only then.
@@ -135,6 +140,7 @@ export const useUi = create<UiState>(() => ({
   details: null,
   trail: [],
   place: null,
+  heldSeason: null,
   visit: 0,
   savedEntry: null,
   channelsOpen: false,
@@ -176,7 +182,7 @@ export function invalidateDetailsCatalogue(): void {
 }
 
 /** No details on screen, nor a way back through any. */
-const NO_DETAILS = { details: null, trail: [], place: null } as const;
+const NO_DETAILS = { details: null, trail: [], place: null, heldSeason: null } as const;
 
 /**
  * Leaves the title, saving how far it got, back to its details or the page. One that plays on a

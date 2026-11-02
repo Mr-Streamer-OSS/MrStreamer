@@ -184,7 +184,27 @@ export function DetailsView({
   useEffect(() => {
     if (returned) useUi.setState({ place: null });
   }, [returned]);
-  const [season, setSeason] = useState(returned?.season ?? null);
+  // Settings closes the sheet over it; the season picked shows again as it closes, once.
+  const [held] = useState(() => {
+    const { heldSeason, visit } = useUi.getState();
+    return heldSeason?.visit === visit ? heldSeason.season : null;
+  });
+  useEffect(() => {
+    if (held !== null) useUi.setState({ heldSeason: null });
+  }, [held]);
+  const [season, setSeason] = useState(returned?.season ?? held);
+  const seasonNow = useRef(season);
+  useEffect(() => {
+    seasonNow.current = season;
+  }, [season]);
+  useEffect(
+    () => () => {
+      const { settings, visit } = useUi.getState();
+      if (settings !== null && seasonNow.current !== null)
+        useUi.setState({ heldSeason: { visit, season: seasonNow.current } });
+    },
+    [],
+  );
   const scroller = useRef<HTMLDivElement>(null);
   const place: SheetPlace = {
     season,
