@@ -1,11 +1,78 @@
 // Record now through the built window, against the fake provider's one connection. A playable
-// channel previews in Live TV, so Record's first start finds the connection held by playing here,
-// asks the provider for nothing more and offers Stop playing and record, which frees it and starts
-// on that one connection. Recordings then shows it under
-// Now; Stop moves it to Recorded, a second recording takes Now again, and the stopped one plays
-// from this computer. Its menu deletes it. Each state is captured at 1280 × 800 and the
+// channel previews in Live TV, so Record says the recording shares the connection playing here,
+// and starts it on Watch's own provider request while Watch plays on. Recordings, which stops the
+// preview, shows it under Now still recording; back in Live TV Watch joins it again, and a Stop of
+// the recording leaves Watch playing, all on that one request. A second recording takes Now
+// again, and the stopped one plays from this computer. Its menu deletes it. Each state is captured at 1280 × 800 and the
 // Recordings page also at 960 × 600.
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { Writable } from "node:stream";
+import type { FakeChannel } from "../../../../apps/desktop/test/fake-provider.ts";
 import type { Driver } from "./language.ts";
+
+/** Three minutes of picture and sound with timestamps that never restart, made once by ffmpeg. */
+let long: Buffer | null = null;
+function longStream(): Buffer {
+  if (long) return long;
+  const path = join(tmpdir(), `mrstreamer-verify-long-${process.pid}.ts`);
+  const made = spawnSync("ffmpeg", [
+    "-v",
+    "error",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc2=size=640x360:rate=25:duration=180",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=440:duration=180",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-g",
+    "25",
+    "-b:v",
+    "600k",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "96k",
+    "-f",
+    "mpegts",
+    path,
+  ]);
+  if (made.status !== 0) throw new Error(`ffmpeg made no long stream: ${String(made.stderr)}`);
+  long = readFileSync(path);
+  return long;
+}
+
+/**
+ * The fake provider's stream for this scenario: a fixture channel sends `longStream` at its
+ * real-time rate, so Watch and a recording have something to read for as long as they run. Other
+ * channels stream as usual.
+ */
+export function longStreams(
+  channel: FakeChannel,
+  out: Writable,
+  signal: AbortSignal,
+  otherwise: (channel: FakeChannel, out: Writable, signal: AbortSignal) => void,
+): void {
+  if (!channel.fixture) return otherwise(channel, out, signal);
+  const stream = longStream();
+  // A tenth of a second at a time, a whole number of packets.
+  const step = Math.ceil(stream.length / 1800 / 188) * 188;
+  let offset = 0;
+  const timer = setInterval(() => {
+    out.write(stream.subarray(offset, offset + step));
+    offset = offset + step >= stream.length ? 0 : offset + step;
+  }, 100);
+  signal.addEventListener("abort", () => clearInterval(timer), { once: true });
+}
 
 const named = (selector: string, text: string, within = "document") =>
   `[...${within}.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
@@ -23,6 +90,15 @@ const listed = (d: Driver) =>
     if (!read.ok) throw new Error(read.error.kind);
     return read.value;
   })()`);
+
+/** Watch's clock moves on by two seconds. */
+async function playsOn(d: Driver) {
+  const from = await d.evaluate<number>("document.querySelector('video')?.currentTime ?? 0");
+  await d.wait(
+    () => d.evaluate<boolean>(`(document.querySelector('video')?.currentTime ?? 0) >= ${from + 2}`),
+    30_000,
+  );
+}
 
 async function size(d: Driver, width: number, height: number) {
   d.action(`Size the page ${width} × ${height}`);
@@ -70,50 +146,67 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
 
   await d.click("Open Record", record);
   await d.wait(() => d.exists(POPUP));
+  // The channel plays here: recording it shares that connection.
+  await d.wait(() =>
+    d.evaluate<boolean>(`${POPUP}.innerText.includes("Shares the connection playing here.")`),
+  );
   d.observed["popover"] = await d.evaluate<string>(`${POPUP}.innerText`);
   await d.capture("record-popover");
 
-  // The preview holds the one connection: starting says so and offers to stop it.
   await d.click("Start recording", named("button", "Start recording", POPUP));
-  const stopAndRecord = named("button", "Stop playing and record", POPUP);
-  await d.wait(() => d.exists(stopAndRecord));
-  d.observed["busy"] = await d.evaluate<string>(`${POPUP}.innerText`);
-  expect((await listed(d)).length === 0, "Busy started a recording");
-  const busy = fixture.streams();
-  expect(
-    busy.requests === before.requests && busy.active === 1,
-    "Busy asked the provider for another stream",
-    busy,
-  );
-  await d.capture("record-busy");
-  // The preview's stream closes first; its slot may take the provider a moment to free.
-  await d.click("Stop playing and record", stopAndRecord);
   const recordingButton = named("button", "Recording");
   await d.wait(() => d.exists(recordingButton), 60_000);
   // The keys go on from Recording, which took Record's place.
   await d.wait(() => d.evaluate<boolean>(`document.activeElement === ${recordingButton}`));
   const first = await listed(d);
   expect(first.length === 1 && first[0]!.status.kind === "recording", "Not recording", first);
-  await d.wait(async () => fixture.streams().active === 1);
-  d.observed["recording"] = { list: first, streams: fixture.streams() };
+  // Watch plays on, and the provider was asked for nothing more.
+  await playsOn(d);
+  const shared = fixture.streams();
+  expect(
+    shared.requests === before.requests && shared.active === 1,
+    "Recording asked the provider for another stream",
+    shared,
+  );
+  d.observed["recording"] = { list: first, streams: shared };
   await d.capture("live-recording");
 
-  // Recordings opens from the bar, which lists it now, and from the strip's Recording.
+  // Recordings stops the preview: the recording goes on, on the same request.
   await d.click("Open Recordings", named("header button", "Recordings"));
   await d.wait(() => d.exists(named("h1", "Recordings")));
-  await d.wait(async () => ((await listed(d))[0]?.bytes ?? 0) > 0);
-  await d.capture("recordings-now");
+  const bytes = (await listed(d))[0]!.bytes;
   // A few seconds of it, to play back.
   await new Promise((resolve) => setTimeout(resolve, 8_000));
+  const grown = await listed(d);
+  expect(grown[0]!.bytes > bytes, "The recording stopped with Watch", grown);
+  expect(fixture.streams().active === 1, "Watch's stop ended the recording", fixture.streams());
+  d.observed["watchStopped"] = { list: grown, streams: fixture.streams() };
+  await d.capture("recordings-now");
 
-  await d.click("Stop the recording", named("li button", "Stop"));
+  // Watch again joins the recording's request, though it holds the only connection.
+  await d.click("Back to Live TV", named("header button", "Live TV"));
+  await d.wait(() => d.exists(named("button", "Recording")));
+  await playsOn(d);
+  expect(
+    fixture.streams().requests === before.requests,
+    "Watch asked the provider again",
+    fixture.streams(),
+  );
+  // The recording stops, through the same call its Stop makes: Watch plays on.
+  const id = grown[0]!.id;
+  d.action("Stop the recording while Watch plays");
+  await d.evaluate(`(async () => {
+    const stopped = await window.mrStreamer.invoke('recordings.stop', { id: ${JSON.stringify(id)} });
+    if (!stopped.ok) throw new Error(stopped.error.kind);
+  })()`);
   await d.wait(async () => (await listed(d))[0]?.status.kind === "stopped");
-  // Its request ended: the provider frees the slot once it hears so.
-  await d.wait(async () => fixture.streams().active === 0);
-  d.observed["stopped"] = { list: await listed(d), streams: fixture.streams() };
+  await playsOn(d);
+  const after = fixture.streams();
+  expect(after.requests === before.requests && after.active === 1, "Watch stopped too", after);
+  d.observed["stopped"] = { list: await listed(d), streams: after };
+  await d.capture("watch-after-recording");
 
   // A second recording takes Now while the first waits under Recorded.
-  await d.click("Back to Live TV", named("header button", "Live TV"));
   await d.click("Open Record again", record);
   await d.wait(() => d.exists(POPUP));
   await d.click("Start recording again", named("button", "Start recording", POPUP));

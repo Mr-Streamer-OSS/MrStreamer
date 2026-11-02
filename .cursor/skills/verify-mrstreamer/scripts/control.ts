@@ -42,7 +42,7 @@ import { nextEpisodeScenario } from "./next-episode.ts";
 import { posterGridScenario } from "./poster-grid.ts";
 import { B_SERIES, detailsBackScenario, withSecondSeason } from "./details-back.ts";
 import { removeDuringGuideScenario } from "./remove-during-guide.ts";
-import { recordingsScenario } from "./recordings.ts";
+import { longStreams, recordingsScenario } from "./recordings.ts";
 import { schedulesScenario } from "./schedules.ts";
 import { remindersScenario } from "./reminders.ts";
 import {
@@ -55,6 +55,7 @@ import {
 } from "./session.ts";
 import { connect, silent, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
 import {
+  liveStreams,
   QUALITY_STREAM_IDS,
   startFakeProvider,
 } from "../../../../apps/desktop/test/fake-provider.ts";
@@ -240,6 +241,11 @@ async function run(scenario: Scenario, prior?: string) {
               channel.fixture && channel.streamId !== 1002
                 ? { ...channel, guideId: channel.guideId ?? `test${channel.streamId}.grid` }
                 : channel,
+          }
+        : {}),
+      ...(scenario === "recordings"
+        ? {
+            streams: (channel, out, signal) => longStreams(channel, out, signal, liveStreams),
           }
         : {}),
       ...(scenario === "recordings" || scenario === "schedules"
