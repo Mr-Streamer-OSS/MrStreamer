@@ -80,6 +80,37 @@ describe("online subtitle service ports", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it("SubDL search returns ordinary subtitles beside hearing-impaired ones, each with SubDL's flag", async () => {
+    // Stand-in for SubDL's documented `hi` parameter: `hi=1` keeps only hearing-impaired subtitles.
+    const subtitles = [
+      { language: "EN", release_name: "Movie.SDH", url: "/subtitle/sdh.zip", hi: true },
+      { language: "EN", release_name: "Movie.WEB", url: "/subtitle/web.zip", hi: false },
+      { language: "EN", release_name: "Movie.BluRay", url: "/subtitle/bluray.zip" },
+    ];
+    const client = subtitleServiceClient({
+      userAgent: "fixture",
+      fetch: async (input) =>
+        json({
+          status: true,
+          results: [{ tmdb_id: 123, type: "movie" }],
+          subtitles:
+            new URL(String(input)).searchParams.get("hi") === "1"
+              ? subtitles.filter((sub) => sub.hi)
+              : subtitles,
+        }),
+    });
+    const results = await client.subdlSearch(
+      keys.subdl,
+      { kind: "movie", tmdbId: 123, languages: ["en"] },
+      signal(),
+    );
+    expect(results.map(({ release, hearingImpaired }) => [release, hearingImpaired])).toEqual([
+      ["Movie.SDH", true],
+      ["Movie.WEB", false],
+      ["Movie.BluRay", false],
+    ]);
+  });
+
   it("uses exact episode coordinates including specials and selects the episode file inside a season pack", async () => {
     const request = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input));
