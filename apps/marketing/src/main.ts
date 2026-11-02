@@ -111,11 +111,15 @@ if (tricks) {
   }).observe(tricks);
 }
 
-// The screens as tabs: one shows at a time. Arrow keys move along the tabs, as tabs do.
+// The screens as tabs: one shows at a time. Arrow keys move along the tabs, as tabs do. The
+// heading's noun follows the tab ("Same guide…", "Same channels…"); without scripts every screen
+// shows and it says "Same app…".
 const tablist = document.querySelector<HTMLElement>(".tabs");
 if (tablist) {
   const tabs = [...tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  const noun = document.querySelector(".screens h2 .noun");
   const select = (chosen: HTMLButtonElement, focus = false): void => {
+    if (noun && chosen.dataset["noun"]) noun.textContent = chosen.dataset["noun"];
     for (const tab of tabs) {
       const on = tab === chosen;
       tab.setAttribute("aria-selected", String(on));
