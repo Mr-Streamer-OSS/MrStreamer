@@ -22,8 +22,8 @@ const three = (patch: (shard: Shard, index: number) => Shard = (shard) => shard)
   [1, 2, 3].map((index) => patch({ shard: `${index}/3` }, index));
 
 /**
- * Writes artifacts for `shards` as download-artifact does, each in a folder of its own, or a lone
- * one straight into the download folder; hands that to `use`, then removes it.
+ * Writes artifacts for `shards` as download-artifact does, each in a folder of its own (a doubled
+ * shard too), or a lone one straight into the download folder; hands that to `use`, then removes it.
  */
 function withShards<T>(shards: readonly Shard[], use: (downloads: string, blobs: string) => T): T {
   const root = mkdtempSync(join(tmpdir(), "mrstreamer-test-shards-"));
@@ -35,7 +35,7 @@ function withShards<T>(shards: readonly Shard[], use: (downloads: string, blobs:
       const dir =
         shards.length === 1
           ? join(root, "downloads")
-          : join(root, "downloads", `test-shard-${report}-${index}`);
+          : join(root, "downloads", `test-shard-${report}-${index}-${position}`);
       mkdirSync(dir, { recursive: true });
       writeFileSync(
         join(dir, "shard.json"),
@@ -100,6 +100,15 @@ test("no shards, a missing shard or a missing blob is a problem; the blobs found
     "Shard 3/3: found 0 times, not once.",
   ]);
   assert.deepEqual(lone.blobs, ["blob-2-3.json"]);
+});
+
+test("a doubled shard, or shards that disagree on their count, is a problem", () => {
+  assert.deepEqual(collect([...three(), { shard: "2/3" }]).problems, [
+    "Shard 2/3: found 2 times, not once.",
+  ]);
+  assert.deepEqual(collect([{ shard: "1/3" }, { shard: "2/2" }]).problems, [
+    "The shards disagree on their count: 3, 2.",
+  ]);
 });
 
 test("other candidates' shards in the same run are left out", () => {
