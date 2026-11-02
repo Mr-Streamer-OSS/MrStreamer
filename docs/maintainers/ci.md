@@ -25,7 +25,7 @@ Checks runs the unchanged suite as three `Test shard <n>` jobs, each a standard 
 The table holds each file's import, setup, hooks and tests, from a hosted run's shards. Test writes a fresh one from every merge, `test-durations.json` in the `test-results-<run id>-<attempt>` artifact. Refresh the committed table from a green run when the shards drift apart, as new or grown test files shift the work:
 
 ```sh
-gh run download <run id> -n test-results-<run id>-<attempt> -D .local/ci-report
+gh run download <run id> -R Mr-Streamer-OSS/MrStreamer -n test-results-<run id>-<attempt> -D .local/ci-report
 cp .local/ci-report/test-durations.json test/durations.json
 ```
 
