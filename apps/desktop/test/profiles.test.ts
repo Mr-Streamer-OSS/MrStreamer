@@ -107,7 +107,7 @@ describe("the Default viewing profile", { timeout: 60_000 }, () => {
     expect(await personal(restarted)).toEqual(saved);
   });
 
-  it("answers no profile while its registry can't be written, and imports nothing twice once it can", async () => {
+  it("answers no profile while its registry can't be written, and imports the legacy lists once", async () => {
     const dataDir = await tempDir();
     const provider = await fakeProvider();
     // A subscription and the lists preferences.json kept before the viewing record and profiles.
@@ -117,38 +117,67 @@ describe("the Default viewing profile", { timeout: 60_000 }, () => {
     const subscriptionId = (await (await promised(login, Subscriptions)).add(demoLogin(provider)))
       .id;
     await login.dispose();
-    await writeFile(
-      join(dataDir, "preferences.json"),
-      JSON.stringify({
-        volume: 0.4,
-        muted: false,
-        lastChannelId: null,
-        lastCategoryId: null,
-        favouriteChannelIds: ["2014", "2015"],
-      }),
-    );
+    const legacy = JSON.stringify({
+      volume: 0.4,
+      muted: false,
+      lastChannelId: null,
+      lastCategoryId: null,
+      favouriteChannelIds: ["2014", "2015"],
+    });
+    await writeFile(join(dataDir, "preferences.json"), legacy);
 
     // Another copy of the app holds the write lock for all of the upgraded start.
     const holder = new DatabaseSync(join(dataDir, "mrstreamer.db"));
-    holder.exec("pragma journal_mode = wal; begin immediate");
-    const refused = await started(dataDir);
+    let refused: App;
+    try {
+      holder.exec("pragma journal_mode = wal; begin immediate");
+      refused = await started(dataDir);
 
-    await expect(refused.profiles.active()).rejects.toMatchObject({
-      error: { kind: "unexpected" },
-    });
-
-    holder.exec("rollback");
-    holder.close();
+      await expect(refused.profiles.active()).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+    } finally {
+      if (holder.isTransaction) holder.exec("rollback");
+      holder.close();
+    }
 
     expect(await refused.profiles.active()).toEqual(DEFAULT);
     await refused.dispose();
     const restarted = await started(dataDir);
+    const imported = await restarted.viewing.state();
 
     expect(await restarted.profiles.active()).toEqual(DEFAULT);
-    expect((await restarted.viewing.state()).favourites).toEqual([
+    expect(imported.favourites).toEqual([
       { subscriptionId, id: "2014" },
       { subscriptionId, id: "2015" },
     ]);
+
+    // The lists back in the file, as after a crash before it was cleaned, aren't imported again.
     await restarted.dispose();
+    await writeFile(join(dataDir, "preferences.json"), legacy);
+    const again = await started(dataDir);
+
+    expect(await again.viewing.state()).toEqual(imported);
+  });
+
+  it("answers no profile when a later release left another one active, and keeps it so", async () => {
+    const dataDir = await tempDir();
+    await (await started(dataDir)).dispose();
+    // What a release with more profiles leaves after its viewer chose another.
+    onDisk(dataDir, (db) =>
+      db.exec(`
+        insert into profiles (id, created_at) values ('later', 0);
+        update active_profile set profile_id = 'later', revision = 7;
+      `),
+    );
+
+    for (let start = 0; start < 2; start++) {
+      const app = await started(dataDir);
+
+      await expect(app.profiles.active()).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+      await app.dispose();
+    }
   });
 });

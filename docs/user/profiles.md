@@ -4,7 +4,7 @@ From 0.0.24, what you watch is kept in a viewing profile: a person's own viewing
 
 ## What Default keeps
 
-Everything personal you saved before 0.0.24 belongs to Default, where it already was. Updating moves, copies and changes none of it:
+Everything personal you saved before 0.0.24 belongs to Default, where it already was. Making it Default's moves, copies and changes none of it:
 
 - favourites and recently watched channels, and your own channel lists
 - how far you got in movies and episodes, Continue watching and watched marks

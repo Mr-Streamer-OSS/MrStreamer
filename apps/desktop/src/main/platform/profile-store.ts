@@ -6,11 +6,13 @@
 //
 // The first start writes the registry in one transaction, so it is either all there or not at
 // all. One that can't (the database is locked or can't be written) answers no profile, and the
-// next read or start tries again. Rows already there are never replaced, so a registry a later
-// release changed is read as that release left it.
+// next read or start tries again; a database that can't open answers none until a restart. Once
+// read, the active profile is kept in memory for the runtime's life. Rows already there are never
+// replaced. A registry a later release left with another profile active answers no profile and
+// stays as it is: this release shows Default's viewing alone, and must not claim another's.
 import type { DatabaseSync } from "node:sqlite";
 import { DEFAULT_PROFILE_ID, type ActiveProfile } from "@mrstreamer/contracts/profiles";
-import type { Failed } from "@mrstreamer/core/failure";
+import { Failed } from "@mrstreamer/core/failure";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import { type } from "arktype";
 import * as Context from "effect/Context";
@@ -36,8 +38,8 @@ export class Profiles extends Context.Service<
   Profiles,
   {
     /**
-     * The active profile, Default on an installation no release with more profiles has changed.
-     * Fails, publishing none, while the registry can't be written or read.
+     * The active profile: Default. Fails, publishing none, while the registry can't be written
+     * or read, and while a later release has left another profile active.
      */
     readonly active: Effect.Effect<ActiveProfile, Failed>;
   }
@@ -58,14 +60,17 @@ export const profilesLayer: Layer.Layer<Profiles, never, Database> = Layer.effec
           );
     yield* active.pipe(
       Effect.catch((failure) =>
-        Effect.logWarning("[profiles] the profiles can't be read; trying again", failure.error),
+        Effect.logWarning(
+          "[profiles] the profiles can't be read; trying again on the next read or start",
+          failure.error,
+        ),
       ),
     );
     return { active };
   }),
 );
 
-/** Registers Default as active, unless a profile already is, and reads the active profile. */
+/** Registers Default as active, unless a profile already is, and reads that it is Default. */
 function activeIn(db: DatabaseSync): ActiveProfile {
   return transaction(db, () => {
     db.exec(SCHEMA);
@@ -79,6 +84,14 @@ function activeIn(db: DatabaseSync): ActiveProfile {
     const row = ActiveRow().assert(
       db.prepare("select profile_id, revision from active_profile where slot = 1").get(),
     );
+    if (row.profile_id !== DEFAULT_PROFILE_ID) {
+      throw new Failed({
+        error: {
+          kind: "unexpected",
+          detail: "A later release made another viewing profile active; this one shows Default's.",
+        },
+      });
+    }
     return { id: row.profile_id, revision: row.revision };
   });
 }
