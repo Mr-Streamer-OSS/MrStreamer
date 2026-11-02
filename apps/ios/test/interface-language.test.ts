@@ -49,7 +49,6 @@ vi.mock("react-native", async () => ({
 }));
 vi.mock("react-native-safe-area-context", async () => ({
   SafeAreaView: (await import("./react-native.ts")).reactNative.View,
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
 vi.mock("expo-router", () => {

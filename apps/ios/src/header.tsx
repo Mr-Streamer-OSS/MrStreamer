@@ -8,10 +8,11 @@ import {
 import type { SFSymbol } from "expo-symbols";
 import { useEffect, useMemo, useRef } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DownloadStatusButton } from "./download-status.tsx";
 import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/navigation.ts";
+import { tabSides } from "./content-width.ts";
+import { useStore } from "./store.ts";
 import { colors } from "./ui.tsx";
 
 // The top bar every tab's screens share, layout A: the brand on the left, after the system's back
@@ -186,15 +187,15 @@ export function tabScreenOptions(tab: Tab, { left, right } = { left: 0, right: 0
 }
 
 /**
- * `tabScreenOptions(tab)` for a tab's stack layout, with the window's side insets, made again
- * when the interface language or those insets change: React Navigation keeps the other tabs'
+ * `tabScreenOptions(tab)` for a tab's stack layout, with `tabSides`, made again when the
+ * interface language or those insets change: React Navigation keeps the other tabs'
  * stacks from rendering again on their own, so their buttons' labels would keep the language
  * they were made in.
  */
 export function useTabScreenOptions(tab: Tab) {
   const locale = useLocale();
-  const { left, right } = useSafeAreaInsets();
-  return useMemo(() => tabScreenOptions(tab, { left, right }), [tab, locale, left, right]);
+  const sides = useStore(tabSides);
+  return useMemo(() => tabScreenOptions(tab, sides), [tab, locale, sides]);
 }
 
 /**
