@@ -5,20 +5,40 @@ import Foundation
 /// `media.mkv`. AVFoundation types a local file by its name and refuses that one
 /// (AVFoundationErrorDomain -11828), where over HTTP the response's type decides. Playback asks
 /// for this by giving the player a copy's `file:` address as `progressive`, once its session
-/// answered `direct`. The player then opens a link to the copy named `.mp4`, which AVFoundation
-/// reads as MP4 or MOV, and still refuses when the file is neither; the link goes with the asset.
+/// answered `direct`, which it also answers for a file that is neither Matroska nor MP4. So only a
+/// copy that starts as MP4 or MOV does is opened through a link to it named `.mp4`, removed with
+/// the asset; any other opens under its own name and fails as it did.
 final class MisnamedCopy: VideoAssetTransportProvider {
   let identifier = "app.mrstreamer.title-formats.misnamed-copy"
   let priority = 0
 
+  /// Where the links go. Emptied when the app starts, before any asset, of those a crash or a
+  /// force quit left.
+  private let links = FileManager.default.temporaryDirectory
+    .appendingPathComponent("misnamed-copies", isDirectory: true)
+
+  init() {
+    try? FileManager.default.removeItem(at: links)
+    try? FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+  }
+
+  /// The box an MP4 or MOV file starts with, at bytes 4 to 8.
+  private static let firstBoxes: Set<String> = ["ftyp", "moov", "mdat", "wide", "free", "skip", "pnot"]
+
   func makeLoadPlan(for source: VideoAssetSourceDescriptor) -> VideoAssetLoadPlan? {
-    guard source.url.isFileURL, source.contentTypeHint == .progressive else { return nil }
-    let link = FileManager.default.temporaryDirectory
-      .appendingPathComponent("copy-\(UUID().uuidString).mp4")
+    guard source.url.isFileURL, source.contentTypeHint == .progressive,
+      let file = try? FileHandle(forReadingFrom: source.url)
+    else { return nil }
+    let head = (try? file.read(upToCount: 8)) ?? Data()
+    try? file.close()
+    guard head.count == 8,
+      let box = String(bytes: head.suffix(4), encoding: .ascii),
+      Self.firstBoxes.contains(box)
+    else { return nil }
+    let link = links.appendingPathComponent("\(UUID().uuidString).mp4")
     do {
       try FileManager.default.createSymbolicLink(at: link, withDestinationURL: source.url)
     } catch {
-      // The copy's own address, which fails as it would have.
       return nil
     }
     return VideoAssetLoadPlan(

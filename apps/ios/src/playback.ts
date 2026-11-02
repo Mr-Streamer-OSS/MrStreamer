@@ -1616,8 +1616,9 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
       } else {
         await opening.closed;
         if (!attemptStands(owned, resource)) return;
-        // A copy that is MP4 or MOV after all: AVFoundation types a file on the phone by its
-        // name and refuses one named .mkv. As `progressive`, modules/title-formats opens it as MP4.
+        // Neither Matroska nor anything the session reads, or MP4 or MOV after all, which
+        // AVFoundation refuses on the phone under a name such as .mkv. As `progressive`,
+        // modules/title-formats opens it as MP4 when it is one.
         if (source.url.startsWith("file:"))
           playable = { uri: source.url, contentType: "progressive" };
       }
