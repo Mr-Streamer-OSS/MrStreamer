@@ -1,6 +1,6 @@
 # Marketing artwork
 
-The website shows five captures of the real app. They live in `docs/assets`:
+The website shows five captures of the real desktop app and five of the iOS app (see [iPhone captures](#iphone-captures)). The desktop ones live in `docs/assets`:
 
 | File                     | Shows                                                                                                 |
 | ------------------------ | ----------------------------------------------------------------------------------------------------- |
@@ -67,7 +67,7 @@ Credit them as "NASA" and "U.S. National Park Service" wherever the pictures app
 It also starts the made-up subscription, on loopback ports of its own:
 
 - The fake provider from the tests, unchanged, streaming the Earth loop through its `streams` option.
-- An adapter in front of it. The app logs in to the adapter. It lists the manifest's eight channels and seven series under the fake provider's ids, answers the guide, and serves the episode's file by byte range. Channels with `catchupDays` in the manifest say they keep that many days of catch-up, for the grid's signs and Play from start; the adapter serves no recording.
+- An adapter in front of it. The app logs in to the adapter. It lists the manifest's eight channels and seven series under the fake provider's ids, answers the guide, and serves the episode's file by byte range. The guide runs from two hours before the demo started to a day after it. Each programme keeps the length `programmeMinutes` gives it, from 15 minutes to 2 hours, and each channel is a different way into its current programme, so the grid's edges don't line up. Channels with `catchupDays` in the manifest say they keep that many days of catch-up, for the grid's signs and Play from start; the adapter serves no recording.
 - The fake TMDB behind a wrapper that answers with the manifest's names, stories and credits. The app reaches it through `MR_STREAMER_TMDB_API` with a made-up key.
 
 `marketing-capture.ts` starts the development build with a throwaway profile and update checks off, then drives it through its DevTools port as a viewer would:
@@ -78,7 +78,7 @@ It also starts the made-up subscription, on loopback ports of its own:
 4. Leaves the actually played episode, which seeds Continue watching and recommendations through normal viewing history.
 5. Stars two channels in Live TV, watches one and captures Live TV.
 6. Opens the guide grid from **Guide**, presses Left until the first channel's selected programme has aired, requires Play from start before Watch live and a catch-up sign beside every channel the manifest gives catch-up, and captures the grid. **List** goes back.
-7. Watches another channel, goes Home and requires the permanent actions, Continue watching and the recommendation naming the actual seed before capturing. Opens Customize for additional ignored native proof.
+7. Watches another channel, goes Home and requires Continue watching and the recommendation naming the actual seed before capturing. Opens Customize for additional ignored native proof.
 
 Each capture is the page of the window, taken with `Emulation.setDeviceMetricsOverride` at 1280 × 800 and a scale of 2, then `Page.captureScreenshot`. `Emulation.setScrollbarsHidden` keeps scroll bars out of it, as on a Mac, where they show only while scrolling. A page capture doesn't include the window's buttons. Home, Live TV, the guide grid and the details are captured in full screen, where the top bar keeps no room for those buttons. The episode is captured in a window, because in full screen the player hides the top bar.
 
@@ -91,13 +91,23 @@ The script verifies the owned CDP arguments and renderer URL, then retains raw p
 ## Before you commit new captures
 
 - Look at all five files at full size. Check the names, the pictures and the subtitle against the manifest.
-- Run `pnpm build:marketing` and look at the page on a wide screen and a phone. The hero fan and two features show parts of the windows, set in `CUTS` in `prepare-assets.ts`. If the app's layout moved, move those parts with it and keep `index.html`'s sizes in step. Regenerate the README's poster with `--readme` and look at it too.
+- Run `pnpm build:marketing` and look at the page on a wide screen and a phone. The five tricks show parts of the windows, set in `CUTS` in `prepare-assets.ts`. If the app's layout moved, move those parts with it and keep `index.html`'s sizes in step. Regenerate the README's poster with `--readme` and look at it too.
 - Put the new files' sizes in the pull request, each and in total. They are lossless and run to a few megabytes.
 
-The original PR 208 captures were made on the Mac mini on 11 October 2026 from Personal Home source `7b54b5265a9a62c1b20ed890c012f2041baa443a`. Live TV, details and watching retain those masters and the manifest's original top-level provenance.
+The original PR 208 captures were made on the Mac mini on 11 October 2026 from Personal Home source `7b54b5265a9a62c1b20ed890c012f2041baa443a`. Details and watching retain those masters and the manifest's original top-level provenance.
 
-Home was replaced on 12 October 2026 from merged Stage source `5db40b13ec7b3bf7a39781a71363f4fb17f2ad6d`, tree `c7d534d273b787d20d4728db6660f40857052bd0`. Its entry records the new capture provenance. This unsigned source build reports 0.0.10 on macOS 27.0.1, arm64 and Electron 44.4.5; it is not an installed 0.0.11 release. Exact capture, bundle and master hashes are in `marketing-capture.json`.
+Home was first replaced on 12 October 2026 from merged Stage source `5db40b13ec7b3bf7a39781a71363f4fb17f2ad6d`, tree `c7d534d273b787d20d4728db6660f40857052bd0`. Its entry records the new capture provenance. This unsigned source build reports 0.0.10 on macOS 27.0.1, arm64 and Electron 44.4.5; it is not an installed 0.0.11 release. Exact capture, bundle and master hashes are in `marketing-capture.json`.
 
 The TV Guide was added on 14 October 2026 with `--only tv-guide` on the Mac mini, with this capture script and demo manifest (their hashes are in its entry). Its `appSource`, `7bfb1a0f`, is this branch before its commits were squashed; its app code is that of `401072a16537c8b57658776440463656339cf0cc`. That unsigned source build reports 0.0.12 on macOS 27.0.1, arm64 and Electron 44.4.5. Its phone asset is 632 × 564 points at 250,236: the catch-up signs, the open programme with Play from start, and the now line.
 
-The cuts are in points of the 1280 × 800 window. A phone's hero shows the Home stage, 574 × 540 at 16,56: the stage preview, favourites and the start of Continue watching. The Live TV/TV Guide fan layers and details use one 6:5 shape: Live TV 600 × 500 at 236,56, the TV Guide 600 × 500 at 246,236 with the catch-up signs and the open programme, the details 600 × 500 at 174,60, and watching 884 × 737 at 396,42, keeping the real subtitle beside the right-hand panel. The 1200 × 630 social asset fits the complete Home window instead of cutting off the recommendation reason. All assets derive from captured pixels; never paint missing UI into a capture.
+Home, Live TV and the TV Guide were captured again on 2 November 2026 with `--only home,live-tv,tv-guide` on the Mac mini, after the demo's guide gained its own programme lengths. Their entries record source `dbc0fbad3ffbebf5635a17374512500240e3a8bb` with this checkout's uncommitted changes, an unsigned source build reporting 0.0.22 on macOS 27.0.1, arm64 and Electron 44.9.3, and the capture script and demo manifest hashes.
+
+The cuts are in points of the 1280 × 800 window, one beside each trick. The Home stage is 574 × 540 at 16,56: the stage preview, favourites and the start of Continue watching. Live TV, the TV Guide and the details use one 6:5 shape: Live TV 600 × 500 at 236,56, the TV Guide 600 × 500 at 266,236 with the catch-up signs and the open programme, the details 600 × 500 at 174,60, and watching 884 × 737 at 396,42, keeping the real subtitle beside the right-hand panel. The 1200 × 630 social asset fits the complete Home window instead of cutting off the recommendation reason. All assets derive from captured pixels; never paint missing UI into a capture.
+
+## iPhone captures
+
+`marketing-iphone-home.png`, `-live.png`, `-guide.png`, `-library.png` and `-watching.png` are the iOS app on the iPhone simulator, signed in to the same made-up subscription. Watching is landscape. `apps/ios/scripts/marketing-fixture.ts` starts the desktop demo unchanged and adds what the iOS app needs: live HLS cut from the Earth loop, the app's own login, the demo's pictures at its own address and the TMDB stand-in. Its header has the commands and the build settings.
+
+Build the app on the Mac mini with the fixture's TMDB settings, open it in the simulator in dark appearance, sign in and take each screen with T3's device session at the simulator's own pixels. Each capture's entry in `marketing-capture.json` records its own provenance: source, app version and build, simulator, runtime, Xcode, bundle and binary hashes, and the demo and fixture script hashes. `prepare-assets.ts` checks every iPhone file against its entry and makes the whole screen at 402 and 804 pixels wide, twice that for landscape.
+
+The five were captured on 2 November 2026 from source `dbc0fbad3ffbebf5635a17374512500240e3a8bb`, a Release simulator build reporting 0.1.0 (17) on an iPhone 18 Pro simulator with iOS 27.0. The status bar is as the simulator showed it.

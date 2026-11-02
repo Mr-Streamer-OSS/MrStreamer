@@ -15,7 +15,8 @@
 //   doesn't list it
 // - the home or download page lacks the script that names the visitor's system, a page links
 //   an installer anywhere but this repository's releases, or the home page describes the app to
-//   search engines in data that doesn't read or shows a picture the package lacks
+//   search engines in data that doesn't read or shows a picture the package lacks, or its FAQ
+//   data asks a question the page doesn't show
 // - a Markdown page lacks source headings, or a public link or fragment is missing
 // - search engines could list 404.html
 // - robots.txt doesn't name the sitemap, or a route answers with a missing page
@@ -180,6 +181,31 @@ try {
   }
 } catch {
   problems.push(`${LISTED["/"]} holds structured data that doesn't read.`);
+}
+// Search engines show FAQ answers only when the page shows the same questions: each question in
+// Home's FAQPage data must be one of its visible <summary> lines.
+try {
+  const blocks = [...home.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/gs)];
+  const faq = blocks
+    .map(([, json = ""]): Record<string, unknown> => JSON.parse(json))
+    .find(({ "@type": type }) => type === "FAQPage");
+  const shown = new Set(
+    [...home.matchAll(/<summary>(.*?)<\/summary>/gs)].map(([, text = ""]) =>
+      text.replace(/\s+/g, " ").trim(),
+    ),
+  );
+  const asked = Array.isArray(faq?.["mainEntity"]) ? faq["mainEntity"] : [];
+  if (
+    asked.length === 0 ||
+    asked.some(
+      (question: { name?: unknown }) =>
+        typeof question.name !== "string" || !shown.has(question.name),
+    )
+  ) {
+    problems.push(`${LISTED["/"]} answers FAQ questions in its data that the page doesn't show.`);
+  }
+} catch {
+  problems.push(`${LISTED["/"]} holds FAQ data that doesn't read.`);
 }
 
 // Every Markdown page holds its source's headings, even without JavaScript.

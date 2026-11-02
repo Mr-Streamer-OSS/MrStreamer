@@ -77,10 +77,14 @@ describe("the home page", () => {
       ["Discord", "https://discord.gg/sR4tjEw6bQ"],
       ["Download", "/download"],
     ]);
-    expect(links(".hero .actions a")).toEqual([["Download", "/download"]]);
+    expect(links(".hero .actions a")).toEqual([
+      ["Download", "/download"],
+      ["Read the source", "https://github.com/Mr-Streamer-OSS/MrStreamer"],
+    ]);
     expect(links("#downloads a")).toEqual([
       ["Homebrew tap", HOMEBREW[1]],
       ["AUR", AUR[1]],
+      ["Hear first on Discord", "https://discord.gg/sR4tjEw6bQ"],
       ["Download", "/download"],
     ]);
     expect(
@@ -95,6 +99,7 @@ describe("the home page", () => {
       ["Mac", "macOS 13 or later, Apple silicon", "DMG · Homebrew tap"],
       ["Windows", "Windows 11, 64-bit", "Microsoft Store · Setup .exe"],
       ["Linux", "64-bit. The AppImage needs FUSE 2.", "AppImage · .deb · AUR for Arch"],
+      ["iPhone", "Coming to the App Store", "Hear first on Discord"],
     ]);
   });
 });

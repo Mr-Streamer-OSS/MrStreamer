@@ -132,6 +132,20 @@
       "programmes": ["Tide Tables", "Weather Watch", "Kids Club"]
     }
   ],
+  "programmeMinutes": {
+    "Weather Watch": 15,
+    "Morning Tide": 60,
+    "Field Notes": 30,
+    "The Garden Show": 45,
+    "Small Kitchens": 30,
+    "Studio Sessions": 90,
+    "Kids Club": 20,
+    "Rally Hour": 60,
+    "The Long Table": 120,
+    "Saturday Workshop": 45,
+    "Night Sessions": 90,
+    "Tide Tables": 15
+  },
   "favourites": ["Riverbend", "Fernlight"],
   "home": "Meridian",
   "guide": "Estuary Max",

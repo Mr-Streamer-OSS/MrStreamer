@@ -1,8 +1,9 @@
 // Every page runs website analytics (analytics.ts). Home moves; download and about keep release
 // links current:
-// - Each part comes in once as it scrolls into view, and the hero fan opens once. Nothing runs
-//   while the page sits still. Without scripts the page is whole and the fan rests open.
+// - Each part comes in once as it scrolls into view. Nothing runs while the page sits still.
 //   styles.css holds the keyframes and switches them off for reduced motion.
+// - The five tricks light the row in the middle of the screen; the screens become tabs. Without
+//   scripts every trick is lit and every screen shows.
 // - One request for the update feed points the download and about pages' links at a stable
 //   release published since the site was built (downloads.ts). Home links /download and holds no
 //   installer, so it doesn't ask. Without an answer the built links stand.
@@ -71,6 +72,79 @@ document.addEventListener("visibilitychange", () => {
 calm.addEventListener("change", () => {
   for (const part of [...playing.keys()]) settle(part);
 });
+
+// The trick nearest the middle of the screen is lit, the others dimmed. It is worked out once a
+// frame while the page scrolls, and only while the tricks are on screen, so nothing runs at rest.
+const tricks = document.querySelector(".tricks");
+if (tricks) {
+  tricks.classList.add("watching");
+  const rows = [...tricks.querySelectorAll(".trick")];
+  let frame = 0;
+  const light = (): void => {
+    frame = 0;
+    const middle = innerHeight / 2;
+    const distance = (row: Element): number => {
+      const { top, bottom } = row.getBoundingClientRect();
+      return Math.abs((top + bottom) / 2 - middle);
+    };
+    const nearest = rows.reduce<Element | undefined>(
+      (best, row) => (best && distance(best) <= distance(row) ? best : row),
+      undefined,
+    );
+    const at = nearest ? rows.indexOf(nearest) : 0;
+    rows.forEach((row, index) => {
+      row.classList.toggle("lit", index === at);
+      // Rows above the lit one: their cards leave upward and come back down from above.
+      row.classList.toggle("past", index < at);
+    });
+  };
+  const schedule = (): void => {
+    if (!frame) frame = requestAnimationFrame(light);
+  };
+  light();
+  new IntersectionObserver(([entry]) => {
+    if (entry?.isIntersecting) {
+      addEventListener("scroll", schedule, { passive: true });
+      addEventListener("resize", schedule);
+      schedule();
+    } else {
+      removeEventListener("scroll", schedule);
+      removeEventListener("resize", schedule);
+    }
+  }).observe(tricks);
+}
+
+// The screens as tabs: one shows at a time. Arrow keys move along the tabs, as tabs do.
+const tablist = document.querySelector<HTMLElement>(".tabs");
+if (tablist) {
+  const tabs = [...tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  const select = (chosen: HTMLButtonElement, focus = false): void => {
+    for (const tab of tabs) {
+      const on = tab === chosen;
+      tab.setAttribute("aria-selected", String(on));
+      tab.tabIndex = on ? 0 : -1;
+      const panel = document.getElementById(tab.getAttribute("aria-controls") ?? "");
+      if (panel) panel.hidden = !on;
+    }
+    if (focus) chosen.focus();
+  };
+  tablist.addEventListener("click", ({ target }) => {
+    const tab =
+      target instanceof Element ? target.closest<HTMLButtonElement>('[role="tab"]') : null;
+    if (tab) select(tab);
+  });
+  tablist.addEventListener("keydown", (event) => {
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
+    const current = tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true");
+    const next = step === undefined ? undefined : tabs.at((current + step) % tabs.length);
+    if (!next) return;
+    event.preventDefault();
+    select(next, true);
+  });
+  const [first] = tabs;
+  if (first) select(first);
+  tablist.hidden = false;
+}
 
 /** Shows the stable release the update feed names now. Without an answer the built links stand. */
 async function refreshDownloads(): Promise<void> {

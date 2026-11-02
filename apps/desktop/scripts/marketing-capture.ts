@@ -34,7 +34,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -428,7 +428,6 @@ try {
       "Continue watching",
       "Recommendations",
       `Because you watched ${featured.name}`,
-      "Watchlist",
       featured.name,
       manifest.home,
     ]);
@@ -714,7 +713,7 @@ async function clickExpression(page: Page, target: string, label: string): Promi
 function cua(tool: string, arguments_: Record<string, unknown>) {
   const result: unknown = JSON.parse(
     execFileSync(
-      "/Users/rentamac/.local/bin/cua-driver",
+      join(homedir(), ".local/bin/cua-driver"),
       ["call", tool, JSON.stringify({ session, ...arguments_ })],
       { encoding: "utf8" },
     ),

@@ -1,18 +1,19 @@
 /*
  * mrstreamer.app: true black, white text. Sizes are in em of the body's font size, which follows
  * the window's width, so the home page keeps its proportions:
- * - Up to 700 px wide everything is one column: the hero, the fan of windows,
- *   the two features, Is it for you? with its needs as stacked rows, and Get Mr. Streamer with
- *   a row for each system.
- * - From 700 px the features are two across and the needs are a table.
- * - From 1120 px the fan, the features, Is it for you? and Get Mr. Streamer share one width,
- *   Is it for you?'s heading beside the table and the systems in three columns.
+ * - Up to 700 px wide everything is one column: the hero, the stage with the desktop window
+ *   running off the edge behind the iPhone, the five tricks, the screens, Is it for you? with its
+ *   needs as stacked rows, Questions and the download lanes as rows.
+ * - From 700 px the needs are a table.
+ * - From 1120 px the stage centres the window with the iPhone overlapping its right edge, the
+ *   sections share one width, the tricks show a screen beside the lit row, and the systems sit in
+ *   four columns.
  * - From 1600 px the page stops growing and stays centred.
  * Every download action on the home page is a link to /download. There, the visitor's own system
  * comes first (src/system.ts) above the rows for every system.
  * Nothing moves by itself, and every animation runs once and ends. The home page's motion is at
  * the end of its rules. With reduced motion nothing moves. Without JavaScript the hero still comes
- * in, and the rest is in place with the fan open.
+ * in, the tricks are all lit and every screen shows.
  * Document pages and 404 share the bar and footer. Their own rules come last.
  */
 :root {
@@ -196,14 +197,31 @@ footer a:hover {
 }
 
 .hero {
-  padding: 2.2em var(--inset) 0;
+  padding: 3.4em var(--inset) 0;
   text-align: center;
 }
 
-.hero .mark {
-  width: 3.4em;
-  height: 3.4em;
-  margin: 0 auto;
+/* The big line. The h1 under it says what the page is about; this is how it sounds. */
+.tagline {
+  font-size: 3.55em;
+  font-weight: 800;
+  line-height: 0.96;
+  letter-spacing: -0.05em;
+}
+
+/* The mark sits on the N of "Nothing", tipped back, the way a hat sits on a head. */
+.hatted {
+  position: relative;
+  display: inline-block;
+}
+
+.hatted img {
+  position: absolute;
+  left: -0.22em;
+  top: -0.7em;
+  width: 0.86em;
+  height: 0.86em;
+  transform: rotate(-14deg);
 }
 
 h1 {
@@ -215,18 +233,18 @@ h1 {
   text-wrap: balance;
 }
 
-/* What it is, in one line, and the systems it runs on in the next. */
-.line {
-  margin-top: 0.25em;
-  font-size: 1.45em;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  text-wrap: balance;
+.hero h1 {
+  max-width: 24em;
+  margin: 1.1em auto 0;
+  font-size: 1.12em;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
 }
 
 .lead {
   max-width: 28em;
-  margin: 0.8em auto 0;
+  margin: 0.15em auto 0;
   color: var(--soft);
   font-size: 1.05em;
   line-height: 1.45;
@@ -242,7 +260,15 @@ h1 {
 }
 
 .hero .actions {
-  margin-top: 1.5em;
+  margin-top: 1.6em;
+}
+
+.source {
+  font-weight: 600;
+}
+
+.source:hover {
+  color: var(--soft);
 }
 
 /* Microsoft's badge as Microsoft draws it, as tall as the button it stands in for. */
@@ -263,139 +289,324 @@ h1 {
   line-height: 1.45;
 }
 
-/* The app's windows: a thin frame, rounded as the window's own corners are. */
-.frame {
+/*
+ * The app's windows and the iPhone. A window is a thin frame rounded as the window's own corners;
+ * the iPhone is its screen in a dark bezel. Both keep their capture's shape.
+ */
+.window {
+  display: block;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 0.6em;
+  border: 1px solid #333;
+  border-radius: 0.75em;
   background: #000;
 }
 
-.frame img {
+.window img,
+.phone img {
+  display: block;
   width: 100%;
   height: auto;
 }
 
-.showcase {
-  margin: 2.2em var(--inset) 0;
+.phone {
+  padding: 0.3em;
+  border-radius: 16.5% / 7.6%;
+  background: #1c1c1e;
+  box-shadow: 0 2em 6em rgb(0 0 0 / 0.9);
+}
+
+.phone img {
+  border-radius: 15.5% / 7.1%;
 }
 
 /*
- * The stack: three windows fanned out from one spot, the whole of Home behind the Live TV and TV
- * Guide cuts. Where each lies is where it rests, also without the script.
+ * The stage: Home on a computer with the iPhone in front of it, lit from behind in the blue of the
+ * Earth the preview plays. On a phone the window runs off the right edge (the page clips it) so the
+ * iPhone can stay large. The window and the iPhone share one grid cell, so the stage is always as
+ * tall as whichever reaches lower and nothing hangs into the next section. Their margins are
+ * shares of the stage's width.
  */
-.stack {
+.stage,
+.screen {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.stage > *,
+.screen > * {
+  grid-area: 1 / 1;
+}
+
+.stage {
   position: relative;
-  margin: 0;
-  aspect-ratio: 1 / 1.1;
+  isolation: isolate;
+  margin: 2.6em 0 0;
+  padding: 0 0 2em var(--inset);
 }
 
-.stack .layer {
+/* The glow stays inside the page, which clips at 1600 px, so it has faded out before any edge. */
+.stage::before {
+  content: "";
   position: absolute;
-  overflow: hidden;
-  height: auto;
-  border: 1px solid #3a3a3a;
-  border-radius: 0.6em;
-  background: #000;
-  box-shadow: 0 10px 40px rgb(0 0 0 / 0.6);
+  inset: -12% 0 -6%;
+  z-index: -1;
+  background: radial-gradient(
+    closest-side,
+    rgb(60 149 210 / 0.5),
+    rgb(60 149 210 / 0.16) 55%,
+    rgb(60 149 210 / 0)
+  );
 }
 
-.stack .layer:nth-child(1) {
-  left: 0;
-  top: 0;
-  width: 88%;
+.stage .window {
+  width: 113%;
 }
 
-.stack .layer:nth-child(2) {
-  left: 0;
-  top: 46%;
-  width: 50%;
-}
-
-.stack .layer:nth-child(3) {
-  left: 50%;
-  top: 56%;
-  width: 50%;
-}
-
-.stack picture img {
-  width: 100%;
-  height: auto;
-}
-
-.legend {
-  display: grid;
-  gap: 1em;
-  margin-top: 1em;
-  font-size: 0.9em;
-  line-height: 1.5;
-}
-
-.legend p {
-  margin-top: 0.2em;
-  color: var(--soft);
-}
-
-@media (min-width: 43.75em) {
-  .stack {
-    aspect-ratio: 16 / 10.4;
-  }
-  .stack .layer:nth-child(1) {
-    width: 78%;
-  }
-  .stack .layer:nth-child(2) {
-    left: 44%;
-    width: 34%;
-  }
-  .stack .layer:nth-child(3) {
-    left: 66%;
-    width: 34%;
-  }
-  .legend {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2em;
-  }
-}
-
-/* Two features: details and subtitles, the screens not already in the fan. */
-.gallery {
-  display: grid;
-  gap: 2.4em;
-  margin: 4em var(--inset) 0;
+.stage .phone {
+  width: 41%;
+  margin: 12% 0 0 50%;
 }
 
 .home h2 {
   font-size: 1.8em;
-  font-weight: 650;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
+  font-weight: 800;
+  line-height: 1.02;
+  letter-spacing: -0.04em;
   text-wrap: balance;
 }
 
-.feature h2 {
-  margin-top: 0.75em;
-  font-size: 1.3em;
+/*
+ * Five tricks: one row each, a name and a line. With scripts, main.ts lights the row
+ * in the middle of the screen and dims the others; under the pointer or the keyboard a row lights
+ * too. From 1120 px a lit row shows its screen beside it. Without scripts every row is lit.
+ */
+.tricks,
+.screens,
+.questions {
+  margin: 4.5em var(--inset) 0;
 }
 
-.feature p,
+.tricks .label {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.3em 1em;
+  padding-bottom: 1em;
+  border-bottom: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 0.85em;
+}
+
+.tricks .label h2 {
+  font-size: 0.9em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.tricks ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trick {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.4em 1fr;
+  align-items: baseline;
+  gap: 0.25em 0;
+  padding: 1.05em 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.trick .nth {
+  grid-row: span 2;
+  color: var(--dim);
+  font-size: 0.85em;
+}
+
+.trick h3 {
+  margin: 0;
+  font-size: 1.9em;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.045em;
+}
+
+.trick h3 {
+  transition: color 0.3s var(--ease);
+}
+
+.trick p {
+  grid-column: 2;
+  color: var(--soft);
+  line-height: 1.4;
+}
+
+.trick .peek {
+  display: none;
+}
+
+.tricks.watching .trick h3 {
+  color: #666;
+}
+
+.tricks.watching .trick.lit h3,
+.tricks .trick:hover h3 {
+  color: #fff;
+}
+
+/* Same guide on the desk and on the couch: tabs once main.ts runs, every screen without it. */
+.screens-head {
+  display: grid;
+  gap: 1em;
+}
+
+.tabs {
+  display: flex;
+  gap: 1.8em;
+  margin-top: 1.8em;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: none;
+}
+
+.tabs[hidden],
+.screen[hidden] {
+  display: none;
+}
+
+.tabs button {
+  flex-shrink: 0;
+  margin-bottom: -1px;
+  padding: 0 0 0.9em;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 0.95em;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tabs button:hover {
+  color: #fff;
+}
+
+.tabs [aria-selected="true"] {
+  border-bottom-color: #fff;
+  color: #fff;
+}
+
+.screen {
+  margin: 2em 0 0;
+}
+
+.screen .window {
+  width: 92%;
+  margin-left: 22%;
+}
+
+.screen .phone {
+  width: 36%;
+  margin-top: 5%;
+}
+
+/* Watching: the window on the left, the iPhone turned sideways over its lower right corner. */
+.phone.landscape {
+  border-radius: 7.6% / 16.5%;
+}
+
+.phone.landscape img {
+  border-radius: 7.1% / 15.5%;
+}
+
+.screen.watching .window {
+  width: 92%;
+  margin-left: 0;
+}
+
+.screen.watching .phone {
+  width: 62%;
+  margin: 48% 0 0 38%;
+}
+
+/* Questions: the answers are in the page, open or closed, as search engines read them. */
+.questions {
+  display: grid;
+  gap: 1.4em;
+}
+
+.questions > div > p {
+  margin-top: 0.5em;
+  color: var(--dim);
+}
+
+.questions a {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.asked {
+  border-top: 1px solid var(--line);
+}
+
+.asked details {
+  border-bottom: 1px solid var(--line);
+}
+
+.asked summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  padding: 1.05em 0;
+  font-size: 1.08em;
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+}
+
+.asked summary::-webkit-details-marker {
+  display: none;
+}
+
+.asked summary::after {
+  content: "+";
+  content: "+" / "";
+  width: 1em;
+  flex-shrink: 0;
+  color: var(--dim);
+  font-weight: 400;
+  text-align: center;
+}
+
+.asked details[open] summary::after {
+  content: "\2212";
+  content: "\2212" / "";
+  color: #fff;
+}
+
+.asked details p {
+  max-width: 36em;
+  padding-bottom: 1.2em;
+  color: var(--soft);
+  line-height: 1.5;
+}
+
 .need p {
   margin-top: 0.4em;
   color: var(--soft);
   line-height: 1.45;
 }
 
-.feature p {
-  max-width: 28em;
-}
-
 .need,
 .downloads {
-  margin: 4em var(--inset) 0;
-}
-
-.need h2 + p {
-  max-width: 30em;
-  font-size: 1.05em;
+  margin: 4.5em var(--inset) 0;
 }
 
 /*
@@ -733,11 +944,38 @@ footer p {
   cursor: pointer;
 }
 
-/* Two features across, and the download rows and the visitor's block side by side. */
+/*
+ * The download rows and the visitor's block side by side, and the devices in their wide
+ * arrangement: the window centred with the iPhone over its right edge, the guide's iPhone at left.
+ */
 @media (min-width: 43.75em) {
-  .gallery {
-    grid-template-columns: 1fr 1fr;
-    gap: 3em 2.5em;
+  .stage .window {
+    width: 73.3%;
+    margin-left: 11.1%;
+  }
+
+  .stage .phone {
+    width: 20.8%;
+    margin: 7% 0 0 72%;
+  }
+
+  .screen .window {
+    width: 79.4%;
+    margin-left: 20.6%;
+  }
+
+  .screen .phone {
+    width: 22%;
+    margin: 5% 0 0 2.9%;
+  }
+
+  .screen.watching .window {
+    width: 79.4%;
+  }
+
+  .screen.watching .phone {
+    width: 46%;
+    margin: 30% 0 0 54%;
   }
 
   .row {
@@ -769,55 +1007,152 @@ footer p {
   }
 
   .hero {
-    padding: 4em 2em 0;
+    padding: 5.6em 2em 0;
   }
 
-  .hero .mark {
-    width: 4.6em;
-    height: 4.6em;
+  .tagline {
+    font-size: 7.1em;
   }
 
-  h1 {
-    font-size: 3.4em;
-  }
-
-  .line {
-    font-size: 1.6em;
+  .hero h1 {
+    font-size: 1.2em;
   }
 
   .lead {
     font-size: 1.1em;
   }
 
-  .showcase,
-  .gallery,
+  .stage {
+    margin-top: 2.2em;
+    padding: 0 0 3em;
+  }
+
+  .tricks,
+  .screens,
   .need,
+  .questions,
   .downloads {
-    width: 68em;
+    width: 75.5em;
     margin-inline: auto;
   }
 
-  .showcase {
+  .tricks {
     margin-top: 3em;
   }
 
-  .gallery {
-    margin-top: 5.5em;
+  .screens,
+  .need,
+  .questions,
+  .downloads {
+    margin-top: 7.5em;
   }
 
   .home h2 {
-    font-size: 2.4em;
+    font-size: 3.55em;
   }
 
-  .feature h2 {
-    font-size: 1.35em;
+  .need h2 {
+    font-size: 2.6em;
+  }
+
+  .trick {
+    grid-template-columns: 5.3em 1fr 14em;
+    align-items: center;
+    padding: 1.4em 0;
+  }
+
+  .trick .nth {
+    grid-row: auto;
+  }
+
+  .trick h3 {
+    font-size: 4em;
+  }
+
+  .trick p {
+    grid-column: 3;
+    font-size: 1.05em;
+  }
+
+  /*
+   * A lit row shows its screen between its name and its line, pinned to the line's column in the
+   * gap the longest name leaves. Each row deals its card differently: its own tilt and height (the
+   * long names get the flatter cards so a tipped corner never reaches them), in
+   * from below when scrolling down onto it and from above when scrolling back, while the card it
+   * replaces leaves the other way. main.ts marks the rows above the lit one `past`.
+   */
+  .tricks.watching .trick .peek {
+    display: block;
+    position: absolute;
+    top: 50%;
+    right: 14.6em;
+    width: 11em;
+    height: auto;
+    border: 1px solid #3a3a3a;
+    border-radius: 0.55em;
+    box-shadow: 0 1.5em 3em rgb(0 0 0 / 0.9);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(calc(-50% + var(--dy) + 2.4em)) rotate(calc(var(--tilt) + 12deg))
+      scale(0.86);
+    transition:
+      opacity 0.3s var(--ease),
+      transform 0.55s cubic-bezier(0.25, 1.25, 0.4, 1);
+  }
+
+  .tricks.watching .trick.past .peek {
+    transform: translateY(calc(-50% + var(--dy) - 2.4em)) rotate(calc(var(--tilt) - 12deg))
+      scale(0.86);
+  }
+
+  .tricks.watching .trick.lit .peek {
+    opacity: 1;
+    transform: translateY(calc(-50% + var(--dy))) rotate(var(--tilt));
+  }
+
+  .trick:nth-child(1) {
+    --tilt: -6deg;
+    --dy: -0.8em;
+  }
+
+  .trick:nth-child(2) {
+    --tilt: 2deg;
+    --dy: 0.6em;
+  }
+
+  .trick:nth-child(3) {
+    --tilt: 7deg;
+    --dy: -1.2em;
+  }
+
+  .trick:nth-child(4) {
+    --tilt: -3deg;
+    --dy: 0.9em;
+  }
+
+  .trick:nth-child(5) {
+    --tilt: 5deg;
+    --dy: -0.4em;
+  }
+
+  .tabs {
+    gap: 2.2em;
+    margin-top: 2.2em;
+  }
+
+  .screen {
+    margin-top: 2.2em;
+  }
+
+  .questions {
+    grid-template-columns: 22em 1fr;
+    gap: 4.4em;
   }
 
   .need {
     display: grid;
     grid-template-columns: 1fr 2fr;
     gap: 3em;
-    margin-top: 5.5em;
   }
 
   .need h2 + p {
@@ -833,12 +1168,11 @@ footer p {
     grid-template-columns: 1fr auto;
     align-items: end;
     gap: 1.56em 2.2em;
-    margin-top: 5.5em;
   }
 
   .downloads dl {
     grid-column: 1 / -1;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 3em;
     padding-top: 1.22em;
   }
@@ -885,12 +1219,11 @@ footer p {
 /*
  * Motion, only for those who haven't asked for less, and only on the home page. Every animation
  * moves and fades from where its keyframes start to where the element already is, once, and
- * holds nothing afterwards.
- * - As the page opens, without JavaScript: the bar drops in, the mark pops, the headline and its
- *   lines rise and the button pops.
- * - As a part scrolls into view, main.ts adds `revealed` to it and takes it off once every
- *   animation under it has finished: a feature, Is it for you? and Download rise, and the
- *   stack's three windows fan out from one spot, one after another, 1.4 seconds in all.
+ * holds nothing afterwards. Nothing loops.
+ * - As the page opens, without JavaScript: the bar drops in, the big line and the lines under it
+ *   rise, the hat drops onto its N and the button pops; the stage rises behind them.
+ * - As a part scrolls into view, main.ts adds `revealed` to it and takes it off once its
+ *   animation has finished: the tricks, the screens, Is it for you?, Questions and Download rise.
  */
 @keyframes drop {
   from {
@@ -913,35 +1246,11 @@ footer p {
   }
 }
 
-@keyframes fan {
+@keyframes don {
   from {
     opacity: 0;
-    transform: translate(var(--fx, 0), var(--fy, 0)) scale(0.94);
+    transform: translateY(-0.5em) rotate(-30deg);
   }
-}
-
-/* Where each window of the stack starts from, and when. */
-.stack .layer:nth-child(1) {
-  --fx: 6%;
-  --fy: 6%;
-  --wait: 0s;
-}
-
-.stack .layer:nth-child(2) {
-  --fx: -30%;
-  --fy: -40%;
-  --wait: 0.24s;
-}
-
-.stack .layer:nth-child(3) {
-  --fx: -60%;
-  --fy: -60%;
-  --wait: 0.48s;
-}
-
-/* The features come in one after another. */
-.gallery .feature:nth-child(2) {
-  --nth: 1;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -949,20 +1258,24 @@ footer p {
     animation: drop 0.5s var(--ease) backwards;
   }
 
-  .hero .mark {
-    animation: pop 0.5s cubic-bezier(0.3, 1.4, 0.4, 1) backwards;
-  }
-
-  .hero h1 {
+  .hero .tagline {
     animation: rise 0.7s var(--ease) 0.05s backwards;
   }
 
-  .hero .line {
-    animation: rise 0.7s var(--ease) 0.1s backwards;
+  .hatted img {
+    animation: don 0.6s cubic-bezier(0.3, 1.4, 0.4, 1) 0.45s backwards;
+  }
+
+  .hero h1 {
+    animation: rise 0.7s var(--ease) 0.12s backwards;
   }
 
   .hero .lead {
-    animation: rise 0.7s var(--ease) 0.15s backwards;
+    animation: rise 0.7s var(--ease) 0.16s backwards;
+  }
+
+  .stage {
+    animation: rise 0.9s var(--ease) 0.2s backwards;
   }
 
   /* A little past its size and back. Under the pointer or the keyboard's focus it lifts. */
@@ -981,20 +1294,16 @@ footer p {
   }
 
   [data-reveal].revealed {
-    animation: rise 0.5s var(--ease) calc(var(--nth, 0) * 0.08s) backwards;
+    animation: rise 0.5s var(--ease) backwards;
   }
+}
 
-  /*
-   * The stack itself stays put: its windows fan out. will-change lasts as long as the class, which
-   * main.ts takes off once the last window has arrived.
-   */
-  .stack.revealed {
-    animation: none;
-  }
-
-  .stack.revealed .layer {
-    animation: fan 0.95s var(--ease) var(--wait) backwards;
-    will-change: transform, opacity;
+/* With reduced motion a trick's card shows and hides where it rests, without sliding or turning. */
+@media (prefers-reduced-motion: reduce) {
+  .tricks.watching .trick .peek,
+  .tricks.watching .trick.past .peek {
+    transform: translateY(calc(-50% + var(--dy))) rotate(var(--tilt));
+    transition: none;
   }
 }
 
