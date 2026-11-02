@@ -1505,6 +1505,7 @@ export const fr: Translation = {
   "Every connection is in use.": "Toutes les connexions sont utilisées.",
   "Uses 1 connection. {used} of {limit} in use now.":
     "Utilise 1 connexion. {used} sur {limit} utilisées.",
+  "Shares the connection playing here.": "Partage la connexion de la lecture en cours.",
   "Ends 2 min after the guide time.": "S'arrête 2 min après l'heure du guide.",
   "Stop playing and record": "Arrêter la lecture et enregistrer",
   "Start recording": "Démarrer l'enregistrement",

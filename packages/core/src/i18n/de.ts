@@ -1448,6 +1448,7 @@ export const de: Translation = {
   "Every connection is in use.": "Alle Verbindungen sind belegt.",
   "Uses 1 connection. {used} of {limit} in use now.":
     "Nutzt 1 Verbindung. {used} von {limit} jetzt belegt.",
+  "Shares the connection playing here.": "Teilt die Verbindung der laufenden Wiedergabe.",
   "Ends 2 min after the guide time.": "Endet 2 Min. nach der Zeit im Programm.",
   "Stop playing and record": "Wiedergabe beenden und aufnehmen",
   "Start recording": "Aufnahme starten",

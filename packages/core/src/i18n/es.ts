@@ -1509,6 +1509,7 @@ export const es: Translation = {
   "Every connection is in use.": "Todas las conexiones están en uso.",
   "Uses 1 connection. {used} of {limit} in use now.":
     "Usa 1 conexión. {used} de {limit} en uso ahora.",
+  "Shares the connection playing here.": "Comparte la conexión de lo que se reproduce aquí.",
   "Ends 2 min after the guide time.": "Termina 2 min después de la hora de la guía.",
   "Stop playing and record": "Detener la reproducción y grabar",
   "Start recording": "Empezar a grabar",

@@ -1,8 +1,9 @@
 // Record, in Live TV's now strip: a popover that records the channel from now, to when its
 // programme ends (two minutes after the guide's time, as guides run late), for an hour or two, or
 // until a time of day it is given (today's, or tomorrow's once that passed, within
-// RECORDING_MAX_MS), and says how many of its subscription's connections are in use. When every
-// one is held, it says so, and where only playing here holds them, offers to stop that and record.
+// RECORDING_MAX_MS), and says how many of its subscription's connections are in use, or that it
+// shares the one playing that channel here. When every one is held, it says so, and where only
+// playing here holds them, offers to stop that and record.
 // While the channel records, the button reads Recording and opens Recordings.
 import { Popover } from "@base-ui/react/popover";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -217,8 +218,12 @@ function RecordPanel({
   );
   const stop = stopOf(choice, programme, now, at);
   const connections = useQuery({
-    queryKey: ["recordings", "connections", channel.subscriptionId],
-    queryFn: () => call("recordings.connections", { subscriptionId: channel.subscriptionId }),
+    queryKey: ["recordings", "connections", channel.subscriptionId, channel.id],
+    queryFn: () =>
+      call("recordings.connections", {
+        subscriptionId: channel.subscriptionId,
+        channel: ownedId(channel),
+      }),
   });
   const start = useMutation({
     mutationFn: async (stopPlaying: boolean) => {
@@ -243,6 +248,8 @@ function RecordPanel({
     },
   });
   const shown = busy ?? connections.data ?? null;
+  // Recording reads what plays of this channel here: no connection more, nothing to stop.
+  const shares = busy === null && connections.data?.shares === true;
   // Playing here is all that holds them: stopping it frees one.
   const onlyWatch = busy !== null && busy.uses.every((use) => use === "watch");
   return (
@@ -340,13 +347,17 @@ function RecordPanel({
             {t("Every connection is in use.")}
           </p>
         )}
-        {shown && (
-          <p>
-            {t("Uses 1 connection. {used} of {limit} in use now.", {
-              used: shown.uses.length,
-              limit: shown.limit,
-            })}
-          </p>
+        {shares ? (
+          <p>{t("Shares the connection playing here.")}</p>
+        ) : (
+          shown && (
+            <p>
+              {t("Uses 1 connection. {used} of {limit} in use now.", {
+                used: shown.uses.length,
+                limit: shown.limit,
+              })}
+            </p>
+          )
         )}
         {choice === "end" && (
           <p className="text-muted-foreground">{t("Ends 2 min after the guide time.")}</p>

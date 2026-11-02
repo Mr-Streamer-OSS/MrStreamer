@@ -1407,6 +1407,7 @@ export const en = {
   "Every connection is in use.": "Every connection is in use.",
   "Uses 1 connection. {used} of {limit} in use now.":
     "Uses 1 connection. {used} of {limit} in use now.",
+  "Shares the connection playing here.": "Shares the connection playing here.",
   "Ends 2 min after the guide time.": "Ends 2 min after the guide time.",
   "Stop playing and record": "Stop playing and record",
   "Start recording": "Start recording",

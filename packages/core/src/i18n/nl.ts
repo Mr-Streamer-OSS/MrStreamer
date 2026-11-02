@@ -1436,6 +1436,7 @@ export const nl: Translation = {
   "Every connection is in use.": "Alle verbindingen zijn in gebruik.",
   "Uses 1 connection. {used} of {limit} in use now.":
     "Gebruikt 1 verbinding. Nu {used} van {limit} in gebruik.",
+  "Shares the connection playing here.": "Deelt de verbinding van wat hier speelt.",
   "Ends 2 min after the guide time.": "Stopt 2 min na de tijd in de gids.",
   "Stop playing and record": "Stop afspelen en neem op",
   "Start recording": "Opname starten",
