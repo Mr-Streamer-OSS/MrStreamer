@@ -1632,6 +1632,45 @@ describe("downloads", { timeout: 30_000 }, () => {
     },
   );
 
+  it.each(["back in the foreground", "by a second Pause"] as const)(
+    "reads a pause whose late native write failed as the transfer it is, until it is kept %s",
+    async (how) => {
+      const app = await installedApp();
+      const { a } = await withProviders(app);
+      one.stallMovieFile(movie().id, 20_000, 60_000);
+      const film = await app.addDownload(movieRef(a));
+      await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+      const { transfers } = await import("../src/download-task.ts");
+      const hold = vi.spyOn(transfers, "holdAuthorization");
+      onTestFinished(() => hold.mockRestore());
+      // The disk refuses writes for a moment: the hold times out, then its late write fails, and
+      // so does the refill's.
+      background.faults.ledger = true;
+      hold.mockImplementationOnce(late(transfers.holdAuthorization.bind(transfers)));
+      // Answered once its request closes.
+      const pausing = app.pauseDownload(film.id);
+      await sleep(500);
+      background.faults.ledger = false;
+      const grant = [...background.grants.values()].find((each) => each.id === film.id);
+      expect(grant?.held).toBe(false);
+      if (how === "back in the foreground") appGoes("background");
+      await sleep(500);
+      expect(native.open).toBe(1);
+      expect(statusOf(app, film.id)).toMatchObject({ kind: "transferring", received: 20_000 });
+
+      if (how === "back in the foreground") appGoes("active");
+      else await expect(app.pauseDownload(film.id)).resolves.toBe("closed");
+      await expect(pausing).resolves.toBe("closed");
+      expect(native.open).toBe(0);
+      expect(grant?.held).toBe(true);
+      expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+      appGoes("background");
+      await sleep(1_500);
+      expect(background.events.filter((each) => each === `start:${film.id}`)).toHaveLength(1);
+      expect(statusOf(app, film.id)?.kind).toBe("paused");
+    },
+  );
+
   it("lets a Resume free a launch held back by a pause the native side won't keep", async () => {
     let app = await installedApp();
     const { a } = await withProviders(app);
