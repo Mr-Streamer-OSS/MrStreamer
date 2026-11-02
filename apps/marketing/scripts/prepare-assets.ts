@@ -36,14 +36,17 @@ const WIDTHS = [960, 1440, 1920, 2560];
 const SCALE = 2;
 /** The five captures, each the whole window in points (1280 × 800). */
 const MASTERS = ["home", "live-tv", "tv-guide", "library", "watching"] as const;
-/** The iPhone captures, each the whole screen at the simulator's own pixels; Watching is landscape. */
-const IPHONES = [
-  "iphone-home",
-  "iphone-live",
-  "iphone-guide",
-  "iphone-library",
-  "iphone-watching",
-] as const;
+/**
+ * The iPhone captures, each the whole screen at the simulator's own pixels, held the way index.html
+ * shows it: Watching sideways, the rest upright.
+ */
+const IPHONES = {
+  "iphone-home": "portrait",
+  "iphone-live": "portrait",
+  "iphone-guide": "portrait",
+  "iphone-library": "portrait",
+  "iphone-watching": "landscape",
+} as const;
 /**
  * The iPhone screen the page is laid out for, in points: index.html gives every iPhone picture
  * this shape (804 × 1748, or 1608 × 740 for landscape Watching), so a capture must have it too.
@@ -111,15 +114,15 @@ for (const name of MASTERS) {
       .toFile(join(out, `${name}-${width}.webp`));
   }
 }
-for (const name of IPHONES) {
+for (const [name, held] of Object.entries(IPHONES)) {
   const capture = sharp(checkedCapture(name));
   const size = await capture.metadata();
   const { format, width = 0, height = 0 } = size;
-  const landscape = width > height;
+  const landscape = held === "landscape";
   const [long, short] = landscape ? [width, height] : [height, width];
   if (format !== "png" || long * IPHONE_SCREEN.width !== short * IPHONE_SCREEN.height)
     throw new Error(
-      `${name} must be a lossless PNG of the whole ${IPHONE_SCREEN.width} × ${IPHONE_SCREEN.height}-point iPhone screen.`,
+      `${name} must be a lossless ${held} PNG of the whole ${IPHONE_SCREEN.width} × ${IPHONE_SCREEN.height}-point iPhone screen.`,
     );
   // A landscape screen is as tall as a portrait one is wide, so it is twice as wide again.
   for (const width of landscape ? IPHONE_WIDTHS.map((each) => each * 2) : IPHONE_WIDTHS) {
