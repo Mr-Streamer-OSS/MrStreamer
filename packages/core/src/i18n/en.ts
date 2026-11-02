@@ -1414,6 +1414,8 @@ export const en = {
   "A recording uses this subscription's connection. Stop it in Recordings to watch.":
     "A recording uses this subscription's connection. Stop it in Recordings to watch.",
   "Stop recording {title}": "Stop recording {title}",
+  "Stop recording": "Stop recording",
+  "{channel} · to {time}": "{channel} · to {time}",
   "The provider refused the stream. Another device may be using your connection.":
     "The provider refused the stream. Another device may be using your connection.",
   "The channel has no stream right now.": "The channel has no stream right now.",

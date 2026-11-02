@@ -1443,6 +1443,8 @@ export const nl: Translation = {
   "A recording uses this subscription's connection. Stop it in Recordings to watch.":
     "Een opname gebruikt de verbinding van dit abonnement. Stop hem bij Opnames om te kijken.",
   "Stop recording {title}": "Opname van {title} stoppen",
+  "Stop recording": "Opname stoppen",
+  "{channel} · to {time}": "{channel} · tot {time}",
   "The provider refused the stream. Another device may be using your connection.":
     "De provider weigerde de stream. Misschien gebruikt een ander apparaat je verbinding.",
   "The channel has no stream right now.": "De zender heeft nu geen stream.",

@@ -1455,6 +1455,8 @@ export const de: Translation = {
   "A recording uses this subscription's connection. Stop it in Recordings to watch.":
     "Eine Aufnahme nutzt die Verbindung dieses Abonnements. Beende sie unter Aufnahmen, um zu schauen.",
   "Stop recording {title}": "Aufnahme von {title} beenden",
+  "Stop recording": "Aufnahme beenden",
+  "{channel} · to {time}": "{channel} · bis {time}",
   "The provider refused the stream. Another device may be using your connection.":
     "Der Anbieter hat den Stream abgelehnt. Vielleicht nutzt ein anderes Gerät deine Verbindung.",
   "The channel has no stream right now.": "Der Sender hat gerade keinen Stream.",
