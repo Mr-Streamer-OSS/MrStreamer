@@ -1750,11 +1750,10 @@ describe("downloads", { timeout: 30_000 }, () => {
     const app = await installedApp();
     const { a } = await withProviders(app);
     const { series, first } = episode();
-    one.stallMovieFile(otherMovie().id, 20_000, 60_000);
+    one.stallMovieFile(otherMovie().id, 1, 60_000);
     one.stallMovieFile(movie().id, 20_000, 60_000);
     // Listed ahead of the transfer: paused before it started, then resumed behind it.
     const next = await app.addDownload(movieRef(a, otherMovie().id));
-    await until(() => receivedOf(app, next.id) === 20_000, "the first transfer to stall");
     await app.pauseDownload(next.id);
     const film = await app.addDownload(movieRef(a));
     await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
