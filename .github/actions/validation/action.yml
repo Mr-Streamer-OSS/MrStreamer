@@ -161,7 +161,9 @@ runs:
     # Also each file's seconds, which test/sequencer.ts splits the shards by.
     - name: Merge test shards
       if: always() && inputs.part == 'test-shards'
-      run: pnpm test --merge-reports="$RUNNER_TEMP/test-blobs" --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/test-results.json" --reporter=./scripts/test-durations.ts --outputFile.durations="$RUNNER_TEMP/test-durations.json"
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: pnpm test --merge-reports="$RUNNER_TEMP/test-blobs" --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/test-results.json" --reporter="$ACTION_PATH/../../../scripts/test-durations.ts" --outputFile.durations="$RUNNER_TEMP/test-durations.json"
       shell: bash
 
     # The report, to look into a failure or a slow file, and merged shards' durations. Missing
