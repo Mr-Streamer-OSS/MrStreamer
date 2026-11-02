@@ -53,10 +53,6 @@ type HistoryRead = Uint8Array | "ahead" | "evicted";
 export interface History {
   /** The offset after the last byte that arrived. */
   end(): number;
-  /** The oldest offset still retained. */
-  start(): number;
-  /** Bytes its files take on disk now. */
-  diskBytes(): number;
   append(chunk: Uint8Array): void;
   /** Up to READ_BYTES from `offset`. */
   read(offset: number): Promise<HistoryRead>;
@@ -66,7 +62,7 @@ export interface History {
   offsetAt(time: number): number;
   /** No more bytes come; readers read what is retained. */
   finish(): void;
-  readonly finished: () => boolean;
+  finished(): boolean;
   /** Removes its files; reads answer evicted from then on. */
   close(): Promise<void>;
 }
@@ -146,8 +142,6 @@ export function historyStore(budget: HistoryBudget) {
     state.sealed = write;
     return {
       end: () => state.end,
-      start: () => state.start(),
-      diskBytes: () => state.disk,
       append: (chunk) => state.append(chunk),
       read: (offset) => state.read(offset),
       arrived: (offset, signal) => state.arrived(offset, signal),
@@ -163,7 +157,7 @@ export function historyStore(budget: HistoryBudget) {
     };
   }
 
-  return { create, ready };
+  return { create };
 }
 
 class HistoryState {

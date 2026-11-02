@@ -95,7 +95,7 @@ import {
 import { Library } from "./library.ts";
 import { Playback, type LocalCopy } from "./playback.ts";
 import { PlaybackCoordination } from "./playback-coordination.ts";
-import { captureKey, LiveCaptures } from "../playback/live-capture.ts";
+import { LiveCaptures, streamKey } from "../playback/live-capture.ts";
 import { Settings } from "./preferences.ts";
 import { Subscriptions } from "./subscription.ts";
 
@@ -937,15 +937,7 @@ function make(deps: RecordingsDeps) {
         // reads: that stream alone, on the connection it holds.
         const keyed = streams.map((each) => ({
           ...each,
-          key:
-            each.stream.format === "mpegts"
-              ? captureKey({
-                  subscriptionId,
-                  revision: source.revision,
-                  url: each.stream.url,
-                  headers: each.stream.headers ?? {},
-                })
-              : null,
+          key: streamKey(subscriptionId, source.revision, each.stream),
         }));
         const shared = keyed.find((each) => each.key !== null && captures.reading(each.key));
         const tried = shared ? [shared] : keyed;
@@ -1983,18 +1975,10 @@ function make(deps: RecordingsDeps) {
           const streams = yield* Effect.forEach(variants, (id) =>
             Effect.promise(() => source.provider.liveStream(id).catch(() => null)),
           );
-          const shares = streams.some(
-            (stream) =>
-              stream?.format === "mpegts" &&
-              captures.reading(
-                captureKey({
-                  subscriptionId,
-                  revision: source.revision,
-                  url: stream.url,
-                  headers: stream.headers ?? {},
-                }),
-              ),
-          );
+          const shares = streams.some((stream) => {
+            const key = streamKey(subscriptionId, source.revision, stream);
+            return key !== null && captures.reading(key);
+          });
           return { limit, uses, shares };
         }),
       start,

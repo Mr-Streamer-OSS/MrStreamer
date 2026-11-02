@@ -18,6 +18,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { DEFAULT_KEEP_FREE } from "@mrstreamer/contracts/recordings";
+import type { LiveStream } from "@mrstreamer/core/provider";
 import { PlaybackCoordination } from "../services/playback-coordination.ts";
 import { historyStore, PIECE_BYTES, TEMPORARY_BYTES, type History } from "./live-history.ts";
 
@@ -41,6 +42,12 @@ export function captureKey(source: CaptureSource): string {
   return JSON.stringify(["live", source.subscriptionId, source.revision, source.url, headers]);
 }
 
+/** The key of a channel's live stream looked up under `revision`; null unless it is MPEG-TS. */
+export function streamKey(subscriptionId: string, revision: number, stream: LiveStream | null) {
+  if (stream?.format !== "mpegts") return null;
+  return captureKey({ subscriptionId, revision, url: stream.url, headers: stream.headers ?? {} });
+}
+
 /** A reader whose bytes were evicted before it read them: it read too slowly. */
 export class FellBehind extends Error {
   constructor() {
@@ -57,8 +64,8 @@ interface Capture {
   /** Where the stream's packets begin: the first sync byte. */
   origin: number | null;
   failure: unknown;
-  /** Each reader, by its owner. */
-  readonly readers: Set<{ readonly owner: string }>;
+  /** How many read it now. */
+  readers: number;
   /** Settles once the provider's request ended. */
   readonly pumped: Promise<void>;
   /** Settles once the request ended and the history is gone; set by the last reader leaving. */
@@ -164,8 +171,7 @@ function make(options: LiveCapturesOptions) {
 
     /** A reader's answer, from `offset`. */
     const attach = (capture: Capture, owner: string, offset: number, signal: AbortSignal) => {
-      const reading = { owner };
-      capture.readers.add(reading);
+      capture.readers++;
       coordination.connected(owner, capture.key);
       let cursor = offset;
       let left = false;
@@ -176,8 +182,7 @@ function make(options: LiveCapturesOptions) {
         left = true;
         signal.removeEventListener("abort", aborted);
         stop.abort();
-        capture.readers.delete(reading);
-        if (capture.readers.size > 0) return;
+        if (--capture.readers > 0) return;
         const closing = close(capture);
         const own = closings.get(owner) ?? new Set();
         own.add(closing);
@@ -276,7 +281,7 @@ function make(options: LiveCapturesOptions) {
             headers: new Headers(response.headers),
             origin: null,
             failure: null,
-            readers: new Set(),
+            readers: 0,
             pumped,
             closing: null,
           };

@@ -285,8 +285,10 @@ export const ipcInputs = {
   "reminders.dismiss": () => type({ id: "string > 0" }),
   "profiles.active": none,
   "recordings.list": none,
-  /** What holds a subscription's connections now, as Record shows before it starts. */
-  /** With `channel`, also whether recording it now would share what plays of it. */
+  /**
+   * What holds a subscription's connections now, as Record shows before it starts, and with
+   * `channel`, whether recording it now would share what plays of it.
+   */
   "recordings.connections": () => type({ subscriptionId: "string > 0", "channel?": owned() }),
   /**
    * Records the channel from now until `stop`, through `variant`, else the stream chosen for it

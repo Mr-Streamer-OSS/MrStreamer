@@ -158,7 +158,7 @@ import {
   type UpstreamSlot,
 } from "../playback/upstream.ts";
 import { Subscriptions, type Source } from "./subscription.ts";
-import { captureKey, LiveCaptures } from "../playback/live-capture.ts";
+import { captureKey, LiveCaptures, streamKey } from "../playback/live-capture.ts";
 import {
   CLEAN_START_CODECS,
   INSPECT_LIMIT,
@@ -771,14 +771,8 @@ function make(deps: PlaybackDeps) {
           Effect.promise(() => source.provider.liveStream(id).catch(() => null)),
         );
         return streams.flatMap((stream) => {
-          if (stream?.format !== "mpegts") return [];
-          const key = captureKey({
-            subscriptionId: channel.subscriptionId,
-            revision: source.revision,
-            url: stream.url,
-            headers: stream.headers ?? {},
-          });
-          return captures.reading(key) ? [key] : [];
+          const key = streamKey(channel.subscriptionId, source.revision, stream);
+          return key !== null && captures.reading(key) ? [key] : [];
         });
       });
     /** When channel streams failed, by upstream address, for `FAILED_STREAM_MS`. */
@@ -1044,16 +1038,13 @@ function make(deps: PlaybackDeps) {
       // A session that played a stream keeps it: a player asking again, as hls.js does for a
       // playlist, gets that stream or none.
       const kept = session.delivered.variantId;
+      const listed = kept ? session.variants.filter(({ id }) => id === kept) : session.variants;
+      const keyed = listed.map((variant) => ({ variant, key: keyOf(session, variant) }));
       // A stream something else reads now goes first: it asks the provider nothing more.
-      const variants = (
-        kept ? session.variants.filter(({ id }) => id === kept) : session.variants
-      ).toSorted((a, b) => Number(reading(b)) - Number(reading(a)));
-      function reading(variant: LiveSession["variants"][number]) {
-        const key = keyOf(session, variant);
-        return key !== null && captures?.reading(key) === true;
-      }
-      for (const variant of variants) {
-        const key = keyOf(session, variant);
+      const read = (key: string | null) => key !== null && captures?.reading(key) === true;
+      for (const { variant, key } of keyed.toSorted(
+        (a, b) => Number(read(b.key)) - Number(read(a.key)),
+      )) {
         const upstream = await connect(
           session,
           variant.url,
