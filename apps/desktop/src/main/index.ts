@@ -49,6 +49,7 @@ import { viewingHandlers } from "./handlers/viewing.ts";
 import { customListHandlers } from "./handlers/custom-lists.ts";
 import { downloadHandlers } from "./handlers/downloads.ts";
 import { recordingHandlers } from "./handlers/recordings.ts";
+import { profileHandlers } from "./handlers/profiles.ts";
 import { reminderHandlers } from "./handlers/reminders.ts";
 import { analyticsHandlers } from "./handlers/analytics.ts";
 import { preferenceHandlers } from "./handlers/preferences.ts";
@@ -58,6 +59,7 @@ import { emit, registerIpc, type IpcHandlers } from "./ipc.ts";
 import { applyLanguage, languageFor } from "./language.ts";
 import { fieldMenu } from "./menu.ts";
 import { miniPlayer, miniPlayerAvailable } from "./mini-player.ts";
+import { Profiles } from "./platform/profile-store.ts";
 import { installedDistribution, snapName, snapPasswordStore } from "./platform/installation.ts";
 import { electronInstaller } from "./platform/installer.ts";
 import { installingOnceStopsKept } from "./recordings/restart.ts";
@@ -595,6 +597,7 @@ async function start(): Promise<void> {
     downloads,
     reminders,
     recordings,
+    profiles,
   } = await runtime.runPromise(
     Effect.all({
       subscriptions: Subscriptions,
@@ -616,6 +619,7 @@ async function start(): Promise<void> {
       downloads: Downloads,
       reminders: Reminders,
       recordings: Recordings,
+      profiles: Profiles,
     }),
   );
 
@@ -882,6 +886,7 @@ async function start(): Promise<void> {
       ...customListHandlers({ customLists }),
       ...downloadHandlers({ downloads }),
       ...reminderHandlers({ reminders }),
+      ...profileHandlers({ profiles }),
       ...recordingHandlers({
         recordings,
         library,

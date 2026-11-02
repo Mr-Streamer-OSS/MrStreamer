@@ -70,6 +70,7 @@ import {
 } from "./playback.ts";
 import { LOCALES, type InterfaceLanguage } from "./language.ts";
 import { Preferences, SubscriptionPreferences } from "./preferences.ts";
+import type { ActiveProfile } from "./profiles.ts";
 import type { Reminder, ReminderList } from "./reminders.ts";
 import {
   RecordingPlanSchema,
@@ -282,6 +283,7 @@ export const ipcInputs = {
   "reminders.cancel": () => type({ id: "string > 0" }),
   /** Takes a reminder's notice in the window down for this run; it stays listed. */
   "reminders.dismiss": () => type({ id: "string > 0" }),
+  "profiles.active": none,
   "recordings.list": none,
   /** What holds a subscription's connections now, as Record shows before it starts. */
   "recordings.connections": () => type({ subscriptionId: "string > 0" }),
@@ -718,6 +720,11 @@ export interface IpcOutputs {
   "reminders.set": Reminder;
   "reminders.cancel": null;
   "reminders.dismiss": null;
+  /**
+   * The viewing profile whose viewing the app shows: Default, the only one this release offers.
+   * Fails while the profiles can't be read or written, rather than guess one.
+   */
+  "profiles.active": ActiveProfile;
   /** Every recording, newest first. Fails while they can't be read. */
   "recordings.list": readonly Recording[];
   "recordings.connections": RecordingConnections;
