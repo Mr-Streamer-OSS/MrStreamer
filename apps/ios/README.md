@@ -138,7 +138,8 @@ Actual background and physical-device acceptance remain separate from source and
   embedded and online subtitles, the next-episode countdown, speed and Now Playing, the download
   queue's pause and order, offline series, metadata and diagnostics recovery, interface language,
   lighter launch and Automatic quality, and the adaptive iPad and Duo layouts below. It's source on
-  `main`: `app.json` still names 0.1.0, and there is no 0.2.0 TestFlight build or App Store release. Its simulator
+  `main`: `app.json` names 0.2.0, build 18, as committed metadata for a later TestFlight candidate.
+  No 0.2.0 build has been archived or uploaded, and there is no App Store release. Its simulator
   results go on the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148), and the [release card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288153777)
   holds what it still needs.
 - **Gated, not delivered:** more media formats and Google Cast each have a researched route that
@@ -983,12 +984,13 @@ proof out: `src/app/proof.tsx` loads it only in development.
 ## Signed iPhone candidates and TestFlight
 
 The app installs as `app.mrstreamer.player`, the desktop's `appId`, in development and release
-builds alike. Its version is its own, not the desktop's: `version` in `app.json` is `0.1.0` for
-the public candidate as well as the private beta, and `main` hasn't moved it to 0.2.0. Build 17
-of 0.1.0 went to App Review on 27 October 2026 with manual release; leave that build and its review
-as they are. Read the current App Store Connect build and
-version inventory before allocating an unused `ios.buildNumber`; record the dated readback and
-allocation on the candidate's project card.
+builds alike. Its version is its own, not the desktop's: `app.json` names `0.2.0` with
+`ios.buildNumber` `18`, after a GET-only App Store Connect read on 2 November 2026 found 18 unused
+across builds and uploads. That is source metadata only; no 0.2.0 build has been archived,
+exported or uploaded. Build 17 of 0.1.0 went to App Review on 27 October 2026 with manual
+release; leave that build and its review as they are. Before each archive, read the current App
+Store Connect build and upload inventory again, move `ios.buildNumber` to the next unused number
+if 18 has been taken, and record the dated readback and allocation on the candidate's project card.
 The submitted 0.1.0 candidate used `supportsTablet: false`, requesting iPhone device family 1
 without a native iPad target; Apple's iPhone compatibility mode on iPad is separate. The
 next-release source sets `supportsTablet: true`, requesting iPhone and iPad families 1 and 2.
