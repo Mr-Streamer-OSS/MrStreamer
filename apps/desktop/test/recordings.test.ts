@@ -1433,6 +1433,11 @@ describe.skipIf(!hasTools)("recordings", () => {
     const { id } = answer.recording;
     await until(recordings.list, ([first]) => first?.status.kind === "complete");
     const manifest = join(dataDir, "recordings", "recordings.json");
+    // Listed before it is written: storage refuses only once its end is written down.
+    await until(
+      async () => (await readFile(manifest, "utf8").catch(() => "")).includes('"kind":"complete"'),
+      Boolean,
+    );
     await rm(manifest);
     await mkdir(manifest);
     await expect(recordings.recordProgress(id, 42, 90)).rejects.toMatchObject({
