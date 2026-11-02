@@ -1746,6 +1746,48 @@ describe("downloads", { timeout: 30_000 }, () => {
     await expect(pausing).resolves.toBe("closed");
   });
 
+  it("lists a transfer whose pause wasn't kept first, and moves only those waiting their turn", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    const { series, first } = episode();
+    one.stallMovieFile(otherMovie().id, 20_000, 60_000);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    // Listed ahead of the transfer: paused before it started, then resumed behind it.
+    const next = await app.addDownload(movieRef(a, otherMovie().id));
+    await until(() => receivedOf(app, next.id) === 20_000, "the first transfer to stall");
+    await app.pauseDownload(next.id);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    await app.resumeDownload(next.id);
+    const show = await app.addDownload({
+      kind: "episode",
+      subscriptionId: a,
+      id: String(first.id),
+      seriesId: String(series.id),
+      season: 1,
+      episode: first.number ?? 1,
+    });
+    await until(() => background.open(show.id).length === 1, "the last one authorized");
+    const { transfers } = await import("../src/download-task.ts");
+    const hold = vi.spyOn(transfers, "holdAuthorization");
+    onTestFinished(() => hold.mockRestore());
+    // Neither the Pause nor the refill after it is kept.
+    hold.mockImplementation(async () => {
+      throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
+    });
+    hold.mockImplementationOnce(async () => Promise.reject(busy()));
+    void app.pauseDownload(film.id);
+    await sleep(300);
+    const listed = () => app.downloadList().items.map((item) => item.id);
+    expect(statusOf(app, film.id)?.kind).toBe("transferring");
+    expect(listed()).toEqual([film.id, next.id, show.id]);
+
+    // Among those waiting, the transfer passed over.
+    await app.moveDownload(show.id, -1);
+    expect(listed()).toEqual([film.id, show.id, next.id]);
+    expect(doc().items.map((item: { id: string }) => item.id)).toEqual([show.id, film.id, next.id]);
+  });
+
   it("reads a pause a relaunch interrupted as its transfer until the native side keeps it", async () => {
     let app = await installedApp();
     const { a } = await withProviders(app);
