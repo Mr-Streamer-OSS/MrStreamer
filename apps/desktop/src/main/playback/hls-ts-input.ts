@@ -3,7 +3,7 @@
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { createInspector, type StreamLayout } from "./inspect.ts";
 
-const PLAYLIST_BYTES = 4 * 1024 * 1024;
+export const PLAYLIST_BYTES = 4 * 1024 * 1024;
 const PREFIX_BYTES = 2 * 1024 * 1024;
 const SEGMENT_BYTES = 32 * 1024 * 1024;
 const SEGMENTS = 10_000;
@@ -51,7 +51,7 @@ interface Segment {
   readonly epoch: number;
   readonly duration: number;
 }
-export interface Media {
+interface Media {
   readonly segments: readonly Segment[];
   readonly ended: boolean;
   readonly target: number;

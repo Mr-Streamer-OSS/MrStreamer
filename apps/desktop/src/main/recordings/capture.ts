@@ -206,8 +206,8 @@ async function openSource(
 ): Promise<Opened> {
   const ask = async (address: string, asked: AbortSignal) => {
     const headers = new Headers({ "User-Agent": options.userAgent, ...source.headers });
-    const key = source.shared;
-    const sharing = key ? options.captures : undefined;
+    const { shared } = source;
+    const sharing = options.captures;
     for (let attempt = 0; ; attempt++) {
       const waiting = new AbortController();
       const timeout = setTimeout(() => waiting.abort(), SILENCE_MS);
@@ -217,11 +217,11 @@ async function openSource(
         options.request(address, { headers, signal: opened }, source.url);
       try {
         answer =
-          !key || !sharing
-            ? await options.request(address, { headers, signal: reading }, source.url)
+          !shared || !sharing
+            ? await open(reading)
             : source.format === "hls"
-              ? await sharing.resource(key, sharing.owner, address, open, reading)
-              : await sharing.request(key, sharing.owner, open, reading);
+              ? await sharing.resource(shared, sharing.owner, address, open, reading)
+              : await sharing.request(shared, sharing.owner, open, reading);
       } catch (cause) {
         if (waiting.signal.aborted && !asked.aborted)
           throw new CaptureFailure({

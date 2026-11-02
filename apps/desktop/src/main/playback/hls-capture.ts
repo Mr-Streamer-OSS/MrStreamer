@@ -13,7 +13,7 @@
 // HLS reader takes, is shared. A multivariant playlist, whose leaf hls.js picks and changes, and
 // any other passes through to the provider as it would alone, and `reading` says nothing reads it.
 // The last owner leaving aborts what is under way and drops the rest.
-import { clearMedia } from "./hls-ts-input.ts";
+import { clearMedia, PLAYLIST_BYTES } from "./hls-ts-input.ts";
 
 /** Complete segments kept for a reader still to come, the newest, and the most they may take. */
 const KEPT_SEGMENTS = 4;
@@ -22,12 +22,6 @@ const KEPT_BYTES = 64 * 1024 * 1024;
 const ANSWER_BYTES = 256 * 1024 * 1024;
 /** How long a playlist answered counts as current, at least: half its target duration else. */
 const FRESH_MS = 250;
-
-class TooLong extends Error {
-  constructor() {
-    super("The provider's answer is too long.");
-  }
-}
 
 /** What the provider answered, once its headers came. */
 interface Head {
@@ -69,10 +63,6 @@ interface Share {
   sequences: ReadonlyMap<string, number>;
   closing: Promise<void> | null;
 }
-
-const ok = (head: Head) => head.status >= 200 && head.status < 300;
-/** The most a playlist may take, as the HLS reader reads one. */
-const PLAYLIST_BYTES = 4 * 1024 * 1024;
 
 /** Reads the provider's answer into `parts` as it arrives, for every reader. */
 function start(
@@ -116,7 +106,7 @@ function start(
           const next = await reader?.read();
           if (!next || next.done) break;
           answer.size += next.value.length;
-          if (answer.size > ANSWER_BYTES) throw new TooLong();
+          if (answer.size > ANSWER_BYTES) throw new Error("The provider's answer is too long.");
           answer.parts.push(next.value);
           wake();
         }
@@ -227,7 +217,7 @@ export function hlsShares(connected: (owner: string, key: string) => void) {
     answer: Answer,
     head: Head | null,
   ) => {
-    if (!head || !ok(head)) return forget(share, answer);
+    if (!head || head.status < 200 || head.status >= 300) return forget(share, answer);
     if (sequence !== undefined) {
       // Newest first: what is kept until it holds too many, or too much.
       const complete = [...share.segments]
@@ -272,34 +262,32 @@ export function hlsShares(connected: (owner: string, key: string) => void) {
   ): Promise<Response> => {
     for (;;) {
       signal.throwIfAborted();
-      let share = shares.get(key);
-      if (share?.closing) {
-        await share.closing;
+      const existing = shares.get(key);
+      if (existing?.closing) {
+        await existing.closing;
         continue;
       }
-      if (!share) {
-        share = {
-          owners: new Set(),
-          media: null,
-          targetMs: 0,
-          playlists: new Map(),
-          segments: new Map(),
-          sequences: new Map(),
-          closing: null,
-        };
-        shares.set(key, share);
-      }
+      const share: Share = existing ?? {
+        owners: new Set(),
+        media: null,
+        targetMs: 0,
+        playlists: new Map(),
+        segments: new Map(),
+        sequences: new Map(),
+        closing: null,
+      };
+      shares.set(key, share);
       share.owners.add(owner);
       if (share.media === false) return open(signal);
       if (share.media) connected(owner, key);
       const sequence = share.sequences.get(address);
       const found =
         sequence === undefined ? share.playlists.get(address) : share.segments.get(sequence);
+      // A segment is kept while it is; a complete playlist only while it is fresh.
       const kept = found && (!found.done || sequence !== undefined || fresh(share, found));
-      const current = share;
       const answer = kept
         ? found
-        : start(open, (done, head) => finish(current, key, address, sequence, done, head));
+        : start(open, (done, head) => finish(share, key, address, sequence, done, head));
       if (!kept) {
         if (sequence === undefined) share.playlists.set(address, answer);
         else share.segments.set(sequence, answer);
@@ -309,7 +297,7 @@ export function hlsShares(connected: (owner: string, key: string) => void) {
         // Nobody reads what still arrives: the provider needn't send the rest.
         if (--answer.readers === 0 && !answer.done) {
           answer.controller.abort();
-          forget(current, answer);
+          forget(share, answer);
         }
       };
       let head: Head;

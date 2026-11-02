@@ -223,7 +223,7 @@ function reading(answer: Response) {
 
 /**
  * Plays an HLS session's playlist as hls.js does near the live edge: reads it every half second
- * and each of its last three segments not read yet, whole. `segments` counts those read.
+ * and each of its last three segments not read yet, whole. `reaches` waits until it read `count`.
  */
 function playing(url: string) {
   const read = new Set<number>();
@@ -249,6 +249,13 @@ function playing(url: string) {
   })();
   return {
     segments: () => read.size,
+    reaches: async (count: number) =>
+      expect(
+        await until(
+          async () => read.size,
+          (size) => size >= count,
+        ),
+      ).toBeGreaterThanOrEqual(count),
     stop: async () => {
       stopped.abort();
       await run;
@@ -1410,10 +1417,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const watching = await playback.open(channel, ["h264", "aac"]);
     expect(watching.format).toBe("hls");
     const player = playing(watching.url);
-    await until(
-      async () => player.segments(),
-      (count) => count >= 2,
-    );
+    await player.reaches(2);
     expect(await recordings.connections(subscriptionId, of)).toEqual({
       limit: 1,
       uses: ["watch"],
@@ -1426,11 +1430,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: ["recording"] });
     const growing = async () => (await recordings.list())[0]?.bytes ?? 0;
     await until(growing, (bytes) => bytes > 0);
-    const watched = player.segments();
-    await until(
-      async () => player.segments(),
-      (count) => count >= watched + 2,
-    );
+    await player.reaches(player.segments() + 2);
 
     // Watch stops: the recording goes on. Watch again joins it.
     await player.stop();
@@ -1439,20 +1439,11 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(await until(growing, (bytes) => bytes > before)).toBeGreaterThan(before);
     const again = await playback.open(channel, ["h264", "aac"]);
     const second = playing(again.url);
-    await until(
-      async () => second.segments(),
-      (count) => count >= 2,
-    );
+    await second.reaches(2);
 
     // The recording stops: Watch plays on.
     await recordings.stop(answer.recording.id);
-    const then = second.segments();
-    expect(
-      await until(
-        async () => second.segments(),
-        (count) => count >= then + 2,
-      ),
-    ).toBeGreaterThan(then + 1);
+    await second.reaches(second.segments() + 2);
     await second.stop();
     await playback.close(again.sessionId);
 
@@ -1488,10 +1479,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const channel = { subscriptionId, id: "epochs.test" };
     const watching = await playback.open(channel, ["h264", "aac"]);
     const player = playing(watching.url);
-    await until(
-      async () => player.segments(),
-      (count) => count >= 1,
-    );
+    await player.reaches(1);
     expect(
       await recordings.connections(subscriptionId, { channel: channel.id, variants: [channel.id] }),
     ).toEqual({ limit: 1, uses: ["watch"], shares: false });
@@ -1535,10 +1523,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const started = await recordings.start(a!, Date.now() + 60_000, {});
     expect(started.kind).toBe("started");
     const asked = provider.streamRequests();
-    const ofChannel = (channel: { id: string }) => ({
-      channel: channel.id,
-      variants: [channel.id],
-    });
+    const ofChannel = ({ id }: { id: string }) => ({ channel: id, variants: [id] });
     expect((await recordings.connections(subscriptionId, ofChannel(b!))).shares).toBe(false);
     await expect(playback.open(b!, ["h264", "aac"])).rejects.toMatchObject({
       error: { kind: "recording-holds" },

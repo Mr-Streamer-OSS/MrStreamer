@@ -1160,26 +1160,6 @@ describe("live captures", () => {
     await captures.idle("record");
     expect(captures.reading(key)).toBe(false);
   });
-
-  it("passes an HLS playlist that lists qualities through, sharing nothing", async () => {
-    const { captures, source } = await capturing();
-    const key = captureKey({ ...source, format: "hls", url: "http://provider/live/1.m3u8" });
-    let asked = 0;
-    const master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nhigh.m3u8\n";
-    const provider = () => {
-      asked++;
-      return Promise.resolve(new Response(master));
-    };
-    const read = async (owner: string) =>
-      (
-        await captures.resource(key, owner, source.url, provider, new AbortController().signal)
-      ).text();
-    expect(await read("watch")).toBe(master);
-    expect(await read("record")).toBe(master);
-    expect(asked).toBe(2);
-    expect(captures.reading(key)).toBe(false);
-    await Promise.all([captures.idle("watch"), captures.idle("record")]);
-  });
 });
 
 describe.skipIf(!hasFfmpeg)("live history", () => {

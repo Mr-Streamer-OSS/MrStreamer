@@ -3222,7 +3222,7 @@ function make(deps: PlaybackDeps) {
             session.request(url, { headers: requested, signal: opened }, from);
           response =
             !shared || !captures
-              ? await session.request(url, { headers: requested, signal: asking }, from)
+              ? await open(asking)
               : session.kind === "live" && session.format === "hls"
                 ? await captures.resource(shared, session.id, url, open, asking)
                 : await captures.request(shared, session.id, open, asking);
