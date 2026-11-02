@@ -17,7 +17,7 @@ import {
 } from "../../../../.cursor/skills/verify-mrstreamer/scripts/session.ts";
 import { startFakeProvider } from "../fake-provider.ts";
 import { startFakeTmdb } from "../fake-tmdb.ts";
-import { addSubscription, connect, key, MODIFIERS, waitFor, type Page } from "./app.ts";
+import { addSubscription, connect, key, MODIFIERS, silent, waitFor, type Page } from "./app.ts";
 
 const { values } = parseArgs({ options: { output: { type: "string" } } });
 assert(values.output, "Required: --output NEW_DIRECTORY");
@@ -294,6 +294,7 @@ try {
       `--user-data-dir=${profile}`,
       "--enable-automation",
       "--use-mock-keychain",
+      ...silent,
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
       desktop,
     ],

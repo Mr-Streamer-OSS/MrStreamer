@@ -101,6 +101,22 @@ When `Test timed out` shows in those two files, look at the machine before runni
 
 ffmpeg 6, which Ubuntu 24.04 and CI install, switches threads for every packet it copies from a single input, and a virtual machine makes each switch expensive. Copying the 60,000 packets of the large-file test took it 9 to 49 seconds on that machine, 2 with `taskset -c 0` in front, and 1 with `-thread_queue_size 64`. That is why the app passes the option when it reads a title's file, and why the test makes its large file with one. `perf bench sched pipe -T` measures what a switch costs: 35 µs for a round trip there, 12 with both threads on one processor.
 
+## Sound
+
+Test playback is silent unless a test is about sound, so a run on the Mac mini or a laptop plays nothing through its speakers. The silence is made at the fixture or at the launched player, never by the computer: no system volume, output device, driver, permission or session changes. The app's own volume, mute and preferences stay as a viewer would leave them, and providers outside the tests are unchanged.
+
+- **iOS simulator.** `apps/ios/scripts/fixture-server.ts` serves silence. Its own channels, catch-up, features and the multi-track stream 7999 carry silent AAC where they had a tone. A TEST clip with sound goes as a copy of every stream, its sound silent in the same codecs, languages and flags, and its container and index as ffmpeg copies them. A clip with no sound above -60 dBFS goes byte for byte, as the long-subtitle MKVs whose indexes are the test do. Tracks to choose, codecs that fail to decode, subtitles and segment timing stay as they were. `native-fixtures.test.ts` checks this default, whatever `FIXTURE_` settings its shell has.
+- **Desktop.** The launchers of the built app that play media add Chromium's `--mute-audio`: `launch` in `apps/desktop/test/e2e/app.ts` and the scripts using it, `installed-media.ts`, `title-compatibility.ts`, `search-app.ts`, `analytics-app.ts` and `pnpm verify:desktop`. The app still decodes and plays, so decoded-byte counts and audio energy measured in the page are unchanged; only the sound output is silent. The fake provider and fake HLS host serve the clips as they are.
+
+A test about sound itself sets `FIXTURE_SOUND=1` for its own run: hearing a track switch, the volume, or captions in step with speech. The fixture server then serves its tones and the TEST clips as they are, and the desktop launchers leave out `--mute-audio`:
+
+```sh
+FIXTURE_SOUND=1 node apps/ios/scripts/fixture-server.ts 8791 8792   # the simulator hears the fixtures
+FIXTURE_SOUND=1 pnpm verify:desktop live-tv                          # the desktop's sound reaches the speakers
+```
+
+Media made silent and made with sound are cached apart, under the hash of the command that made them, so switching does not serve the other kind. Silence is measured, not heard: decoded sound and a silent output say nothing about audible output, which only a listening run on the hardware shows.
+
 ## Fake provider and codec clips
 
 `apps/desktop/test/fake-provider.ts` answers like an Xtream Codes panel, with the untidiness of real ones: prefixed names, separator entries, numbers sent as strings, missing logos, one connection at a time. Tests can make catalogue requests fail or change the channels it lists. With `adultChannels`, it adds channels for adults: one the provider flags in an ordinary category, and two in a category named for adults. About half its channels have a guide id, shared by variants of one channel, and `xmltv.php` serves half-hour programmes around the current time. Tests can replace that document, fail it, hold it open or send it in pieces of a few bytes, and count guide and stream requests. Its "TEST | Formats and failures" category streams the clips in `test/fixtures`, plus an offline channel. Its last category, "BE | Kwaliteit", lists one channel in Full HD, HD and SD, the Full HD stream off air. "TEST | H.264 + AAC" keeps three days of catch-up and "TEST | HEVC + AAC" two; the login's answer names the panel's time zone (`timeZone`), and their timeshift addresses send the clip once and end, while `archiveRequests` lists the minutes and start each asked for, and `breakNextArchive` drops the next one part way.

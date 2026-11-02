@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { xtreamProvider } from "@mrstreamer/core/xtream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { catchUpPlaylist } from "../scripts/native-fixtures/catch-up.ts";
+import { peak } from "../scripts/native-fixtures/media.ts";
 
 // The simulator fixture (scripts/fixture-server.ts) as native verification journeys reach it: its
 // panel through core's Xtream adapter, its media through ffprobe, and its control port, run as a
@@ -155,6 +156,50 @@ describe("the native verification fixture", () => {
     const dutch = await text(`${panel}/hls/7999/subtitles-nl/6.vtt`);
     expect(dutch).toMatch(/X-TIMESTAMP-MAP=MPEGTS:\d+,LOCAL:00:00:00\.000/);
     expect(dutch).toContain("00:00:12.250 --> 00:00:13.750\nNederlands 0:12");
+  }, 90_000);
+
+  it("serves silence in the tracks and codecs its media has, and TEST clips already silent as they are", async () => {
+    const { channels } = await provider().liveCatalogue();
+    const { movies } = await provider().onDemandCatalogue();
+    const titleUrl = async (name: string) => {
+      const movie = movies.find((each) => each.name === name);
+      if (!movie?.container) throw new Error(`no movie ${name}`);
+      return (await provider().titleFile("movie", movie.id, movie.container)).url;
+    };
+    const ac3 = channels.find((channel) => channel.name === "TEST | H.264 + AC-3");
+    const ordinary = movies.find((movie) => !movie.name.startsWith("TEST"));
+    const tracks = await titleUrl("TEST | Two sound tracks and subtitles (MULTI)");
+    for (const url of [
+      `${panel}/hls/2014/0.ts`,
+      `${panel}/hls/1000/past/0.ts`,
+      `${panel}/hls/7999/sound-en/0.ts`,
+      `${panel}/hls/7999/sound-nl/0.ts`,
+      `${panel}/hls/${ac3?.id}/0.ts`,
+      await titleUrl(ordinary?.name ?? ""),
+      tracks,
+    ]) {
+      expect(peak(url), url).toBeLessThanOrEqual(-60);
+    }
+
+    /** What a player chooses between in `file`: each stream's kind, codec, language and flags. */
+    const streams = (file: string) =>
+      execFileSync(
+        "ffprobe",
+        [
+          ...["-v", "error", "-of", "compact", "-show_entries"],
+          "stream=codec_type,codec_name,profile,sample_rate,channels:stream_tags=language:stream_disposition=default,forced",
+          file,
+        ],
+        { encoding: "utf8" },
+      );
+    const fixtures = join(root, "apps/desktop/test/fixtures");
+    expect(streams(tracks)).toBe(streams(join(fixtures, "title-h264-eac3-subs.mkv")));
+    expect(streams(`${panel}/hls/${ac3?.id}/0.ts`)).toMatch(/codec_name=ac3\|.*codec_type=audio/);
+    // A clip whose index is the test, with no sound to hear, goes byte for byte.
+    const gap = await download(await titleUrl("TEST | Index with a gap (MULTI)"));
+    expect(sha256(gap.body)).toBe(
+      sha256(readFileSync(join(fixtures, "title-long-subs-uncued.mkv"))),
+    );
   }, 90_000);
 
   it("answers catch-up as HLS recordings of programmes within the days kept, never as Live", async () => {
@@ -307,7 +352,7 @@ describe("the native verification fixture", () => {
     const hashes = new Set(
       declared.artifacts.flatMap(({ files }) => files.map((file) => file.sha256)),
     );
-    // A TEST movie's clip, which the server sends as the repository has it.
+    // A TEST movie's clip, which the server sends as a copy whose sound is silent.
     const { movies } = await provider().onDemandCatalogue();
     const clip = movies.find((each) => each.name === "TEST | Index at the end (NL)");
     if (!clip?.container) throw new Error("no TEST movie");

@@ -53,7 +53,7 @@ import {
   record,
   stop,
 } from "./session.ts";
-import { connect, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
+import { connect, silent, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
 import {
   QUALITY_STREAM_IDS,
   startFakeProvider,
@@ -406,6 +406,7 @@ async function run(scenario: Scenario, prior?: string) {
         `--user-data-dir=${ownedProfile}`,
         "--enable-automation",
         "--use-mock-keychain",
+        ...silent,
         ...(process.platform === "linux" ? ["--no-sandbox"] : []),
         ...(running.app ? [running.app] : []),
       ];

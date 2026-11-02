@@ -15,7 +15,7 @@ import {
 } from "../../../../.cursor/skills/verify-mrstreamer/scripts/session.ts";
 import { fixture, startFakeProvider } from "../fake-provider.ts";
 import { startFakeTmdb } from "../fake-tmdb.ts";
-import { connect, key, login, waitFor, type Page } from "./app.ts";
+import { connect, key, login, silent, waitFor, type Page } from "./app.ts";
 
 const variant = process.argv[2] ?? "h264-10bit";
 if (
@@ -57,6 +57,7 @@ const args = [
   `--user-data-dir=${profile}`,
   "--enable-automation",
   "--use-mock-keychain",
+  ...silent,
   ...(process.platform === "linux" ? ["--no-sandbox"] : []),
   desktop,
 ];

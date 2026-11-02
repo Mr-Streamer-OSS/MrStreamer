@@ -5,7 +5,7 @@
 //
 // - Picture: a minute of 720p H.264 test picture, alone in its variant.
 // - Sound: "English", the default, a 440 Hz tone, and "Nederlands", a 660 Hz one, each in its own
-//   rendition, so switching is audible.
+//   rendition, so switching is audible with FIXTURE_SOUND=1; both are silence without it.
 // - Subtitles, as WebVTT: "English" and "Nederlands", neither on by default. Each shows its
 //   language and the second of the minute, "English 0:12", from a quarter second into every two
 //   seconds to a quarter second before the next.
@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { FakeChannel } from "../../../desktop/test/fake-provider.ts";
-import { livePlaylist, type Media, type mediaMaker } from "./media.ts";
+import { livePlaylist, tone, type Media, type mediaMaker } from "./media.ts";
 
 /** The channel the fixture lists with renditions, in place of an ordinary one. */
 export const TRACKS_STREAM_ID = 7999;
@@ -69,7 +69,7 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number
     SOUND.map((sound) => [
       sound.id,
       maker.make(`tracks-${sound.id}`, [
-        ...["-f", "lavfi", "-i", `sine=frequency=${sound.frequency}:sample_rate=48000`],
+        ...["-f", "lavfi", "-i", tone(sound.frequency)],
         ...["-t", "59.9", "-ac", "2", "-c:a", "aac", "-b:a", "96k"],
       ]),
     ]),
