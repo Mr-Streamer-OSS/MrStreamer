@@ -3,7 +3,8 @@
 // hatched minutes and the row's start count from when capture was owed, the time a schedule saved
 // partway through its programme was saved, else its padded start. A complete one's bar is full.
 // A refused Stop or Delete says why in its row; a Stop taken whose end isn't written down yet says
-// that, and that it is retried, until main saves it.
+// that, and that it is retried, until main saves it. Captured time and gaps count as they were,
+// added up before rounding to whole minutes, and gaps under a minute say so.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -108,6 +109,53 @@ it("counts the minutes a gap missed out of what was captured, and says when and 
   });
   expect(row.text).toMatch(/12:20\D* to 12:35\D* missed\. The stream stopped\./);
   expect(row).toMatchObject({ captured: "45", planned: "60" });
+});
+
+const seconds = (time: string, s: number) => at(time) + s * 1000;
+
+it("adds up captured time and short gaps before rounding them to whole minutes", async () => {
+  // 171 s captured around gaps of 40.158 s and 27.438 s that each cross a minute, then cut off.
+  const row = await rowOf(undefined, {
+    start: at("12:00"),
+    stop: at("12:26"),
+    ended: seconds("12:00", 238.596),
+    status: { kind: "partial", cut: "stream" },
+    gaps: [
+      { from: seconds("12:00", 50), to: seconds("12:01", 30.158), why: "stream" },
+      { from: seconds("12:02", 50), to: seconds("12:03", 17.438), why: "stream" },
+    ],
+  });
+  expect(row.text).toContain("2 of 26 min");
+  expect(row.text).toContain("1 min missed in between. The stream stopped.");
+  expect(row).toMatchObject({ captured: "2", planned: "26" });
+});
+
+it.each([
+  ["within one minute", seconds("12:20", 10), seconds("12:20", 50)],
+  ["across a minute", seconds("12:20", 40), seconds("12:21", 20)],
+])("says a 40 s gap %s missed less than a minute, and why", async (_, from, to) => {
+  const row = await rowOf(undefined, {
+    start: at("12:00"),
+    status: { kind: "partial", cut: "stream" },
+    gaps: [{ from, to, why: "stream" }],
+  });
+  expect(row.text).toMatch(/Less than a minute missed at 12:20\D*\. The stream stopped\./);
+  expect(row.text).not.toMatch(/12:2\d\D* to 12:2\d/);
+  expect(row).toMatchObject({ captured: "59", planned: "60" });
+});
+
+it("says gaps that missed less than a minute together did so", async () => {
+  const row = await rowOf(undefined, {
+    start: at("12:00"),
+    status: { kind: "partial", cut: "stream" },
+    gaps: [
+      { from: seconds("12:10", 50), to: seconds("12:11", 10), why: "stream" },
+      { from: seconds("12:30", 50), to: seconds("12:31", 15), why: "away" },
+    ],
+  });
+  expect(row.text).toContain(
+    "Less than a minute missed in between. Mr. Streamer wasn't open, or the computer slept.",
+  );
 });
 
 it("keeps a paused recording in Now with Stop, its bar missing the time it waits", async () => {

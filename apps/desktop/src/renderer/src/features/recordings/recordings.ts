@@ -171,11 +171,14 @@ export function coverageStart(recording: Recording): number {
 }
 
 /**
- * Captured and planned whole minutes, what the coverage bar and "3 of 52 min" show, those missed
- * at the start: a late schedule's from when it was owed to when it began, or all of a missed one,
- * and the gaps it missed since, by minutes from where coverage starts, one still going on to now.
- * One on time, or saved after its start, is planned from when it began. All count whole minutes
- * from where coverage starts, and a complete one's add up to what was planned, at least a minute.
+ * Captured and planned whole minutes, what "3 of 52 min" shows, and the coverage bar. All count
+ * from where coverage starts. Planned minutes are whole ones to the stop, at least one. A complete
+ * one captured all of them but those missed at the start, whole minutes as main counts a start
+ * within one as on time; any other captured what it reached less its gaps, one still going on to
+ * now, added up before it is rounded down to whole minutes, so it never claims more than it has.
+ * The bar shows the same spans as they were, as fractions of the planned time: hatched at the
+ * start up to `late`, a late schedule's from when it was owed to when it began, or all of a missed
+ * one, and over each of the `gaps` since, white up to where it `reached`.
  */
 export function coverage(
   recording: Recording,
@@ -183,30 +186,41 @@ export function coverage(
 ): {
   captured: number;
   planned: number;
-  missed: number;
-  gaps: readonly { readonly from: number; readonly to: number }[];
+  bar: {
+    late: number;
+    reached: number;
+    gaps: readonly { readonly from: number; readonly to: number }[];
+  };
 } {
   const from = coverageStart(recording);
-  const minutesTo = (at: number) => Math.max(0, Math.floor((at - from) / MINUTE_MS));
-  const planned = Math.max(1, minutesTo(recording.stop));
+  const planned = Math.max(1, Math.floor((recording.stop - from) / MINUTE_MS));
+  const share = (at: number) =>
+    Math.min(1, Math.max(0, (at - from) / Math.max(1, recording.stop - from)));
   if (recording.status.kind === "missed")
-    return { captured: 0, planned, missed: planned, gaps: [] };
-  // Whole minutes, as main counts a start within one as on time.
-  const missed = Math.min(planned, minutesTo(recording.start));
-  const reached =
-    recording.status.kind === "complete"
-      ? planned
-      : minutesTo(recording.ended ?? Math.min(now, recording.stop));
+    return { captured: 0, planned, bar: { late: 1, reached: 1, gaps: [] } };
+  const late = Math.min(planned, Math.max(0, Math.floor((recording.start - from) / MINUTE_MS)));
+  const complete = recording.status.kind === "complete";
+  const reached = complete ? recording.stop : Math.min(recording.ended ?? now, recording.stop);
   const gaps = (recording.gaps ?? []).flatMap((gap) => {
-    const span = {
-      from: Math.min(reached, minutesTo(gap.from)),
-      to: Math.min(reached, minutesTo(gap.to ?? now)),
-    };
-    return span.to > span.from ? [span] : [];
+    const to = Math.min(reached, gap.to ?? now);
+    return to > gap.from ? [{ from: gap.from, to }] : [];
   });
   const lost = gaps.reduce((sum, gap) => sum + gap.to - gap.from, 0);
-  const captured = Math.min(planned - missed, Math.max(0, reached - missed - lost));
-  return { captured, planned, missed, gaps };
+  const captured = complete
+    ? planned - late
+    : Math.min(
+        planned - late,
+        Math.max(0, Math.floor((reached - recording.start - lost) / MINUTE_MS)),
+      );
+  return {
+    captured,
+    planned,
+    bar: {
+      late: share(recording.start),
+      reached: share(reached),
+      gaps: gaps.map((gap) => ({ from: share(gap.from), to: share(gap.to) })),
+    },
+  };
 }
 
 /** Why a recording missed time, as a sentence. */
@@ -223,21 +237,28 @@ function gapText(why: RecordingGapReason): string {
   }
 }
 
-/** "20:31 to 20:45 missed. The computer slept." for one gap; for several, how much they missed. */
-function gapsText(gaps: readonly RecordingGap[], now: number): string | null {
+/**
+ * "20:31 to 20:45 missed. The computer slept." for one gap; for several, how much they missed
+ * together, rounded once so short ones aren't each counted as a minute. Under a minute says so.
+ */
+function gapsText(gaps: readonly RecordingGap[]): string | null {
   const settled = gaps.filter((gap) => gap.to !== null);
-  const first = settled[0];
-  if (!first) return null;
-  if (settled.length === 1)
-    return `${t("{from} to {to} missed.", {
-      from: formatDate(first.from, "time"),
-      to: formatDate(first.to ?? now, "time"),
-    })} ${gapText(first.why)}`;
-  const minutes = settled.reduce(
-    (sum, gap) => sum + Math.max(1, Math.round(((gap.to ?? now) - gap.from) / MINUTE_MS)),
-    0,
-  );
-  return `${t("{minutes} min missed in between.", { minutes })} ${gapText(settled.at(-1)!.why)}`;
+  const last = settled.at(-1);
+  if (!last) return null;
+  const lost = settled.reduce((sum, gap) => sum + (gap.to ?? gap.from) - gap.from, 0);
+  const one = settled.length === 1;
+  const missed =
+    lost < MINUTE_MS
+      ? one
+        ? t("Less than a minute missed at {time}.", { time: formatDate(last.from, "time") })
+        : t("Less than a minute missed in between.")
+      : one
+        ? t("{from} to {to} missed.", {
+            from: formatDate(last.from, "time"),
+            to: formatDate(last.to ?? last.from, "time"),
+          })
+        : t("{minutes} min missed in between.", { minutes: Math.round(lost / MINUTE_MS) });
+  return `${missed} ${gapText(last.why)}`;
 }
 
 /** Why a recording pauses, and that the rest is recorded once that passes. */
@@ -300,7 +321,7 @@ export function outcome(recording: Recording, now: number): { word: string; reas
   const reason = [
     late,
     late && recording.status.kind === "complete" ? null : why,
-    recording.status.kind === "paused" ? null : gapsText(recording.gaps ?? [], now),
+    recording.status.kind === "paused" ? null : gapsText(recording.gaps ?? []),
     recording.unsaved ? t("Not saved yet. Trying again.") : null,
   ]
     .filter(Boolean)

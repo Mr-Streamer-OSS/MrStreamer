@@ -1322,6 +1322,8 @@ export const en = {
   "There wasn't enough free space.": "There wasn't enough free space.",
   "{from} to {to} missed.": "{from} to {to} missed.",
   "{minutes} min missed in between.": "{minutes} min missed in between.",
+  "Less than a minute missed at {time}.": "Less than a minute missed at {time}.",
+  "Less than a minute missed in between.": "Less than a minute missed in between.",
   "Paused at {time} while Mr. Streamer was closed or the computer slept.":
     "Paused at {time} while Mr. Streamer was closed or the computer slept.",
   "Paused at {time}. Every connection is in use.": "Paused at {time}. Every connection is in use.",
