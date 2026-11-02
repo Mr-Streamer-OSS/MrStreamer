@@ -277,14 +277,23 @@ const DATE_STYLES = {
 
 export type DateStyle = keyof typeof DATE_STYLES;
 
-/** A moment in the interface language, in one of the app's few date styles. */
+/**
+ * A moment in the interface language, in one of the app's few date styles, on the system's clock
+ * as it is now. A formatter keeps the time zone it was made in, and the system's can change while
+ * the app runs, so every kept formatter writes UTC and a local moment first moves by the offset
+ * Date reads at that moment. That holds while no style names its time zone.
+ */
 export function formatDate(at: number | Date, style: DateStyle): string {
   const tag = active.formats;
+  const options = DATE_STYLES[style];
+  const time = Number(at);
+  const wallClock =
+    "timeZone" in options ? time : time - new Date(time).getTimezoneOffset() * 60_000;
   return made(
     dateFormats,
     `${style} ${tag}`,
-    () => new Intl.DateTimeFormat(tag, DATE_STYLES[style]),
-  ).format(at);
+    () => new Intl.DateTimeFormat(tag, { ...options, timeZone: "UTC" }),
+  ).format(wallClock);
 }
 
 /** A language by its name in the interface language: "Dutch", "néerlandais". Null when unknown. */
