@@ -411,6 +411,34 @@ describe("Back over details", () => {
     expect(sheet()?.textContent).not.toContain("Season");
   });
 
+  it("shows a season held through Settings once, not again after a title played", async () => {
+    await window_();
+    await act(async () => openDetails({ kind: "series", ...ownedOf(canyon) }));
+    await showing("Canyon Hours");
+    await press(inSheet("Season 2"));
+    await key(",", { ctrlKey: true, metaKey: true });
+    await settle();
+    await key("Escape");
+    await showing("Canyon Hours");
+    expect(inSheet("Season 2")?.getAttribute("aria-pressed")).toBe("true");
+
+    await press(inSheet("Season 1"));
+    ipc.hold("playback.openTitle");
+    await press(
+      [...(sheet()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((each) =>
+        each.textContent?.trim().startsWith("Play"),
+      ),
+    );
+    expect(sheet()).toBeNull();
+    await press(
+      [...document.querySelectorAll<HTMLButtonElement>("[data-view=title] header button")].find(
+        (each) => each.textContent?.trim() === "Back",
+      ),
+    );
+    await showing("Canyon Hours");
+    expect(inSheet("Season 2")?.getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("gives the keyboard to the sheet when the title opened from it is no longer related", async () => {
     await threeDeep();
     // Long enough away for what Canyon Hours showed to be forgotten, and its related titles change.

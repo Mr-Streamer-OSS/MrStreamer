@@ -184,11 +184,15 @@ export function DetailsView({
   useEffect(() => {
     if (returned) useUi.setState({ place: null });
   }, [returned]);
-  // Settings closes the sheet over it; the season picked shows again as it closes.
-  const [season, setSeason] = useState(() => {
+  // Settings closes the sheet over it; the season picked shows again as it closes, once.
+  const [held] = useState(() => {
     const { heldSeason, visit } = useUi.getState();
-    return returned?.season ?? (heldSeason?.visit === visit ? heldSeason.season : null);
+    return heldSeason?.visit === visit ? heldSeason.season : null;
   });
+  useEffect(() => {
+    if (held !== null) useUi.setState({ heldSeason: null });
+  }, [held]);
+  const [season, setSeason] = useState(returned?.season ?? held);
   const seasonNow = useRef(season);
   seasonNow.current = season;
   useEffect(
