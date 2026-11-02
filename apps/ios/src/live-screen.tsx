@@ -718,6 +718,14 @@ const NAMES = 104;
 const MINUTE = 60_000;
 
 /**
+ * The narrowest Guide cell that shows its title and time, its title alone over two lines, or its
+ * initials, in points at the default text size: a cell's width is divided by the text scale
+ * first. Narrower cells show nothing but stay buttons. On an iPhone a quarter hour is about 72 at
+ * both window sizes, half an hour about 143.
+ */
+const ROOM = { time: 120, title: 64, initials: 36 } as const;
+
+/**
  * Where the Guide grid is: its day (null follows Today), its window's start from that day's first
  * instant (null follows now), and the programme opened from it last, which stays marked. Kept
  * while the window resizes or folds, a programme shows over or beside the grid, and Live shows
@@ -754,10 +762,10 @@ function gridWindow(
 
 /**
  * Live's Guide: channels as rows of one virtualised list, each its programmes across a window of
- * two hours (one at large text, where the name goes above them), with the day and Earlier and
- * Later to move it rather than scrolling sideways. A channel's name opens its Schedule and a
- * programme opens it, beside the grid from the split width. Only the rows in view are read
- * (`useGuideGrid`).
+ * an hour (45 minutes at large text, where the name goes above them), so a quarter-hour programme
+ * has room for its title, with the day and Earlier and Later to move it half an hour rather than
+ * scrolling sideways. A channel's name opens its Schedule and a programme opens it, beside the
+ * grid from the split width. Only the rows in view are read (`useGuideGrid`).
  */
 function GuideGrid({
   library,
@@ -793,13 +801,13 @@ function GuideGrid({
     },
     [],
   );
-  const span = large ? 60 : 120;
+  const span = large ? 45 : 60;
   // The grid draws again on the owner's minute tick, which moves now and a window following it.
   // On the minute, so the rows' memo holds while the grid draws again as it scrolls.
   const now = Math.floor(Date.now() / MINUTE) * MINUTE;
   const { day, offset, latest, from, until } = gridWindow(place, now, span);
   const read = useGuideGrid(visible, day, library);
-  const step = (span / 2) * MINUTE;
+  const step = 30 * MINUTE;
   const messages = [
     ...new Set(
       visible
@@ -825,10 +833,11 @@ function GuideGrid({
       chosen: place.chosen,
       scheduled,
       strip,
+      fontScale,
       split,
       locale,
     }),
-    [read.rows, from, until, now, place.chosen, scheduled, strip, split, locale],
+    [read.rows, from, until, now, place.chosen, scheduled, strip, fontScale, split, locale],
   );
   const saved = gridScroll.get(scope);
   return (
@@ -878,7 +887,14 @@ function GuideGrid({
               onPress={() => moveGrid({ day: day.from, offset: offset + step })}
             />
           </View>
-          <TimeAxis from={from} until={until} now={now} strip={strip} large={large} />
+          <TimeAxis
+            from={from}
+            until={until}
+            now={now}
+            strip={strip}
+            large={large}
+            scale={fontScale}
+          />
         </View>
       }
       renderItem={({ item }) => {
@@ -908,6 +924,7 @@ function GuideGrid({
             strip={strip}
             height={height}
             large={large}
+            scale={fontScale}
             chosen={place.chosen?.channel === item.key ? place.chosen.start : null}
             scheduled={item.key === scheduled}
             onSchedule={onSchedule}
@@ -936,9 +953,19 @@ function GuideGrid({
 const across = (at: number, from: number, until: number, strip: number) =>
   ((at - from) / (until - from)) * strip;
 
+/** A title's first two words' first letters, which a cell too narrow for the title shows. */
+const initials = (title: string) =>
+  title
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => Array.from(word)[0])
+    .join("")
+    .toLocaleUpperCase();
+
 /**
- * The half hours over the grid's programmes, and now in white where it falls. Hidden from
- * VoiceOver, which reads each programme's own times.
+ * The half hours over the grid's programmes, and now in white where it falls, at the reader's text
+ * `scale`. Hidden from VoiceOver, which reads each programme's own times.
  */
 function TimeAxis({
   from,
@@ -946,38 +973,50 @@ function TimeAxis({
   now,
   strip,
   large,
+  scale,
 }: {
   from: number;
   until: number;
   now: number;
   strip: number;
   large: boolean;
+  scale: number;
 }) {
   const half = 30 * MINUTE;
   const day = localDay(from).from;
-  const airing = now >= from && now < until ? across(now, from, until, strip) : null;
-  const marks: number[] = [];
-  for (let at = day + Math.ceil((from - day) / half) * half; at < until; at += half) marks.push(at);
+  // A label's width, over-estimated from its characters at 13 points so any locale's times fit.
+  const wide = (label: string) => label.length * 8 * scale;
+  const nowLabel = programmeTime(now);
+  // Now's label starts a little before its line, kept within the strip.
+  const nowAt =
+    now >= from && now < until
+      ? Math.max(0, Math.min(strip - wide(nowLabel), across(now, from, until, strip) - 18 * scale))
+      : null;
+  const labels: { at: number; left: number }[] = [];
+  let free = 0;
+  for (let at = day + Math.ceil((from - day) / half) * half; at < until; at += half) {
+    const left = across(at, from, until, strip) + 6;
+    const right = left + wide(programmeTime(at));
+    // A half hour that would touch the one before it, now's label or the strip's end is left out.
+    const clear = nowAt === null || right + 8 <= nowAt || left >= nowAt + wide(nowLabel) + 8;
+    if (left < free || right > strip || !clear) continue;
+    labels.push({ at, left });
+    free = right + 8;
+  }
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={styles.axis}
+      style={[styles.axis, { height: Math.round(8 + 16 * scale) }]}
     >
       <View style={[styles.marks, { marginLeft: large ? 16 : NAMES, width: strip }]}>
-        {marks.map((at) => {
-          const x = across(at, from, until, strip);
-          // A half hour under now's own label, or too near the end to fit, is left out.
-          return (airing !== null && Math.abs(x - airing) < 48) || x > strip - 44 ? null : (
-            <Text key={at} style={[styles.mark, { left: x + 6 }]}>
-              {programmeTime(at)}
-            </Text>
-          );
-        })}
-        {airing === null ? null : (
-          <Text style={[styles.mark, styles.nowMark, { left: Math.max(0, airing - 18) }]}>
-            {programmeTime(now)}
+        {labels.map(({ at, left }) => (
+          <Text key={at} style={[styles.mark, { left }]}>
+            {programmeTime(at)}
           </Text>
+        ))}
+        {nowAt === null ? null : (
+          <Text style={[styles.mark, styles.nowMark, { left: nowAt }]}>{nowLabel}</Text>
         )}
       </View>
     </View>
@@ -987,7 +1026,8 @@ function TimeAxis({
 /**
  * One channel of the Guide grid: its name, with its provider where another's channel shares it,
  * which opens its Schedule, and its programmes in the window, each a button VoiceOver reads with
- * the channel, times, title and whether it is on now.
+ * the channel, times, title and whether it is on now. A cell shows as much as its width holds at
+ * the text size (`ROOM`): title and time, title alone, initials or, for a sliver, nothing.
  * Past programmes are grey, the one on now bold, and now a white line across.
  */
 const GridRow = memo(function GridRow({
@@ -1001,6 +1041,7 @@ const GridRow = memo(function GridRow({
   strip,
   height,
   large,
+  scale,
   chosen,
   scheduled,
   onSchedule,
@@ -1017,6 +1058,8 @@ const GridRow = memo(function GridRow({
   strip: number;
   height: number;
   large: boolean;
+  /** The reader's text scale, which sets what a cell has room for. */
+  scale: number;
   /** The start of this row's programme opened last, if it is this row's. */
   chosen: number | null;
   /** Whether the channel's Schedule shows in the detail column. */
@@ -1061,6 +1104,13 @@ const GridRow = memo(function GridRow({
           const span = across(Math.min(programme.stop, until), from, until, strip) - left;
           const airing = programme.start <= now && programme.stop > now;
           const time = programmeRange(programme);
+          const room = span / scale;
+          const title = [
+            styles.cellTitle,
+            room < ROOM.title && styles.initials,
+            airing && styles.airing,
+            programme.stop <= now && styles.past,
+          ];
           return (
             <Pressable
               // A start and its place, as two programmes can share a start in bad data.
@@ -1079,6 +1129,8 @@ const GridRow = memo(function GridRow({
               onPress={() => onProgramme(channel.key, programme)}
               style={({ pressed }) => [
                 styles.cell,
+                room < ROOM.time && styles.shortCell,
+                room < ROOM.title && styles.initialsCell,
                 { left, width: span },
                 chosen === programme.start && styles.chosen,
                 pressed && styles.pressed,
@@ -1086,22 +1138,23 @@ const GridRow = memo(function GridRow({
               testID={`grid-${channel.key}-${programme.start}`}
             >
               {/* Too narrow for words, the cell is still a button with its whole label. */}
-              {span >= 40 ? (
+              {room >= ROOM.time ? (
                 <>
-                  <Text
-                    style={[
-                      styles.cellTitle,
-                      airing && styles.airing,
-                      programme.stop <= now && styles.past,
-                    ]}
-                    numberOfLines={1}
-                  >
+                  <Text style={title} numberOfLines={1}>
                     {programme.title}
                   </Text>
                   <Text style={styles.cellTime} numberOfLines={1}>
                     {time}
                   </Text>
                 </>
+              ) : room >= ROOM.title ? (
+                <Text style={title} numberOfLines={2}>
+                  {programme.title}
+                </Text>
+              ) : room >= ROOM.initials ? (
+                <Text style={title} numberOfLines={1} ellipsizeMode="clip">
+                  {initials(programme.title)}
+                </Text>
               ) : null}
             </Pressable>
           );
@@ -1512,8 +1565,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
   },
   day: { color: colors.text, fontSize: 17 },
+  // Its height grows with the text size.
   axis: {
-    height: 24,
     borderBottomColor: colors.line,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
@@ -1541,8 +1594,12 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.line,
     borderLeftWidth: StyleSheet.hairlineWidth,
   },
+  // A title alone keeps more of its width for words.
+  shortCell: { paddingLeft: 6, paddingRight: 4 },
+  initialsCell: { paddingLeft: 0, paddingRight: 0, alignItems: "center" },
   chosen: { backgroundColor: colors.fill, borderRadius: 6 },
   cellTitle: { color: colors.text, fontSize: 15 },
+  initials: { fontWeight: "500" },
   airing: { fontWeight: "600" },
   past: { color: colors.dim },
   cellTime: { color: colors.dim, fontSize: 13, marginTop: 2 },

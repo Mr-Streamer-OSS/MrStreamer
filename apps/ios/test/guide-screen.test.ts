@@ -1336,11 +1336,35 @@ describe("Live's Guide grid", () => {
     expect(read.has("trusted-30")).toBe(false);
   });
 
+  it.each([
+    ["default", 1],
+    ["large", 1.786],
+  ])("titles each quarter-hour programme's cell at %s text", async (_size, fontScale) => {
+    state.window = { width: 390, height: 844, fontScale };
+    const quarter = (title: string, start: number): Programme => ({
+      title,
+      start,
+      stop: start + 15 * 60_000,
+      description: null,
+    });
+    const short = [
+      quarter("Field Notes", at - 15 * 60_000),
+      quarter("Weather Watch", at),
+      quarter("Tide Tables", at + 15 * 60_000),
+    ];
+    state.answer = async () => answer(short);
+    await guide();
+    for (const programme of short)
+      expect(cell("a:1", programme)?.textContent).toContain(programme.title);
+  });
+
   it("moves its window by Earlier and Later, and its day, back to now", async () => {
     await guide();
     await click("Later");
+    await click("Later");
     expect(cell("a:1", current)).toBeNull();
     expect(cell("a:1", next)).not.toBeNull();
+    await click("Earlier");
     await click("Earlier");
     await click("Earlier");
     expect(cell("a:1", current)).not.toBeNull();
@@ -1584,7 +1608,7 @@ describe("Live's Guide grid", () => {
     expect(cell("a:1", next)).not.toBeNull();
   });
 
-  it("moves an hour's window by half an hour at large text", async () => {
+  it("moves a 45-minute window by half an hour at large text", async () => {
     state.window = { width: 390, height: 844, fontScale: 1.786 };
     await guide();
     await click("Later");
@@ -1604,11 +1628,13 @@ describe("Live's Guide grid", () => {
       },
     ]);
     await click("Later");
+    await click("Later");
     // Another screen and back, as Back, a tab or a resize can remount it.
     await draw(React.createElement(Home));
     await draw(React.createElement(LiveTab));
     await settle();
     expect(cell("a:1", current)).toBeNull();
+    await click("Earlier");
     await click("Earlier");
     expect(cell("a:1", current)?.getAttribute("aria-pressed")).toBe("true");
   });
