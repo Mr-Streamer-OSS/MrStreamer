@@ -1,6 +1,10 @@
 # Security
 
+Your passwords and playlist links stay on your computer, encrypted by your system's storage, except under Linux's `basic_text` fallback. Report a security problem privately to [security@mrstreamer.app](mailto:security@mrstreamer.app).
+
 ## Your login
+
+_Passwords and links use your system's storage encryption, except under Linux's `basic_text` fallback._
 
 Your subscriptions are stored on your computer. Passwords, playlist links, guide addresses and subtitle-service logins use Electron's system storage encryption: macOS Keychain, your Windows account, or GNOME Keyring or KWallet when selected on Linux. Linux can instead use `basic_text`, a fixed-key fallback that does not protect secrets from other programs running as you. Server addresses, subscription usernames and your own TMDB key are not encrypted.
 
@@ -10,15 +14,21 @@ An address entered with `http://` sends its login unencrypted. An address withou
 
 ## Basic app-use statistics
 
+_On by default and pseudonymous. Turn them off in Settings > Privacy._
+
 **Share basic usage statistics** in Settings > Privacy is on by default without a prompt. The app uses a random installation identifier to link coarse usage and reliability events. That makes them pseudonymous. Turning statistics off stops collection and sending, clears pending work and keeps the choice after restart. It retains an identifier already stored, as does removing a subscription. Turning statistics on again uses that identifier without reporting activity while they were off. A new profile gets its identifier at its first foreground observation.
 
 Configured production capture uses HTTPS. The [privacy policy](privacy.md#usage-statistics) describes the fixed event fields, destination and retention. Statistics exclude provider logins, viewing titles, searches, file paths and raw errors. PostHog receives the connection's source IP address even with location lookup disabled.
 
 ## Diagnostics
 
+_Text you inspect and save yourself. Nothing is uploaded._
+
 **Diagnostics…** in Settings > About reconstructs text from fixed fields for you to inspect and save. It uploads nothing and excludes the analytics identifier. Ordinary local console output is separate and can include file paths or invalid values from damaged local files. Review it before sharing.
 
 ## Playing on a TV
+
+_Casting relies on a local network you trust._
 
 Casting relies on a trusted local network. The TV receives an HTTP stream address on your computer with a random token for the active playback session. Anyone on that network with the address can use it while it is active. The address lasts for its active session or title load, with no separate expiry timer. Pausing alone does not expire it.
 
@@ -26,9 +36,13 @@ Google Cast discovery and the receiver's identity are not cryptographically veri
 
 ## Reporting a problem
 
+_Privately, to security@mrstreamer.app._
+
 Report a security problem privately to [security@mrstreamer.app](mailto:security@mrstreamer.app), rather than in a public issue. Include what you found, how to reproduce it and the Mr. Streamer version from Settings > About. Leave out your provider's server address, username, password, playlist link and guide address.
 
 ## Signed installers
+
+_The Mac DMG and the Store copy are signed. The setup .exe, AppImage and .deb are not._
 
 | Download                | Signing                                                                      |
 | ----------------------- | ---------------------------------------------------------------------------- |
@@ -40,6 +54,8 @@ Report a security problem privately to [security@mrstreamer.app](mailto:security
 The Microsoft Store and setup-file copies keep separate data. See [Updates and channels](user/updates.md#installed-from-the-microsoft-store).
 
 ## Checking a download
+
+_Compare it with SHA256SUMS.txt from the same release._
 
 Download the installer and `SHA256SUMS.txt` from the **same release** on [GitHub Releases](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest). The [download page](https://mrstreamer.app/download) links that release and its sources.
 

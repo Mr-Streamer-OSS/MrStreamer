@@ -1,6 +1,15 @@
 # What plays
 
+Most channels and files play directly. Mr. Streamer converts only what the player can't handle, on your computer, while you watch.
+
+- **Plays directly.** Channels in H.264 with AAC or MP3 sound, MPEG-TS or HLS, and MP3 and AAC radio. Files in H.264 with AAC, Opus or FLAC sound. HEVC on macOS, 10-bit and 4K too.
+- **Converted.** Dolby Digital, DTS, MP2 and other sound to stereo AAC. MPEG-2, Xvid, VP8, VP9, AV1, and HEVC without a decoder, to H.264. A converted channel starts about a second later.
+- **On a TV.** AirPlay on macOS, Google Cast on Windows. Linux plays on the computer only. Keep the computer on while the TV plays.
+- **Left out.** Playlist entries it can't play at all: DASH (`.mpd`) and addresses that don't start with `http` or `https`, such as `rtmp`.
+
 ## Live channels
+
+_MPEG-TS, HLS and radio. Most play directly._
 
 Mr. Streamer plays live channels your provider delivers as MPEG-TS, the format most Xtream Codes providers use, and radio channels that send plain MP3 or AAC audio.
 
@@ -24,6 +33,8 @@ Converted channels take a moment longer to start, about a second, and use more o
 
 ## Movies and episodes
 
+_MKV, MP4 and a few AVI. One starts about a second after you choose it._
+
 Providers keep movies and episodes as files, mostly MKV and MP4 and a few AVI. Mr. Streamer reads which picture, sound and subtitle tracks a file holds when you open it, then plays it from where you ask with the tracks you pick. As with channels, only what the player can't handle is converted:
 
 | The file carries                                         | What happens                                                              |
@@ -43,6 +54,8 @@ A movie starts about a second after you choose it. Skipping into what's already 
 
 ## Recordings
 
+_From 0.0.23, now in Nightly. The channel's stream as sent, nothing converted._
+
 From 0.0.23, now in Nightly, Mr. Streamer can [record live channels](live-tv.md#recordings). A recording keeps the channel's MPEG-TS stream as your provider sends it, with every picture, sound, subtitle and teletext track, and converts nothing while recording. It plays as a download does, converting only what Mr. Streamer can't play as it is. Recordings play on this computer only, not on a TV.
 
 An HLS channel can be recorded when its stream is plain MPEG-TS: its highest quality up to 1080p, one segment after another. Encrypted streams, fragmented MP4, byte-range and low-latency playlists, sound sent as a separate stream, and streams without an MPEG-TS programme table can't be. Record then says "This channel's stream can't be recorded." before anything is kept. After a gap, a recording of a live HLS channel goes on up to three segments before live, as playback starts, so after a shorter gap its first seconds can repeat what was recorded just before.
@@ -50,6 +63,8 @@ An HLS channel can be recorded when its stream is plain MPEG-TS: its highest qua
 <a id="online-subtitles-from-009"></a>
 
 ## Online subtitles
+
+_SubDL or OpenSubtitles with your own key. Off until you set it up._
 
 Online search starts off. In Settings > Subtitles > Online search, set up SubDL with your own API key, or OpenSubtitles with your API key, username and password, or both. Choose saved languages and enable search. Saving these settings makes no service request.
 
@@ -64,6 +79,8 @@ Under **Timing** in the same panel, downloaded text has 0.1-second and 1-second 
 Downloaded subtitles and their timing play on this computer only. A receiver keeps the file's supported subtitle tracks. Returning to this computer restores its saved download, unless you had turned it off for that file on this computer.
 
 ## Playing on a TV
+
+_AirPlay on macOS, Google Cast on Windows. The controls in Mr. Streamer work the TV._
 
 Mr. Streamer sends what you watch to a TV on your network: with AirPlay on macOS, and with Google Cast on Windows. The Linux builds play on the computer only. The TV fetches the stream from your computer, so the computer has to stay on and on the same network for as long as the TV plays. Mr. Streamer keeps it awake meanwhile.
 
@@ -91,6 +108,8 @@ A movie or episode starts later on a TV than on your computer, and so does a ski
 
 ## Known limits
 
+_What doesn't work yet, or works differently._
+
 - Live subtitles show from their next line after you turn them on, and another sound track starts the channel again, except on HLS channels.
 - An HLS channel shows the subtitles its stream lists and the closed captions in its picture. DVB subtitles and teletext inside an HLS stream don't show.
 - Surround sound that needs converting plays as stereo.
@@ -103,6 +122,8 @@ A movie or episode starts later on a TV than on your computer, and so does a ski
 - If your TV doesn't show up or doesn't play, please [report it](https://github.com/Mr-Streamer-OSS/MrStreamer/issues/new/choose) with its make and model.
 
 ## When something won't play
+
+_Every message, what it means and what to try._
 
 Mr. Streamer tells you why. The cross at the top right of the message closes it, also with Tab and then Enter or Space; the channel or title stays stopped, and **Watch** or **Play** beside the picture tries it again. A new failure shows its own message.
 

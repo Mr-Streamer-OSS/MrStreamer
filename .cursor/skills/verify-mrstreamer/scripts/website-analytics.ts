@@ -659,9 +659,12 @@ app.on('window-all-closed', () => app.quit());
     // 2. Turning off while a guide's events are held in flight aborts them, and nothing follows.
     hold = true;
     const beforeHeld = captures.length;
-    act("Open the Subscriptions guide from the address bar while capture answers nothing");
+    // Its address names a section, which opens and counts once in view.
+    act(
+      "Open the Subscriptions guide at Adding one from the address bar while capture answers nothing",
+    );
     await wide();
-    await send("Page.navigate", { url: `${origin}/docs/subscriptions` });
+    await send("Page.navigate", { url: `${origin}/docs/subscriptions#adding-one` });
     await wait(
       () => captures.slice(beforeHeld).some((c) => c.raw.includes('"guide_section_viewed"')),
       "held guide events",
@@ -735,6 +738,8 @@ app.on('window-all-closed', () => app.quit());
       "privacy",
     );
     await wait(() => captures.some((c) => c.raw.includes('"route":"/faq","visible"')), "FAQ leave");
+    // The switch sits in the policy's collapsed first section: open it as a reader does.
+    await click("#information-we-collect");
     observed["policySwitch"] = await switchText("policy");
     if (observed["policySwitch"] !== "Website analytics are on in this browser. Turn off")
       throw new Error(`Policy switch: ${String(observed["policySwitch"])}`);
@@ -785,10 +790,59 @@ app.on('window-all-closed', () => app.quit());
 
     // 6. Release notes count each release seen, and an unknown address counts as /404 alone.
     act("Open /releases from the address bar and scroll to its end");
+    const releasesFrom = captures.length;
     await send("Page.navigate", { url: `${origin}/releases` });
     await wait(() => captures.some((c) => c.raw.includes('"$pathname":"/releases"')), "releases");
     await scrollToEnd();
     await wait(() => captures.some((c) => c.raw.includes('"changelog_viewed"')), "release seen");
+
+    // Collapsed parts count once open and in view, once each: a closed heading that scrolled by
+    // counts nothing, opening it counts once, and closing and opening it again adds nothing.
+    const counted = (from: number, event: string, value: string) =>
+      captures.slice(from).filter((c) => c.raw.includes(`"${event}"`) && c.raw.includes(value))
+        .length;
+    const opensOnce = async (from: number, event: string, value: string, summary: string) => {
+      await delay(1_000);
+      if (counted(from, event, value) !== 0) throw new Error(`Closed ${value} counted`);
+      await click(summary);
+      await wait(() => counted(from, event, value) === 1, `${value} counted once open`);
+      await click(summary);
+      await click(summary);
+      await delay(1_000);
+      if (counted(from, event, value) !== 1) throw new Error(`Reopened ${value} counted again`);
+    };
+    const second = await evaluate<string>("document.querySelectorAll('.section h2')[1].id");
+    await opensOnce(
+      releasesFrom,
+      "changelog_viewed",
+      `"version":"${second.slice(1)}"`,
+      `#${second.replaceAll(".", "\\.")}`,
+    );
+    // The opened release made the page taller: its leave is checked as read to the foot.
+    await scrollToEnd();
+    act("Open /faq from the address bar, scroll to its end and open a question");
+    const faqFrom = captures.length;
+    await send("Page.navigate", { url: `${origin}/faq` });
+    await wait(
+      () => captures.slice(faqFrom).some((c) => c.raw.includes('"$pathname":"/faq"')),
+      "FAQ",
+    );
+    await scrollToEnd();
+    await opensOnce(
+      faqFrom,
+      "faq_question_viewed",
+      '"faq_question":"channels"',
+      "#channels > summary",
+    );
+    act("Open a guide from the address bar, scroll to its end and open a section");
+    const guideFrom = captures.length;
+    await send("Page.navigate", { url: `${origin}/docs/playback` });
+    await wait(
+      () => captures.slice(guideFrom).some((c) => c.raw.includes('"$pathname":"/docs/playback"')),
+      "guide",
+    );
+    await scrollToEnd();
+    await opensOnce(guideFrom, "guide_section_viewed", '"section":"recordings"', "#recordings");
     act("Open an unknown address with a private query and fragment");
     await send("Page.navigate", {
       url: `${origin}/private-route?campaign=private-query#private-fragment`,

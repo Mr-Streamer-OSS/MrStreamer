@@ -207,7 +207,8 @@ app.on('window-all-closed', () => app.quit());
       throw new Error("Homepage overflows horizontally at 390px.");
     await capture("home-mobile");
     const visit = async (href: string, expected: string, name: string) => {
-      const element = `[...document.querySelectorAll(${JSON.stringify(`a[href="${href}"]`)})].find(a => { const box = a.getBoundingClientRect(); return box.width > 0 && box.height > 0; })`;
+      // A link inside a closed section has a box but isn't shown: checkVisibility() says so.
+      const element = `[...document.querySelectorAll(${JSON.stringify(`a[href="${href}"]`)})].find(a => { const box = a.getBoundingClientRect(); return a.checkVisibility() && box.width > 0 && box.height > 0; })`;
       await wait(() => livePage.evaluate<boolean>(`!!${element}`));
       let scrolled = false;
       // Scroll when a requested link is below the current viewport.
@@ -265,7 +266,23 @@ app.on('window-all-closed', () => app.quit());
       await capture(name);
       await doctor();
     };
+    // FAQ answers sit in collapsed questions: open one with the pointer, as a reader does.
+    const openQuestion = async (id: string) => {
+      const summary = `document.querySelector(${JSON.stringify(`#${id} > summary`)})`;
+      await livePage.evaluate(`${summary}.scrollIntoView({ block: 'center' })`);
+      const point = await livePage.evaluate<{ x: number; y: number }>(
+        `(() => { const box = ${summary}.getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()`,
+      );
+      actions.push({ action: `Click FAQ question #${id}`, at: new Date().toISOString() });
+      for (const type of ["mousePressed", "mouseReleased"])
+        await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
+      await wait(() =>
+        livePage.evaluate<boolean>(`document.getElementById(${JSON.stringify(id)}).open`),
+      );
+      await capture(`faq-${id}-open`);
+    };
     await visit("/faq", "Questions", "faq");
+    await openQuestion("download");
     await visit("/docs/downloads", "Downloads", "downloads-guide");
     await visit("/docs", "Guides", "guides");
     await visit("/docs/subscriptions", "Subscriptions", "subscriptions-guide");
@@ -312,15 +329,16 @@ app.on('window-all-closed', () => app.quit());
     await send("Page.navigate", { url: origin + "/faq" });
     await wait(() =>
       livePage.evaluate<boolean>(
-        "location.pathname === '/faq' && document.readyState === 'complete' && document.querySelectorAll('.faq-rows > div').length === 15",
+        "location.pathname === '/faq' && document.readyState === 'complete' && document.querySelectorAll('.faq-rows > details').length === 15",
       ),
     );
     actions.push({ action: "Read FAQ with page scripts disabled", at: new Date().toISOString() });
     observed["faqWithoutScripts"] = await livePage.evaluate(
-      "({ title: document.title, groups: [...document.querySelectorAll('main h2')].map(h => h.textContent), rows: document.querySelectorAll('.faq-rows > div').length, width: innerWidth, contentWidth: document.documentElement.scrollWidth })",
+      "({ title: document.title, groups: [...document.querySelectorAll('main h2')].map(h => h.textContent), rows: document.querySelectorAll('.faq-rows > details').length, width: innerWidth, contentWidth: document.documentElement.scrollWidth })",
     );
     await capture("faq-without-scripts");
     await doctor();
+    await openQuestion("download");
     await visit("/docs/downloads", "Downloads", "downloads-guide-without-scripts");
     const missing = await fetch(origin + "/verification-missing-page");
     observed["missingRouteStatus"] = missing.status;

@@ -1,6 +1,15 @@
 # Live TV
 
+Every channel of every subscription in one guide, with favourites, your own lists, search and reminders.
+
+- **Home.** The channel you watched last plays muted, with what's on now and next.
+- **The guide.** Favourites, your own lists and nine topics, as a list or a grid by time.
+- **Catch-up.** Programmes that aired play from their start when your provider keeps them.
+- **Search.** ⌘K, or Ctrl K on Windows and Linux, finds channels, programmes, movies and series.
+
 ## Home
+
+_The last channel plays muted, with what's on now and next._
 
 Home plays the channel you watched last, muted, in a compact preview with what's on it now: the programme, how long it has left and what comes next. **Watch** opens it full window with sound, on the same stream, so it doesn't start again. The speaker button turns the sound on without leaving Home.
 
@@ -15,6 +24,8 @@ Until you've watched something, the backdrop shows a channel without playing it.
 Your subscription may allow a single connection. Home then uses it as soon as it opens, so if another device is already watching, the backdrop stays still instead of taking the connection over. With [several subscriptions](subscriptions.md), Home plays the channel you watched last, whichever it is from. Minimising Mr. Streamer, hiding it behind other windows, or going to Movies or Series stops the muted backdrop; it starts again when you come back.
 
 ## The guide
+
+_Favourites, your lists and nine topics, filtered by country, language and source._
 
 **Live TV** keeps Favourites, Recently watched and All channels, then [your own lists](#your-lists), beside nine fixed topics: News, Sports, Kids, Movies, Entertainment, Music, Documentary, Regional and Other. Topics span [every subscription you added](subscriptions.md#everything-together). They describe the provider's category labels, never a guessed channel identity. A channel can appear in several content topics. Regional is for recognized place-only category labels; uncertain labels stay in Other. All channels and **Provider lists** always remain available.
 
@@ -61,6 +72,8 @@ The guide, the channel list while watching and Home's category row show the list
 
 ## Watching
 
+_The channel list, the controls, quality, and what to do when a channel doesn't play._
+
 While watching, the channel list opens over the left of the picture with the list button, Enter or the left arrow. Click a channel to switch; its title switches to another category, with the same countries and **Find** as Live TV. Clicking the picture shows the controls, and a double click toggles full screen. Scroll over the picture to switch channel, once per gesture.
 
 The bar keeps Channels, Favourite, Stop or Watch, CC when available, volume, full screen and **More**. More holds channel up, channel down, the previous channel, Sound, Quality, Play on and Mini player.
@@ -100,9 +113,13 @@ When the picture stands still for three seconds, "Waiting for data" shows at the
 
 ## Search
 
+_⌘K or Ctrl K searches channels, programmes, movies and series in every subscription._
+
 ⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today, in every subscription. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details. Opened from Live TV, it starts with what the list's field searched for. Live TV searches the list it shows from [that field](#the-guide), and Movies and Series their own titles from a field in their tabs; see [Movies and series](movies-and-series.md#finding-something). Channel name results use the same safe groups and **Show copies**. Right expands and Left collapses while the search field keeps focus. Programme results keep their own rows after movies and series.
 
 ## Reminders
+
+_Remind me on a programme to come, and Mr. Streamer tells you when it starts._
 
 A programme still to come has **Remind me** in its details: under its channel in the guide grid, under its description in the rest of a day, and in ⌘K's search. Once set it reads **Reminder set**, and the programme shows a bell. Press it again to cancel. The bell beside the list's name in Live TV counts the reminders still to come and lists them, with when and on which channel each is. The cross beside one takes it out. Tab reaches the buttons, and Enter presses them.
 
@@ -111,6 +128,8 @@ When the programme starts, Mr. Streamer shows a notice at the top of its window,
 A reminder belongs to its subscription, channel and start time. If the guide later lists another programme then, the reminder says what it was and reminds you of the new one. If it lists nothing then, or your provider stops listing the channel, it says it's not in the guide now and doesn't remind you, unless the programme comes back. It never moves to a programme of the same name at another time. Reminders are kept in a local `reminders.json` file and cleared when the app checks after the end of the day their programme ends. Removing a subscription removes its reminders. Reminders of adult channels show only in the app while **For adults** is on. A reminder due while they are hidden becomes Missed and does not notify when you show them again.
 
 ## Recordings
+
+_New in 0.0.23, now in Nightly. Stable 0.0.22 and earlier can't record._
 
 Recording is new in Mr. Streamer 0.0.23, now in [Nightly](updates.md#stable-and-nightly). Stable 0.0.22 and earlier can't record. Going back to one of them leaves your recordings and schedules on this computer without showing them; 0.0.23 shows them again, and a scheduled time that passed meanwhile, within the last week, is listed as **Missed**.
 
@@ -173,6 +192,8 @@ Settings > **Recordings** shows the folder new recordings go to, with **Change**
 Mr. Streamer manages these folders: use **Delete** rather than removing files by hand. What a recording keeps, and which channels can be recorded, is in [What plays](playback.md#recordings).
 
 ## Keys
+
+_Every key in the guide, while watching and while reordering._
 
 | Key                | In the guide                                                                              | While watching                                                          |
 | ------------------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |

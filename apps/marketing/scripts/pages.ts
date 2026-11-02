@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { Marked } from "marked";
+import { Marked, type MarkedToken } from "marked";
 import type { Downloads } from "../src/downloads.ts";
 import { PACKAGE_ROUTES, type PackageName, type PackageRoutes } from "../src/packages.ts";
 import { RELEASES, type Release } from "./releases.ts";
@@ -10,50 +10,73 @@ const REPOSITORY = "https://github.com/Mr-Streamer-OSS/MrStreamer";
 const root = join(import.meta.dirname, "..");
 const repository = resolve(root, "../..");
 
+/** The guides in reading order. `summary` is the guides index's line; `description` is metadata. */
 export const GUIDES = [
   {
     slug: "subscriptions",
     title: "Subscriptions",
     description:
       "Connect and manage Xtream Codes subscriptions and M3U playlists, programme guides and channel mappings in Mr. Streamer.",
+    summary: "Xtream Codes logins and M3U playlists, programme guides and channel mappings.",
   },
   {
     slug: "live-tv",
     title: "Live TV",
     description:
       "Watch live TV in Mr. Streamer, use the programme guide, search channels and control playback with the keyboard.",
+    summary: "The programme guide, your own lists, search, reminders and keyboard control.",
   },
   {
     slug: "movies-and-series",
     title: "Movies and series",
     description:
       "Find movies and series, use the watchlist and continue episodes from your Xtream Codes subscriptions in Mr. Streamer.",
+    summary: "Find titles, keep a watchlist and continue episodes.",
   },
   {
     slug: "downloads",
     title: "Downloads",
     description:
       "Download movies and episodes in Mr. Streamer, manage the queue and watch saved copies offline.",
+    summary: "Save movies and episodes, manage the queue, watch offline.",
   },
   {
     slug: "updates",
     title: "Updates and channels",
     description:
       "Update Mr. Streamer, choose Stable or Nightly, and understand how Microsoft Store updates work.",
+    summary: "Stable or Nightly, Homebrew and the AUR, and how Microsoft Store updates work.",
   },
   {
     slug: "playback",
     title: "What plays",
     description:
       "The streams, formats, sound and subtitles Mr. Streamer plays, playing on a TV, and known playback limits.",
+    summary: "Formats, sound and subtitles, playing on a TV, known limits.",
   },
   {
     slug: "troubleshooting",
     title: "Troubleshooting",
     description:
       "Fix login, programme guide, playback and update problems in Mr. Streamer, and find your local data.",
+    summary: "Login, guide, playback and update problems, and where your data lives.",
   },
 ] as const;
+
+type GuideSlug = (typeof GUIDES)[number]["slug"];
+
+/** The guides index's most asked tasks, each a section of a guide. The build checks the fragments. */
+const TASKS: readonly (readonly [task: string, guide: GuideSlug, fragment: string])[] = [
+  ["Add an Xtream Codes login", "subscriptions", "adding-one"],
+  ["Add an M3U playlist", "subscriptions", "adding-one"],
+  ["Add an XMLTV guide", "subscriptions", "guides-from-other-addresses"],
+  ["Play a programme from its start", "live-tv", "the-guide"],
+  ["Watch on a TV", "playback", "playing-on-a-tv"],
+  ["Download a whole series", "downloads", "downloading"],
+  ["A channel won't play", "playback", "when-something-wont-play"],
+  ["Login not accepted", "troubleshooting", "channels-or-login-stop-working"],
+  ["Switch to Nightly", "updates", "stable-and-nightly"],
+];
 
 interface Page {
   readonly address: string;
@@ -149,8 +172,8 @@ const LANE: Readonly<Record<PackageName, readonly [link: string, after: string]>
 /** Writes only independently verified package routes, never inferred from the release feed. */
 export function writePackages(html: string, routes: PackageRoutes = PACKAGE_ROUTES): string {
   return html.replaceAll(
-    /<!-- package:(homebrew|aur):(link|details|availability|lane) -->/g,
-    (_mark, name: PackageName, part: "link" | "details" | "availability" | "lane") => {
+    /<!-- package:(homebrew|aur):(link|command|details|availability|lane) -->/g,
+    (_mark, name: PackageName, part: "link" | "command" | "details" | "availability" | "lane") => {
       const route = routes[name];
       if (
         route.publication.state !== "published" ||
@@ -160,6 +183,8 @@ export function writePackages(html: string, routes: PackageRoutes = PACKAGE_ROUT
       const anchor = (words: string) =>
         `<a data-package="${name}" href="${escapeHtml(route.url)}">${escapeHtml(words)}</a>`;
       if (part === "lane") return ` <span>·</span> ${anchor(LANE[name][0])}${LANE[name][1]}`;
+      if (part === "command")
+        return `<p class="command"><span>or</span> <code>${escapeHtml(route.install)}</code></p>`;
       const link = anchor(`${route.name} · ${route.platform}, ${route.architecture}`);
       if (part === "availability") return `<span>Also on ${link}.</span>`;
       if (part === "link") return link;
@@ -187,18 +212,18 @@ function linkTo(href: string, source: string): string | null {
   return `${REPOSITORY}/blob/main/${target}${suffix}`;
 }
 
+/** A paragraph that is only an empty anchor: a renamed heading's old fragment. */
+const LEGACY_ANCHOR = /^<a id="([a-z0-9_-]+)"><\/a>$/;
+
 /**
- * Render Markdown without embedded HTML, unsafe URLs or third-party image requests. The one HTML
- * kept is an empty anchor alone in a paragraph, which holds a renamed heading's old fragment.
+ * A Markdown renderer without embedded HTML, unsafe URLs or third-party image requests. The one
+ * HTML kept is an empty anchor alone in a paragraph, which holds a renamed heading's old fragment.
+ * One renderer numbers repeated headings across everything it renders, so render a document's
+ * parts with the same one, in order.
  */
-export function renderMarkdown(
-  text: string,
-  source: string,
-  headingOffset = 0,
-  anchorPrefix = "",
-): string {
+function markdownFor(source: string, headingOffset = 0, anchorPrefix = ""): Marked {
   const headings = new Map<string, number>();
-  const markdown = new Marked({
+  return new Marked({
     renderer: {
       heading({ text, tokens, depth }) {
         const slug = text
@@ -210,7 +235,10 @@ export function renderMarkdown(
         headings.set(slug, count + 1);
         const id = anchorPrefix + (count === 0 ? slug : `${slug}-${count}`);
         const level = Math.min(depth + headingOffset, 6);
-        return `<h${level} id="${id}">${this.parser.parseInline(tokens)}</h${level}>\n`;
+        // styles.css sizes a page title so its longest word fits the width.
+        const longest = Math.max(...text.split(/\s+/).map((word) => word.length));
+        const fit = level === 1 ? ` style="--longest: ${longest}"` : "";
+        return `<h${level} id="${id}"${fit}>${this.parser.parseInline(tokens)}</h${level}>\n`;
       },
       link({ href, title, tokens }) {
         const target =
@@ -229,44 +257,228 @@ export function renderMarkdown(
           : escapeHtml(text);
       },
       paragraph({ text }) {
-        const legacy = /^<a id="([a-z0-9_-]+)"><\/a>$/.exec(text.trim())?.[1];
+        const legacy = LEGACY_ANCHOR.exec(text.trim())?.[1];
         return legacy ? `<a id="${anchorPrefix}${legacy}"></a>\n` : false;
       },
       html({ text }) {
         return escapeHtml(text);
       },
+      // A table of three or more columns stacks on phones (styles.css), so each cell carries its
+      // column's name to show above it there.
+      table({ header, rows }) {
+        if (header.length < 3) return false;
+        const cells = (row: typeof header, tag: "th" | "td") =>
+          row
+            .map((cell, column) => {
+              const label =
+                tag === "td" ? ` data-label="${escapeHtml(header[column]?.text ?? "")}"` : "";
+              return `<${tag}${label}>${this.parser.parseInline(cell.tokens)}</${tag}>`;
+            })
+            .join("");
+        const body = rows.map((row) => `<tr>${cells(row, "td")}</tr>`).join("\n");
+        return `<table>\n<thead>\n<tr>${cells(header, "th")}</tr>\n</thead>\n<tbody>\n${body}\n</tbody>\n</table>\n`;
+      },
     },
   });
-  return markdown.parse(text, { async: false });
+}
+
+/** Renders a whole Markdown text in reading order, as release notes are. */
+export function renderMarkdown(
+  text: string,
+  source: string,
+  headingOffset = 0,
+  anchorPrefix = "",
+): string {
+  return markdownFor(source, headingOffset, anchorPrefix).parse(text, { async: false });
+}
+
+/** One collapsed part of a page: its heading, a line that answers it, and the rest. */
+interface Section {
+  readonly anchors?: string;
+  readonly heading: string;
+  readonly dek?: string | undefined;
+  readonly body: string;
+  readonly open?: boolean;
+}
+
+/** The answer-first opening every document page shares, before its sections. */
+interface Opening {
+  readonly eyebrow?: string | undefined;
+  readonly title: string;
+  readonly answer?: string | undefined;
+  readonly after?: string | undefined;
+}
+
+function opening({ eyebrow, title, answer, after = "" }: Opening): string {
+  return `<div class="opening">${eyebrow ? `<p class="eyebrow">${eyebrow}</p>` : ""}${title}${
+    answer ? `<div class="answer">${answer}</div>` : ""
+  }${after}</div>`;
+}
+
+/**
+ * Collapsed sections that open with a click, the keyboard or a link to anything inside them, and
+ * without scripts. The heading stays in the summary, so its fragment always shows.
+ */
+function sections(parts: readonly Section[]): string {
+  return `<div class="sections">${parts
+    .map(
+      ({ anchors = "", heading, dek, body, open }) =>
+        `${anchors}<details class="section"${open ? " open" : ""}><summary>${heading}${
+          dek ? `<span class="dek">${dek}</span>` : ""
+        }</summary><div class="body">${body}</div></details>`,
+    )
+    .join("")}</div>`;
+}
+
+/**
+ * A Markdown document, answer first. The source keeps an order that reads on GitHub too:
+ * - The first paragraph under the title is the short answer.
+ * - A list right after it whose every item opens in bold is the key points, side by side.
+ * - Anything else before the first `##` follows them.
+ * - Each `##` is a collapsed section. An italic paragraph right under its heading is the line
+ *   beside the heading that answers it. A section with one table puts the table beside the text.
+ */
+function renderDocument(text: string, source: string, eyebrow?: string, after?: string): string {
+  const markdown = markdownFor(source);
+  const render = (tokens: MarkedToken[]) => markdown.parser(tokens);
+  // marked types its tokens with an open-ended member; every token its lexer makes is a MarkedToken.
+  const tokens = (markdown.lexer(text) as MarkedToken[]).filter((token) => token.type !== "space");
+  const isSection = (token: MarkedToken | undefined) =>
+    token?.type === "heading" && token.depth === 2;
+  const isAnchor = (token: MarkedToken | undefined) =>
+    token?.type === "paragraph" && LEGACY_ANCHOR.test(token.text.trim());
+  // A section starts at its heading, or at the first of the old fragments' anchors right above it.
+  const anchorsThenSection = (index: number): boolean =>
+    isSection(tokens[index]) || (isAnchor(tokens[index]) && anchorsThenSection(index + 1));
+  const starts = (index: number) => !isAnchor(tokens[index - 1]) && anchorsThenSection(index);
+
+  const [title] = tokens;
+  if (title?.type !== "heading" || title.depth !== 1)
+    throw new Error(`${source} doesn't open with its title.`);
+  const groups: MarkedToken[][] = [[]];
+  for (const [index, token] of tokens.entries()) {
+    if (index === 0) continue;
+    if (starts(index)) groups.push([]);
+    groups.at(-1)?.push(token);
+  }
+  const [intro = [], ...parts] = groups;
+
+  const [first, second] = intro;
+  const answer = first?.type === "paragraph" ? first : undefined;
+  const points =
+    answer &&
+    second?.type === "list" &&
+    second.items.every(
+      ({ tokens: [lead] }) => lead?.type === "text" && lead.tokens?.[0]?.type === "strong",
+    )
+      ? second
+      : undefined;
+  const others = intro.slice((answer ? 1 : 0) + (points ? 1 : 0));
+
+  return (
+    opening({
+      eyebrow,
+      title: render([title]),
+      answer: answer && render([answer]),
+      after,
+    }) +
+    (points
+      ? render([points])
+          .replace("<ul>", '<ul class="points">')
+          .replace(/<li><strong>([\s\S]*?)\.?<\/strong>\s*/g, "<li><strong>$1</strong> ")
+      : "") +
+    (others.length ? `<div class="intro">${render(others)}</div>` : "") +
+    sections(
+      parts.map((part) => {
+        const at = part.findIndex(isSection);
+        const anchors = part.slice(0, at);
+        const [heading, lead, ...rest] = part.slice(at);
+        const dek =
+          lead?.type === "paragraph" && lead.tokens.length === 1 && lead.tokens[0]?.type === "em"
+            ? lead
+            : undefined;
+        const body = dek || !lead ? rest : [lead, ...rest];
+        const tables = body.filter((token) => token.type === "table");
+        const table =
+          tables.length === 1 && body.length > 1 && !body.some(({ type }) => type === "heading")
+            ? tables[0]
+            : undefined;
+        return {
+          anchors: render(anchors),
+          heading: render(heading ? [heading] : []),
+          dek: dek && render([dek]).replace(/^<p><em>([\s\S]*)<\/em><\/p>\s*$/, "$1"),
+          body: table
+            ? `<div class="split"><div>${render(body.filter((token) => token !== table))}</div>${render([table])}</div>`
+            : render(body),
+        };
+      }),
+    )
+  );
 }
 
 const markdownOf = (file: string) => readFileSync(join(repository, file), "utf8");
 
 function guideIndex(): string {
-  return `<h1>Guides</h1><dl class="guide-list">${GUIDES.map((guide) => {
-    const summary = escapeHtml(guide.description);
-    return `<div><dt><a href="/docs/${guide.slug}">${guide.title}</a></dt><dd>${summary}</dd></div>`;
-  }).join("")}</dl>`;
+  const tasks = TASKS.map(([task, slug, fragment]) => {
+    const guide = GUIDES.find((guide) => guide.slug === slug);
+    return `<li><a href="/docs/${slug}#${fragment}">${escapeHtml(task)}<span>${guide?.title ?? ""}</span></a></li>`;
+  }).join("");
+  const guides = GUIDES.map(
+    (guide) =>
+      `<div><dt><a href="/docs/${guide.slug}">${guide.title}</a></dt><dd>${escapeHtml(guide.summary)}</dd></div>`,
+  ).join("");
+  return (
+    opening({
+      title: "<h1>Guides</h1>",
+      answer: "<p>Pick what you want to do. Each guide opens with the short answer.</p>",
+    }) +
+    `<section class="tasks" aria-labelledby="most-asked"><h2 class="label" id="most-asked">Most asked</h2><ul>${tasks}</ul></section>` +
+    `<section aria-labelledby="every-guide"><h2 class="label" id="every-guide">All seven guides</h2><dl class="guide-list">${guides}</dl></section>`
+  );
+}
+
+/** The guides before and after this one, wrapping around, so every guide leads on. */
+function guideNav(slug: GuideSlug): string {
+  const index = GUIDES.findIndex((guide) => guide.slug === slug);
+  const previous = GUIDES[(index + GUIDES.length - 1) % GUIDES.length];
+  const next = GUIDES[(index + 1) % GUIDES.length];
+  if (!previous || !next) return "";
+  return `<nav class="guide-nav" aria-label="Other guides"><h2>Other guides</h2><a class="previous" href="/docs/${previous.slug}"><span>Previous guide</span><b><span aria-hidden="true">← </span>${previous.title}</b></a><a class="next" href="/docs/${next.slug}"><span>Next guide</span><b>${next.title}<span aria-hidden="true"> →</span></b></a></nav>`;
 }
 
 function releaseHistory(releases: readonly Release[] | null): string {
-  const intro = "<h1>Releases</h1>";
+  const title = "<h1>Releases</h1>";
   if (!releases?.length)
-    return `${intro}<p>Release history is unavailable here. Read the stable releases and notes on <a href="${RELEASES}">GitHub Releases</a>.</p>`;
-  return `${intro}<p>Every stable release, newest first. Nightly builds are on <a href="${RELEASES}">GitHub</a>.</p>${releases
-    .map((release) => {
-      const date = new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeZone: "UTC" }).format(
-        new Date(release.published),
-      );
-      const headings: number[] = [];
-      const markdown = new Marked();
-      markdown.walkTokens(markdown.lexer(release.notes), (token) => {
-        if (token.type === "heading") headings.push(token.depth);
-      });
-      const offset = 3 - (headings.length ? Math.min(...headings) : 3);
-      return `<section class="release"><h2 id="v${release.version}">${release.version}</h2><p><time datetime="${escapeHtml(release.published)}">${date}</time>. <a href="${RELEASES}/tag/v${release.version}">Download and source</a></p>${release.notes ? renderMarkdown(release.notes, "README.md", offset, `v${release.version}-`) : "<p>No release notes were published.</p>"}</section>`;
-    })
-    .join("")}`;
+    return opening({
+      title,
+      answer: `<p>Release history is unavailable here. Read the stable releases and notes on <a href="${RELEASES}">GitHub Releases</a>.</p>`,
+    });
+  return (
+    opening({
+      title,
+      answer: `<p>Every stable release, newest first. Nightly builds are on <a href="${RELEASES}">GitHub</a>.</p>`,
+    }) +
+    sections(
+      releases.map((release, index) => {
+        const date = new Intl.DateTimeFormat("en-GB", {
+          dateStyle: "long",
+          timeZone: "UTC",
+        }).format(new Date(release.published));
+        const headings: number[] = [];
+        const markdown = new Marked();
+        markdown.walkTokens(markdown.lexer(release.notes), (token) => {
+          if (token.type === "heading") headings.push(token.depth);
+        });
+        const offset = 3 - (headings.length ? Math.min(...headings) : 3);
+        return {
+          heading: `<h2 id="v${release.version}">${release.version}</h2>`,
+          dek: `<time datetime="${escapeHtml(release.published)}">${date}</time>`,
+          body: `<p><a href="${RELEASES}/tag/v${release.version}">Download and source</a></p>${release.notes ? renderMarkdown(release.notes, "README.md", offset, `v${release.version}-`) : "<p>No release notes were published.</p>"}`,
+          open: index === 0,
+        };
+      }),
+    )
+  );
 }
 
 /** The policy's own website analytics switch, under its heading. analytics.ts brings it to life. */
@@ -281,7 +493,10 @@ function withAnalyticsSwitch(policy: string): string {
   );
 }
 
-/** Expands the shared privacy layout before Vite resolves its stylesheet and script. */
+/** About's line naming the stable release, which downloads.ts keeps current. */
+const RELEASE_LINE = `<p class="release-line"><span data-release-version>Stable release on GitHub.</span> <a data-release-link="notes" href="${RELEASES}/latest">Release notes</a>.</p>`;
+
+/** Expands the shared document layout before Vite resolves its stylesheet and script. */
 export function renderPage(
   file: string,
   downloads: Downloads | null,
@@ -294,14 +509,15 @@ export function renderPage(
     page.address === "/download" && version
       ? `Download Mr. Streamer ${version} for Mac, Windows and Linux`
       : page.title;
-  let content = page.markdown ? renderMarkdown(markdownOf(page.markdown), page.markdown) : "";
-  if (page.address === "/about")
-    content = content.replace(
-      "<h2",
-      '<p><span data-release-version>Stable release on GitHub.</span> <a data-release-link="notes" href="' +
-        RELEASES +
-        '/latest">Release notes</a>.</p><h2',
-    );
+  const guide = GUIDES.find((guide) => page.address === `/docs/${guide.slug}`);
+  let content = page.markdown
+    ? renderDocument(
+        markdownOf(page.markdown),
+        page.markdown,
+        guide ? '<a href="/docs">Guides</a>' : undefined,
+        page.address === "/about" ? RELEASE_LINE : undefined,
+      )
+    : "";
   if (page.address === "/privacy") content = withAnalyticsSwitch(content);
   if (page.address === "/docs") content = guideIndex();
   if (page.address === "/faq")
@@ -309,21 +525,15 @@ export function renderPage(
   if (page.address === "/download")
     content = writePackages(readFileSync(join(root, "src/download.html"), "utf8"));
   if (page.address === "/releases") content = releaseHistory(releases);
-  const guide = GUIDES.find((guide) => page.address === `/docs/${guide.slug}`);
-  const crumb = guide ? `<p class="crumb"><a href="/docs">Guides</a> / ${guide.title}</p>` : "";
-  const other = guide
-    ? `<nav class="other-guides" aria-label="Other guides"><h2>Other guides</h2><ul>${GUIDES.filter(
-        (other) => other.slug !== guide.slug,
-      )
-        .map((other) => `<li><a href="/docs/${other.slug}">${other.title}</a></li>`)
-        .join("")}</ul></nav>`
-    : "";
+  // The article names its kind for styles.css: "guide" for every guide, else its address.
+  const kind = guide ? "guide" : page.address.slice(1);
   let html = readFileSync(join(root, "src/page.html"), "utf8")
     .replaceAll("<!-- title -->", escapeHtml(title))
     .replaceAll("<!-- description -->", escapeHtml(page.description))
     .replaceAll("<!-- address -->", SITE + page.address)
+    .replaceAll("<!-- kind -->", kind)
     .replaceAll(`href="${guide ? "/docs" : page.address}"`, `$& aria-current="page"`)
-    .replace("<!-- content -->", () => crumb + content + other);
+    .replace("<!-- content -->", () => content + (guide ? guideNav(guide.slug) : ""));
   if (page.address === "/download")
     html = html
       .replace("<title>", "<title data-download-title>")

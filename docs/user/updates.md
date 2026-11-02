@@ -1,8 +1,17 @@
 # Updates and channels
 
+With a direct or Homebrew copy, Mr. Streamer says when an update is ready. You download it and choose when to restart.
+
+- **Direct and Homebrew.** Checks a little after it starts, then every four hours.
+- **Microsoft Store.** The Store updates it, and Mr. Streamer never looks for updates.
+- **AUR and Snap.** Updated separately, as their sections below describe.
+- **Stable or Nightly.** Choose under **Updates** in Settings. Your login, preferences, favourites and history stay.
+
 With a direct or Homebrew installation, Mr. Streamer looks for updates a little after it starts and then every four hours. It never downloads or restarts without you: you download an update, and then choose when to restart into it. The [AUR](#installed-through-the-aur), [Snap](#installed-as-a-snap) and [Microsoft Store](#installed-from-the-microsoft-store) manage their updates separately. Your login, preferences, favourites and history stay through every update.
 
 ## When an update is available
+
+_Update appears at the top right, and stays quiet while you watch._
 
 **Update** appears at the top right, with a dot. It stays quiet while you watch: it fades with the other controls, and nothing covers the picture.
 
@@ -16,6 +25,8 @@ On Linux, installing the deb package asks for your password, because installing 
 
 ## A reminder when Stable is behind
 
+_From the 0.0.21 client, a centered reminder once two Stable releases are newer._
+
 Starting with the 0.0.21 client, direct and Homebrew Stable copies show a centered reminder when at least two published Stable releases are newer than yours. It uses the known previous Stable release, including skipped version numbers; an older feed without that history keeps the quiet update notice. Current, ahead and one-release-behind copies get no prominent reminder. This cannot add reminders to older clients.
 
 The reminder appears at most once per app process launch, while you browse. Full Watch and movie or episode playback defer it until you return; the muted Home preview does not. **Not now** or Escape closes it and returns keyboard focus, leaving the quiet **Update** entry available. Rechecking, reopening the window or finding a newer offer during that launch does not repeat a reminder already shown. The next app launch can remind you again. **Download** starts only when you choose it, and restart still needs your confirmation.
@@ -24,15 +35,21 @@ Nightly, Microsoft Store and AUR copies keep their existing update behavior, and
 
 ## Updates in Settings
 
+_Your version, where the update stands, and Check now._
+
 Settings (⌘, on macOS, Ctrl , on Windows and Linux) > **Updates** shows your version, where the update stands: when Mr. Streamer checks next, that it's up to date, or the step the update is at, with the same actions as the top bar, and your channel. **Check now** looks straight away. **What's new** lists the changes in the offered version, each linked to its details.
 
 When a check doesn't work, Settings says why in a few words: you're offline, the update server answered with an error, or GitHub is limiting requests from your network and until when. A check Mr. Streamer made on its own fails quietly and tries again later, sooner at first. Either way, an update found earlier stays available to download.
 
 ## Install a newer version by hand
 
+_Install an installer over the old one, and everything carries over._
+
 **GitHub ›** beside an offered update in Settings opens its release. You can also take an installer from the [download page](https://mrstreamer.app/download) and install it over the old one. Mr. Streamer keeps its data in a folder of its own (see [Troubleshooting](troubleshooting.md#where-your-data-is)), so everything carries over.
 
 ## Installed through Homebrew
+
+_Update in the app, or quit it and run brew upgrade._
 
 The maintained Homebrew tap uses the same signed stable DMG for macOS 13 or later on Apple silicon. The [download page](https://mrstreamer.app/download) has the current install command.
 
@@ -45,6 +62,8 @@ An explicitly named upgrade, `--greedy` or `brew reinstall` can replace a newer 
 Homebrew replaces the app bundle. Your profile and downloaded copies live outside it, and Homebrew uninstall leaves them in place. If a direct install already occupies the destination, quit it and move only its app bundle aside before installing through Homebrew. Leave the profile and downloads alone.
 
 ## Installed through the AUR
+
+_With yay or paru, or makepkg by hand._
 
 On Arch Linux, x86_64, [mrstreamer-bin](https://aur.archlinux.org/packages/mrstreamer-bin) packages the stable release with its bundled player and media tools. With yay installed, run `yay -S mrstreamer-bin`; with paru, run `paru -S mrstreamer-bin`.
 
@@ -67,6 +86,8 @@ Your login, preferences, favourites, watchlist, playback progress, downloaded co
 To uninstall, run `sudo pacman -R mrstreamer-bin`. This removes the app and keeps your profile, downloaded copies and keyring credentials. Installing it again reuses them.
 
 ## Installed as a Snap
+
+_Not in the Snap Store yet. A Snap installed by hand never updates on its own._
 
 Recording behavior in this section requires 0.0.23. Stable 0.0.22 and earlier cannot record live TV.
 
@@ -92,6 +113,8 @@ The Snap is separate from the deb, the AppImage and the AUR copy. It can't read 
 
 ## Installed from the Microsoft Store
 
+_The Store updates it, with stable releases only._
+
 The Microsoft Store updates a copy you installed from it, so Mr. Streamer never looks for updates or downloads them, and shows no update notice. Settings > **Updates** shows your version, updated by the Microsoft Store, and **Open Store** opens Mr. Streamer's page there. The Store only carries stable releases, so there's no channel to choose.
 
 Windows lists the Store copy with 1 added to the first number of the version, such as 1.0.4.0 for Mr. Streamer 0.0.4, because the Store doesn't take a 0 there.
@@ -102,6 +125,8 @@ The Store copy and a copy installed from the setup file are separate. Each keeps
 
 ## Stable and Nightly
 
+_Stable gets tested releases only. Nightly gets new builds first._
+
 These channels apply to direct downloads and Homebrew. The AUR, the Snap and the Microsoft Store carry stable releases and manage updates separately.
 
 - **Stable** gets tested releases only.
@@ -110,6 +135,8 @@ These channels apply to direct downloads and Homebrew. The AUR, the Snap and the
 The version you download sets your channel on first launch. After that, only **Channel** under **Updates** in Settings changes it. Installing a stable release while on Nightly keeps you on Nightly, and Mr. Streamer offers the next nightly once one is out. Nightly never offers a version older than yours. The same goes when you switch a stable release to Nightly.
 
 ## Going back to Stable
+
+_Choose Stable in Settings, and the newest stable release installs like any update._
 
 Choose **Stable** as the **Channel** under **Updates** in Settings. Mr. Streamer offers the newest stable release right away, even when it is older than your nightly, and installs it like any other update: your login, preferences, favourites and history stay.
 

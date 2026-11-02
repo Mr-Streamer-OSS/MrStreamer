@@ -4,6 +4,8 @@ Mr. Streamer is a free, open source IPTV player for Mac, Windows and Linux. Brin
 
 ## What it plays
 
+_Live TV, movies and series from your own subscription, with the tracks your provider sends._
+
 - Live TV from Xtream Codes or an M3U playlist, with favourites, [your own channel lists](user/live-tv.md#your-lists) and [programme reminders](user/live-tv.md#reminders), and a programme guide when your provider or playlist supplies one, as a list or a grid by time. You can add XMLTV guides of your own, which fill in the channels it doesn't cover. Programmes that aired play from their start when your provider keeps catch-up.
 - Movies and series from Xtream Codes or a playlist whose groups you mapped in Settings, with a watchlist, saved progress, keyboard navigation through poster grids and Back through related titles. Playlist movies and episodes need finished files; HLS entries stay out.
 - The sound and subtitle tracks your provider sends. See [What plays](user/playback.md) for formats, playback on a TV and limits.
@@ -13,6 +15,8 @@ You can [download movies, episodes and whole series](user/downloads.md) to watch
 It reads MPEG-TS and HLS live streams, MP3 and AAC radio, and MKV, MP4 and AVI movies and episodes. Playback depends on the file's tracks and your system's decoders; [What plays](user/playback.md) describes conversion and the known limits. DASH streams are not supported.
 
 ## Systems
+
+_macOS 13 or later on Apple silicon, Windows 11 and 64-bit Linux._
 
 | System  | Requirements                                                                |
 | ------- | --------------------------------------------------------------------------- |
@@ -24,9 +28,13 @@ It reads MPEG-TS and HLS live streams, MP3 and AAC radio, and MKV, MP4 and AVI m
 
 ## Your data
 
+_It stays on your computer. Usage statistics can be turned off._
+
 Logins, preferences, favourites, watchlist, history and progress stay on your computer. Provider requests go directly from the app to the configured addresses and any redirects or stream addresses they supply, subject to the [login checks](security.md#your-login). Usage statistics default on and can be turned off in **Settings > Privacy**: first-seen profiles and daily app use, the parts of the app opened, playback, download and update-check results, and unexpected window stops. Viewing history and provider details are excluded; builds without a configured PostHog project send no app statistics. The [privacy policy](privacy.md) describes its connections, what each app sends and the website's analytics; [Security](security.md) explains login storage and installer signing.
 
 ## Licence and source
+
+_GPL-3.0, made in Belgium, with public source._
 
 Mr. Streamer is made by Mr Streamer OSS, based in Belgium, and licensed under [GPL-3.0](../LICENSE). The [source repository](https://github.com/Mr-Streamer-OSS/MrStreamer) is public. Each release carries source archives for the dependencies whose licences require them.
 

@@ -497,7 +497,8 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
     on,
   );
 
-  // Parts of the page reached, each once. The build wrote every id these read.
+  // Parts of the page reached, each once. The build wrote every id these read. FAQ questions,
+  // guide sections and releases sit in collapsed sections and count once open and in view.
   const seen = new Map<Element, () => SiteEvent | undefined>();
   const opened = location.hash.slice(1);
   if (route === "/")
@@ -518,7 +519,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
           properties: { guide, section: heading.id },
         }));
   if (route === "/faq")
-    for (const row of document.querySelectorAll(".faq-rows > div[id]")) {
+    for (const row of document.querySelectorAll(".faq-rows > details[id]")) {
       if (!ID.test(row.id)) continue;
       const faq_question = row.id;
       // The page opened on this question's address: counted now, as the reason it was read.
@@ -531,21 +532,38 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
         }));
     }
   if (route === "/releases")
-    for (const heading of document.querySelectorAll(".release > h2[id]")) {
+    for (const heading of document.querySelectorAll(".section h2[id]")) {
       const version = heading.id.slice(1);
       if (/^v\d+\.\d+\.\d+$/.test(heading.id))
         seen.set(heading, () => ({ event: "changelog_viewed", properties: { version } }));
     }
   if (seen.size && typeof IntersectionObserver === "function") {
-    observer = new IntersectionObserver((entries) => {
+    // A part in a collapsed section counts once it is open and in view, not as its heading passes.
+    const shown = (part: Element) => part.closest("details")?.open !== false;
+    const watch = new IntersectionObserver((entries) => {
       for (const { isIntersecting, target } of entries) {
-        if (!isIntersecting) continue;
-        observer?.unobserve(target);
+        if (!isIntersecting || !shown(target)) continue;
+        watch.unobserve(target);
         const event = seen.get(target)?.();
+        seen.delete(target);
         if (event) send(event);
       }
     });
-    for (const element of seen.keys()) observer.observe(element);
+    observer = watch;
+    for (const element of seen.keys()) watch.observe(element);
+    // Watching again reports where an opened section's parts are now.
+    document.addEventListener(
+      "toggle",
+      ({ target }) => {
+        if (!(target instanceof HTMLDetailsElement) || !target.open) return;
+        for (const element of seen.keys())
+          if (target.contains(element)) {
+            watch.unobserve(element);
+            watch.observe(element);
+          }
+      },
+      { ...on, capture: true },
+    );
   }
 
   return () => {

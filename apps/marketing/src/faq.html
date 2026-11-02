@@ -1,142 +1,208 @@
-<h1>Questions</h1>
-<h2>Getting started</h2>
-<dl class="faq-rows">
-  <div id="channels">
-    <dt>Does it come with channels?</dt>
-    <dd>
-      No. Mr. Streamer includes no channels and sells none. You connect the subscription you already
-      have.
-    </dd>
+<!--
+  Answer first: each question's summary holds its short answer, and the full answer opens below
+  it, with or without scripts. The ids are the questions' addresses; main.ts opens the one a link
+  names.
+-->
+<div class="opening">
+  <h1>Questions</h1>
+  <div class="answer"><p>The answer is on the line. Open a question for the detail.</p></div>
+</div>
+<section class="faq-group">
+  <h2>Getting started</h2>
+  <div class="faq-rows">
+    <details id="channels">
+      <summary>
+        <span class="q">Does it come with channels?</span>
+        <span class="a"><b>No.</b> You connect the subscription you have.</span>
+      </summary>
+      <div class="more">
+        Mr. Streamer includes no channels and sells none. You connect the subscription you already
+        have.
+      </div>
+    </details>
+    <details id="what-you-need">
+      <summary>
+        <span class="q">What do I need?</span>
+        <span class="a"><b>An IPTV subscription.</b> Xtream Codes or M3U.</span>
+      </summary>
+      <div class="more">
+        Xtream Codes access means a server address, username and password. An M3U playlist is a
+        single link. <a href="/docs/subscriptions">Subscriptions</a>
+      </div>
+    </details>
+    <details id="compare">
+      <summary>
+        <span class="q">How does it compare with other players?</span>
+        <span class="a">Side by side with TiviMate, IPTV Smarters, IPTVX, VLC and Kodi.</span>
+      </summary>
+      <div class="more">
+        <a href="/#what-you-need">Is it for you?</a> on Home lines up what you might want with what
+        Mr. Streamer does and which of TiviMate, IPTV Smarters, IPTVX, VLC and Kodi document it.
+        <a href="https://github.com/Mr-Streamer-OSS/MrStreamer#is-it-for-you"
+          >Every player, side by side</a
+        >
+      </div>
+    </details>
+    <details id="m3u">
+      <summary>
+        <span class="q">Will my M3U playlist work?</span>
+        <span class="a"><b>Yes.</b> Map its groups for movies and series.</span>
+      </summary>
+      <div class="more">
+        Live TV works straight away. For movies and series, map the playlist's groups in Settings.
+        Movies and episodes need finished files, so HLS entries stay out and the app says why.
+        <a href="/docs/subscriptions#mapping-mixed-playlists">Mapping playlists</a>
+      </div>
+    </details>
+    <details id="several">
+      <summary>
+        <span class="q">Can I use more than one subscription?</span>
+        <span class="a"><b>Yes.</b> As many as you like, shown together.</span>
+      </summary>
+      <div class="more">
+        Add as many as you like. Their channels, movies and series show together.
+      </div>
+    </details>
   </div>
-  <div id="what-you-need">
-    <dt>What do I need?</dt>
-    <dd>
-      An IPTV subscription with Xtream Codes access (a server address, username and password) or an
-      M3U playlist link. <a href="/docs/subscriptions">Subscriptions</a>
-    </dd>
+</section>
+<section class="faq-group">
+  <h2>Watching</h2>
+  <div class="faq-rows">
+    <details id="download">
+      <summary>
+        <span class="q">Can I download?</span>
+        <span class="a"><b>Yes.</b> Whole series too, to watch offline.</span>
+      </summary>
+      <div class="more">
+        Download a movie, an episode or a whole series and watch it offline, even after the
+        subscription ends. Pause downloads and reorder the queue as you like. This works with Xtream
+        Codes and with mapped playlists.
+        <a href="/docs/downloads">Downloads</a>
+      </div>
+    </details>
+    <details id="record">
+      <summary>
+        <span class="q">Can it record live TV?</span>
+        <span class="a"><b>No.</b> Catch-up plays a programme from its start.</span>
+      </summary>
+      <div class="more">
+        Live TV can't be recorded. Catch-up plays a programme that aired from its start, when your
+        provider keeps it: with Xtream Codes, or a playlist whose catch-up addresses name the
+        programme's start. <a href="/docs/live-tv#the-guide">The guide</a>
+      </div>
+    </details>
+    <details id="guide">
+      <summary>
+        <span class="q">Is there a programme guide?</span>
+        <span class="a"><b>Yes.</b> Your provider's, plus XMLTV guides of your own.</span>
+      </summary>
+      <div class="more">
+        When your provider or playlist supplies one, as a list or a grid by time. You can also add
+        XMLTV guides of your own, which fill in the channels it doesn't cover, and set reminders for
+        programmes still to come.
+        <a href="/docs/subscriptions#guides-from-other-addresses">Guides</a>
+      </div>
+    </details>
+    <details id="tv">
+      <summary>
+        <span class="q">Can I play on my TV?</span>
+        <span class="a"><b>Mac and Windows.</b> AirPlay and Google Cast.</span>
+      </summary>
+      <div class="more">
+        On a Mac, with AirPlay. On Windows, with Google Cast. On Linux it plays on the computer
+        only.
+        <a href="/docs/playback#playing-on-a-tv">What plays</a>
+      </div>
+    </details>
   </div>
-  <div id="compare">
-    <dt>How does it compare with other players?</dt>
-    <dd>
-      <a href="/#what-you-need">Is it for you?</a> on Home lines up what you might want with what
-      Mr. Streamer does and which of TiviMate, IPTV Smarters, IPTVX, VLC and Kodi document it.
-      <a href="https://github.com/Mr-Streamer-OSS/MrStreamer#is-it-for-you"
-        >Every player, side by side</a
-      >
-    </dd>
+</section>
+<section class="faq-group">
+  <h2>Installing and updates</h2>
+  <div class="faq-rows">
+    <details id="systems">
+      <summary>
+        <span class="q">Which computers does it run on?</span>
+        <span class="a">Apple silicon Macs, Windows 11 and 64-bit Linux.</span>
+      </summary>
+      <div class="more">
+        macOS 13 or later on Apple silicon, 64-bit Windows 11 and 64-bit Linux.
+        <a href="/download">Download</a>
+        <!-- package:homebrew:availability -->
+        <!-- package:aur:availability -->
+      </div>
+    </details>
+    <details id="store">
+      <summary>
+        <span class="q">Store or .exe on Windows?</span>
+        <span class="a">Either. The Store updates it; the .exe offers updates in the app.</span>
+      </summary>
+      <div class="more">
+        The Store copy is signed and the Store updates it. The .exe does the same job without the
+        Store and offers updates in the app: you choose when to download and restart.
+      </div>
+    </details>
+    <details id="updates">
+      <summary>
+        <span class="q">How do updates work?</span>
+        <span class="a"
+          >In the app, when you choose. Store and AUR copies update their own way.</span
+        >
+      </summary>
+      <div class="more">
+        Direct downloads and Homebrew copies check for updates in the app. You choose when to
+        download and restart, and pick Stable or Nightly in Settings. The Microsoft Store manages
+        its own updates. For the AUR, quit the app and update with makepkg or an AUR helper. Quit
+        before replacing the app with Homebrew too.
+        <a href="/docs/updates">Updates</a>
+      </div>
+    </details>
   </div>
-  <div id="m3u">
-    <dt>Will my M3U playlist work?</dt>
-    <dd>
-      Yes. Live TV works straight away. For movies and series, map the playlist's groups in
-      Settings. Movies and episodes need finished files, so HLS entries stay out and the app says
-      why. <a href="/docs/subscriptions#mapping-mixed-playlists">Mapping playlists</a>
-    </dd>
+</section>
+<section class="faq-group">
+  <h2>Price and privacy</h2>
+  <div class="faq-rows">
+    <details id="free">
+      <summary>
+        <span class="q">Is it really free?</span>
+        <span class="a"><b>Yes.</b> GPL-3.0, no ads, no account.</span>
+      </summary>
+      <div class="more">
+        Free and open source under GPL-3.0, with no ads and no account.
+        <a href="https://github.com/Mr-Streamer-OSS/MrStreamer">Don't like it? Fork it.</a>
+      </div>
+    </details>
+    <details id="privacy">
+      <summary>
+        <span class="q">What does it collect?</span>
+        <span class="a">Usage statistics you can turn off. Never what you watch.</span>
+      </summary>
+      <div class="more">
+        On desktop, usage and reliability statistics are on by default: which parts of the app you
+        use, when live TV or a movie or episode starts and stops playing and for how long, and
+        whether playback, downloads and update checks work. Turn them off in Settings &gt; Privacy.
+        They never include what you watch, your searches, your provider or your login. On iPhone,
+        statistics stay off until you choose to share them, except when an upgrade retains an
+        earlier deliberate choice. Change the choice in Settings &gt; Privacy. On the desktop, usage
+        is sent in five-minute groups and each play is reported once when it ends. Errors are sent
+        directly; after an unexpected exit, the next launch can report the last saved playback
+        duration. Desktop playback failures can also report fixed failure stages, reasons, container
+        and codec families, delivery and fallback categories. Unknown facts stay unknown. No raw
+        errors or stream addresses. The policy explains what each app sends.
+        <a href="/privacy">Privacy policy</a>
+      </div>
+    </details>
+    <details id="website">
+      <summary>
+        <span class="q">Does the website count visits?</span>
+        <span class="a"><b>Yes.</b> No cookie, no identifier in your browser.</span>
+      </summary>
+      <div class="more">
+        It does, unless your browser asks sites not to track. It counts the pages you read, the
+        download links you use and the kind of site you came from, such as a search engine or
+        GitHub, with no cookie, no identifier in your browser and nothing that follows you into the
+        app. Turn it off with Site analytics at the foot of any page.
+        <a href="/privacy#website-analytics">What's counted</a>
+      </div>
+    </details>
   </div>
-  <div id="several">
-    <dt>Can I use more than one subscription?</dt>
-    <dd>Yes. Add as many as you like. Their channels, movies and series show together.</dd>
-  </div>
-</dl>
-<h2>Watching</h2>
-<dl class="faq-rows">
-  <div id="download">
-    <dt>Can I download?</dt>
-    <dd>
-      Yes. Download a movie, an episode or a whole series and watch it offline, even after the
-      subscription ends. Pause downloads and reorder the queue as you like. This works with Xtream
-      Codes and with mapped playlists.
-      <a href="/docs/downloads">Downloads</a>
-    </dd>
-  </div>
-  <div id="record">
-    <dt>Can it record live TV?</dt>
-    <dd>
-      No. Live TV can't be recorded. Catch-up plays a programme that aired from its start, when your
-      provider keeps it: with Xtream Codes, or a playlist whose catch-up addresses name the
-      programme's start. <a href="/docs/live-tv#the-guide">The guide</a>
-    </dd>
-  </div>
-  <div id="guide">
-    <dt>Is there a programme guide?</dt>
-    <dd>
-      Yes, when your provider or playlist supplies one, as a list or a grid by time. You can also
-      add XMLTV guides of your own, which fill in the channels it doesn't cover, and set reminders
-      for programmes still to come.
-      <a href="/docs/subscriptions#guides-from-other-addresses">Guides</a>
-    </dd>
-  </div>
-  <div id="tv">
-    <dt>Can I play on my TV?</dt>
-    <dd>
-      On a Mac, with AirPlay. On Windows, with Google Cast. On Linux it plays on the computer only.
-      <a href="/docs/playback#playing-on-a-tv">What plays</a>
-    </dd>
-  </div>
-</dl>
-<h2>Installing and updates</h2>
-<dl class="faq-rows">
-  <div id="systems">
-    <dt>Which computers does it run on?</dt>
-    <dd>
-      macOS 13 or later on Apple silicon, 64-bit Windows 11 and 64-bit Linux.
-      <a href="/download">Download</a>
-      <!-- package:homebrew:availability -->
-      <!-- package:aur:availability -->
-    </dd>
-  </div>
-  <div id="store">
-    <dt>Store or .exe on Windows?</dt>
-    <dd>
-      The Store copy is signed and the Store updates it. The .exe does the same job without the
-      Store and updates itself.
-    </dd>
-  </div>
-  <div id="updates">
-    <dt>How do updates work?</dt>
-    <dd>
-      Direct downloads and Homebrew copies check for updates in the app. You choose when to download
-      and restart, and pick Stable or Nightly in Settings. The Microsoft Store manages its own
-      updates. For the AUR, quit the app and update with makepkg or an AUR helper. Quit before
-      replacing the app with Homebrew too.
-      <a href="/docs/updates">Updates</a>
-    </dd>
-  </div>
-</dl>
-<h2>Price and privacy</h2>
-<dl class="faq-rows">
-  <div id="free">
-    <dt>Is it really free?</dt>
-    <dd>
-      Yes. GPL-3.0, no ads, no account.
-      <a href="https://github.com/Mr-Streamer-OSS/MrStreamer">Don't like it? Fork it.</a>
-    </dd>
-  </div>
-  <div id="privacy">
-    <dt>What does it collect?</dt>
-    <dd>
-      On desktop, usage and reliability statistics are on by default: which parts of the app you
-      use, when live TV or a movie or episode starts and stops playing and for how long, and whether
-      playback, downloads and update checks work. Turn them off in Settings &gt; Privacy. They never
-      include what you watch, your searches, your provider or your login. On iPhone, statistics stay
-      off until you choose to share them, except when an upgrade retains an earlier deliberate
-      choice. Change the choice in Settings &gt; Privacy. On the desktop, usage is sent in
-      five-minute groups and each play is reported once when it ends. Errors are sent directly;
-      after an unexpected exit, the next launch can report the last saved playback duration. Desktop
-      playback failures can also report fixed failure stages, reasons, container and codec families,
-      delivery and fallback categories. Unknown facts stay unknown. No raw errors or stream
-      addresses. The policy explains what each app sends.
-      <a href="/privacy">Privacy policy</a>
-    </dd>
-  </div>
-  <div id="website">
-    <dt>Does the website count visits?</dt>
-    <dd>
-      Yes, unless your browser asks sites not to track. It counts the pages you read, the download
-      links you use and the kind of site you came from, such as a search engine or GitHub, with no
-      cookie, no identifier and nothing that follows you into the app. Turn it off with Site
-      analytics at the foot of any page.
-      <a href="/privacy#website-analytics">What's counted</a>
-    </dd>
-  </div>
-</dl>
+</section>

@@ -62,10 +62,55 @@ describe("public document pages without JavaScript", () => {
       document.querySelector('a[href="/docs/troubleshooting#where-your-data-is"]'),
     ).not.toBeNull();
     expect(document.querySelector('main a[href="https://mrstreamer.app/download"]')).not.toBeNull();
-    expect(document.querySelectorAll(".other-guides li")).toHaveLength(6);
+    expect(
+      [...document.querySelectorAll(".guide-nav a")].map((link) => link.getAttribute("href")),
+    ).toEqual(["/docs/downloads", "/docs/playback"]);
     open(renderPage("docs/index.html", null, null));
     expect(document.querySelectorAll(".guide-list dt a")).toHaveLength(7);
     expect(document.querySelector('a[href="/docs#installed-from-the-microsoft-store"]')).toBeNull();
+  });
+
+  it("opens a guide with its short answer and key points, and keeps every section collapsed with its old fragments", () => {
+    open(renderPage("docs/playback/index.html", null, null));
+    expect(document.querySelector(".opening .answer")?.textContent).toContain(
+      "Most channels and files play directly.",
+    );
+    expect(
+      [...document.querySelectorAll(".points li > strong")].map((point) => point.textContent),
+    ).toEqual(["Plays directly", "Converted", "On a TV", "Left out"]);
+    const sections = [...document.querySelectorAll("details.section")];
+    expect(sections.map((section) => section.querySelector("summary h2")?.id)).toEqual([
+      "live-channels",
+      "movies-and-episodes",
+      "recordings",
+      "online-subtitles",
+      "playing-on-a-tv",
+      "known-limits",
+      "when-something-wont-play",
+    ]);
+    expect(sections.some((section) => section.hasAttribute("open"))).toBe(false);
+    expect(sections[0]?.querySelector(".dek")?.textContent).toBe(
+      "MPEG-TS, HLS and radio. Most play directly.",
+    );
+    // A renamed heading's old address lands right before its section, not inside the one above.
+    expect(document.querySelector("#online-subtitles-from-009")?.nextElementSibling).toBe(
+      sections[3],
+    );
+  });
+
+  it("names each cell's column in a wide table, for phones where its header is hidden", () => {
+    open(renderPage("docs/live-tv/index.html", null, null));
+    const keys = [...document.querySelectorAll("table")].find((table) =>
+      table.querySelector("th")?.textContent?.includes("Key"),
+    );
+    const enter = [...(keys?.querySelectorAll("tr") ?? [])].find(
+      (row) => row.cells[0]?.textContent === "Enter",
+    );
+    expect([...(enter?.cells ?? [])].map((cell) => cell.dataset["label"])).toEqual([
+      "Key",
+      "In the guide",
+      "While watching",
+    ]);
   });
 
   it("offers the grouped FAQ and its working guide links without JavaScript", () => {
@@ -73,7 +118,7 @@ describe("public document pages without JavaScript", () => {
     expect([...document.querySelectorAll("main h2")].map((heading) => heading.textContent)).toEqual(
       ["Getting started", "Watching", "Installing and updates", "Price and privacy"],
     );
-    expect(document.querySelectorAll(".faq-rows > div[id]")).toHaveLength(15);
+    expect(document.querySelectorAll(".faq-rows > details[id]")).toHaveLength(15);
     expect(document.querySelector("#download")?.textContent).toContain(
       "Download a movie, an episode or a whole series",
     );
@@ -119,15 +164,15 @@ describe("public document pages without JavaScript", () => {
         ]),
       );
       expect(document.querySelector("time")?.textContent).toBe("3 February 2026");
-      expect(document.querySelector(".release li")?.textContent).toBe("A published change");
-      expect(document.querySelector("details")).toBeNull();
+      expect(document.querySelector(".section li")?.textContent).toBe("A published change");
+      expect(document.querySelector("details.section[open] h2#v1\\.2\\.3")).not.toBeNull();
       expect(document.querySelector('h3[id="v1.2.3-fixes"]')).not.toBeNull();
       expect(document.querySelector('a[href="/releases#v1.2.3-fixes"]')).not.toBeNull();
       open(renderPage("releases/index.html", null, null));
       expect(document.querySelector("main")?.textContent).toContain(
         "Release history is unavailable here.",
       );
-      expect(document.querySelector(".release")).toBeNull();
+      expect(document.querySelector(".section")).toBeNull();
     },
   );
 });
