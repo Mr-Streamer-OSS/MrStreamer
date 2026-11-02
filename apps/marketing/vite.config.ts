@@ -24,6 +24,7 @@ const addresses = new Map(
   ),
 );
 const MISSING = "404.html";
+const HTML_ALIAS = /\.html\/?$/i;
 const systemScript = `<script>{const os=(${systemOf})(navigator);if(os)document.documentElement.dataset.os=os}</script>`;
 interface DownloadResult {
   readonly downloads: Downloads | null;
@@ -155,17 +156,20 @@ const config = (analytics: SiteCapture | null): UserConfig => ({
         server.middlewares.use((req, res, next) => {
           const path = req.url?.split("?")[0] ?? "/";
           if (path === "/llms.txt") res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          return addresses.has(path) || path.endsWith(".html") ? answer(req, res, next) : next();
+          return addresses.has(path) || HTML_ALIAS.test(path) ? answer(req, res, next) : next();
         });
         return () => server.middlewares.use(answer);
       },
       configurePreviewServer(server) {
         const answer = pages((file) => readFileSync(join(root, "dist", file), "utf8"));
-        // Ahead of filesystem handling: directory URLs and HTML aliases must agree with dev/Vercel.
+        // Ahead of filesystem handling, as PAGE_ROUTES are on Vercel: the files serve folders and
+        // decoded paths, so only an address with a file extension reaches them.
         server.middlewares.use((req, res, next) => {
           const path = req.url?.split("?")[0] ?? "/";
           if (path === "/llms.txt") res.setHeader("Content-Type", "text/plain; charset=utf-8");
-          return addresses.has(path) || path.endsWith(".html") ? answer(req, res, next) : next();
+          return addresses.has(path) || HTML_ALIAS.test(path) || !path.includes(".")
+            ? answer(req, res, next)
+            : next();
         });
         return () => server.middlewares.use(answer);
       },

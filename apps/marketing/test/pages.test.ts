@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PAGES, renderMarkdown, renderPage, SITE } from "../scripts/pages.ts";
+import { PAGE_ROUTES, PAGES, renderMarkdown, renderPage, SITE } from "../scripts/pages.ts";
 import {
   installers,
   LATEST,
@@ -173,6 +173,45 @@ describe("public document pages without JavaScript", () => {
         "Release history is unavailable here.",
       );
       expect(document.querySelector(".section")).toBeNull();
+    },
+  );
+});
+
+describe("Vercel page routes", () => {
+  // Vercel takes the first route whose src matches the path as sent, ignoring case unless the
+  // route says otherwise. An address no route takes goes on to the packaged files.
+  const answer = (path: string) => {
+    const route = PAGE_ROUTES.find(({ src, caseSensitive }) =>
+      new RegExp(src, caseSensitive ? "" : "i").test(path),
+    );
+    return route ? (route.status ?? route.dest) : "file";
+  };
+
+  it("answers each page at its own address, with or without a trailing slash", () => {
+    for (const { address, file } of PAGES) {
+      expect(answer(address)).toBe(`/${file}`);
+      expect(answer(address === "/" ? address : `${address}/`)).toBe(`/${file}`);
+    }
+  });
+
+  it.each([
+    "/DOCS",
+    "/Docs/Live-TV",
+    "/FAQ/",
+    "/index.html",
+    "/docs/index.html/",
+    "/docs/index%2ehtml",
+    "/doc%73",
+    "/docs/live-tv%2F",
+    "/nothing/here",
+  ])("answers %s with the 404 page", (path) => {
+    expect(answer(path)).toBe(404);
+  });
+
+  it.each(["/robots.txt", "/sitemap.xml", "/llms.txt", "/generated/social.png"])(
+    "leaves %s to the files",
+    (path) => {
+      expect(answer(path)).toBe("file");
     },
   );
 });

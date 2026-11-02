@@ -154,6 +154,28 @@ export const PAGES: readonly Page[] = [
   },
 ];
 
+/**
+ * Vercel's routes for the pages, ahead of its filesystem: each page at its address, in its exact
+ * case (Vercel ignores case unless told) and with or without a trailing slash, then the 404 page for
+ * HTML aliases and every other address without a file extension. Vercel's filesystem decodes the
+ * path and answers a folder with its index.html, so `/doc%73` or `/docs/index.html/` would
+ * otherwise show a page at an address that isn't its own.
+ */
+export const PAGE_ROUTES: readonly {
+  readonly src: string;
+  readonly dest: string;
+  readonly status?: number;
+  readonly caseSensitive?: boolean;
+}[] = [
+  ...PAGES.map(({ address, file }) => ({
+    src: address === "/" ? "^/$" : `^${address}/?$`,
+    dest: `/${file}`,
+    caseSensitive: true,
+  })),
+  { src: "^/.*\\.html/?$", status: 404, dest: "/404.html" },
+  { src: "^/[^.]*$", status: 404, dest: "/404.html" },
+];
+
 function escapeHtml(text: string): string {
   return text.replace(
     /[&<>"']/g,

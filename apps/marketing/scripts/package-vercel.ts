@@ -4,11 +4,11 @@
 //   node scripts/package-vercel.ts    (after `vite build`)
 //
 // - static/: everything in dist/.
-// - config.json: each page answers its canonical address in its exact case (Vercel ignores case
-//   unless told), with or without a trailing slash. A POST to /ingest/i/v0/e/ goes on to
-//   PostHog's EU capture, the only route that leaves the site.
-//   An unknown address or an HTML alias answers 404.html with status 404. No builds.json: without one the CLI deploys to the target it is told,
-//   where a builds.json naming a preview would win.
+// - config.json: each page answers its canonical address in its exact case, with or without a
+//   trailing slash (`PAGE_ROUTES` in pages.ts). A POST to /ingest/i/v0/e/ goes on to PostHog's
+//   EU capture, the only route that leaves the site. An unknown address or an HTML alias answers
+//   404.html with status 404. No builds.json: without one the CLI deploys to the target it is
+//   told, where a builds.json naming a preview would win.
 //
 // Fails, listing every problem, when:
 // - a page names a file the package lacks, or has no script or styles
@@ -34,7 +34,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { PAGES, SITE } from "./pages.ts";
+import { PAGE_ROUTES, PAGES, SITE } from "./pages.ts";
 import { INGEST_ROUTE } from "./site-analytics.ts";
 
 const LISTED = Object.fromEntries(PAGES.map(({ address, file }) => [address, file]));
@@ -66,12 +66,7 @@ const routes = [
     dest: `/${INDEXNOW_MARKER}`,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
   },
-  ...PAGES.map(({ address, file }) => ({
-    src: address === "/" ? "^/$" : `^${address}/?$`,
-    dest: `/${file}`,
-    caseSensitive: true,
-  })),
-  { src: "^/.*\\.html$", ...missing },
+  ...PAGE_ROUTES,
   { handle: "filesystem" },
   { src: "^/.*$", ...missing },
 ];
