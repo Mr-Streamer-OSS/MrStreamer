@@ -14,7 +14,7 @@
 // picture segment, with its sound, is then asked of a title just opened with one of its reads
 // failing in turn and the rest read, as a downloaded copy can: it must be the same bytes, or fail
 // and be the same bytes when asked again, and the subtitle segments before it, asked between, the
-// same lines.
+// same lines, with the same CHECK_UNCUED exception for unindexed cues.
 //
 //   check <file> <folder> [start-seconds [interrupt-after-reads]]
 #define _FILE_OFFSET_BITS 64
@@ -156,11 +156,13 @@ static int differs(const char *name, int fault, const uint8_t *data, size_t size
  * Asks a title just opened from the start for picture segment `index` with only its `fault`th
  * read failing, after the segment two before it. Then that one's subtitle segments, whose lines
  * from earlier clusters are read again, then the picture again if it failed for the read, and its
- * sound renditions. 1 when any differs from `made`, -1 on any other failure; `*faulted` says
- * whether the segment had that many reads.
+ * sound renditions. 1 when any non-exempt result differs from `made`, -1 on any other failure;
+ * `*faulted` says whether the segment had that many reads, and `*unlisted` counts the subtitle
+ * differences allowed by CHECK_UNCUED.
  */
 static int once(TitleHlsSource *source, int index, int fault, char renditions[][16],
-                const char **ext, int count, uint8_t **made, size_t *sizes, int *faulted) {
+                const char **ext, int count, uint8_t **made, size_t *sizes, int *faulted,
+                int uncued, int *unlisted) {
   File *file = source->opaque;
   TitleHls *title = NULL;
   char detail[256] = "", name[64];
@@ -204,7 +206,9 @@ static int once(TitleHlsSource *source, int index, int fault, char renditions[][
         status = -1;
         goto done;
       }
-      status |= differs(name, fault, data, size, made[at * count + r], sizes[at * count + r]);
+      int apart = differs(name, fault, data, size, made[at * count + r], sizes[at * count + r]);
+      if (text && uncued) *unlisted += apart;
+      else status |= apart;
       free(data);
     }
   }
@@ -400,10 +404,11 @@ int main(int argc, char **argv) {
     if (uncued)
       printf("%d fault retries differ in a file whose index leaves lines out\n", apart);
     else differ += apart;
-    int once_faults = 0, once_apart = 0;
+    int once_faults = 0, once_apart = 0, once_unlisted = 0;
     for (int i = 0; i < segments; i++) {
       for (int fault = 1, faulted = 1; faulted; fault++) {
-        int got = once(&source, i, fault, renditions, ext, count, made, sizes, &faulted);
+        int got = once(&source, i, fault, renditions, ext, count, made, sizes, &faulted,
+                       uncued, &once_unlisted);
         if (got < 0) goto done;
         once_faults += faulted;
         once_apart += got;
@@ -411,6 +416,9 @@ int main(int argc, char **argv) {
     }
     printf("single faults: %d reads failed once, %d segments differ after one\n", once_faults,
            once_apart);
+    if (uncued)
+      printf("%d subtitle comparisons differ in a file whose index leaves lines out\n",
+             once_unlisted);
     differ += once_apart;
   }
   status = differ ? 1 : 0;
