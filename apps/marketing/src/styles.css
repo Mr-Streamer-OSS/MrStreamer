@@ -380,8 +380,8 @@ h1 {
 
 /*
  * Five tricks: one row each, a name and a line. With scripts, main.ts lights the row
- * in the middle of the screen and dims the others; under the pointer or the keyboard a row lights
- * too. From 1120 px a lit row shows its screen beside it. Without scripts every row is lit.
+ * in the middle of the screen and dims the others; under the pointer a row lights too. The names
+ * are not links: the tricks say what the app does, the guides are a click away in the header. From 1120 px a lit row shows its screen beside it. Without scripts every row is lit.
  */
 .tricks,
 .screens,
@@ -455,8 +455,7 @@ h1 {
 }
 
 .tricks.watching .trick.lit h3,
-.tricks .trick:hover h3,
-.tricks .trick:focus-within h3 {
+.tricks .trick:hover h3 {
   color: #fff;
 }
 
