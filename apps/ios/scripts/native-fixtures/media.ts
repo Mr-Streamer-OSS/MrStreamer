@@ -127,10 +127,11 @@ function alive(pid: number) {
 }
 
 /**
- * The directory this server makes `dir` in before moving it there, after removing what a server
- * stopped while making it left beside it.
+ * Fills `dir` through `fill`, in a directory of this server's own beside it so a second one
+ * starting beside it fills its own, then moves it there once complete. What a server stopped
+ * while filling left is removed, and a `dir` another server completed first is kept: it is the same.
  */
-function clearedBeside(dir: string) {
+function settle(dir: string, fill: (making: string) => void) {
   const parent = dirname(dir);
   mkdirSync(parent, { recursive: true });
   for (const left of readdirSync(parent)) {
@@ -139,15 +140,11 @@ function clearedBeside(dir: string) {
       rmSync(join(parent, left), { recursive: true, force: true });
     }
   }
-  return `${dir}.making-${process.pid}`;
-}
-
-/** Moves the complete `making` to `dir`, unless another server put it there first. */
-function moveComplete(making: string, dir: string) {
+  const making = `${dir}.making-${process.pid}`;
+  fill(making);
   try {
     renameSync(making, dir);
   } catch (error) {
-    // The other one finished first: its media is the same.
     if (!existsSync(dir)) throw error;
     rmSync(making, { recursive: true, force: true });
   }
@@ -237,21 +234,16 @@ export function mediaMaker(root: string, out: string, declaration: string, cache
     const key = sha256(JSON.stringify([ffmpeg, options, local("."), output, inputs]));
     const dir = join(out, "media", `${name}-${key.slice(0, 12)}`);
     if (!existsSync(dir)) {
-      // A directory of this server's own, so a second one starting beside it makes its own.
-      const making = clearedBeside(dir);
       const kept = cache && join(cache, basename(dir));
       if (kept && existsSync(kept)) {
-        cpSync(kept, making, { recursive: true });
+        settle(dir, (making) => cpSync(kept, making, { recursive: true }));
       } else {
-        mkdirSync(making, { recursive: true });
-        execFileSync("ffmpeg", [...options, ...local(making), join(making, output)]);
-        if (kept) {
-          const keeping = clearedBeside(kept);
-          cpSync(making, keeping, { recursive: true });
-          moveComplete(keeping, kept);
-        }
+        settle(dir, (making) => {
+          mkdirSync(making, { recursive: true });
+          execFileSync("ffmpeg", [...options, ...local(making), join(making, output)]);
+        });
+        if (kept) settle(kept, (making) => cpSync(dir, making, { recursive: true }));
       }
-      moveComplete(making, dir);
     }
     const path = join(dir, output);
     const command = [...options, ...local(dir), path];
