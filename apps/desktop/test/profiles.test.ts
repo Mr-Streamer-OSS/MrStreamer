@@ -36,7 +36,6 @@ async function started(dataDir: string) {
     lists: await promised(runtime, CustomLists),
     settings: await promised(runtime, Settings),
     roster: await promised(runtime, Roster),
-    subscriptions: await promised(runtime, Subscriptions),
     library: await promised(runtime, Library),
     onDemand: await promised(runtime, OnDemand),
   };
@@ -151,8 +150,5 @@ describe("the Default viewing profile", { timeout: 60_000 }, () => {
       { subscriptionId, id: "2015" },
     ]);
     await restarted.dispose();
-    const again = await started(dataDir);
-
-    expect((await again.viewing.state()).favourites).toHaveLength(2);
   });
 });

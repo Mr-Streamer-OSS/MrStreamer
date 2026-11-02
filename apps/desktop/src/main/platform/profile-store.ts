@@ -11,6 +11,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { DEFAULT_PROFILE_ID, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { Failed } from "@mrstreamer/core/failure";
+import { lazy } from "@mrstreamer/contracts/lazy";
 import { type } from "arktype";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -29,7 +30,7 @@ const SCHEMA = `
   );
 `;
 
-const ActiveRow = type({ profile_id: "string", revision: "number.integer >= 1" });
+const ActiveRow = lazy(() => type({ profile_id: "string", revision: "number.integer >= 1" }));
 
 export class Profiles extends Context.Service<
   Profiles,
@@ -75,7 +76,7 @@ function activeIn(db: DatabaseSync): ActiveProfile {
     db.prepare(
       "insert or ignore into active_profile (slot, profile_id, revision) values (1, ?, 1)",
     ).run(DEFAULT_PROFILE_ID);
-    const row = ActiveRow.assert(
+    const row = ActiveRow().assert(
       db.prepare("select profile_id, revision from active_profile where slot = 1").get(),
     );
     return { id: row.profile_id, revision: row.revision };
