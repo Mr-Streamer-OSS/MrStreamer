@@ -14,6 +14,7 @@ Source of truth for desktop and website verification paths. Run the relevant bas
 | [Interface language](language.md)     | `language`                                    | Five languages, keyboard pick, restart, System default, unknown saved value, player and titles                                                   |
 | [Settings](settings.md)               | `settings`                                    | Local search, eleven sections, focus, drafts, failed retry, text scaling, restart, `controls`                                                    |
 | [Viewing preferences](preferences.md) | `preferences`                                 | Settings/player track publication, independent edits, drafts, ordering and restart                                                               |
+| [Viewing profiles](profiles.md)       | `pnpm vitest run profiles`                    | Default keeps prior state through upgrade, restart and a locked database; prior-release round trip by hand                                       |
 | [Basic usage statistics](privacy.md)  | `node apps/desktop/test/e2e/analytics-app.ts` | Settings opt-out/restart, loopback payload inspection; lifecycle and offline service contracts                                                   |
 | [Marketing website](website.md)       | `pnpm verify:website`                         | Responsive routes, download choices, guides, releases, privacy; live feed and Safari separately                                                  |
 

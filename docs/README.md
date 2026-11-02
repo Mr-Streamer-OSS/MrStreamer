@@ -8,6 +8,7 @@
 - [Live TV](./user/live-tv.md), and [recording it](./user/live-tv.md#recordings) from 0.0.23, now in Nightly
 - [Movies and series](./user/movies-and-series.md)
 - [Downloads](./user/downloads.md)
+- [Viewing profiles](./user/profiles.md), from 0.0.24
 - [Updates and channels](./user/updates.md)
 - [What plays](./user/playback.md)
 - [Troubleshooting](./user/troubleshooting.md)

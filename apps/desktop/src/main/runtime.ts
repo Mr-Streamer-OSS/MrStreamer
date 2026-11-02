@@ -25,6 +25,7 @@ import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { databaseLayer } from "./platform/database.ts";
+import { Profiles, profilesLayer } from "./platform/profile-store.ts";
 import { DetailCache, detailCacheLayer } from "./platform/detail-cache.ts";
 import { diagnosticsLogLayer } from "./platform/diagnostics-log.ts";
 import { downloadStoreLayer } from "./platform/downloads-store.ts";
@@ -108,7 +109,8 @@ export type MainServices =
   | OnlineSubtitles
   | Downloads
   | Reminders
-  | Recordings;
+  | Recordings
+  | Profiles;
 
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
@@ -336,6 +338,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
         downloads,
         reminders,
         recordings,
+        profilesLayer.pipe(Layer.provide(database)),
       ),
     ),
     Layer.provideMerge(services),
