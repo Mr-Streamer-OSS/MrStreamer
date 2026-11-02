@@ -95,7 +95,7 @@ async function run() {
       ({ src, methods }) =>
         src !== undefined && new RegExp(src).test(path) && (!methods || methods.includes(method)),
     )?.dest;
-    return dest?.startsWith("https://") ? dest : "site";
+    return dest && URL.canParse(dest) ? dest : "site";
   };
   const key = /"(phc_[A-Za-z0-9_-]+)"/.exec(bundle)?.[1] ?? "";
   await mkdir(join(root, ".local/verification"), { recursive: true });
