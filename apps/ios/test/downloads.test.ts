@@ -1671,6 +1671,79 @@ describe("downloads", { timeout: 30_000 }, () => {
     },
   );
 
+  it("keeps a second Pause the native side kept when the first is refused after it", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    const { transfers } = await import("../src/download-task.ts");
+    const hold = vi.spyOn(transfers, "holdAuthorization");
+    onTestFinished(() => hold.mockRestore());
+    hold.mockImplementationOnce(async () => {
+      await sleep(300);
+      throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
+    });
+    const first = app.pauseDownload(film.id);
+    // Not kept yet: it reads as its transfer, with Pause to ask again.
+    expect(statusOf(app, film.id)?.kind).toBe("transferring");
+    await expect(app.pauseDownload(film.id)).resolves.toBe("closed");
+    await expect(first).resolves.toBe("closed");
+    await sleep(1_500);
+    expect(doc().items[0]).toMatchObject({ id: film.id, paused: true });
+    expect([...background.grants.values()].find((grant) => grant.id === film.id)?.held).toBe(true);
+    expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+  });
+
+  it("reads a pause a relaunch interrupted as its transfer until the native side keeps it", async () => {
+    let app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    // The process ends between the pause on its record and its native hold, and the app is
+    // launched again in the background, where no hold is asked.
+    const written = doc();
+    written.items.find((item: { id: string }) => item.id === film.id).paused = true;
+    background.die();
+    new DiskFile(native.root, "documents", "downloads.json").writeSync(JSON.stringify(written));
+    memory.appState = "background";
+    app = await launch();
+    await sleep(500);
+    expect(native.open).toBe(1);
+    expect(statusOf(app, film.id)?.kind).toBe("transferring");
+    appGoes("active");
+    await until(() => native.open === 0, "the pause to be kept");
+    expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+  });
+
+  it("keeps an earlier pause when Pause is asked again and refused", async () => {
+    const app = await installedApp();
+    const { a } = await withProviders(app);
+    one.stallMovieFile(movie().id, 20_000, 60_000);
+    const film = await app.addDownload(movieRef(a));
+    await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
+    const { transfers } = await import("../src/download-task.ts");
+    const hold = vi.spyOn(transfers, "holdAuthorization");
+    onTestFinished(() => hold.mockRestore());
+    const refuse = async () => {
+      throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
+    };
+    hold.mockImplementationOnce(async () => Promise.reject(busy()));
+    // The refill after it is refused too, so the pause isn't kept.
+    hold.mockImplementationOnce(refuse);
+    const first = app.pauseDownload(film.id);
+    await sleep(300);
+    hold.mockImplementationOnce(refuse);
+    await expect(app.pauseDownload(film.id)).rejects.toThrow();
+    expect(doc().items[0]).toMatchObject({ id: film.id, paused: true });
+    hold.mockRestore();
+    appGoes("background");
+    appGoes("active");
+    await expect(first).resolves.toBe("closed");
+    expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
+  });
+
   it("lets a Resume free a launch held back by a pause the native side won't keep", async () => {
     let app = await installedApp();
     const { a } = await withProviders(app);

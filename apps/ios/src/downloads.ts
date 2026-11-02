@@ -463,8 +463,9 @@ function transferring(record: Stored): Live | null {
 }
 
 /**
- * Authorizations whose viewer pause the native side hasn't said it keeps: asked, timed out or
- * refused. Memory only: a relaunch asks again under the first foreground's barrier.
+ * Authorizations whose viewer pause this process asked and the native side hasn't answered as
+ * kept: in flight, timed out or refused. What a reconcile reports covers the rest, a relaunch's
+ * included.
  */
 const unkept = new Set<string>();
 
@@ -476,7 +477,8 @@ const unkept = new Set<string>();
 function pausedNow(record: Stored): boolean {
   if (record.state !== "queued" || record.paused !== true) return false;
   const bound = boundOf(record);
-  return transferring(record) === null || !bound || !unkept.has(bound.authorization);
+  if (transferring(record) === null || !bound) return true;
+  return !unkept.has(bound.authorization) && known.get(bound.authorization)?.held !== false;
 }
 
 function viewOf(
@@ -1928,25 +1930,40 @@ export type Paused = "closed" | "closing" | "unchanged";
  */
 const unanswered = (cause: unknown) => refusalOf(cause) === "busy";
 
+/** Counts each download's Pause and Resume: a refused one is put back only while no other came since. */
+const holdAsks = new Map<string, number>();
+
+/** Counts an ask of download `id`; answers whether no other came since. */
+function ask(id: string): () => boolean {
+  const asked = (holdAsks.get(id) ?? 0) + 1;
+  holdAsks.set(id, asked);
+  return () => holdAsks.get(id) === asked;
+}
+
 /**
  * Pauses a queued or transferring download where it is, or asks again for a pause the native side
  * hasn't kept while it transfers: written on its record, then held on the native side, so neither
  * the queue nor a relaunch starts it again until it is resumed. Resolves once its request ended
- * or the wait for it did. Rejects, leaving it as it was, when the native side refuses the pause.
+ * or the wait for it did. Rejects, leaving it as it was, when the native side refuses the pause and
+ * no other Pause or Resume of it came since.
  */
 export async function pauseDownload(id: string): Promise<Paused> {
   const record = find(id);
   if (!unfinished(record) || pausedNow(record)) return "unchanged";
   const bound = boundOf(record);
+  const latest = ask(id);
+  // Asked again for a pause not kept yet: a refusal leaves that pause to the refills.
+  const fresh = record.paused !== true;
   if (bound) unkept.add(bound.authorization);
-  update(id, (latest) => ({ ...latest, paused: true }));
+  update(id, (stored) => ({ ...stored, paused: true }));
   tell();
   try {
     if (bound) await keepHold(bound.authorization, true);
   } catch (cause) {
     // Ended meanwhile: its receipt says what that means, and it stays paused if it stays queued.
-    if (!unanswered(cause) && refusalOf(cause) !== "obsolete") {
-      update(id, withoutPause);
+    // A Pause or Resume asked since decides instead.
+    if (!unanswered(cause) && refusalOf(cause) !== "obsolete" && latest()) {
+      if (fresh) update(id, withoutPause);
       tell();
       goOn();
       throw new AppFailure({ kind: "unexpected", detail: "The pause couldn't be kept." });
@@ -1964,19 +1981,20 @@ export async function pauseDownload(id: string): Promise<Paused> {
 /**
  * Lets a paused download go on in its place in the queue, from its bytes when the provider still
  * serves the same file to the same login. Rejects, leaving it paused, when the native side
- * refuses to let it go.
+ * refuses to let it go and no other Pause or Resume of it came since.
  */
 export async function resumeDownload(id: string): Promise<void> {
   const record = find(id);
   if (!unfinished(record) || !record.paused) return;
+  const latest = ask(id);
   update(id, withoutPause);
   tell();
   const bound = boundOf(record);
   try {
     if (bound) await transfers.holdAuthorization(bound.authorization, false);
   } catch (cause) {
-    if (!unanswered(cause) && refusalOf(cause) !== "obsolete") {
-      update(id, (latest) => ({ ...latest, paused: true }));
+    if (!unanswered(cause) && refusalOf(cause) !== "obsolete" && latest()) {
+      update(id, (stored) => ({ ...stored, paused: true }));
       tell();
       goOn();
       throw new AppFailure({ kind: "unexpected", detail: "The download couldn't be resumed." });
