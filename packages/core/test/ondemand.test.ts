@@ -18,7 +18,7 @@ import {
   subtitleTracks,
   type RenditionFacts,
 } from "../src/ondemand/tracks.ts";
-import type { OnDemandCatalogue } from "../src/provider.ts";
+import type { OnDemandCatalogue, ProviderDetails } from "../src/provider.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
 
 /** The subscription every title of these tests is listed by. */
@@ -770,7 +770,7 @@ function seriesOf(
   ])[],
   language = "en",
   sourceOrder = false,
-  seasons: readonly { number: number; name: string | null; posterUrl: string | null }[] = [],
+  seasons: ProviderDetails["seasons"] = [],
 ) {
   return seriesDetails(
     {

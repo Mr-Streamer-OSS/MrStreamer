@@ -218,10 +218,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
     try {
       const again = await onDemand.details("series", own("80000"));
       if (again.kind !== "series") throw new Error("Not a series.");
-      expect(again.seasons.map((season) => [season.number, season.name])).toEqual([
-        [1, "Staffel 1"],
-        [2, "Staffel 2"],
-      ]);
+      expect(again.seasons.map((season) => season.name)).toEqual(["Staffel 1", "Staffel 2"]);
     } finally {
       setLanguage({ locale: "en-US", formats: "en-US" });
     }

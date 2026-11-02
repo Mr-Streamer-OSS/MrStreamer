@@ -96,7 +96,6 @@ export function seriesDetails(
       const known = provided.get(number);
       return {
         number,
-        // Named in the interface language by number, whatever the provider calls it.
         name: number === 0 ? t("Specials") : t("Season {number}", { number: String(number) }),
         posterUrl: known?.posterUrl ?? null,
         episodes: sourceOrder ? episodes : episodes.sort((a, b) => a.number - b.number),
