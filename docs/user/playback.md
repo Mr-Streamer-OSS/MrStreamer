@@ -58,6 +58,8 @@ _From 0.0.23, now in Nightly. The channel's stream as sent, nothing converted._
 
 From 0.0.23, now in Nightly, Mr. Streamer can [record live channels](live-tv.md#recordings). A recording keeps the channel's MPEG-TS stream as your provider sends it, with every picture, sound, subtitle and teletext track, and converts nothing while recording. It plays as a download does, converting only what Mr. Streamer can't play as it is. Recordings play on this computer only, not on a TV.
 
+From 0.0.24, a channel playing here and its recording share one connection to the provider (see [Record now](live-tv.md#record-now)). While a channel sent as MPEG-TS plays or records, Mr. Streamer keeps its recent stream in a temporary folder in its data folder, up to 2 GB for all channels together, never leaving less than 5 GB free on that disk; nothing plays from it yet, and it is removed when the stream stops.
+
 An HLS channel can be recorded when its stream is plain MPEG-TS: its highest quality up to 1080p, one segment after another. Encrypted streams, fragmented MP4, byte-range and low-latency playlists, sound sent as a separate stream, and streams without an MPEG-TS programme table can't be. Record then says "This channel's stream can't be recorded." before anything is kept. After a gap, a recording of a live HLS channel goes on up to three segments before live, as playback starts, so after a shorter gap its first seconds can repeat what was recorded just before.
 
 <a id="online-subtitles-from-009"></a>
