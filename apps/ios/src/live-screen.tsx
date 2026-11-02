@@ -721,7 +721,8 @@ const MINUTE = 60_000;
  * The narrowest Guide cell that shows its title and time, its title alone over two lines, or its
  * initials, in points at the default text size: a cell's width is divided by the text scale
  * first. Narrower cells show nothing but stay buttons. On an iPhone a quarter hour is about 72 at
- * both window sizes, half an hour about 143.
+ * both window sizes, half an hour about 143; above about twice the default text size, a quarter
+ * hour has room only for its initials.
  */
 const ROOM = { time: 120, title: 64, initials: 36 } as const;
 
@@ -762,10 +763,10 @@ function gridWindow(
 
 /**
  * Live's Guide: channels as rows of one virtualised list, each its programmes across a window of
- * an hour (45 minutes at large text, where the name goes above them), so a quarter-hour programme
- * has room for its title, with the day and Earlier and Later to move it half an hour rather than
- * scrolling sideways. A channel's name opens its Schedule and a programme opens it, beside the
- * grid from the split width. Only the rows in view are read (`useGuideGrid`).
+ * an hour (45 minutes at large text, where the name goes above them, or where a quarter hour
+ * would be too narrow for its title), with the day and Earlier and Later to move it half an hour
+ * rather than scrolling sideways. A channel's name opens its Schedule and a programme opens it,
+ * beside the grid from the split width. Only the rows in view are read (`useGuideGrid`).
  */
 function GuideGrid({
   library,
@@ -801,7 +802,8 @@ function GuideGrid({
     },
     [],
   );
-  const span = large ? 45 : 60;
+  // An hour, or 45 minutes where an hour leaves a quarter hour too narrow for its title.
+  const span = large || strip / 4 / fontScale < ROOM.title ? 45 : 60;
   // The grid draws again on the owner's minute tick, which moves now and a window following it.
   // On the minute, so the rows' memo holds while the grid draws again as it scrolls.
   const now = Math.floor(Date.now() / MINUTE) * MINUTE;
@@ -953,13 +955,15 @@ function GuideGrid({
 const across = (at: number, from: number, until: number, strip: number) =>
   ((at - from) / (until - from)) * strip;
 
-/** A title's first two words' first letters, which a cell too narrow for the title shows. */
+/**
+ * The first letter or digit, with its accents, of a title's first two words that have one, which
+ * a cell too narrow for the title shows: "👩‍🚀 Launch Night" as "LN".
+ */
 const initials = (title: string) =>
   title
     .split(/\s+/)
-    .filter(Boolean)
+    .flatMap((word) => word.match(/[\p{L}\p{N}]\p{M}*/u) ?? [])
     .slice(0, 2)
-    .map((word) => Array.from(word)[0])
     .join("")
     .toLocaleUpperCase();
 

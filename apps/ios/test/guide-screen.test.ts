@@ -1337,20 +1337,40 @@ describe("Live's Guide grid", () => {
   });
 
   it.each([
-    ["default", 1],
-    ["large", 1.786],
-  ])("titles each quarter-hour programme's cell at %s text", async (_size, fontScale) => {
-    state.window = { width: 390, height: 844, fontScale };
-    const short = ["Field Notes", "Weather Watch", "Tide Tables"].map((title, i) => ({
-      title,
-      start: at + (i - 1) * 15 * 60_000,
-      stop: at + i * 15 * 60_000,
+    ["default text", 390, 1, true],
+    ["a larger text size on a narrow phone", 375, 1.353, false],
+    ["large text", 390, 1.786, false],
+  ])(
+    "titles each quarter-hour programme's cell at %s, in an hour's window or 45 minutes",
+    async (_size, width, fontScale, hour) => {
+      state.window = { width, height: 844, fontScale };
+      const short = ["Field Notes", "Weather Watch", "Tide Tables", "Kids Club"].map(
+        (title, i) => ({
+          title,
+          start: at + (i - 1) * 15 * 60_000,
+          stop: at + i * 15 * 60_000,
+          description: null,
+        }),
+      );
+      state.answer = async () => answer(short);
+      await guide();
+      // Around noon the window starts at 11:45, so Kids Club, 12:30 to 12:45, is in an hour only.
+      for (const programme of short.slice(0, 3))
+        expect(cell("a:1", programme)?.textContent).toContain(programme.title);
+      expect(cell("a:1", short[3]!) !== null).toBe(hour);
+    },
+  );
+
+  it("shows a programme too short for its title by the initials of its words", async () => {
+    const brief = {
+      title: "👩‍🚀 launch Night",
+      start: at,
+      stop: at + 10 * 60_000,
       description: null,
-    }));
-    state.answer = async () => answer(short);
+    };
+    state.answer = async () => answer([brief]);
     await guide();
-    for (const programme of short)
-      expect(cell("a:1", programme)?.textContent).toContain(programme.title);
+    expect(cell("a:1", brief)?.textContent).toBe("LN");
   });
 
   it("moves its window by Earlier and Later, and its day, back to now", async () => {
