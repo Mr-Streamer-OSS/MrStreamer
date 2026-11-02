@@ -1,7 +1,11 @@
 import { spawnSync } from "node:child_process";
+import { readdir, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { Codec } from "@mrstreamer/contracts/playback";
 import * as Layer from "effect/Layer";
+import { captureKey, FellBehind, LiveCaptures } from "../src/main/playback/live-capture.ts";
+import { historyStore } from "../src/main/playback/live-history.ts";
 import { PlaybackCoordination } from "../src/main/services/playback-coordination.ts";
 import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
@@ -733,5 +737,218 @@ describe("one stream across several subscriptions", () => {
       locked.playback.open({ subscriptionId, id: liveChannels(provider)[0] ?? "" }, LINUX),
     ).rejects.toMatchObject({ error: { kind: "needs-secret", subscriptionId } });
     expect(provider.streamRequests()).toBe(0);
+  });
+});
+
+/**
+ * Live captures on their own: a provider stream of the fixture sent again and again, two packets
+ * short of `piece` bytes every 10 ms, its requests and their closing counted.
+ */
+async function capturing(options: { bytes?: number; pieceBytes?: number; folder?: string } = {}) {
+  const folder = options.folder ?? join(await tempDir(), "live-history");
+  const runtime = runtimeFor(
+    LiveCaptures.layer({
+      folder,
+      bytes: options.bytes ?? 64 * 188 * 100,
+      pieceBytes: options.pieceBytes ?? 188 * 100,
+      keepFree: 0,
+    }).pipe(Layer.provideMerge(PlaybackCoordination.layer)),
+  );
+  const captures = await runtime.runPromise(LiveCaptures);
+  const recording = fixture("h264-subtitles.mpegts");
+  let requests = 0;
+  let open = 0;
+  const provider = (signal: AbortSignal) => {
+    requests++;
+    open++;
+    let offset = 0;
+    let timer: NodeJS.Timeout | undefined;
+    const closed = () => {
+      clearInterval(timer);
+      open--;
+    };
+    const body = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        timer = setInterval(() => {
+          const step = 188 * 98;
+          const piece = recording.subarray(offset, offset + step);
+          offset = offset + step >= recording.length ? 0 : offset + step;
+          controller.enqueue(new Uint8Array(piece));
+        }, 10);
+        signal.addEventListener("abort", () => {
+          closed();
+          controller.error(signal.reason);
+        });
+      },
+      cancel: closed,
+    });
+    return Promise.resolve(new Response(body, { headers: { "Content-Type": "video/mp2t" } }));
+  };
+  const source = {
+    subscriptionId: "s",
+    revision: 1,
+    url: "http://provider/live/1.ts",
+    headers: {},
+  };
+  return {
+    captures,
+    folder,
+    key: captureKey(source),
+    otherKey: captureKey({ ...source, revision: 2 }),
+    provider,
+    requests: () => requests,
+    open: () => open,
+  };
+}
+
+/** Bytes the files under `folder` take. */
+async function bytesIn(folder: string) {
+  const names = await readdir(folder, { recursive: true }).catch(() => []);
+  const sizes = await Promise.all(
+    names.map((name) =>
+      stat(join(folder, name)).then(
+        (found) => (found.isFile() ? found.size : 0),
+        () => 0,
+      ),
+    ),
+  );
+  return sizes.reduce((sum, size) => sum + size, 0);
+}
+
+/** Reads `bytes` or more of a reader's answer. */
+async function take(reader: ReadableStreamDefaultReader<Uint8Array>, bytes: number) {
+  const taken: Uint8Array[] = [];
+  let size = 0;
+  while (size < bytes) {
+    const { done, value } = await reader.read();
+    if (done) throw new Error("The stream ended.");
+    taken.push(value);
+    size += value.length;
+  }
+  return Buffer.concat(taken);
+}
+
+describe("live captures", () => {
+  it("reads one provider request for every reader of the exact source, and ends it with the last", async () => {
+    const { captures, key, otherKey, provider, requests, open } = await capturing();
+    const watch = new AbortController();
+    const record = new AbortController();
+    const first = (await captures.request(key, "watch", provider, watch.signal)).body!.getReader();
+    await take(first, 188 * 200);
+    const second = (
+      await captures.request(key, "record", provider, record.signal)
+    ).body!.getReader();
+    // The one joining mid-stream starts on a packet.
+    expect((await take(second, 188))[0]).toBe(0x47);
+    expect(requests()).toBe(1);
+
+    // The same address under another login revision is another source.
+    const other = new AbortController();
+    const elsewhere = await captures.request(otherKey, "other", provider, other.signal);
+    await take(elsewhere.body!.getReader(), 188);
+    expect(requests()).toBe(2);
+    other.abort();
+    await captures.idle("other");
+    expect(open()).toBe(1);
+
+    // Either reader leaving leaves the other reading.
+    watch.abort();
+    await captures.idle("watch");
+    await take(second, 188 * 400);
+    expect(open()).toBe(1);
+    record.abort();
+    await captures.idle("record");
+    expect(open()).toBe(0);
+    expect(captures.reading(key)).toBe(false);
+  });
+
+  it("keeps its files within the budget, and fails only the reader that fell behind", async () => {
+    const budget = 16 * 188 * 100;
+    const { captures, folder, key, provider, open } = await capturing({ bytes: budget });
+    const paused = (
+      await captures.request(key, "paused", provider, new AbortController().signal)
+    ).body!.getReader();
+    await take(paused, 188);
+    const live = new AbortController();
+    const reader = (await captures.request(key, "live", provider, live.signal)).body!.getReader();
+    // Four budgets' worth of the stream, while one reader reads nothing.
+    let most = 0;
+    for (let read = 0; read < 4 * budget; read += 188 * 1000) {
+      await take(reader, 188 * 1000);
+      most = Math.max(most, await bytesIn(folder));
+    }
+    expect(most).toBeGreaterThan(0);
+    expect(most).toBeLessThanOrEqual(budget);
+    await expect(
+      (async () => {
+        for (;;) if ((await paused.read()).done) return;
+      })(),
+    ).rejects.toBeInstanceOf(FellBehind);
+    await take(reader, 188 * 100);
+    live.abort();
+    await captures.idle("live");
+    expect(open()).toBe(0);
+    expect(await bytesIn(folder)).toBe(0);
+  });
+
+  it("serves the live edge from memory when its folder can't be written", async () => {
+    const parent = join(await tempDir(), "a-file");
+    await writeFile(parent, "");
+    const { captures, key, provider, open } = await capturing({ folder: join(parent, "history") });
+    const live = new AbortController();
+    const reader = (await captures.request(key, "live", provider, live.signal)).body!.getReader();
+    await take(reader, 188 * 100 * 20);
+    live.abort();
+    await captures.idle("live");
+    expect(open()).toBe(0);
+  });
+});
+
+describe.skipIf(!hasFfmpeg)("live history", () => {
+  it("decodes pictures read from where it was a moment ago", async () => {
+    const store = historyStore({
+      folder: join(await tempDir(), "history"),
+      bytes: 1024 ** 3,
+      pieceBytes: 188 * 100,
+      keepFree: 0,
+    });
+    const history = store.create();
+    const recording = fixture("h264-subtitles.mpegts");
+    const started = Date.now();
+    for (let offset = 0; offset < recording.length; offset += 188 * 50) {
+      history.append(recording.subarray(offset, offset + 188 * 50));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    // About half way back, from the piece that began then.
+    const from = history.offsetAt(started + (Date.now() - started) / 2);
+    expect(from).toBeGreaterThan(0);
+    expect(from % 188).toBe(0);
+    const read: Uint8Array[] = [];
+    for (let offset = from; offset < history.end();) {
+      const bytes = await history.read(offset);
+      if (!(bytes instanceof Uint8Array)) throw new Error(`Read ${bytes}`);
+      read.push(bytes);
+      offset += bytes.length;
+    }
+    const path = join(await tempDir(), "rewound.ts");
+    await writeFile(path, Buffer.concat(read));
+    const result = spawnSync(
+      FFPROBE,
+      [
+        "-v",
+        "error",
+        "-count_frames",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=nb_read_frames",
+        "-of",
+        "csv=p=0",
+        path,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(Number.parseInt(result.stdout, 10)).toBeGreaterThan(0);
+    await history.close();
   });
 });

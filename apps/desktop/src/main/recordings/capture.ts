@@ -4,7 +4,9 @@
 // subset playback reads (../playback/hls-ts-input.ts); a discontinuity stays in the file as the
 // provider sent it. Each read waits for the write before it, so no more than one piece of the
 // stream is ever held in memory. Capture that goes on after a gap appends to the file it wrote
-// before, starting again from a program table, as a discontinuity does.
+// before, starting again from a program table, as a discontinuity does. An MPEG-TS stream that
+// plays meanwhile is read from what Watch reads (../playback/live-capture.ts), not asked of the
+// provider again; a recording that reads too slowly to keep up with it ends as cut by the disk.
 import { open, rm } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { StreamFailure, StreamFormat } from "@mrstreamer/contracts/playback";
@@ -14,6 +16,7 @@ import { t } from "@mrstreamer/core/i18n";
 import { createInspector } from "../playback/inspect.ts";
 import { HlsInputFailure, openHlsTsInput } from "../playback/hls-ts-input.ts";
 import { classify } from "../services/playback.ts";
+import { FellBehind, type LiveCaptures } from "../playback/live-capture.ts";
 
 /** How long the provider may send nothing before a recording counts its stream as broken. */
 const SILENCE_MS = 15_000;
@@ -30,6 +33,14 @@ export interface CaptureSource {
   readonly url: string;
   readonly format: StreamFormat;
   readonly headers: Readonly<Record<string, string>>;
+  /** The live capture an MPEG-TS stream is read through; null to ask the provider directly. */
+  readonly shared?: string | null;
+}
+
+/** Live captures and who the recording reads them as, for a source's `shared`. */
+interface Sharing {
+  readonly request: LiveCaptures["Service"]["request"];
+  readonly owner: string;
 }
 
 /** Why capture couldn't start: what the provider answered, as playback names it. */
@@ -83,6 +94,7 @@ export async function startCapture(
     readonly changed: () => void;
     readonly room?: () => boolean;
     readonly append?: boolean;
+    readonly captures?: Sharing;
   },
 ): Promise<Capture> {
   // Appending takes the file as it is, or makes it when it went. Not in append mode, which
@@ -183,21 +195,31 @@ interface Opened {
 
 async function openSource(
   source: CaptureSource,
-  options: { readonly request: Provider["request"]; readonly userAgent: string },
+  options: {
+    readonly request: Provider["request"];
+    readonly userAgent: string;
+    readonly captures?: Sharing;
+  },
   signal: AbortSignal,
 ): Promise<Opened> {
   const ask = async (address: string, asked: AbortSignal) => {
     const headers = new Headers({ "User-Agent": options.userAgent, ...source.headers });
+    const shared = source.format === "mpegts" && address === source.url ? source.shared : null;
     for (let attempt = 0; ; attempt++) {
       const waiting = new AbortController();
       const timeout = setTimeout(() => waiting.abort(), SILENCE_MS);
       let answer: Response;
+      const reading = AbortSignal.any([asked, waiting.signal]);
       try {
-        answer = await options.request(
-          address,
-          { headers, signal: AbortSignal.any([asked, waiting.signal]) },
-          source.url,
-        );
+        answer =
+          shared && options.captures
+            ? await options.captures.request(
+                shared,
+                options.captures.owner,
+                (opened) => options.request(address, { headers, signal: opened }, source.url),
+                reading,
+              )
+            : await options.request(address, { headers, signal: reading }, source.url);
       } catch (cause) {
         if (waiting.signal.aborted && !asked.aborted)
           throw new CaptureFailure({
@@ -290,7 +312,11 @@ async function run(
   // Its timer waits out a computer's sleep: the clock says when the stop time passed meanwhile.
   let late = false;
   for (;;) {
-    const next = await opened.chunks.next().catch(() => null);
+    const next = await opened.chunks.next().catch((cause: unknown) => {
+      // Too slow for the stream it shares: what it missed is the disk's.
+      if (cause instanceof FellBehind) end = "disk";
+      return null;
+    });
     if (next?.done) end = opened.ends ? "ended" : "closed";
     if (!next || next.done) break;
     if (Date.now() >= options.until) {

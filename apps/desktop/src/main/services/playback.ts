@@ -158,6 +158,7 @@ import {
   type UpstreamSlot,
 } from "../playback/upstream.ts";
 import { Subscriptions, type Source } from "./subscription.ts";
+import { captureKey, LiveCaptures } from "../playback/live-capture.ts";
 import {
   CLEAN_START_CODECS,
   INSPECT_LIMIT,
@@ -340,6 +341,12 @@ interface LiveSession extends SessionBase {
    * recording starts (`ArchiveStream.start`) to the end asked for; null for live.
    */
   readonly archive: ArchiveWindow | null;
+  /**
+   * The login revision its streams were looked up under, when it reads a live MPEG-TS stream
+   * through a capture another reader of the same source shares (../playback/live-capture.ts);
+   * null for a recording from the archive and a receiver's stream.
+   */
+  readonly shares: number | null;
   /** Which stream plays, and those that failed before it: see `Playback.playing`. */
   delivered: LivePlaying;
   readonly format: StreamFormat;
@@ -711,6 +718,8 @@ function make(deps: PlaybackDeps) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
     const coordination = yield* PlaybackCoordination;
+    // The app shares live sources between Watch and recordings; standalone ports read their own.
+    const captures = Option.getOrNull(yield* Effect.serviceOption(LiveCaptures));
     const diagnostics = yield* Diagnostics;
     const receiverTools = {
       ffmpeg: deps.ffmpeg,
@@ -733,10 +742,45 @@ function make(deps: PlaybackDeps) {
           ? session.origin.title.subscriptionId
           : null;
     /** A session is open: what plays, and so `busy`, changed. */
-    const register = (session: Session) => {
+    const register = (session: Session, joining?: string) => {
       sessions.set(session.id, session);
-      coordination.opened(session.id, subscriptionOf(session));
+      coordination.opened(session.id, subscriptionOf(session), joining);
     };
+    /** The capture a live session's stream is read through: see LiveSession.shares. */
+    const keyOf = (
+      session: LiveSession,
+      variant: { readonly url: string; readonly headers: Readonly<Record<string, string>> },
+    ) =>
+      session.shares === null || !captures
+        ? null
+        : captureKey({
+            subscriptionId: session.channel.subscriptionId,
+            revision: session.shares,
+            url: variant.url,
+            headers: variant.headers,
+          });
+    /**
+     * Captures that read one of the channel's live MPEG-TS streams now, under the login it has:
+     * what playing them would read too, asking the provider nothing more.
+     */
+    const readingOf = (channel: OwnedId, variants: readonly string[]) =>
+      Effect.gen(function* () {
+        if (!captures) return [];
+        const source = yield* subscriptions.sourceOf(channel.subscriptionId);
+        const streams = yield* Effect.forEach(variants, (id) =>
+          Effect.promise(() => source.provider.liveStream(id).catch(() => null)),
+        );
+        return streams.flatMap((stream) => {
+          if (stream?.format !== "mpegts") return [];
+          const key = captureKey({
+            subscriptionId: channel.subscriptionId,
+            revision: source.revision,
+            url: stream.url,
+            headers: stream.headers ?? {},
+          });
+          return captures.reading(key) ? [key] : [];
+        });
+      });
     /** When channel streams failed, by upstream address, for `FAILED_STREAM_MS`. */
     const failedAt = new Map<string, number>();
     /**
@@ -1000,9 +1044,25 @@ function make(deps: PlaybackDeps) {
       // A session that played a stream keeps it: a player asking again, as hls.js does for a
       // playlist, gets that stream or none.
       const kept = session.delivered.variantId;
-      const variants = kept ? session.variants.filter(({ id }) => id === kept) : session.variants;
+      // A stream something else reads now goes first: it asks the provider nothing more.
+      const variants = (
+        kept ? session.variants.filter(({ id }) => id === kept) : session.variants
+      ).toSorted((a, b) => Number(reading(b)) - Number(reading(a)));
+      function reading(variant: LiveSession["variants"][number]) {
+        const key = keyOf(session, variant);
+        return key !== null && captures?.reading(key) === true;
+      }
       for (const variant of variants) {
-        const upstream = await connect(session, variant.url, variant.headers, signal);
+        const key = keyOf(session, variant);
+        const upstream = await connect(
+          session,
+          variant.url,
+          variant.headers,
+          signal,
+          undefined,
+          undefined,
+          key,
+        );
         const body = upstream.ok ? upstream.response.body : null;
         if (signal.aborted) {
           void body?.cancel().catch(() => {});
@@ -3133,6 +3193,8 @@ function make(deps: PlaybackDeps) {
       signal: AbortSignal,
       retryDelays: readonly number[] = REFUSED_RETRY_DELAYS_MS,
       from = url,
+      /** The capture to read it through, shared with what else reads that source. */
+      shared: string | null = null,
     ): Promise<{ ok: true; response: Response } | { ok: false; failure: StreamFailure }> {
       for (let attempt = 0; ; attempt++) {
         const timeout = new AbortController();
@@ -3143,11 +3205,16 @@ function make(deps: PlaybackDeps) {
           if (session.kind === "title")
             session.headers.forEach((value, name) => requested.set(name, value));
           new Headers(headers).forEach((value, name) => requested.set(name, value));
-          response = await session.request(
-            url,
-            { headers: requested, signal: AbortSignal.any([signal, timeout.signal]) },
-            from,
-          );
+          const asking = AbortSignal.any([signal, timeout.signal]);
+          response =
+            shared && captures
+              ? await captures.request(
+                  shared,
+                  session.id,
+                  (opened) => session.request(url, { headers: requested, signal: opened }, from),
+                  asking,
+                )
+              : await session.request(url, { headers: requested, signal: asking }, from);
         } catch (cause) {
           return {
             ok: false,
@@ -3238,6 +3305,8 @@ function make(deps: PlaybackDeps) {
               await session.hlsInput?.close();
               await Promise.allSettled([...session.hlsChildren, ...session.hlsRequests]);
             }
+            // A stream it read last ends its provider request before the connection counts free.
+            await captures?.idle(id);
             sessions.delete(id);
             coordination.closed(id);
             receiver?.closed?.();
@@ -3265,6 +3334,8 @@ function make(deps: PlaybackDeps) {
         readonly audio?: number | null;
         readonly audioLanguage?: string | null;
         readonly turn?: number | undefined;
+        /** A capture of the channel the session will read, as `readingOf` found. */
+        readonly joining?: string;
       },
       receiver: ReceiverTarget | null,
     ) =>
@@ -3328,6 +3399,7 @@ function make(deps: PlaybackDeps) {
           channel,
           variants,
           archive: recording,
+          shares: archive || receiver || format !== "mpegts" ? null : source.revision,
           delivered: { variantId: null, failed: [] },
           request: source.provider.request,
           format,
@@ -3352,7 +3424,7 @@ function make(deps: PlaybackDeps) {
           failure: null,
           diagnostic: null,
         };
-        register(session);
+        register(session, session.shares === null ? undefined : options.joining);
         if (format === "hls" && (receiver || options.repair)) {
           const prepared = prepareHls(session, receiver !== null);
           session.hlsRequests.add(prepared);
@@ -3659,8 +3731,19 @@ function make(deps: PlaybackDeps) {
                 error: { kind: "unexpected", detail: t("A receiver has playback.") },
               });
             }
-            yield* coordination.reclaim(channel.subscriptionId);
-            const session = yield* liveSession(channel, decoders, options, null);
+            const joining = options.archive
+              ? []
+              : yield* readingOf(
+                  channel,
+                  options.variants?.length ? options.variants : [channel.id],
+                );
+            yield* coordination.reclaim(channel.subscriptionId, joining);
+            const session = yield* liveSession(
+              channel,
+              decoders,
+              { ...options, ...(joining[0] && { joining: joining[0] }) },
+              null,
+            );
             const extension = session.delivery === "mpegts" ? "ts" : "m3u8";
             return {
               sessionId: session.id,

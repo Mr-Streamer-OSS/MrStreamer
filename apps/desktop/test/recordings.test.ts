@@ -167,6 +167,60 @@ function decodes(path: string): boolean {
   return spawnSync("ffmpeg", args).status === 0;
 }
 
+/** How many pictures ffmpeg decodes from the file. */
+function decodedFrames(path: string): number {
+  const result = spawnSync(
+    "ffprobe",
+    [
+      "-v",
+      "error",
+      "-count_frames",
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=nb_read_frames",
+      "-of",
+      "csv=p=0",
+      path,
+    ],
+    { encoding: "utf8" },
+  );
+  // Once per program that lists the picture.
+  return Number.parseInt(result.stdout, 10) || 0;
+}
+
+/** A channel's recording sent again and again, a third of a second of it each tenth, without end. */
+const looping: NonNullable<FakeProviderOptions["streams"]> = (source, out, signal) => {
+  const recording = fixture(source.fixture ?? "h264-aac.mpegts");
+  const step = Math.ceil(recording.length / 10);
+  let offset = 0;
+  const timer = setInterval(() => {
+    out.write(recording.subarray(offset, offset + step));
+    offset += step;
+    if (offset >= recording.length) offset = 0;
+  }, 100);
+  signal.addEventListener("abort", () => clearInterval(timer), { once: true });
+};
+
+/** Reads a player's answer as it plays: `next` takes at least `bytes` more, `closed` its end. */
+function reading(answer: Response) {
+  const reader = answer.body!.getReader();
+  return {
+    next: async (bytes: number) => {
+      const taken: Uint8Array[] = [];
+      let size = 0;
+      while (size < bytes) {
+        const { done, value } = await reader.read();
+        if (done) throw new Error("The stream ended.");
+        taken.push(value);
+        size += value.length;
+      }
+      return Buffer.concat(taken);
+    },
+    closed: reader.closed.catch(() => {}),
+  };
+}
+
 describe.skipIf(!hasTools)("recordings", () => {
   it("records a live channel to its stop time with every track, and plays it back here", async () => {
     const { provider, dataDir, channel, recordings, playback } = await connected();
@@ -199,12 +253,69 @@ describe.skipIf(!hasTools)("recordings", () => {
     await served.body?.cancel();
   });
 
-  it("takes no connection Watch holds, and keeps the one it holds from Watch", async () => {
+  it("records the channel Watch plays from Watch's own request, and either stops without the other", async () => {
+    const { provider, dataDir, channel, subscriptionId, recordings, playback } = await connected({
+      slotReleaseMs: 300,
+      streams: looping,
+    });
+    const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
+    const player = reading(await fetch(watching.url));
+    await player.next(16 * 1024);
+    const asked = provider.streamRequests();
+    expect(await recordings.connections(subscriptionId, [channel(TRACKS).id])).toEqual({
+      limit: 1,
+      uses: ["watch"],
+      shares: true,
+    });
+
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: ["recording"] });
+    // Watch plays on through the recording's start.
+    await player.next(64 * 1024);
+
+    // Watch stops: the recording goes on, on the same request.
+    await playback.close(watching.sessionId);
+    await player.closed;
+    const growing = async () => (await recordings.list())[0]?.bytes ?? 0;
+    const before = await growing();
+    expect(await until(growing, (bytes) => bytes > before + 64 * 1024)).toBeGreaterThan(
+      before + 64 * 1024,
+    );
+    expect(provider.activeStreams()).toBe(1);
+
+    // Watch again joins it, though the recording holds the only connection.
+    const again = await playback.open(channel(TRACKS), ["h264", "aac"]);
+    const second = reading(await fetch(again.url));
+    await second.next(16 * 1024);
+    expect(provider.streamRequests()).toBe(asked);
+
+    // The recording stops: Watch plays on.
+    await recordings.stop(answer.recording.id);
+    const watched = await second.next(160 * 1024);
+    expect(provider.activeStreams()).toBe(1);
+    expect(provider.streamRequests()).toBe(asked);
+
+    // The last reader leaving ends the provider's request.
+    await playback.close(again.sessionId);
+    expect(await allClosed(provider)).toBe(true);
+
+    const [done] = await recordings.list();
+    expect(done?.status).toEqual({ kind: "stopped" });
+    const file = await fileOf(dataDir, done!);
+    expect(probe(file.path)).toEqual(["h264", "aac", "aac", "dvb_subtitle", "dvb_teletext"]);
+    expect(decodes(file.path)).toBe(true);
+    const joined = join(dataDir, "watched.ts");
+    await writeFile(joined, watched);
+    expect(decodedFrames(joined)).toBeGreaterThan(0);
+  }, 30_000);
+
+  it("takes no connection Watch holds on another channel, and keeps the one it holds from Watch", async () => {
     // The provider frees a closed stream's slot a moment after it closes, as real panels do.
     const { provider, channel, subscriptionId, recordings, playback } = await connected({
       slotReleaseMs: 300,
     });
-    const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
+    const watching = await playback.open(channel("TEST | H.264 + AAC"), ["h264", "aac"]);
     const player = await fetch(watching.url);
     await player.body?.getReader().read();
     expect(provider.activeStreams()).toBe(1);
@@ -221,7 +332,9 @@ describe.skipIf(!hasTools)("recordings", () => {
     });
     expect(started.kind).toBe("started");
     expect(await playback.playing(watching.sessionId)).toBeNull();
-    await expect(playback.open(channel(TRACKS), ["h264", "aac"])).rejects.toMatchObject({
+    await expect(
+      playback.open(channel("TEST | H.264 + AAC"), ["h264", "aac"]),
+    ).rejects.toMatchObject({
       error: { kind: "recording-holds" },
     });
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: ["recording"] });
@@ -288,7 +401,12 @@ describe.skipIf(!hasTools)("recordings", () => {
         limit: now,
         uses: ["recording"],
       });
-      const opening = playback.open(channel, ["h264", "aac"]);
+      // Another channel: one the recording reads would share its connection.
+      const other = provider.catalogue.channels.find((each) => each.name === "TEST | H.264 + AAC")!;
+      const opening = playback.open({ subscriptionId, id: String(other.streamId) }, [
+        "h264",
+        "aac",
+      ]);
       if (watch === "opens") await expect(opening).resolves.toBeTruthy();
       else await expect(opening).rejects.toMatchObject({ error: { kind: "recording-holds" } });
     },
@@ -2068,7 +2186,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       clockTo,
       quit,
     } = await scheduling();
-    const watching = await playback.open(channel(GUIDED), ["h264", "aac"]);
+    // Another channel: Watch of the one it records would share its connection.
+    const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
     const player = await fetch(watching.url);
     await player.body?.getReader().read();
     const { now } = await listing();
@@ -2127,7 +2246,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
   it("misses a programme saved partway through from when it was saved, while every connection stays held", async () => {
     const { recordings, playback, channel, listing, programmePlan, clockTo } = await scheduling();
-    const watching = await playback.open(channel(GUIDED), ["h264", "aac"]);
+    // Another channel: Watch of the one it records would share its connection.
+    const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
     const player = await fetch(watching.url);
     await player.body?.getReader().read();
     const { now } = await listing();
@@ -2163,7 +2283,8 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       };
     };
     // Watch holds the one connection, so nothing captures before the app closes.
-    const watching = await playback.open(channel(GUIDED), ["h264", "aac"]);
+    // Another channel: Watch of the one it records would share its connection.
+    const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
     const player = await fetch(watching.url);
     await player.body?.getReader().read();
     // Saved at ten past for later; changed at forty past onto half past, ten minutes under way.

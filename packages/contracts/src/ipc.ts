@@ -286,7 +286,8 @@ export const ipcInputs = {
   "profiles.active": none,
   "recordings.list": none,
   /** What holds a subscription's connections now, as Record shows before it starts. */
-  "recordings.connections": () => type({ subscriptionId: "string > 0" }),
+  /** With `channel`, also whether recording it now would share what plays of it. */
+  "recordings.connections": () => type({ subscriptionId: "string > 0", "channel?": owned() }),
   /**
    * Records the channel from now until `stop`, through `variant`, else the stream chosen for it
    * before or Auto's, as `playback.open` picks. `stopPlaying` first stops what plays of its

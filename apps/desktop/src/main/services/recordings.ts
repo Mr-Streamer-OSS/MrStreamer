@@ -95,6 +95,7 @@ import {
 import { Library } from "./library.ts";
 import { Playback, type LocalCopy } from "./playback.ts";
 import { PlaybackCoordination } from "./playback-coordination.ts";
+import { captureKey, LiveCaptures } from "../playback/live-capture.ts";
 import { Settings } from "./preferences.ts";
 import { Subscriptions } from "./subscription.ts";
 
@@ -168,8 +169,14 @@ export class Recordings extends Context.Service<
   {
     /** Every recording, newest first. Fails while recordings.json can't be read. */
     readonly list: Effect.Effect<readonly Recording[], Failed>;
-    /** What holds the subscription's connections now, against the account's limit. */
-    connections(subscriptionId: string): Effect.Effect<RecordingConnections, Failed>;
+    /**
+     * What holds the subscription's connections now, against the account's limit, and with
+     * `variants`, a channel's streams to try, whether recording them would share what plays.
+     */
+    connections(
+      subscriptionId: string,
+      variants?: readonly string[],
+    ): Effect.Effect<RecordingConnections, Failed>;
     /**
      * Records `channel` from now until `stop`, through the first of its streams to try whose
      * stream has a program table. Busy, starting nothing, while every connection the account
@@ -327,6 +334,7 @@ function make(deps: RecordingsDeps) {
     const guide = yield* Guide;
     const playback = yield* Playback;
     const coordination = yield* PlaybackCoordination;
+    const captures = yield* LiveCaptures;
     const settings = yield* Settings;
     const savedSubtitles = yield* SavedSubtitles;
     const root = join(deps.dataDir, "recordings");
@@ -925,10 +933,27 @@ function make(deps: RecordingsDeps) {
             ? { title: options.title ?? resumes?.title ?? listed.title }
             : (yield* guide.listings([ownedId(listed)]))[ownedKey(listed)]?.now;
         if (options.stopPlaying) yield* playback.closeOf(subscriptionId);
+        // A stream of the channel that plays now, under this login, is recorded from what it
+        // reads: that stream alone, on the connection it holds.
+        const keyed = streams.map((each) => ({
+          ...each,
+          key:
+            each.stream.format === "mpegts"
+              ? captureKey({
+                  subscriptionId,
+                  revision: source.revision,
+                  url: each.stream.url,
+                  headers: each.stream.headers ?? {},
+                })
+              : null,
+        }));
+        const shared = keyed.find((each) => each.key !== null && captures.reading(each.key));
+        const tried = shared ? [shared] : keyed;
         const admitted = yield* coordination.hold(
           subscriptionId,
           limitOf(subscriptionId),
           options.stopPlaying ?? false,
+          shared?.key ?? undefined,
         );
         if (admitted.kind === "busy")
           return {
@@ -984,14 +1009,16 @@ function make(deps: RecordingsDeps) {
           )
           .then(() =>
             startCapture(
-              streams.map(({ stream: { url, format, headers } }) => ({
+              tried.map(({ key, stream: { url, format, headers } }) => ({
                 url,
                 format,
                 headers: headers ?? {},
+                shared: key,
               })),
               fileOf(record),
               {
                 request: source.provider.request,
+                captures: { request: captures.request, owner: held.id },
                 userAgent: deps.userAgent,
                 until: stop,
                 signal: controller.signal,
@@ -1028,6 +1055,8 @@ function make(deps: RecordingsDeps) {
                 (opened) => opened.ended,
                 () => {},
               );
+              // What it read last ends its provider request before the connection counts free.
+              await captures.idle(held.id);
               held.release();
             }).pipe(Effect.andThen(resumes ? Effect.void : dropStart(record))),
           ),
@@ -1054,14 +1083,15 @@ function make(deps: RecordingsDeps) {
                 ),
               }),
             }
-          : { ...record, variants: [streams[capture.source]!.id] };
+          : { ...record, variants: [tried[capture.source]!.id] };
         records.set(id, started);
         beginning.delete(id);
         active.set(id, live);
         remeasure(started);
         settle();
         void capture.ended
-          .then((end) => {
+          .then(async (end) => {
+            await captures.idle(held.id);
             held.release();
             return Effect.runPromise(ended(id, end, live));
           })
@@ -1944,10 +1974,28 @@ function make(deps: RecordingsDeps) {
 
     return {
       list: usable.pipe(Effect.andThen(look), Effect.andThen(shown)),
-      connections: (subscriptionId: string) =>
+      connections: (subscriptionId: string, variants?: readonly string[]) =>
         Effect.gen(function* () {
           const limit = yield* limitOf(subscriptionId);
-          return { limit, uses: yield* coordination.uses(subscriptionId) };
+          const uses = yield* coordination.uses(subscriptionId);
+          if (!variants?.length) return { limit, uses };
+          const source = yield* subscriptions.sourceOf(subscriptionId);
+          const streams = yield* Effect.forEach(variants, (id) =>
+            Effect.promise(() => source.provider.liveStream(id).catch(() => null)),
+          );
+          const shares = streams.some(
+            (stream) =>
+              stream?.format === "mpegts" &&
+              captures.reading(
+                captureKey({
+                  subscriptionId,
+                  revision: source.revision,
+                  url: stream.url,
+                  headers: stream.headers ?? {},
+                }),
+              ),
+          );
+          return { limit, uses, shares };
         }),
       start,
       stop: (id: string) =>

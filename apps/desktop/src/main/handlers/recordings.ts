@@ -42,7 +42,16 @@ export function recordingHandlers({
 }): HandlersFor<"recordings"> {
   return {
     "recordings.list": () => recordings.list,
-    "recordings.connections": ({ subscriptionId }) => recordings.connections(subscriptionId),
+    "recordings.connections": ({ subscriptionId, channel: named }) =>
+      Effect.gen(function* () {
+        if (!named || named.subscriptionId !== subscriptionId)
+          return yield* recordings.connections(subscriptionId);
+        const channel = yield* library.channel(named);
+        return yield* recordings.connections(
+          subscriptionId,
+          yield* streamsOf(settings, channel, undefined),
+        );
+      }),
     "recordings.start": ({ channel: named, variant, stop, stopPlaying }) =>
       Effect.gen(function* () {
         const channel = yield* library.channel(named);

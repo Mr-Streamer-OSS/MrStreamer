@@ -138,6 +138,11 @@ export type ConnectionUse = "watch" | "download" | "recording";
 export interface RecordingConnections {
   readonly limit: number;
   readonly uses: readonly ConnectionUse[];
+  /**
+   * Asked of a channel: recording it now reads the stream that plays of it here, under the same
+   * login, taking no connection more.
+   */
+  readonly shares?: boolean;
 }
 
 /** What asking to record answered: started, or every connection is held by what `connections` lists. */
