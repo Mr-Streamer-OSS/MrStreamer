@@ -409,8 +409,8 @@ describe("a file AVPlayer can't open", () => {
   });
 
   // AVFoundation types a file on the phone by its name, and refuses MP4 named .mkv. As
-  // `progressive`, the native module has the player open it as MP4.
-  it("plays a copy that turns out to be MP4 as a file of its own type", async () => {
+  // `progressive`, the native module has the player open it as MP4 when its bytes are.
+  it("gives the player a copy the session leaves to it as progressive", async () => {
     const copy = "file:///documents/downloads/d-1/media.mkv";
     void play(
       movie("a"),

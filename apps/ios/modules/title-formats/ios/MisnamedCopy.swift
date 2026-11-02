@@ -12,31 +12,34 @@ final class MisnamedCopy: VideoAssetTransportProvider {
   let identifier = "app.mrstreamer.title-formats.misnamed-copy"
   let priority = 0
 
-  /// Where the links go. Emptied when the app starts, before any asset, of those a crash or a
-  /// force quit left.
-  private let links = FileManager.default.temporaryDirectory
-    .appendingPathComponent("misnamed-copies", isDirectory: true)
+  /// Where the links go: emptied of those a crash or a force quit left once per process, before
+  /// its first link, however often the module is made again.
+  private static let links: URL = {
+    let folder = FileManager.default.temporaryDirectory
+      .appendingPathComponent("misnamed-copies", isDirectory: true)
+    try? FileManager.default.removeItem(at: folder)
+    return folder
+  }()
 
-  init() {
-    try? FileManager.default.removeItem(at: links)
-    try? FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
-  }
-
-  /// The box an MP4 or MOV file starts with, at bytes 4 to 8.
-  private static let firstBoxes: Set<String> = ["ftyp", "moov", "mdat", "wide", "free", "skip", "pnot"]
+  /// The boxes an MP4 or MOV file starts with, at bytes 4 to 8, as FFmpeg's MOV probe knows them.
+  private static let firstBoxes: Set<String> = [
+    "ftyp", "moov", "mdat", "wide", "ediw", "free", "junk", "skip", "pnot", "udta", "uuid", "pict",
+    "prfl",
+  ]
 
   func makeLoadPlan(for source: VideoAssetSourceDescriptor) -> VideoAssetLoadPlan? {
     guard source.url.isFileURL, source.contentTypeHint == .progressive,
       let file = try? FileHandle(forReadingFrom: source.url)
     else { return nil }
+    defer { try? file.close() }
     let head = (try? file.read(upToCount: 8)) ?? Data()
-    try? file.close()
     guard head.count == 8,
       let box = String(bytes: head.suffix(4), encoding: .ascii),
       Self.firstBoxes.contains(box)
     else { return nil }
-    let link = links.appendingPathComponent("\(UUID().uuidString).mp4")
+    let link = Self.links.appendingPathComponent("\(UUID().uuidString).mp4")
     do {
+      try FileManager.default.createDirectory(at: Self.links, withIntermediateDirectories: true)
       try FileManager.default.createSymbolicLink(at: link, withDestinationURL: source.url)
     } catch {
       return nil
