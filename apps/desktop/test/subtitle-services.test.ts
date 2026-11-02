@@ -81,22 +81,25 @@ describe("online subtitle service ports", () => {
   });
 
   it("SubDL search returns ordinary subtitles beside hearing-impaired ones, each with SubDL's flag", async () => {
-    // Stand-in for SubDL's documented `hi` parameter: `hi=1` keeps only hearing-impaired subtitles.
+    // SubDL filters to hearing-impaired subtitles with hi=1, ordinary ones with hi=0, or both without it.
     const subtitles = [
       { language: "EN", release_name: "Movie.SDH", url: "/subtitle/sdh.zip", hi: true },
       { language: "EN", release_name: "Movie.WEB", url: "/subtitle/web.zip", hi: false },
     ];
     const client = subtitleServiceClient({
       userAgent: "fixture",
-      fetch: async (input) =>
-        json({
+      fetch: async (input) => {
+        const hi = new URL(String(input)).searchParams.get("hi");
+        return json({
           status: true,
           results: [{ tmdb_id: 123, type: "movie" }],
-          subtitles:
-            new URL(String(input)).searchParams.get("hi") === "1"
-              ? subtitles.filter((sub) => sub.hi)
-              : subtitles,
-        }),
+          subtitles: subtitles.filter((sub) => {
+            if (hi === "1") return sub.hi;
+            if (hi === "0") return !sub.hi;
+            return true;
+          }),
+        });
+      },
     });
     const results = await client.subdlSearch(
       keys.subdl,
