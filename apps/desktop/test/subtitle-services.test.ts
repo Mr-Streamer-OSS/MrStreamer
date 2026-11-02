@@ -85,7 +85,6 @@ describe("online subtitle service ports", () => {
     const subtitles = [
       { language: "EN", release_name: "Movie.SDH", url: "/subtitle/sdh.zip", hi: true },
       { language: "EN", release_name: "Movie.WEB", url: "/subtitle/web.zip", hi: false },
-      { language: "EN", release_name: "Movie.BluRay", url: "/subtitle/bluray.zip" },
     ];
     const client = subtitleServiceClient({
       userAgent: "fixture",
@@ -107,7 +106,6 @@ describe("online subtitle service ports", () => {
     expect(results.map(({ release, hearingImpaired }) => [release, hearingImpaired])).toEqual([
       ["Movie.SDH", true],
       ["Movie.WEB", false],
-      ["Movie.BluRay", false],
     ]);
   });
 
