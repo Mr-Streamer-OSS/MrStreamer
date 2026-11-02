@@ -281,6 +281,7 @@ export type DateStyle = keyof typeof DATE_STYLES;
  * A moment in the interface language, in one of the app's few date styles, in the system's time
  * zone as it is now. The zone can change while the app runs and a kept formatter would keep the
  * old one, so kept formatters write UTC and a local moment first moves by Date's offset for it.
+ * A style that names its time zone would then show UTC, so none does.
  */
 export function formatDate(at: number | Date, style: DateStyle): string {
   const tag = active.formats;
