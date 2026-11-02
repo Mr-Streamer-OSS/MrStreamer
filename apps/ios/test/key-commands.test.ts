@@ -42,6 +42,9 @@ vi.mock("expo-router", async () => {
   };
 });
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+vi.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
 vi.mock("react-native", () => ({
   Settings: { get: () => ["en-US"] },
   Image: () => null,

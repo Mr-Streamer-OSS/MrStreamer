@@ -24,6 +24,9 @@ vi.mock("../src/downloads.ts", async () => {
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-router", () => ({ router: { push: (path: string) => owner.asked.push(path) } }));
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF" } }));
+vi.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
 vi.mock("react-native", async () => {
   const { createElement } = await import("react");
   return {

@@ -8,6 +8,7 @@ import {
 import type { SFSymbol } from "expo-symbols";
 import { useEffect, useMemo, useRef } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DownloadStatusButton } from "./download-status.tsx";
 import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/navigation.ts";
@@ -166,10 +167,13 @@ function actions(tab: Tab, current: string): NativeStackHeaderItem[] {
 /**
  * The options every screen of `tab`'s stack starts from, as its layout's `screenOptions`: black,
  * white, the brand and the three buttons. Screens set their own title and transparency.
+ * `left` and `right` are the window's side safe-area insets. Content stays inside them, in black,
+ * where UIKit puts the status bar, the header's buttons and a vertical tab bar in a side column,
+ * as on iPhone Duo's narrow panel or iPhone in landscape. They are 0 on iPhone and iPad portrait.
  */
-export function tabScreenOptions(tab: Tab) {
+export function tabScreenOptions(tab: Tab, { left, right } = { left: 0, right: 0 }) {
   return ({ route }: { route: { name: string } }): NativeStackNavigationOptions => ({
-    contentStyle: { backgroundColor: "#000000" },
+    contentStyle: { backgroundColor: "#000000", paddingLeft: left, paddingRight: right },
     headerTintColor: "#FFFFFF",
     headerTitleStyle: { color: "#FFFFFF" },
     // The brand takes the left side; a pushed screen keeps the system's back button beside it.
@@ -182,13 +186,15 @@ export function tabScreenOptions(tab: Tab) {
 }
 
 /**
- * `tabScreenOptions(tab)` for a tab's stack layout, made again when the interface language
- * changes: React Navigation keeps the other tabs' stacks from rendering again on their own, so
- * their buttons' labels would keep the language they were made in.
+ * `tabScreenOptions(tab)` for a tab's stack layout, with the window's side insets, made again
+ * when the interface language or those insets change: React Navigation keeps the other tabs'
+ * stacks from rendering again on their own, so their buttons' labels would keep the language
+ * they were made in.
  */
 export function useTabScreenOptions(tab: Tab) {
   const locale = useLocale();
-  return useMemo(() => tabScreenOptions(tab), [tab, locale]);
+  const { left, right } = useSafeAreaInsets();
+  return useMemo(() => tabScreenOptions(tab, { left, right }), [tab, locale, left, right]);
 }
 
 /**
