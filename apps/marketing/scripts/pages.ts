@@ -163,7 +163,8 @@ export const MISSING = { status: 404, dest: "/404.html" } as const;
  * HTML aliases, addresses without a file extension and percent-encoded addresses. Vercel matches
  * the path as sent, but its filesystem decodes it and answers a folder with its index.html, so
  * `/doc%73`, `/docs/index.htm%6c` or `/docs/index.html/` would otherwise show a page at an
- * address that isn't its own.
+ * address that isn't its own. Vercel anchors each src with `^` and `$`, so every src matches the
+ * whole path.
  */
 export const PAGE_ROUTES = [
   ...PAGES.map(({ address, file }) => ({
@@ -173,7 +174,7 @@ export const PAGE_ROUTES = [
   })),
   { src: "^/.*\\.html/?$", ...MISSING },
   { src: "^/[^.]*$", ...MISSING },
-  { src: "^/.*%", ...MISSING },
+  { src: "^/.*%.*$", ...MISSING },
 ];
 
 function escapeHtml(text: string): string {

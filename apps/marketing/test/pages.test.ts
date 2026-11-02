@@ -179,10 +179,14 @@ describe("public document pages without JavaScript", () => {
 
 describe("Vercel page routes", () => {
   // Vercel takes the first route whose src matches the path as sent, ignoring case unless the
-  // route says otherwise. An address no route takes goes on to the packaged files.
+  // route says otherwise, after anchoring each src with `^` and `$` (normalizeRoutes in
+  // @vercel/routing-utils). An address no route takes goes on to the packaged files.
   const answer = (path: string) => {
-    const route = PAGE_ROUTES.find((route) =>
-      new RegExp(route.src, "caseSensitive" in route ? "" : "i").test(path),
+    const route = PAGE_ROUTES.find(({ src, ...route }) =>
+      new RegExp(
+        `${src.startsWith("^") ? "" : "^"}${src}${src.endsWith("$") ? "" : "$"}`,
+        "caseSensitive" in route ? "" : "i",
+      ).test(path),
     );
     return route ? ("status" in route ? route.status : route.dest) : "file";
   };
