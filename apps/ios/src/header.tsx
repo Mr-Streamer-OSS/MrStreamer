@@ -168,9 +168,10 @@ function actions(tab: Tab, current: string): NativeStackHeaderItem[] {
 /**
  * The options every screen of `tab`'s stack starts from, as its layout's `screenOptions`: black,
  * white, the brand and the three buttons. Screens set their own title and transparency.
- * Content stays inside the window's `left` and `right` safe-area insets, the side column where
- * UIKit puts the status bar, the header's buttons and the tab bar on iPhone Duo's narrow panel
- * and beside the Dynamic Island in iPhone landscape. They are 0 on iPhone and iPad portrait.
+ * Content stays inside the window's `left` and `right` safe-area insets (`tabSides`): the column
+ * where UIKit puts the status bar, the header's buttons and the tab bar on iPhone Duo's closed
+ * panel, and the sensor housing and corners in iPhone landscape. A screen that sets its own
+ * `contentStyle`, as Movies' and Series' details do, keeps inside them itself.
  */
 export function tabScreenOptions(tab: Tab, { left, right } = { left: 0, right: 0 }) {
   return ({ route }: { route: { name: string } }): NativeStackNavigationOptions => ({

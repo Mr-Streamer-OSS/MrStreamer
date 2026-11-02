@@ -47,7 +47,7 @@ import {
 } from "./play-title.ts";
 import { request, type Request } from "./playback.ts";
 import { useRead, type Loaded } from "./read.ts";
-import { tabSides } from "./content-width.ts";
+import { tabSides, useContentWidth } from "./content-width.ts";
 import { useStore } from "./store.ts";
 import { members, retryTitles, useRoster } from "./account.ts";
 import { describeError } from "./errors.ts";
@@ -119,23 +119,28 @@ export function DetailsScreen({
   if (lists.kind === "ready" && title && opened) {
     return <Details title={title} opened={opened} asked={asked} sides={sides} />;
   }
+  const inside = { paddingLeft: sides.left, paddingRight: sides.right };
+  if (lists.kind !== "ready" && lists.kind !== "failed") {
+    // The placeholder backdrop as wide as the one it stands for, so nothing jumps once it loads.
+    return (
+      <Docked status={loadingStatus("movies and series")}>
+        <Placeholders testID="details-placeholder">
+          <Shape style={[styles.backdrop, styles.stillBackdrop]} />
+          <View style={[styles.facts, inside]}>
+            <Shape style={styles.nameShape} />
+            <Shape style={styles.lineShape} />
+          </View>
+        </Placeholders>
+      </Docked>
+    );
+  }
   return (
-    <View style={[styles.screen, { paddingLeft: sides.left, paddingRight: sides.right }]}>
+    <View style={[styles.screen, inside]}>
       {lists.kind === "failed" ? (
         <Message
           text={describeError(lists.error)}
           action={{ label: t("Try again"), onPress: retryTitles }}
         />
-      ) : lists.kind !== "ready" ? (
-        <Docked status={loadingStatus("movies and series")}>
-          <Placeholders testID="details-placeholder">
-            <Shape style={[styles.backdrop, styles.stillBackdrop]} />
-            <View style={styles.facts}>
-              <Shape style={styles.nameShape} />
-              <Shape style={styles.lineShape} />
-            </View>
-          </Placeholders>
-        </Docked>
       ) : (
         <Message text={t("The provider no longer lists this title.")} />
       )}
@@ -177,6 +182,7 @@ function Details({
   asked: boolean;
   sides: { left: number; right: number };
 }) {
+  const width = useContentWidth();
   const locale = useLocale();
   const viewing = useViewing();
   const watchlist = useWatchlist();
@@ -353,7 +359,8 @@ function Details({
           width={780}
           style={StyleSheet.absoluteFill}
         />
-        <Glass style={[styles.capsule, { left: 16 + sides.left }]}>
+        {/* Inside the content's width, so a long label shrinks rather than reach the column. */}
+        <Glass style={[styles.capsule, { left: 16 + sides.left, maxWidth: width - 32 }]}>
           {title.kind === "movie" ? (
             <CapsuleButton
               symbol="play.fill"
@@ -898,6 +905,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   capsuleButton: {
+    flexShrink: 1,
     minWidth: 44,
     minHeight: 44,
     flexDirection: "row",
@@ -906,7 +914,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
   },
-  capsuleLabel: { color: "#FFFFFF", fontSize: 17, fontWeight: "600" },
+  capsuleLabel: { flexShrink: 1, color: "#FFFFFF", fontSize: 17, fontWeight: "600" },
   facts: { paddingHorizontal: 16, paddingTop: 14, gap: 6 },
   name: { color: colors.text, fontSize: 28, fontWeight: "700" },
   line: { color: colors.dim, fontSize: 15 },
