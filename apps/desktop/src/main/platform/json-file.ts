@@ -1,3 +1,4 @@
+import type { Type } from "arktype";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -21,8 +22,8 @@ const ZLIB = { chunkSize: 1024 * 1024 };
  */
 export async function readJsonFile<T>(
   path: string,
-  schema: (data: unknown) => T | ArkErrors,
-): Promise<T | null> {
+  schema: Type<T>,
+): Promise<Type<T>["infer"] | null> {
   let bytes: Buffer;
 
   try {

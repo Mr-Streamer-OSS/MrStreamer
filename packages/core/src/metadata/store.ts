@@ -69,7 +69,7 @@ const ServiceList = lazy(() =>
   type({ id: "number", name: "string", priority: "number", ids: "string[]" }),
 );
 
-const MetadataFile = lazy(() =>
+export const MetadataFile = lazy(() =>
   type({
     version: "1",
     entries: type({ "[string]": Entry() }),

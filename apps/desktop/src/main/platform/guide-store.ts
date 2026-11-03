@@ -1,3 +1,4 @@
+import type { Type } from "arktype";
 // Keeps the programme guides on disk: each subscription's own in its folder, and the global
 // XMLTV sources the viewer adds in Settings > Guides in a folder of their own.
 //
@@ -156,10 +157,7 @@ const documentOf = (file: string, fetchedAt: number): GuideDocument => ({
  * Reads a record of the guide's: null where there is none, and a failure where one is there but
  * can't be read or isn't one, as after a disk error or a write of another program.
  */
-async function readRecord<T>(
-  path: string,
-  schema: (data: unknown) => T | type.errors,
-): Promise<T | null> {
+async function readRecord<T>(path: string, schema: Type<T>): Promise<Type<T>["infer"] | null> {
   let text: string;
 
   try {
