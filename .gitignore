@@ -3,6 +3,8 @@ out/
 dist/
 # Built by scripts/build-ffmpeg.sh.
 vendor/
+# Copied source, kept with its licence (tools/oxlint/anti-slop/UPSTREAM.md).
+!tools/oxlint/anti-slop/vendor/
 # Built by apps/marketing: the page's pictures, and the package Vercel takes.
 apps/marketing/public/generated/
 apps/marketing/.vercel/
