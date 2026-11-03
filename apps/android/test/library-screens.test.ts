@@ -481,6 +481,40 @@ it("shows provider facts before slow TMDB and does not reload details on list re
   expect(shown.textContent).toContain("Saved TMDB story");
 });
 
+it("offers Try again when TMDB fails, and shows its facts once it answers", async () => {
+  const { about } = await import("./library-fixture.ts");
+  let answers = 0;
+  const { source } = fixture();
+
+  const model = libraryModel({
+    language: () => "en",
+    sources: () => [source],
+    metadata: {
+      revision: () => 0,
+      subscribe: () => () => {},
+      about: async () => {
+        answers++;
+
+        if (answers === 1) throw new Error("TMDB down");
+
+        return about;
+      },
+    },
+  });
+
+  await model.refresh();
+  route.params = { kind: "movie", title: model.made("movie").list("all")[0]!.key };
+  const shown = show(createElement(DetailsScreen, { model }));
+  await act(async () => {});
+  expect(shown.textContent).toContain("Provider story");
+  expect(shown.textContent).toContain("TMDB isn't answering.");
+  await act(async () => press(shown, "Try again"));
+  await act(async () => {});
+  expect(answers).toBe(2);
+  expect(shown.textContent).not.toContain("TMDB isn't answering.");
+  expect(shown.textContent).toContain("Saved TMDB story");
+});
+
 it("offers Settings to restore a lost login when no catalogue can be read", async () => {
   const f = fixture();
 
