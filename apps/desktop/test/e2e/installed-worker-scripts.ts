@@ -1,4 +1,4 @@
-import { JsonValue, type Json, type JsonObject } from "../../../../packages/contracts/src/json.ts";
+import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -30,7 +30,7 @@ async function packedMainScripts(resources: string, expectedAsarSha256: string) 
 
   if (headerEnd > dataStart || dataStart > bytes.length)
     throw new Error("Invalid ASAR header bounds");
-  const header = JsonValue.assert(JSON.parse(bytes.subarray(16, headerEnd).toString()));
+  const header: Json = JSON.parse(bytes.subarray(16, headerEnd).toString());
   let files = object(object(header).files);
 
   for (const directory of ["out", "main"]) files = object(object(files[directory]).files);

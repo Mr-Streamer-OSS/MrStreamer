@@ -1,6 +1,3 @@
-import type { Preferences } from "@mrstreamer/contracts/preferences";
-import type { LiveCatalogue, OnDemandCatalogue } from "@mrstreamer/core/provider";
-import type { KeptSchedule, StoredRecording } from "../recordings/store.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import type { Type } from "arktype";
 import { randomUUID } from "node:crypto";
@@ -63,17 +60,7 @@ export async function readJsonFile<T>(
  * file intact. Windows replacement retries keep the same temp and bytes, with at most 70 ms of
  * intentional delay. Callers must await each write settling before starting a newer same-path write.
  */
-export async function writeJsonFile(
-  path: string,
-  value:
-    | Json
-    | Preferences
-    | LiveCatalogue
-    | OnDemandCatalogue
-    | { readonly version: number; readonly schedules: readonly KeptSchedule[] }
-    | { readonly version: number; readonly recordings: readonly StoredRecording[] }
-    | { toJSON(): Json },
-): Promise<void> {
+export async function writeJsonFile(path: string, value: Json | { toJSON(): Json }): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${randomUUID()}.tmp`;
   const text = JSON.stringify(value);

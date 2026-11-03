@@ -1,4 +1,4 @@
-import { JsonValue, type Json } from "@mrstreamer/contracts/json";
+import type { Json } from "@mrstreamer/contracts/json";
 // Stream sessions and the loopback proxy that serves them to the UI.
 //
 // The UI never sees provider URLs: they carry the login. It gets a 127.0.0.1 URL with a random
@@ -3636,7 +3636,7 @@ function make(deps: PlaybackDeps) {
       let json: Json | null = null;
 
       try {
-        json = output === null ? null : JsonValue.assert(JSON.parse(output));
+        json = output === null ? null : JSON.parse(output);
       } catch {
         // Unusable probe output is a probe failure, not evidence about the media.
       }

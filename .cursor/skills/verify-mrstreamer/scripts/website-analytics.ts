@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node
+import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 // Website analytics in a production-configured build, against an isolated loopback capture.
 // The browser reaches the site's own route, mrstreamer.app/ingest, only through a loopback proxy
 // that hands it to a local TLS fixture with a certificate this run made; every other external
@@ -1059,10 +1060,15 @@ app.on('window-all-closed', () => app.quit());
 
       if (PRIVATE.some((word) => entry.raw.includes(word)))
         throw new Error("A private query or fragment leaked.");
-      const body: unknown = JSON.parse(entry.raw);
+      const body: Json = JSON.parse(entry.raw);
 
-      if (!record(body) || !record(body["properties"])) throw new Error("Malformed body.");
+      const jsonObject = (value: Json | undefined): value is JsonObject =>
+        value !== null && typeof value === "object" && !Array.isArray(value);
+
+      if (!jsonObject(body)) throw new Error("Malformed body.");
       const { api_key, event, distinct_id, properties, ...rest } = body;
+
+      if (!jsonObject(properties)) throw new Error("Malformed body.");
 
       if (
         Object.keys(rest).length ||
@@ -1124,7 +1130,7 @@ app.on('window-all-closed', () => app.quit());
         throw new Error(`Entry codes malformed on ${event}: ${JSON.stringify(fields)}`);
 
       // Measurements are bounded numbers in their units, and each leave carries all three.
-      const share = (value: unknown): value is number =>
+      const share = (value: Json | undefined): boolean =>
         typeof value === "number" &&
         value >= 0 &&
         value <= 1 &&

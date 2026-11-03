@@ -1,4 +1,5 @@
-import { JsonValue, type Json, type JsonObject } from "../../../../packages/contracts/src/json.ts";
+import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
+import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -171,7 +172,7 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
       });
 
       if (!response.ok) throw new Error(`Target listing HTTP ${response.status}`);
-      const targets = JsonValue.assert(await response.json());
+      const targets = await response.json();
 
       if (!Array.isArray(targets)) throw new Error("No target list");
 

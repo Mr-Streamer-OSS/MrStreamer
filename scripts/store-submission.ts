@@ -1,4 +1,4 @@
-import { JsonValue, type Json } from "../packages/contracts/src/json.ts";
+import type { Json } from "../packages/contracts/src/json.ts";
 // The Microsoft side of a Store submission, through Microsoft's Store submission API: what the
 // Store holds, sending a checked package, and reading what Microsoft did with it.
 // scripts/store-release.ts is the GitHub side; docs/maintainers/microsoft-store.md describes both.
@@ -1337,7 +1337,7 @@ async function request(
       let body: Json | undefined;
 
       try {
-        body = JsonValue.assert(JSON.parse(text));
+        body = JSON.parse(text);
       } catch {
         body = undefined;
       }

@@ -1,4 +1,5 @@
-import { JsonValue } from "@mrstreamer/contracts/json";
+import { JsonValue } from "@mrstreamer/contracts/json-value";
+
 import type { UsageObservers } from "../analytics/observers.ts";
 // The saved subscriptions: each validated with its provider and stored with a sealed password or,
 // for a playlist, a sealed link. Every one of them shows in the app at once; none is "the active

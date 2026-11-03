@@ -1,4 +1,5 @@
-import { JsonValue } from "@mrstreamer/contracts/json";
+import { JsonValue } from "@mrstreamer/contracts/json-value";
+
 import { type } from "arktype";
 import { LiveDiscovery, RememberedLiveBrowse } from "@mrstreamer/contracts/live-browse";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";

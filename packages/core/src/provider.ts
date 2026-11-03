@@ -3,14 +3,14 @@ import type { AccountStatus } from "@mrstreamer/contracts/subscription";
 import { t } from "./i18n.ts";
 
 /** A category as the provider lists it. */
-export interface ProviderCategory {
+export type ProviderCategory = {
   readonly id: string;
   /** Exactly as the provider wrote it: "BE | VLAANDEREN". */
   readonly name: string;
-}
+};
 
 /** A channel as the provider lists it, with the provider's loose fields made consistent. */
-export interface ProviderChannel {
+export type ProviderChannel = {
   readonly id: string;
   /** Exactly as the provider wrote it: "BE | VRT 1 FHD (VLAANDEREN)". */
   readonly name: string;
@@ -23,19 +23,19 @@ export interface ProviderChannel {
   readonly adult?: boolean;
   /** How many days of catch-up the provider keeps of the channel, or null for none. */
   readonly catchupDays: number | null;
-}
+};
 
 /**
  * A live catalogue as the provider delivers it. Adapters report names as they are; the catalogue
  * module decides how to show them, the same way for every provider.
  */
-export interface LiveCatalogue {
+export type LiveCatalogue = {
   readonly categories: readonly ProviderCategory[];
   readonly channels: readonly ProviderChannel[];
-}
+};
 
 /** A movie or a series as the provider lists it. */
-export interface ProviderTitle {
+export type ProviderTitle = {
   readonly id: string;
   /** Exactly as the provider wrote it: "Blow 2001 (NL)". */
   readonly name: string;
@@ -60,15 +60,15 @@ export interface ProviderTitle {
   readonly metadata?: "lazy";
   /** Mapped series' current exact files. No URLs, headers or guessed episode identities. */
   readonly episodeFiles?: readonly string[];
-}
+};
 
 /** Movies and series as the provider delivers them, each with its own categories. */
-export interface OnDemandCatalogue {
+export type OnDemandCatalogue = {
   readonly movieCategories: readonly ProviderCategory[];
   readonly movies: readonly ProviderTitle[];
   readonly seriesCategories: readonly ProviderCategory[];
   readonly series: readonly ProviderTitle[];
-}
+};
 
 /** What the provider knows about one movie or series beyond its list entry. */
 export interface ProviderDetails {

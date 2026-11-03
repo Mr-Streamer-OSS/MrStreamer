@@ -1,4 +1,4 @@
-import { JsonValue, type Json } from "@mrstreamer/contracts/json";
+import type { Json } from "@mrstreamer/contracts/json";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Title, TitleDetails, TitleRef } from "@mrstreamer/contracts/ondemand";
@@ -97,7 +97,8 @@ export const useViewing = () => useStore(viewing);
 export const currentViewing = () => viewing.get();
 
 /** viewing.json as this launch read it. */
-const read = readJson(FILE);
+const json = readJson(FILE);
+const read: unknown = json;
 
 function snapshot(): ViewingSnapshot | null {
   return read && typeof read === "object" && "version" in read && read.version === 1
@@ -107,8 +108,8 @@ function snapshot(): ViewingSnapshot | null {
 
 /** The favourites' memory as read: another build's, or one not to trust, is only carried. */
 const kept = readMembership(
-  read && typeof read === "object" && "favouriteMembership" in read
-    ? JsonValue.assert(read.favouriteMembership)
+  json && typeof json === "object" && "favouriteMembership" in json
+    ? json.favouriteMembership
     : undefined,
 );
 

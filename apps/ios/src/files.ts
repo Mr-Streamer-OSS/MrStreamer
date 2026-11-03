@@ -1,7 +1,3 @@
-import type { KeptReminder } from "@mrstreamer/core/reminders/rules";
-import type { SavedTitle } from "@mrstreamer/core/ondemand/watchlist";
-import type { ViewingSnapshot } from "@mrstreamer/core/viewing/memory-store";
-import type { MembershipFile } from "./viewing-membership.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import { File, Paths } from "expo-file-system";
 
@@ -14,7 +10,7 @@ const fileOf = (name: string) => new File(Paths.document, name);
 const pendingOf = (name: string) => new File(Paths.document, `${name}.next`);
 
 /** The file's contents, or null when there is none or it doesn't read as JSON. */
-export function readJson(name: string): unknown {
+export function readJson(name: string): Json {
   return read(name, false);
 }
 
@@ -22,11 +18,11 @@ export function readJson(name: string): unknown {
  * As `readJson`, but throws when a file there can't be read now, rather than answering none: for
  * a caller that mustn't write over what it couldn't read. Text that isn't JSON still reads as none.
  */
-export function readJsonStrictly(name: string): unknown {
+export function readJsonStrictly(name: string): Json {
   return read(name, true);
 }
 
-function read(name: string, strict: boolean): unknown {
+function read(name: string, strict: boolean): Json {
   for (const file of [fileOf(name), pendingOf(name)]) {
     if (!file.exists) continue;
     let text: string;
@@ -39,7 +35,7 @@ function read(name: string, strict: boolean): unknown {
     }
 
     try {
-      return JSON.parse(text) as unknown;
+      return JSON.parse(text);
     } catch {
       // Not JSON: try the other, then start again.
     }
@@ -49,17 +45,7 @@ function read(name: string, strict: boolean): unknown {
 }
 
 /** Replaces the file with `value`, whole. Throws when the folder won't take it. */
-export function writeJson(
-  name: string,
-  value:
-    | Json
-    | { readonly version: number; readonly reminders: readonly KeptReminder[] }
-    | {
-        readonly version: number;
-        readonly accounts: Readonly<Record<string, readonly SavedTitle[]>>;
-      }
-    | (ViewingSnapshot & { readonly favouriteMembership?: MembershipFile | Json | undefined }),
-): void {
+export function writeJson(name: string, value: Json): void {
   const pending = pendingOf(name);
 
   if (!pending.exists) pending.create();

@@ -1,4 +1,4 @@
-import { JsonValue, type Json } from "@mrstreamer/contracts/json";
+import type { Json } from "@mrstreamer/contracts/json";
 import type { Type } from "arktype";
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
@@ -95,7 +95,10 @@ const AuthorizationView = lazy(() =>
 export type AuthorizationView = Infer<typeof AuthorizationView>;
 
 /** Receipts that read, and how many didn't: one bad entry hides no other. */
-function readable<T>(parse: Type<T>, values: Json | undefined): Type<T>["infer"][] {
+function readable<T>(
+  parse: Type<T>,
+  values: Json | readonly object[] | undefined,
+): Type<T>["infer"][] {
   return (Array.isArray(values) ? values : []).flatMap((value) => {
     const parsed = parse(value);
 
@@ -111,9 +114,9 @@ const Envelope = lazy(() =>
     foregroundToken: "string | null",
     blocked: "'none' | 'locked' | 'storage' | 'corrupt' | 'capacity' | 'recovering'",
     sources: "string[]",
-    authorizations: JsonValue.array(),
-    receipts: JsonValue.array(),
-    legacy: { receipts: JsonValue.array() },
+    authorizations: "object[]",
+    receipts: "object[]",
+    legacy: { receipts: "object[]" },
   }),
 );
 

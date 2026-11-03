@@ -80,7 +80,7 @@ function install(profile: string, delayMs: number) {
   const normalize = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
   const owned = normalize(native.realpathSync(profile));
 
-  const matches = (value: unknown, directory: boolean): value is string => {
+  const matches = (value: string | URL, directory: boolean): boolean => {
     if (typeof value !== "string" || (!directory && path.basename(value) !== "analytics.json"))
       return false;
 
@@ -259,7 +259,11 @@ function install(profile: string, delayMs: number) {
       apply(target, receiver, args: unknown[]) {
         const run = () => target.apply(receiver, args as Parameters<T>);
 
-        return matches(args[argument], operation === "directory") ? observe(operation, run) : run();
+        const value = args[argument];
+
+        return typeof value === "string" && matches(value, operation === "directory")
+          ? observe(operation, run)
+          : run();
       },
     });
 

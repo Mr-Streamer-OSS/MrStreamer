@@ -126,12 +126,12 @@ function readCatalogue(file: Infer<typeof CachedCatalogue>): CatalogueFile & { o
 }
 
 /** What the disk cache holds. */
-interface CatalogueFile extends LiveCatalogue {
+type CatalogueFile = LiveCatalogue & {
   readonly version: 4;
   readonly key: string;
   readonly fetchedAt: number;
   readonly importRevision?: string;
-}
+};
 
 /** A provider category of one subscription, with whether its name says it is for adults. */
 interface OwnCategory extends Omit<Category, "members"> {

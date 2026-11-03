@@ -109,7 +109,8 @@ export function registerIpc(
     // Built on the method's first call, not while the app starts.
     let validate: Type<IpcInput<IpcMethod>> | null = null;
 
-    ipcMain.handle(method, async (event, raw): Promise<Result<unknown>> => {
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Electron supplies untyped arguments; the method input schema validates raw before dispatch.
+    ipcMain.handle(method, async (event, raw: unknown): Promise<Result<unknown>> => {
       // Electron gives no frame once the one that sent the call has navigated or gone.
       const from = event.senderFrame;
 

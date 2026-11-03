@@ -1,4 +1,4 @@
-import { JsonValue, type Json, type JsonObject } from "../../../packages/contracts/src/json.ts";
+import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 // The site's download links: where each installer of the current stable release is, and how
 // the page shows it. README.md, Downloads, has the whole account.
 //
@@ -104,9 +104,7 @@ export async function verifiedDownloads(
         signal: AbortSignal.timeout(10_000),
         cache: "no-store",
       })
-        .then((response): Promise<Json> | null =>
-          response.ok ? response.json().then((json) => JsonValue.assert(json)) : null,
-        )
+        .then((response): Promise<Json> | null => (response.ok ? response.json() : null))
         .catch(() => null);
 
   const published = released && Date.parse(released.published);
@@ -216,7 +214,7 @@ export function showDownloads(page: ParentNode, downloads: Downloads): void {
 
 /** The version describes verified/listed installers, rather than an unreleased package version. */
 function writeSoftwareVersion(json: string, downloads: Downloads): string {
-  const parsed = JsonValue.assert(JSON.parse(json));
+  const parsed: Json = JSON.parse(json);
 
   if (!isRecord(parsed)) return json;
   const data = { ...parsed };

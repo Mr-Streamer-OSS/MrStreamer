@@ -1,4 +1,4 @@
-import { JsonValue, type Json, type JsonObject } from "../../../packages/contracts/src/json.ts";
+import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 // Packs the built site as Vercel's Build Output API, version 3, in .vercel/output/, and checks
 // the package before anything deploys it: `vercel deploy --prebuilt` uploads exactly this folder.
 //
@@ -191,7 +191,7 @@ for (const link of new Set(links.filter((link) => !installer.test(link)))) {
 
 try {
   const [, json = ""] = /<script type="application\/ld\+json">(.*?)<\/script>/s.exec(home) ?? [];
-  const parsed = JsonValue.assert(JSON.parse(json));
+  const parsed: Json = JSON.parse(json);
 
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
     throw new Error("Invalid app metadata");
@@ -221,7 +221,7 @@ try {
 const faq = [...home.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/gs)]
   .map(([, json = ""]): Json | undefined => {
     try {
-      return JsonValue.assert(JSON.parse(json));
+      return JSON.parse(json);
     } catch {
       return undefined;
     }

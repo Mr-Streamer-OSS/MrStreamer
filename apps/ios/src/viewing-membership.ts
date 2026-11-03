@@ -26,10 +26,10 @@ export type Cohort = readonly string[];
 export type Membership = Readonly<Record<string, readonly Cohort[]>>;
 
 /** The field in viewing.json, as this build writes it. */
-export interface MembershipFile {
+export type MembershipFile = {
   readonly version: 1;
   readonly accounts: Membership;
-}
+};
 
 /** viewing.json's field as read: none, one this build reads, or one it keeps as it is. */
 export type ReadMembership =

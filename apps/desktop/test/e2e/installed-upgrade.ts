@@ -1,4 +1,4 @@
-import { JsonValue, type Json } from "../../../../packages/contracts/src/json.ts";
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { preferenceValues } from "./preference-reply.ts";
 // The Windows installed upgrade check, which a stable release run makes before publishing and
 // `.github/workflows/release.yml` makes by hand from main, on a disposable GitHub-hosted
@@ -1197,9 +1197,9 @@ async function resolveCommand(args: string[]) {
   const github = restGitHub(repository, token);
   const archives = new Map<string, Uint8Array>();
 
-  const privateInput: Json | undefined = values["private-input"]
+  const privateInput: Json = values["private-input"]
     ? JSON.parse(await readFile(values["private-input"], "utf8"))
-    : undefined;
+    : null;
 
   const privateCandidate = values["private-input"]
     ? await verifyPrivateCandidate(
@@ -1212,7 +1212,7 @@ async function resolveCommand(args: string[]) {
             return bytes;
           },
         },
-        JsonValue.assert(privateInput),
+        privateInput,
         true,
       )
     : undefined;
@@ -1672,9 +1672,7 @@ export async function runCommand(args: string[]) {
       `${usage}\nThe root must be ${fleet ? "a new direct child of the owned task temp" : "a new folder under RUNNER_TEMP"}.`,
     );
 
-  const raw = JsonValue.assert(
-    JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8")),
-  );
+  const raw: Json = JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8"));
 
   const repository = fleet ? values.repository : process.env["GITHUB_REPOSITORY"];
   check(repository, "A repository is required.");

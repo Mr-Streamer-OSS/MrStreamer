@@ -1,5 +1,6 @@
 import { type } from "arktype";
-import { JsonValue, type Json } from "../../../../packages/contracts/src/json.ts";
+import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Drives a built app over the DevTools protocol, against the fake provider or the fake playlist
 // host. Shared by the tests of a built app and the measuring script.
 import { spawn, type ChildProcess } from "node:child_process";

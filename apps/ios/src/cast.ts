@@ -1,4 +1,4 @@
-import { JsonValue, type Json, type JsonObject } from "@mrstreamer/contracts/json";
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { rewritePlaylist, type Refusal, type RouteKind } from "./cast-media.ts";
 import { store, useStore, type Store } from "./store.ts";
 import { defined } from "@mrstreamer/core/defined";
@@ -614,7 +614,7 @@ const isRecord = (value: Json | undefined): value is JsonObject =>
 /** A JSON payload's fields, or an empty object when it isn't one. */
 function payloadOf(message: CastMessage): JsonObject {
   try {
-    const value = JsonValue.assert(JSON.parse(message.payload));
+    const value: Json = JSON.parse(message.payload);
 
     return isRecord(value) ? value : {};
   } catch {

@@ -1,3 +1,4 @@
+import { ArkErrors } from "arktype";
 import { workerResults } from "../ondemand/protocol.ts";
 import { listedFileKey } from "@mrstreamer/core/ondemand/files";
 // Movies and series: the catalogue lives in a worker thread (see ../ondemand/catalogue-worker.ts),
@@ -11,7 +12,7 @@ import { listedFileKey } from "@mrstreamer/core/ondemand/files";
 // reached keeps what it loaded and holds no other back.
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
-import type { AppError } from "@mrstreamer/contracts/errors";
+import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type {
   CollectionId,
   CollectionPage,
@@ -1760,11 +1761,21 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
         resolve: (reply) => {
           if (!reply.ok) return;
 
-          try {
-            resolve(workerResults[method].assert(reply.value));
-          } catch (cause) {
-            reject(cause);
+          const result = workerResults[method](reply.value);
+
+          if (result instanceof ArkErrors) {
+            console.warn(`[catalogue] invalid ${method} reply: ${result.summary}`);
+            reject(
+              new AppFailure({
+                kind: "unexpected",
+                detail: `Invalid catalogue reply for ${method}.`,
+              }),
+            );
+
+            return;
           }
+
+          resolve(result);
         },
         reject,
         worker: to,

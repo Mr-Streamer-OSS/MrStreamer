@@ -1,4 +1,4 @@
-import { JsonValue, type Json, type JsonObject } from "@mrstreamer/contracts/json";
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { QUALITIES, type LiveChannel, type Quality } from "@mrstreamer/contracts/library";
 import { DEFAULT_LIVE_QUALITY } from "@mrstreamer/contracts/preferences";
 import { TITLE_LANGUAGES, type TitleLanguage } from "@mrstreamer/core/ondemand/languages";
@@ -108,7 +108,7 @@ function saved(): Store<MediaPreferences> {
       const file = new File(Paths.document, name);
 
       if (!file.exists) continue;
-      const raw = JsonValue.assert(JSON.parse(file.textSync()));
+      const raw: Json = JSON.parse(file.textSync());
 
       if (!record(raw)) {
         writable = false;

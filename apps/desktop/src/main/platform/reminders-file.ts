@@ -1,4 +1,5 @@
-import { JsonValue, type Json } from "@mrstreamer/contracts/json";
+import { JsonValue } from "@mrstreamer/contracts/json-value";
+import type { Json } from "@mrstreamer/contracts/json";
 // reminders.json in the data folder: the programme reminders, which only services/reminders.ts
 // reads and writes. Version 1 keeps each saved subscription's reminders under its id:
 //

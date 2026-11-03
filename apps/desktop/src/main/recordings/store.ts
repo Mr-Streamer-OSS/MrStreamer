@@ -41,7 +41,7 @@ const VERSION = 1;
  * file's name, the folder its own folder is in when not beside recordings.json, the streams it
  * asked for, to go on with them, and how far it played.
  */
-export interface StoredRecording extends Omit<Recording, "status" | "unsaved"> {
+export type StoredRecording = Omit<Recording, "status" | "unsaved"> & {
   readonly file: string;
   readonly folder?: string;
   /** The id its chosen folder was marked with as it began, where it goes on. */
@@ -49,7 +49,7 @@ export interface StoredRecording extends Omit<Recording, "status" | "unsaved"> {
   readonly variants?: readonly string[];
   readonly progress?: { readonly position: number; readonly duration: number };
   readonly status: Exclude<Recording["status"], { readonly kind: "missing" | "paused" }>;
-}
+};
 
 const Channel = lazy(() => type({ subscriptionId: "string > 0", id: "string" }));
 
@@ -126,7 +126,7 @@ export function writeStorage(path: string, storage: KeptStorage): Promise<void> 
 }
 
 /** A schedule as kept. */
-export interface KeptSchedule {
+export type KeptSchedule = {
   readonly id: string;
   readonly plan: RecordingPlan;
   /** Its channel's name when it was saved: listed under another, it is held as gone. */
@@ -143,7 +143,7 @@ export interface KeptSchedule {
    * is owed from when the change was saved, `at`, not from its start.
    */
   readonly owed?: { readonly from: number; readonly at: number };
-}
+};
 
 const Schedule = lazy(() =>
   type({

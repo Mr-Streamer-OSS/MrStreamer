@@ -1,4 +1,3 @@
-import { JsonValue } from "@mrstreamer/contracts/json";
 // What the iOS app needs from the shared packages, run as plain functions so the same files run on
 // Hermes in the app and in Node on the workbench. scripts/proof-server.ts runs them in Node, takes
 // the app's report and compares the two: a shared rule proved on iOS gives Node's answer.
@@ -50,8 +49,7 @@ export const groups: readonly {
 ];
 
 /** Reads the JSON text a case serialises, the same data the report will compare. */
-export const plain = (text: string | undefined): Observed =>
-  JsonValue.assert(JSON.parse(text ?? "null"));
+export const plain = (text: string | undefined): Observed => JSON.parse(text ?? "null");
 
 /** What a request came to, without anything that differs per run. */
 export async function outcome(request: () => Promise<Response>): Promise<Observed> {

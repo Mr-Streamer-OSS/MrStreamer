@@ -101,12 +101,12 @@ export type MarkEvent = Extract<ViewingEvent, { readonly series: string }>;
 export type TitleEvent = Exclude<ViewingEvent, ChannelEvent | MarkEvent>;
 
 /** An episode's mark as an account's record keeps it: with the episode it was made on. */
-export interface StoredMark extends EpisodeMark {
+export type StoredMark = EpisodeMark & {
   /** What the series is kept under: see `SeriesIdentity.key`. */
   readonly series: string;
   /** The episode in the series version it was marked in. */
   readonly title: EpisodeTitle;
-}
+};
 
 export type ViewingCommand =
   | {
@@ -135,21 +135,21 @@ export type ViewingCommand =
  * One account's favourites and recently watched channels, by the provider's stream ids: one or
  * more per channel. The service shows them by channel (see ./service.ts).
  */
-export interface ViewingState {
+export type ViewingState = {
   /** In the order they were added, or the order the viewer gave them since. */
   readonly favourites: readonly string[];
   /** Most recent first, at most `RECENT_LIMIT`. */
   readonly recent: readonly string[];
-}
+};
 
 export const emptyState: ViewingState = { favourites: [], recent: [] };
 
 /** A channel in one account's record, by the provider's stream id. */
-export interface StoredChannel {
+export type StoredChannel = {
   /** The account whose record holds it. */
   readonly account: string;
   readonly id: string;
-}
+};
 
 /** An event, and the account whose record it joins. */
 export interface AccountEvent {

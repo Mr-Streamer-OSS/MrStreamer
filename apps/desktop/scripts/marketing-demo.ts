@@ -1,4 +1,4 @@
-import { JsonValue, type Json } from "../../../packages/contracts/src/json.ts";
+import type { Json } from "../../../packages/contracts/src/json.ts";
 // The made-up subscription the marketing captures show, and the public-domain footage it plays.
 // docs/assets/marketing-demo-sources.json names the sources and everything shown: channels,
 // programmes, titles, people and subtitles, all invented. See
@@ -264,7 +264,7 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
     switch (url.searchParams.get("action")) {
       // The account, as the provider knows it.
       case null:
-        return JsonValue.assert(await (await forward(url)).json());
+        return JSON.parse(await (await forward(url)).text());
       case "get_live_categories":
         return manifest.categories.map(categoryRow);
       case "get_live_streams": {
@@ -316,7 +316,7 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
       case "get_series_info":
         return url.searchParams.get("series_id") === String(featured.providerId)
           ? featuredInfo()
-          : JsonValue.assert(await (await forward(url)).json());
+          : JSON.parse(await (await forward(url)).text());
       // No movies: the captures show a series.
       default:
         return [];
@@ -354,7 +354,8 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
   const wrapper = await listen(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://tmdb");
     const answer = await fetch(new URL(url.pathname + url.search, tmdb.url));
-    json(response, about(url, JsonValue.assert(await answer.json())), answer.status);
+    const body: Json = JSON.parse(await answer.text());
+    json(response, about(url, body), answer.status);
   });
 
   return {

@@ -1,4 +1,5 @@
-import { JsonValue } from "@mrstreamer/contracts/json";
+import { JsonValue } from "@mrstreamer/contracts/json-value";
+
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import type { Title } from "@mrstreamer/contracts/ondemand";

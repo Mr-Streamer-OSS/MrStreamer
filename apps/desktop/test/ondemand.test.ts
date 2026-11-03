@@ -78,6 +78,32 @@ async function onDemandApp(options: { titles?: number } = {}) {
 
 // Each test starts the catalogue's worker thread, which takes a moment under a busy suite.
 describe("movies and series", { timeout: 20_000 }, () => {
+  it("reports a plain failure for a malformed catalogue reply", async () => {
+    const dataDir = await tempDir();
+
+    const runtime = runtimeFor(
+      mainLayer({
+        ...testConfig(dataDir),
+        catalogueWorker: () =>
+          new Worker(
+            `
+        const { parentPort } = require("node:worker_threads");
+        parentPort.on("message", ({ id }) => parentPort.postMessage({ id, ok: true, value: "private schema payload" }));
+      `,
+            { eval: true },
+          ),
+      }),
+    );
+
+    const service = await promised(runtime, OnDemand);
+    const subscriptions = await promised(runtime, Subscriptions);
+    const provider = await fakeProvider();
+    const { id } = await subscriptions.add(demoLogin(provider));
+    await expect(service.refresh(id)).rejects.toMatchObject({
+      error: { kind: "unexpected", detail: "Invalid catalogue reply for refresh." },
+    });
+  });
+
   it("fetches both lists on first use and lists them newest first, without adult titles", async () => {
     const { onDemand } = await onDemandApp();
 

@@ -89,7 +89,7 @@ export interface TitleProgress {
  * the series and the episode's numbers, so it holds for every version of the series that
  * subscription lists and for whichever file the provider serves the episode from.
  */
-export interface EpisodeMark {
+export type EpisodeMark = {
   readonly season: number;
   readonly episode: number;
   readonly watched: boolean;
@@ -100,7 +100,7 @@ export interface EpisodeMark {
   readonly at: number;
   /** Names this mark for Undo. A later mark of the series has a higher one. */
   readonly revision: number;
-}
+};
 
 /** How the episodes of a series stand in one subscription. */
 export interface SeriesViewing {

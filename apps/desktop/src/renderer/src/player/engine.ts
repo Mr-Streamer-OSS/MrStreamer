@@ -287,7 +287,8 @@ function mpegtsEngine(
 
   let privateData: ((pid: number, data: Uint8Array, at: number) => void) | null = null;
   // mpegts.js times private data in milliseconds on the timeline it gives the element.
-  player.on(mpegts.Events.PES_PRIVATE_DATA_ARRIVED, (raw) => {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- mpegts supplies untyped packets; PrivatePacket validates raw before use.
+  player.on(mpegts.Events.PES_PRIVATE_DATA_ARRIVED, (raw: unknown) => {
     if (!privateData) return;
 
     const packet = PrivatePacket(raw);

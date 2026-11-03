@@ -1,6 +1,6 @@
 import { preferenceValues } from "./preference-reply.ts";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
-import { JsonValue, type Json, type JsonObject } from "@mrstreamer/contracts/json";
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 // Built-app proof through the actual Settings control, with an isolated profile and loopback only.
 import { watch } from "node:fs";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
@@ -961,7 +961,7 @@ async function usageCount(key: UsageKey): Promise<number> {
         sha256: createHash("sha256").update(bytes).digest("hex"),
         stage: "parse",
       });
-      const parsed = JsonValue.assert(JSON.parse(bytes.toString("utf8")));
+      const parsed: Json = JSON.parse(bytes.toString("utf8"));
 
       if (!record(parsed)) throw new Error("Invalid analytics state.");
       kept = parsed;

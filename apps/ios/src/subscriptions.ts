@@ -1,4 +1,4 @@
-import { JsonValue, type Json } from "@mrstreamer/contracts/json";
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import type { Type } from "arktype";
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
@@ -112,9 +112,12 @@ const DemoValue = lazy(() => type({ version: "1", state: "'active' | 'erasing'" 
 
 /** A bad demo field never invalidates the unchanged personal envelope. */
 export function readRegistry(): RegistryFile | null {
-  const read = JsonValue.assert(readJson(FILE));
+  const read = readJson(FILE);
 
-  if (!read || typeof read !== "object" || Array.isArray(read)) return null;
+  const object = (value: Json): value is JsonObject =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+
+  if (!object(read)) return null;
 
   const {
     version,

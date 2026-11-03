@@ -1,4 +1,4 @@
-import { JsonValue, type Json, type JsonObject } from "../packages/contracts/src/json.ts";
+import type { Json, JsonObject } from "../packages/contracts/src/json.ts";
 // The GitHub side of a Microsoft Store submission: whether the package a release run built carries
 // the Store's identity, whether the Store jobs may run, which release it is for, and whether
 // the package a release run kept is that release's. scripts/store-submission.ts is the Microsoft
@@ -463,7 +463,7 @@ export function isRecord(value: Json | undefined): value is JsonObject {
 
 /** The release file `release` wrote, with the package once `verify` added it. */
 export function readStoreRelease(path: string): StoreRelease {
-  const file = JsonValue.assert(JSON.parse(readFileSync(path, "utf8")));
+  const file: Json = JSON.parse(readFileSync(path, "utf8"));
 
   const text = (from: Json | undefined, key: string) => {
     const value = isRecord(from) ? from[key] : undefined;

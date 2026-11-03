@@ -174,7 +174,7 @@ function* rows<R>(list: readonly unknown[], row: Type<R>): Steps<Type<R>["infer"
 }
 
 /**
- * `json` as `id`'s saved `kind` made under `mapping`, or "invalid": its envelope, its age, then
+ * `head` as `id`'s saved `kind` made under `mapping`, or "invalid": its envelope, its age, then
  * every row of every list. Nothing of it is answered until all have checked.
  */
 function* checked(

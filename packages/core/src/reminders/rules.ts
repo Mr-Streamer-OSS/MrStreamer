@@ -10,7 +10,7 @@ import type { Programme } from "@mrstreamer/contracts/guide";
 import type { ReminderStatus } from "@mrstreamer/contracts/reminders";
 
 /** A reminder as the main process keeps it. */
-export interface KeptReminder {
+export type KeptReminder = {
   readonly id: string;
   readonly subscriptionId: string;
   /** Its channel's id when last found: the lowest of the channel's streams' then. */
@@ -27,7 +27,7 @@ export interface KeptReminder {
   /** The title the guide lists at `start`, as last read. */
   readonly title: string;
   readonly state: KeptState;
-}
+};
 
 /**
  * `pending` until its start, upcoming or changed by its title; `gone` while the guide lists

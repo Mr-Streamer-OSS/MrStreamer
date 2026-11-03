@@ -1,4 +1,5 @@
-import { JsonValue, type Json, type JsonObject } from "@mrstreamer/contracts/json";
+import { JsonValue } from "@mrstreamer/contracts/json-value";
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { type, type Type } from "arktype";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { AppFailure } from "@mrstreamer/contracts/errors";

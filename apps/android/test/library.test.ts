@@ -142,7 +142,7 @@ describe("Android library public behavior", () => {
     expect(chosenVersion(title, { manual: null, requested: nl }).id).toBe(title.id);
     expect(chosenVersion(title, { manual: "removed", remembered: nl }).id).toBe("nl");
     let refused = false;
-    let saved: unknown = {};
+    let saved: Json = {};
 
     const storage = {
       readJson: () => saved,
@@ -277,7 +277,7 @@ it("reuses collection metadata across searches until its revision or language ch
 });
 
 it("ignores unknown preference values without blocking valid choices or erasing them", () => {
-  let saved: unknown;
+  let saved: Json | undefined;
 
   const memory = versionMemory({
     readJson: () => ({ valid: "version", future: 42 }),
@@ -293,7 +293,7 @@ it("ignores unknown preference values without blocking valid choices or erasing 
 });
 
 it("persists and restores the first version choice on a fresh install", () => {
-  let saved: unknown = null;
+  let saved: Json = null;
 
   const storage = {
     readJson: () => saved,
@@ -377,7 +377,7 @@ it("keeps loaded episodes after a failed provider retry", async () => {
 it.each(["throws", "invalid"])(
   "can save after a preferences read %s and then recovers",
   (failure) => {
-    let raw: unknown = failure === "invalid" ? [] : undefined;
+    let raw: Json | undefined = failure === "invalid" ? [] : undefined;
     let writes = 0;
 
     const memory = versionMemory({
