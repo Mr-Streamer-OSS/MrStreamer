@@ -49,6 +49,7 @@ export interface MediaModel {
   enterPip(): Promise<boolean>;
   watch(visible: boolean): void;
   reconcile(): void;
+  admitted(attempt: string): void;
   cancelNext(): void;
   playNext(): void;
   registerNext(resolver: NextEpisodeResolver): () => void;
@@ -76,7 +77,18 @@ const choice = (track: Track): Choice => ({
 function preferred(tracks: readonly Track[], saved: Choice, type: Track["type"]) {
   const candidates = tracks.filter((t) => t.supported && t.type === type);
 
-  if (type === "video") return candidates.find((t) => t.height === saved.height);
+  if (type === "video") {
+    let pool = candidates.filter((t) => saved.height !== null && t.height === saved.height);
+
+    for (const key of ["label", "codec", "bitrate"] as const) {
+      const matches = pool.filter((t) => t[key] === saved[key]);
+
+      if (matches.length) pool = matches;
+    }
+
+    return pool[0];
+  }
+
   const language = candidates.filter((t) => t.language === saved.language);
   const labels = language.filter((t) => t.label === saved.label);
   const pool = labels.length ? labels : language;
@@ -124,11 +136,12 @@ export function mediaModel(
   const confirmations = new Set<Request>();
   let watching = false;
   let cancelled: string | undefined;
+  let admitted: string | undefined;
   let nextSent: string | undefined;
   const restored = new Set<keyof MediaPreferences>();
 
   function cancelNext() {
-    cancelled = attempt;
+    if (timer || ended) cancelled = attempt;
 
     if (timer) clearInterval(timer);
     timer = undefined;
@@ -149,7 +162,7 @@ export function mediaModel(
 
     patch({ next: next ?? null });
 
-    if (now.kind === "playing") {
+    if (now.kind === "playing" && now.attempt === admitted) {
       const signature = `${now.attempt}:${!!next}`;
 
       if (signature !== nextSent) {
@@ -236,7 +249,10 @@ export function mediaModel(
       nextForCurrent();
     }
 
-    if (now.phase === "playing") ended = false;
+    if (now.phase === "playing") {
+      ended = false;
+      cancelled = undefined;
+    }
 
     if (now.phase === "paused" || now.phase === "failed") cancelNext();
 
@@ -276,6 +292,15 @@ export function mediaModel(
     // Saved choices apply once per attempt, by identity, to the first tracks that match them.
     for (const key of ["audio", "text", "quality"] as const) {
       const value = saved[key];
+      const now = owner.state.get();
+
+      if (
+        key === "quality" &&
+        (now.kind !== "playing" ||
+          !now.live ||
+          tracks.filter((t) => t.type === "video" && t.supported).length < 2)
+      )
+        continue;
 
       if (!value || restored.has(key) || pending.has(key)) continue;
 
@@ -298,11 +323,13 @@ export function mediaModel(
     }
   });
   native.addListener("onMedia", (event) => {
-    if (event.attempt === attempt)
+    if (event.attempt === attempt) {
+      if (event.pip) patch({ error: null });
       patch({
         pip: event.pip,
         pipSupported: event.pipSupported ?? native.pipSupported?.() ?? false,
       });
+    }
   });
   native.addListener("onMediaCommand", (event) => {
     if (event.attempt !== attempt) return;
@@ -410,6 +437,10 @@ export function mediaModel(
 
       if (!visible) cancelNext();
       void native.setWatch?.(visible);
+    },
+    admitted(id) {
+      admitted = id;
+      nextForCurrent();
     },
     reconcile() {
       void native.reconcile?.();

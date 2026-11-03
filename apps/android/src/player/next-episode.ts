@@ -1,17 +1,28 @@
+import {
+  nextEpisode as coreNextEpisode,
+  seriesEpisodeOrder,
+  episodeFileVersion,
+} from "@mrstreamer/core/ondemand/details";
 import type { DetailState } from "../library/model.ts";
 import type { EpisodeIntent, NextEpisode } from "./media.ts";
 
 /** Uses the selected Library version's order and exact stream containers. */
 export function nextEpisode(details: DetailState, current: EpisodeIntent): NextEpisode | undefined {
   if (details.value?.kind !== "series") return undefined;
-  const episodes = details.value.seasons.flatMap((season) => season.episodes);
+  const series = details.value;
 
-  const index = episodes.findIndex(
-    (episode) => episode.subscriptionId === current.sourceId && episode.id === current.id,
+  const row = seriesEpisodeOrder(series).find(
+    (episode) =>
+      episode.subscriptionId === current.sourceId &&
+      (episode.id === current.id || episode.versions?.some((version) => version.id === current.id)),
   );
 
-  if (index < 0) return undefined;
-  const episode = episodes[index + 1];
+  if (!row) return undefined;
+  const exact = episodeFileVersion(row, current.id);
+
+  const episode =
+    coreNextEpisode(series, { id: exact.id, season: exact.season, episode: exact.number }) ??
+    undefined;
 
   if (!episode || episode.subscriptionId !== current.sourceId) return undefined;
   const container = details.containers.get(episode.id)?.trim();

@@ -63,6 +63,9 @@ class MediaTest {
       PlayerPip.attach(activity)
       PlayerPip.watch(true); PlayerPip.watch(false)
       assertArrayEquals(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), shadowOf(activity).lastRequestedPermission.requestedPermissions)
+      val first = shadowOf(activity).lastRequestedPermission
+      PlayerPip.watch(true); PlayerPip.watch(false)
+      assertSame(first, shadowOf(activity).lastRequestedPermission)
       assertNotNull(owner.attempt)
     } finally { PlayerPip.detach(activity); owner.stopAll(); activity.finish() }
   }
@@ -95,8 +98,38 @@ class MediaTest {
       assertEquals("expand", owner.attempt)
       activity.inPip = true; PlayerPip.mode(true)
       activity.inPip = false; PlayerPip.mode(false)
+      shadowOf(android.os.Looper.getMainLooper()).idle()
       PlayerPip.stopped(activity)
       assertNull(owner.attempt)
+    } finally { PlayerPip.detach(activity); owner.stopAll(); activity.finish() }
+  }
+
+  @Test fun homeAndPipDoNotRequestNotifications() {
+    val activity = Robolectric.buildActivity(PipActivity::class.java).setup().get()
+    val owner = PlayerHost.owner(activity)
+    try {
+      PlayerPip.attach(activity)
+      owner.admit(Admission("permission-entry", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      PlayerPip.watch(true)
+      PlayerPip.home()
+      PlayerPip.enter()
+      assertNull(shadowOf(activity).lastRequestedPermission)
+    } finally { PlayerPip.detach(activity); owner.stopAll(); PlayerPip.watch(false); activity.finish() }
+  }
+
+  @Test fun forgedPipBroadcastCannotControlPlayback() {
+    val activity = Robolectric.buildActivity(PipActivity::class.java).setup().get()
+    val owner = PlayerHost.owner(activity)
+    try {
+      PlayerPip.attach(activity)
+      owner.admit(Admission("guessable", "https://example.invalid/video.mp4", emptyMap(), "progressive", "title", 0, HoldRef.Source("test")))
+      val view = androidx.media3.ui.PlayerView(activity)
+      owner.attach(view)
+      owner.pauseCurrent()
+      // The unauthenticated Pause broadcast must not resume paused playback.
+      activity.sendBroadcast(android.content.Intent("app.mrstreamer.player.PAUSE").setPackage(activity.packageName).putExtra("attempt", "guessable"))
+      shadowOf(android.os.Looper.getMainLooper()).idle()
+      assertFalse(view.player!!.playWhenReady)
     } finally { PlayerPip.detach(activity); owner.stopAll(); activity.finish() }
   }
 

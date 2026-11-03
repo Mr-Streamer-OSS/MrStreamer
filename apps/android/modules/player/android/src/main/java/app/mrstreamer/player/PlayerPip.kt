@@ -26,8 +26,10 @@ object PlayerPip {
   private var stopped = false
   private var leavingPip = false
   private var permissionAsked = false
+  private val token = java.util.UUID.randomUUID().toString()
   private val receiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+      if (intent.getStringExtra("token") != token) return
       val owner = PlayerHost.existing() ?: return
       if (intent.getStringExtra("attempt") != owner.attempt) return
       when (intent.action) {
@@ -56,18 +58,19 @@ object PlayerPip {
     val host = activity.get() ?: return
     if (Build.VERSION.SDK_INT >= 33 && !permissionAsked && PlayerHost.existing()?.attempt != null &&
       host.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-      permissionAsked = true
-      host.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 501)
+      try {
+        host.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 501)
+        permissionAsked = true
+      } catch (_: IllegalStateException) { }
+        catch (_: SecurityException) { }
     }
   }
   fun enter(): Boolean {
     val host = activity.get() ?: return false
     if (!supported(host) || !watch || PlayerHost.existing()?.attempt == null) return false
-    requestNotifications()
     return try { host.enterPictureInPictureMode(params(host)) } catch (_: IllegalStateException) { false }
   }
   fun home() {
-    requestNotifications()
     if (Build.VERSION.SDK_INT < 31 && watch && PlayerHost.existing()?.isPlaying == true) enter()
   }
   fun mode(inPip: Boolean) {
@@ -79,7 +82,6 @@ object PlayerPip {
       android.os.Handler(android.os.Looper.getMainLooper()).post {
         val current = activity.get()
         if (leavingPip && current != null && dismissed(stopped, false, current.isChangingConfigurations, locked(current))) PlayerHost.existing()?.stopAll()
-        leavingPip = false
       }
     }
     val host = activity.get()
@@ -104,7 +106,7 @@ object PlayerPip {
   private fun params(host: Activity): PictureInPictureParams {
     val owner = PlayerHost.existing()
     fun action(name: String, label: String, icon: Int, request: Int): RemoteAction {
-      val intent = Intent("app.mrstreamer.player.$name").setPackage(host.packageName).putExtra("attempt", owner?.attempt)
+      val intent = Intent("app.mrstreamer.player.$name").setPackage(host.packageName).putExtra("attempt", owner?.attempt).putExtra("token", token)
       return RemoteAction(Icon.createWithResource(host, icon), label, label,
         PendingIntent.getBroadcast(host, request, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
     }

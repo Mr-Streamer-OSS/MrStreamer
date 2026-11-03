@@ -119,6 +119,54 @@ const flush = async () => {
 afterEach(() => vi.useRealTimers());
 
 describe("Android media public contract", () => {
+  it.each(["pause", "leave", "seek", "register"])(
+    "counts down after %s before the episode ends",
+    async (action) => {
+      vi.useFakeTimers();
+      const f = setup();
+      f.owner.media.registerNext(() => next);
+      f.owner.media.watch(true);
+      f.owner.play(episode);
+      await flush();
+      f.observe("playing");
+
+      if (action === "pause") {
+        await f.owner.pause();
+        f.observe("paused");
+        await f.owner.resume();
+      }
+
+      if (action === "leave") {
+        f.owner.media.watch(false);
+        f.owner.media.watch(true);
+      }
+
+      if (action === "seek") await f.owner.seek(20);
+
+      if (action === "register") f.owner.media.registerNext(() => next);
+      f.observe("playing");
+      f.observe("ended");
+      expect(f.owner.media.state.get().remaining).toBe(10);
+    },
+  );
+  it("sends next availability only after admission and once per value", async () => {
+    const f = setup();
+    f.owner.media.registerNext(() => next);
+    const attempt = f.owner.play(episode);
+    expect(f.native.setNextAvailable).not.toHaveBeenCalled();
+    await flush();
+    expect(f.native.setNextAvailable).toHaveBeenCalledExactlyOnceWith(attempt, true);
+    f.observe("playing");
+    expect(f.native.setNextAvailable).toHaveBeenCalledTimes(1);
+  });
+  it("dismisses a media error when PiP starts", async () => {
+    const f = setup();
+    const attempt = f.owner.play(episode);
+    await flush();
+    await f.owner.media.audio("missing");
+    f.emit("onMedia", { attempt, pip: true });
+    expect(f.owner.media.state.get().error).toBeNull();
+  });
   it("ticks and saves audio only after a supported native selection, and restores its identity on another source", async () => {
     const f = setup();
     f.owner.media.watch(true);
@@ -211,8 +259,25 @@ describe("Android media public contract", () => {
     ]);
     f.owner.play({ ...live, channelId: "two" });
     await flush();
-    f.tracks([{ ...video, id: "new", codec: "video/hevc", bitrate: 4000000 }]);
+    f.tracks([
+      { ...video, id: "new", codec: "video/hevc", bitrate: 4000000 },
+      { ...video, id: "low", height: 720 },
+    ]);
     expect(f.native.setQuality).toHaveBeenLastCalledWith(expect.any(String), "new");
+    vi.mocked(f.native.setQuality).mockClear();
+    f.owner.play(episode);
+    await flush();
+    f.tracks([video, { ...video, id: "low", height: 720 }]);
+    expect(f.native.setQuality).not.toHaveBeenCalled();
+    f.owner.play(live);
+    await flush();
+    f.tracks([video]);
+    expect(f.native.setQuality).not.toHaveBeenCalled();
+    f.tracks([
+      { ...video, id: "wrong", label: "Other" },
+      { ...video, id: "exact" },
+    ]);
+    expect(f.native.setQuality).toHaveBeenLastCalledWith(expect.any(String), "exact");
   });
 
   it("retains an audio save while a subtitle selection is also awaiting confirmation", async () => {

@@ -266,14 +266,19 @@ export function playerOwner(
           if (resolving !== controller) return;
           resolving = null;
           admitted.set(attempt, admittedOf(intent, request.startMs));
-          native.admit({ ...request, attempt, title: intent.title }).catch((cause: unknown) => {
-            // Whatever the native player opened before it failed is unknown: say so.
-            admitted
-              .get(attempt)
-              ?.settle({ attempt, hold: holdOf(intent), outcome: "unconfirmed" });
-            admitted.delete(attempt);
-            failed(cause);
-          });
+          native
+            .admit({ ...request, attempt, title: intent.title })
+            .then(() => {
+              if (playing()?.attempt === attempt) owner.media.admitted(attempt);
+            })
+            .catch((cause: unknown) => {
+              // Whatever the native player opened before it failed is unknown: say so.
+              admitted
+                .get(attempt)
+                ?.settle({ attempt, hold: holdOf(intent), outcome: "unconfirmed" });
+              admitted.delete(attempt);
+              failed(cause);
+            });
         },
         (cause: unknown) => {
           if (resolving !== controller) return;

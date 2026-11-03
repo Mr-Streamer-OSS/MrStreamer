@@ -11,7 +11,7 @@ PiP toggles play/pause and, for non-live, ten-second jumps. Home entry is armed 
 and playing. Dismissal stops the owner; expansion keeps Watch. Activity recreation reattaches
 to the process owner. Playback is not restored after process death. Android draws system
 controls and may show a subset of the session actions. Android 13+ notification permission is requested
-when playback first leaves Watch; denial keeps playback running without a shade notification.
+only on the first in-app departure from Watch, never on Home or PiP entry; denial keeps playback running without a shade notification.
 Source replacement retains the session service; final stop removes it. Refused background
 service starts leave playback intact.
 
@@ -28,13 +28,16 @@ in PiP.
 
 `player.media.registerNext` takes a synchronous resolver receiving the full current episode
 PlayIntent, returning `{ intent, label }` or undefined. Its unsubscribe removes the resolver.
-`apps/android/src/player/next-episode.ts` adapts Library DetailState in season/episode order,
+`apps/android/src/player/next-episode.ts` adapts Library DetailState using the core series order and exact episode version identity,
 requiring an exact container. Library does not expose its last-read details, so this function
 is exported for its future caller; no production resolver is registered. No result means no Next action or countdown. Ended episodes count down using
 the shared ten-second default and a deadline that catches up after suspended timers.
-Only a visible Watch starts a countdown; cancellation remains attached to its attempt. Pause, seek, Back, Close, source replacement and resolver
-registration cancel. Cancel retains manual Play next; a new source resolves its own next item.
+Only a visible Watch starts a countdown. Pause, seek, Back, Close, source replacement and resolver
+registration cancel a running countdown or ended state; resuming playback clears cancellation.
+Leaving Watch before the end prevents a late ended event from starting a countdown. Cancel retains manual Play next; a new source resolves its own next item.
 Credentials enter only through the existing source resolver.
+
+Play from start is not offered.
 
 Fake-native tests cover public state, saved preferences and countdown cancellation. JVM tests
 cover track mapping and command limits. These and compilation do not prove decoding, sound,
