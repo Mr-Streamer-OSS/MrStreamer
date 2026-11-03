@@ -59,26 +59,27 @@ function downloadStatus({
 /**
  * The tab header's glyph in its fixed slot, with no text: the circle is the ring of how far the
  * transfer is, dotted while its total is unknown, and a dim track while waiting, queued or
- * paused; retries left add a badge. It changes only when the status does.
+ * paused; retries left add a badge. It changes only when the status does. While a ring shows, the
+ * same symbol draws only its arrow (palette: arrow, then circle), so the arrow keeps the idle
+ * glyph's size and weight; expo-symbols scales a symbol's strokes with its box.
  */
 function HeaderGlyph({ status }: { status: ReturnType<typeof downloadStatus> }) {
   const mark = status?.mark;
-  if (typeof mark === "number")
-    return (
-      <>
-        <Ring done={mark} size={22} stroke={3} />
-        <View style={styles.over}>
-          <SymbolView name="arrow.down" size={13} tintColor="#FFFFFF" weight="semibold" />
-        </View>
-      </>
-    );
+  const ring = typeof mark === "number";
   return (
     <>
+      {ring ? (
+        <View style={styles.over}>
+          <Ring done={mark} size={22} stroke={3} />
+        </View>
+      ) : null}
       <SymbolView
         name={mark === "unknown" ? "arrow.down.circle.dotted" : "arrow.down.circle"}
         size={26}
-        tintColor="#FFFFFF"
         weight="semibold"
+        {...(ring
+          ? { type: "palette", colors: ["#FFFFFF", "transparent"] }
+          : { tintColor: "#FFFFFF" })}
       />
       {mark === "failed" ? (
         <View style={styles.badge}>

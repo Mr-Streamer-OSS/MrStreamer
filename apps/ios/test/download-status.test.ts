@@ -167,6 +167,7 @@ describe("the shared Downloads action", () => {
       for (const reported of [
         transferring(499, 1000),
         item({ kind: "paused", received: 0, size: null }),
+        item({ kind: "failed", failure: { kind: "disk-full", needed: null } }),
         item({ kind: "queued" }),
       ]) {
         publish([reported]);
