@@ -10,6 +10,8 @@
     "apps/ios/ios/",
     "apps/ios/build/",
     "apps/ios/.expo/",
+    "apps/android/android/",
+    "apps/android/.expo/",
     "apps/marketing/public/generated/",
     "apps/marketing/.vercel/"
   ],

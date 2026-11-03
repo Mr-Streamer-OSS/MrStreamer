@@ -1,0 +1,37 @@
+{
+  "name": "mrstreamer-android",
+  "private": true,
+  "type": "module",
+  "description": "The Android app: React Native on Hermes, sharing contracts and portable rules with the desktop and iOS apps.",
+  "license": "GPL-3.0-only",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "58.0.14",
+    "@expo/vector-icons": "15.1.1",
+    "@formatjs/intl-displaynames": "7.3.15",
+    "@formatjs/intl-getcanonicallocales": "3.2.12",
+    "@formatjs/intl-listformat": "8.3.15",
+    "@formatjs/intl-locale": "5.3.12",
+    "@formatjs/intl-numberformat": "9.4.3",
+    "@formatjs/intl-pluralrules": "6.3.15",
+    "@mrstreamer/contracts": "link:../../packages/contracts",
+    "@mrstreamer/core": "link:../../packages/core",
+    "arktype": "2.2.9",
+    "core-js": "3.50.0",
+    "effect": "4.0.0-rc.118",
+    "expo": "58.0.9",
+    "expo-build-properties": "58.0.10",
+    "expo-file-system": "58.0.9",
+    "expo-system-ui": "58.0.5",
+    "react": "19.3.0",
+    "react-native": "0.88.0-rc.4",
+    "react-native-safe-area-context": "5.9.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0"
+  }
+}

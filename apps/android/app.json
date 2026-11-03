@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Mr. Streamer",
+    "slug": "mrstreamer-android",
+    "scheme": "mrstreamer",
+    "version": "0.1.0",
+    "platforms": ["android"],
+    "orientation": "default",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#000000",
+    "icon": "./assets/icon.png",
+    "android": {
+      "package": "app.mrstreamer.player",
+      "versionCode": 1,
+      "allowBackup": false,
+      "permissions": ["android.permission.INTERNET"],
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26,
+            "compileSdkVersion": 37,
+            "targetSdkVersion": 36,
+            "buildArchs": ["arm64-v8a", "x86_64"],
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ]
+  }
+}
