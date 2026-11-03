@@ -46,7 +46,7 @@
         "height": 803
       },
       "headlines": {
-        "en-GB": "The whole guide.",
+        "en-US": "The whole guide.",
         "nl-NL": "De hele gids.",
         "fr-FR": "Tout le guide.",
         "de-DE": "Der ganze Programmführer.",
@@ -77,7 +77,7 @@
         "height": 495
       },
       "headlines": {
-        "en-GB": "Unfold the guide.",
+        "en-US": "Unfold the guide.",
         "nl-NL": "Vouw de gids open.",
         "fr-FR": "Dépliez le guide.",
         "de-DE": "Den Programmführer entfalten.",
@@ -108,7 +108,7 @@
         "height": 502
       },
       "headlines": {
-        "en-GB": "Every channel, folded.",
+        "en-US": "Every channel, folded.",
         "nl-NL": "Alle zenders, dichtgevouwen.",
         "fr-FR": "Toutes les chaînes, repliées.",
         "de-DE": "Alle Sender, zusammengeklappt.",

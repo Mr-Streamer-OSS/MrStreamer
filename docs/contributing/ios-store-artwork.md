@@ -31,7 +31,7 @@ Read independently on **3 November 2026**:
   latest OS with full network, Wi-Fi and battery indicators. Secure media rights.
 
 Frame use requires an inspected official pose, explicit cutout geometry, a source
-URL, a terms source and a local licence record. No Apple bezel DMG was downloaded
+URL, an HTTPS terms source and a non-empty local licence record. No Apple bezel DMG was downloaded
 or inspected for this implementation. A supplied frame is scaled uniformly,
 never rotated or cropped; the screen fits its cutout. The frameless fallback is a
 square-corner capture with a 1-point #2C2C2E border, without simulated hardware.
@@ -78,7 +78,8 @@ it never crops it or accepts smaller inputs for upscaling.
 Install workspace dependencies with `pnpm install --frozen-lockfile`. iOS keeps
 its own install; this Node tool resolves Sharp directly from the desktop install,
 without adding an iOS dependency. Put inputs, optional frames, licence records and
-exports in this checkout's gitignored `.local/`. Relative input paths resolve
+exports in this checkout's gitignored `.local/`, creating it first with
+`mkdir -p .local`. Relative input paths resolve
 beside the input JSON. Create one input file per language, with all three slots:
 
 ```json
@@ -120,15 +121,21 @@ capture record, replacing every example value with the inspected asset's facts:
 permitted use and pose in the licence record. Keep raw frames local; do not commit
 or redistribute them. The PNG must have transparency and the cutout's aspect
 ratio must match the capture within 0.5% for integer-pixel rounding. The generator
-does not paint a bezel or repair the supplied frame's screen opening.
+requires a transparent opening, except within a 5% inset at each rounded
+corner. It does not paint a bezel or repair the supplied frame's screen opening.
+Captures and frames must be static PNGs; animated PNGs are rejected.
 
 ```sh
 node apps/ios/scripts/store-artwork.ts \
-  --input .local/store-inputs/en-GB.json \
-  --output .local/store-candidates-en-GB --locale en-GB
+  --input .local/store-inputs/en-US.json \
+  --output .local/store-candidates-en-US --locale en-US
 ```
 
-Supported locale arguments: `en-GB`, `nl-NL`, `fr-FR`, `de-DE`, `es-ES`.
+Unknown input keys and slot IDs are rejected, including medium iPhone inputs.
+Capture filenames in the manifest are relative to the input JSON; frame records
+contain only source/terms URLs, cutout geometry, hashes and native size.
+
+Supported locale arguments: `en-US`, `nl-NL`, `fr-FR`, `de-DE`, `es-ES`.
 The output parent must already exist and the output directory must be new.
 Validation and rendering of every slot finish before that directory is created.
 A failed write raises an error; remove only that incomplete candidate directory
@@ -137,7 +144,8 @@ before retrying. Existing candidates are never overwritten.
 Each batch contains three opaque RGB PNGs and `manifest.json`, recording output
 hashes, source capture hashes and provenance, frame source/terms and licence hash
 (or `frameless`), layout, screen placement, translated headline and its point
-size, input JSON hash, Inter hash/licence and Sharp/libvips versions. Keep the input JSON and raw captures
+size, input JSON hash, generator source SHA-256, Node version, Inter hash/licence and
+Sharp/libvips versions. Keep the input JSON and raw captures
 beside the manifest for reproduction. Rendering libraries can change pixels;
 review hashes and full-size output after regeneration.
 

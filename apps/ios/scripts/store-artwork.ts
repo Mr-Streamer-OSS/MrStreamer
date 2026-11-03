@@ -11,7 +11,6 @@ import sharp, {
 import spec from "../assets/store/spec.json" with { type: "json" };
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
-const local = await realpath(resolve(root, ".local"));
 const fontPath = resolve(root, "apps/desktop/assets/brand/fonts/Inter.ttf");
 const hash = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
@@ -19,20 +18,37 @@ const { values } = parseArgs({
   options: {
     input: { type: "string" },
     output: { type: "string" },
-    locale: { type: "string", default: "en-GB" },
+    locale: { type: "string", default: "en-US" },
   },
 });
 
 if (!values.input || !values.output) {
   throw new Error(
-    "Usage: node apps/ios/scripts/store-artwork.ts --input .local/inputs.json --output .local/store-candidates [--locale en-GB]",
+    "Usage: node apps/ios/scripts/store-artwork.ts --input .local/inputs.json --output .local/store-candidates [--locale en-US]",
   );
 }
 
 const locale = values.locale;
 
-if (!Object.hasOwn(spec.slots[0]!.headlines, locale))
+if (!spec.slots.every((slot) => Object.hasOwn(slot.headlines, locale)))
   throw new Error(`Unsupported locale: ${locale}`);
+
+let local: string;
+
+try {
+  local = await realpath(resolve(root, ".local"));
+} catch (cause) {
+  throw new Error(
+    "Create this worktree's .local/ directory and put capture inputs there before running the generator (mkdir -p .local).",
+    { cause },
+  );
+}
+
+/** Reject unrecognised metadata rather than copying operator notes into exports. */
+function knownKeys(value: Record<string, unknown>, keys: readonly string[], label: string) {
+  for (const key of Object.keys(value))
+    if (!keys.includes(key)) throw new Error(`${label}: unknown key ${key}`);
+}
 
 /** JSON is untrusted: require objects and named values before using any capture metadata. */
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -72,7 +88,16 @@ async function inputFile(path: string) {
 
 const input = await inputFile(resolve(values.input));
 const config = object(JSON.parse(input.bytes.toString()), "input");
+
+knownKeys(config, ["slots"], "input");
+
 const slots = object(config.slots, "slots");
+
+for (const id of Object.keys(slots)) {
+  if (!spec.slots.some((slot) => slot.id === id))
+    throw new Error(`Unknown slot: ${id}; the medium iPhone slot is outside this generator`);
+}
+
 const output = insideLocal(resolve(values.output));
 
 // Resolve the parent to prevent a symlink from redirecting writes out of this worktree.
@@ -167,7 +192,16 @@ async function fitTitle(text: string, slot: Slot, width: number) {
 }
 
 /** A single-page PNG without an EXIF rotation, so its pixels are what composition sees. */
-function uprightPng(info: Metadata) {
+function uprightPng(info: Metadata, bytes: Buffer) {
+  // Sharp can report no pages for APNG. Walk PNG chunks, not arbitrary compressed bytes.
+  if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    for (let offset = 8; offset + 12 <= bytes.length;) {
+      if (bytes.toString("ascii", offset + 4, offset + 8) === "acTL")
+        throw new Error("animated PNG inputs are not supported");
+      offset += bytes.readUInt32BE(offset) + 12;
+    }
+  }
+
   return info.format === "png" && (info.pages || 1) === 1 && (info.orientation || 1) === 1;
 }
 
@@ -177,21 +211,30 @@ function uprightPng(info: Metadata) {
  */
 async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
   const supplied = object(value, "frame");
+  knownKeys(supplied, ["file", "source", "termsSource", "licenceFile", "cutout"], "frame");
 
-  if (!string(supplied.source, "frame.source").startsWith("https://developer.apple.com/"))
+  const frameSource = string(supplied.source, "frame.source");
+
+  if (!frameSource.startsWith("https://developer.apple.com/"))
     throw new Error("frame.source must be an Apple Developer URL");
-  string(supplied.termsSource, "frame.termsSource");
+  const termsSource = string(supplied.termsSource, "frame.termsSource");
+
+  if (!URL.canParse(termsSource) || new URL(termsSource).protocol !== "https:")
+    throw new Error("frame.termsSource must be an https URL");
 
   const licence = await inputFile(
     resolve(dirname(input.file), string(supplied.licenceFile, "frame.licenceFile")),
   );
 
+  if (!licence.bytes.toString("utf8").trim()) throw new Error("frame licence must be non-empty");
+
   const image = await inputFile(resolve(dirname(input.file), string(supplied.file, "frame.file")));
   const info = await sharp(image.bytes).metadata();
 
-  if (!uprightPng(info) || !info.hasAlpha || !info.width || !info.height)
+  if (!uprightPng(info, image.bytes) || !info.hasAlpha || !info.width || !info.height)
     throw new Error("frame must be an upright transparent PNG");
   const cutout = object(supplied.cutout, "frame.cutout");
+  knownKeys(cutout, ["left", "top", "width", "height"], "frame.cutout");
   const left = integer(cutout.left, "cutout.left");
   const top = integer(cutout.top, "cutout.top");
   const width = integer(cutout.width, "cutout.width", 1);
@@ -205,6 +248,25 @@ async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
     throw new Error(
       "frame cutout must fit the frame and match the capture aspect ratio without rotation",
     );
+
+  // Permit rounded corners within 5% of the opening's shorter side. Every other
+  // opening pixel, including its centre and straight edges, must reveal the capture.
+  const inset = Math.floor(Math.min(width, height) * 0.05);
+
+  const alpha = await sharp(image.bytes)
+    .extract({ left, top, width, height })
+    .extractChannel("alpha")
+    .raw()
+    .toBuffer();
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const corner = (x < inset || x >= width - inset) && (y < inset || y >= height - inset);
+
+      if (!corner && alpha[y * width + x] !== 0)
+        throw new Error("frame cutout must be transparent outside the rounded corner inset");
+    }
+  }
 
   const resized = await sharp(image.bytes)
     .resize({ ...box, fit: "inside", withoutEnlargement: true })
@@ -249,7 +311,9 @@ async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
     height: resized.info.height,
     screenGeometry,
     frame: {
-      ...supplied,
+      source: frameSource,
+      termsSource,
+      cutout: { left, top, width, height },
       sha256: hash(image.bytes),
       licenceSha256: hash(licence.bytes),
       nativeWidth: info.width,
@@ -299,12 +363,17 @@ async function frameless(slot: Slot, capture: Buffer, box: Box) {
 
 for (const slot of spec.slots) {
   const capture = object(slots[slot.id], `${slot.id} capture`);
+  knownKeys(capture, ["file", "sha256", "provenance", "frame"], "capture");
   const provenance = object(capture.provenance, `${slot.id} provenance`);
+  knownKeys(provenance, ["appCommit", "device", "os", "provider", "capturedAt"], "provenance");
 
-  if (!/^[a-f0-9]{40}$/.test(string(provenance.appCommit, "provenance.appCommit")))
+  const appCommit = string(provenance.appCommit, "provenance.appCommit");
+
+  if (!/^[a-f0-9]{40}$/.test(appCommit))
     throw new Error("provenance.appCommit must be a full Git SHA");
-  string(provenance.device, "provenance.device");
-  string(provenance.os, "provenance.os");
+  const device = string(provenance.device, "provenance.device");
+  const os = string(provenance.os, "provenance.os");
+  const provider = string(provenance.provider, "provenance.provider");
   const capturedAt = string(provenance.capturedAt, "provenance.capturedAt");
 
   if (
@@ -313,7 +382,7 @@ for (const slot of spec.slots) {
   )
     throw new Error("provenance.capturedAt must be an ISO timestamp with timezone");
 
-  if (provenance.provider !== "apps/ios/scripts/marketing-fixture.ts")
+  if (provider !== "apps/ios/scripts/marketing-fixture.ts")
     throw new Error("provenance.provider must name apps/ios/scripts/marketing-fixture.ts");
 
   const source = await inputFile(
@@ -324,7 +393,11 @@ for (const slot of spec.slots) {
     throw new Error(`${slot.id}: capture SHA-256 mismatch`);
   const metadata = await sharp(source.bytes).metadata();
 
-  if (metadata.width !== slot.width || metadata.height !== slot.height || !uprightPng(metadata)) {
+  if (
+    metadata.width !== slot.width ||
+    metadata.height !== slot.height ||
+    !uprightPng(metadata, source.bytes)
+  ) {
     throw new Error(
       `${slot.id}: native capture must be ${slot.width}x${slot.height}, single-page upright PNG`,
     );
@@ -396,7 +469,17 @@ for (const slot of spec.slots) {
     alpha: false,
     bytes: bytes.length,
     sha256: hash(bytes),
-    capture,
+    capture: {
+      file: relative(dirname(input.file), source.file),
+      sha256: hash(source.bytes),
+      provenance: {
+        appCommit,
+        device,
+        os,
+        provider,
+        capturedAt,
+      },
+    },
     frame,
     layout: slot,
     geometry,
@@ -423,6 +506,8 @@ await writeFile(
       spec,
       sources: {
         inputSha256: hash(input.bytes),
+        generatorSha256: hash(await readFile(fileURLToPath(import.meta.url))),
+        node: process.version,
         font: {
           file: relative(root, fontPath),
           sha256: hash(font),
