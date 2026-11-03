@@ -1407,12 +1407,16 @@ export const en = {
   "Every connection is in use.": "Every connection is in use.",
   "Uses 1 connection. {used} of {limit} in use now.":
     "Uses 1 connection. {used} of {limit} in use now.",
+  "Shares the connection playing here.": "Shares the connection playing here.",
   "Ends 2 min after the guide time.": "Ends 2 min after the guide time.",
   "Stop playing and record": "Stop playing and record",
   "Start recording": "Start recording",
   "A recording uses this subscription's connection. Stop it in Recordings to watch.":
     "A recording uses this subscription's connection. Stop it in Recordings to watch.",
   "Stop recording {title}": "Stop recording {title}",
+  "Stop recording": "Stop recording",
+  "{channel} · to {time}": "{channel} · to {time}",
+  "Quality stays fixed while this records.": "Quality stays fixed while this records.",
   "The provider refused the stream. Another device may be using your connection.":
     "The provider refused the stream. Another device may be using your connection.",
   "The channel has no stream right now.": "The channel has no stream right now.",

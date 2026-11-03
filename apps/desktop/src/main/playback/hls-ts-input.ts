@@ -3,7 +3,7 @@
 import type { StreamFailure } from "@mrstreamer/contracts/playback";
 import { createInspector, type StreamLayout } from "./inspect.ts";
 
-const PLAYLIST_BYTES = 4 * 1024 * 1024;
+export const PLAYLIST_BYTES = 4 * 1024 * 1024;
 const PREFIX_BYTES = 2 * 1024 * 1024;
 const SEGMENT_BYTES = 32 * 1024 * 1024;
 const SEGMENTS = 10_000;
@@ -186,6 +186,61 @@ function media(text: string, base: string): Media {
   return { segments, target, ended: /^#EXT-X-ENDLIST\s*$/m.test(text) };
 }
 
+/** A multivariant playlist's variant: its media playlist, and what it declares of it. */
+export interface Variant {
+  readonly address: string;
+  readonly height: number;
+  readonly bandwidth: number;
+  /**
+   * Whether this reader takes it: at most 1080 lines, its sound in its own segments rather than
+   * a separate rendition, and no session key in the playlist.
+   */
+  readonly recordable: boolean;
+  /** Whether it has subtitles in a rendition of their own, which this reader leaves out. */
+  readonly subtitles: boolean;
+}
+
+/** The variants of the multivariant playlist `text`, read from `base`, in its order. */
+export function variantsOf(text: string, base: string): readonly Variant[] {
+  const lines = text.split(/\r?\n/).map((line) => line.trim());
+  const renditions = lines
+    .filter((line) => line.startsWith("#EXT-X-MEDIA:"))
+    .map((line) => attributes(line.slice(13)));
+  const keyed = /^#EXT-X-SESSION-KEY:/m.test(text);
+  return lines.flatMap((line, index) => {
+    if (!line.startsWith("#EXT-X-STREAM-INF:")) return [];
+    const attrs = attributes(line.slice(18));
+    const uri = lines[index + 1];
+    if (!uri || uri.startsWith("#")) malformed();
+    const height = Number(attrs.get("RESOLUTION")?.split("x")[1]) || 0;
+    const separate = (type: string, group: string | undefined) =>
+      renditions.some((r) => r.get("TYPE") === type && r.has("URI") && r.get("GROUP-ID") === group);
+    return [
+      {
+        address: addressOf(uri, base),
+        height,
+        bandwidth: Number(attrs.get("BANDWIDTH")) || Infinity,
+        recordable: height <= 1080 && !separate("AUDIO", attrs.get("AUDIO")) && !keyed,
+        subtitles: separate("SUBTITLES", attrs.get("SUBTITLES")),
+      },
+    ];
+  });
+}
+
+/**
+ * The media playlist `text` is, read from `base`, when it names its clear segments itself as this
+ * reader takes them; null for a multivariant playlist, any other, and what is no playlist.
+ */
+export function clearMedia(text: string, base: string): Media | null {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("#EXTM3U") || /^#EXT-X-STREAM-INF:/m.test(trimmed)) return null;
+  try {
+    return media(trimmed, base);
+  } catch {
+    return null;
+  }
+}
+
 /** Resolve one media rendition and inspect its first segment without starting a second reader. */
 export async function openHlsTsInput(
   root: string,
@@ -207,25 +262,7 @@ export async function openHlsTsInput(
     selected = rootAnswer.url || selected;
     let text = await playlist(rootAnswer, lifetime);
     if (/^#EXT-X-STREAM-INF:/m.test(text)) {
-      const lines = text.split(/\r?\n/).map((line) => line.trim());
-      const renditions = lines
-        .filter((line) => line.startsWith("#EXT-X-MEDIA:"))
-        .map((line) => attributes(line.slice(13)));
-      const variants = lines.flatMap((line, index) => {
-        if (!line.startsWith("#EXT-X-STREAM-INF:")) return [];
-        const attrs = attributes(line.slice(18));
-        const uri = lines[index + 1];
-        if (!uri || uri.startsWith("#")) malformed();
-        const height = Number(attrs.get("RESOLUTION")?.split("x")[1]) || 0;
-        return [
-          {
-            address: addressOf(uri, selected),
-            attrs,
-            height,
-            bandwidth: Number(attrs.get("BANDWIDTH")) || Infinity,
-          },
-        ];
-      });
+      const variants = variantsOf(text, selected);
       const eligible = variants.filter((v) => v.height <= 1080);
       const chosen =
         eligible.find((v) => v.address === preferred) ??
@@ -233,17 +270,7 @@ export async function openHlsTsInput(
           (a, b) =>
             b.height - a.height || a.bandwidth - b.bandwidth || a.address.localeCompare(b.address),
         )[0];
-      if (!chosen) throw hlsSubsetFailure();
-      if (
-        renditions.some(
-          (r) =>
-            r.get("TYPE") === "AUDIO" &&
-            r.has("URI") &&
-            r.get("GROUP-ID") === chosen.attrs.get("AUDIO"),
-        )
-      )
-        throw hlsSubsetFailure();
-      if (/^#EXT-X-SESSION-KEY:/m.test(text)) throw hlsSubsetFailure();
+      if (!chosen?.recordable) throw hlsSubsetFailure();
       selected = chosen.address;
       const mediaAnswer = await open(selected, lifetime);
       selected = mediaAnswer.url || selected;

@@ -42,7 +42,22 @@ export function recordingHandlers({
 }): HandlersFor<"recordings"> {
   return {
     "recordings.list": () => recordings.list,
-    "recordings.connections": ({ subscriptionId }) => recordings.connections(subscriptionId),
+    "recordings.connections": ({ subscriptionId, channel: named }) =>
+      Effect.gen(function* () {
+        if (!named || named.subscriptionId !== subscriptionId)
+          return yield* recordings.connections(subscriptionId);
+        // A channel that can't be looked up still gets the count, without sharing.
+        const of = yield* library.channel(named).pipe(
+          Effect.flatMap((channel) =>
+            Effect.map(streamsOf(settings, channel, undefined), (variants) => ({
+              channel: channel.id,
+              variants,
+            })),
+          ),
+          Effect.orElseSucceed(() => undefined),
+        );
+        return yield* recordings.connections(subscriptionId, of);
+      }),
     "recordings.start": ({ channel: named, variant, stop, stopPlaying }) =>
       Effect.gen(function* () {
         const channel = yield* library.channel(named);

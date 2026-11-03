@@ -285,8 +285,11 @@ export const ipcInputs = {
   "reminders.dismiss": () => type({ id: "string > 0" }),
   "profiles.active": none,
   "recordings.list": none,
-  /** What holds a subscription's connections now, as Record shows before it starts. */
-  "recordings.connections": () => type({ subscriptionId: "string > 0" }),
+  /**
+   * What holds a subscription's connections now, as Record shows before it starts, and with
+   * `channel`, whether recording it now would share what plays of it.
+   */
+  "recordings.connections": () => type({ subscriptionId: "string > 0", "channel?": owned() }),
   /**
    * Records the channel from now until `stop`, through `variant`, else the stream chosen for it
    * before or Auto's, as `playback.open` picks. `stopPlaying` first stops what plays of its
@@ -1070,6 +1073,12 @@ export interface IpcEvents {
    * channel was found in its pictures. Read them again to know which.
    */
   "playback.tracksChanged": { readonly sessionId: string };
+  /**
+   * While a recording shares a channel session's HLS stream, the player holds one quality: the
+   * variant whose playlist address is `variant`, as the session's multivariant playlist names
+   * it. Null once the player picks its quality itself again.
+   */
+  "playback.fixed": { readonly sessionId: string; readonly variant: string | null };
   /** Where playback goes changed, or what the receiver plays did, or the receivers found. */
   "output.changed": OutputStatus;
   /**

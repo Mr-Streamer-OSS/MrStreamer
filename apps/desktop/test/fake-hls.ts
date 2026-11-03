@@ -2,7 +2,28 @@
 import { createServer } from "node:http";
 import { fixture } from "./fake-provider.ts";
 
-export async function startFakeHls(options: { readonly realtime?: boolean } = {}) {
+export async function startFakeHls(
+  options: {
+    /** Each segment is sent in parts over six seconds, as a provider sends at its rate. */
+    readonly realtime?: boolean;
+    /** Or over this many milliseconds. */
+    readonly deliveryMs?: number;
+    /**
+     * Its playlists go on without end, a segment every `segmentMs` (3000 unless given), listing
+     * the last four, each after a discontinuity.
+     */
+    readonly live?: { readonly segmentMs?: number };
+    /** A playlist's address sends on to the same one under a token, as a panel's session. */
+    readonly tokens?: boolean;
+    /**
+     * A channel "qualities" too, whose multivariant playlist offers H.264 in these of 1080, 720
+     * and 2160 lines, as `qualities-hd`, `qualities-sd` and `qualities-uhd`: 720's sound is MP3,
+     * the others' AAC.
+     */
+    readonly qualities?: readonly ("hd" | "sd" | "uhd")[];
+  } = {},
+) {
+  const began = Date.now();
   let origin = "";
   let active = 0;
   let peak = 0;
@@ -19,20 +40,46 @@ export async function startFakeHls(options: { readonly realtime?: boolean } = {}
       readonly body?: string | Buffer | (() => string | Buffer);
     }
   >();
-  const media = (kind: string) =>
-    [
+  const live = (kind: string, segmentMs: number) => {
+    // Four segments in from the start, as a stream already running.
+    const last = Math.floor((Date.now() - began) / segmentMs) + 3;
+    const first = Math.max(0, last - 3);
+    return [
       "#EXTM3U",
-      "#EXT-X-TARGETDURATION:6",
-      "#EXT-X-MEDIA-SEQUENCE:0",
-      ...Array.from({ length: kind === "archive" ? 40 : 4 }, (_, index) => [
-        ...(index % 2 ? ["#EXT-X-DISCONTINUITY"] : []),
-        "#EXTINF:6,",
-        `${kind}-${index}.ts`,
+      `#EXT-X-TARGETDURATION:${Math.ceil(segmentMs / 1000)}`,
+      `#EXT-X-MEDIA-SEQUENCE:${first}`,
+      `#EXT-X-DISCONTINUITY-SEQUENCE:${first}`,
+      ...Array.from({ length: last - first + 1 }, (_, index) => [
+        ...(index > 0 ? ["#EXT-X-DISCONTINUITY"] : []),
+        `#EXTINF:${(segmentMs / 1000).toFixed(3)},`,
+        `${kind}-${first + index}.ts`,
       ]).flat(),
-      "#EXT-X-ENDLIST",
       "",
     ].join("\n");
-  const names = ["compatible", "ac3", "epochs", "archive", "excluded"];
+  };
+  const media = (kind: string) =>
+    options.live
+      ? live(kind, options.live.segmentMs ?? 3000)
+      : [
+          "#EXTM3U",
+          "#EXT-X-TARGETDURATION:6",
+          "#EXT-X-MEDIA-SEQUENCE:0",
+          ...Array.from({ length: kind === "archive" ? 40 : 4 }, (_, index) => [
+            ...(index % 2 ? ["#EXT-X-DISCONTINUITY"] : []),
+            "#EXTINF:6,",
+            `${kind}-${index}.ts`,
+          ]).flat(),
+          "#EXT-X-ENDLIST",
+          "",
+        ].join("\n");
+  const names = [
+    "compatible",
+    "ac3",
+    "epochs",
+    "archive",
+    "excluded",
+    ...(options.qualities ? ["qualities"] : []),
+  ];
   const server = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://fixture").pathname;
     requests.push(path);
@@ -68,26 +115,46 @@ export async function startFakeHls(options: { readonly realtime?: boolean } = {}
         `<tv>${names.map((name) => `<programme channel="${name}.test" start="${time(start)}" stop="${time(start + 60000)}"><title>HLS recording</title></programme><programme channel="${name}.test" start="${time(start + 60000)}" stop="${time(start + 3600000)}"><title>Test card</title></programme>`).join("")}</tv>`,
       );
     }
-    const name = /^\/media\/([\w-]+)\.m3u8$/.exec(path)?.[1];
+    if (options.tokens && /^\/media\/[\w-]+\.m3u8$/.test(path))
+      return response.writeHead(302, { Location: path.replace("/media/", "/media/t1/") }).end();
+    const name = /^\/media\/(?:t\d+\/)?([\w-]+)\.m3u8$/.exec(path)?.[1];
     if (name)
       return response
         .writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" })
         .end(
           name === "epochs" || name === "archive"
             ? `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=256x144,CODECS="mp2v.61,ac-3"\n${name}-selected.m3u8\n`
-            : name === "excluded"
-              ? '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="English",URI="audio.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=100000,AUDIO="a"\nac3.m3u8\n'
-              : media(name.replace("-selected", "")),
+            : name === "qualities"
+              ? [
+                  "#EXTM3U",
+                  ...[
+                    ["hd", "1920x1080", 3_000_000] as const,
+                    ["sd", "1280x720", 1_500_000] as const,
+                    ["uhd", "3840x2160", 12_000_000] as const,
+                  ]
+                    .filter(([variant]) => options.qualities?.includes(variant))
+                    .flatMap(([variant, size, bandwidth]) => [
+                      `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${size},CODECS="avc1.640028,${variant === "sd" ? "mp4a.40.34" : "mp4a.40.2"}"`,
+                      `qualities-${variant}.m3u8`,
+                    ]),
+                  "",
+                ].join("\n")
+              : name === "excluded"
+                ? '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="English",URI="audio.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=100000,AUDIO="a"\nac3.m3u8\n'
+                : media(name.replace("-selected", "")),
         );
-    const segment = /^\/media\/([\w-]+)-(\d+)\.ts$/.exec(path);
+    const segment = /^\/media\/(?:t\d+\/)?([\w-]+)-(\d+)\.ts$/.exec(path);
     if (!segment) return response.writeHead(404).end();
     const kind = segment[1];
     const body = fixture(
-      kind === "compatible"
-        ? "h264-aac.mpegts"
-        : kind === "ac3"
-          ? "h264-ac3.mpegts"
-          : `hls-epoch-${Number(segment[2]) % 2}.mpegts`,
+      // 720 lines sound as MP3, so a recording tells which quality it has.
+      kind === "qualities-sd"
+        ? "h264-mp3.mpegts"
+        : kind === "compatible" || kind?.startsWith("qualities")
+          ? "h264-aac.mpegts"
+          : kind === "ac3"
+            ? "h264-ac3.mpegts"
+            : `hls-epoch-${Number(segment[2]) % 2}.mpegts`,
     );
     bytes += body.length;
     if (stalls.has(path)) {
@@ -96,8 +163,9 @@ export async function startFakeHls(options: { readonly realtime?: boolean } = {}
       return;
     }
     response.writeHead(200, { "Content-Type": "video/mp2t" });
-    if (!options.realtime) return response.end(body);
-    const step = Math.ceil(body.length / 120 / 188) * 188;
+    const deliveryMs = options.deliveryMs ?? (options.realtime ? 6000 : 0);
+    if (!deliveryMs) return response.end(body);
+    const step = Math.ceil(body.length / Math.ceil(deliveryMs / 50) / 188) * 188;
     let offset = 0;
     const timer = setInterval(() => {
       response.write(body.subarray(offset, offset + step));
