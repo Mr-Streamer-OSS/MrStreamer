@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { posix, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { defined } from "@mrstreamer/core/defined";
@@ -13,7 +14,7 @@ export interface MainTransport {
     result?: unknown;
     error?: unknown;
   }>;
-  on(method: string, listener: (params: unknown) => void): () => void;
+  on(method: string, listener: (params: Json | undefined) => void): () => void;
 }
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };

@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Drives a built app over the DevTools protocol, against the fake provider or the fake playlist
 // host. Shared by the tests of a built app and the measuring script.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -87,14 +88,14 @@ export async function connect(
   });
   let nextId = 1;
   const pending = new Map<number, (message: { result?: unknown; error?: unknown }) => void>();
-  const listeners = new Map<string, (params: unknown) => void>();
+  const listeners = new Map<string, (params: Json | undefined) => void>();
   const closeListeners = new Set<() => void>();
   let closed = false;
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data)) as {
       id?: number;
       method?: string;
-      params?: unknown;
+      params?: Json;
       result?: unknown;
       error?: unknown;
     };
@@ -144,7 +145,7 @@ export async function connect(
   return {
     send,
     /** Calls `listener` with each event of this name, as `Fetch.requestPaused`. */
-    on(method: string, listener: (params: unknown) => void): () => void {
+    on(method: string, listener: (params: Json | undefined) => void): () => void {
       listeners.set(method, listener);
 
       return () => {

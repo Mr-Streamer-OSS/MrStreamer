@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -330,7 +331,7 @@ function capture(mode = "success", capturedProfile = profile(), events = [metada
   vi.useFakeTimers();
   const directory = mkdtempSync(join(tmpdir(), "attribution-contract-"));
   directories.push(directory);
-  const listeners = new Map<string, (params: unknown) => void>();
+  const listeners = new Map<string, (params: Json) => void>();
   const closes = new Set<() => void>();
   const calls: string[] = [];
   const closeTimeouts: number[] = [];

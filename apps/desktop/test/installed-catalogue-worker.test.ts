@@ -1,3 +1,4 @@
+import type { Json } from "../../../packages/contracts/src/json.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -33,7 +34,7 @@ function object(value: unknown): value is Record<string, unknown> {
 
 /** Speaks the private NodeWorker protocol at its main transport boundary. */
 class Transport implements MainTransport {
-  listeners = new Map<string, (params: unknown) => void>();
+  listeners = new Map<string, (params: Json | undefined) => void>();
   commands: Command[] = [];
   outer: string[] = [];
   /** Sessions of other workers, and what each was sent. */
@@ -46,14 +47,14 @@ class Transport implements MainTransport {
   beforeReply?: (command: Command) => void;
   deliveryError?: string;
   disableError?: string;
-  on(method: string, listener: (params: unknown) => void) {
+  on(method: string, listener: (params: Json | undefined) => void) {
     this.listeners.set(method, listener);
 
     return () => {
       if (this.listeners.get(method) === listener) this.listeners.delete(method);
     };
   }
-  event(method: string, params: unknown) {
+  event(method: string, params: Json | undefined) {
     this.listeners.get(method)?.(params);
   }
   worker(message: unknown, sessionId = "owned") {

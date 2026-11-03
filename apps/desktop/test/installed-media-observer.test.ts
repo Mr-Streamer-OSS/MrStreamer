@@ -1,3 +1,4 @@
+import type { Json } from "../../../packages/contracts/src/json.ts";
 import { createContext, runInContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import type { Page } from "./e2e/app.ts";
@@ -24,13 +25,13 @@ function observer(fetch: typeof globalThis.fetch) {
   });
 
   runInContext("window=globalThis", context);
-  const listeners = new Map<string, (data: unknown) => void>();
+  const listeners = new Map<string, (data: Json) => void>();
 
   const page = {
     async evaluate<T>(expression: string): Promise<T> {
       return structuredClone(await runInContext(expression, context)) as T;
     },
-    on(method: string, listener: (data: unknown) => void) {
+    on(method: string, listener: (data: Json) => void) {
       listeners.set(method, listener);
 
       return () => listeners.delete(method);
