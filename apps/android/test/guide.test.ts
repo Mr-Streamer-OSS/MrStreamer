@@ -48,6 +48,23 @@ describe("Android guide public service", () => {
     expect(await owner.programme(page.programmes[0]!.detail)).toEqual(programme);
     expect(await owner.programmeAt(key, programme.start)).toEqual(programme);
   });
+  it("lists each read catalogue's channels once and names a variant's channel", async () => {
+    const { owner, sourceId, key } = await setup();
+    const news = owner.channel(key);
+    owner.setPart({
+      subscriptionId: sourceId,
+      byId: new Map([
+        ["1", news!],
+        ["1-hd", news!],
+      ]),
+      guideIds: new Map([["1", ["news.tv"]]]),
+    });
+    expect(owner.channels()).toEqual(new Map([[sourceId, [news]]]));
+    expect(owner.channel(`${sourceId}:1-hd`)).toBe(news);
+    await owner.forget(sourceId);
+    expect(owner.channels()).toEqual(new Map());
+    expect(owner.channel(key)).toBeNull();
+  });
   it("withdraws schedule and detail answers when mappings change or a source is revoked", async () => {
     const { owner, key, sourceId } = await setup();
     const page = await owner.schedule(key, localDay(at));

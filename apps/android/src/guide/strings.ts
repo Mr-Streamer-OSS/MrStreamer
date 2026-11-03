@@ -103,6 +103,7 @@ const english = {
   "Previous day": "Previous day",
   "Next day": "Next day",
   "Schedule for {channel}": "Schedule for {channel}",
+  "Its provider's guide": "Its provider's guide",
 } as const;
 
 const dutch = {
@@ -205,6 +206,7 @@ const dutch = {
   "Previous day": "Vorige dag",
   "Next day": "Volgende dag",
   "Schedule for {channel}": "Zendschema van {channel}",
+  "Its provider's guide": "Gids van de provider",
 } as const;
 
 export const t = catalogue(english, { "nl-NL": dutch });

@@ -13,7 +13,7 @@ import {
 } from "./guide-native.ts";
 import type { Provider } from "@mrstreamer/core/provider";
 import { searchWords } from "@mrstreamer/core/text";
-import type { Part } from "./part.ts";
+import type { GuideChannel, Part } from "./part.ts";
 import type { SourceLogin } from "./types.ts";
 import { currentSource } from "./origins.ts";
 import { store } from "../platform/store.ts";
@@ -768,6 +768,19 @@ export function createGuide(
       mappings = mapped;
       withdrawAll();
       state.set(new Map(state.get()));
+    },
+    /**
+     * Each subscription's channels whose catalogue is read, once each (a variant's id names its
+     * channel), in catalogue order. `listingRevision` changes as a catalogue is read or forgotten.
+     */
+    channels(): ReadonlyMap<string, readonly GuideChannel[]> {
+      return new Map(
+        [...parts.values()].map((part) => [part.subscriptionId, [...new Set(part.byId.values())]]),
+      );
+    },
+    /** The channel `key` names, a variant's key its channel's, or null before its catalogue is read. */
+    channel(key: string): GuideChannel | null {
+      return channelOf(key)?.channel ?? null;
     },
     /** The guide ids channel `key`'s provider names it by, as its own guide is read. */
     guideIdsOf(key: string): readonly string[] {

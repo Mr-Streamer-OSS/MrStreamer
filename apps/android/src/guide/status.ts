@@ -41,6 +41,9 @@ export function statusLines(
 
   if (status.error) return [{ text: t(problems[status.error]), failed: true }, ...kept];
 
+  // The provider answered that it has no guide: nothing to download, and nothing failed.
+  if (status.availability === "none") return [{ text: t("Guide unavailable") }];
+
   if (status.fetchedAt !== null)
     return [{ text: t("Updated {time}", { time: when(status.fetchedAt) }) }];
 
