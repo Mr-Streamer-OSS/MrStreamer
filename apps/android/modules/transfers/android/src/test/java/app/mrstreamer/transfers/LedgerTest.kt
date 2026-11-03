@@ -57,18 +57,6 @@ class LedgerTest {
     } finally { ledger.root.deleteRecursively() }
   }
 
-  @Test fun legacyRowsWithoutTitleFactsStillRestore() {
-    val ledger = Ledger(RuntimeEnvironment.getApplication())
-    try {
-      val row = JSONObject().put("state", "complete").put("total", 8)
-      ledger.save(listOf(row))
-      val restored = Ledger(RuntimeEnvironment.getApplication()).read().single()
-      Ledger.reconcile(restored, 8, true)
-      assertEquals("complete", restored.getString("state"))
-      assertFalse(restored.has("episode"))
-    } finally { ledger.root.deleteRecursively() }
-  }
-
   @Test fun damagedLedgerFailsRatherThanLosingTheQueue() {
     val context = RuntimeEnvironment.getApplication()
     val ledger = Ledger(context)

@@ -228,10 +228,6 @@ export default function DownloadsScreen() {
             close();
             void change(shown, choice === "delete" ? "remove" : "cancel");
           }}
-          onDelete={() => {
-            close();
-            void change(shown, "remove");
-          }}
         />
       ) : null}
     </Screen>
@@ -302,6 +298,7 @@ function Row({
 }) {
   const { focused, handlers } = useKeyboardFocus();
   const trailing = trailingChoice(row);
+  const facts = rowFacts(row);
 
   return (
     <Pressable
@@ -327,9 +324,7 @@ function Row({
         <Text style={{ color: colors.text, fontSize: 15, lineHeight: 20, fontWeight: "500" }}>
           {row.title}
         </Text>
-        {rowFacts(row) ? (
-          <Text style={{ ...small, color: colors.secondary }}>{rowFacts(row)}</Text>
-        ) : null}
+        {facts ? <Text style={{ ...small, color: colors.secondary }}>{facts}</Text> : null}
         {status.progress === null ? null : (
           <View
             style={{
@@ -396,7 +391,6 @@ function OverlayView({
   onClose,
   onChoose,
   onConfirm,
-  onDelete,
 }: {
   overlay: Overlay;
   rows: readonly DownloadRow[];
@@ -404,7 +398,6 @@ function OverlayView({
   onClose: () => void;
   onChoose: (choice: RowChoice) => void;
   onConfirm: (choice: "cancel" | "delete") => void;
-  onDelete: () => void;
 }) {
   const { row } = overlay;
   const name = row.title;
@@ -503,7 +496,7 @@ function OverlayView({
           body={t("The copy on this device can't be read. Delete it and download it again.")}
           onClose={onClose}
           actions={[
-            action(t("Delete download"), onDelete, true),
+            action(t("Delete download"), () => onConfirm("delete"), true),
             action(t("OK"), onClose, false, true),
           ]}
         />

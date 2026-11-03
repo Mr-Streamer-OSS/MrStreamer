@@ -15,8 +15,9 @@ import Watch from "../watch.tsx";
 export default function OfflinePlay() {
   useSyncExternalStore(onLanguageChange, currentLanguage);
   const state = useStore(player.state);
-  const copy = state.kind === "playing" && state.intent.kind === "file" ? state.intent : null;
-  const failed = copy && state.kind === "playing" && state.failure ? copy : null;
+
+  const failed =
+    state.kind === "playing" && state.intent.kind === "file" && state.failure ? state.intent : null;
 
   async function remove(path: string) {
     await player.stop();

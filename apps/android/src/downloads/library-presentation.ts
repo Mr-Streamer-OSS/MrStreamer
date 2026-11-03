@@ -2,11 +2,48 @@ import type { DownloadPresentation, MediaIdentity } from "../library/intents.ts"
 import type { DownloadRow } from "./state.ts";
 import { t } from "./copy.ts";
 
+type Message = Parameters<typeof t>[0];
+
+type LibraryAction = "pause" | "resume" | "retry" | "open";
+
+const labels = {
+  open: "Downloads",
+  retry: "Retry",
+  resume: "Resume",
+  pause: "Pause",
+} as const satisfies Record<LibraryAction, Message>;
+
+/** A row's line in the library, its one action and that action's icon. */
+function presented(row: DownloadRow): [string, LibraryAction, DownloadPresentation["icon"]] {
+  switch (row.state) {
+    case "complete":
+      return [t("Downloaded"), "open", "done"];
+    case "failed":
+      return [
+        t(
+          row.reason === "missing"
+            ? "File missing"
+            : "The download couldn't go on from where it stopped.",
+        ),
+        "retry",
+        "retry",
+      ];
+    case "paused":
+      return [t("Paused"), "resume", "empty"];
+    case "queued":
+      return [t("Queued"), "pause", "empty"];
+    case "running":
+      return [t("Downloading"), "pause", "stop"];
+    case "removing":
+      return [t("Removing"), "pause", "stop"];
+  }
+}
+
 /** Exact provider file identity keeps other episodes and versions independent. */
 export function libraryDownload(
   rows: readonly DownloadRow[],
   media: MediaIdentity,
-  act: (row: DownloadRow, action: "pause" | "resume" | "retry" | "open") => void,
+  act: (row: DownloadRow, action: LibraryAction) => void,
 ): DownloadPresentation | undefined {
   const id = media.kind === "movie" ? media.titleId : media.episodeId;
 
@@ -19,53 +56,16 @@ export function libraryDownload(
   );
 
   if (!row) return undefined;
-  const state = row.state;
-
-  const action =
-    state === "complete"
-      ? "open"
-      : state === "failed"
-        ? "retry"
-        : state === "paused"
-          ? "resume"
-          : "pause";
+  const [text, action, icon] = presented(row);
 
   return {
-    text: t(
-      state === "complete"
-        ? "Downloaded"
-        : state === "failed"
-          ? row.reason === "missing"
-            ? "File missing"
-            : "The download couldn't go on from where it stopped."
-          : state === "paused"
-            ? "Paused"
-            : state === "removing"
-              ? "Removing"
-              : state === "running"
-                ? "Downloading"
-                : "Queued",
-    ),
-    label: t(
-      action === "open"
-        ? "Downloads"
-        : action === "retry"
-          ? "Retry"
-          : action === "resume"
-            ? "Resume"
-            : "Pause",
-    ),
-    icon:
-      state === "complete"
-        ? "done"
-        : state === "failed"
-          ? "retry"
-          : state === "paused" || state === "queued"
-            ? "empty"
-            : "stop",
+    text,
+    label: t(labels[action]),
+    icon,
     progress: row.total > 0 ? Math.min(1, row.bytes / row.total) : 0,
+    // A row being removed has nothing left to do.
     activate: () => {
-      if (state !== "removing") act(row, action);
+      if (row.state !== "removing") act(row, action);
     },
   };
 }

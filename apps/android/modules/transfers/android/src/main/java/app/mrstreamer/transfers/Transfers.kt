@@ -25,12 +25,7 @@ object Transfers {
         val file = ledger.media(row.getString("id"))
         Ledger.reconcile(row, file.length(), file.isFile && file.canRead())
       }
-      for (row in rows.filter { it.getString("state") == "removing" }) {
-        for (partial in listOf(true, false)) {
-          val file = ledger.media(row.getString("id"), partial)
-          check(!file.exists() || file.delete())
-        }
-      }
+      for (row in rows.filter { it.getString("state") == "removing" }) ledger.discard(row.getString("id"))
       rows.removeAll { it.getString("state") == "removing" }
       ledger.save(rows)
     }
@@ -83,12 +78,7 @@ object Transfers {
     }
     ledger.save(rows) // Fence the writer before unlinking either file.
     if (action in listOf("cancel", "remove")) {
-      for (partial in listOf(true, false)) {
-        val file = ledger.media(id, partial)
-        check(!file.exists() || file.delete())
-      }
-      val artwork = java.io.File(ledger.root, "$id.art")
-      check(!artwork.exists() || artwork.delete())
+      ledger.discard(id)
       rows.remove(row)
       ledger.save(rows)
     }

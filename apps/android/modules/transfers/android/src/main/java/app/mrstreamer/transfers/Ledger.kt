@@ -34,6 +34,13 @@ class Ledger(context: Context) {
     return File(root, id + if (partial) ".part" else ".media")
   }
 
+  fun artwork(id: String) = File(root, "$id.art")
+
+  /** Unlinks a row's partial, finished and artwork files. Save the ledger first to fence its writer. */
+  fun discard(id: String) {
+    for (file in listOf(media(id, true), media(id), artwork(id))) check(!file.exists() || file.delete())
+  }
+
   companion object {
     // All workers and bridge calls share this lock, including across new Ledger instances.
     val lock = Any()

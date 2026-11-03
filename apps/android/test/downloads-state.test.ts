@@ -1,6 +1,20 @@
 import { expect, it, vi } from "vitest";
 import { downloadState, type TransferPort } from "../src/downloads/state.ts";
 
+/** A native port whose restore and snapshot both answer with `read`. */
+function port(read: () => Promise<string>): TransferPort {
+  return {
+    restore: read,
+    snapshot: read,
+    enqueue: vi.fn(),
+    cacheArtwork: vi.fn(),
+    command: vi.fn(),
+    path: vi.fn(),
+    filePath: vi.fn(),
+    blockSource: vi.fn(),
+  };
+}
+
 it("keeps the last queue after a failed read and allows a retry", async () => {
   let broken = false;
   const snapshot = { rows: [], free: 123 };
@@ -11,18 +25,7 @@ it("keeps the last queue after a failed read and allows a retry", async () => {
     return JSON.stringify(snapshot);
   };
 
-  const native: TransferPort = {
-    restore: read,
-    snapshot: read,
-    enqueue: vi.fn(),
-    cacheArtwork: vi.fn(),
-    command: vi.fn(),
-    path: vi.fn(),
-    filePath: vi.fn(),
-    blockSource: vi.fn(),
-  };
-
-  const model = downloadState(native);
+  const model = downloadState(port(read));
   await model.refresh(true);
   expect(model.state.get()).toMatchObject({ free: 123, error: null, loading: false });
   broken = true;
@@ -36,18 +39,7 @@ it("keeps the last queue after a failed read and allows a retry", async () => {
 it("reports a failed command and never publishes a successful save", async () => {
   const read = vi.fn(async () => JSON.stringify({ rows: [], free: 123 }));
 
-  const native: TransferPort = {
-    restore: read,
-    snapshot: read,
-    enqueue: vi.fn(),
-    cacheArtwork: vi.fn(),
-    command: vi.fn(),
-    path: vi.fn(),
-    filePath: vi.fn(),
-    blockSource: vi.fn(),
-  };
-
-  const model = downloadState(native);
+  const model = downloadState(port(read));
   await model.refresh();
   read.mockClear();
   await model.change(async () => {
@@ -60,18 +52,7 @@ it("reports a failed command and never publishes a successful save", async () =>
 it("rejects a damaged native snapshot rather than claiming an empty queue", async () => {
   const read = async () => JSON.stringify({ rows: [{ state: "complete" }], free: 0 });
 
-  const native: TransferPort = {
-    restore: read,
-    snapshot: read,
-    enqueue: vi.fn(),
-    cacheArtwork: vi.fn(),
-    command: vi.fn(),
-    path: vi.fn(),
-    filePath: vi.fn(),
-    blockSource: vi.fn(),
-  };
-
-  const model = downloadState(native);
+  const model = downloadState(port(read));
   await model.refresh(true);
   expect(model.state.get().error).toBe("read");
 });
@@ -104,18 +85,7 @@ it("keeps optional title facts and accepts ledgers created before facts were sav
 
   const read = async () => JSON.stringify({ rows: [old, facts], free: 10 });
 
-  const port: TransferPort = {
-    snapshot: read,
-    restore: read,
-    enqueue: vi.fn(),
-    command: vi.fn(),
-    path: vi.fn(),
-    filePath: vi.fn(),
-    blockSource: vi.fn(),
-    cacheArtwork: vi.fn(),
-  };
-
-  const model = downloadState(port);
+  const model = downloadState(port(read));
   await model.refresh();
   expect(model.state.get().error).toBeNull();
   expect(model.state.get().rows).toEqual([old, facts]);

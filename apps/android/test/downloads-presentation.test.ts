@@ -1,5 +1,13 @@
-import { expect, it } from "vitest";
-import { isCopy, rowStatus, sheetChoices, trailingChoice } from "../src/downloads/presentation.ts";
+import { expect, it, vi } from "vitest";
+import { libraryDownload } from "../src/downloads/library-presentation.ts";
+import {
+  isCopy,
+  rowFacts,
+  rowStatus,
+  sheetChoices,
+  trailingChoice,
+} from "../src/downloads/presentation.ts";
+import { downloadPresentationRegistry } from "../src/library/intents.ts";
 import type { DownloadRow } from "../src/downloads/state.ts";
 
 const GB = 1e9;
@@ -88,8 +96,7 @@ it("moves a row only among those waiting", () => {
   ]);
 });
 
-it("distinguishes saved episodes with facts and keeps legacy size-only rows readable", async () => {
-  const { rowFacts } = await import("../src/downloads/presentation.ts");
+it("distinguishes saved episodes with facts and keeps legacy size-only rows readable", () => {
   expect(rowFacts(row("legacy", { total: 0 }))).toBe("");
   expect(rowFacts(row("legacy"))).toContain("GB");
 
@@ -108,9 +115,7 @@ it("distinguishes saved episodes with facts and keeps legacy size-only rows read
   expect(facts).toContain("45");
 });
 
-it("presents only the exact episode file and dispatches its state action", async () => {
-  const { libraryDownload } = await import("../src/downloads/library-presentation.ts");
-  const { vi } = await import("vitest");
+it("presents only the exact episode file and dispatches its state action", () => {
   const act = vi.fn();
 
   const media = {
@@ -123,11 +128,8 @@ it("presents only the exact episode file and dispatches its state action", async
   };
 
   const queued = row("one", { kind: "episode" });
-  const identity = media;
-  expect(libraryDownload([queued], { ...identity, sourceId: "other" }, act)).toBeUndefined();
-  expect(
-    libraryDownload([queued], { ...identity, kind: "episode", episodeId: "two" }, act),
-  ).toBeUndefined();
+  expect(libraryDownload([queued], { ...media, sourceId: "other" }, act)).toBeUndefined();
+  expect(libraryDownload([queued], { ...media, episodeId: "two" }, act)).toBeUndefined();
 
   for (const [state, icon, action] of [
     ["queued", "empty", "pause"],
@@ -137,15 +139,14 @@ it("presents only the exact episode file and dispatches its state action", async
     ["complete", "done", "open"],
   ] as const) {
     const saved = { ...queued, state };
-    const shown = libraryDownload([saved], identity, act);
+    const shown = libraryDownload([saved], media, act);
     expect(shown?.icon).toBe(icon);
     shown?.activate();
     expect(act).toHaveBeenLastCalledWith(saved, action);
   }
 });
 
-it("keeps the successor presentation adapter when an older registration cleans up", async () => {
-  const { downloadPresentationRegistry } = await import("../src/library/intents.ts");
+it("keeps the successor presentation adapter when an older registration cleans up", () => {
   const registry = downloadPresentationRegistry();
   const adapter = { read: () => undefined, snapshot: () => 0, subscribe: () => () => {} };
   const first = registry.register(adapter);

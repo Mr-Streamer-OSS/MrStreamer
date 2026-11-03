@@ -19,8 +19,10 @@ export default function Connect() {
         if (disposed) return;
         const owner = downloads();
 
-        const update = () =>
-          setHasDownloads(owner.state.get().rows.length > 0 || owner.state.get().error !== null);
+        const update = () => {
+          const { rows, error } = owner.state.get();
+          setHasDownloads(rows.length > 0 || error !== null);
+        };
 
         const unsubscribe = owner.state.subscribe(update);
         const stop = owner.start();

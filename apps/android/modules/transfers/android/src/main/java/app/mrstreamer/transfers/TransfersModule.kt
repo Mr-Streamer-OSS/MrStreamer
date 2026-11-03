@@ -1,23 +1,24 @@
 package app.mrstreamer.transfers
 
+import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class TransfersModule : Module() {
+  private val context get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+
   override fun definition() = ModuleDefinition {
     Name("Transfers")
     AsyncFunction("restore") {
-      val context = appContext.reactContext ?: error("context")
       androidx.work.WorkManager.getInstance(context).cancelUniqueWork("downloads").result.get()
       val result = Transfers.snapshot(context, true)
       Transfers.kick(context)
       result
     }
-    AsyncFunction("snapshot") { Transfers.snapshot(appContext.reactContext ?: error("context"), false) }
-    AsyncFunction("enqueue") { json: String -> Transfers.add(appContext.reactContext ?: error("context"), json) }
-    AsyncFunction("command") { id: String, action: String -> Transfers.command(appContext.reactContext ?: error("context"), id, action) }
+    AsyncFunction("snapshot") { Transfers.snapshot(context, false) }
+    AsyncFunction("enqueue") { json: String -> Transfers.add(context, json) }
+    AsyncFunction("command") { id: String, action: String -> Transfers.command(context, id, action) }
     AsyncFunction("cacheArtwork") { id: String, address: String ->
-      val context = appContext.reactContext ?: error("context")
       val connection = TransferHttp.open(address)
       try {
         check(connection.responseCode == 200)
@@ -36,7 +37,7 @@ class TransfersModule : Module() {
           val ledger = Ledger(context)
           val rows = ledger.read()
           val row = rows.first { it.getString("id") == id }
-          val file = java.io.File(ledger.root, "$id.art")
+          val file = ledger.artwork(id)
           val atomic = android.util.AtomicFile(file)
           val stream = atomic.startWrite()
           try { stream.write(bytes); atomic.finishWrite(stream) }
@@ -46,9 +47,8 @@ class TransfersModule : Module() {
         }
       } catch (_: Exception) { error("artwork") } finally { connection.disconnect() }
     }
-    AsyncFunction("filePath") { id: String -> Ledger(appContext.reactContext ?: error("context")).media(id).absolutePath }
+    AsyncFunction("filePath") { id: String -> Ledger(context).media(id).absolutePath }
     AsyncFunction("path") { id: String ->
-      val context = appContext.reactContext ?: error("context")
       synchronized(Ledger.lock) {
         val ledger = Ledger(context)
         val row = ledger.read().first { it.getString("id") == id }
@@ -58,7 +58,6 @@ class TransfersModule : Module() {
       }
     }
     AsyncFunction("blockSource") { source: String, blocked: Boolean ->
-      val context = appContext.reactContext ?: error("context")
       synchronized(Ledger.lock) {
         val ledger = Ledger(context)
         val rows = ledger.read()
