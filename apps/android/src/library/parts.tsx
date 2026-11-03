@@ -268,7 +268,7 @@ export function RadioRow({
 }) {
   return (
     <Press
-      label={label}
+      label={count === undefined ? label : `${label} · ${formatNumber(count)}`}
       role="radio"
       state={{ checked: selected }}
       onPress={onPress}

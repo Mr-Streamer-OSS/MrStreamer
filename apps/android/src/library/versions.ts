@@ -27,18 +27,24 @@ export function versionMemory(storage: {
   writeJson(name: string, value: unknown): void;
 }) {
   const file = "library-versions.json";
-  const raw = storage.readJson(file);
+  let raw: unknown;
 
-  const valid =
-    raw === null ||
-    (typeof raw === "object" &&
-      !Array.isArray(raw) &&
-      Object.values(raw).every((v) => typeof v === "string"));
+  try {
+    raw = storage.readJson(file);
+  } catch {
+    // An unreadable file is never an empty preference file.
+  }
 
-  let picks: Record<string, string> = valid && raw ? Object.fromEntries(Object.entries(raw)) : {};
+  // null also means an unreadable file in Android storage, so it cannot authorize a write.
+  const valid = raw !== null && typeof raw === "object" && !Array.isArray(raw);
+
+  let picks: Record<string, unknown> =
+    raw !== null && typeof raw === "object" && !Array.isArray(raw)
+      ? Object.fromEntries(Object.entries(raw))
+      : {};
 
   return {
-    get: (key: string) => picks[key],
+    get: (key: string) => (typeof picks[key] === "string" ? picks[key] : undefined),
     set(key: string, version: string | null) {
       if (!valid) throw new Error("Couldn't save version");
       const next = { ...picks };

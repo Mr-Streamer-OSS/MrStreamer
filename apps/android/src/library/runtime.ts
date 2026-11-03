@@ -32,6 +32,7 @@ export function library() {
       return state.kind !== "ready"
         ? []
         : state.sources.flatMap((source) => {
+            if (source.kind === "m3u") return [];
             const reader = sources.onDemand(source.id);
 
             return reader
@@ -44,13 +45,47 @@ export function library() {
                       kind === "movie" ? reader.movieDetails(id) : reader.seriesDetails(id),
                   },
                 ]
-              : [];
+              : [
+                  {
+                    id: source.id,
+                    label: source.label,
+                    needsLogin: true,
+                    catalogue: async () => {
+                      throw new Error("Login unavailable");
+                    },
+                    details: async () => {
+                      throw new Error("Login unavailable");
+                    },
+                  },
+                ];
           });
     },
   });
 
   model = made;
+
+  const identities = () => {
+    const state = sources.state.get();
+
+    return new Map(
+      state.kind === "ready"
+        ? state.sources
+            .filter((s) => s.kind === "xtream")
+            .map((s) => [s.id, sources.onDemand(s.id)] as const)
+        : [],
+    );
+  };
+
+  let previous = identities();
   stop = sources.state.subscribe(() => {
+    const next = identities();
+
+    if (
+      next.size === previous.size &&
+      [...next].every(([id, reader]) => previous.has(id) && previous.get(id) === reader)
+    )
+      return;
+    previous = next;
     void made.refresh();
   });
   void made.refresh();

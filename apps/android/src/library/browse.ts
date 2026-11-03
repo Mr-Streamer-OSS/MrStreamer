@@ -14,6 +14,18 @@ export interface BrowseChoices {
 // (titles.ts `filterFilesOf`), and core counts them for the one file they were found in.
 const declaredFiles: FilterFiles = new Map();
 
+const cached = new WeakMap<
+  Collections,
+  Map<
+    string,
+    {
+      choices: string;
+      files: FilterFiles;
+      value: BrowsedCollection;
+    }
+  >
+>();
+
 /**
  * Core owns membership, stable ordering on ties and same-version filter conjunction. `files` are
  * the facts playback found in listed files, by version; without them only declared hints count.
@@ -23,6 +35,29 @@ export function browseCollection(
   id: CollectionId,
   choices: BrowseChoices,
   files: FilterFiles = declaredFiles,
+) {
+  const key = JSON.stringify(choices);
+  let entries = cached.get(made);
+
+  if (!entries) {
+    entries = new Map();
+    cached.set(made, entries);
+  }
+
+  const previous = entries.get(id);
+
+  if (previous?.choices === key && previous.files === files) return previous.value;
+  const value = buildCollection(made, id, choices, files);
+  entries.set(id, { choices: key, files, value });
+
+  return value;
+}
+
+function buildCollection(
+  made: Collections,
+  id: CollectionId,
+  choices: BrowseChoices,
+  files: FilterFiles,
 ) {
   const titles = made.list(id, choices.sort ?? collectionSort(id));
 
@@ -40,7 +75,7 @@ export function browseCollection(
   const matching = (filters: BrowseChoices["filters"]) =>
     filterTitles(titles, filters, files, eligible);
 
-  return {
+  const value = {
     titles: matching(choices.filters),
     total: titles.length,
     sort: choices.sort ?? collectionSort(id),
@@ -60,6 +95,8 @@ export function browseCollection(
     /** Listed files whose tracks were found, not titles or episodes. */
     files: options.files,
   };
+
+  return value;
 }
 
-export type BrowsedCollection = ReturnType<typeof browseCollection>;
+export type BrowsedCollection = ReturnType<typeof buildCollection>;

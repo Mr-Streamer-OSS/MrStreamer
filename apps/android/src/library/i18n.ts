@@ -66,6 +66,8 @@ const english = {
   "Showing the last list.": "Showing the last list.",
   Retry: "Retry",
   Settings: "Settings",
+  "Restore the login for {providers} in Settings.":
+    "Restore the login for {providers} in Settings.",
   "TMDB isn't answering.": "TMDB isn't answering.",
   "Couldn't save version.": "Couldn't save version.",
   Movie: "Movie",
@@ -142,6 +144,8 @@ const dutch = {
   "Showing the last list.": "De laatste lijst wordt getoond.",
   Retry: "Opnieuw",
   Settings: "Instellingen",
+  "Restore the login for {providers} in Settings.":
+    "Herstel de login voor {providers} in Instellingen.",
   "TMDB isn't answering.": "TMDB antwoordt niet.",
   "Couldn't save version.": "Versie kon niet worden opgeslagen.",
   Movie: "Film",

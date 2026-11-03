@@ -139,7 +139,7 @@ describe("Android library public behavior", () => {
     expect(chosenVersion(title, { manual: null, requested: nl }).id).toBe(title.id);
     expect(chosenVersion(title, { manual: "removed", remembered: nl }).id).toBe("nl");
     let refused = false;
-    let saved: unknown = null;
+    let saved: unknown = {};
 
     const storage = {
       readJson: () => saved,
@@ -196,4 +196,92 @@ describe("Android library public behavior", () => {
       value: { plot: "Provider story" },
     });
   });
+});
+
+it("protects ambiguous or invalid preference reads", () => {
+  for (const raw of [null, [], "broken"]) {
+    let writes = 0;
+
+    const memory = versionMemory({
+      readJson: () => raw,
+      writeJson: () => {
+        writes++;
+      },
+    });
+
+    expect(() => memory.set("title", "version")).toThrow();
+    expect(writes).toBe(0);
+  }
+});
+
+it("shows TMDB facts even when the first provider details read fails", async () => {
+  const f = fixture({ about: async () => about });
+  await f.model.refresh();
+  f.failDetails(true);
+  const title = f.model.made("series").list("all")[0]!;
+  expect(await f.model.details(title)).toMatchObject({
+    providerFailed: true,
+    value: { plot: "Saved TMDB story", seasons: [] },
+  });
+});
+
+it("reuses collection metadata across searches until its revision or language changes", async () => {
+  let reads = 0;
+  let revision = 0;
+  let language = "en";
+  const { source } = fixture();
+  const { libraryModel } = await import("../src/library/model.ts");
+
+  const model = libraryModel({
+    language: () => language,
+    sources: () => [source],
+    metadata: {
+      about: async () => about,
+      revision: () => revision,
+      facts: {
+        get: () => {
+          reads++;
+
+          return null;
+        },
+        name: () => null,
+        services: () => [],
+      },
+    },
+  });
+
+  await model.refresh();
+  model.made("movie").list("all");
+  const first = reads;
+  expect(first).toBeGreaterThan(0);
+
+  for (const query of ["M", "Mo", "Mov"]) {
+    model.search("movie", query);
+    model.made("movie").list("all");
+  }
+
+  expect(reads).toBe(first);
+  revision++;
+  model.made("movie").list("all");
+  expect(reads).toBeGreaterThan(first);
+  const revised = reads;
+  language = "nl";
+  model.made("movie").list("all");
+  expect(reads).toBeGreaterThan(revised);
+});
+
+it("ignores unknown preference values without blocking valid choices or erasing them", () => {
+  let saved: unknown;
+
+  const memory = versionMemory({
+    readJson: () => ({ valid: "version", future: 42 }),
+    writeJson: (_, value) => {
+      saved = value;
+    },
+  });
+
+  expect(memory.get("valid")).toBe("version");
+  expect(memory.get("future")).toBeUndefined();
+  memory.set("next", "choice");
+  expect(saved).toEqual({ valid: "version", future: 42, next: "choice" });
 });

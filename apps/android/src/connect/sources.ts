@@ -237,6 +237,8 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
     });
   }
 
+  const onDemandReaders = new WeakMap<CatalogueReader, OnDemandReader>();
+
   return {
     state,
 
@@ -244,6 +246,9 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       const login = readers.current(id);
 
       if (!login?.onDemandCatalogue || !login.movieDetails || !login.seriesDetails) return null;
+      const cached = onDemandReaders.get(login);
+
+      if (cached) return cached;
       const catalogue = login.onDemandCatalogue.bind(login);
       const movie = login.movieDetails.bind(login);
       const series = login.seriesDetails.bind(login);
@@ -260,11 +265,15 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
         return result;
       }
 
-      return {
+      const bound: OnDemandReader = {
         onDemandCatalogue: () => read("on-demand", catalogue),
         movieDetails: (title) => read(`movie:${title}`, (signal) => movie(title, signal)),
         seriesDetails: (title) => read(`series:${title}`, (signal) => series(title, signal)),
       };
+
+      onDemandReaders.set(login, bound);
+
+      return bound;
     },
 
     async restore() {

@@ -103,6 +103,7 @@ function hasTitles(model: LibraryModel) {
  */
 function ListRecovery({ model, empty }: { model: LibraryModel; empty: string }) {
   const state = useStore(model.state);
+  const open = useOpenShared();
 
   if (state.loading) return <Recovery message={t("Loading…")} />;
 
@@ -110,15 +111,24 @@ function ListRecovery({ model, empty }: { model: LibraryModel; empty: string }) 
     return (
       <Recovery
         icon="cloud-off"
-        message={t("Couldn't load movies and series from {providers}.", {
-          providers: formatList(state.failures),
-        })}
+        message={
+          state.needsLogin.length
+            ? t("Restore the login for {providers} in Settings.", {
+                providers: formatList(state.needsLogin),
+              })
+            : t("Couldn't load movies and series from {providers}.", {
+                providers: formatList(state.failures),
+              })
+        }
         action={
-          <OutlinedButton
-            label={t("Try again")}
-            icon="refresh"
-            onPress={() => void model.refresh()}
-          />
+          <>
+            <OutlinedButton
+              label={t("Try again")}
+              icon="refresh"
+              onPress={() => void model.refresh()}
+            />
+            <TextButton label={t("Settings")} onPress={() => open("settings")} />
+          </>
         }
       />
     );
@@ -135,9 +145,15 @@ function StaleStatus({ model }: { model: LibraryModel }) {
 
   return (
     <StatusLine
-      message={`${t("Couldn't update movies and series from {providers}.", {
-        providers: formatList(state.failures),
-      })} ${t("Showing the last list.")}`}
+      message={
+        state.needsLogin.length
+          ? t("Restore the login for {providers} in Settings.", {
+              providers: formatList(state.needsLogin),
+            })
+          : `${t("Couldn't update movies and series from {providers}.", {
+              providers: formatList(state.failures),
+            })} ${t("Showing the last list.")}`
+      }
       actions={
         <>
           <TextButton label={t("Settings")} onPress={() => open("settings")} />
@@ -254,7 +270,14 @@ export function BrowseScreen({
   const made = model.made(kind);
   const visible = model.tabs(kind);
   // Keep a selected empty tab in the route after a refresh; only offer tabs with content.
-  const tab = params.tab ?? visible[0] ?? "all";
+  const [resolvedTab, setResolvedTab] = useState<string>();
+  const tab = params.tab ?? resolvedTab ?? visible[0] ?? "all";
+  useEffect(() => {
+    if (!pushed && !params.tab && visible.length && !resolvedTab) {
+      setResolvedTab(tab);
+      router.setParams({ tab });
+    }
+  }, [pushed, params.tab, visible.length, resolvedTab, tab]);
   const id = pushed ? collectionId(params.collection) : tab === "4k" ? "4k" : "all";
   const result = browseCollection(made, id, choices);
   const destination = kind === "movie" ? "movies" : "series";
@@ -303,6 +326,8 @@ export function BrowseScreen({
     ) : (
       <Recovery message={t("Nothing here.")} />
     )
+  ) : !visible.some((shown) => shown === tab) ? (
+    <Recovery message={t("Nothing here.")} />
   ) : (
     <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
       {tab === "genres"
@@ -639,22 +664,30 @@ function FilterSheet({
 }
 
 /** The identity a Download intent carries, for a movie or one of a series' episodes. */
-function mediaOf(title: Title, episode?: Episode): MediaIdentity {
+function mediaOf(title: Title, episode?: Episode, titleId = title.id): MediaIdentity {
   return {
     sourceId: title.subscriptionId,
     titleKey: title.key,
-    titleId: title.id,
+    titleId,
     version: chosenVersion(title, {}),
     ...(episode ? { kind: "episode", episodeId: episode.id } : { kind: "movie" }),
   };
 }
 
 /** A movie's Play and Download, each only while its later owner handles it. */
-function MovieActions({ title, container }: { title: Title; container: string | undefined }) {
+function MovieActions({
+  title,
+  titleId,
+  container,
+}: {
+  title: Title;
+  titleId: string;
+  container: string | undefined;
+}) {
   const { play, download } = useStore(libraryIntents.state);
 
   if (!play && !download) return null;
-  const media = mediaOf(title);
+  const media = mediaOf(title, undefined, titleId);
 
   return (
     <View style={{ flexDirection: "row", gap: 8, paddingTop: 12 }}>
@@ -689,17 +722,19 @@ function MovieActions({ title, container }: { title: Title; container: string | 
 /** An episode's row: its still, number and name, length, and the actions its owners handle. */
 function EpisodeRow({
   title,
+  titleId,
   episode,
   container,
   wide,
 }: {
   title: Title;
+  titleId: string;
   episode: Episode;
   container: string | undefined;
   wide: boolean;
 }) {
   const { play, download } = useStore(libraryIntents.state);
-  const media = () => mediaOf(title, episode);
+  const media = () => mediaOf(title, episode, titleId);
 
   return (
     <View
@@ -801,14 +836,18 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     let current = true;
 
     if (title && version)
-      void model.details({ ...title, ...version }).then((state) => {
-        if (current) setAnswer({ key, state });
-      });
+      void model
+        .details({ ...title, ...version }, (state) => {
+          if (current) setAnswer({ key, state });
+        })
+        .then((state) => {
+          if (current) setAnswer({ key, state });
+        });
 
     return () => {
       current = false;
     };
-  }, [model, key, list.revision, attempt, locale]);
+  }, [model, key, attempt, locale]);
   const details = answer?.key === key ? answer.state : null;
   const shown = title && version ? { ...title, ...version } : undefined;
   const value = details?.value;
@@ -830,11 +869,12 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     try {
       savedVersions().set(title.key, next);
       setSaveFailed(false);
-      router.setParams({ version: next ?? "automatic" });
-      setMenu(false);
     } catch {
       setSaveFailed(true);
     }
+
+    router.setParams({ version: next ?? "automatic" });
+    setMenu(false);
   };
 
   if (!title)
@@ -847,7 +887,10 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     );
 
   const automatic =
-    manual === null || (!manual && !params.requested && !savedVersions().get(title.key));
+    manual === null ||
+    ![manual, params.requested, savedVersions().get(title.key)].some((key) =>
+      title.versions.some((v) => ownedKey(v) === key),
+    );
 
   const versionLabel = automatic
     ? t("Automatic")
@@ -899,9 +942,11 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
       {shown && kind === "movie" ? (
         <MovieActions
           title={shown}
+          titleId={title.id}
           container={shown.container?.trim() || details?.containers.get(shown.id)}
         />
       ) : null}
+      {saveFailed ? <DetailNotice message={t("Couldn't save version.")} /> : null}
       {!details ? <DetailNotice message={t("Loading…")} /> : null}
       {details?.providerFailed ? (
         <DetailNotice
@@ -951,6 +996,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
             <EpisodeRow
               key={`${episode.subscriptionId}:${episode.id}`}
               title={shown}
+              titleId={title.id}
               episode={episode}
               container={details?.containers.get(episode.id)}
               wide={beside}
@@ -1019,20 +1065,12 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
                     .filter(Boolean)
                     .join(" · ")}
                   height={56}
-                  selected={ownedKey(v) === ownedKey(version!)}
+                  selected={!automatic && ownedKey(v) === ownedKey(version!)}
                   onPress={() => pick(ownedKey(v))}
                 />
               )),
             )}
           </View>
-          {saveFailed ? (
-            <Text
-              accessibilityLiveRegion="polite"
-              style={{ ...typeScale.small, paddingHorizontal: 24, paddingTop: 8 }}
-            >
-              {t("Couldn't save version.")}
-            </Text>
-          ) : null}
         </SheetScroll>
       </Sheet>
     </Screen>

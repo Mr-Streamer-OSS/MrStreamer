@@ -23,7 +23,12 @@ vi.mock("expo-router", () => ({
 
 vi.mock("../src/bootstrap/sources.ts", () => ({ sources: {} }));
 
-vi.mock("../src/platform/storage.ts", () => ({ readJson: () => null, writeJson: () => {} }));
+vi.mock("../src/platform/storage.ts", () => ({
+  readJson: () => ({}),
+  writeJson: () => {
+    throw new Error("Read only");
+  },
+}));
 
 vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
 
@@ -150,11 +155,26 @@ it("keeps route filters across refresh, resets no matches and opens the filtered
   press(shown, "Sort & filter");
   expect(shown.querySelector("dialog")?.textContent).toContain("Known audio/subtitles");
   press(shown, "Show 43 movies");
-  press(shown, model.made("movie").list("all")[0]!.title);
+  route.params.filters = JSON.stringify({ quality: "4k" });
+  act(() => root?.render(createElement(BrowseScreen, { kind: "movie", model })));
+  const opened = model.made("movie").list("all")[0]!;
+  press(shown, opened.title);
   expect(route.opened[0]).toMatchObject({
     pathname: "/movies/library/details",
-    params: { kind: "movie" },
+    params: { kind: "movie", requested: ownedKey(opened) },
   });
+  route.params = { kind: "movie", title: opened.key, requested: ownedKey(opened) };
+  act(() => root?.render(createElement(DetailsScreen, { model })));
+  await act(async () => {});
+
+  const versionButton = Array.from(shown.querySelectorAll("button")).find((b) =>
+    b.getAttribute("aria-label")?.startsWith("Version:"),
+  )!;
+
+  act(() => versionButton.click());
+  const checked = shown.querySelector('[aria-checked="true"]');
+  expect(checked?.getAttribute("aria-label")).toContain("4K");
+  expect(checked?.getAttribute("aria-label")).not.toBe("Automatic");
 });
 
 it("renders Search pages and stale-list recovery from the real model", async () => {
@@ -199,10 +219,10 @@ it("shows seasons and translated copy, and only exposes actions while their owne
     stopPlay = libraryIntents.register({ play: (intent) => intents.push(intent) });
     stopDownload = libraryIntents.register({ download: (intent) => intents.push(intent) });
   });
-  press(shown, "Play");
-  press(shown, "Download");
 
   try {
+    press(shown, "Play");
+    press(shown, "Download");
     expect(intents).toEqual([
       {
         kind: "title",
@@ -224,21 +244,20 @@ it("shows seasons and translated copy, and only exposes actions while their owne
         },
       },
     ]);
-  } catch (error) {
+    // Each owner's stop removes only its own action.
+    act(() => stopPlay());
+    expect(button("Play")).toBeNull();
+    expect(button("Download")).not.toBeNull();
+    act(() => stopDownload());
+    expect(libraryIntents.state.get()).toEqual({});
+    expect(button("Download")).toBeNull();
+  } finally {
     act(() => {
       stopPlay();
       stopDownload();
     });
-    throw error;
   }
 
-  // Each owner's stop removes only its own action.
-  act(() => stopPlay());
-  expect(button("Play")).toBeNull();
-  expect(button("Download")).not.toBeNull();
-  act(() => stopDownload());
-  expect(libraryIntents.state.get()).toEqual({});
-  expect(button("Download")).toBeNull();
   act(() => setLanguage(resolveLanguage("nl-NL", [])));
   expect(shown.textContent).toContain("Seizoen 1");
 });
@@ -282,7 +301,10 @@ it("labels versions with saved source names and plays the selected movie file", 
 
   try {
     act(() => {
-      stop = libraryIntents.register({ play: (intent) => intents.push(intent) });
+      stop = libraryIntents.register({
+        play: (intent) => intents.push(intent),
+        download: (intent) => intents.push(intent),
+      });
     });
     press(shown, "Play");
     expect(intents).toEqual([
@@ -295,6 +317,11 @@ it("labels versions with saved source names and plays the selected movie file", 
         title: title.title,
       },
     ]);
+    press(shown, "Download");
+    expect(intents[1]).toMatchObject({
+      action: "download",
+      media: { titleId: title.id, sourceId: second.id, version: { id: version.id } },
+    });
   } finally {
     act(() => stop());
   }
@@ -340,3 +367,190 @@ it.each(["movie", "series"] as const)(
     }
   },
 );
+
+it("applies version choices despite a failed save and checks exactly one radio", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  const title = f.model.made("movie").list("all")[0]!;
+  route.params = { kind: "movie", title: title.key, requested: "removed" };
+  const shown = show(createElement(DetailsScreen, { model: f.model }));
+  await act(async () => {});
+  press(shown, "Version: Automatic");
+  expect(shown.querySelectorAll('[aria-checked="true"]').length).toBe(1);
+
+  const version = Array.from(
+    shown.querySelectorAll<HTMLElement>('dialog button[role="radio"]'),
+  ).find((b) => b.getAttribute("aria-label") !== "Automatic")!;
+
+  act(() => version.click());
+  expect(route.params.version).toBe(ownedKey(title.versions[0]!));
+  expect(shown.textContent).toContain("Couldn't save version.");
+  act(() => root?.render(createElement(DetailsScreen, { model: f.model })));
+
+  const open = Array.from(shown.querySelectorAll("button")).find((b) =>
+    b.getAttribute("aria-label")?.startsWith("Version:"),
+  )!;
+
+  act(() => open.click());
+  press(shown, "Automatic");
+  expect(route.params.version).toBe("automatic");
+});
+
+it("records the first resolved tab and shows empty selected rows", async () => {
+  const f = fixture();
+  const shown = show(createElement(BrowseScreen, { kind: "movie", model: f.model }));
+  expect(route.params.tab).toBeUndefined();
+  await act(async () => {
+    await f.model.refresh();
+  });
+  expect(route.params.tab).toBe("for-you");
+  route.params.tab = "genres";
+  act(() => root?.render(createElement(BrowseScreen, { kind: "movie", model: f.model })));
+  expect(shown.textContent).toContain("Nothing here.");
+});
+
+it("shows provider facts before slow TMDB and does not reload details on list refresh", async () => {
+  let release!: (value: typeof import("./library-fixture.ts").about) => void;
+
+  const held = new Promise<typeof import("./library-fixture.ts").about>((resolve) => {
+    release = resolve;
+  });
+
+  let reads = 0;
+  const { source } = fixture();
+
+  const model = libraryModel({
+    language: () => "en",
+    sources: () => [
+      {
+        ...source,
+        details: (...args) => {
+          reads++;
+
+          return source.details(...args);
+        },
+      },
+    ],
+    metadata: { about: () => held },
+  });
+
+  await model.refresh();
+  route.params = { kind: "movie", title: model.made("movie").list("all")[0]!.key };
+  const shown = show(createElement(DetailsScreen, { model }));
+
+  try {
+    await act(async () => {});
+    expect(shown.textContent).toContain("Provider story");
+    await act(async () => {
+      await model.refresh();
+    });
+    expect(reads).toBe(1);
+  } finally {
+    const { about } = await import("./library-fixture.ts");
+    await act(async () => {
+      release(about);
+      await held;
+    });
+  }
+
+  expect(shown.textContent).toContain("Saved TMDB story");
+});
+
+it("offers Settings to restore a lost login when no catalogue can be read", async () => {
+  const f = fixture();
+
+  const model = libraryModel({
+    language: () => "en",
+    sources: () => [
+      {
+        ...f.source,
+        needsLogin: true,
+        catalogue: async () => {
+          throw new Error("No login");
+        },
+      },
+    ],
+  });
+
+  await model.refresh();
+  const shown = show(createElement(BrowseScreen, { kind: "movie", model }));
+  expect(shown.textContent).toContain("Restore the login for Test provider in Settings.");
+  expect(shown.querySelector('button[aria-label="Settings"]')).not.toBeNull();
+});
+
+it("includes filter option counts in TalkBack labels", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  route.params = { tab: "all" };
+  const shown = show(createElement(BrowseScreen, { kind: "movie", model: f.model }));
+  press(shown, "Sort & filter");
+  expect(shown.querySelector('button[aria-label="4K · 43"]')).not.toBeNull();
+});
+
+it("keeps a selected tab visible as an empty state", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  route.params = { tab: "genres" };
+  const shown = show(createElement(BrowseScreen, { kind: "movie", model: f.model }));
+  expect(shown.textContent).toContain("Nothing here.");
+});
+
+it("still applies Automatic when writing the preference fails", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  const title = f.model.made("movie").list("all")[0]!;
+  route.params = { kind: "movie", title: title.key, version: ownedKey(title) };
+  const shown = show(createElement(DetailsScreen, { model: f.model }));
+  await act(async () => {});
+
+  const open = Array.from(shown.querySelectorAll("button")).find((b) =>
+    b.getAttribute("aria-label")?.startsWith("Version:"),
+  )!;
+
+  act(() => open.click());
+  press(shown, "Automatic");
+  expect(route.params.version).toBe("automatic");
+  expect(shown.textContent).toContain("Couldn't save version.");
+});
+
+it("checks only Automatic when no explicit version is chosen", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  route.params = { kind: "movie", title: f.model.made("movie").list("all")[0]!.key };
+  const shown = show(createElement(DetailsScreen, { model: f.model }));
+  await act(async () => {});
+  press(shown, "Version: Automatic");
+  const checked = shown.querySelectorAll('[aria-checked="true"]');
+  expect(checked.length).toBe(1);
+  expect(checked[0]?.getAttribute("aria-label")).toBe("Automatic");
+});
+
+it("keeps open provider details across a catalogue refresh", async () => {
+  let reads = 0;
+  const { source } = fixture();
+
+  const model = libraryModel({
+    sources: () => [
+      {
+        ...source,
+        details: (...args) => {
+          reads++;
+
+          return source.details(...args);
+        },
+      },
+    ],
+    language: () => "en",
+  });
+
+  await model.refresh();
+  route.params = { kind: "movie", title: model.made("movie").list("all")[0]!.key };
+  const shown = show(createElement(DetailsScreen, { model }));
+  await act(async () => {});
+  expect(shown.textContent).toContain("Provider story");
+  await act(async () => {
+    await model.refresh();
+  });
+  expect(reads).toBe(1);
+  expect(shown.textContent).toContain("Provider story");
+});

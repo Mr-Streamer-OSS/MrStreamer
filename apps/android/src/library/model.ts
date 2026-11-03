@@ -15,6 +15,7 @@ import { store } from "../platform/store.ts";
 export interface LibrarySource {
   readonly id: string;
   readonly label: string;
+  readonly needsLogin?: boolean;
   catalogue(): Promise<OnDemandCatalogue>;
   details(kind: TitleKind, id: string): Promise<ProviderDetails>;
 }
@@ -22,12 +23,14 @@ export interface LibrarySource {
 /** Settings supplies this only with consent and access. No port means no network and no retry. */
 export interface MetadataPort {
   readonly facts?: Pick<ReturnType<typeof metadataStore>, "get" | "name" | "services">;
+  revision?(): number;
   about(kind: TitleKind, id: string, language: string): Promise<TitleAbout | null>;
 }
 
 export interface ListState {
   readonly loading: boolean;
   readonly failures: readonly string[];
+  readonly needsLogin: readonly string[];
   readonly revision: number;
 }
 
@@ -45,7 +48,7 @@ export function libraryModel(options: {
   metadata?: MetadataPort | undefined;
   now?: () => number;
 }) {
-  const state = store<ListState>({ loading: true, failures: [], revision: 0 });
+  const state = store<ListState>({ loading: true, failures: [], needsLogin: [], revision: 0 });
   const kept = new Map<string, OnDemandCatalogue>();
   const abouts = new Map<string, { at: number; value: TitleAbout | null }>();
   const provided = new Map<string, ProviderDetails>();
@@ -82,20 +85,38 @@ export function libraryModel(options: {
     return indexed;
   }
 
+  const madeCache = new Map<
+    TitleKind,
+    {
+      index: ReturnType<typeof indexCatalogue>;
+      revision: number;
+      value: ReturnType<typeof collections>;
+    }
+  >();
+
   function made(kind: TitleKind) {
+    const index = catalogue();
+    const revision = options.metadata?.revision?.() ?? 0;
+    const cached = madeCache.get(kind);
+
+    if (cached?.index === index && cached.revision === revision) return cached.value;
     const language = options.language();
     const facts = options.metadata?.facts;
     const tmdbKind = kind === "movie" ? "movie" : "tv";
 
-    return collections({
+    const value = collections({
       kind,
-      titles: kindOf(catalogue(), kind).titles,
+      titles: kindOf(index, kind).titles,
       language,
       metadata: (id): TitleMetadata | null => facts?.get(tmdbKind, id) ?? null,
       names: (id) => facts?.name(tmdbKind, id, language) ?? null,
       services: facts?.services(tmdbKind) ?? ([] satisfies readonly ServiceTitles[]),
       now: now(),
     });
+
+    madeCache.set(kind, { index, revision, value });
+
+    return value;
   }
 
   return {
@@ -130,6 +151,7 @@ export function libraryModel(options: {
         state.set((s) => ({
           loading: false,
           failures: results.filter((s): s is string => s !== null),
+          needsLogin: active.filter((s) => s.needsLogin).map((s) => s.label),
           revision: s.revision + 1,
         }));
     },
@@ -154,7 +176,7 @@ export function libraryModel(options: {
     search(kind: TitleKind, query: string, pages = 1) {
       return searchPage(catalogue(), kind, query, undefined, Math.max(1, pages) * 20);
     },
-    async details(title: Title): Promise<DetailState> {
+    async details(title: Title, onUpdate?: (state: DetailState) => void): Promise<DetailState> {
       const language = options.language();
       const key = `${title.kind}:${title.subscriptionId}:${title.id}`;
       const read = (detailReads.get(key) ?? 0) + 1;
@@ -180,6 +202,51 @@ export function libraryModel(options: {
       const aboutKey = `${language}:${title.kind}:${title.tmdbId}`;
       let metadataFailed = false;
 
+      const result = (): DetailState => {
+        const saved = abouts.get(aboutKey);
+        const about = saved && now() - saved.at < TMDB_EXPIRE_MS ? saved.value : null;
+        const details = provided.get(key);
+
+        const facts = details ?? {
+          originalName: null,
+          plot: null,
+          genres: [],
+          cast: [],
+          directors: [],
+          releaseDate: null,
+          duration: null,
+          posterUrl: null,
+          backdropUrl: null,
+          seasons: [],
+          episodes: [],
+          container: null,
+        };
+
+        const files =
+          title.kind === "movie"
+            ? [{ id: title.id, container: details?.container }]
+            : (details?.episodes ?? []);
+
+        return {
+          containers: new Map(
+            files.flatMap((file) => (file.container?.trim() ? [[file.id, file.container]] : [])),
+          ),
+          value:
+            title.kind === "movie"
+              ? movieDetails(title, facts, about)
+              : seriesDetails(
+                  title,
+                  providerFailed ? { ...facts, episodes: [], seasons: [] } : facts,
+                  about,
+                  language,
+                ),
+          providerFailed,
+          metadataFailed,
+        };
+      };
+
+      if (detailReads.get(key) === read) onUpdate?.(result());
+
       if (options.metadata && title.tmdbId) {
         try {
           const value = await options.metadata.about(title.kind, title.tmdbId, language);
@@ -190,27 +257,7 @@ export function libraryModel(options: {
         }
       }
 
-      const saved = abouts.get(aboutKey);
-      const about = saved && now() - saved.at < TMDB_EXPIRE_MS ? saved.value : null;
-      const details = provided.get(key);
-
-      const files =
-        title.kind === "movie"
-          ? [{ id: title.id, container: details?.container }]
-          : (details?.episodes ?? []);
-
-      return {
-        containers: new Map(
-          files.flatMap((file) => (file.container?.trim() ? [[file.id, file.container]] : [])),
-        ),
-        value: !details
-          ? null
-          : title.kind === "movie"
-            ? movieDetails(title, details, about)
-            : seriesDetails(title, details, about, language),
-        providerFailed,
-        metadataFailed,
-      };
+      return result();
     },
   };
 }
