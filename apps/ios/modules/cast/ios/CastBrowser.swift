@@ -25,6 +25,9 @@ final class CastBrowser {
       for: .bonjourWithTXTRecord(type: "_googlecast._tcp", domain: nil), using: parameters)
     made.stateUpdateHandler = { [weak self] state in
       switch state {
+      // Ready again, as after Local Network was allowed: what it finds is shown, "denied" goes.
+      case .ready:
+        if let results = self?.browser?.browseResults { self?.found(results) }
       case .waiting(let error), .failed(let error):
         if case .dns(let code) = error, code == Self.denied {
           self?.report?("denied", [])

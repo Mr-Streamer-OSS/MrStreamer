@@ -142,7 +142,10 @@ export interface Playing {
 export type TvRoute =
   | { readonly kind: "off" }
   | { readonly kind: "connecting" | "on"; readonly tv: Tv }
-  | { readonly kind: "ended"; readonly tv: Tv; readonly why: "left" | "lost" };
+  | { readonly kind: "ended"; readonly tv: Tv; readonly why: TvEnd };
+
+/** Why a TV route ended: the app left the foreground, the TV went, or it stopped playing there. */
+type TvEnd = "left" | "lost" | "stopped";
 
 export type Phase =
   | { readonly kind: "idle" }
@@ -1769,7 +1772,9 @@ async function attachTv(owned: NonNullable<typeof current>, resource: Resource, 
     let url = source.url;
     let headers = source.headers;
     let kind: Parameters<typeof serveOnRelay>[2] =
-      way.kind === "file" ? { hls: false, contentType: way.contentType } : { hls: true };
+      way.kind === "file"
+        ? { hls: false, contentType: way.contentType }
+        : { hls: true, strict: way.kind === "session" };
     if (way.kind === "session") {
       const opening = openFormat(source.url, source.headers, 0, resource.controller.signal);
       resource.formats.push(opening);
@@ -1794,7 +1799,7 @@ async function attachTv(owned: NonNullable<typeof current>, resource: Resource, 
     const hold = choice.holds.audio;
     const sound =
       hold && "language" in hold ? hold.language : audioTarget(choice.policy.audio, choice.context);
-    tv.relay = await serveOnRelay(url, headers, kind, sound);
+    tv.relay = await serveOnRelay(url, headers, kind, sound, resource.controller.signal);
     if (!attemptStands(owned, resource)) return;
     const from = owned.seek === null ? 0 : owned.seek + owned.offset;
     owned.seek = null;
@@ -1810,15 +1815,12 @@ async function attachTv(owned: NonNullable<typeof current>, resource: Resource, 
         paused: pauseOnStart === "viewer" || resource.holdInitialPlay,
       },
       (status) => onTvStatus(owned, resource, status),
+      resource.controller.signal,
     );
   } catch (cause) {
     if (!attemptStands(owned, resource)) return;
-    failOnTv(
-      owned,
-      cause instanceof TvRefused
-        ? refusalText(cause.refusal)
-        : tvText("{tv} couldn't play it.", { tv: tv.link.tv.name }),
-    );
+    if (cause instanceof TvRefused) failOnTv(owned, refusalText(cause.refusal), "unsupported");
+    else failOnTv(owned, tvText("{tv} couldn't play it.", { tv: tv.link.tv.name }), "unavailable");
   }
 }
 
@@ -1834,6 +1836,8 @@ function refusalText(refusal: TvRefused["refusal"]): string {
       return tvText("This channel's stream can't play on a TV.");
     case "network":
       return tvText("Connect this iPhone to Wi-Fi to play on a TV.");
+    case "unreadable":
+      return t("The connection to the provider failed.");
   }
 }
 
@@ -1848,10 +1852,14 @@ function onTvStatus(owned: NonNullable<typeof current>, resource: Resource, stat
     length.set(lengthOf(owned.item, status.duration));
   }
   if (status.state === "failed") {
-    return failOnTv(owned, tvText("{tv} couldn't play it.", { tv: tv.link.tv.name }));
+    return failOnTv(
+      owned,
+      tvText("{tv} couldn't play it.", { tv: tv.link.tv.name }),
+      "unavailable",
+    );
   }
-  // Another sender's load, or the TV's own remote: the link says whether the TV went.
-  if (status.state === "stopped") return;
+  // Another sender's load or the TV's own remote ended it: the TV is no longer this route's.
+  if (status.state === "stopped") return void (link === tv.link && endTv("stopped"));
   const { phase } = state.get();
   if (phase.kind === "idle" || phase.kind === "failed") return;
   if (status.state === "ended") {
@@ -1885,14 +1893,14 @@ function onTvStatus(owned: NonNullable<typeof current>, resource: Resource, stat
 }
 
 /** Ends this play on the TV with `message`; nothing tries again on its own. */
-function failOnTv(owned: NonNullable<typeof current>, message: string) {
+function failOnTv(owned: NonNullable<typeof current>, message: string, category: AnalyticsFailure) {
   const { epoch } = owned;
   if (current !== owned || epoch.terminal) return;
   epoch.terminal = true;
   cancelEpoch(epoch);
   playingTime(epoch, false);
   release();
-  failed?.("unsupported");
+  failed?.(category);
   if (!epoch.played) owned.options.outcome?.(false);
   owned.loaded = false;
   state.set((s) => ({ ...s, phase: { kind: "failed", item: owned.item, error: message } }));
@@ -2013,16 +2021,25 @@ export function playHere(paused = true) {
  * where a title got to is kept for playing again here, and Watch says why. `done` is told once
  * the TV's readers and connection closed.
  */
-function endTv(why: "left" | "lost", done?: () => void) {
+function endTv(why: TvEnd, done?: () => void) {
   const ending = link;
-  if (!ending) return done?.();
+  if (!ending) {
+    // Left while still connecting: the TV doesn't start once the app is away.
+    if (state.get().tv.kind === "connecting") {
+      routes++;
+      state.set((s) => ({ ...s, tv: { kind: "off" } }));
+    }
+    return done?.();
+  }
   dropLink();
   const owned = current;
   const { phase } = state.get();
   const message =
     why === "left"
       ? tvText("Stopped on the TV when you left the app.")
-      : tvText("Lost {tv}.", { tv: ending.tv.name });
+      : why === "lost"
+        ? tvText("Lost {tv}.", { tv: ending.tv.name })
+        : tvText("{tv} stopped playing it.", { tv: ending.tv.name });
   if (owned && phase.kind !== "idle") {
     supersede();
     cancelEpoch(owned.epoch);
@@ -2118,9 +2135,9 @@ export function togglePause() {
   const { phase } = state.get();
   // On the TV, its own report of playing or paused follows the request.
   const onTv = current?.resource.tv?.loaded;
-  if (onTv && (phase.kind === "playing" || phase.kind === "paused")) {
-    if (phase.kind === "playing") onTv.pause();
-    else onTv.play();
+  if (onTv && phase.kind !== "idle" && phase.kind !== "failed") {
+    if (phase.kind === "paused") onTv.play();
+    else onTv.pause();
     return;
   }
   if (phase.kind === "playing" || phase.kind === "loading") {

@@ -77,8 +77,11 @@ export interface TvLink {
   readonly tv: Tv;
   readonly volume: Pick<Store<Volume | null>, "get" | "subscribe">;
   setVolume(level: number): void;
-  /** Loads `media`; rejects when the TV refuses it or doesn't answer. */
-  load(media: TvMedia, status: (status: TvStatus) => void): Promise<TvLoaded>;
+  /**
+   * Loads `media`; rejects when the TV refuses it or doesn't answer, or at once when `signal`
+   * aborts, after which a late answer's media is stopped.
+   */
+  load(media: TvMedia, status: (status: TvStatus) => void, signal: AbortSignal): Promise<TvLoaded>;
   /** Stops the receiver and closes the connection, within a few seconds whatever the TV does. */
   close(): Promise<void>;
   /** Resolves when the link went on its own: the TV, the network or another sender ended it. */
@@ -87,8 +90,9 @@ export interface TvLink {
 
 /** A refusal said before anything reached the TV, for playback.ts to show. */
 export class TvRefused extends Error {
-  readonly refusal: Refusal | "network";
-  constructor(refusal: Refusal | "network") {
+  /** Beside the media's own: no private Wi-Fi address, or the stream couldn't be read. */
+  readonly refusal: Refusal | "network" | "unreadable";
+  constructor(refusal: TvRefused["refusal"]) {
     super(`Can't play on a TV: ${refusal}`);
     this.refusal = refusal;
   }
@@ -238,8 +242,9 @@ export interface Relay {
   revoke(): Promise<void>;
 }
 
+/** The file extension `url`'s path ends in, else `fallback`. */
 const extension = (url: string, fallback: string) =>
-  /\.([a-z0-9]{2,4})(?:[?#]|$)/i.exec(new URL(url).pathname)?.[1]?.toLowerCase() ?? fallback;
+  /\.([a-z0-9]{2,4})$/i.exec(url.replace(/[?#].*$/, ""))?.[1]?.toLowerCase() ?? fallback;
 
 /**
  * Serves `url` for one load: a file as it is, an HLS stream with each playlist rewritten as it is
@@ -250,8 +255,15 @@ const extension = (url: string, fallback: string) =>
 export async function serveOnRelay(
   url: string,
   headers: Readonly<Record<string, string>> | undefined,
-  kind: { readonly hls: true } | { readonly hls: false; readonly contentType: string },
+  kind:
+    | {
+        readonly hls: true;
+        /** The format session's own playlist, which names the codecs of everything it can. */
+        readonly strict: boolean;
+      }
+    | { readonly hls: false; readonly contentType: string },
   sound: string | null,
+  signal: AbortSignal,
 ): Promise<Relay> {
   const module = native();
   if (!module) throw new TvRefused("network");
@@ -262,7 +274,13 @@ export async function serveOnRelay(
     relays.delete(token);
     return module.revoke(token);
   };
+  // Given up on, as when the viewer stops or plays something else while it is read: the token
+  // goes now, which ends any read under way, rather than once the reads answer.
+  const abort = () => void revoke();
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
   if (!kind.hls) {
+    signal.removeEventListener("abort", abort);
     return {
       address: `${served.address}0.${extension(url, "mp4")}`,
       contentType: kind.contentType,
@@ -272,15 +290,26 @@ export async function serveOnRelay(
   }
   let next = 1;
   /** Rewrites one playlist read from `base`, adding the routes it names to the token. */
+  /** Each address a playlist named and its path, so a refreshed playlist names the same ones. */
+  const known = new Map<string, string>();
   const rewrite = (base: string, body: string) => {
     const made: RelayRoute[] = [];
+    const fresh = new Map<string, string>();
     const route = (target: string, kind: RouteKind) => {
+      const key = `${kind} ${target}`;
+      const found = known.get(key) ?? fresh.get(key);
+      if (found) return found;
       const id = String(next++);
+      const path = `${id}.${kind === "playlist" ? "m3u8" : extension(target, "ts")}`;
       made.push({ id, url: target, playlist: kind === "playlist" });
-      return `${id}.${kind === "playlist" ? "m3u8" : extension(target, "ts")}`;
+      fresh.set(key, path);
+      return path;
     };
-    const rewritten = rewritePlaylist(body, base, route, sound);
-    if (rewritten.kind === "playlist") module.route(token, made);
+    const rewritten = rewritePlaylist(body, base, route, sound, kind.hls && kind.strict);
+    if (rewritten.kind === "playlist") {
+      module.route(token, made);
+      for (const [key, path] of fresh) known.set(key, path);
+    }
     return rewritten;
   };
   relays.set(token, (base, body) => {
@@ -289,14 +318,16 @@ export async function serveOnRelay(
   });
   try {
     const entry = await module.read(token, "0");
-    if (!entry) throw new TvRefused("stream");
+    if (!entry) throw new TvRefused("unreadable");
     let first = rewrite(entry.url, entry.body);
     if (first.kind === "playlist" && first.variant !== null) {
       const variant = await module.read(token, first.variant.replace(/\.m3u8$/, ""));
-      if (!variant) throw new TvRefused("stream");
+      if (!variant) throw new TvRefused("unreadable");
       first = rewrite(variant.url, variant.body);
     }
     if (first.kind === "refused") throw new TvRefused(first.refusal);
+    // From here the load's own teardown stops the TV's media before the token goes.
+    signal.removeEventListener("abort", abort);
     return {
       address: `${served.address}0.m3u8`,
       contentType: "application/x-mpegURL",
@@ -564,10 +595,8 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     timers = [];
     channels.delete(channel);
     module.disconnect(channel);
-    if (by === "them") {
-      media?.status({ state: "stopped", time: 0, duration: null });
-      lostNow();
-    }
+    // What the TV last said stands: where a title got to is kept for playing it again.
+    if (by === "them") lostNow();
   };
 
   const receiverStatus = (payload: Record<string, unknown>) => {
@@ -590,10 +619,19 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
 
   const mediaStatus = (payload: Record<string, unknown>) => {
     const statuses = Array.isArray(payload["status"]) ? payload["status"] : [];
+    const ids = statuses.map((status) =>
+      isRecord(status) ? numberOr(status["mediaSessionId"], null) : null,
+    );
+    // Only once the LOAD's answer named this load's media, so a late word of the one before
+    // can't end it. Another sender's load in its place ends it.
+    if (!media || media.id === null) return;
+    if (ids.length > 0 && !ids.includes(media.id)) {
+      return media.status({ state: "stopped", time: 0, duration: null });
+    }
     for (const status of statuses) {
       if (!isRecord(status) || !media) continue;
       const id = numberOr(status["mediaSessionId"], null);
-      if (media.id !== null && id !== media.id) continue;
+      if (id !== media.id) continue;
       const info = isRecord(status["media"]) ? status["media"] : {};
       media.status({
         state: stateOf(status["playerState"], status["idleReason"]),
@@ -690,18 +728,27 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   return {
     tv,
     volume,
-    setVolume: (level) =>
+    setVolume(level) {
       send(PLATFORM, NAMESPACE.receiver, {
         type: "SET_VOLUME",
         volume: { level: Math.min(1, Math.max(0, level)) },
         requestId: ++requests,
-      }),
+      });
+      // Cast keeps mute apart from the level: moving the level from the phone also unmutes.
+      if (volume.get()?.muted) {
+        send(PLATFORM, NAMESPACE.receiver, {
+          type: "SET_VOLUME",
+          volume: { muted: false },
+          requestId: ++requests,
+        });
+      }
+    },
     lost,
     close,
-    async load(loaded, status) {
+    async load(loaded, status, signal) {
       const mine: NonNullable<typeof media> = { id: null, status };
       media = mine;
-      const answer = await ask(to, NAMESPACE.media, {
+      const asked = ask(to, NAMESPACE.media, {
         type: "LOAD",
         sessionId: session,
         media: {
@@ -719,8 +766,32 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         autoplay: !loaded.paused,
         ...(loaded.live ? {} : { currentTime: loaded.from }),
       });
-      const statuses = Array.isArray(answer["status"]) ? answer["status"] : [];
-      const first = statuses.find(isRecord);
+      const firstOf = (answer: Record<string, unknown>) =>
+        (Array.isArray(answer["status"]) ? answer["status"] : []).find(isRecord);
+      const answer = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        const abort = () => {
+          if (media === mine) media = null;
+          reject(new Error("The load was given up."));
+          // The TV may still start it: what it starts is stopped.
+          void asked.then(
+            (late) => {
+              const id = numberOr(firstOf(late)?.["mediaSessionId"], null);
+              if (id !== null) {
+                send(to, NAMESPACE.media, {
+                  type: "STOP",
+                  mediaSessionId: id,
+                  requestId: ++requests,
+                });
+              }
+            },
+            () => undefined,
+          );
+        };
+        if (signal.aborted) return abort();
+        signal.addEventListener("abort", abort, { once: true });
+        asked.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+      });
+      const first = firstOf(answer);
       if (answer["type"] !== "MEDIA_STATUS" || !first) {
         if (media === mine) media = null;
         throw new Error("The TV couldn't play it.");

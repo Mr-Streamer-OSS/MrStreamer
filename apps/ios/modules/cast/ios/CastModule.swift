@@ -17,6 +17,8 @@ public class CastModule: Module {
   /// Open channels by JavaScript's name for them; touched on the main queue only.
   private var channels: [String: CastChannel] = [:]
   private var background: UIBackgroundTaskIdentifier = .invalid
+  /// Whether this module turned the idle timer off, so it turns it back on only then.
+  private var keptAwake = false
   private var observer: NSObjectProtocol?
 
   public func definition() -> ModuleDefinition {
@@ -69,9 +71,11 @@ public class CastModule: Module {
           closed: { [weak self] in
             guard let self else { return }
             self.channels[channel] = nil
+            self.stayAwake()
             self.sendEvent("onClosed", ["channel": channel])
           })
         self.channels[channel] = opened
+        self.stayAwake()
         opened.open { failure in
           if let failure {
             promise.reject("ERR_CAST_CONNECT", failure)
@@ -88,7 +92,10 @@ public class CastModule: Module {
     }
 
     Function("disconnect") { (channel: String) in
-      DispatchQueue.main.async { self.channels.removeValue(forKey: channel)?.close() }
+      DispatchQueue.main.async {
+        self.channels.removeValue(forKey: channel)?.close()
+        self.stayAwake()
+      }
     }
 
     /// Serves `url` as route "0" of a new token: `{ address, token }`, or null with no Wi-Fi.
@@ -136,6 +143,14 @@ public class CastModule: Module {
     if background == .invalid { closeEverything() }
   }
 
+  /// The TV plays only while the app is open: the screen stays on while a TV is connected.
+  private func stayAwake() {
+    let wanted = !channels.isEmpty
+    guard wanted != keptAwake else { return }
+    keptAwake = wanted
+    UIApplication.shared.isIdleTimerDisabled = wanted
+  }
+
   private func endBackground() {
     guard background != .invalid else { return }
     UIApplication.shared.endBackgroundTask(background)
@@ -150,6 +165,7 @@ public class CastModule: Module {
       channel.close()
       sendEvent("onClosed", ["channel": name])
     }
+    stayAwake()
     CastRelay.shared.revokeAll()
   }
 }

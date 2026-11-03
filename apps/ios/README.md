@@ -346,8 +346,8 @@ where iOS shows next beside the ±10 s skips.
 
 Watch's TV button plays what plays on a Cast TV on the same Wi-Fi, through an open sender: no
 Google SDK, account or registration. `modules/cast` browses `_googlecast._tcp` only while the
-chooser is open, so iOS asks for Local Network on its first open and never before; denying it
-keeps this iPhone and AirPlay. It opens TLS to the TV's port 8009 and serves media. `src/cast.ts`
+chooser is open, so Cast never makes iOS ask for Local Network before then; a provider on the
+local network may already have made it ask. Denying it keeps this iPhone and AirPlay. It opens TLS to the TV's port 8009 and serves media. `src/cast.ts`
 speaks the protocol (Default Media Receiver `CC1AD845`, LOAD, PLAY, PAUSE, SEEK, SET_VOLUME, STOP,
 CLOSE and the heartbeat), and `src/cast-media.ts` decides what a TV is given.
 
@@ -359,16 +359,21 @@ CLOSE and the heartbeat), and `src/cast-media.ts` decides what a TV is given.
   redirects itself and rewrites every playlist to opaque paths under the token, so no provider
   address, login or header reaches the TV. Revoking the token cuts its requests and connections.
 - **First profile.** Matroska goes through a format session from 0 as fMP4 HLS, with resume as
-  the LOAD's `currentTime`; MP4 and MOV go as they are, byte ranges and all; a channel goes only
-  as HLS, LIVE, with the segment format its playlist names. Only the chosen sound track goes and
-  no subtitles. Refused with a plain reason before anything reaches the TV: AVI and other files,
-  keys (even one that appears later), variants outside H.264 up to level 4.1, 1080p and AAC, a
-  channel that isn't HLS, and no private Wi-Fi address.
+  the LOAD's `currentTime`, the chosen sound track's rendition only and no subtitles. Refused
+  with a plain reason before anything reaches the TV: AVI and other files, keys (even one that
+  appears later), a channel that isn't HLS, no private Wi-Fi address, and HLS variants whose
+  CODECS name anything outside H.264 up to level 4.1, 1080p and AAC (a Matroska file's own
+  playlist must name them). MP4 and MOV go as they are, byte ranges and every track, and a
+  channel's variants that name no codecs go unchecked: a TV that can't play them says so, and
+  Watch says "<TV> couldn't play it." In a Matroska file with AAC and AC-3 tracks, the chosen
+  track is sent whichever it is. Watch hides Audio, Subtitles and Speed while a TV plays.
 - **Foreground only.** Leaving the app with a TV connected asks iOS for background time at once;
   the TV's media and receiver stop, the token goes, readers close and then the lease returns, and
   Watch says "Stopped on the TV when you left the app." Without that time, or once it ends,
-  everything closes natively. There is no silent-audio keepalive. How long a TV plays what it
-  buffered after the phone stops serving is unmeasured.
+  the relay and the TV's connection close natively; a Matroska title's format session then
+  closes when the app runs again, as one paused here does. The screen stays on while a TV is
+  connected. There is no silent-audio keepalive. How long a TV plays what it buffered after the
+  phone stops serving is unmeasured.
 - **Trust.** The TV isn't authenticated, as on the desktop: whatever answers the browse as a TV
   gets a TV's address and title, nothing more.
 

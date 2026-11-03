@@ -87,8 +87,8 @@ const written = (values: Map<string, string>) =>
  * picture is outside it or none of its sounds is in it. A variant that names no codecs is let
  * through: the TV decides.
  */
-function profiled(codecs: string | null): string | null | undefined {
-  if (codecs === null) return undefined;
+function profiled(codecs: string | null, strict: boolean): string | null | undefined {
+  if (codecs === null) return strict ? null : undefined;
   const named = codecs.split(",").map((codec) => codec.trim());
   const pictures = named.filter((codec) => !codec.startsWith("mp4a.") && !/^[ae]c-3$/.test(codec));
   const sounds = named.filter((codec) => !pictures.includes(codec));
@@ -100,6 +100,9 @@ function profiled(codecs: string | null): string | null | undefined {
   });
   const fitting = sounds.filter((codec) => SOUNDS.has(codec));
   if (!picturesFit || (sounds.length > 0 && fitting.length === 0)) return null;
+  // The format session's sound tracks share one group whose renditions don't say their codec, so
+  // the chosen one could be the AC-3 one: a file with any sound outside the profile is refused.
+  if (strict && fitting.length < sounds.length) return null;
   return [...pictures, ...fitting].join(",");
 }
 
@@ -113,17 +116,25 @@ function fitsScreen(resolution: string | undefined): boolean {
  * Rewrites one playlist read from `base`, its address after any redirect, for the TV. `route`
  * turns each URI it names into the relay's path for it, made once per playlist read. `sound` is
  * the chosen sound's language code: of each sound group only the track in it goes, else the group's
- * default, else its first.
+ * default, else its first. `strict` refuses a variant that names no codecs, as the format
+ * session's own playlist names every codec it can.
  */
 export function rewritePlaylist(
   text: string,
   base: string,
   route: (url: string, kind: RouteKind) => string,
   sound: string | null,
+  strict = false,
 ): Rewritten {
   const lines = text.replace(/^﻿/, "").split(/\r?\n/);
   if (lines[0]?.trim() !== "#EXTM3U") return { kind: "refused", refusal: "stream" };
-  const absolute = (uri: string) => new URL(uri, base).href;
+  /** Set by a URI that isn't http or https, such as `file:`, which refuses the whole playlist. */
+  let foreign = false;
+  const absolute = (uri: string) => {
+    const resolved = resolveUri(uri, base);
+    if (resolved === null) foreign = true;
+    return resolved ?? "";
+  };
   const out: string[] = [];
   let segments: "fmp4" | "ts" | null = null;
   let variant: string | null = null;
@@ -163,7 +174,7 @@ export function rewritePlaylist(
         continue;
       case "#EXT-X-STREAM-INF": {
         master = true;
-        const codecs = profiled(unquoted(values.get("CODECS")));
+        const codecs = profiled(unquoted(values.get("CODECS")), strict);
         if (codecs === null || !fitsScreen(values.get("RESOLUTION"))) {
           pending = "skip";
           continue;
@@ -200,6 +211,7 @@ export function rewritePlaylist(
         out.push(line);
     }
   }
+  if (foreign) return { kind: "refused", refusal: "stream" };
   if (master && variants === 0) return { kind: "refused", refusal: "codec" };
   return { kind: "playlist", text: `${out.join("\n")}\n`, variant, segments };
 }
@@ -225,4 +237,36 @@ function soundsKept(lines: readonly string[], sound: string | null): Set<string>
     if (chosen) kept.add(chosen.line);
   }
   return kept;
+}
+
+const HTTP = /^(https?:)\/\/([^/?#]*)([^?#]*)(\?[^#]*)?/i;
+
+/**
+ * `uri` resolved against `base` as RFC 3986 does, or null unless both are http or https. React
+ * Native's own `URL` joins a relative path onto the whole base, playlist name and all, so it isn't
+ * used here.
+ */
+function resolveUri(uri: string, base: string): string | null {
+  const from = HTTP.exec(base);
+  if (!from) return null;
+  const [, scheme = "", authority = "", path = "", query = ""] = from;
+  const target = uri.trim().replace(/#.*$/, "");
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return HTTP.test(target) ? target : null;
+  if (target.startsWith("//")) return `${scheme}${target}`;
+  if (target === "") return `${scheme}//${authority}${path}${query}`;
+  if (target.startsWith("?")) return `${scheme}//${authority}${path}${target}`;
+  const [relative = "", rest = ""] = /^([^?]*)(.*)$/.exec(target)!.slice(1);
+  const merged = relative.startsWith("/")
+    ? relative
+    : `${path.slice(0, path.lastIndexOf("/") + 1) || "/"}${relative}`;
+  const kept: string[] = [];
+  const parts = merged.split("/");
+  parts.forEach((part, at) => {
+    if (part === "..") {
+      if (kept.length > 1) kept.pop();
+    } else if (part !== ".") kept.push(part);
+    // A path ending in "." or ".." still names a directory.
+    if (at === parts.length - 1 && (part === "." || part === "..")) kept.push("");
+  });
+  return `${scheme}//${authority}${kept.join("/")}${rest}`;
 }

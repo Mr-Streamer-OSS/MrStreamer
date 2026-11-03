@@ -610,9 +610,11 @@ function OnTv({ top, bottom }: { top: number; bottom: number }) {
             line:
               tv.why === "left"
                 ? tvT("{tv} stops when you leave Mr. Streamer.", { tv: tv.tv.name })
-                : tvT("Check that {tv} is on and on the same Wi-Fi as this iPhone.", {
-                    tv: tv.tv.name,
-                  }),
+                : tv.why === "stopped"
+                  ? tvT("{tv} stopped playing it.", { tv: tv.tv.name })
+                  : tvT("Check that {tv} is on and on the same Wi-Fi as this iPhone.", {
+                      tv: tv.tv.name,
+                    }),
           }
         : null;
   if (!shown) return null;
@@ -1208,6 +1210,8 @@ function Scrubber() {
  */
 function TextButtons({ item }: { item: Playing }) {
   const upNext = useUpNext();
+  // The TV plays the sound chosen before it started, no subtitles, at its own speed.
+  const onTv = usePlayback().tv.kind === "on";
   // A copy's Next episode reads the downloads, so it shows again as its next copy comes or goes.
   useDownloads();
   const menu = useRef(0);
@@ -1273,17 +1277,25 @@ function TextButtons({ item }: { item: Playing }) {
   if (upNext) return <UpNextRow key={upNext.place} {...upNext} />;
   return (
     <View style={styles.textButtons}>
-      <TextControl label={t("Audio")} onPress={() => void choose("audio")} testID="watch-audio" />
-      <TextControl
-        label={t("Subtitles")}
-        onPress={() => void choose("subtitles")}
-        testID="watch-subtitles"
-      />
+      {onTv ? null : (
+        <>
+          <TextControl
+            label={t("Audio")}
+            onPress={() => void choose("audio")}
+            testID="watch-audio"
+          />
+          <TextControl
+            label={t("Subtitles")}
+            onPress={() => void choose("subtitles")}
+            testID="watch-subtitles"
+          />
+        </>
+      )}
       {item.live ? (
         <StartOver item={item} />
       ) : (
         <>
-          {item.past ? null : <TitleSpeed />}
+          {item.past || onTv ? null : <TitleSpeed />}
           {item.next ? (
             <TextControl label={t("Next episode")} onPress={playNext} testID="watch-next" />
           ) : null}

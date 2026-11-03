@@ -44,8 +44,9 @@ final class CastRelay {
     }
   }
 
-  /// The most routes a token keeps: a channel's playlists name new segments on every read.
-  private static let routesKept = 4096
+  /// The most segment routes a token keeps: a channel's playlists name new segments on every
+  /// read. Enough for a film's every segment in two renditions, at the format core's most.
+  private static let routesKept = 100_000
   /// The most a playlist may be.
   private static let playlistLimit = 4 * 1024 * 1024
   /// How long JavaScript gets to rewrite a playlist.
@@ -78,10 +79,14 @@ final class CastRelay {
     lock.lock()
     defer { lock.unlock() }
     guard let served = tokens[token] else { return }
+    // Only the entry route may be a copy's file; what a playlist names is http or https.
     for route in routes {
-      guard let url = URL(string: route.url), served.routes[route.id] == nil else { continue }
+      guard let url = URL(string: route.url), url.scheme == "http" || url.scheme == "https",
+        served.routes[route.id] == nil
+      else { continue }
       served.routes[route.id] = Route(url: url, playlist: route.playlist)
-      served.order.append(route.id)
+      // Playlists stay: the TV reads a channel's again and again. Only old segments go.
+      if !route.playlist { served.order.append(route.id) }
     }
     while served.order.count > Self.routesKept {
       served.routes[served.order.removeFirst()] = nil
@@ -92,7 +97,7 @@ final class CastRelay {
   func read(_ token: String, _ id: String, _ done: @escaping ((url: String, body: String)?) -> Void) {
     DispatchQueue.global().async {
       guard let found = self.enter(token, id) else { return done(nil) }
-      defer { self.leave(found.served) }
+      defer { self.leave(token, found.served) }
       done(found.route.playlist ? self.fetchPlaylist(found.route.url, found.served) : nil)
     }
   }
@@ -104,32 +109,46 @@ final class CastRelay {
     waiting?.answer(body)
   }
 
-  /// Removes `token`; `done` once every request under it ended.
+  /// Ends `token`; `done` once every request under it ended. A token stays in the ledger,
+  /// refusing new requests, until its readers drained, so revoking it again, as JavaScript does
+  /// after the native side cut everything, waits for the same readers.
   func revoke(_ token: String, _ done: @escaping () -> Void) {
     lock.lock()
-    guard let served = tokens.removeValue(forKey: token) else {
+    guard let served = tokens[token] else {
       lock.unlock()
       return done()
+    }
+    if served.revoked {
+      served.waiters.append(done)
+      lock.unlock()
+      return
     }
     served.revoked = true
     let unanswered = answers.filter { $0.value.token == token }
     for request in unanswered.keys { answers[request] = nil }
     for task in served.tasks.values { task.cancel() }
     for client in served.clients { shutdown(client, SHUT_RDWR) }
-    if served.active == 0 {
-      lock.unlock()
-      done()
-    } else {
-      served.waiters.append(done)
-      lock.unlock()
-    }
+    served.waiters.append(done)
+    let finished = drained(token, served)
+    lock.unlock()
     for waiting in unanswered.values { waiting.answer(nil) }
-    stopWhenIdle()
+    for waiter in finished { waiter() }
+  }
+
+  /// A revoked token with no reader left leaves the ledger, and the listener stops once none is
+  /// left; answers its waiters to tell. Called with the lock held.
+  private func drained(_ token: String, _ served: Served) -> [() -> Void] {
+    guard served.revoked, served.active == 0 else { return [] }
+    tokens[token] = nil
+    if tokens.isEmpty { stopListening() }
+    let waiting = served.waiters
+    served.waiters = []
+    return waiting
   }
 
   func revokeAll() {
     lock.lock()
-    let all = Array(tokens.keys)
+    let all = tokens.filter { !$0.value.revoked }.map(\.key)
     lock.unlock()
     for token in all { revoke(token) {} }
   }
@@ -176,13 +195,6 @@ final class CastRelay {
     return true
   }
 
-  /// Nothing listens on the network while nothing is served.
-  private func stopWhenIdle() {
-    lock.lock()
-    if tokens.isEmpty { stopListening() }
-    lock.unlock()
-  }
-
   private func stopListening() {
     source?.cancel()
     source = nil
@@ -195,6 +207,10 @@ final class CastRelay {
       if client < 0 { return }
       var on: Int32 = 1
       setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+      // A request's head must arrive within ten seconds, so a client that never finishes one
+      // doesn't hold a connection open after casting stops.
+      var patience = timeval(tv_sec: 10, tv_usec: 0)
+      setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &patience, socklen_t(MemoryLayout<timeval>.size))
       _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)
       DispatchQueue(label: "app.mrstreamer.cast.connection").async { [weak self] in
         self?.handle(client)
@@ -219,12 +235,11 @@ final class CastRelay {
     return (served, route)
   }
 
-  private func leave(_ served: Served, client: Int32? = nil) {
+  private func leave(_ token: String, _ served: Served, client: Int32? = nil) {
     lock.lock()
     served.active -= 1
     if let client { served.clients.remove(client) }
-    let finished = served.revoked && served.active == 0 ? served.waiters : []
-    if !finished.isEmpty { served.waiters = [] }
+    let finished = drained(token, served)
     lock.unlock()
     for waiter in finished { waiter() }
   }
@@ -256,7 +271,7 @@ final class CastRelay {
       return reply(client, status: 404, headers: [:], body: Data())
     }
     let (served, route) = (found.served, found.route)
-    defer { leave(served, client: client) }
+    defer { leave(segments[0], served, client: client) }
     if route.playlist {
       playlist(client, token: segments[0], route: route, served: served, head: method == "HEAD")
     } else if route.url.isFileURL {
@@ -303,6 +318,8 @@ final class CastRelay {
   private func fetchPlaylist(_ url: URL, _ served: Served) -> (url: String, body: String)? {
     var request = URLRequest(url: url)
     for (name, value) in served.headers { request.setValue(value, forHTTPHeaderField: name) }
+    // Bytes as the provider sends them, so the length it says is the length the TV gets.
+    request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     var result: (url: String, body: String)?
     let done = DispatchSemaphore(value: 0)
     let task = Self.session.dataTask(with: request) { data, response, _ in
@@ -344,6 +361,8 @@ final class CastRelay {
     var request = URLRequest(url: url)
     request.httpMethod = method
     for (name, value) in served.headers { request.setValue(value, forHTTPHeaderField: name) }
+    // Bytes as the provider sends them, so the length it says is the length the TV gets.
+    request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     if let range { request.setValue(range, forHTTPHeaderField: "Range") }
     let streaming = Streaming(client: client)
     let session = URLSession(
@@ -406,7 +425,9 @@ final class CastRelay {
     all["Access-Control-Allow-Headers"] = "Content-Type, Range, Accept-Encoding"
     all["Access-Control-Expose-Headers"] = "Content-Length, Content-Range"
     all["Connection"] = "close"
-    let reason = HTTPURLResponse.localizedString(forStatusCode: status).capitalized
+    let reason =
+      [200: "OK", 204: "No Content", 206: "Partial Content", 404: "Not Found",
+       416: "Range Not Satisfiable", 502: "Bad Gateway"][status] ?? "Error"
     let lines = all.map { "\($0.key): \($0.value)" }.sorted().joined(separator: "\r\n")
     return Data("HTTP/1.1 \(status) \(reason)\r\n\(lines)\r\n\r\n".utf8)
   }

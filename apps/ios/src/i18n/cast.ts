@@ -9,6 +9,7 @@ export const t = catalogue(
   {
     "Stopped on the TV when you left the app.": "Stopped on the TV when you left the app.",
     "Lost {tv}.": "Lost {tv}.",
+    "{tv} stopped playing it.": "{tv} stopped playing it.",
     "Couldn't connect to {tv}.": "Couldn't connect to {tv}.",
     "{tv} couldn't play it.": "{tv} couldn't play it.",
     "This file type can't play on a TV.": "This file type can't play on a TV.",
@@ -56,6 +57,7 @@ export const t = catalogue(
     "nl-NL": {
       "Stopped on the TV when you left the app.": "Gestopt op de tv toen je de app verliet.",
       "Lost {tv}.": "Verbinding met {tv} verbroken.",
+      "{tv} stopped playing it.": "{tv} is gestopt met afspelen.",
       "Couldn't connect to {tv}.": "Kan geen verbinding maken met {tv}.",
       "{tv} couldn't play it.": "{tv} kon het niet afspelen.",
       "This file type can't play on a TV.": "Dit bestandstype kan niet op een tv spelen.",
@@ -105,6 +107,7 @@ export const t = catalogue(
       "Stopped on the TV when you left the app.":
         "Arrêté sur la télé quand vous avez quitté l'app.",
       "Lost {tv}.": "Connexion à {tv} perdue.",
+      "{tv} stopped playing it.": "{tv} a arrêté la lecture.",
       "Couldn't connect to {tv}.": "Impossible de se connecter à {tv}.",
       "{tv} couldn't play it.": "{tv} n'a pas pu le lire.",
       "This file type can't play on a TV.": "Ce type de fichier ne peut pas être lu sur une télé.",
@@ -154,6 +157,7 @@ export const t = catalogue(
       "Stopped on the TV when you left the app.":
         "Auf dem Fernseher gestoppt, als du die App verlassen hast.",
       "Lost {tv}.": "Verbindung zu {tv} verloren.",
+      "{tv} stopped playing it.": "{tv} hat die Wiedergabe beendet.",
       "Couldn't connect to {tv}.": "Keine Verbindung zu {tv} möglich.",
       "{tv} couldn't play it.": "{tv} konnte es nicht abspielen.",
       "This file type can't play on a TV.":
@@ -204,6 +208,7 @@ export const t = catalogue(
     "es-ES": {
       "Stopped on the TV when you left the app.": "Se detuvo en la tele al salir de la app.",
       "Lost {tv}.": "Se perdió la conexión con {tv}.",
+      "{tv} stopped playing it.": "{tv} dejó de reproducirlo.",
       "Couldn't connect to {tv}.": "No se pudo conectar con {tv}.",
       "{tv} couldn't play it.": "{tv} no pudo reproducirlo.",
       "This file type can't play on a TV.": "Este tipo de archivo no se puede ver en una tele.",

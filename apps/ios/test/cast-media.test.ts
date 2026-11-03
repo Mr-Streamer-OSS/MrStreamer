@@ -32,6 +32,8 @@ describe("rewritePlaylist", () => {
         "seg1.m4s?token=abc",
         "#EXTINF:6,",
         "http://cdn.example/seg2.m4s",
+        "#EXTINF:6,",
+        "../../other/seg3.m4s",
         '#EXT-X-PRELOAD-HINT:TYPE=PART,URI="part.m4s"',
       ].join("\n"),
     );
@@ -44,6 +46,7 @@ describe("rewritePlaylist", () => {
       { url: "http://provider.example:8080/live/user/secret/init.mp4", kind: "media" },
       { url: "http://provider.example:8080/live/user/secret/seg1.m4s?token=abc", kind: "media" },
       { url: "http://cdn.example/seg2.m4s", kind: "media" },
+      { url: "http://provider.example:8080/live/other/seg3.m4s", kind: "media" },
     ]);
   });
 
@@ -93,12 +96,30 @@ describe("rewritePlaylist", () => {
       kind: "refused",
       refusal: "codec",
     });
-    // A file with an AAC track beside an AC-3 one still goes, naming only what the TV plays.
+    // The format session names every codec it can: a variant naming none is outside the profile.
+    const unnamed = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv.m3u8\n";
+    expect(rewritePlaylist(unnamed, PROVIDER, () => "1.m3u8", null, true)).toEqual({
+      kind: "refused",
+      refusal: "codec",
+    });
+    expect(rewritePlaylist(unnamed, PROVIDER, () => "1.m3u8", null).kind).toBe("playlist");
+    // A channel with an AAC sound beside an AC-3 one still goes, naming only what the TV plays.
     const mixed = only("avc1.640028,mp4a.40.2,ac-3");
     expect(mixed.kind === "playlist" && mixed.text).toContain('CODECS="avc1.640028,mp4a.40.2"');
+    // A Matroska file's renditions don't say which is the AC-3 one: it is refused.
+    const file =
+      '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="avc1.640028,mp4a.40.2,ac-3"\nv.m3u8\n';
+    expect(rewritePlaylist(file, PROVIDER, () => "1.m3u8", null, true)).toEqual({
+      kind: "refused",
+      refusal: "codec",
+    });
   });
 
-  it("refuses what isn't a playlist", () => {
+  it("refuses what isn't a playlist, and one that names a file on the phone", () => {
     expect(rewrite("<html>login</html>").result).toEqual({ kind: "refused", refusal: "stream" });
+    expect(rewrite("#EXTM3U\n#EXTINF:6,\nfile:///var/mobile/a.ts\n").result).toEqual({
+      kind: "refused",
+      refusal: "stream",
+    });
   });
 });

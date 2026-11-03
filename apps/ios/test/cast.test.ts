@@ -202,8 +202,17 @@ Object.assign(globalThis, {
   },
 });
 
-const { onAdmission, play, playbackState, playHere, playOnTv, setTvVolume, stop, togglePause } =
-  await import("../src/playback.ts");
+const {
+  onAdmission,
+  play,
+  playbackState,
+  playHere,
+  playOnTv,
+  retry,
+  setTvVolume,
+  stop,
+  togglePause,
+} = await import("../src/playback.ts");
 
 onAdmission({
   acquire: async (_subscription, lease) => void events.push(`acquire ${lease.split("-").pop()}`),
@@ -436,15 +445,48 @@ describe("Play on TV", () => {
     });
   });
 
-  it("says the TV was lost when its connection goes", async () => {
+  it("says the TV was lost when its connection goes, keeping where the title got to", async () => {
     void play(title("m1"), file("mp4"), options);
     await settle();
     await playOnTv(tv);
     await relayCloses();
+    tvSays(channel, "t1", MEDIA, {
+      type: "MEDIA_STATUS",
+      status: [{ mediaSessionId: 1, playerState: "PLAYING", currentTime: 300 }],
+    });
     emit("onClosed", { channel });
     await relayCloses();
     expect(playbackState.get().phase).toMatchObject({ error: "Lost Living Room TV." });
     expect(events.some((each) => each.startsWith("release"))).toBe(true);
+
+    retry();
+    await settle();
+    expect(given.at(-1)?.uri).toContain(PROVIDER);
+    fakePlayer.ready();
+    expect(fakePlayer.currentTime).toBe(300);
+  });
+
+  it.each([
+    ["interrupts it", { mediaSessionId: 1, playerState: "IDLE", idleReason: "INTERRUPTED" }],
+    ["loads its own", { mediaSessionId: 2, playerState: "PLAYING" }],
+  ])("ends the TV route when another sender %s", async (_, status) => {
+    void play(title("m1"), file("mp4"), options);
+    await settle();
+    await playOnTv(tv);
+    await relayCloses();
+    tvSays(channel, "t1", MEDIA, { type: "MEDIA_STATUS", status: [status] });
+    await relayCloses();
+    expect(playbackState.get().tv).toEqual({ kind: "ended", tv, why: "stopped" });
+    expect(events.some((each) => each.startsWith("release"))).toBe(true);
+  });
+
+  it("doesn't start the TV when the app leaves while it connects", async () => {
+    const connecting = playOnTv(tv);
+    emit("onBackground", {});
+    await connecting;
+    await settle();
+    expect(playbackState.get().tv).toEqual({ kind: "off" });
+    expect(events).toContain("end background");
   });
 
   it("Disconnect plays the title here again, from where the TV was", async () => {
