@@ -28,6 +28,79 @@ import org.robolectric.annotation.Config
 class MediaTest {
   @After fun reset() = resetPlayerState()
 
+  /** A connected controller may see identity/title, but never the owner's playback address. */
+  @Test fun controllerMediaItemsContainOnlyIdentityAndTitle() {
+    val context: Context = RuntimeEnvironment.getApplication()
+    val owner = PlayerHost.owner(context)
+    val file = java.io.File(context.cacheDir, "controller-media.mp4")
+    javaClass.classLoader!!.getResourceAsStream("media/h264-aac.mp4")!!.use { input ->
+      file.outputStream().use { input.copyTo(it) }
+    }
+    var controller: androidx.media3.session.MediaController? = null
+    val view = androidx.media3.ui.PlayerView(context)
+    val events = mutableListOf<MediaItem>()
+    val listener = object : Player.Listener {
+      override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+        for (index in 0 until timeline.windowCount) {
+          events += timeline.getWindow(index, androidx.media3.common.Timeline.Window()).mediaItem
+        }
+      }
+      override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        mediaItem?.let { events += it }
+      }
+      override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
+        old.mediaItem?.let { events += it }
+        new.mediaItem?.let { events += it }
+      }
+    }
+    fun checkItem(item: MediaItem, id: String, title: String) {
+      assertEquals(id, item.mediaId)
+      assertEquals(title, item.mediaMetadata.title.toString())
+      assertNull("Controller must not receive local playback configuration", item.localConfiguration)
+      assertNull("Controller must not receive a request URI", item.requestMetadata.mediaUri)
+      assertEquals(MediaItem.Builder().setMediaId(id).setMediaMetadata(
+        androidx.media3.common.MediaMetadata.Builder().setTitle(title).build()).build(), item)
+    }
+    try {
+      owner.attach(view)
+      fun admit(id: String, title: String) {
+        assertTrue(owner.admit(Admission(id, file.toURI().toString(), emptyMap(), "progressive", "file", 0,
+          HoldRef.LocalFile(file.path), title = title)))
+      }
+      admit("first", "First title")
+      val session = PlayerHost.session!!
+      val future = androidx.media3.session.MediaController.Builder(context, session.token).buildAsync()
+      androidx.media3.test.utils.robolectric.RobolectricUtil.runMainLooperUntil { future.isDone }
+      val connected = future.get()
+      controller = connected
+      connected.addListener(listener)
+      session.player.addListener(listener)
+      for ((id, title) in listOf("first" to "First title", "replacement" to "Replacement title")) {
+        if (id == "replacement") admit(id, title)
+        androidx.media3.test.utils.robolectric.RobolectricUtil.runMainLooperUntil {
+          connected.currentMediaItem?.mediaId == id && connected.mediaMetadata.title.toString() == title
+        }
+        for (reader in listOf<Player>(connected, session.player)) {
+          checkItem(reader.currentMediaItem!!, id, title)
+          checkItem(reader.getMediaItemAt(0), id, title)
+          checkItem(reader.currentTimeline.getWindow(0, androidx.media3.common.Timeline.Window()).mediaItem, id, title)
+        }
+        // The actual renderer still plays the owner's file with its full local configuration.
+        assertEquals(android.net.Uri.fromFile(file), view.player!!.currentMediaItem!!.localConfiguration!!.uri)
+      }
+      assertTrue("Replacement must publish media events", events.isNotEmpty())
+      events.forEach { item ->
+        checkItem(item, item.mediaId, if (item.mediaId == "first") "First title" else "Replacement title")
+      }
+      session.player.removeListener(listener)
+    } finally {
+      controller?.release()
+      owner.detach(view)
+      owner.stopAll()
+      file.delete()
+    }
+  }
+
   @Test fun sessionCannotReplaceMediaOrChangeSpeed() {
     val owner = PlayerHost.owner(RuntimeEnvironment.getApplication())
     try {

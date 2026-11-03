@@ -17,6 +17,8 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
+import androidx.media3.exoplayer.source.ForwardingTimeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
@@ -123,6 +125,85 @@ object PlayerHost {
     }.build()
 
   private class OwnerPlayer(player: Player, private val owner: PlayerOwner) : ForwardingPlayer(player) {
+    private val listeners = java.util.IdentityHashMap<Player.Listener, Player.Listener>()
+
+    // Build from an allowlist: playback configuration and request metadata stay with ExoPlayer.
+    private fun publicItem(item: MediaItem) = MediaItem.Builder()
+      .setMediaId(item.mediaId)
+      .setMediaMetadata(MediaMetadata.Builder().setTitle(item.mediaMetadata.title).build())
+      .build()
+
+    private fun publicTimeline(timeline: Timeline): Timeline = object : ForwardingTimeline(timeline) {
+      override fun getWindow(index: Int, window: Timeline.Window, projectionUs: Long): Timeline.Window =
+        super.getWindow(index, window, projectionUs).apply {
+          mediaItem = publicItem(mediaItem)
+          manifest = null
+        }
+    }
+
+    private fun publicPosition(position: Player.PositionInfo) = Player.PositionInfo(
+      position.windowUid, position.mediaItemIndex, position.mediaItem?.let(::publicItem),
+      position.periodUid, position.periodIndex, position.positionMs, position.contentPositionMs,
+      position.adGroupIndex, position.adIndexInAdGroup)
+
+    override fun getCurrentMediaItem() = super.getCurrentMediaItem()?.let(::publicItem)
+    override fun getMediaItemAt(index: Int) = publicItem(super.getMediaItemAt(index))
+    override fun getCurrentTimeline() = publicTimeline(super.getCurrentTimeline())
+
+    // Session updates also carry items; sanitizing getters alone would leak on replacement.
+    override fun addListener(listener: Player.Listener) {
+      if (listeners.containsKey(listener)) return
+      val wrapped = object : Player.Listener {
+        // Java default methods need explicit forwarding in Kotlin, including metadata and onEvents.
+        override fun onEvents(player: Player, events: Player.Events) = listener.onEvents(player, events)
+        override fun onTracksChanged(tracks: androidx.media3.common.Tracks) = listener.onTracksChanged(tracks)
+        override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) = listener.onMediaMetadataChanged(mediaMetadata)
+        override fun onPlaylistMetadataChanged(mediaMetadata: MediaMetadata) = listener.onPlaylistMetadataChanged(mediaMetadata)
+        override fun onIsLoadingChanged(isLoading: Boolean) = listener.onIsLoadingChanged(isLoading)
+        override fun onLoadingChanged(isLoading: Boolean) = listener.onLoadingChanged(isLoading)
+        override fun onAvailableCommandsChanged(availableCommands: Player.Commands) = listener.onAvailableCommandsChanged(availableCommands)
+        override fun onTrackSelectionParametersChanged(parameters: TrackSelectionParameters) = listener.onTrackSelectionParametersChanged(parameters)
+        override fun onPlayerStateChanged(playWhenReady: Boolean, playbackState: Int) = listener.onPlayerStateChanged(playWhenReady, playbackState)
+        override fun onPlaybackStateChanged(playbackState: Int) = listener.onPlaybackStateChanged(playbackState)
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = listener.onPlayWhenReadyChanged(playWhenReady, reason)
+        override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) = listener.onPlaybackSuppressionReasonChanged(playbackSuppressionReason)
+        override fun onIsPlayingChanged(isPlaying: Boolean) = listener.onIsPlayingChanged(isPlaying)
+        override fun onRepeatModeChanged(repeatMode: Int) = listener.onRepeatModeChanged(repeatMode)
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = listener.onShuffleModeEnabledChanged(shuffleModeEnabled)
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) = listener.onPlayerError(error)
+        override fun onPlayerErrorChanged(error: androidx.media3.common.PlaybackException?) = listener.onPlayerErrorChanged(error)
+        override fun onPositionDiscontinuity(reason: Int) = listener.onPositionDiscontinuity(reason)
+        override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = listener.onPlaybackParametersChanged(playbackParameters)
+        override fun onSeekBackIncrementChanged(seekBackIncrementMs: Long) = listener.onSeekBackIncrementChanged(seekBackIncrementMs)
+        override fun onSeekForwardIncrementChanged(seekForwardIncrementMs: Long) = listener.onSeekForwardIncrementChanged(seekForwardIncrementMs)
+        override fun onMaxSeekToPreviousPositionChanged(maxSeekToPreviousPositionMs: Long) = listener.onMaxSeekToPreviousPositionChanged(maxSeekToPreviousPositionMs)
+        override fun onAudioSessionIdChanged(audioSessionId: Int) = listener.onAudioSessionIdChanged(audioSessionId)
+        override fun onAudioAttributesChanged(audioAttributes: AudioAttributes) = listener.onAudioAttributesChanged(audioAttributes)
+        override fun onVolumeChanged(volume: Float) = listener.onVolumeChanged(volume)
+        override fun onSkipSilenceEnabledChanged(skipSilenceEnabled: Boolean) = listener.onSkipSilenceEnabledChanged(skipSilenceEnabled)
+        override fun onDeviceInfoChanged(deviceInfo: androidx.media3.common.DeviceInfo) = listener.onDeviceInfoChanged(deviceInfo)
+        override fun onDeviceVolumeChanged(volume: Int, muted: Boolean) = listener.onDeviceVolumeChanged(volume, muted)
+        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) = listener.onVideoSizeChanged(videoSize)
+        override fun onSurfaceSizeChanged(width: Int, height: Int) = listener.onSurfaceSizeChanged(width, height)
+        override fun onRenderedFirstFrame() = listener.onRenderedFirstFrame()
+        override fun onCues(cues: List<androidx.media3.common.text.Cue>) = listener.onCues(cues)
+        override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) = listener.onCues(cueGroup)
+        override fun onMetadata(metadata: androidx.media3.common.Metadata) = listener.onMetadata(metadata)
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) =
+          listener.onTimelineChanged(publicTimeline(timeline), reason)
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) =
+          listener.onMediaItemTransition(mediaItem?.let(::publicItem), reason)
+        override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) =
+          listener.onPositionDiscontinuity(publicPosition(old), publicPosition(new), reason)
+      }
+      listeners[listener] = wrapped
+      super.addListener(wrapped)
+    }
+
+    override fun removeListener(listener: Player.Listener) {
+      listeners.remove(listener)?.let { super.removeListener(it) }
+    }
+
     override fun mute() {}
     override fun unmute() {}
     override fun setDeviceVolume(volume: Int) {}

@@ -7,6 +7,8 @@ catch-up and files support speed. Audio focus and noisy routes use Media3.
 
 The non-exported session service permits playback commands and metadata reads only. Live
 permits play/pause and stop; non-live adds seeking, ten-second jumps and Next when supplied.
+Controller items and timeline updates expose only media identity and title; playback addresses,
+request metadata and local configuration stay with ExoPlayer.
 PiP toggles play/pause and, for non-live, ten-second jumps. Home entry is armed while Watch is visible
 and playing. Dismissal stops the owner; expansion keeps Watch. Activity recreation reattaches
 to the process owner. Playback is not restored after process death. Android draws system
