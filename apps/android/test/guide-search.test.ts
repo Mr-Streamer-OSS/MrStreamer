@@ -72,7 +72,7 @@ it("keeps fast edits locally and returns from tablet details to the changed quer
   ui.dimensions = { width: 900, fontScale: 1 };
   const now = Date.now();
   ui.search.mockImplementation(async (query) => ({
-    unsearched: false,
+    unsearched: true,
     found: [
       {
         key: "source:0",
@@ -94,14 +94,18 @@ it("keeps fast edits locally and returns from tablet details to the changed quer
         .find((b) => b.getAttribute("aria-label")?.startsWith("sports,"))!
         .getAttribute("aria-label")!,
     );
-    ui.dimensions = { width: 400, fontScale: 1 };
-    await screen.render(h(GuideSearchScreen));
-    await act(async () => {
-      expect(ui.backHandler()).toBe(true);
-    });
+    expect(screen.container.textContent).toContain("Programme unavailable");
+    await screen.click("Retry");
+    expect(
+      screen.container.querySelector('[aria-selected="true"]')?.getAttribute("aria-label"),
+    ).toContain("sports,");
+    await screen.click("Back");
+    expect(screen.container.textContent).not.toContain("Programme unavailable");
     expect(screen.container.querySelector("input")?.value).toBe("sports");
     expect(screen.container.textContent).toContain("sports");
     expect(ui.back).not.toHaveBeenCalled();
+    await screen.click("Back");
+    expect(ui.back).toHaveBeenCalledOnce();
   } finally {
     await screen.close();
     ui.params.query = "news";
@@ -133,6 +137,139 @@ it("refills the search when a shown programme ends", async () => {
     expect(screen.container.textContent).not.toContain("Ending");
   } finally {
     await screen.close();
+    vi.useRealTimers();
+  }
+});
+
+it("merges fresh partial results, replaces matching identities and drops ended or removed channels", async () => {
+  vi.useFakeTimers();
+  const now = Date.now();
+
+  const old = {
+    key: "source:0",
+    programme: { start: now, stop: now + 1000, title: "Old", detail: "d" },
+  };
+
+  const removed = {
+    key: "source:1",
+    programme: { start: now, stop: now + 10000, title: "Removed", detail: "r" },
+  };
+
+  ui.search.mockResolvedValue({ unsearched: true, found: [old, removed] });
+  const screen = await mount(h(GuideSearchScreen));
+  const { guide } = await import("../src/guide/runtime.ts");
+  const channels = guide.channels();
+
+  const available = vi
+    .spyOn(guide, "channels")
+    .mockReturnValue(new Map([["source", channels.get("source")!.filter((c) => c.id !== "1")]]));
+
+  try {
+    ui.search.mockResolvedValue({
+      unsearched: true,
+      found: [
+        { ...old, programme: { ...old.programme, title: "Updated" } },
+        {
+          key: "source:0",
+          programme: { start: now + 1000, stop: now + 10000, title: "Fresh", detail: "f" },
+        },
+      ],
+    });
+    await screen.click("Retry");
+    expect(screen.container.textContent).toContain("Updated");
+    expect(screen.container.textContent).toContain("Fresh");
+    expect(screen.container.textContent).not.toContain("Old");
+    expect(screen.container.textContent).not.toContain("Removed");
+    ui.search.mockResolvedValue({
+      unsearched: true,
+      found: [
+        {
+          key: "source:0",
+          programme: { start: now + 2000, stop: now + 20000, title: "Refill", detail: "n" },
+        },
+      ],
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1001);
+    });
+    expect(screen.container.textContent).not.toContain("Updated");
+    expect(screen.container.textContent).toContain("Fresh");
+    expect(screen.container.textContent).toContain("Refill");
+  } finally {
+    await screen.close();
+    available.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it("searches ready channels while another provider is pending without claiming no matches", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  sources.state.set({
+    kind: "ready",
+    sources: [
+      { id: "source", label: "Ready", kind: "m3u", channels: { kind: "loading" } },
+      { id: "pending", label: "Pending", kind: "m3u", channels: { kind: "loading" } },
+    ],
+  });
+  ui.search.mockClear().mockResolvedValue({ unsearched: false, found: [] });
+  const screen = await mount(h(GuideSearchScreen));
+
+  try {
+    expect(ui.search).toHaveBeenCalledWith(
+      "news",
+      expect.arrayContaining(["source:0"]),
+      expect.anything(),
+    );
+    expect(screen.container.textContent).toContain("Some channels still loading…");
+    expect(screen.container.textContent).not.toContain("Nothing named");
+    const { GuideGrid } = await import("../src/guide/grid.tsx");
+    const grid = await mount(h(GuideGrid));
+
+    try {
+      expect(grid.container.textContent).toContain("Channel 0");
+      expect(grid.container.textContent).toContain("Some channels still loading…");
+      expect(grid.container.textContent).not.toContain("Loading channels…");
+    } finally {
+      await grid.close();
+    }
+  } finally {
+    await screen.close();
+    sources.state.set({ kind: "ready", sources: [] });
+  }
+});
+
+it("pauses timed refills under a pushed screen and refills on return", async () => {
+  vi.useFakeTimers();
+  const now = Date.now();
+  ui.search.mockResolvedValue({
+    unsearched: false,
+    found: [
+      {
+        key: "source:0",
+        programme: { start: now, stop: now + 1000, title: "Ending", detail: "e" },
+      },
+    ],
+  });
+  const screen = await mount(h(GuideSearchScreen));
+
+  try {
+    ui.focused = false;
+    await screen.render(h(GuideSearchScreen));
+    const calls = ui.search.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1001);
+    });
+    expect(ui.search).toHaveBeenCalledTimes(calls);
+    ui.search.mockResolvedValue({ unsearched: false, found: [] });
+    ui.focused = true;
+    await screen.render(h(GuideSearchScreen));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(ui.search.mock.calls.length).toBeGreaterThan(calls);
+  } finally {
+    await screen.close();
+    ui.focused = true;
     vi.useRealTimers();
   }
 });

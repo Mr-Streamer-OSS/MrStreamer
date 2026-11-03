@@ -1,8 +1,12 @@
 import { Window } from "happy-dom";
-import { act, createElement as h, type ReactNode } from "react";
+import { act, createElement as h, useImperativeHandle, type ReactNode } from "react";
 import { vi } from "vitest";
 
 const ui = vi.hoisted(() => ({
+  scroll: (_offset: number) => {},
+  scrollToOffset: vi.fn(),
+  focused: true,
+  accessibilityFocus: vi.fn(),
   params: { query: "news", country: "" },
   push: vi.fn(),
   back: vi.fn(),
@@ -26,7 +30,7 @@ vi.mock("expo-file-system", () => ({ File: class {}, Paths: {} }));
 vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
 
 vi.mock("expo-router", () => ({
-  useIsFocused: () => true,
+  useIsFocused: () => ui.focused,
   useSegments: () => ["(tabs)", "(live)"],
   useLocalSearchParams: () => ui.params,
   router: {
@@ -55,16 +59,23 @@ vi.mock("../src/guide/ui.tsx", () => ({
     children,
     onPress,
     accessibilityLabel,
+    accessibilityState,
     style,
   }: {
     children: ReactNode;
     onPress: () => void;
     accessibilityLabel: string;
+    accessibilityState?: { selected?: boolean };
     style?: unknown;
   }) =>
     h(
       "button",
-      { onClick: onPress, "aria-label": accessibilityLabel, "data-style": JSON.stringify(style) },
+      {
+        onClick: onPress,
+        "aria-label": accessibilityLabel,
+        "aria-selected": accessibilityState?.selected,
+        "data-style": JSON.stringify(style),
+      },
       children,
     ),
   Button: ({ label, onPress }: { label: string; onPress: () => void }) =>
@@ -96,7 +107,16 @@ vi.mock("../src/live/chrome.tsx", () => ({
 vi.mock("react-native", () => ({
   View: ({ children, style }: { children: ReactNode; style?: unknown }) =>
     h("div", { "data-style": JSON.stringify(style) }, children),
-  Pressable: ({ children }: { children: ReactNode }) => h("div", {}, children),
+  AccessibilityInfo: { sendAccessibilityEvent: ui.accessibilityFocus },
+  Pressable: ({
+    children,
+    accessibilityLabel,
+    onPress,
+  }: {
+    children: ReactNode;
+    accessibilityLabel?: string;
+    onPress?: () => void;
+  }) => h("button", { "aria-label": accessibilityLabel, onClick: onPress }, children),
   TextInput: ({ value, onChangeText }: { value: string; onChangeText: (s: string) => void }) => {
     ui.input = onChangeText;
 
@@ -116,7 +136,8 @@ vi.mock("react-native", () => ({
       };
     },
   },
-  Text: ({ children }: { children: ReactNode }) => h("span", {}, children),
+  Text: ({ children, ref }: { children: ReactNode; ref?: React.Ref<HTMLSpanElement> }) =>
+    h("span", { ref }, children),
   ScrollView: ({ children, style }: { children: ReactNode; style?: unknown }) =>
     h("div", { "data-style": JSON.stringify(style) }, children),
   useWindowDimensions: () => ui.dimensions,
@@ -139,13 +160,20 @@ vi.mock("react-native", () => ({
     ListEmptyComponent,
     ListHeaderComponent,
     onViewableItemsChanged,
+    ref,
+    onScroll,
   }: {
+    ref?: React.Ref<{ scrollToOffset: typeof ui.scrollToOffset }>;
+    onScroll?: (e: { nativeEvent: { contentOffset: { y: number } } }) => void;
     data: unknown[];
     renderItem: (p: { item: unknown; index: number }) => ReactNode;
     ListEmptyComponent?: ReactNode;
     ListHeaderComponent?: ReactNode;
     onViewableItemsChanged?: (p: { viewableItems: { item: unknown }[] }) => void;
   }) => {
+    useImperativeHandle(ref, () => ({ scrollToOffset: ui.scrollToOffset }));
+    ui.scroll = (y) => onScroll?.({ nativeEvent: { contentOffset: { y } } });
+
     // Native viewability can report more than the contract permits. The screen must bound it.
     return h(
       "section",

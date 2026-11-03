@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams, useSegments } from "expo-router";
+import { router, useIsFocused, useLocalSearchParams, useSegments } from "expo-router";
 import { useEffect, useState } from "react";
 import { FlatList, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { Bar, Body, Frame, TextButton, useFrame } from "../live/chrome.tsx";
@@ -28,6 +28,7 @@ export function GuideSearchScreen() {
   useLocale();
   useGuideStatus();
   const revision = useListingRevision();
+  const focused = useIsFocused();
   const params = useLocalSearchParams<{ query?: string }>();
   const [query, setQuery] = useState(() => param(params.query));
 
@@ -50,7 +51,7 @@ export function GuideSearchScreen() {
   } | null>(null);
 
   useEffect(() => {
-    if (!query.trim() || catalogue.loading) {
+    if (!query.trim()) {
       setBusy(false);
 
       return;
@@ -68,17 +69,17 @@ export function GuideSearchScreen() {
         if (!controller.signal.aborted)
           setRead((before) => ({
             query,
-            value:
-              value.unsearched && before?.query === query && before.value.found.length
-                ? { ...value, found: before.value.found }
-                : value,
+            value: retain(value, before?.query === query ? before.value : null),
           }));
       })
       .catch(() => {
         if (!controller.signal.aborted)
           setRead((before) => ({
             query,
-            value: { found: before?.query === query ? before.value.found : [], unsearched: true },
+            value: retain(
+              { found: [], unsearched: true },
+              before?.query === query ? before.value : null,
+            ),
           }));
       })
       .finally(() => {
@@ -101,9 +102,12 @@ export function GuideSearchScreen() {
     .slice(0, 20);
 
   // Refill the bounded result set when one of the shown programmes ends.
-  const nextEnd = found.length ? Math.min(...found.map((f) => f.programme.stop)) : null;
+  const nextEnd = value?.found.length
+    ? Math.min(...value.found.map((f) => f.programme.stop))
+    : null;
+
   useEffect(() => {
-    if (nextEnd === null) return;
+    if (nextEnd === null || !focused) return;
 
     const timer = setTimeout(
       () => retry((n) => n + 1),
@@ -111,7 +115,7 @@ export function GuideSearchScreen() {
     );
 
     return () => clearTimeout(timer);
-  }, [nextEnd, attempt]);
+  }, [nextEnd, attempt, focused]);
 
   const identityOf = (key: string): ChannelIdentity | null => {
     for (const [sourceId, channels] of guide.channels()) {
@@ -246,7 +250,10 @@ export function GuideSearchScreen() {
               const channel = guide.channel(item.key)?.title ?? "";
               const day = localDay(item.programme.start);
               const line = `${day.from === localDay(now).from ? "" : `${dayLabel(day, now)} · `}${programmeRange(item.programme)} · ${channel}`;
-              const shown = selection?.found === item;
+
+              const shown =
+                selection?.found.key === item.key &&
+                selection.found.programme.start === item.programme.start;
 
               return (
                 <Press
@@ -350,4 +357,27 @@ export function GuideSearchScreen() {
       </Body>
     </Frame>
   );
+}
+
+/** Keep useful same-query results during partial reads; fresh identities replace retained ones. */
+function retain(value: ProgrammeSearch, previous: ProgrammeSearch | null): ProgrammeSearch {
+  const keys = new Set([...guide.channels().values()].flatMap((rows) => rows.map((r) => r.key)));
+  const now = Date.now();
+  const merged = new Map<string, FoundProgramme>();
+
+  for (const found of [...(value.unsearched ? (previous?.found ?? []) : []), ...value.found]) {
+    if (keys.has(found.key) && found.programme.stop > now)
+      merged.set(`${found.key} ${found.programme.start}`, found);
+  }
+
+  return {
+    ...value,
+    found: [...merged.values()]
+      .sort(
+        (a, b) =>
+          Number(b.programme.start <= now) - Number(a.programme.start <= now) ||
+          a.programme.start - b.programme.start,
+      )
+      .slice(0, 20),
+  };
 }

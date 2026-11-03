@@ -302,15 +302,15 @@ it.each(["loading", "failed", "unknown"])(
     try {
       expect(screen.container.textContent).toContain(
         kind === "loading"
-          ? "Loading channels…"
+          ? "Some channels still loading…"
           : kind === "failed"
             ? "Couldn't load channels"
-            : "Country unavailable",
+            : "Gone isn't listed any more.",
       );
       expect(screen.container.textContent).not.toContain("No programme information");
 
       if (kind === "failed") {
-        await screen.click("Retry");
+        await screen.click("Try again");
         expect(ui.retryChannels).toHaveBeenCalled();
       }
     } finally {
@@ -346,29 +346,84 @@ it("keeps an open tablet detail and its Back handler when folded to phone width"
       }),
     );
     expect(screen.container.textContent).toContain("Selected programme");
-    expect(ui.backHandler()).toBe(true);
+    expect(ui.accessibilityFocus).toHaveBeenCalledWith(expect.anything(), "focus");
+    await screen.click("Back");
     expect(close).toHaveBeenCalledOnce();
+    expect(ui.backHandler()).toBe(true);
+    expect(close).toHaveBeenCalledTimes(2);
   } finally {
     await screen.close();
     ui.dimensions = { width: 400, fontScale: 1 };
   }
 });
 
-it("pins a manually moved day across midnight and a Live tab remount", async () => {
+it("retains a moved window on same-day remount but expires past pinned days", async () => {
   const at = new Date(2026, 9, 24, 12).getTime();
   const clock = vi.spyOn(Date, "now").mockReturnValue(at);
   ui.schedule.mockResolvedValue({ programmes: [], cursor: null });
   const first = await mount(h(GuideGrid));
   await first.click("Later");
+  await act(async () => ui.scroll(320));
   await first.close();
+  const sameDay = await mount(h(GuideGrid), false);
+  expect(sameDay.container.textContent).toContain("12:30");
+  expect(ui.scrollToOffset).toHaveBeenLastCalledWith({ offset: 320, animated: false });
+  await sameDay.close();
   clock.mockReturnValue(localDay(at, 1).from + 12 * 3600000);
   const second = await mount(h(GuideGrid), false);
 
   try {
-    expect(ui.schedule.mock.calls.at(-1)?.[1]).toEqual(localDay(at));
+    expect(ui.schedule.mock.calls.at(-1)?.[1]).toEqual(localDay(Date.now()));
   } finally {
     await second.click("Now");
     await second.close();
     clock.mockRestore();
+  }
+});
+
+it("resets navigation context when the provider set changes", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const at = new Date(2026, 9, 24, 12).getTime();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(at);
+  const screen = await mount(h(GuideGrid));
+
+  try {
+    await screen.click("Next day");
+    await screen.click("Later");
+    await act(async () => ui.scroll(480));
+    await act(async () =>
+      sources.state.set({
+        kind: "ready",
+        sources: [
+          { id: "replacement", label: "Provider", kind: "m3u", channels: { kind: "loading" } },
+        ],
+      }),
+    );
+    await screen.click("Show visible");
+    expect(ui.schedule.mock.calls.at(-1)?.[1]).toEqual(localDay(at));
+    expect(screen.container.textContent).not.toContain("13:00");
+    expect(ui.scrollToOffset).toHaveBeenLastCalledWith({ offset: 0, animated: false });
+  } finally {
+    await screen.close();
+    sources.state.set({ kind: "ready", sources: [] });
+    clock.mockRestore();
+  }
+});
+
+it("ignores a bound swipe while following now", async () => {
+  vi.useFakeTimers();
+  const at = new Date(2026, 9, 24, 0).getTime();
+  vi.setSystemTime(at);
+  const screen = await mount(h(GuideGrid));
+
+  try {
+    await act(async () => ui.swipe(80, 0));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 3600000);
+    });
+    expect(screen.container.textContent).toContain("2:00");
+  } finally {
+    await screen.close();
+    vi.useRealTimers();
   }
 });

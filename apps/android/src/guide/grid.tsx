@@ -10,10 +10,21 @@ import {
   useState,
   useSyncExternalStore,
   type ReactNode,
+  type ComponentRef,
 } from "react";
-import { BackHandler, FlatList, PanResponder, Text, useWindowDimensions, View } from "react-native";
+import {
+  AccessibilityInfo,
+  BackHandler,
+  FlatList,
+  PanResponder,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { sources } from "../bootstrap/sources.ts";
+import { t as liveText } from "../live/copy.ts";
+import { IconButton } from "../ui/icon-button.tsx";
 import { discover } from "../live/discovery.ts";
 import { destinationIn, useOpenShared } from "../navigation/open.ts";
 import { Screen } from "../navigation/screen.tsx";
@@ -50,7 +61,7 @@ export const t = catalogue(
     'Nothing named "{query}"': 'Nothing named "{query}"',
     Guides: "Guides",
     Retry: "Retry",
-    "Country unavailable": "Country unavailable",
+    "Some channels still loading…": "Some channels still loading…",
   },
   {
     "nl-NL": {
@@ -69,13 +80,14 @@ export const t = catalogue(
       'Nothing named "{query}"': 'Niets met de naam "{query}"',
       Guides: "Gidsen",
       Retry: "Opnieuw",
-      "Country unavailable": "Land niet beschikbaar",
+      "Some channels still loading…": "Sommige kanalen worden nog geladen…",
     },
   },
 );
 
 // Navigation context only; programme data stays with the guide owner.
 const place = {
+  sources: null as string | null,
   day: null as number | null,
   offset: null as number | null,
   last: "",
@@ -92,17 +104,31 @@ export function useCatalogueState() {
     state.kind !== "ready" ||
     state.sources.some((s) => !guide.channels().has(s.id) && !failures.has(s.id));
 
-  return { failed, loading };
+  const loaded = [...guide.channels().values()].some((rows) => rows.length > 0);
+
+  return { failed, loading, loaded };
 }
 
-export function CatalogueNotice({ failed, loading }: { failed: boolean; loading: boolean }) {
+export function CatalogueNotice({
+  failed,
+  loading,
+  loaded,
+}: {
+  failed: boolean;
+  loading: boolean;
+  loaded: boolean;
+}) {
   return failed ? (
     <View>
       <Still text={guideText("Couldn't load channels")} />
-      <Button label={t("Retry")} onPress={retryGuideChannels} />
+      <Button label={liveText("Try again")} onPress={retryGuideChannels} />
     </View>
   ) : loading ? (
-    <Still text={guideText("Loading channels…")} />
+    loaded ? (
+      <Text style={{ ...text.secondary, padding: 16 }}>{t("Some channels still loading…")}</Text>
+    ) : (
+      <Still text={guideText("Loading channels…")} />
+    )
   ) : null;
 }
 
@@ -180,12 +206,23 @@ export function GuideGridScreen() {
 }
 
 /** The list remains mounted under detail navigation; viewability gates all schedule reads. */
-export function GuideGrid({
+export function GuideGrid(props: { country?: string; pushed?: boolean }) {
+  const state = useStore(sources.state);
+
+  const ids =
+    state.kind === "ready" ? JSON.stringify(state.sources.map((s) => s.id).sort()) : place.sources;
+
+  return <GuideGridView key={ids} {...props} sourceIds={ids} />;
+}
+
+function GuideGridView({
+  sourceIds,
   country: scope,
   pushed = false,
 }: {
   country?: string;
   pushed?: boolean;
+  sourceIds: string | null;
 }) {
   useGuideStart();
   useLocale();
@@ -203,7 +240,24 @@ export function GuideGrid({
 
     return () => clearInterval(timer);
   }, []);
-  const [chosen, setChosen] = useState(() => place.day);
+
+  const [chosen, setChosen] = useState(() => {
+    if (place.sources !== sourceIds) {
+      place.sources = sourceIds;
+      place.day = null;
+      place.offset = null;
+      place.last = "";
+      place.scroll.clear();
+    }
+
+    if (place.day !== null && place.day < localDay(Date.now()).from) {
+      place.day = null;
+      place.offset = null;
+    }
+
+    return place.day;
+  });
+
   const [offset, setOffset] = useState(() => place.offset);
 
   const [selection, setSelection] = useState<{
@@ -226,18 +280,23 @@ export function GuideGrid({
     setVisible(viewableItems.slice(0, 24).map(({ item }) => item.key)),
   ).current;
 
-  const channels = useMemo(() => {
+  const { channels, unknownCountry } = useMemo(() => {
     const view = discover(state);
 
     const allowed = country
       ? new Set(view.countries.find((g) => g.name === country)?.rows.map((r) => r.key) ?? [])
       : null;
 
-    return [...guide.channels()].flatMap(([sourceId, rows]) =>
+    const channels = [...guide.channels()].flatMap(([sourceId, rows]) =>
       rows
         .filter((r) => !allowed || allowed.has(r.key))
         .map((r) => ({ ...r, sourceId, channelId: r.id })),
     );
+
+    return {
+      channels,
+      unknownCountry: !!country && !view.countries.some((c) => c.name === country),
+    };
   }, [state, country, revision]);
 
   // Each country keeps its own scroll, restored on a country change and on layout (rotation, resizing).
@@ -257,8 +316,11 @@ export function GuideGrid({
   const until = from + span;
 
   const shift = (direction: number) => {
+    const next = Math.max(0, Math.min(latest, from - day.from + direction * HALF));
+
+    if (next === from - day.from) return;
     setChosen(day.from);
-    setOffset(Math.max(0, Math.min(latest, from - day.from + direction * HALF)));
+    setOffset(next);
   };
 
   const shiftRef = useRef(shift);
@@ -286,7 +348,6 @@ export function GuideGrid({
 
   const gesture = gestureRef.current;
   const catalogueState = useCatalogueState();
-  const unknownCountry = !!country && !discover(state).countries.some((c) => c.name === country);
 
   const onSchedule = useCallback(
     (channel: GridChannel) => router.push(scheduleHref(destination, channel, day.from)),
@@ -437,7 +498,7 @@ export function GuideGrid({
             <Still
               text={
                 unknownCountry
-                  ? t("Country unavailable")
+                  ? liveText("{name} isn't listed any more.", { name: country })
                   : guideText("No programme information for this day")
               }
             />
@@ -588,7 +649,12 @@ function Move({
       disabled={disabled}
       accessibilityState={{ disabled }}
       onPress={onPress}
-      style={{ minHeight: 48, justifyContent: "center", paddingHorizontal: wide ? 12 : 10 }}
+      style={{
+        minHeight: 48,
+        justifyContent: "center",
+        paddingHorizontal: wide ? 12 : 10,
+        opacity: disabled ? 0.5 : 1,
+      }}
     >
       <Text
         style={{
@@ -713,6 +779,11 @@ export function Beside({
   const open = detail !== null;
   const beside = width >= BESIDE;
   const focused = useIsFocused();
+  const heading = useRef<ComponentRef<typeof Text>>(null);
+  useEffect(() => {
+    if (open && !beside && focused && heading.current)
+      AccessibilityInfo.sendAccessibilityEvent(heading.current, "focus");
+  }, [open, beside, focused]);
   const close = useRef(onClose);
   useEffect(() => {
     close.current = onClose;
@@ -740,6 +811,14 @@ export function Beside({
               : { flex: 1 }
           }
         >
+          {!beside ? (
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <IconButton icon="arrow-back" label={liveText("Back")} onPress={onClose} />
+              <Text ref={heading} accessibilityRole="header" style={text.title}>
+                {t("Programmes")}
+              </Text>
+            </View>
+          ) : null}
           {detail}
         </View>
       ) : null}
