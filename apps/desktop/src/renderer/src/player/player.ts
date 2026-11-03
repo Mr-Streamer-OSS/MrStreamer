@@ -895,11 +895,6 @@ async function loadTracks(mine: number, sessionId: string): Promise<void> {
 }
 
 /**
- * The main process found another caption channel in a stream's pictures. Only the stream that
- * plays here counts: one closed since is nobody's, an HLS engine tells its own tracks, and what
- * was found before a stream plays is in the tracks read when it does.
- */
-/**
  * A recording shares the stream that plays, or stopped sharing it: its engine holds the quality
  * the main process names, or picks again.
  */
@@ -909,6 +904,11 @@ listen("playback.fixed", ({ sessionId, variant }) => {
   store.setState({ fixed: variant !== null });
 });
 
+/**
+ * The main process found another caption channel in a stream's pictures. Only the stream that
+ * plays here counts: one closed since is nobody's, an HLS engine tells its own tracks, and what
+ * was found before a stream plays is in the tracks read when it does.
+ */
 listen("playback.tracksChanged", ({ sessionId }) => {
   if (current?.sessionId !== sessionId || current.engine.tracks) return;
   if (store.getState().phase.kind !== "playing") return;

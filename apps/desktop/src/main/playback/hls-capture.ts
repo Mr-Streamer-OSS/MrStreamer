@@ -283,29 +283,30 @@ function headOf(answer: Answer, signal: AbortSignal): Promise<Head> {
  * stream, once that stream is known to be shared, and `changed` of each whose `fixed` variant
  * changed.
  */
-export function hlsShares(events: {
+export function hlsShares({
+  connected,
+  changed,
+}: {
   readonly connected: (owner: string, key: string) => void;
   readonly changed: (owner: string) => void;
 }) {
-  const { connected } = events;
   const shares = new Map<string, Share>();
+
+  /** The variant held, or else the one its first owner to read a variant read. */
+  const heldOrFirst = (share: Share) =>
+    share.fixed ?? [...share.owners].map((owner) => share.current.get(owner)).find(Boolean) ?? null;
 
   /** Holds every owner to one variant while two or more read, telling each when that changed. */
   const settle = (share: Share) => {
     const before = share.fixed;
-    if (share.owners.size < 2) share.fixed = null;
-    else
-      share.fixed ??=
-        [...share.owners].map((owner) => share.current.get(owner)).find((path) => path) ?? null;
-    if (share.fixed !== before) for (const owner of share.owners) events.changed(owner);
+    share.fixed = share.owners.size < 2 ? null : heldOrFirst(share);
+    if (share.fixed !== before) for (const owner of share.owners) changed(owner);
   };
 
   /** The variant an owner joining `share` now holds, when the HLS reader takes it. */
   const joins = (share: Share) => {
-    const path =
-      share.fixed ??
-      [...share.owners].map((owner) => share.current.get(owner)).find((each) => each);
-    const variant = path ? share.variants.get(path) : undefined;
+    const path = heldOrFirst(share);
+    const variant = path === null ? undefined : share.variants.get(path);
     return variant?.recordable ? variant.address : null;
   };
 

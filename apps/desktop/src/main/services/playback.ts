@@ -777,7 +777,7 @@ function make(deps: PlaybackDeps) {
       if (session?.kind !== "live" || !session.hls || session.receiver || !captures) return;
       const address = captures.fixed(sessionId);
       const id = address === null ? null : session.hls.known(address);
-      if (address !== null && id === undefined) return;
+      if (id === undefined) return;
       const variant = id === null ? null : `${base}/stream/${session.token}/${id}`;
       PubSub.publishUnsafe(fixed, { sessionId, variant });
     };

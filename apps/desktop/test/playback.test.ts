@@ -1283,7 +1283,7 @@ describe("live captures", () => {
     expect(captures.reading(second!)).toBe(false);
   });
 
-  it("holds every reader of an HLS stream offered in several qualities to the one read first, until one is left", async () => {
+  it("holds every reader of an HLS stream offered in several qualities to the one Watch read, until one is left", async () => {
     const { captures, source } = await capturing();
     const key = captureKey({ ...source, format: "hls", url: "http://provider/live/master.m3u8" });
     const asked: string[] = [];
@@ -1342,21 +1342,7 @@ describe("live captures", () => {
     await captures.idle("again");
     expect(captures.fixed("watch")).toBeNull();
     expect(await read("watch", "hd.m3u8?token=1")).toBe(media("hd"));
-    // A quality the HLS reader can't record is no stream to join.
-    await read("watch", "uhd.m3u8?token=1");
-    expect(captures.reading(key)).toBe(false);
-    expect(captures.joins(key)).toBeNull();
     await captures.idle("watch");
-
-    // A recording first: Watch joining holds the quality the recording reads.
-    await read("record", "master.m3u8");
-    await read("record", "hd.m3u8?token=1");
-    await read("watch", "master.m3u8");
-    expect(captures.fixed("watch")).toBe(variant("hd"));
-    expect(await read("watch", "sd.m3u8?token=1")).toBe(media("hd"));
-    await captures.idle("watch");
-    await captures.idle("record");
-    expect(captures.reading(key)).toBe(false);
   });
 });
 

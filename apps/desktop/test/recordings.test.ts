@@ -1554,12 +1554,11 @@ describe.skipIf(!hasTools)("recordings", () => {
     const shared = asked("qualities-sd", sharedFrom, sharedTo);
     expect(shared.length).toBeGreaterThan(1);
     expect(new Set(shared).size).toBe(shared.length);
-    expect(asked("qualities-hd", sharedFrom, sharedTo)).toEqual([]);
     expect(
       host
         .requests()
         .slice(sharedFrom, sharedTo)
-        .filter((path) => path.endsWith("qualities-hd.m3u8")),
+        .filter((path) => path.includes("qualities-hd")),
     ).toEqual([]);
     const [done] = await recordings.list();
     expect(done?.status).toEqual({ kind: "stopped" });
