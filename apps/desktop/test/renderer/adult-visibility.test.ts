@@ -25,6 +25,7 @@ import {
   syncViewing,
   syncWatchlist,
 } from "../../src/renderer/src/lib/queries.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const movie = (name: string, adult = false): Title => ({
   kind: "movie",
@@ -204,7 +205,7 @@ describe("after a refresh marks a listed title for adults", () => {
   const updated = (fetchedAt: number, markedForAdults?: true): OnDemandUpdate => ({
     lists: [{ subscriptionId: SUBSCRIPTION, movies: 3, series: 0, fetchedAt, failure: null }],
     metadata: null,
-    ...(markedForAdults ? { markedForAdults } : {}),
+    ...defined({ markedForAdults }),
   });
   const saved = (title: Title): WatchlistEntry => ({
     subscriptionId: SUBSCRIPTION,

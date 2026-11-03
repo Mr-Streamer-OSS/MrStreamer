@@ -72,6 +72,7 @@ import { OnDemand, Overtaken, subscriptionChanged } from "./ondemand.ts";
 import { Playback, type LocalCopy } from "./playback.ts";
 import { PlaybackCoordination, type Lent } from "./playback-coordination.ts";
 import { Subscriptions } from "./subscription.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** How often the window hears how a transfer goes, at most. */
 const CHANGES_MS = 250;
@@ -842,7 +843,7 @@ function make(deps: DownloadsDeps) {
             sourceStamp: source.fileRevision,
             container: file.container,
             about: { ...kept.about, poster: null, wide: null },
-            ...("series" in kept ? { series: kept.series } : {}),
+            ...defined({ series: "series" in kept ? kept.series : undefined }),
             state: "queued",
             size: null,
             received: 0,
@@ -909,9 +910,11 @@ function make(deps: DownloadsDeps) {
       pauseAll: attempt(async () => {
         const at = Date.now();
         writeAll(
-          [...records.values()]
-            .filter((record) => record.state === "queued" && record.pausedAt === undefined)
-            .map((record) => ({ ...record, pausedAt: at })),
+          [...records.values()].flatMap((record) =>
+            record.state === "queued" && record.pausedAt === undefined
+              ? [{ ...record, pausedAt: at }]
+              : [],
+          ),
         );
         tell();
         if (active && records.get(active.id)?.pausedAt !== undefined) await stopPaused(active);
@@ -919,9 +922,9 @@ function make(deps: DownloadsDeps) {
 
       resumeAll: attempt(async () => {
         writeAll(
-          [...records.values()]
-            .filter((record) => record.state === "queued" && record.pausedAt !== undefined)
-            .map(({ pausedAt: _pausedAt, ...rest }) => rest),
+          [...records.values()].flatMap(({ pausedAt, ...rest }) =>
+            rest.state === "queued" && pausedAt !== undefined ? [rest] : [],
+          ),
         );
         tell();
         wake();
@@ -1050,18 +1053,19 @@ function make(deps: DownloadsDeps) {
             poster: series.title.posterUrl,
             wide: episode?.stillUrl ?? series.backdropUrl ?? series.title.backdropUrl,
           },
-          ...(series.kind === "series"
-            ? {
-                series: {
-                  tmdb: series.title.tmdbId,
-                  seasons: seriesEpisodeSeasons(series).map(({ number, episodes }) => ({
-                    number,
-                    episodes: episodes.map((each) => each.number),
-                  })),
-                  sourceOrder: series.episodeOrder !== undefined,
-                },
-              }
-            : {}),
+          ...defined({
+            series:
+              series.kind === "series"
+                ? {
+                    tmdb: series.title.tmdbId,
+                    seasons: seriesEpisodeSeasons(series).map(({ number, episodes }) => ({
+                      number,
+                      episodes: episodes.map((each) => each.number),
+                    })),
+                    sourceOrder: series.episodeOrder !== undefined,
+                  }
+                : undefined,
+          }),
         };
       });
     }

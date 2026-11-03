@@ -1158,9 +1158,9 @@ describe("searching across saved accounts", () => {
     ] as const;
     expect(await run(guide.searchChannels("news", channels, at("23:00")))).toEqual(
       Object.fromEntries(
-        expected
-          .filter(([subscriptionId]) => subscriptionId !== broken)
-          .map(([subscriptionId, match]) => [ownedKey({ subscriptionId, id: "1" }), match]),
+        expected.flatMap(([subscriptionId, match]) =>
+          subscriptionId === broken ? [] : [[ownedKey({ subscriptionId, id: "1" }), match]],
+        ),
       ),
     );
   });

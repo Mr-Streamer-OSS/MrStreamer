@@ -20,6 +20,7 @@ import {
 } from "../src/ondemand/tracks.ts";
 import type { OnDemandCatalogue, ProviderDetails } from "../src/provider.ts";
 import { continueWatching, isFinished, type TitleRow } from "../src/viewing/titles.ts";
+import { defined } from "../src/defined.ts";
 
 /** The subscription every title of these tests is listed by. */
 const SUBSCRIPTION = "subscription";
@@ -817,7 +818,7 @@ function seriesOf(
         container: "mkv",
       })),
       container: null,
-      ...(sourceOrder ? { episodeOrder: "source" as const } : {}),
+      ...defined({ episodeOrder: sourceOrder ? ("source" as const) : undefined }),
     },
     null,
     language,

@@ -8,6 +8,7 @@ import { type } from "arktype";
 import { Directory, File, Paths } from "expo-file-system";
 import { readJson, writeJson } from "./files.ts";
 import { store, useStore } from "./store.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Downloaded subtitles kept on this phone, one per exact movie or episode version with its timing,
 // so it shows again when that version or a downloaded copy of it plays, offline too.
@@ -51,7 +52,7 @@ export function subtitleTitle(version: {
   const known = {
     ...(tmdbId !== null ? { tmdbId } : { title: version.title }),
     // A series' year is when it began, which no episode search needs.
-    ...(version.year !== null && !version.episode ? { year: version.year } : {}),
+    ...defined({ year: version.year !== null && !version.episode ? version.year : undefined }),
   };
   return {
     subscriptionId: version.subscriptionId,

@@ -37,6 +37,7 @@ import { player } from "../player/player.ts";
 import { hostOf } from "./format.ts";
 import { call, listen, searchCall } from "./ipc.ts";
 import { preferenceQuery } from "./preferences.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Listings move on as programmes end; asking again each minute is enough for progress. */
 const LISTINGS_REFRESH_MS = 60_000;
@@ -332,7 +333,12 @@ export const queries = {
   rows: (kind: TitleKind, tab: RowTab, like: OwnedId | null) =>
     queryOptions({
       queryKey: ["ondemand", "rows", kind, tab, like && ownedKey(like)],
-      queryFn: () => call("ondemand.rows", { kind, tab, ...(like ? { like: ownedId(like) } : {}) }),
+      queryFn: () =>
+        call("ondemand.rows", {
+          kind,
+          tab,
+          ...defined({ like: like ? ownedId(like) : undefined }),
+        }),
       staleTime: Infinity,
       placeholderData: (previous) => previous,
     }),
@@ -378,8 +384,7 @@ export const queries = {
           id,
           offset,
           limit,
-          ...(sort ? { sort } : {}),
-          ...(chosen ? { filters: chosen } : {}),
+          ...defined({ sort, filters: chosen }),
         }),
       staleTime: Infinity,
       // Keep a sort/page transition smooth, without presenting old matches under new filters.
@@ -407,8 +412,7 @@ export const queries = {
     const chosen = filters && Object.keys(filters).length ? filters : undefined;
     return queryOptions({
       queryKey: ["ondemand", "searchKind", kind, query, ...(chosen ? [chosen] : [])],
-      queryFn: () =>
-        call("ondemand.searchKind", { kind, query, ...(chosen ? { filters: chosen } : {}) }),
+      queryFn: () => call("ondemand.searchKind", { kind, query, ...defined({ filters: chosen }) }),
       staleTime: Infinity,
       enabled: query.trim().length > 0,
       placeholderData: (previous, previousQuery) =>
@@ -464,8 +468,10 @@ export const queries = {
       ],
       queryFn: () =>
         call("viewing.progress", {
-          ...(titles.movies ? { movies: titles.movies.map(ownedId) } : {}),
-          ...(titles.series ? { series: titles.series.map(ownedId) } : {}),
+          ...defined({
+            movies: titles.movies ? titles.movies.map(ownedId) : undefined,
+            series: titles.series ? titles.series.map(ownedId) : undefined,
+          }),
         }),
       staleTime: Infinity,
     }),
@@ -491,7 +497,8 @@ export const queries = {
   watchlist: (sort: WatchlistSort, offset: number, limit: number, home = false) =>
     queryOptions({
       queryKey: ["watchlist", "list", sort, offset, limit, home],
-      queryFn: () => call("watchlist.list", { sort, offset, limit, ...(home ? { home } : {}) }),
+      queryFn: () =>
+        call("watchlist.list", { sort, offset, limit, ...defined({ home: home || undefined }) }),
       staleTime: Infinity,
       placeholderData: (previous) => previous,
     }),
@@ -653,7 +660,7 @@ export function useSubscriptionPreferences(
   return useQueries({
     queries: (subscriptions ?? NO_SUBSCRIPTIONS).map(({ id }) => ({
       ...queries.subscriptionPreferences(id),
-      ...(refetchOnMount ? { refetchOnMount } : {}),
+      ...defined({ refetchOnMount }),
     })),
     // The same function until the subscriptions change, so the same map until an answer does.
     combine: useCallback(

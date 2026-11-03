@@ -15,6 +15,7 @@ import type { MarkedNext } from "@mrstreamer/contracts/viewing";
 import { continuation } from "./episodes.ts";
 import type { MarkEvent, SeriesListing, StoredMark } from "./record.ts";
 import type { RawProgress } from "./titles.ts";
+import { defined } from "../defined.ts";
 
 /** What a series is in one subscription, as the lists have it. */
 export interface SeriesIdentity {
@@ -200,7 +201,7 @@ export function goesOn(
     : null;
   // Exact playlist files also identify a source-ordered listing, including specials in place.
   const found = continuation(
-    { seasons, ...(files ? { episodeOrder: "source" as const } : {}) },
+    { seasons, ...defined({ episodeOrder: files ? ("source" as const) : undefined }) },
     files ? played.filter((entry) => files.has(entry.title.id)) : played,
     marks,
   );

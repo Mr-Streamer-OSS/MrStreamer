@@ -72,6 +72,7 @@ import {
 } from "../receivers/adapter.ts";
 import { PlaybackCoordination } from "./playback-coordination.ts";
 import { Playback, type Asked, type ReceiverTarget } from "./playback.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /**
  * How long a receiver gets to ask this computer for what it was sent. One that never does can't
@@ -1042,8 +1043,7 @@ function make(deps: OutputDeps) {
           if (!connection?.volume) return Effect.void;
           return told(() =>
             connection.setVolume({
-              ...(volume.level !== undefined ? { level: volume.level } : {}),
-              ...(volume.muted !== undefined ? { muted: volume.muted } : {}),
+              ...defined({ level: volume.level, muted: volume.muted }),
             }),
           );
         }),

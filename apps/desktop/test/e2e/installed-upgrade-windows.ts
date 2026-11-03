@@ -521,7 +521,7 @@ export function outboundBlock(runner: Runner) {
           ),
         );
       if (audit) attempt("restore audit", () => setAudit(audit!));
-      const left = rules.filter((rule) => readRule(rule.name).length > 0).map((rule) => rule.name);
+      const left = rules.flatMap((rule) => (readRule(rule.name).length > 0 ? [rule.name] : []));
       if (left.length > 0) errors.push(`rules still present: ${left.join(", ")}`);
       if (errors.length > 0) throw new Error(`Restoring the network: ${errors.join("; ")}`);
       return { rulesRemoved: rules.map((rule) => rule.name), profilesRestored: true, audit };

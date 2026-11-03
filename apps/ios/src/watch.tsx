@@ -121,6 +121,7 @@ import type { UnshownSubtitles } from "./title-formats.ts";
 import { colors } from "./ui.tsx";
 import { currentSource } from "./sources.ts";
 import { store, useStore } from "./store.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 type WatchKey = "pause" | "rewind" | "skip" | "close" | "dismiss";
 
@@ -1267,7 +1268,7 @@ function TextButtons({ item }: { item: Playing }) {
         title: t(of === "audio" ? "Audio" : "Subtitles"),
         options: [...rows.map((row) => row.label), t("Cancel")],
         cancelButtonIndex: rows.length,
-        ...(message ? { message } : {}),
+        ...defined({ message: message || undefined }),
       },
       (index) => {
         if (stands()) rows[index]?.run();
@@ -1350,7 +1351,7 @@ function TitleSpeed() {
           t("Cancel"),
         ],
         cancelButtonIndex: SPEEDS.length,
-        ...(message ? { message } : {}),
+        ...defined({ message: message || undefined }),
       },
       (index) => {
         const picked = SPEEDS[index];
@@ -1541,10 +1542,16 @@ const FPS = [
  * at subtitle fps over video fps.
  */
 const FRAME_RATES = FPS.flatMap((from) =>
-  FPS.filter((to) => to !== from).map((to) => ({
-    label: `${from.name} → ${to.name} fps`,
-    speed: from.fps / to.fps,
-  })),
+  FPS.flatMap((to) =>
+    to !== from
+      ? [
+          {
+            label: `${from.name} → ${to.name} fps`,
+            speed: from.fps / to.fps,
+          },
+        ]
+      : [],
+  ),
 );
 
 /**

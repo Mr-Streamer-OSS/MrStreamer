@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Result } from "../../../../packages/contracts/src/errors.ts";
 import type { Preferences } from "../../../../packages/contracts/src/preferences.ts";
 import type { Driver } from "./installed-upgrade.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 type AudioPreferences = Pick<Preferences, "audioLanguage">;
 type AudioReply = AudioPreferences | { revision: number; preferences: AudioPreferences };
@@ -201,7 +202,7 @@ export async function restoreAudioInput(
         key: "N",
         code: "KeyN",
         windowsVirtualKeyCode: 78,
-        ...(type === "keyDown" ? { text: "N" } : {}),
+        ...defined({ text: type === "keyDown" ? "N" : undefined }),
       });
       key.completedAt = Date.now();
       if (reply.error) throw new Error(`Restore Audio in ${type}: ${String(reply.error)}`);

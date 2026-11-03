@@ -148,21 +148,30 @@ const ACTIONS: readonly {
 
 /** The three buttons, less the one for the screen they show on, in the interface language. */
 function actions(tab: Tab, current: string): NativeStackHeaderItem[] {
-  return ACTIONS.filter(({ screen }) => screen !== current).map(({ screen, label, symbol }) =>
-    screen === "downloads"
-      ? {
-          type: "custom",
-          // A fixed slot like its neighbours; the glyph's own ring shows the queue, with no text.
-          element: <DownloadStatusButton ring onPress={() => router.push(tabHref(tab, screen))} />,
-        }
-      : {
-          type: "button",
-          label: t(label),
-          icon: { type: "sfSymbol", name: symbol },
-          // The same item on the next screen, so the glass group carries over as a screen is pushed.
-          identifier: screen,
-          onPress: () => (screen === "search" ? openSearch() : router.push(tabHref(tab, screen))),
-        },
+  return ACTIONS.flatMap(({ screen, label, symbol }): NativeStackHeaderItem[] =>
+    screen === current
+      ? []
+      : screen === "downloads"
+        ? [
+            {
+              type: "custom",
+              // A fixed slot like its neighbours; the glyph's own ring shows the queue, with no text.
+              element: (
+                <DownloadStatusButton ring onPress={() => router.push(tabHref(tab, screen))} />
+              ),
+            },
+          ]
+        : [
+            {
+              type: "button",
+              label: t(label),
+              icon: { type: "sfSymbol", name: symbol },
+              // The same item on the next screen, so the glass group carries over as a screen is pushed.
+              identifier: screen,
+              onPress: () =>
+                screen === "search" ? openSearch() : router.push(tabHref(tab, screen)),
+            },
+          ],
   );
 }
 

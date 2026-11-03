@@ -819,9 +819,9 @@ describe("a quality gone while another's row is listed twice", () => {
     (categoryId: string, ...ids: string[]) =>
     (all: readonly FakeChannel[]) => [
       ...all,
-      ...all
-        .filter((each) => ids.includes(String(each.streamId)))
-        .map((each) => ({ ...each, categoryId })),
+      ...all.flatMap((each) =>
+        ids.includes(String(each.streamId)) ? [{ ...each, categoryId }] : [],
+      ),
     ];
   const remembered = (a: string) =>
     (file().favouriteMembership?.accounts?.[a] ?? []).map((cohort: string[]) => cohort.toSorted());

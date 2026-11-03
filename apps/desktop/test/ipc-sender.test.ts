@@ -30,13 +30,13 @@ vi.mock("electron", () => ({
 /** A window's page as Electron gives it to main: the same main frame object on every call. */
 function page(processId: number) {
   const mainFrame = { processId, routingId: 1, parent: null };
-  return Object.assign(new EventEmitter(), { mainFrame }) as unknown as WebContents;
+  return Object.assign(new EventEmitter(), { mainFrame }) as WebContents;
 }
 
 /** A frame inside `of`'s page, as an iframe of it is, in the same renderer process. */
 function childOf(of: WebContents) {
   const parent = of.mainFrame;
-  return { processId: parent.processId, routingId: 2, parent } as unknown as WebFrameMain;
+  return { processId: parent.processId, routingId: 2, parent } as WebFrameMain;
 }
 
 const refused = {

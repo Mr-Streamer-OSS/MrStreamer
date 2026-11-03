@@ -2,6 +2,7 @@ import { diagnosticCodecs, type PlaybackDiagnostic } from "@mrstreamer/contracts
 import type { StreamLayout } from "./inspect.ts";
 import type { Conversion } from "./convert.ts";
 import type { TitlePlan, TitleProbe } from "./title.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Facts from the selected program table and conversion plan, never their raw descriptions. */
 export function liveDiagnostic(
@@ -31,7 +32,7 @@ export function titleDiagnostic(
   const software = video === "vp8" || video === "vp9" || video === "av1" ? video : null;
   return {
     ...diagnosticCodecs(probe?.video?.codec ?? null, sound?.codec ?? null),
-    ...(software ? { diagnostic_video_codec: software } : {}),
+    ...defined({ diagnostic_video_codec: software ?? undefined }),
     diagnostic_container: probe?.container ?? "unknown",
     diagnostic_delivery: !plan
       ? "unknown"

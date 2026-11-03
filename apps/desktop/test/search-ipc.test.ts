@@ -23,7 +23,7 @@ function sender(id: number) {
   return Object.assign(events, {
     id,
     mainFrame: { processId: id, routingId: 1 },
-  }) as unknown as WebContents;
+  }) as WebContents;
 }
 function invoke(method: IpcMethod, from: WebContents, input: unknown) {
   return boundary.get(method)!(
@@ -40,12 +40,12 @@ const cancel = (from: WebContents, metadata = request()) =>
 beforeEach(() => boundary.clear());
 function start(handler: IpcHandlers["guide.search"] = () => Effect.never) {
   // Only these public methods are exercised; registerIpc still registers all contracts.
-  const handlers = {
+  const handlers: Partial<IpcHandlers> = {
     "guide.search": handler,
-    "guide.searchList": handler,
+    "guide.searchList": () => Effect.never,
     "guide.cancelSearch": () => Effect.succeed(null),
-  } as unknown as IpcHandlers;
-  registerIpc(Effect.runPromiseExit, handlers, () => true);
+  };
+  registerIpc(Effect.runPromiseExit, handlers as IpcHandlers, () => true);
 }
 
 describe("owned guide-search IPC", () => {

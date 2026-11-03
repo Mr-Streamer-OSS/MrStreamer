@@ -404,7 +404,7 @@ export function useGuideSchedule(key: string, day: Day, catalogue: Library) {
       void (async () => {
         try {
           let cursor = append ? (before?.page.cursor ?? undefined) : undefined;
-          let programmes = append && before ? [...before.page.programmes] : [];
+          const programmes = append && before ? [...before.page.programmes] : [];
           let pages = append && before ? before.pages : 0;
           const count = append ? 1 : (before?.pages ?? 1);
           for (let index = 0; index < count; index++) {
@@ -412,7 +412,7 @@ export function useGuideSchedule(key: string, day: Day, catalogue: Library) {
               signal: work.controller.signal,
             });
             if (!wanted()) return;
-            programmes = [...programmes, ...page.programmes];
+            programmes.push(...page.programmes);
             pages++;
             cursor = page.cursor ?? undefined;
             if (!cursor) break;

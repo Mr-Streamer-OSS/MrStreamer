@@ -12,6 +12,7 @@ import { playOf, showDownloaded, type SubtitleTitle } from "./downloaded-subtitl
 import { effectiveTitleLanguage, getMediaPreferences } from "./media-preferences.ts";
 import { keychainSecrets } from "./secrets.ts";
 import { store, useStore } from "./store.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Online subtitles: SubDL searched with the viewer's own API key for the movie or episode playing,
 // and the result chosen downloaded, for `downloaded-subtitles.ts` to keep and show. The key stays
@@ -240,21 +241,23 @@ async function subdlSearch(
   if (query.languages.length === 0) throw new SubtitleFailure("unsupported");
   const kind = query.kind === "movie" ? "movie" : "tv";
   const url = new URL("https://api.subdl.com/api/v1/subtitles");
-  url.search = new URLSearchParams({
+  const params = new URLSearchParams({
     api_key: key,
     ...(query.tmdbId !== undefined
       ? { tmdb_id: String(query.tmdbId) }
       : { film_name: query.title ?? "" }),
-    ...(query.year !== undefined ? { year: String(query.year) } : {}),
+    ...defined({ year: query.year !== undefined ? String(query.year) : undefined }),
     type: kind,
     languages: query.languages.join(",").toUpperCase(),
     subs_per_page: "30",
     unpack: "1",
     client: "custom_integration",
-    ...(query.kind === "episode"
-      ? { season_number: String(query.season), episode_number: String(query.episode) }
-      : {}),
-  }).toString();
+  });
+  if (query.kind === "episode") {
+    params.set("season_number", String(query.season));
+    params.set("episode_number", String(query.episode));
+  }
+  url.search = params.toString();
   const timeout = AbortSignal.any([signal, AbortSignal.timeout(15_000)]);
   const response = await request(url, { headers: { Accept: "application/json" } }, timeout);
   // An answer from where a redirect led, not SubDL's own API, isn't taken.

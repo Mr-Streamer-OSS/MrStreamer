@@ -16,6 +16,7 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { DetailCache } from "../src/main/platform/detail-cache.ts";
 import { startFakeTmdb, type FakeTmdb } from "./fake-tmdb.ts";
 import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
@@ -36,7 +37,7 @@ async function app({ metadata = false } = {}) {
       mainLayer({
         ...testConfig(dir),
         tmdbKey: key,
-        ...(remote ? { tmdbApi: remote.url } : {}),
+        ...defined({ tmdbApi: remote ? remote.url : undefined }),
       }).pipe(Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" }))),
     );
     await runtime.runPromise(TestClock.setTime(NOW));

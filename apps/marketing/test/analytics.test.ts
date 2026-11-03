@@ -492,14 +492,15 @@ describe("website analytics", () => {
     let inView = (_target: Element): void => {};
     vi.stubGlobal(
       "IntersectionObserver",
-      class {
+      class implements IntersectionObserver {
+        readonly root = null;
+        readonly rootMargin = "0px";
+        readonly scrollMargin = "0px";
+        readonly thresholds = [0];
         constructor(callback: IntersectionObserverCallback) {
           inView = (target) => {
             if (watched.has(target))
-              callback(
-                [{ isIntersecting: true, target } as IntersectionObserverEntry],
-                this as unknown as IntersectionObserver,
-              );
+              callback([{ isIntersecting: true, target } as IntersectionObserverEntry], this);
           };
         }
         observe(target: Element) {
@@ -510,6 +511,9 @@ describe("website analytics", () => {
         }
         disconnect() {
           watched.clear();
+        }
+        takeRecords() {
+          return [];
         }
       },
     );

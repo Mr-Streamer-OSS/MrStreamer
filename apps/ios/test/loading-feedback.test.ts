@@ -227,24 +227,27 @@ const member = (id: string, label: string, standing: Partial<Member> = {}): Memb
     ...standing,
   }) as Member;
 
-const channels = [
+const channelsFields: Partial<Channel>[] = [
   { key: "a:1", title: "NPO 1", tags: [], logoUrl: null },
   { key: "a:2", title: "BBC One", tags: [], logoUrl: null },
-] as unknown as Channel[];
-const library = {
+];
+const channels = channelsFields as Channel[];
+const libraryFields: Partial<Library> = {
   regions: [{ name: "Netherlands", channels, shelves: [] }],
   channels,
   byKey: new Map(),
   placeOf: new Map(),
   labels: new Map(),
-} as unknown as Library;
-const emptyLibrary = {
+};
+const library = libraryFields as Library;
+const emptyLibraryFields: Partial<Library> = {
   regions: [],
   channels: [],
   byKey: new Map(),
   placeOf: new Map(),
   labels: new Map(),
-} as unknown as Library;
+};
+const emptyLibrary = emptyLibraryFields as Library;
 
 /** Collections Movies can browse, with nothing in any row. */
 const nothingMade = {

@@ -88,6 +88,7 @@ import {
   type Source,
   type PlaylistRefresh,
 } from "./subscription.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Provider details retained in memory; freshness still requires the current catalogue and age. */
 const DETAILS_KEPT = 200;
@@ -336,7 +337,7 @@ function make(deps: OnDemandDeps) {
                 ? {
                     key: tmdbKey,
                     region: deps.region,
-                    ...(deps.tmdbApi ? { api: deps.tmdbApi } : {}),
+                    ...defined({ api: deps.tmdbApi || undefined }),
                   }
                 : null,
             }),
@@ -471,7 +472,7 @@ function make(deps: OnDemandDeps) {
       account: source.key,
       subscriptionId: source.id,
       sourceStamp: source.fileRevision,
-      ...(source.importRevision ? { importRevision: source.importRevision } : {}),
+      ...defined({ importRevision: source.importRevision || undefined }),
       titleKind: kind,
       id,
     });
@@ -491,7 +492,7 @@ function make(deps: OnDemandDeps) {
       subscriptionId: id,
       key,
       dir,
-      ...(importRevision ? { importRevision } : {}),
+      ...defined({ importRevision: importRevision || undefined }),
     });
 
     /** The saved subscriptions with movies and series, in their order: Xtream and explicitly mapped playlists. */
@@ -516,7 +517,7 @@ function make(deps: OnDemandDeps) {
       movies: worked.movies,
       series: worked.series,
       fetchedAt: worked.fetchedAt,
-      ...(worked.importRevision ? { importRevision: worked.importRevision } : {}),
+      ...defined({ importRevision: worked.importRevision || undefined }),
       failure: failures.get(subscriptionId)?.error ?? null,
     });
     const stampOf = (source: SavedSubscription) =>
@@ -575,7 +576,7 @@ function make(deps: OnDemandDeps) {
                   catch: failedWith,
                 })
               : undefined;
-          yield* call("refresh", { ...owner, account, ...(catalogue ? { catalogue } : {}) });
+          yield* call("refresh", { ...owner, account, ...defined({ catalogue }) });
           const keep = yield* stillSaved;
           const finished = yield* call("finishRefresh", { ...owner, keep });
           if (!keep) return yield* switched;
@@ -755,7 +756,7 @@ function make(deps: OnDemandDeps) {
         )
           return { value, flight: undefined };
         const flightKey = JSON.stringify([sourceKey(source), key]);
-        const client = tmdb({ key: tmdbKey, ...(deps.tmdbApi ? { api: deps.tmdbApi } : {}) });
+        const client = tmdb({ key: tmdbKey, ...defined({ api: deps.tmdbApi || undefined }) });
         const flight = yield* shared(
           asking,
           flightKey,
@@ -1023,7 +1024,7 @@ function make(deps: OnDemandDeps) {
                 seriesId: held.version.id,
                 listingKey,
                 tags: hints,
-                ...(tracks ? { tracks } : {}),
+                ...defined({ tracks }),
               });
             }
           }
@@ -1036,16 +1037,16 @@ function make(deps: OnDemandDeps) {
       const files = new Map(known.map((file) => [ownedKey(file), file.tracks]));
       return <E extends Episode>(episode: E) => ({
         ...episode,
-        ...(episode.versions
-          ? {
-              versions: episode.versions.map((version) => {
+        ...defined({
+          versions: episode.versions
+            ? episode.versions.map((version) => {
                 const tracks = files.get(
                   ownedKey({ subscriptionId: episode.subscriptionId, id: version.id }),
                 );
                 return tracks ? { ...version, observed: { files: 1, ...tracks } } : version;
-              }),
-            }
-          : {}),
+              })
+            : undefined,
+        }),
       });
     });
 
@@ -1078,7 +1079,7 @@ function make(deps: OnDemandDeps) {
           !tmdbKey
         )
           return usable;
-        const client = tmdb({ key: tmdbKey, ...(deps.tmdbApi ? { api: deps.tmdbApi } : {}) });
+        const client = tmdb({ key: tmdbKey, ...defined({ api: deps.tmdbApi || undefined }) });
         const fiber = yield* shared(
           seasonFlights,
           JSON.stringify([sourceKey(source), key]),
@@ -1139,8 +1140,7 @@ function make(deps: OnDemandDeps) {
 
       rows: (kind: TitleKind, tab: RowTab, like?: OwnedId) =>
         loaded(
-          (owners, language) =>
-            call("rows", { owners, language, kind, tab, ...(like ? { like } : {}) }),
+          (owners, language) => call("rows", { owners, language, kind, tab, ...defined({ like }) }),
           true,
         ),
       recommendations: (seeds: readonly HomeSeed[]) =>
@@ -1172,14 +1172,14 @@ function make(deps: OnDemandDeps) {
             language: viewer,
             kind,
             version,
-            ...(about
-              ? {
-                  metadata: {
+            ...defined({
+              metadata: about
+                ? {
                     genres: [...new Set(about.genres.flatMap((id) => GENRES[id] ?? []))],
                     language: about.language,
-                  },
-                }
-              : {}),
+                  }
+                : undefined,
+            }),
           });
         }),
       tiles: (kind: TitleKind, of: "genres" | "services") =>
@@ -1192,6 +1192,7 @@ function make(deps: OnDemandDeps) {
               if (id === "adult" && !(yield* settings.get).adultTitles) {
                 return { name: "For adults", total: 0, titles: [] };
               }
+              const files = filters ? yield* knownFiles(kind) : undefined;
               return yield* call("collection", {
                 owners,
                 language,
@@ -1199,8 +1200,7 @@ function make(deps: OnDemandDeps) {
                 id,
                 offset,
                 limit,
-                ...(sort ? { sort } : {}),
-                ...(filters ? { filters, files: yield* knownFiles(kind) } : {}),
+                ...defined({ sort, filters, files }),
               });
             }),
           true,
@@ -1211,13 +1211,14 @@ function make(deps: OnDemandDeps) {
         loaded(
           (owners, language) =>
             Effect.gen(function* () {
+              const files = filters ? yield* knownFiles(kind) : undefined;
               return yield* call("searchKind", {
                 owners,
                 language,
                 kind,
                 query,
                 limit: SEARCH_PAGE,
-                ...(filters ? { filters, files: yield* knownFiles(kind) } : {}),
+                ...defined({ filters, files }),
               });
             }),
           true,

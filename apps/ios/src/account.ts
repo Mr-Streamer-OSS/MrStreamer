@@ -108,6 +108,7 @@ import {
   viewingHolds,
 } from "./viewing.ts";
 import { eraseWatchlist, setWatchlistOwners } from "./watchlist.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // The saved subscriptions, each signed in on its own, and their lists. Everything from all of them
 // shows together: there is no subscription to switch to. Each has its own login, lists, loads and
@@ -257,7 +258,7 @@ const providerFor = (account: ProviderAccount): Provider =>
 const accountOf = (entry: SubscriptionEntry, secret: string): ProviderAccount =>
   entry.kind === "xtream"
     ? { kind: "xtream", server: entry.server, username: entry.username, password: secret }
-    : { kind: "m3u", link: secret, ...(entry.mapping ? { mapping: entry.mapping } : {}) };
+    : { kind: "m3u", link: secret, ...defined({ mapping: entry.mapping }) };
 
 /**
  * The login's parts as `[username, ...passwords]`, which failures and saved copies keep out: an
@@ -1270,7 +1271,9 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
             ...identity,
             id,
             name: name ?? null,
-            ...(retired?.kind === "m3u" && retired.mapping ? { mapping: retired.mapping } : {}),
+            ...defined({
+              mapping: retired?.kind === "m3u" && retired.mapping ? retired.mapping : undefined,
+            }),
           };
     const first = registry.subscriptions.length === 0;
     try {
@@ -1449,12 +1452,12 @@ function forgotten(state: SavedState, id: string, erase: boolean): SavedState {
   return {
     ...(erase ? withoutVersions(state, id) : state),
     subscription: original ? null : state.subscription,
-    ...(erase
-      ? {
-          recent: original ? [] : state.recent,
-          recentChannels: (state.recentChannels ?? []).filter((key) => !key.startsWith(`${id}:`)),
-        }
-      : {}),
+    ...defined({
+      recent: erase ? (original ? [] : state.recent) : undefined,
+      recentChannels: erase
+        ? (state.recentChannels ?? []).filter((key) => !key.startsWith(`${id}:`))
+        : undefined,
+    }),
   };
 }
 
@@ -1545,8 +1548,7 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
           },
           url: stream.url,
           container: stream.format === "hls" ? "m3u8" : "ts",
-          ...(stream.headers ? { headers: stream.headers } : {}),
-          ...(stream.start === undefined ? {} : { start: stream.start }),
+          ...defined({ headers: stream.headers, start: stream.start }),
         };
       },
     }),

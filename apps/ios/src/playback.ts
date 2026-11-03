@@ -62,6 +62,7 @@ import {
 import { currentSource, onSignedIn, type Source as SignedInSource } from "./sources.ts";
 import { store, useStore, type Store } from "./store.ts";
 import { openFormat, type FormatSession, type UnshownSubtitles } from "./title-formats.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // The app's one player and what it plays: a live channel, or a movie or an episode. Every surface
 // shows this player and no other: Home's preview, Watch, Picture in Picture and AirPlay, and the
@@ -1674,7 +1675,7 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
         : null;
     let playable: Parameters<typeof attach>[1] = {
       uri: source.url,
-      ...(source.headers ? { headers: { ...source.headers } } : {}),
+      ...defined({ headers: source.headers ? { ...source.headers } : undefined }),
       contentType: source.container === "m3u8" ? "hls" : "auto",
     };
     if (!item.live && THROUGH_SESSION.has(source.container.toLowerCase())) {
@@ -1957,7 +1958,7 @@ function replay(from: number | undefined, paused: boolean) {
   void start(choice, {
     ...options,
     watch: state.get().watch,
-    ...(from === undefined ? {} : { from }),
+    ...defined({ from }),
   });
   if (paused) {
     held = { by: "viewer", acknowledged: false };
@@ -2128,7 +2129,7 @@ export function retry() {
   void start(choice, {
     ...options,
     watch: state.get().watch,
-    ...(from === undefined ? {} : { from }),
+    ...defined({ from }),
   });
 }
 

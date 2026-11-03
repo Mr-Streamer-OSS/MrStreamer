@@ -36,6 +36,7 @@ import { PlaylistMap, PlaylistRows } from "./PlaylistMap.tsx";
 import { GuideMap } from "./GuideMap.tsx";
 import { GuideRows } from "./GuideSource.tsx";
 import { Row, RowForm } from "./Rows.tsx";
+import { defined } from "@mrstreamer/core/defined";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** An account that ends within this many days says how many are left, in place of the date. */
@@ -569,7 +570,9 @@ function Edit({
   const playlist = subscription.kind === "m3u";
   return (
     <RowForm
-      onSubmit={() => update.mutate({ name: name.trim() || null, ...(secret ? { secret } : {}) })}
+      onSubmit={() =>
+        update.mutate({ name: name.trim() || null, ...defined({ secret: secret || undefined }) })
+      }
     >
       <h2 className="mb-5 text-2xl font-semibold tracking-tight">
         {subscriptionName(subscription)}

@@ -5,6 +5,7 @@ import { sha256Hex } from "@mrstreamer/core/sha256";
 import { DEMO_ID } from "./demo.ts";
 import { readJson, writeJson } from "./files.ts";
 import type { SavedState } from "./storage.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // The saved subscriptions, in the order they were added, in subscriptions.json in Documents.
 // account.ts alone reads and writes it, one change at a time. Passwords stay in the Keychain under
@@ -123,7 +124,7 @@ export function readRegistry(): RegistryFile | null {
     subscriptions: withPlaylists(subscriptions, saved.read),
     retired: withPlaylists(retired, gone.read),
     pendingSecrets,
-    ...(erasing === undefined ? {} : { erasing }),
+    ...defined({ erasing }),
   });
   if (parsed instanceof type.errors) return null;
   const { demo, ...rest } = extra;
@@ -183,11 +184,14 @@ export function writeRegistry({ registry, demo, opaque }: RegistryFile): void {
       playlists: [...placed(subscriptions), ...listed(opaque["playlists"])],
       retiredPlaylists: [...placed(retired), ...listed(opaque["retiredPlaylists"])],
     }),
-    ...(demo.kind === "absent"
-      ? {}
-      : {
-          demo: demo.kind === "unreadable" ? demo.raw : { version: 1, state: demo.kind },
-        }),
+    ...defined({
+      demo:
+        demo.kind === "absent"
+          ? undefined
+          : demo.kind === "unreadable"
+            ? demo.raw
+            : { version: 1, state: demo.kind },
+    }),
   });
 }
 
@@ -243,7 +247,7 @@ export function withoutSubscription(
           kind: entry.kind,
           server: entry.server,
           key: entry.key,
-          ...(entry.mapping ? { mapping: entry.mapping } : {}),
+          ...defined({ mapping: entry.mapping }),
         };
   const others = registry.retired.filter(
     (each) => each.id !== entry.id && !sameAccount(each, entry),

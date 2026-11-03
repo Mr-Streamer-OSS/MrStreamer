@@ -14,9 +14,11 @@ export function memoryFiles(memory: { files: Map<string, string>; full: Set<stri
     create() {}
     list() {
       const within = `${this.path}/`;
-      return [...memory.files.keys()]
-        .filter((path) => path.startsWith(within) && !path.slice(within.length).includes("/"))
-        .map((path) => new File(this, path.slice(within.length)));
+      return [...memory.files.keys()].flatMap((path) =>
+        path.startsWith(within) && !path.slice(within.length).includes("/")
+          ? [new File(this, path.slice(within.length))]
+          : [],
+      );
     }
   }
   class File {

@@ -443,8 +443,9 @@ const late =
   };
 
 /** The model's bridge, as the app finds it: kept across launches, so a spy on it is too. */
-const bridge = (globalThis as unknown as { expo: { modules: { BackgroundDownloads: Bridge } } })
-  .expo.modules.BackgroundDownloads;
+const bridge = (
+  globalThis as typeof globalThis & { expo: { modules: { BackgroundDownloads: Bridge } } }
+).expo.modules.BackgroundDownloads;
 interface Bridge {
   holdAuthorization(authorization: string, held: boolean): Promise<void>;
   arrangeAuthorizations(authorizations: string[]): Promise<void>;

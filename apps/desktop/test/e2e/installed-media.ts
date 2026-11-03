@@ -1006,9 +1006,9 @@ async function runCase(
       stopped = true;
     }
     return Promise.all(
-      [provider?.url, tmdb?.url, subtitles?.origin]
-        .filter((origin): origin is string => !!origin)
-        .map(refused),
+      [provider?.url, tmdb?.url, subtitles?.origin].flatMap((origin) =>
+        origin ? [refused(origin)] : [],
+      ),
     );
   };
   try {

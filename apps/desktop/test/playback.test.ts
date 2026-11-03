@@ -20,6 +20,7 @@ import {
   testSecrets,
   userAgent,
 } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** What Chromium on Linux decodes: no HEVC, no AC-3, no MP2. */
 const LINUX: readonly Codec[] = ["h264", "aac", "mp3", "opus"];
@@ -129,7 +130,7 @@ function streamIds(body: Buffer): { type: string; id: number; language?: string 
   ).streams.map((stream) => ({
     type: stream.codec_type,
     id: Number(stream.id),
-    ...(stream.tags?.language ? { language: stream.tags.language } : {}),
+    ...defined({ language: stream.tags?.language || undefined }),
   }));
 }
 

@@ -15,9 +15,9 @@ const PROBES: readonly [Codec, string][] = [
   ["opus", 'audio/mp4; codecs="opus"'],
 ];
 
-export const decoders: readonly Codec[] = PROBES.filter(
-  ([, type]) => typeof MediaSource !== "undefined" && MediaSource.isTypeSupported(type),
-).map(([codec]) => codec);
+export const decoders: readonly Codec[] = PROBES.flatMap(([codec, type]) =>
+  typeof MediaSource !== "undefined" && MediaSource.isTypeSupported(type) ? [codec] : [],
+);
 
 /**
  * What the player decodes from the fragmented MP4 movies and episodes arrive in. Unlike live
@@ -35,6 +35,6 @@ const TITLE_PROBES: readonly [Codec, string][] = [
   ["flac", 'audio/mp4; codecs="flac"'],
 ];
 
-export const titleDecoders: readonly Codec[] = TITLE_PROBES.filter(
-  ([, type]) => typeof MediaSource !== "undefined" && MediaSource.isTypeSupported(type),
-).map(([codec]) => codec);
+export const titleDecoders: readonly Codec[] = TITLE_PROBES.flatMap(([codec, type]) =>
+  typeof MediaSource !== "undefined" && MediaSource.isTypeSupported(type) ? [codec] : [],
+);

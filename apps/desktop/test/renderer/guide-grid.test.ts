@@ -19,6 +19,7 @@ import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { queries, syncGuideUpdates } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // The tests' clock: 10:40:20 on a day without a clock change, well inside most of the test
 // guide's programmes (ten minutes into One's half hour, twenty-five into Two's hour) and twenty
@@ -42,7 +43,15 @@ const channel = (id: string, title: string, catchupDays: number | null = null): 
   number: Number(id),
   logoUrl: null,
   categoryIds: [],
-  variants: [{ id, name: title, tags: [], quality: null, ...(catchupDays ? { catchupDays } : {}) }],
+  variants: [
+    {
+      id,
+      name: title,
+      tags: [],
+      quality: null,
+      ...defined({ catchupDays: catchupDays || undefined }),
+    },
+  ],
   catchupDays,
 });
 

@@ -14,6 +14,7 @@ import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { GENRES, tmdbImage, type TitleMetadata } from "../metadata/tmdb.ts";
 import { finish, pacer, type Steps } from "../steps.ts";
 import { suitability, suits } from "./languages.ts";
+import { defined } from "../defined.ts";
 
 /** The order a collection uses before the viewer chooses another sort. */
 export function collectionSort(id: CollectionId): CollectionSort {
@@ -133,7 +134,7 @@ export function* collectionSteps(source: CollectionSource): Steps<Collections> {
     const shown: Title = meta
       ? {
           ...title,
-          ...(names ? { title: names.name, originalTitle: names.original } : {}),
+          ...defined({ title: names?.name, originalTitle: names?.original }),
           originalLanguage: meta.language ?? null,
           backdropUrl: title.backdropUrl ?? (meta.backdrop ? tmdbImage(meta.backdrop, 1280) : null),
           genres: genresOf(meta),

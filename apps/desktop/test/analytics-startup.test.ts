@@ -17,6 +17,7 @@ import type {
   SummaryEvent,
 } from "../src/main/analytics/model.ts";
 import { tempDir } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const properties: BuildProperties = {
   app_version: "0.0.18",
@@ -119,7 +120,7 @@ async function start(
     origin: options.origin ?? Promise.resolve("fresh"),
     properties,
     store,
-    ...(options.consentChanged ? { consentChanged: options.consentChanged } : {}),
+    ...defined({ consentChanged: options.consentChanged }),
     transport: {
       kind: "local",
       async send(event) {

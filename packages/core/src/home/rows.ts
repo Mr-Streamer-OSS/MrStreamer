@@ -23,8 +23,5 @@ export function homeRows(saved: Preferences["homeRows"]): HomeRow[] {
     seen.add(id);
     result.push({ id, visible: row.visible });
   }
-  return [
-    ...result,
-    ...HOME_ROWS.filter((id) => !seen.has(id)).map((id) => ({ id, visible: true })),
-  ];
+  return [...result, ...HOME_ROWS.flatMap((id) => (!seen.has(id) ? [{ id, visible: true }] : []))];
 }

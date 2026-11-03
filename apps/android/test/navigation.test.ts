@@ -191,8 +191,8 @@ const labels = (container: ReturnType<typeof show>, selector: string) =>
 
 function press(container: ReturnType<typeof show>, label: string) {
   const button = container.querySelector(`button[aria-label="${label}"]`);
-  if (!button) throw new Error(`No ${label}`);
-  act(() => (button as unknown as { click(): void }).click());
+  if (!(button instanceof window.HTMLButtonElement)) throw new Error(`No ${label}`);
+  act(() => button.click());
 }
 
 /** Presses Back: its listeners run newest first until one takes it. Says whether one did. */

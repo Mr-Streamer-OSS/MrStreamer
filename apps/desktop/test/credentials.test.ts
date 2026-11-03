@@ -12,6 +12,7 @@ import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import type { FakeProvider } from "./fake-provider.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const LOGIN = { username: "viewer-7", password: "s3cret-pass" };
 
@@ -29,7 +30,7 @@ async function app(fetchImpl: typeof fetch, tcpConnect?: TcpConnect) {
           dataDir,
           secrets: testSecrets,
           providerOptions: { userAgent, fetch: fetchImpl },
-          ...(tcpConnect ? { tcpConnect } : {}),
+          ...defined({ tcpConnect }),
         }),
       ),
       Layer.provideMerge(diagnosticsLogLayer(dataDir)),

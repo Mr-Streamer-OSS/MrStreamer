@@ -94,9 +94,9 @@ export class PlaybackCoordination extends Context.Service<
       const recordingsOf = (subscriptionId: string) =>
         [...recordings.values()].filter((each) => each.subscriptionId === subscriptionId);
       const usesOf = (subscriptionId: string): ConnectionUse[] => [
-        ...[...sessions.values()]
-          .filter((owner) => owner === subscriptionId)
-          .map(() => "watch" as const),
+        ...[...sessions.values()].flatMap((owner) =>
+          owner === subscriptionId ? (["watch"] as const) : [],
+        ),
         ...(lent.has(subscriptionId) ? (["download"] as const) : []),
         ...recordingsOf(subscriptionId).map(() => "recording" as const),
       ];

@@ -8,6 +8,7 @@ import type mpegts from "mpegts.js";
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
 import { t } from "@mrstreamer/core/i18n";
 import type { EngineTracks, SoundChoice } from "./hls-tracks.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** The picture may run this far behind the newest data before it jumps forward. */
 const LIVE_MAX_LATENCY_S = 8;
@@ -496,7 +497,7 @@ function hlsError(Hls: HlsJs, data: ErrorData, source: string): EngineError {
   return {
     kind: network ? "network" : unsupported ? "unsupported" : "media",
     detail: data.details,
-    ...(parsing ? { diagnosticReason: "malformed_input" as const } : {}),
+    ...defined({ diagnosticReason: parsing ? ("malformed_input" as const) : undefined }),
     failure: { kind: "hls", requestId },
   };
 }

@@ -111,10 +111,11 @@ for (const key of ["audioTrack", "subtitleTrack"]) {
   });
 }
 assert.equal(writes, 1);
-assert.equal(Reflect.get(managed, "audioTrack"), null);
+assert.equal("audioTrack" in managed ? managed.audioTrack : undefined, null);
 Reflect.set(legacy, "subtitleTrack", { id: "1" });
 assert.equal(writes, 2);
-const useVideoPlayer: unknown = Reflect.get(module.namespace, "useVideoPlayer");
+const exports = module.namespace;
+const useVideoPlayer = "useVideoPlayer" in exports ? exports.useVideoPlayer : undefined;
 assert.equal(typeof useVideoPlayer, "function");
 if (typeof useVideoPlayer !== "function") throw new Error("fixture-hook-missing");
 const createHookPlayer = useVideoPlayer;

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Member, DemoErase, DemoStart } from "../src/account.ts";
 import { demoEntry } from "../src/demo.ts";
 import { keychain } from "./keychain.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Removing a provider from Settings when the removal doesn't all go through: a removal the
 // registry refused leaves the provider saved, and Settings says so; a removal that went through
@@ -49,7 +50,7 @@ vi.mock("react-native", async () => ({
   },
   Alert: {
     alert: (title: string, message: string, buttons?: readonly Button[]) => {
-      scenario.alerts.push({ title, message, ...(buttons ? { buttons } : {}) });
+      scenario.alerts.push({ title, message, ...defined({ buttons }) });
     },
   },
 }));

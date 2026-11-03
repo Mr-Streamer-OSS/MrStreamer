@@ -111,6 +111,7 @@ import {
 } from "./native-fixtures/media.ts";
 import { liveTracks, tracksChannel, TRACKS_STREAM_ID } from "./native-fixtures/tracks.ts";
 import { titleTransfers } from "./native-fixtures/transfers.ts";
+import { defined } from "../../../packages/core/src/defined.ts";
 
 const USERNAME = process.env.FIXTURE_USERNAME ?? "fixture";
 const PASSWORD = process.env.FIXTURE_PASSWORD ?? "fixture-pass";
@@ -199,8 +200,10 @@ const provider = await startFakeProvider({
   password: PASSWORD,
   second,
   channelOf: tracksChannel,
-  ...(pngLogos ? { logoPng: pngLogo } : {}),
-  ...(browsing ? { titlesOf: (built: FakeTitles) => browseTitles(built, second) } : {}),
+  ...defined({
+    logoPng: pngLogos ? pngLogo : undefined,
+    titlesOf: browsing ? (built: FakeTitles) => browseTitles(built, second) : undefined,
+  }),
 });
 const browse = browsing ? browseControls(provider, second) : null;
 const lists = liveLists(provider);
@@ -439,7 +442,7 @@ createServer((request, response) => {
       channel: id,
       status,
       path: redacted(path),
-      ...(range ? { range } : {}),
+      ...defined({ range: range || undefined }),
     });
     if (status !== 200 && status !== 206 && status !== 416)
       answer(response, status, "text/plain", "");
@@ -560,7 +563,7 @@ createServer((request, response) => {
 
 writeFileSync(
   join(out, second ? `server-${port}.json` : "server.json"),
-  JSON.stringify({ port, controlPort, started, ...(profile ? { profile } : {}) }),
+  JSON.stringify({ port, controlPort, started, ...defined({ profile: profile ?? undefined }) }),
 );
 console.log(`fake TMDB at http://127.0.0.1:${port}/tmdb/3`);
 if (profile) console.log(`${profile.name} profile ${JSON.stringify(profile)}`);

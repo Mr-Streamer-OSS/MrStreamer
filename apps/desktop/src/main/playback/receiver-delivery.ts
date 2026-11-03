@@ -49,6 +49,7 @@ import {
   type Spent,
 } from "./title-reading.ts";
 import { receiverPlan, type TitleProbe } from "./title.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Operations on one admitted session. Delivery cannot admit or close sessions. */
 interface ReceiverSourceBase {
@@ -431,7 +432,9 @@ export function liveReceiverDelivery(
     if (!hls) source.started(layout, chosen?.pid ?? null);
     const decodes = (codec: Codec | "unknown") => codec !== "unknown" && source.decoders.has(codec);
     const segments: LiveSegments = {
-      ...(hls ? { subtitles: [...new Set(layout.subtitles.map((track) => track.pid))] } : {}),
+      ...defined({
+        subtitles: hls ? [...new Set(layout.subtitles.map((track) => track.pid))] : undefined,
+      }),
       video: !video ? "none" : decodes(video.codec) ? "copy" : "h264",
       audio: !chosen ? "none" : decodes(chosen.codec) ? "copy" : "aac",
       pids: { video: video?.pid ?? null, audio: chosen?.pid ?? null },

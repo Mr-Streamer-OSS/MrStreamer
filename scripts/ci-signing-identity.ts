@@ -26,6 +26,7 @@ import {
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { defined } from "../packages/core/src/defined.ts";
 
 // Apple issues Developer ID certificates from its G2 authority; older accounts may only offer the
 // original type.
@@ -222,7 +223,7 @@ async function api(method: string, path: string, body?: unknown): Promise<unknow
   const response = await fetch(`https://api.appstoreconnect.apple.com/v1${path}`, {
     method,
     headers: { authorization: `Bearer ${token()}`, "content-type": "application/json" },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...defined({ body: body === undefined ? undefined : JSON.stringify(body) }),
   });
   const json = (await response.json().catch(() => null)) as {
     errors?: { detail?: string; title?: string }[];

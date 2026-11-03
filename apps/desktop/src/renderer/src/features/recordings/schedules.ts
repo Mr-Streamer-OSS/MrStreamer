@@ -14,6 +14,7 @@ import type { IpcInput } from "@mrstreamer/contracts/ipc";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatDate, formatList, t, type PlainKey } from "@mrstreamer/core/i18n";
 import { call } from "../../lib/ipc.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 export const schedulesQuery = () =>
   queryOptions({
@@ -29,7 +30,7 @@ export type PlanInput = IpcInput<"recordings.plan">["plan"];
 export const planQuery = (plan: PlanInput, id: string | undefined) =>
   queryOptions({
     queryKey: ["schedules", "plan", plan, id ?? null],
-    queryFn: () => call("recordings.plan", { plan, ...(id ? { id } : {}) }),
+    queryFn: () => call("recordings.plan", { plan, ...defined({ id: id || undefined }) }),
   });
 
 export function useSchedules() {

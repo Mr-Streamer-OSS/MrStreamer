@@ -33,6 +33,7 @@ import {
 import type { OperationOutcome } from "./operations.ts";
 import { analyticsStore } from "./storage.ts";
 import type { CaptureTransport } from "./transport.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const IO_MS = 1500;
 const QUIT_MS = 500;
@@ -212,8 +213,10 @@ export class Analytics {
         ...base,
         enabled,
         pending: enabled ? base.pending : [],
-        ...(enabled && summaries ? { summaries } : {}),
-        ...(enabled && lifecycle ? { lifecycle } : {}),
+        ...defined({
+          summaries: enabled && summaries ? summaries : undefined,
+          lifecycle: enabled && lifecycle ? lifecycle : undefined,
+        }),
       });
       // The consent commit is independent of both the bounded caller and later recovery.
       // Publication reads current owners, so queued choices cannot replay an obsolete value.
@@ -399,8 +402,7 @@ export class Analytics {
       watchMs: 0,
       checkpointMs: 0,
       summary: null,
-      ...(remoteControl !== undefined ? { remoteControl } : {}),
-      ...(intent ? { intent } : {}),
+      ...defined({ remoteControl, intent }),
     };
     return token;
   }
@@ -1013,26 +1015,24 @@ export class Analytics {
             (item) =>
               item.attempts < ATTEMPTS && !(isLegacyLifecycle(item.event) && expired(item.event)),
           ),
-          ...(record.summaries
-            ? {
-                summaries: {
+          ...defined({
+            summaries: record.summaries
+              ? {
                   ...record.summaries,
                   pending: record.summaries.pending.filter(
                     (item) => item.attempts < ATTEMPTS && !expired(item.event),
                   ),
-                },
-              }
-            : {}),
-          ...(record.lifecycle
-            ? {
-                lifecycle: {
+                }
+              : undefined,
+            lifecycle: record.lifecycle
+              ? {
                   ...record.lifecycle,
                   pending: record.lifecycle.pending.filter(
                     (item) => item.attempts < ATTEMPTS && !expired(item.event),
                   ),
-                },
-              }
-            : {}),
+                }
+              : undefined,
+          }),
         });
       })
         .catch(() => {})
@@ -1103,9 +1103,11 @@ export class Analytics {
             pending: record.pending.map((item) =>
               item.event.uuid === sent.uuid ? { ...item, attempts: item.attempts + 1 } : item,
             ),
-            ...(isLegacyLifecycle(sent)
-              ? { lifecycle: record.lifecycle ?? emptyLifecycle(sent.distinct_id) }
-              : {}),
+            ...defined({
+              lifecycle: isLegacyLifecycle(sent)
+                ? (record.lifecycle ?? emptyLifecycle(sent.distinct_id))
+                : undefined,
+            }),
           });
         }
         reserved = true;
@@ -1298,18 +1300,18 @@ function bounded(record: AnalyticsRecord): AnalyticsRecord {
   const result = {
     ...record,
     pending,
-    ...(block ? { summaries: { ...block, pending: summaries } } : {}),
-    ...(record.lifecycle
-      ? {
-          lifecycle: {
+    ...defined({
+      summaries: block ? { ...block, pending: summaries } : undefined,
+      lifecycle: record.lifecycle
+        ? {
             ...record.lifecycle,
             pending: versions,
             legacyRetries: record.lifecycle.legacyRetries.filter((retry) =>
               pending.some((item) => item.event.uuid === retry.uuid),
             ),
-          },
-        }
-      : {}),
+          }
+        : undefined,
+    }),
   };
   const openSlots = Number(!!block?.usage) + Number(!!block?.unfinished);
   // Open owners reserve slots: evicting their snapshots would let a later checkpoint revive
