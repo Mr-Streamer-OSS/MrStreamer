@@ -116,8 +116,6 @@ interface Share {
   readonly current: Map<string, Variant>;
   /** The variant every owner holds while two or more read. */
   fixed: Variant | null;
-  /** Readers that came while it couldn't be shared, which ask the provider themselves. */
-  readonly strangers: Set<string>;
   /** Playlists by the address asked for, and by the address they came from. */
   readonly playlists: Map<string, Answer>;
   /** Segments by playlist, media and discontinuity sequence numbers and address but for its query. */
@@ -308,6 +306,14 @@ export function hlsShares({
   readonly changed: (owner: string) => void;
 }) {
   const shares = new Map<string, Share>();
+  // An independently admitted reader outlives the share it couldn't join, until it leaves.
+  const strangers = new Map<string, string>();
+
+  const rememberAlias = (share: Share, address: string, variant: Variant) => {
+    share.aliases.delete(address);
+    share.aliases.set(address, variant);
+    if (share.aliases.size > ALIASES) share.aliases.delete(share.aliases.keys().next().value!);
+  };
 
   /**
    * The variant held, or else the one the first owner to read one the HLS reader takes read: a
@@ -411,7 +417,7 @@ export function hlsShares({
         for (const [at, each] of variants.entries()) {
           const kept = share.variants[at];
           if (kept && pathOf(kept.address) === pathOf(each.address))
-            share.aliases.set(each.address, kept);
+            rememberAlias(share, each.address, kept);
         }
         return;
       }
@@ -426,8 +432,7 @@ export function hlsShares({
       // listed: another reader may have that read. Numbers that went back are named anew.
       // A variant's playlist at the address it sent on to is that variant's too.
       const variant = variantOf(share, address);
-      if (variant && url !== address && share.aliases.size < ALIASES)
-        share.aliases.set(url, variant);
+      if (variant && url !== address) rememberAlias(share, url, variant);
       const of = variant?.address ?? pathOf(url);
       answer.playlist = of;
       const oldest = media.segments[0]!.sequence;
@@ -473,6 +478,7 @@ export function hlsShares({
   ): Promise<Response> => {
     for (;;) {
       signal.throwIfAborted();
+      if (strangers.get(owner) === key) return open(asked, signal);
       const existing = shares.get(key);
       if (existing?.closing) {
         await existing.closing;
@@ -486,7 +492,6 @@ export function hlsShares({
         aliases: new Map(),
         current: new Map(),
         fixed: null,
-        strangers: new Set(),
         playlists: new Map(),
         segments: new Map(),
         requests: new Set(),
@@ -495,11 +500,10 @@ export function hlsShares({
         closing: null,
       };
       shares.set(key, share);
-      if (share.strangers.has(owner)) return open(asked, signal);
       if (!share.owners.has(owner)) {
         drop(owner, key);
         if (!joining && share.kind === "variants" && share.current.size > 0 && !joins(share)) {
-          share.strangers.add(owner);
+          strangers.set(owner, key);
           return open(asked, signal);
         }
         share.owners.add(owner);
@@ -563,9 +567,9 @@ export function hlsShares({
   const closings = new Map<string, Set<Promise<void>>>();
   /** Takes `owner` out of every share but `kept`'s, closing those it was the last of. */
   const drop = (owner: string, kept?: string) => {
+    if (strangers.get(owner) !== kept) strangers.delete(owner);
     for (const [key, share] of shares) {
       if (key === kept) continue;
-      share.strangers.delete(owner);
       if (!share.owners.delete(owner)) continue;
       share.current.delete(owner);
       if (share.owners.size > 0) {
@@ -625,6 +629,12 @@ export function hlsShares({
     },
     leave,
     /** Ends every share, as the app quits. */
-    close: () => Promise.all([...shares.values()].flatMap((share) => [...share.owners]).map(leave)),
+    close: () =>
+      Promise.all(
+        [...shares.values()]
+          .flatMap((share) => [...share.owners])
+          .concat([...strangers.keys()])
+          .map(leave),
+      ),
   };
 }

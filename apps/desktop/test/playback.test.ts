@@ -1355,6 +1355,13 @@ describe("live captures", () => {
     expect(await read("other", "sd.m3u8?token=1")).toBe(media("sd"));
     expect(asked).toEqual(["master.m3u8", "sd.m3u8", "sd.m3u8"]);
     expect(captures.fixed("watch")).toBeNull();
+    // Its own connection stays separate after Watch leaves and the recording refreshes.
+    await captures.idle("watch");
+    expect(await read("other", "sd.m3u8?token=1")).toBe(media("sd"));
+    expect(captures.reading(key)).toBe(false);
+    await captures.idle("other");
+    await read("watch", "master.m3u8");
+    await read("watch", "uhd.m3u8?token=1");
     // One admitted to share it as Watch went to 2160 holds Watch to the quality it reads instead.
     await read("record", "master.m3u8", true);
     expect(captures.fixed("watch")).toBeNull();
@@ -1453,6 +1460,8 @@ describe("live captures", () => {
     const asked: string[] = [];
     const from = { hd: 10, sd: 10 };
     let started = 1;
+    let token = 0;
+    let moved = "t";
     const read = async (owner: string, name: string) => {
       const answer = await captures.resource(
         key,
@@ -1468,13 +1477,17 @@ describe("live captures", () => {
           };
           if (url.pathname === "/master.m3u8")
             return answer(
-              "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2,RESOLUTION=1920x1080\nhd.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=1,RESOLUTION=1280x720\nsd.m3u8\n",
+              `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2,RESOLUTION=1920x1080\nhd.m3u8${token ? `?token=${token}` : ""}\n#EXT-X-STREAM-INF:BANDWIDTH=1,RESOLUTION=1280x720\nsd.m3u8${token ? `?token=${token}` : ""}\n`,
             );
-          const variant = /^\/(?:t\/)?(hd|sd)\.m3u8$/.exec(url.pathname)?.[1] as "hd" | "sd";
+          const variant = /^\/(?:(?:t|next)\/)?(hd|sd)\.m3u8$/.exec(url.pathname)?.[1] as
+            "hd" | "sd";
           if (variant) {
             const list = `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:${from[variant]}\n#EXTINF:2,\n${variant}-${from[variant]}.ts\n`;
             // hd's playlist sends on to one under a token.
-            return answer(list, variant === "hd" ? "http://provider/t/hd.m3u8?token=1" : address);
+            return answer(
+              list,
+              variant === "hd" ? `http://provider/${moved}/hd.m3u8?token=1` : address,
+            );
           }
           return answer(`${url.pathname.slice(1)} ${started}`);
         },
@@ -1484,6 +1497,16 @@ describe("live captures", () => {
     };
 
     await read("watch", "master.m3u8");
+    await read("watch", "hd.m3u8");
+    // Many master tokens must not stop a newly redirected playlist being held to the share.
+    for (token = 1; token <= 130; token++) await read("watch", "master.m3u8");
+    moved = "next";
+    await read("watch", "hd.m3u8");
+    await read("watch", "sd.m3u8");
+    await read("record", "master.m3u8");
+    expect(await read("watch", "next/hd.m3u8?token=1")).toContain("sd-10.ts");
+    await captures.idle("record");
+    moved = "t";
     await read("watch", "hd.m3u8");
     await read("record", "master.m3u8");
     expect(captures.fixed("record")).toBe("http://provider/hd.m3u8");
