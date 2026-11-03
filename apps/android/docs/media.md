@@ -14,7 +14,9 @@ and playing. Dismissal stops the owner; expansion keeps Watch. Activity recreati
 to the process owner. Playback is not restored after process death. Android draws system
 controls and may show a subset of the session actions. Android 13+ notification permission is requested
 only on the first eligible in-app departure from Watch, never on Home or PiP entry. An initiated
-request is saved across process restarts; a thrown request can be retried. Denial keeps playback running without a shade notification.
+request is saved across process restarts; a thrown request can be retried. A failed save is retried
+on the next notification check without another prompt. Process death before a successful save
+can lose suppression. Denial keeps playback running without a shade notification.
 Source replacement retains the session service; final stop removes it. Refused background
 service starts leave playback intact.
 
@@ -40,8 +42,8 @@ registration cancel a running countdown or ended state; resuming playback clears
 Leaving Watch before the end prevents a late ended event from starting a countdown. Cancel retains manual Play next; a new source resolves its own next item.
 Credentials enter only through the existing source resolver.
 
-Play from start is not offered. Offline routes are owned by Downloads (#666); this PR does not
-register an offline screen or provide providerless installed playback.
+Play from start is not offered. No offline route is registered; Downloads (#666) owns offline playback. Providerless installed
+playback remains unproven.
 
 Fake-native tests cover public state, saved preferences and countdown cancellation. JVM tests
 cover track mapping and command limits. These and compilation do not prove decoding, sound,

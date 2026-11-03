@@ -21,6 +21,6 @@ fun resetPlayerState() {
   set(PlayerHost, "owner", null)
   set(PlayerHost, "serviceStarted", false)
   set(PlayerPip, "activity", WeakReference<Activity>(null))
-  for (name in listOf("watch", "pip", "leavingPip")) set(PlayerPip, name, false)
+  for (name in listOf("watch", "pip", "leavingPip", "notificationSavePending")) set(PlayerPip, name, false)
   set(PlayerPip, "stopped", true)
 }

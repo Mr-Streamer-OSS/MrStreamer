@@ -25,6 +25,7 @@ object PlayerPip {
   private var pip = false
   private var stopped = true
   private var leavingPip = false
+  private var notificationSavePending = false
   private val token = java.util.UUID.randomUUID().toString()
   private val receiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -55,14 +56,18 @@ object PlayerPip {
   fun watch(enabled: Boolean) { if (watch && !enabled) requestNotifications(); watch = enabled; refresh() }
   fun requestNotifications() {
     val host = activity.get() ?: return
+    val preferences = host.getSharedPreferences("player", Context.MODE_PRIVATE)
+    if (notificationSavePending) {
+      notificationSavePending = !preferences.edit().putBoolean("notificationsRequested", true).commit()
+      return
+    }
     if (Build.VERSION.SDK_INT >= 33 && PlayerHost.existing()?.takeUnless { it.preview }?.attempt != null &&
       host.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-      val preferences = host.getSharedPreferences("player", Context.MODE_PRIVATE)
       if (preferences.getBoolean("notificationsRequested", false)) return
       try {
         host.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 501)
         // Record only an initiated request, so a thrown request remains retryable.
-        preferences.edit().putBoolean("notificationsRequested", true).commit()
+        notificationSavePending = !preferences.edit().putBoolean("notificationsRequested", true).commit()
       } catch (_: IllegalStateException) { }
         catch (_: SecurityException) { }
     }
