@@ -1,3 +1,4 @@
+import { JsonValue, type Json, type JsonObject } from "../packages/contracts/src/json.ts";
 // The GitHub side of a Microsoft Store submission: whether the package a release run built carries
 // the Store's identity, whether the Store jobs may run, which release it is for, and whether
 // the package a release run kept is that release's. scripts/store-submission.ts is the Microsoft
@@ -359,7 +360,7 @@ export function readManifest(xml: string): PackageManifest {
 }
 
 /** Throws unless `actual` is `wanted`, saying what `what` is instead. */
-function differs(what: string, actual: unknown, wanted: string): void {
+function differs(what: string, actual: Json | undefined, wanted: string): void {
   if (actual !== wanted) throw new Error(`${what} is ${JSON.stringify(actual)}, not "${wanted}".`);
 }
 
@@ -456,15 +457,15 @@ export function verifyPackage(
 }
 
 /** Whether `value` is a JSON object, whose fields are still to be checked. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+export function isRecord(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value) && JsonValue.allows(value);
 }
 
 /** The release file `release` wrote, with the package once `verify` added it. */
 export function readStoreRelease(path: string): StoreRelease {
-  const file: unknown = JSON.parse(readFileSync(path, "utf8"));
+  const file = JsonValue.assert(JSON.parse(readFileSync(path, "utf8")));
 
-  const text = (from: unknown, key: string) => {
+  const text = (from: Json | undefined, key: string) => {
     const value = isRecord(from) ? from[key] : undefined;
 
     if (typeof value !== "string") throw new Error(`${path} names no ${key}.`);
