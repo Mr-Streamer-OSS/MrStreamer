@@ -1,6 +1,6 @@
 {
   "expo-dom-webview": "@expo/dom-webview@58.0.2",
-  "expo-log-box": "@expo/log-box@58.0.12",
+  "expo-log-box": "@expo/log-box@58.0.14",
   "credentials": "mrstreamer-android@0.1.0",
   "expo": "expo@58.0.9",
   "expo-constants": "expo-constants@58.0.11",

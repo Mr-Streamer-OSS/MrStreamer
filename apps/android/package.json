@@ -10,7 +10,7 @@
     "android": "expo run:android"
   },
   "dependencies": {
-    "@expo/log-box": "58.0.12",
+    "@expo/log-box": "58.0.14",
     "@expo/metro-runtime": "58.0.14",
     "@expo/vector-icons": "15.1.1",
     "@formatjs/intl-displaynames": "7.3.15",
