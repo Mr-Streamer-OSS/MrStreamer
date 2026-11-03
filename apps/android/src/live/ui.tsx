@@ -1,57 +1,22 @@
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useState, type ReactNode } from "react";
-import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Alert, Pressable, Text, TextInput, View } from "react-native";
 import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
-import { formatList } from "@mrstreamer/core/i18n";
 import { sources } from "../bootstrap/sources.ts";
-import { useOpenShared } from "../navigation/open.ts";
+import type { Sources } from "../connect/sources.ts";
 import { useStore } from "../platform/store.ts";
-import { Sheet } from "../ui/sheet.tsx";
+import { useKeyboardFocus } from "../ui/focus.ts";
+import { IconButton, type IconName } from "../ui/icon-button.tsx";
 import { colors } from "../ui/theme.ts";
 import { useLocale } from "./catalogue.ts";
+import { Dialog, FitSheet, RAISED_RULE, RED, SheetRow, TextButton, useGaps } from "./chrome.tsx";
 import { t } from "./copy.ts";
-import { discover } from "./discovery.ts";
-import { identity, resolve, same, type Entry } from "./model.ts";
+import { identity, resolve, same, type Entry, type Resolution } from "./model.ts";
 import { intentHandlers } from "./intents.ts";
 import { lists } from "./runtime.ts";
 import { FAVOURITES } from "./store.ts";
 
-export function Label({ children }: { children: ReactNode }) {
-  return <Text style={{ color: colors.text, fontSize: 16 }}>{children}</Text>;
-}
-
-export function Button({
-  title,
-  onPress,
-  disabled = false,
-}: {
-  title: string;
-  onPress(): void;
-  disabled?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      disabled={disabled}
-      accessibilityState={{ disabled }}
-      onPress={onPress}
-      style={{ minHeight: 48, padding: 12, justifyContent: "center", opacity: disabled ? 0.4 : 1 }}
-    >
-      <Label>{title}</Label>
-    </Pressable>
-  );
-}
-
-export function Content({ children }: { children: ReactNode }) {
-  const insets = useSafeAreaInsets();
-
-  return (
-    <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: insets.bottom + 16, gap: 8 }}>
-      {children}
-    </ScrollView>
-  );
-}
-
+/** Says why a change to a list was refused, in a platform alert. */
 export function failure(cause: unknown, name: string) {
   const code = cause instanceof Error ? cause.message : "";
   Alert.alert(
@@ -66,61 +31,190 @@ export function failure(cause: unknown, name: string) {
   );
 }
 
-export function Status() {
-  useLocale();
-  const state = useStore(sources.state);
-  const open = useOpenShared();
-  const view = discover(state);
+/** The provider's name for a saved channel's source, while one source has that id. */
+export function providerOf(sourceId: string, state: Sources): string | undefined {
+  if (state.kind !== "ready") return undefined;
+  const owners = state.sources.filter((source) => source.id === sourceId);
 
+  return owners.length === 1 ? owners[0]!.label : undefined;
+}
+
+/** Why a saved channel doesn't show, after its provider's name: "Kade TV: channels didn't load". */
+export function whyNot(resolution: Exclude<Resolution["kind"], "listed">, provider?: string) {
+  if (resolution === "removed" || !provider) return t("Its provider was removed.");
+
+  if (resolution === "ambiguous")
+    return t("Its provider lists the channel as more than one channel now.");
+
+  return t("{provider}: {why}", { provider, why: reason(resolution) });
+}
+
+/** The short reason after a provider's name, as Favourites' footer says it. */
+export const reason = (resolution: "loading" | "failed" | "missing") =>
+  t(
+    resolution === "loading"
+      ? "channels still loading"
+      : resolution === "failed"
+        ? "channels didn't load"
+        : "no longer listed",
+  );
+
+/** Up to two initials for a channel's badge: "Harbour HD" is "HH", a one-word "Nova" is "NO". */
+function monogram(title: string): string {
+  const words = title.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const [first, second] = words.map((word) => Array.from(word));
+  const letters = second ? [first?.[0], second[0]] : (first ?? []).slice(0, 2);
+
+  return letters.join("").toLocaleUpperCase();
+}
+
+/**
+ * A channel's 48x36dp badge: its initials on #141414, on #262626 inside a sheet, or outlined and
+ * dimmed for a saved channel that doesn't show.
+ */
+export function Badge({
+  title,
+  look = "row",
+}: {
+  title: string;
+  look?: "row" | "sheet" | "absent";
+}) {
   return (
-    <View accessibilityLiveRegion="polite">
-      {view.restoring ? <Label>{t("Loading channels…")}</Label> : null}
-      {view.loading.length ? (
-        <>
-          <Label>
-            {t("Loading channels from {providers}.", { providers: formatList(view.loading) })}
-          </Label>
-          <Label>{t("Loading channels…")}</Label>
-        </>
-      ) : null}
-      {view.failed.length ? (
-        <>
-          <Label>
-            {t("Couldn't load channels from {providers}.", { providers: formatList(view.failed) })}
-          </Label>
-          <Button
-            title={t("Try again")}
-            onPress={() => {
-              if (state.kind === "ready")
-                state.sources
-                  .filter((s) => s.channels.kind === "failed")
-                  .forEach((s) => sources.retry(s.id));
-            }}
-          />
-          <Button title={t("Settings")} onPress={() => open("settings")} />
-        </>
+    <View
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        width: 48,
+        height: 36,
+        flexShrink: 0,
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 4,
+        borderWidth: look === "absent" ? 1 : 0,
+        borderColor: RAISED_RULE,
+        backgroundColor:
+          look === "row" ? colors.surface : look === "sheet" ? RAISED_RULE : undefined,
+      }}
+    >
+      <Text
+        style={{
+          color: look === "absent" ? colors.inactive : colors.text,
+          fontSize: 12,
+          lineHeight: 16,
+          fontWeight: "700",
+        }}
+      >
+        {monogram(title)}
+      </Text>
+    </View>
+  );
+}
+
+/** A row's two lines: the 16sp name over its 14sp grey detail. */
+export function Lines({
+  title,
+  detail,
+  dim = false,
+  gap = 4,
+}: {
+  title: string;
+  detail?: string | undefined;
+  dim?: boolean;
+  gap?: number;
+}) {
+  return (
+    <View style={{ flex: 1, minWidth: 0, gap, paddingVertical: 12 }}>
+      <Text
+        numberOfLines={2}
+        style={{
+          color: dim ? colors.secondary : colors.text,
+          fontSize: 16,
+          lineHeight: 20,
+          fontWeight: "500",
+        }}
+      >
+        {title}
+      </Text>
+      {detail ? (
+        <Text numberOfLines={2} style={{ color: colors.secondary, fontSize: 14, lineHeight: 18 }}>
+          {detail}
+        </Text>
       ) : null}
     </View>
   );
 }
 
-/** One focus stop; only a current, uniquely matched channel with a handler offers Play. */
-export function Channel({ entry, onLists }: { entry: Entry; onLists(entry: Entry): void }) {
+/**
+ * A channel's 72dp row, one TalkBack stop: its name and what's on, with actions Add to or Remove
+ * from Favourites and Lists. Holding it opens the Lists sheet; the star stars it and plays
+ * nothing. Only a current, uniquely matched channel with a registered Play handler is a button;
+ * until one is registered a tap does nothing and nothing announces Play. A saved channel that
+ * doesn't show says why, plays nothing, and offers Remove (when `onRemove` is given) only once
+ * its provider no longer lists it.
+ */
+export function Channel({
+  entry,
+  onLists,
+  onRemove,
+  listName,
+}: {
+  entry: Entry;
+  onLists: (entry: Entry) => void;
+  onRemove?: ((entry: Entry) => void) | undefined;
+  /** The list `onRemove` takes it out of, for TalkBack's action. */
+  listName?: string;
+}) {
   useLocale();
   const state = useStore(sources.state);
   const handlers = useStore(intentHandlers);
   const saved = useStore(lists.state);
   const found = resolve(entry, state);
+  const { focused, handlers: focus } = useKeyboardFocus();
 
   const starred =
     saved.kind === "ready" &&
-    saved.lists.find((list) => list.id === FAVOURITES)?.entries.some((each) => same(each, entry));
+    !!saved.lists.find((list) => list.id === FAVOURITES)?.entries.some((each) => same(each, entry));
+
+  if (found.kind !== "listed") {
+    const removable = onRemove && (found.kind === "missing" || found.kind === "removed");
+    const detail = whyNot(found.kind, providerOf(entry.sourceId, state));
+
+    return (
+      <View
+        accessible
+        accessibilityLabel={`${entry.title}, ${detail}`}
+        accessibilityActions={
+          removable
+            ? [{ name: "remove", label: t("Remove from {list}", { list: listName ?? "" }) }]
+            : []
+        }
+        onAccessibilityAction={() => onRemove?.(entry)}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 16,
+          minHeight: 72,
+          paddingLeft: 16,
+          paddingRight: removable ? 4 : 16,
+        }}
+      >
+        <Badge title={entry.title} look="absent" />
+        <Lines title={entry.title} detail={detail} dim gap={2} />
+        {removable ? <TextButton label={t("Remove")} onPress={() => onRemove(entry)} /> : null}
+      </View>
+    );
+  }
+
+  const title = found.row.title;
+  const now = t("No programme information");
+  const playable = !!handlers.play;
+  const schedule = !!handlers.schedule;
+  const favourite = t(starred ? "Remove from Favourites" : "Add to Favourites");
 
   const play = () => {
-    const now = resolve(entry, sources.state.get());
+    const current = resolve(entry, sources.state.get());
 
-    if (now.kind !== "listed") return failure(new Error("identity"), entry.title);
-    intentHandlers.get().play?.({ ...identity(now.row), kind: "live" });
+    if (current.kind !== "listed") return failure(new Error("identity"), entry.title);
+    intentHandlers.get().play?.({ ...identity(current.row), kind: "live" });
   };
 
   const star = () => {
@@ -131,181 +225,449 @@ export function Channel({ entry, onLists }: { entry: Entry; onLists(entry: Entry
     }
   };
 
-  const playable = found.kind === "listed" && !!handlers.play;
-  const schedule = found.kind === "listed" && !!handlers.schedule;
-  const title = found.kind === "listed" ? found.row.title : entry.title;
+  const scheduleNow = () => {
+    const current = resolve(entry, sources.state.get());
+
+    if (current.kind === "listed")
+      intentHandlers.get().schedule?.({ ...identity(current.row), kind: "schedule" });
+  };
 
   return (
-    <View>
-      <Pressable
-        accessible
-        accessibilityRole={playable ? "button" : undefined}
-        accessibilityLabel={title}
-        accessibilityHint={playable ? t("Play {channel}", { channel: title }) : undefined}
-        accessibilityActions={[
-          { name: "lists", label: t("Lists") },
-          ...(found.kind === "listed"
-            ? [{ name: "star", label: t(starred ? "Remove from Favourites" : "Add to Favourites") }]
-            : []),
-          ...(schedule ? [{ name: "schedule", label: t("Schedule") }] : []),
-        ]}
-        onAccessibilityAction={({ nativeEvent }) => {
-          if (nativeEvent.actionName === "lists") onLists(entry);
+    <Pressable
+      accessible
+      accessibilityRole={playable ? "button" : undefined}
+      accessibilityLabel={`${title}, ${now}`}
+      // Android's click label: TalkBack says "Double-tap to play" for a playable row.
+      accessibilityActions={[
+        ...(playable ? [{ name: "activate", label: t("Play") }] : []),
+        { name: "star", label: favourite },
+        { name: "lists", label: t("Lists") },
+        ...(schedule ? [{ name: "schedule", label: t("Schedule") }] : []),
+      ]}
+      onAccessibilityAction={({ nativeEvent }) => {
+        if (nativeEvent.actionName === "activate" && playable) play();
 
-          if (nativeEvent.actionName === "star") star();
+        if (nativeEvent.actionName === "star") star();
 
-          if (nativeEvent.actionName === "schedule") {
-            const now = resolve(entry, sources.state.get());
+        if (nativeEvent.actionName === "lists") onLists(entry);
 
-            if (now.kind === "listed")
-              intentHandlers.get().schedule?.({ ...identity(now.row), kind: "schedule" });
-          }
-        }}
-        onPress={playable ? play : undefined}
-        onLongPress={() => onLists(entry)}
-        style={{ minHeight: 56, padding: 12, borderBottomWidth: 1, borderColor: colors.hairline }}
-      >
-        <Label>{title}</Label>
-        {found.kind !== "listed" ? (
-          <Label>
-            {t(
-              found.kind === "loading"
-                ? "channels still loading"
-                : found.kind === "failed"
-                  ? "channels didn't load"
-                  : "no longer listed",
-            )}
-          </Label>
-        ) : null}
-      </Pressable>
+        if (nativeEvent.actionName === "schedule") scheduleNow();
+      }}
+      onPress={playable ? play : undefined}
+      onLongPress={() => onLists(entry)}
+      {...focus}
+      android_ripple={{ color: colors.ripple }}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 16,
+        minHeight: 72,
+        paddingLeft: 16,
+        backgroundColor: focused ? colors.focus : undefined,
+      }}
+    >
+      <Badge title={title} />
+      <Lines title={title} detail={now} />
+      <View importantForAccessibility="no-hide-descendants">
+        <IconButton
+          icon={starred ? "star" : "star-border"}
+          label={favourite}
+          color={starred ? colors.text : colors.secondary}
+          onPress={star}
+        />
+      </View>
+    </Pressable>
+  );
+}
+
+/**
+ * Still placeholder rows for channels a provider hasn't sent yet, in the channel rows' lanes. They
+ * don't shimmer or pulse: the status line says what's loading.
+ */
+export function StillRows({ count = 5 }: { count?: number }) {
+  return (
+    <View importantForAccessibility="no-hide-descendants">
+      {Array.from({ length: count }, (_, index) => (
+        <View
+          key={index}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 16,
+            height: 72,
+            paddingLeft: 16,
+          }}
+        >
+          <View
+            style={{ width: 48, height: 36, borderRadius: 4, backgroundColor: colors.surface }}
+          />
+          <View style={{ flex: 1, gap: 8 }}>
+            <View
+              style={{ width: 120, height: 12, borderRadius: 2, backgroundColor: colors.hairline }}
+            />
+            <View
+              style={{ width: 176, height: 10, borderRadius: 2, backgroundColor: colors.surface }}
+            />
+          </View>
+          <View style={{ width: 48, height: 48 }} />
+        </View>
+      ))}
     </View>
   );
 }
 
-/** Controlled dialog keeps its text after validation or storage fails. */
-export function NameDialog({
-  visible,
-  initial = "",
+/**
+ * A row that opens a screen: Live's 48dp shortcuts (Favourites, each list, Find) with a chevron,
+ * or a 56dp country or category from Find and Categories, its channel count at the end.
+ */
+export function NavRow({
+  icon,
+  label,
+  count,
+  accessibilityLabel,
+  onPress,
+  size = "result",
+}: {
+  icon: IconName;
+  label: string;
+  count?: string | undefined;
+  accessibilityLabel?: string;
+  onPress: () => void;
+  size?: "shortcut" | "result";
+}) {
+  const { focused, handlers } = useKeyboardFocus();
+  const shortcut = size === "shortcut";
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? (count ? `${label}, ${count}` : label)}
+      onPress={onPress}
+      {...handlers}
+      android_ripple={{ color: colors.ripple }}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 16,
+        minHeight: shortcut ? 48 : 56,
+        paddingLeft: 16,
+        paddingRight: shortcut ? 8 : 16,
+        backgroundColor: focused ? colors.focus : undefined,
+      }}
+    >
+      <MaterialIcons name={icon} size={24} color={colors.text} />
+      <Text
+        style={{
+          flex: 1,
+          minWidth: 0,
+          paddingVertical: 8,
+          color: colors.text,
+          fontSize: 16,
+          lineHeight: 20,
+          fontWeight: "500",
+        }}
+      >
+        {label}
+      </Text>
+      {count ? (
+        <Text style={{ flexShrink: 0, color: colors.secondary, fontSize: 14, lineHeight: 18 }}>
+          {count}
+        </Text>
+      ) : null}
+      {shortcut ? <MaterialIcons name="chevron-right" size={24} color={colors.secondary} /> : null}
+    </Pressable>
+  );
+}
+
+/** Grey text in the rows' text lane, as Favourites' "2 saved from Kade TV: channels didn't load". */
+export function Note({ children }: { children: string }) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 16,
+        minHeight: 56,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+      }}
+    >
+      <View style={{ width: 48, flexShrink: 0 }} />
+      <Text style={{ flex: 1, color: colors.secondary, fontSize: 14, lineHeight: 18 }}>
+        {children}
+      </Text>
+    </View>
+  );
+}
+
+/** A provider gap inline with Find's results: an icon, then the status line's own sentence. */
+export function GapRows() {
+  const { loading, failed } = useGaps();
+
+  return (
+    <>
+      {[
+        failed ? { icon: "error-outline" as const, color: RED, text: failed } : undefined,
+        loading ? { icon: "sync" as const, color: colors.secondary, text: loading } : undefined,
+      ].map((gap) =>
+        gap ? (
+          <View
+            key={gap.icon}
+            accessible
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 16,
+              minHeight: 56,
+              paddingVertical: 8,
+              paddingHorizontal: 16,
+            }}
+          >
+            <MaterialIcons name={gap.icon} size={24} color={gap.color} />
+            <Text style={{ flex: 1, color: colors.text, fontSize: 14, lineHeight: 18 }}>
+              {gap.text}
+            </Text>
+          </View>
+        ) : null,
+      )}
+    </>
+  );
+}
+
+/** What an empty screen says: a line, the next step under it, and an optional action. */
+export function Empty({
   title,
+  body,
+  action,
+}: {
+  title: string;
+  body?: string | undefined;
+  action?: ReactNode;
+}) {
+  return (
+    <View accessible style={{ gap: 4, paddingHorizontal: 16, paddingVertical: 24 }}>
+      <Text style={{ color: colors.text, fontSize: 16, lineHeight: 20, fontWeight: "500" }}>
+        {title}
+      </Text>
+      {body ? (
+        <Text style={{ color: colors.secondary, fontSize: 14, lineHeight: 18 }}>{body}</Text>
+      ) : null}
+      {action ? <View style={{ alignItems: "flex-start", marginLeft: -12 }}>{action}</View> : null}
+    </View>
+  );
+}
+
+/**
+ * New list and Rename's Material dialog: a 56dp outlined field with the name, a 60-character
+ * counter and the reason a name was refused, in red, keeping the text to fix. `onSave` throws
+ * what the lists owner refused.
+ */
+export function NameDialog({
+  title,
+  body,
+  initial = "",
+  confirm,
+  failed,
   onClose,
   onSave,
 }: {
-  visible: boolean;
-  initial?: string;
   title: string;
-  onClose(): void;
-  onSave(name: string): void;
+  body?: string | undefined;
+  initial?: string;
+  confirm: string;
+  /** What a storage failure says, for the name typed. */
+  failed: (name: string) => string;
+  onClose: () => void;
+  onSave: (name: string) => void;
 }) {
   const [name, setName] = useState(initial);
   const [error, setError] = useState("");
 
+  const save = () => {
+    try {
+      onSave(name);
+      onClose();
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : "";
+      const typed = name.trim();
+      setError(
+        code === "name-taken"
+          ? t("There's already a list called {name}.", { name: typed })
+          : code === "name-length"
+            ? t("A list's name has 1 to {max} characters.", { max: CUSTOM_LIST_NAME_MAX })
+            : failed(typed),
+      );
+    }
+  };
+
   return (
-    <Modal visible={visible} transparent onRequestClose={onClose}>
-      <View
-        style={{ flex: 1, justifyContent: "center", backgroundColor: colors.scrim, padding: 24 }}
-      >
-        <View accessibilityViewIsModal style={{ backgroundColor: colors.surface, padding: 16 }}>
-          <Label>{title}</Label>
-          <TextInput
-            autoFocus
-            accessibilityLabel={title}
-            value={name}
-            onChangeText={setName}
-            style={{ color: colors.text, minHeight: 48, fontSize: 18 }}
-          />
-          <Label>{`${name.length}/${CUSTOM_LIST_NAME_MAX}`}</Label>
-          {error ? (
-            <Text accessibilityLiveRegion="polite" style={{ color: "#FF5A4E" }}>
-              {error}
-            </Text>
-          ) : null}
-          <Button
-            title={t("Save")}
-            onPress={() => {
-              try {
-                onSave(name);
-                onClose();
-              } catch (cause) {
-                const code = cause instanceof Error ? cause.message : "";
-                setError(
-                  code === "name-taken"
-                    ? t("There's already a list called {name}.", { name })
-                    : code === "name-length"
-                      ? t("A list's name has 1 to {max} characters.", { max: CUSTOM_LIST_NAME_MAX })
-                      : t("Couldn't save {name}", { name }),
-                );
-              }
-            }}
-          />
-          <Button title={t("Cancel")} onPress={onClose} />
+    <Dialog
+      title={title}
+      body={body}
+      onClose={onClose}
+      actions={
+        <>
+          <TextButton label={t("Cancel")} onPress={onClose} />
+          <TextButton label={confirm} strong onPress={save} />
+        </>
+      }
+    >
+      <View style={{ gap: 4, paddingTop: 20 }}>
+        <TextInput
+          autoFocus
+          accessibilityLabel={title}
+          value={name}
+          maxLength={CUSTOM_LIST_NAME_MAX}
+          onChangeText={(next) => {
+            setName(next);
+            setError("");
+          }}
+          onSubmitEditing={save}
+          returnKeyType="done"
+          cursorColor={colors.text}
+          selectionColor={colors.focus}
+          style={{
+            height: 56,
+            paddingHorizontal: 14,
+            borderWidth: 2,
+            borderRadius: 4,
+            borderColor: error ? RED : colors.text,
+            color: colors.text,
+            fontSize: 16,
+            lineHeight: 20,
+          }}
+        />
+        <View
+          style={{
+            flexDirection: "row",
+            gap: 16,
+            justifyContent: "space-between",
+            paddingHorizontal: 16,
+          }}
+        >
+          <Text
+            accessibilityLiveRegion="polite"
+            style={{ flex: 1, color: RED, fontSize: 12, lineHeight: 16 }}
+          >
+            {error}
+          </Text>
+          <Text style={{ flexShrink: 0, color: colors.secondary, fontSize: 12, lineHeight: 16 }}>
+            {`${name.length}/${CUSTOM_LIST_NAME_MAX}`}
+          </Text>
         </View>
       </View>
-    </Modal>
+    </Dialog>
   );
 }
 
-export function ListsSheet({ entry, onClose }: { entry: Entry | null; onClose(): void }) {
+/**
+ * The one Lists sheet a held row, or TalkBack's Lists action, opens: the channel and its provider,
+ * Add to or Remove from Favourites, every list (a check holds the channel; tapping takes it out)
+ * and New list…, whose dialog puts the channel in the list it makes.
+ */
+export function ListsSheet({ entry, onClose }: { entry: Entry | null; onClose: () => void }) {
+  useLocale();
   const saved = useStore(lists.state);
+  const state = useStore(sources.state);
   const [creating, setCreating] = useState(false);
+  const shown = entry ?? { sourceId: "", channelId: "", title: "" };
+  const provider = providerOf(shown.sourceId, state);
+
+  const toggle = (id: string, name: string, included: boolean) => {
+    if (!entry) return;
+
+    try {
+      lists.member(id, entry, !included);
+    } catch (cause) {
+      failure(cause, name);
+    }
+  };
+
+  const favourites = saved.lists.find((list) => list.id === FAVOURITES);
+  const starred = !!favourites?.entries.some((each) => same(each, shown));
 
   return (
-    <Sheet visible={entry !== null} label={t("Lists")} onClose={onClose}>
-      <Content>
-        <Label>{entry?.title}</Label>
-        <Label>
-          {entry?.sourceId
-            ? (() => {
-                const now = sources.state.get();
-
-                return now.kind === "ready"
-                  ? now.sources.find((s) => s.id === entry.sourceId)?.label
-                  : "";
-              })()
-            : ""}
-        </Label>
+    <FitSheet visible={entry !== null} label={t("Lists")} onClose={onClose}>
+      <View
+        accessible
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 16,
+          paddingHorizontal: 24,
+          paddingBottom: 12,
+          borderBottomWidth: 1,
+          borderColor: RAISED_RULE,
+        }}
+      >
+        <Badge title={shown.title} look="sheet" />
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Text style={{ color: colors.text, fontSize: 16, lineHeight: 20, fontWeight: "700" }}>
+            {shown.title}
+          </Text>
+          {provider ? (
+            <Text style={{ color: colors.secondary, fontSize: 14, lineHeight: 18 }}>
+              {provider}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+      <View style={{ paddingTop: 8 }}>
         {saved.kind === "failed" ? (
           <>
-            <Label>{t("Couldn't read your lists.")}</Label>
-            <Button title={t("Try again")} onPress={lists.read} />
+            <Text
+              style={{
+                paddingHorizontal: 24,
+                paddingVertical: 8,
+                color: colors.text,
+                fontSize: 14,
+                lineHeight: 18,
+              }}
+            >
+              {t("Couldn't read your lists.")}
+            </Text>
+            <SheetRow icon="refresh" label={t("Try again")} onPress={lists.read} />
           </>
         ) : (
-          saved.lists.map((list) => {
-            const included = entry && list.entries.some((each) => same(each, entry));
+          <>
+            <SheetRow
+              icon={starred ? "star" : "star-border"}
+              label={t(starred ? "Remove from Favourites" : "Add to Favourites")}
+              onPress={() => toggle(FAVOURITES, t("Favourites"), starred)}
+            />
+            {saved.lists
+              .filter((list) => list.id !== FAVOURITES)
+              .map((list) => {
+                const included = list.entries.some((each) => same(each, shown));
 
-            return (
-              <Button
-                key={list.id}
-                title={
-                  list.id === FAVOURITES
-                    ? t(included ? "Remove from Favourites" : "Add to Favourites")
-                    : `${included ? "✓ " : ""}${list.name}`
-                }
-                onPress={() => {
-                  if (!entry) return;
-
-                  try {
-                    lists.member(list.id, entry, !included);
-                  } catch (cause) {
-                    failure(cause, list.name);
-                  }
-                }}
-              />
-            );
-          })
+                return (
+                  <SheetRow
+                    key={list.id}
+                    role="checkbox"
+                    icon={included ? "check" : undefined}
+                    label={list.name}
+                    selected={included}
+                    trailing={String(list.entries.length)}
+                    onPress={() => toggle(list.id, list.name, included)}
+                  />
+                );
+              })}
+            <SheetRow icon="add" label={t("New list…")} onPress={() => setCreating(true)} />
+          </>
         )}
-        <Button title={t("New list…")} onPress={() => setCreating(true)} />
-        <Button title={t("Close")} onPress={onClose} />
-      </Content>
-      {creating ? (
+      </View>
+      {creating && entry ? (
         <NameDialog
-          visible
           title={t("New list")}
+          body={t("{name} goes in it.", { name: entry.title })}
+          confirm={t("Create")}
+          failed={(name) => t("Couldn't make {name}", { name })}
           onClose={() => setCreating(false)}
           onSave={(name) => {
-            if (entry) lists.create(name, entry);
+            lists.create(name, entry);
           }}
         />
       ) : null}
-    </Sheet>
+    </FitSheet>
   );
 }

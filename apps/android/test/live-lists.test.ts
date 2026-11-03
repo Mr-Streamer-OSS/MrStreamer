@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChannelRow, Sources } from "../src/connect/sources.ts";
-import { draftOf, identity, move, remove, resolve } from "../src/live/model.ts";
+import { draftOf, identity, move, remove, resolve, step } from "../src/live/model.ts";
 import { FAVOURITES, listsOwner } from "../src/live/store.ts";
 import { discover, findGroups } from "../src/live/discovery.ts";
 
@@ -100,6 +100,20 @@ describe("Live lists public behavior", () => {
     expect(s.list().entries).toEqual([identity(other)]);
     s.owner.read();
     expect(s.list().entries).toEqual([identity(other)]);
+  });
+  it("moves a shown entry past a hidden one, which keeps its place, and saves that order", () => {
+    const s = setup();
+    const third: ChannelRow = { ...row, key: "source:3", title: "Sport" };
+    s.change(catalogue([row, other, third]));
+    s.owner.member(FAVOURITES, identity(third), true);
+    const hidden = identity(other);
+    const shown = (entry: { channelId: string }) => entry.channelId !== hidden.channelId;
+    const start = draftOf(s.list(), s.providers());
+    const draft = step(start, 0, 1, shown);
+    expect(draft.entries).toEqual([identity(third), hidden, identity(row)]);
+    expect(step(draft, 2, 1, shown)).toBe(draft);
+    s.owner.commit(draft);
+    expect(s.list().entries).toEqual([identity(third), hidden, identity(row)]);
   });
   it("never matches missing, ambiguous or another source's identity", () => {
     const entry = identity(row);

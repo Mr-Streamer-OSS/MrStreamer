@@ -78,6 +78,29 @@ export function move(draft: Draft, index: number, offset: -1 | 1): Draft {
   return { ...draft, entries };
 }
 
+/**
+ * Moves the entry at `index` past its nearest neighbour that `shown` keeps, so an entry an edit
+ * screen doesn't show (Favourites' channels still loading) keeps its place. Unchanged at an end.
+ */
+export function step(
+  draft: Draft,
+  index: number,
+  offset: -1 | 1,
+  shown: (entry: Entry) => boolean,
+): Draft {
+  let other = index + offset;
+
+  while (other >= 0 && other < draft.entries.length && !shown(draft.entries[other]!))
+    other += offset;
+
+  if (index < 0 || index >= draft.entries.length || other < 0 || other >= draft.entries.length)
+    return draft;
+  const entries = [...draft.entries];
+  [entries[index], entries[other]] = [entries[other]!, entries[index]!];
+
+  return { ...draft, entries };
+}
+
 export const remove = (draft: Draft, index: number): Draft => ({
   ...draft,
   entries: draft.entries.filter((_, at) => at !== index),

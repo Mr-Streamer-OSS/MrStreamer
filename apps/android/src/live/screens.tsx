@@ -1,136 +1,387 @@
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
-import { Alert, FlatList, TextInput, View } from "react-native";
+import { useState, type ReactNode } from "react";
+import { FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
+import type { ChannelRow, Sources } from "../connect/sources.ts";
 import { ConnectScreen } from "../connect/connect-screen.tsx";
+import type { NavigationLayout } from "../navigation/destinations.ts";
 import { Screen } from "../navigation/screen.tsx";
 import { store, useStore } from "../platform/store.ts";
+import { useKeyboardFocus } from "../ui/focus.ts";
+import { IconButton, type IconName } from "../ui/icon-button.tsx";
 import { Sheet } from "../ui/sheet.tsx";
+import { colors } from "../ui/theme.ts";
+import { TopAppBar } from "../ui/top-app-bar.tsx";
 import { useLocale } from "./catalogue.ts";
+import {
+  Bar,
+  Body,
+  FitSheet,
+  Frame,
+  SheetRow,
+  SheetTitle,
+  StatusLine,
+  TextButton,
+  useFrame,
+  useGaps,
+} from "./chrome.tsx";
 import { t } from "./copy.ts";
-import { discover, findGroups } from "./discovery.ts";
-import { draftOf, identity, move, remove, resolve, type Draft, type Entry } from "./model.ts";
+import { discover, findGroups, type Group } from "./discovery.ts";
+import { identity, resolve, type ChannelList, type Entry } from "./model.ts";
 import { lists } from "./runtime.ts";
 import { FAVOURITES } from "./store.ts";
-import { Button, Channel, Content, Label, ListsSheet, NameDialog, Status } from "./ui.tsx";
+import { Channel, Empty, GapRows, ListsSheet, NavRow, StillRows } from "./ui.tsx";
 
+/** Find's text, kept while Find is on the stack and when it opens again. */
 const findQuery = store("");
 
 const root = "/(tabs)/(live)" as const;
 
-function Channels({ entries }: { entries: readonly Entry[] }) {
-  const [selected, setSelected] = useState<Entry | null>(null);
+type Tab = "For you" | "Categories" | "All";
+
+const count = (rows: number) => t("{count} channels", { count: rows });
+
+/** How many of a list's channels open now; unsaid while a provider is still loading. */
+function opens(list: ChannelList, state: Sources, loading: boolean) {
+  if (loading) return undefined;
+
+  return String(list.entries.filter((entry) => resolve(entry, state).kind === "listed").length);
+}
+
+const openList = (list: ChannelList) =>
+  list.id === FAVOURITES
+    ? router.push(`${root}/favourites`)
+    : router.push({ pathname: `${root}/list/[id]`, params: { id: list.id } });
+
+/**
+ * Channel rows with one Lists sheet for whichever is held, and still rows after them while a
+ * provider is loading.
+ */
+function Channels({
+  entries,
+  still,
+  empty,
+}: {
+  entries: readonly Entry[];
+  still: boolean;
+  empty?: ReactNode;
+}) {
+  const [held, setHeld] = useState<Entry | null>(null);
 
   return (
     <>
       <FlatList
+        style={{ flex: 1 }}
         data={entries}
-        keyExtractor={(entry, index) => JSON.stringify([entry.sourceId, entry.channelId, index])}
-        renderItem={({ item }) => <Channel entry={item} onLists={setSelected} />}
+        keyExtractor={(entry) => JSON.stringify([entry.sourceId, entry.channelId])}
+        renderItem={({ item }) => <Channel entry={item} onLists={setHeld} />}
+        ListFooterComponent={still ? <StillRows /> : undefined}
+        ListEmptyComponent={still ? undefined : <>{empty}</>}
       />
-      <ListsSheet entry={selected} onClose={() => setSelected(null)} />
+      <ListsSheet entry={held} onClose={() => setHeld(null)} />
     </>
   );
 }
 
-export function LiveScreen() {
-  useLocale();
-  const state = useStore(sources.state);
-  const saved = useStore(lists.state);
-  const params = useLocalSearchParams<{ country?: string }>();
-  const [tab, setTab] = useState<"For you" | "Categories" | "All">("For you");
-  const [country, setCountry] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const view = discover(state);
-
-  const rows = params.country
-    ? (view.countries.find((group) => group.name === params.country)?.rows ?? [])
-    : view.rows;
+/** Live's tabs after the country it shows: For you, Categories and All. Scrolls when text grows. */
+function Tabs({
+  tab,
+  onTab,
+  country,
+  onCountry,
+}: {
+  tab: Tab;
+  onTab: (tab: Tab) => void;
+  country: string;
+  onCountry: () => void;
+}) {
+  const label = country || t("All countries");
+  const { focused, handlers } = useKeyboardFocus();
 
   return (
-    <Screen title={t("Live")}>
-      <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+    <View style={{ borderBottomWidth: 1, borderColor: colors.hairline }}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ minHeight: 48, paddingLeft: 8, alignItems: "stretch" }}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("Country, {name}", { name: label })}
+          onPress={onCountry}
+          {...handlers}
+          android_ripple={{ color: colors.ripple }}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 2,
+            paddingHorizontal: 8,
+            backgroundColor: focused ? colors.focus : undefined,
+          }}
+        >
+          <Text style={{ color: colors.text, fontSize: 14, lineHeight: 18, fontWeight: "500" }}>
+            {label}
+          </Text>
+          <MaterialIcons name="arrow-drop-down" size={20} color={colors.text} />
+        </Pressable>
+        <View
+          style={{ alignSelf: "center", width: 1, height: 24, backgroundColor: colors.hairline }}
+        />
         {(["For you", "Categories", "All"] as const).map((name) => (
-          <Button
+          <TabButton
             key={name}
-            title={`${tab === name ? "✓ " : ""}${t(name)}`}
-            onPress={() => setTab(name)}
+            label={t(name)}
+            selected={tab === name}
+            onPress={() => onTab(name)}
           />
         ))}
-      </View>
-      <Button title={params.country ?? t("All countries")} onPress={() => setCountry(true)} />
-      <Button
-        title={t("Find countries or categories")}
-        onPress={() => router.push(`${root}/find`)}
+      </ScrollView>
+    </View>
+  );
+}
+
+function TabButton({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const { focused, handlers } = useKeyboardFocus();
+
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      {...handlers}
+      android_ripple={{ color: colors.ripple }}
+      style={{
+        justifyContent: "center",
+        paddingHorizontal: 12,
+        paddingTop: selected ? 3 : 0,
+        borderBottomWidth: selected ? 3 : 0,
+        borderColor: colors.text,
+        backgroundColor: focused ? colors.focus : undefined,
+      }}
+    >
+      <Text
+        style={{
+          color: selected ? colors.text : colors.secondary,
+          fontSize: 14,
+          lineHeight: 18,
+          fontWeight: selected ? "700" : "500",
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** One of the tablet header's shortcuts: a 20dp icon and its 14sp label. */
+function Chip({ icon, label, onPress }: { icon: IconName; label: string; onPress: () => void }) {
+  const { focused, handlers } = useKeyboardFocus();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      {...handlers}
+      android_ripple={{ color: colors.ripple }}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        minHeight: 48,
+        backgroundColor: focused ? colors.focus : undefined,
+      }}
+    >
+      <MaterialIcons name={icon} size={20} color={colors.text} />
+      <Text style={{ color: colors.text, fontSize: 14, lineHeight: 18, fontWeight: "500" }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/**
+ * Live's top: on phones the shared top app bar, then Favourites, each list and Find as rows;
+ * beside the rail one 56dp header with them as its shortcuts.
+ */
+function LiveTop({
+  layout,
+  framed,
+  shortcuts,
+}: {
+  layout: NavigationLayout;
+  framed: ReturnType<typeof useFrame>["framed"];
+  shortcuts: readonly {
+    icon: IconName;
+    label: string;
+    count?: string | undefined;
+    onPress: () => void;
+  }[];
+}) {
+  if (layout === "bar")
+    return (
+      <>
+        <TopAppBar title={t("Live")} layout={layout} insets={framed} />
+        {shortcuts.map((shortcut) => (
+          <NavRow key={shortcut.label} size="shortcut" {...shortcut} />
+        ))}
+      </>
+    );
+
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 24,
+        minHeight: framed.top + 56,
+        paddingTop: framed.top,
+        paddingLeft: framed.left + 24,
+        paddingRight: framed.right + 24,
+      }}
+    >
+      <Text
+        accessibilityRole="header"
+        style={{
+          color: colors.text,
+          fontSize: 22,
+          lineHeight: 28,
+          fontWeight: "700",
+          letterSpacing: -0.22,
+        }}
+      >
+        {t("Live")}
+      </Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", gap: 24 }}
+      >
+        {shortcuts.map((shortcut) => (
+          <Chip key={shortcut.label} {...shortcut} />
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+/**
+ * Live: every provider's channels together, opening on All of every country. Favourites, each
+ * list and Find head it; Country is a sheet, and the status line names a provider still loading or
+ * failed while what loaded shows at once.
+ */
+export function LiveScreen() {
+  useLocale();
+  const { layout, framed } = useFrame();
+  const state = useStore(sources.state);
+  const saved = useStore(lists.state);
+  const { country = "" } = useLocalSearchParams<{ country?: string }>();
+  const [tab, setTab] = useState<Tab>("All");
+  const [choosing, setChoosing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const view = discover(state);
+  const gaps = useGaps();
+  const loading = view.restoring || view.loading.length > 0;
+  const chosen = country ? view.countries.find((group) => group.name === country) : undefined;
+  const rows = country ? (chosen?.rows ?? []) : view.rows;
+  const inCountry = new Set(rows);
+  const all = saved.kind === "ready" ? saved.lists : [];
+  const favourites = all.find((list) => list.id === FAVOURITES);
+
+  const shortcuts = [
+    ...[...(favourites ? [favourites] : []), ...all.filter((list) => list.id !== FAVOURITES)].map(
+      (list) => ({
+        icon: (list.id === FAVOURITES ? "star" : "list") as IconName,
+        label: list.id === FAVOURITES ? t("Favourites") : list.name,
+        count: opens(list, state, loading),
+        onPress: () => openList(list),
+      }),
+    ),
+    {
+      icon: "search" as const,
+      label: t("Find countries or categories"),
+      onPress: () => router.push(`${root}/find`),
+    },
+  ];
+
+  const empty =
+    state.kind === "ready" && state.sources.length === 0 ? (
+      <Empty
+        title={t("No live channels")}
+        action={<TextButton label={t("Add provider")} onPress={() => setAdding(true)} />}
       />
-      <Status />
-      {tab === "For you" ? (
-        <Content>
-          <Button title={t("Favourites")} onPress={() => router.push(`${root}/favourites`)} />
-          {saved.kind === "ready" ? (
-            saved.lists
-              .filter((list) => list.id !== FAVOURITES)
-              .map((list) => (
-                <Button
-                  key={list.id}
-                  title={list.name}
-                  onPress={() =>
-                    router.push({ pathname: `${root}/list/[id]`, params: { id: list.id } })
-                  }
-                />
-              ))
-          ) : (
-            <Button title={t("Try again")} onPress={lists.read} />
-          )}
-          <Button title={t("New list…")} onPress={() => setCreating(true)} />
-        </Content>
-      ) : tab === "Categories" ? (
-        <Content>
-          {view.categories
-            .filter((group) => group.rows.some((row) => rows.includes(row)))
-            .map((group) => (
-              <Button
-                key={group.name}
-                title={`${group.name} · ${t("{count} channels", { count: group.rows.filter((row) => rows.includes(row)).length })}`}
+    ) : country && !chosen ? (
+      <Empty title={t("{name} isn't listed any more.", { name: country })} />
+    ) : gaps.failed ? null : (
+      <Empty title={t("Your providers list no channels.")} />
+    );
+
+  const categories = view.categories
+    .map((group) => ({ name: group.name, rows: group.rows.filter((row) => inCountry.has(row)) }))
+    .filter((group) => group.rows.length);
+
+  const forYou = (favourites?.entries ?? []).filter((entry) => {
+    const found = resolve(entry, state);
+
+    return found.kind === "listed" && inCountry.has(found.row);
+  });
+
+  return (
+    <Frame framed={framed} bar={<LiveTop layout={layout} framed={framed} shortcuts={shortcuts} />}>
+      <Body>
+        <Tabs tab={tab} onTab={setTab} country={country} onCountry={() => setChoosing(true)} />
+        {tab === "All" ? (
+          <Channels entries={rows.map(identity)} still={loading} empty={empty} />
+        ) : tab === "For you" ? (
+          <Channels
+            entries={forYou}
+            still={false}
+            empty={<Empty title={t("No favourites yet.")} body={t("Star a channel in Live.")} />}
+          />
+        ) : (
+          <FlatList
+            style={{ flex: 1 }}
+            data={categories}
+            keyExtractor={(group) => group.name}
+            renderItem={({ item }) => (
+              <NavRow
+                icon="label-outline"
+                label={item.name}
+                count={count(item.rows.length)}
                 onPress={() =>
                   router.push({
                     pathname: `${root}/category`,
-                    params: { name: group.name, country: params.country ?? "" },
+                    params: { name: item.name, country },
                   })
                 }
               />
-            ))}
-        </Content>
-      ) : (
-        <Channels entries={rows.map(identity)} />
-      )}
-      {!rows.length && !view.restoring && !view.loading.length && !view.failed.length ? (
-        <Label>{t("Your providers list no channels.")}</Label>
-      ) : null}
-      <Button title={t("Add provider")} onPress={() => setAdding(true)} />
-      <Sheet visible={country} label={t("Country")} onClose={() => setCountry(false)}>
-        <Content>
-          <Status />
-          <Button
-            title={t("All countries")}
-            onPress={() => {
-              router.setParams({ country: "" });
-              setCountry(false);
-            }}
+            )}
+            ListFooterComponent={loading ? <StillRows count={3} /> : undefined}
+            ListEmptyComponent={loading ? undefined : (empty ?? undefined)}
           />
-          {view.countries.map((group) => (
-            <Button
-              key={group.name}
-              title={`${group.name} · ${t("{count} channels", { count: group.rows.length })}`}
-              onPress={() => {
-                router.setParams({ country: group.name });
-                setCountry(false);
-              }}
-            />
-          ))}
-        </Content>
-      </Sheet>
+        )}
+        <StatusLine />
+      </Body>
+      <CountrySheet
+        visible={choosing}
+        countries={view.countries}
+        total={view.rows.length}
+        chosen={country}
+        onChoose={(name) => {
+          router.setParams({ country: name });
+          setChoosing(false);
+        }}
+        onClose={() => setChoosing(false)}
+      />
       <Sheet visible={adding} label={t("Add provider")} onClose={() => setAdding(false)}>
         <ConnectScreen
           owner={sources}
@@ -138,237 +389,191 @@ export function LiveScreen() {
           onConnected={() => setAdding(false)}
         />
       </Sheet>
-      {creating ? (
-        <NameDialog
-          visible
-          title={t("New list")}
-          onClose={() => setCreating(false)}
-          onSave={(name) => {
-            lists.create(name);
-          }}
-        />
-      ) : null}
-    </Screen>
+    </Frame>
   );
 }
 
+/** Country: every country with its channels that loaded, and which providers they leave out. */
+function CountrySheet({
+  visible,
+  countries,
+  total,
+  chosen,
+  onChoose,
+  onClose,
+}: {
+  visible: boolean;
+  countries: readonly Group[];
+  total: number;
+  chosen: string;
+  onChoose: (name: string) => void;
+  onClose: () => void;
+}) {
+  const { loading, failed } = useGaps();
+
+  return (
+    <FitSheet visible={visible} label={t("Country")} onClose={onClose}>
+      <SheetTitle>{t("Country")}</SheetTitle>
+      <SheetRow
+        role="radio"
+        icon={chosen ? undefined : "check"}
+        selected={!chosen}
+        label={t("All countries")}
+        trailing={count(total)}
+        onPress={() => onChoose("")}
+      />
+      {countries.map((group) => (
+        <SheetRow
+          key={group.name}
+          role="radio"
+          icon={chosen === group.name ? "check" : undefined}
+          selected={chosen === group.name}
+          label={group.name}
+          trailing={count(group.rows.length)}
+          onPress={() => onChoose(group.name)}
+        />
+      ))}
+      {[failed, loading].map((gap) =>
+        gap ? (
+          <Text
+            key={gap}
+            style={{
+              minHeight: 48,
+              paddingTop: 8,
+              paddingLeft: 64,
+              paddingRight: 24,
+              color: colors.secondary,
+              fontSize: 14,
+              lineHeight: 18,
+            }}
+          >
+            {gap}
+          </Text>
+        ) : null,
+      )}
+    </FitSheet>
+  );
+}
+
+/**
+ * Find countries or categories, pushed with its field in the top app bar. A country returns to
+ * Live showing it, on the tab Live was on; a category opens its channels; Back from there finds
+ * the text and results as they were. Nothing here plays.
+ */
 export function FindScreen() {
   useLocale();
+  const { layout, framed } = useFrame();
   const query = useStore(findQuery);
-  const setQuery = (value: string) => findQuery.set(value);
-  const state = useStore(sources.state);
-  const view = discover(state);
+  const view = discover(useStore(sources.state));
+  const gaps = useGaps();
   const countries = findGroups(view.countries, query);
   const categories = findGroups(view.categories, query);
 
+  const result = (group: Group, kind: "country" | "category") => (
+    <NavRow
+      key={`${kind}:${group.name}`}
+      icon={kind === "country" ? "public" : "label-outline"}
+      label={group.name}
+      count={count(group.rows.length)}
+      accessibilityLabel={`${group.name}, ${t(kind)}, ${count(group.rows.length)}`}
+      onPress={() =>
+        kind === "country"
+          ? router.dismissTo({ pathname: root, params: { country: group.name } })
+          : router.push({ pathname: `${root}/category`, params: { name: group.name } })
+      }
+    />
+  );
+
+  const field = (
+    <TextInput
+      autoFocus
+      accessibilityLabel={t("Countries or categories")}
+      placeholder={t("Countries or categories")}
+      placeholderTextColor={colors.secondary}
+      cursorColor={colors.text}
+      selectionColor={colors.focus}
+      value={query}
+      onChangeText={(text) => findQuery.set(text)}
+      returnKeyType="search"
+      style={{ flex: 1, minHeight: 48, paddingLeft: 8, color: colors.text, fontSize: 16 }}
+    />
+  );
+
   return (
-    <Screen pushed title={t("Find countries or categories")}>
-      <TextInput
-        accessibilityLabel={t("Countries or categories")}
-        placeholder={t("Countries or categories")}
-        placeholderTextColor="#A3A3A3"
-        value={query}
-        onChangeText={setQuery}
-        style={{ color: "#FFF", minHeight: 48, padding: 12, fontSize: 18 }}
-      />
-      <Status />
-      <Content>
-        {countries.map((group) => (
-          <Button
-            key={group.name}
-            title={`${group.name}, ${t("country")}, ${t("{count} channels", { count: group.rows.length })}`}
-            onPress={() => {
-              router.dismissTo({ pathname: root, params: { country: group.name } });
-            }}
-          />
-        ))}
-        {categories.map((group) => (
-          <Button
-            key={group.name}
-            title={`${group.name}, ${t("category")}, ${t("{count} channels", { count: group.rows.length })}`}
-            onPress={() =>
-              router.push({ pathname: `${root}/category`, params: { name: group.name } })
-            }
-          />
-        ))}
-        {!countries.length && !categories.length ? (
-          <Label>
-            {t(
-              view.failed.length
-                ? "No country or category is called “{query}” in the channels that loaded."
-                : view.loading.length || view.restoring
-                  ? "No country or category is called “{query}” yet."
-                  : "No country or category is called “{query}”.",
-              { query },
-            )}
-          </Label>
-        ) : null}
-      </Content>
-    </Screen>
+    <Frame
+      framed={framed}
+      bar={
+        <Bar
+          layout={layout}
+          framed={framed}
+          rule
+          leading={{ icon: "arrow-back", label: "Back", onPress: () => router.back() }}
+          title={field}
+          trailing={
+            query ? (
+              <IconButton icon="close" label={t("Clear")} onPress={() => findQuery.set("")} />
+            ) : null
+          }
+        />
+      }
+    >
+      <Body>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingTop: 8 }}>
+          {countries.map((group) => result(group, "country"))}
+          {categories.map((group) => result(group, "category"))}
+          {!countries.length && !categories.length && query ? (
+            <Empty
+              title={t(
+                gaps.failed
+                  ? "No country or category is called “{query}” in the channels that loaded."
+                  : gaps.loading
+                    ? "No country or category is called “{query}” yet."
+                    : "No country or category is called “{query}”.",
+                { query },
+              )}
+            />
+          ) : null}
+          <GapRows />
+        </ScrollView>
+      </Body>
+    </Frame>
   );
 }
 
+/**
+ * A category's channels, in the country Live showed when it opened. Back returns to Live or Find
+ * as it was.
+ */
 export function CategoryScreen() {
   useLocale();
   const { name = "", country = "" } = useLocalSearchParams<{ name: string; country?: string }>();
   const view = discover(useStore(sources.state));
-  const group = view.categories.find((group) => group.name === name);
+  const group = view.categories.find((each) => each.name === name);
+  const loading = view.restoring || view.loading.length > 0;
 
-  const allowed = country
-    ? (view.countries.find((group) => group.name === country)?.rows ?? [])
-    : view.rows;
+  const allowed = new Set<ChannelRow>(
+    country ? (view.countries.find((each) => each.name === country)?.rows ?? []) : view.rows,
+  );
 
   return (
     <Screen pushed title={name}>
-      <Status />
-      {group ? (
-        <Channels entries={group.rows.filter((row) => allowed.includes(row)).map(identity)} />
-      ) : (
-        <Label>{t("This category isn't listed any more.")}</Label>
-      )}
-    </Screen>
-  );
-}
-
-export function ListScreen({ favourites = false }: { favourites?: boolean }) {
-  useLocale();
-  const { id: param = "" } = useLocalSearchParams<{ id: string }>();
-  const id = favourites ? FAVOURITES : param;
-  const state = useStore(lists.state);
-  const providers = useStore(sources.state);
-  const list = state.kind === "ready" ? state.lists.find((each) => each.id === id) : undefined;
-  const name = favourites ? t("Favourites") : (list?.name ?? "");
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [renaming, setRenaming] = useState(false);
-  const [savingFailed, setSavingFailed] = useState(false);
-
-  // Screen closes its edit pane before either Back can pop the list route.
-  const close = () => {
-    setDraft(null);
-    setSavingFailed(false);
-  };
-
-  const save = () => {
-    if (!draft) return;
-
-    try {
-      lists.commit(draft);
-      close();
-    } catch (cause) {
-      if (cause instanceof Error && cause.message === "stale")
-        Alert.alert(
-          t("{name} changed", { name }),
-          t("Nothing was moved or removed. It changed while you edited it: edit it as it is now."),
-        );
-      else setSavingFailed(true);
-    }
-  };
-
-  const editContent = draft ? (
-    <Content>
-      <Status />
-      <Button title={t("Close")} onPress={close} />
-      <Button title={t("Save")} onPress={save} />
-      {savingFailed ? (
-        <>
-          <Label>{t("Couldn't save {name}", { name })}</Label>
-          <Button title={t("Try again")} onPress={save} />
-        </>
-      ) : null}
-      {draft.entries.map((entry, index) => (
-        <View key={JSON.stringify([entry.sourceId, entry.channelId])}>
-          <Label>
-            {t("{name}, {position} of {count}", {
-              name: entry.title,
-              position: index + 1,
-              count: draft.entries.length,
-            })}
-          </Label>
-          <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-            <Button
-              title={t("Move {name} up", { name: entry.title })}
-              disabled={index === 0}
-              onPress={() => setDraft(move(draft, index, -1))}
-            />
-            <Button
-              title={t("Move {name} down", { name: entry.title })}
-              disabled={index === draft.entries.length - 1}
-              onPress={() => setDraft(move(draft, index, 1))}
-            />
-            {resolve(entry, providers).kind === "listed" ||
-            resolve(entry, providers).kind === "missing" ||
-            resolve(entry, providers).kind === "removed" ? (
-              <Button
-                title={t("Remove from {list}", { list: name })}
-                onPress={() => setDraft(remove(draft, index))}
-              />
-            ) : null}
-          </View>
-        </View>
-      ))}
-      {!favourites ? (
-        <>
-          <Button title={t("Rename list")} onPress={() => setRenaming(true)} />
-          <Button
-            title={t("Delete list")}
-            onPress={() =>
-              Alert.alert(t("Delete {name}?", { name }), t("Its channels stay in Live."), [
-                { text: t("Cancel"), style: "cancel" },
-                {
-                  text: t("Delete"),
-                  style: "destructive",
-                  onPress: () => {
-                    try {
-                      lists.delete(id);
-                      close();
-                      router.back();
-                    } catch {
-                      setSavingFailed(true);
-                    }
-                  },
-                },
-              ])
-            }
+      <Body>
+        {group ? (
+          <Channels
+            entries={group.rows.filter((row) => allowed.has(row)).map(identity)}
+            still={loading}
           />
-        </>
-      ) : null}
-    </Content>
-  ) : null;
-
-  return (
-    <Screen
-      pushed
-      title={name}
-      detail={draft ? { title: name, content: editContent, onClose: close } : undefined}
-    >
-      <Status />
-      {state.kind === "failed" ? (
-        <>
-          <Label>{t("Couldn't read your lists.")}</Label>
-          <Button title={t("Try again")} onPress={lists.read} />
-        </>
-      ) : !list ? (
-        <Label>{t("This list was deleted.")}</Label>
-      ) : (
-        <>
-          <Button title={t("Edit")} onPress={() => setDraft(draftOf(list, providers))} />
-          {!list.entries.length ? (
-            <Label>
-              {favourites ? t("No favourites yet.") : t("No channels in {name}.", { name })}
-            </Label>
-          ) : null}
-          <Channels entries={list.entries} />
-        </>
-      )}
-      {renaming ? (
-        <NameDialog
-          visible
-          initial={name}
-          title={t("Rename list")}
-          onClose={() => setRenaming(false)}
-          onSave={(next) => lists.rename(id, next)}
-        />
-      ) : null}
+        ) : loading ? (
+          <View style={{ flex: 1 }}>
+            <StillRows />
+          </View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            <Empty title={t("This category isn't listed any more.")} />
+          </View>
+        )}
+        <StatusLine />
+      </Body>
     </Screen>
   );
 }
