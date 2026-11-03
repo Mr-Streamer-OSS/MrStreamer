@@ -10,6 +10,8 @@ const fixture = vi.hoisted(() => ({
   starts: [] as Level[],
   groups: new Map<string, readonly Rendition[]>(),
   unsupported: new Set<Level>(),
+  /** Each level the engine held loading at, -1 for its own pick. */
+  held: [] as number[],
 }));
 vi.mock("hls.js", async (original) => {
   const real = await original<typeof import("hls.js")>();
@@ -19,6 +21,9 @@ vi.mock("hls.js", async (original) => {
     default: class extends standIn(real.default) {
       startLevel = -1;
       override levels = fixture.levels;
+      set loadLevel(index: number) {
+        fixture.held.push(index);
+      }
       get firstAutoLevel() {
         return this.levels.length - 1;
       }
@@ -53,12 +58,18 @@ afterEach(() => {
   fixture.starts = [];
   fixture.groups.clear();
   fixture.unsupported.clear();
+  fixture.held = [];
 });
-function level(bitrate: number, group?: string, videoCodec = "avc1.42e01e") {
+function level(
+  bitrate: number,
+  group?: string,
+  videoCodec = "avc1.42e01e",
+  url = "http://localhost/fixture.m3u8",
+) {
   return new Level({
     bitrate,
     name: "fixture",
-    url: "http://localhost/fixture.m3u8",
+    url,
     attrs: new AttrList({ "FRAME-RATE": "25", ...(group ? { AUDIO: group } : {}) }),
     videoCodec,
     audioCodec: "mp4a.40.2",
@@ -97,6 +108,24 @@ it("keeps the initial audio group and the requested sound through ABR and a late
   playing.tracks!.setAudio(audioId!);
   streams.latest().variant({ audio: fixture.groups.get("multilingual") ?? [] });
   expect(streams.latest().audioTrack).toBe(0);
+});
+
+it("holds the quality a shared recording reads from the start, and picks again once it ends", async () => {
+  const low = level(128, undefined, undefined, "http://localhost/low.m3u8");
+  const high = level(512, undefined, undefined, "http://localhost/high.m3u8");
+  fixture.levels = [low, high];
+  engine = createEngine("hls", document.createElement("video"), "http://localhost/master.m3u8", {
+    audio: null,
+    audioLanguage: null,
+  });
+  engine.fix?.(high.uri);
+  await vi.dynamicImportSettled();
+  fixture.parsed();
+  expect(fixture.starts).toEqual([high]);
+  expect(fixture.held).toEqual([1]);
+  engine.fix?.(null);
+  engine.fix?.(low.uri);
+  expect(fixture.held).toEqual([1, -1, 0]);
 });
 
 it("starts with the lowest bitrate when no audio group changes", async () => {

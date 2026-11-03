@@ -94,6 +94,11 @@ export interface Engine {
    * offers none to choose from, so a stream it plays shows no Sound or CC.
    */
   readonly tracks: EngineTracks | null;
+  /**
+   * Holds an HLS stream's quality at the variant whose playlist is at `variant`, from the next
+   * segment on, or with null lets the engine pick again. Engines without qualities ignore it.
+   */
+  fix?(variant: string | null): void;
   info(): StreamInfo;
   /** Stops playback, closes the connection and frees the video element. */
   destroy(): void;
@@ -185,6 +190,7 @@ function loadingEngine(
     get tracks() {
       return current ? current.tracks : format === "hls" ? tracks : null;
     },
+    fix: (variant) => forward((engine) => engine.fix?.(variant)),
     info: () => current?.info() ?? elementInfo(video),
     destroy() {
       if (destroyed) return;
@@ -309,8 +315,21 @@ function hlsEngine(
   const tracks = hlsTracks(hls, video, sound);
   let released = false;
   let supportTimer: ReturnType<typeof setTimeout> | undefined;
+  // The variant a recording sharing the stream holds it at, by its playlist's address (`fix`),
+  // and whether its levels are listed yet: until then, startup holds it.
+  let fixed: string | null = null;
+  let listed = false;
+  const heldLevel = () => (fixed === null ? -1 : hls.levels.findIndex(({ uri }) => uri === fixed));
   if (ends === null) {
     hls.once(Hls.Events.MANIFEST_PARSED, () => {
+      listed = true;
+      const held = heldLevel();
+      if (held >= 0) {
+        hls.startLevel = held;
+        hls.startLoad();
+        hls.loadLevel = held;
+        return;
+      }
       // Reading firstAutoLevel starts hls.js's own capability checks. Let their handlers remove
       // unsupported levels before using any index; another read can start further checks.
       const checked = new Set<Promise<unknown>>();
@@ -431,6 +450,13 @@ function hlsEngine(
     ...life.handle,
     onPrivateData: () => {},
     tracks: tracks.handle,
+    fix(variant) {
+      fixed = variant;
+      if (released || !listed) return;
+      const held = heldLevel();
+      // One it doesn't list is still the only one the main process sends meanwhile.
+      if (variant === null || held >= 0) hls.loadLevel = held;
+    },
     info() {
       const level = hls.levels[hls.currentLevel];
       return {

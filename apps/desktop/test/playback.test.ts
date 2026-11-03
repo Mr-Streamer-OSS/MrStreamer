@@ -1282,6 +1282,82 @@ describe("live captures", () => {
     await captures.idle("record");
     expect(captures.reading(second!)).toBe(false);
   });
+
+  it("holds every reader of an HLS stream offered in several qualities to the one read first, until one is left", async () => {
+    const { captures, source } = await capturing();
+    const key = captureKey({ ...source, format: "hls", url: "http://provider/live/master.m3u8" });
+    const asked: string[] = [];
+    const master = [
+      "#EXTM3U",
+      '#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"',
+      "hd.m3u8?token=1",
+      '#EXT-X-STREAM-INF:BANDWIDTH=1500000,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2"',
+      "sd.m3u8?token=1",
+      '#EXT-X-STREAM-INF:BANDWIDTH=12000000,RESOLUTION=3840x2160,CODECS="avc1.640033,mp4a.40.2"',
+      "uhd.m3u8?token=1",
+      "",
+    ].join("\n");
+    const media = (name: string) =>
+      `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:2,\n${name}-7.ts\n`;
+    const read = async (owner: string, name: string) => {
+      const answer = await captures.resource(
+        key,
+        owner,
+        new URL(name, "http://provider/live/").href,
+        (address) => {
+          asked.push(new URL(address).pathname.slice(6));
+          const file = /(\w+)\.m3u8/.exec(address)?.[1];
+          return Promise.resolve(new Response(file === "master" ? master : media(file ?? "")));
+        },
+        new AbortController().signal,
+      );
+      return answer.text();
+    };
+    const variant = (name: string) => `http://provider/live/${name}.m3u8?token=1`;
+
+    // Watch alone picks and changes its quality as it would without sharing.
+    await read("watch", "master.m3u8");
+    expect(await read("watch", "hd.m3u8?token=1")).toBe(media("hd"));
+    expect(await read("watch", "sd.m3u8?token=1&_HLS_msn=7")).toBe(media("sd"));
+    expect(captures.reading(key)).toBe(true);
+    expect(captures.joins(key)).toBe(variant("sd"));
+    expect(captures.fixed("watch")).toBeNull();
+
+    // A recording joins: it is given the same variants, and both hold the one Watch reads.
+    expect(await read("record", "master.m3u8")).toBe(master);
+    expect(captures.fixed("watch")).toBe(variant("sd"));
+    expect(captures.fixed("record")).toBe(variant("sd"));
+    expect(await read("record", "sd.m3u8?token=1")).toBe(media("sd"));
+    // Watch asking for another quality meanwhile reads the held one's, from the provider once.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(await read("watch", "hd.m3u8?token=1")).toBe(media("sd"));
+    expect(await read("record", "sd.m3u8?token=1")).toBe(media("sd"));
+    expect(asked).toEqual(["master.m3u8", "hd.m3u8", "sd.m3u8", "sd.m3u8", "sd.m3u8"]);
+    // Another recording joining keeps it held when the first leaves.
+    await read("again", "master.m3u8");
+    await captures.idle("record");
+    expect(captures.fixed("watch")).toBe(variant("sd"));
+
+    // With Watch alone again, it reads what it asks for.
+    await captures.idle("again");
+    expect(captures.fixed("watch")).toBeNull();
+    expect(await read("watch", "hd.m3u8?token=1")).toBe(media("hd"));
+    // A quality the HLS reader can't record is no stream to join.
+    await read("watch", "uhd.m3u8?token=1");
+    expect(captures.reading(key)).toBe(false);
+    expect(captures.joins(key)).toBeNull();
+    await captures.idle("watch");
+
+    // A recording first: Watch joining holds the quality the recording reads.
+    await read("record", "master.m3u8");
+    await read("record", "hd.m3u8?token=1");
+    await read("watch", "master.m3u8");
+    expect(captures.fixed("watch")).toBe(variant("hd"));
+    expect(await read("watch", "sd.m3u8?token=1")).toBe(media("hd"));
+    await captures.idle("watch");
+    await captures.idle("record");
+    expect(captures.reading(key)).toBe(false);
+  });
 });
 
 describe.skipIf(!hasFfmpeg)("live history", () => {

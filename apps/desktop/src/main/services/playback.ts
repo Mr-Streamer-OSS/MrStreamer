@@ -647,6 +647,12 @@ export class Playback extends Context.Service<
      * for again since.
      */
     readonly tracksChanged: Stream.Stream<string>;
+    /**
+     * A channel session's HLS quality is held while a recording shares its stream: `variant` is
+     * the address of the variant playlist the player holds, as its multivariant playlist names
+     * it here, and null once the player picks its quality itself again.
+     */
+    readonly fixed: Stream.Stream<{ readonly sessionId: string; readonly variant: string | null }>;
     /** Closes a stream and its provider connection. Unknown or already closed ids are ignored. */
     close(sessionId: string): Effect.Effect<void>;
     /** Closes every open stream, for example when the window closes. */
@@ -732,6 +738,7 @@ function make(deps: PlaybackDeps) {
     const replaced = yield* PubSub.unbounded<string>();
     const readingAhead = yield* PubSub.unbounded<string>();
     const tracksChanged = yield* PubSub.unbounded<string>();
+    const fixed = yield* PubSub.unbounded<{ sessionId: string; variant: string | null }>();
     const scope = yield* Effect.scope;
     const sessions = new Map<string, Session>();
     /** The subscription whose provider a session reads from; none for a copy's. */
@@ -761,6 +768,23 @@ function make(deps: PlaybackDeps) {
           });
     /** Whether a live session of `format` reads through captures: see LiveSession.shares. */
     const shareable = (format: StreamFormat, repair: boolean) => format === "mpegts" || !repair;
+    /**
+     * Tells the player which variant of its HLS stream it holds while a recording shares it, by
+     * the address it knows it at, once its multivariant playlist named it.
+     */
+    const announce = (sessionId: string) => {
+      const session = sessions.get(sessionId);
+      if (session?.kind !== "live" || !session.hls || session.receiver || !captures) return;
+      const address = captures.fixed(sessionId);
+      const id = address === null ? null : session.hls.known(address);
+      if (address !== null && id === undefined) return;
+      const variant = id === null ? null : `${base}/stream/${session.token}/${id}`;
+      PubSub.publishUnsafe(fixed, { sessionId, variant });
+    };
+    if (captures)
+      yield* Effect.forkScoped(
+        Stream.runForEach(captures.fixedChanged, (owner) => Effect.sync(() => announce(owner))),
+      );
     /**
      * Captures that read one of the channel's live streams now, under the login it has: what
      * playing them would read too, asking the provider nothing more. `channel` is the channel's
@@ -1707,6 +1731,8 @@ function make(deps: PlaybackDeps) {
         return proxied(`${marker}${addresses.idOf(target, pin)}`);
       });
       if (session.receiver && !subtitle) session.failure = null;
+      // Now the player knows the variants: one it holds while a recording shares them, say so.
+      if (pin && !subtitle && captures?.fixed(session.id)) announce(session.id);
       response.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" });
       response.end(playlist);
     }
@@ -3218,14 +3244,14 @@ function make(deps: PlaybackDeps) {
             session.headers.forEach((value, name) => requested.set(name, value));
           new Headers(headers).forEach((value, name) => requested.set(name, value));
           const asking = AbortSignal.any([signal, timeout.signal]);
-          const open = (opened: AbortSignal) =>
-            session.request(url, { headers: requested, signal: opened }, from);
+          const open = (address: string, opened: AbortSignal) =>
+            session.request(address, { headers: requested, signal: opened }, from);
           response =
             !shared || !captures
-              ? await open(asking)
+              ? await open(url, asking)
               : session.kind === "live" && session.format === "hls"
                 ? await captures.resource(shared, session.id, url, open, asking)
-                : await captures.request(shared, session.id, open, asking);
+                : await captures.request(shared, session.id, (opened) => open(url, opened), asking);
         } catch (cause) {
           return {
             ok: false,
@@ -3717,6 +3743,7 @@ function make(deps: PlaybackDeps) {
       fileReplaced: Stream.fromPubSub(replaced),
       readingAhead: Stream.fromPubSub(readingAhead),
       tracksChanged: Stream.fromPubSub(tracksChanged),
+      fixed: Stream.fromPubSub(fixed),
 
       begin: coordination.begin,
 

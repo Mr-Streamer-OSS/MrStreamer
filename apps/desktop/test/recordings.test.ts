@@ -24,7 +24,7 @@ import { ownedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { Deferred, Effect, Layer } from "effect";
+import { Deferred, Effect, Layer, Stream } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import { installingOnceStopsKept } from "../src/main/recordings/restart.ts";
 import { occurrences } from "../src/main/recordings/schedules.ts";
@@ -264,6 +264,27 @@ function playing(url: string) {
       ).toBeGreaterThanOrEqual(count),
     stop,
   };
+}
+
+/** The variant playlists Watch's multivariant playlist at `url` names, in its order. */
+async function variantsOf(url: string): Promise<string[]> {
+  const text = await (await fetch(url)).text();
+  return text
+    .split("\n")
+    .filter((line) => line && !line.startsWith("#"))
+    .map((line) => new URL(line, url).href);
+}
+
+/** What Playback has told Watch of the quality it holds, as it says it. */
+function heldQualities(runtime: Awaited<ReturnType<typeof app>>["runtime"]) {
+  const told: { readonly sessionId: string; readonly variant: string | null }[] = [];
+  runtime.runFork(
+    Effect.gen(function* () {
+      const playback = yield* Playback;
+      yield* Stream.runForEach(playback.fixed, (each) => Effect.sync(() => void told.push(each)));
+    }),
+  );
+  return async () => [...told];
 }
 
 describe.skipIf(!hasTools)("recordings", () => {
@@ -1469,30 +1490,136 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(decodes(file.path)).toBe(true);
   }, 30_000);
 
-  it("takes a connection of its own for an HLS channel whose playlist lists qualities to choose from", async () => {
-    const host = await startFakeHls({ live: { segmentMs: 1000 } });
+  it("records the quality Watch plays of an HLS channel offered in several, holding Watch to it until the recording stops", async () => {
+    const host = await startFakeHls({ live: { segmentMs: 1000 }, qualities: true });
     onTestFinished(() => host.close());
-    const { recordings, subscriptions, library, playback } = await app(await tempDir());
+    const dataDir = await tempDir();
+    const { recordings, subscriptions, library, playback, runtime } = await app(dataDir);
+    const held = heldQualities(runtime);
     const { id: subscriptionId } = await subscriptions.add({
       server: host.link,
       username: "",
       password: "",
     });
     await library.refresh(subscriptionId);
-    const channel = { subscriptionId, id: "epochs.test" };
+    const channel = { subscriptionId, id: "qualities.test" };
+    const of = { channel: channel.id, variants: [channel.id] };
+
+    // Watch plays it in 720 lines.
     const watching = await playback.open(channel, ["h264", "aac"]);
-    const player = playing(watching.url);
-    await player.reaches(1);
+    const [hd, sd] = await variantsOf(watching.url);
+    let player = playing(sd!);
+    await player.reaches(2);
+    expect(await recordings.connections(subscriptionId, of)).toEqual({
+      limit: 1,
+      uses: ["watch"],
+      shares: true,
+    });
+
+    // Recording it takes no connection more, and holds Watch to 720.
+    const sharedFrom = host.requests().length;
+    const answer = await recordings.start(channel, Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: ["recording"] });
+    expect(await until(held, (each) => each.length > 0)).toEqual([
+      { sessionId: watching.sessionId, variant: sd },
+    ]);
+    const growing = async () => (await recordings.list())[0]?.bytes ?? 0;
+    await until(growing, (bytes) => bytes > 0);
+    // Watch asking for 1080 meanwhile reads 720 still.
+    await player.stop();
+    player = playing(hd!);
+    await player.reaches(6);
+
+    // The recording stops: Watch picks its quality again, and reads 1080.
+    await recordings.stop(answer.recording.id);
+    const sharedTo = host.requests().length;
+    expect((await until(held, (each) => each.length > 1)).at(-1)).toEqual({
+      sessionId: watching.sessionId,
+      variant: null,
+    });
+    const asked = (name: string, from = 0, to = host.requests().length) =>
+      host
+        .requests()
+        .slice(from, to)
+        .flatMap((path) => new RegExp(`^/media/${name}-(\\d+)\\.ts$`).exec(path)?.[1] ?? []);
+    await until(
+      async () => asked("qualities-hd", sharedTo).length,
+      (count) => count > 0,
+    );
+    await player.stop();
+    await playback.close(watching.sessionId);
+
+    // While both read, the provider sent 720 alone, each segment once.
+    const shared = asked("qualities-sd", sharedFrom, sharedTo);
+    expect(shared.length).toBeGreaterThan(1);
+    expect(new Set(shared).size).toBe(shared.length);
+    expect(asked("qualities-hd", sharedFrom, sharedTo)).toEqual([]);
     expect(
-      await recordings.connections(subscriptionId, { channel: channel.id, variants: [channel.id] }),
-    ).toEqual({ limit: 1, uses: ["watch"], shares: false });
+      host
+        .requests()
+        .slice(sharedFrom, sharedTo)
+        .filter((path) => path.endsWith("qualities-hd.m3u8")),
+    ).toEqual([]);
+    const [done] = await recordings.list();
+    expect(done?.status).toEqual({ kind: "stopped" });
+    const file = await fileOf(dataDir, done!);
+    expect(probe(file.path)).toEqual(["h264", "aac"]);
+    expect(decodes(file.path)).toBe(true);
+  }, 30_000);
+
+  it("holds Watch joining a recording of an HLS channel to the recorded quality, and shares none it can't record", async () => {
+    const host = await startFakeHls({ live: { segmentMs: 1000 }, qualities: true });
+    onTestFinished(() => host.close());
+    const { recordings, subscriptions, library, playback, runtime } = await app(await tempDir());
+    const held = heldQualities(runtime);
+    const { id: subscriptionId } = await subscriptions.add({
+      server: host.link,
+      username: "",
+      password: "",
+    });
+    await library.refresh(subscriptionId);
+    const channel = { subscriptionId, id: "qualities.test" };
+    const of = { channel: channel.id, variants: [channel.id] };
+
+    // Recorded alone, in the most lines it records: 1080.
+    const answer = await recordings.start(channel, Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    await until(
+      async () => (await recordings.list())[0]?.bytes ?? 0,
+      (bytes) => bytes > 0,
+    );
+    // Watch joins it on its connection, held to 1080 though it asks for 720.
+    const watching = await playback.open(channel, ["h264", "aac"]);
+    const [hd, sd, uhd] = await variantsOf(watching.url);
+    expect(await until(held, (each) => each.length > 0)).toEqual([
+      { sessionId: watching.sessionId, variant: hd },
+    ]);
+    const player = playing(sd!);
+    await player.reaches(2);
+    expect(host.requests().filter((path) => path.includes("qualities-sd"))).toEqual([]);
+    await recordings.stop(answer.recording.id);
+    expect((await until(held, (each) => each.length > 1)).at(-1)).toEqual({
+      sessionId: watching.sessionId,
+      variant: null,
+    });
+    await player.stop();
+
+    // 2160 lines are more than a recording takes: recording them would need a connection more.
+    const big = playing(uhd!);
+    await big.reaches(1);
+    expect(await recordings.connections(subscriptionId, of)).toEqual({
+      limit: 1,
+      uses: ["watch"],
+      shares: false,
+    });
     expect(await recordings.start(channel, Date.now() + 60_000, {})).toEqual({
       kind: "busy",
       connections: { limit: 1, uses: ["watch"] },
     });
-    await player.stop();
+    await big.stop();
     await playback.close(watching.sessionId);
-  }, 20_000);
+  }, 30_000);
 
   it("takes a connection of its own for another of a playlist's channels at the same address", async () => {
     const provider = await fakeProvider({ live: true, maxConnections: 1, streams: looping });

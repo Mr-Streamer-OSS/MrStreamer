@@ -54,6 +54,8 @@ export function hlsAddresses(kept = KEPT) {
       }
       return id;
     },
+    /** The id that stands for `address`, or undefined while none does. */
+    known: (address: string): string | undefined => ids.get(address),
     /** The address `id` stands for, or undefined once it went. */
     addressOf: (id: string): string | undefined => addresses.get(id)?.address,
     /**

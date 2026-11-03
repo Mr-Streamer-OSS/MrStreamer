@@ -221,6 +221,11 @@ export interface PlayerState {
    * the channel changes or another quality is chosen.
    */
   readonly fellBack: { readonly from: string; readonly to: string } | null;
+  /**
+   * A recording shares the HLS stream that plays, so the picture keeps one quality until it ends
+   * and the player picks again.
+   */
+  readonly fixed: boolean;
 }
 
 const store = createStore<PlayerState>(() => ({
@@ -240,6 +245,7 @@ const store = createStore<PlayerState>(() => ({
   stream: null,
   waiting: false,
   fellBack: null,
+  fixed: false,
 }));
 
 /** Reads player state in a component. */
@@ -365,9 +371,11 @@ function release(): void {
   current = null;
   declaredTracks = null;
   recentSubtitlePackets = [];
-  // Nothing loads the chosen subtitles any more, and no picture is left to stand still.
-  const { subtitleLoading, waiting } = store.getState();
-  if (subtitleLoading || waiting) store.setState({ subtitleLoading: false, waiting: false });
+  // Nothing loads the chosen subtitles any more, no picture is left to stand still, and no
+  // quality is held.
+  const { subtitleLoading, waiting, fixed } = store.getState();
+  if (subtitleLoading || waiting || fixed)
+    store.setState({ subtitleLoading: false, waiting: false, fixed: false });
 }
 
 /** The channel plays live from now on: a recording that played is forgotten. */
@@ -891,6 +899,16 @@ async function loadTracks(mine: number, sessionId: string): Promise<void> {
  * plays here counts: one closed since is nobody's, an HLS engine tells its own tracks, and what
  * was found before a stream plays is in the tracks read when it does.
  */
+/**
+ * A recording shares the stream that plays, or stopped sharing it: its engine holds the quality
+ * the main process names, or picks again.
+ */
+listen("playback.fixed", ({ sessionId, variant }) => {
+  if (current?.sessionId !== sessionId) return;
+  current.engine.fix?.(variant);
+  store.setState({ fixed: variant !== null });
+});
+
 listen("playback.tracksChanged", ({ sessionId }) => {
   if (current?.sessionId !== sessionId || current.engine.tracks) return;
   if (store.getState().phase.kind !== "playing") return;

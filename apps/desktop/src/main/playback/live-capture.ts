@@ -17,11 +17,14 @@
 //
 // An HLS stream is many requests, not one: its playlist, read again and again, and its segments.
 // Those of a clear media playlist are shared through `resource` (./hls-capture.ts), so Watch and a
-// recording ask the provider for each once.
+// recording ask the provider for each once. Of a multivariant playlist, both hold one variant
+// while they share it: `fixed` says which, and `fixedChanged` when that changed.
 import { join } from "node:path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
+import * as Stream from "effect/Stream";
 import { DEFAULT_KEEP_FREE } from "@mrstreamer/contracts/recordings";
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
 import type { LiveStream } from "@mrstreamer/core/provider";
@@ -155,11 +158,23 @@ export class LiveCaptures extends Context.Service<
       key: string,
       owner: string,
       address: string,
-      open: (signal: AbortSignal) => Promise<Response>,
+      open: (address: string, signal: AbortSignal) => Promise<Response>,
       signal: AbortSignal,
     ): Promise<Response>;
     /** Whether something reads `key` now, so reading it too asks the provider nothing more. */
     reading(key: string): boolean;
+    /**
+     * The variant of the multivariant HLS stream `key` a reader joining it now holds, as its
+     * playlist names it; null for any other stream, or one nothing reads.
+     */
+    joins(key: string): string | null;
+    /**
+     * The variant `owner` holds while it shares a multivariant HLS stream with another reader,
+     * as its playlist names it; null while it reads what it asks for.
+     */
+    fixed(owner: string): string | null;
+    /** Owners whose `fixed` changed. */
+    readonly fixedChanged: Stream.Stream<string>;
     /**
      * Settles once each request `owner` still had opening has settled, and each capture it was
      * the last reader of has ended its request and removed its history, and each HLS stream its
@@ -185,7 +200,11 @@ function make(options: LiveCapturesOptions) {
       keepFree: options.keepFree ?? DEFAULT_KEEP_FREE,
     });
     const entries = new Map<string, Entry>();
-    const hls = hlsShares(coordination.connected);
+    const changes = yield* PubSub.unbounded<string>();
+    const hls = hlsShares({
+      connected: coordination.connected,
+      changed: (owner) => PubSub.publishUnsafe(changes, owner),
+    });
     /** What each owner's leaving closed, and its requests still under way, for `idle`. */
     const closings = new Map<string, Set<Promise<void>>>();
     const asking = new Map<string, Set<Promise<void>>>();
@@ -413,6 +432,9 @@ function make(options: LiveCapturesOptions) {
         const entry = entries.get(key);
         return entry?.kind === "open" || entry?.kind === "opening" || hls.reading(key);
       },
+      joins: hls.joins,
+      fixed: hls.fixed,
+      fixedChanged: Stream.fromPubSub(changes),
       idle: async (owner: string) => {
         await hls.leave(owner);
         // A request still opening may yet attach and leave, closing what it read last.

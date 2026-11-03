@@ -37,6 +37,11 @@ export interface CaptureSource {
   readonly headers: Readonly<Record<string, string>>;
   /** The live capture the stream is read through; null to ask the provider directly. */
   readonly shared?: string | null;
+  /**
+   * Of a multivariant HLS stream it shares, the variant Watch holds, as the playlist names it:
+   * the one recorded.
+   */
+  readonly variant?: string | null;
 }
 
 /** Live captures and who the recording reads them as, for a source's `shared`. */
@@ -214,15 +219,20 @@ async function openSource(
       const timeout = setTimeout(() => waiting.abort(), SILENCE_MS);
       let answer: Response;
       const reading = AbortSignal.any([asked, waiting.signal]);
-      const open = (opened: AbortSignal) =>
-        options.request(address, { headers, signal: opened }, source.url);
+      const open = (at: string, opened: AbortSignal) =>
+        options.request(at, { headers, signal: opened }, source.url);
       try {
         answer =
           !shared || !sharing
-            ? await open(reading)
+            ? await open(address, reading)
             : source.format === "hls"
               ? await sharing.resource(shared, sharing.owner, address, open, reading)
-              : await sharing.request(shared, sharing.owner, open, reading);
+              : await sharing.request(
+                  shared,
+                  sharing.owner,
+                  (opened) => open(address, opened),
+                  reading,
+                );
       } catch (cause) {
         if (waiting.signal.aborted && !asked.aborted)
           throw new CaptureFailure({
@@ -243,7 +253,7 @@ async function openSource(
     }
   };
   if (source.format === "hls") {
-    const input = await openHlsTsInput(source.url, ask, signal, false, null);
+    const input = await openHlsTsInput(source.url, ask, signal, false, source.variant ?? null);
     const chunks = (async function* () {
       for await (const epoch of input.epochs) yield* epoch.chunks;
     })();

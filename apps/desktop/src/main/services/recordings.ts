@@ -1007,6 +1007,7 @@ function make(deps: RecordingsDeps) {
                 format,
                 headers: headers ?? {},
                 shared: key,
+                variant: key === null ? null : captures.joins(key),
               })),
               fileOf(record),
               {
