@@ -4,6 +4,10 @@ After checking out the exact candidate and trusted validation tools, call this c
 with `part: check`, `test`, or `website`, and a unique `report-name` when calling more than once.
 Run Check and Test in separate jobs, bounded at 10 and 15 minutes; Checks bounds each test shard at
 15 minutes and its merging Test at 10. Check includes the production desktop build and workflow validation. A pull request that only adds or edits Markdown and images outside Test's and Website's inputs doesn't call this action: its Check runs `pnpm fmt:check` and `node scripts/docs-references.ts`.
+The pnpm cache key includes the Android lockfile alongside the root lockfile. Check also installs the independently locked Android app with `pnpm install --frozen-lockfile --ignore-scripts`
+in `apps/android` and runs `pnpm exec tsc --noEmit -p .` there. This keeps the desktop graph
+separate, uses the root-installed compiler on PATH, and skips Android on historical candidates without its package manifest.
+
 Test preserves the full suite, multimedia setup, JSON artifact and completeness gate,
 and installs ffmpeg alongside Node and the dependencies. It restores
 the native fixture's encoded media from an Actions cache keyed by the ffmpeg package set and the

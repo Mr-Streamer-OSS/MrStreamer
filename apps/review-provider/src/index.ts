@@ -25,7 +25,7 @@ export interface Env {
   readonly PUBLIC_ORIGIN?: string;
 }
 
-type Shape =
+type ProtectedRoute =
   | { readonly kind: "api"; readonly action: string; readonly id: string | null }
   | { readonly kind: "guide" }
   | { readonly kind: "path"; readonly folder: string; readonly tail: readonly string[] };
@@ -38,11 +38,11 @@ type Parsed =
       readonly kind: "protected";
       readonly username: string;
       readonly password: string;
-      readonly shape: Shape;
+      readonly route: ProtectedRoute;
     };
 
 // Only grammar/credential extraction. No catalogue, key or resource lookup here.
-function parseShape(url: URL): Parsed {
+function parseRoute(url: URL): Parsed {
   if (url.username || url.password || url.pathname.length > 2048 || url.search.length > 2048)
     return { kind: "malformed" };
   let parts: string[];
@@ -76,7 +76,7 @@ function parseShape(url: URL): Parsed {
       kind: "protected",
       username,
       password,
-      shape:
+      route:
         parts[0] === "xmltv.php"
           ? { kind: "guide" }
           : {
@@ -104,7 +104,7 @@ function parseShape(url: URL): Parsed {
     )
       return { kind: "malformed" };
 
-    return { kind: "protected", username, password, shape: { kind: "path", folder, tail } };
+    return { kind: "protected", username, password, route: { kind: "path", folder, tail } };
   }
 
   return { kind: "unrelated" };
@@ -213,7 +213,7 @@ export function createReviewProvider(media: MediaIndex, now: () => number = Date
         const at = now();
 
         if (!Number.isFinite(at) || at < EPOCH) return privateError(503, head);
-        const parsed = parseShape(new URL(request.url));
+        const parsed = parseRoute(new URL(request.url));
 
         if (parsed.kind === "malformed") return privateError(400, head);
 
@@ -237,10 +237,10 @@ export function createReviewProvider(media: MediaIndex, now: () => number = Date
         const origin = originOf(env.PUBLIC_ORIGIN);
 
         if (!origin) return privateError(503, head);
-        const shape = parsed.shape;
+        const route = parsed.route;
 
-        if (shape.kind === "api") {
-          const answer = apiAnswer(shape.action, shape.id, origin);
+        if (route.kind === "api") {
+          const answer = apiAnswer(route.action, route.id, origin);
 
           return new Response(head ? null : JSON.stringify(answer.body), {
             status: answer.status,
@@ -251,9 +251,9 @@ export function createReviewProvider(media: MediaIndex, now: () => number = Date
           });
         }
 
-        if (shape.kind === "guide")
+        if (route.kind === "guide")
           return textResponse(guideDocument(at), "application/xml; charset=utf-8", head, at);
-        const { folder, tail } = shape;
+        const { folder, tail } = route;
 
         if (folder === "movie" || folder === "series") {
           const original = ORIGINALS.find(

@@ -1,0 +1,7 @@
+{
+  "client-only@0.0.1": "https://raw.githubusercontent.com/facebook/react/v18.2.0/LICENSE",
+  "standard-navigation@0.0.5": "https://raw.githubusercontent.com/react-navigation/standard-navigation/33f3d3c976a24bad9fe32583939318bc143fa41b/LICENSE",
+  "jimp-compact@0.16.1": "https://raw.githubusercontent.com/jimp-dev/jimp/v0.16.1/LICENSE",
+  "server-only@0.0.1": "https://raw.githubusercontent.com/facebook/react/v18.2.0/LICENSE",
+  "structured-headers@0.4.1": "https://raw.githubusercontent.com/evert/structured-header/1762e198465b2ebe4ddf07633ab67d42f85189ea/LICENSE"
+}

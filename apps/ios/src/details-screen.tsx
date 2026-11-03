@@ -51,7 +51,7 @@ import { tabSides, useContentWidth } from "./content-width.ts";
 import { useStore } from "./store.ts";
 import { members, retryTitles, useRoster } from "./account.ts";
 import { describeError } from "./errors.ts";
-import { Docked, loadingStatus, PlaceholderLines, Placeholders, Shape } from "./loading.tsx";
+import { Docked, loadingStatus, Placeholder, PlaceholderLines, Placeholders } from "./loading.tsx";
 import { openDetails, versionOf } from "./resume.ts";
 import { SeriesDownloadRow } from "./series-download-row.tsx";
 import { pickedVersion, pickVersion, useSavedState } from "./storage.ts";
@@ -130,10 +130,10 @@ export function DetailsScreen({
     return (
       <Docked status={loadingStatus("movies and series")}>
         <Placeholders testID="details-placeholder">
-          <Shape style={[styles.backdrop, styles.stillBackdrop]} />
+          <Placeholder style={[styles.backdrop, styles.stillBackdrop]} />
           <View style={[styles.facts, inside]}>
-            <Shape style={styles.nameShape} />
-            <Shape style={styles.lineShape} />
+            <Placeholder style={styles.namePlaceholder} />
+            <Placeholder style={styles.linePlaceholder} />
           </View>
         </Placeholders>
       </Docked>
@@ -959,8 +959,8 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.35 },
   backdrop: { width: "100%", aspectRatio: 16 / 11, backgroundColor: "#000000" },
   stillBackdrop: { backgroundColor: colors.fill, borderRadius: 0 },
-  nameShape: { width: "60%", height: 28 },
-  lineShape: { width: "40%", height: 14 },
+  namePlaceholder: { width: "60%", height: 28 },
+  linePlaceholder: { width: "40%", height: 14 },
   capsule: {
     position: "absolute",
     bottom: 14,

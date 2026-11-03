@@ -52,9 +52,13 @@ export interface ChannelRow {
 }
 
 export type Channels =
-  | { readonly kind: "loading" }
+  | { readonly kind: "loading"; readonly channels?: readonly ChannelRow[] }
   | { readonly kind: "ready"; readonly rows: readonly ChannelRow[] }
-  | { readonly kind: "failed"; readonly error: AppError };
+  | {
+      readonly kind: "failed";
+      readonly error: AppError;
+      readonly channels?: readonly ChannelRow[];
+    };
 
 export interface SavedSource {
   readonly id: string;
@@ -163,8 +167,8 @@ export interface SourcesOwner {
   onDemand(id: string): OnDemandReader | null;
   /** Reads the saved sources and signs each in again. Call once, at launch. */
   restore(): Promise<void>;
-  /** Checks `input` with its provider, then saves it and lists its channels. */
-  connect(input: LoginInput, signal?: AbortSignal): Promise<Connected>;
+  /** Checks and saves `input`, then lists its channels. `replaceId` re-enters a listed source. */
+  connect(input: LoginInput, signal?: AbortSignal, replaceId?: string): Promise<Connected>;
   /** Checks a source's login and lists its channels again. */
   retry(id: string): void;
   /** Erases the source's authority, then stops its reads and forgets it. Throws when refused. */
@@ -186,12 +190,19 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
     return now.kind === "ready" ? now.sources : [];
   };
 
+  const authorities = new WeakMap<CatalogueReader, Authority>();
+
   function readerOf(authority: Authority): CatalogueReader & Partial<OnDemandReader> {
     const options = { userAgent: platform.userAgent, fetch: platform.fetch };
 
-    return authority.kind === "xtream"
-      ? xtreamProvider(authority, { ...options, inTasks })
-      : playlistReader(authority.link, options);
+    const reader =
+      authority.kind === "xtream"
+        ? xtreamProvider(authority, { ...options, inTasks })
+        : playlistReader(authority.link, options);
+
+    authorities.set(reader, authority);
+
+    return reader;
   }
 
   function setChannels(id: string, channels: Channels) {
@@ -216,7 +227,9 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
 
     if (!read) return;
     const { login: reader, signal, stands } = read;
-    setChannels(id, { kind: "loading" });
+    const previous = listed().find((source) => source.id === id)?.channels;
+    const channels = previous?.kind === "ready" ? previous.rows : previous?.channels;
+    setChannels(id, channels ? { kind: "loading", channels } : { kind: "loading" });
     (checked ? Promise.resolve() : reader.authenticate(signal))
       .then(() => reader.liveCatalogue(signal))
       .then((catalogue) => rowsOf(id, catalogue, stands))
@@ -225,7 +238,13 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
           if (rows && stands()) setChannels(id, { kind: "ready", rows });
         },
         (cause: unknown) => {
-          if (stands()) setChannels(id, { kind: "failed", error: failureOf(cause) });
+          if (stands()) {
+            const error = failureOf(cause);
+            setChannels(
+              id,
+              channels ? { kind: "failed", error, channels } : { kind: "failed", error },
+            );
+          }
         },
       );
   }
@@ -307,7 +326,14 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       for (const source of restoredSources) load(source.id);
     },
 
-    async connect(input, signal) {
+    async connect(input, signal, replaceId) {
+      const replacing = replaceId ? readers.current(replaceId) : undefined;
+
+      const replacementStands = () =>
+        !replaceId ||
+        (listed().some((source) => source.id === replaceId) &&
+          readers.current(replaceId) === replacing);
+
       let parsed: ParsedLogin;
 
       try {
@@ -333,25 +359,40 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
         return { kind: "failed", error, http };
       }
 
-      const saved = savedOf(authority);
+      const identity = savedOf(authority);
+      const saved = replaceId ? { ...identity, id: replaceId } : identity;
       await ready;
 
-      if (signal?.aborted) return { kind: "cancelled" };
+      if (signal?.aborted || !replacementStands()) return { kind: "cancelled" };
       const known = listed().some((source) => source.id === saved.id);
       // What a cancel or a refused list puts back: the login this source had, or none. A new
       // login left behind no list names, and the next launch erases it.
       const previous = known ? await platform.credentials.read(saved.id).catch(() => null) : null;
 
-      const undo = () =>
-        (previous
-          ? platform.credentials.write(saved.id, previous)
-          : platform.credentials.remove(saved.id)
+      const undo = () => {
+        const current = readers.current(saved.id);
+        const restore = current && current !== replacing ? authorities.get(current) : previous;
+
+        return (
+          restore
+            ? platform.credentials.write(saved.id, restore)
+            : platform.credentials.remove(saved.id)
         ).catch(() => {});
+      };
+
+      if (signal?.aborted || !replacementStands()) return { kind: "cancelled" };
 
       try {
         await platform.credentials.write(saved.id, authority);
       } catch (cause) {
         return { kind: "failed", error: failureOf(cause), http: null };
+      }
+
+      if (!replacementStands()) {
+        if (listed().some((source) => source.id === saved.id)) await undo();
+        else await platform.credentials.remove(saved.id).catch(() => {});
+
+        return { kind: "cancelled" };
       }
 
       if (signal?.aborted) {

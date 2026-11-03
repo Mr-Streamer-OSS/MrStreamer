@@ -167,7 +167,7 @@ vi.mock("../src/glass.tsx", async () => {
 vi.mock("../src/loading.tsx", () => ({
   Docked: ({ children }: { children?: React.ReactNode }) => children,
   Placeholders: ({ children }: { children?: React.ReactNode }) => children,
-  Shape: () => null,
+  Placeholder: () => null,
   PlaceholderLines: () => null,
   loadingStatus: (what: string) => ({ text: `Loading ${what}.` }),
 }));

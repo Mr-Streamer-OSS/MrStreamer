@@ -1,3 +1,4 @@
+import { t as playerText } from "./copy.ts";
 import { t } from "@mrstreamer/core/i18n";
 import { router, usePathname } from "expo-router";
 import { Pressable, Text, useWindowDimensions, View } from "react-native";
@@ -100,7 +101,7 @@ export function MiniPlayer() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={[state.intent.title, status].filter(Boolean).join(", ")}
-        accessibilityHint="Opens the player"
+        accessibilityHint={playerText("Opens the player")}
         onPress={() => router.push(watchHref(state.intent))}
         {...handlers}
         android_ripple={{ color: colors.ripple }}

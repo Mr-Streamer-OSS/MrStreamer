@@ -1,3 +1,4 @@
+import { t } from "./copy.ts";
 import type { IconName } from "../ui/icon-button.tsx";
 
 // Paper A Destinations: Home, Live, Movies and Series, each a tab with its own stack under
@@ -18,10 +19,38 @@ export type DestinationRoute = Destination["route"];
 
 /** In the order the navigation bar and rail show them. */
 export const DESTINATIONS: readonly Destination[] = [
-  { route: "home", label: "Home", icon: "home", selectedIcon: "home-filled" },
-  { route: "(live)", label: "Live", icon: "live-tv", selectedIcon: "live-tv" },
-  { route: "movies", label: "Movies", icon: "movie", selectedIcon: "movie" },
-  { route: "series", label: "Series", icon: "video-library", selectedIcon: "video-library" },
+  {
+    route: "home",
+    get label() {
+      return t("Home");
+    },
+    icon: "home",
+    selectedIcon: "home-filled",
+  },
+  {
+    route: "(live)",
+    get label() {
+      return t("Live");
+    },
+    icon: "live-tv",
+    selectedIcon: "live-tv",
+  },
+  {
+    route: "movies",
+    get label() {
+      return t("Movies");
+    },
+    icon: "movie",
+    selectedIcon: "movie",
+  },
+  {
+    route: "series",
+    get label() {
+      return t("Series");
+    },
+    icon: "video-library",
+    selectedIcon: "video-library",
+  },
 ];
 
 /** Where the app opens, and where Back from another destination's root goes. */

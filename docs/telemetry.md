@@ -195,3 +195,18 @@ Before stable, reconcile the first nightly's real summaries read-only. A failed 
 Insights still built on `app_summary_day` describe builds up to 0.0.13 only. Private saved queries and ingestion deduplication need validation in the private project. Verify the contract through `apps/desktop/test/analytics.test.ts` and the built-app Privacy feature-map path. Settings, FAQ and privacy-policy claims must match this catalogue before release.
 
 After 0.0.16 is distributed, the release owner must check a read-only breakdown of `stream_error` by app version, OS, stream type and these fixed fields, keeping absent historical context labelled unknown. Compare incident counts with the unchanged coarse `error_type` report and re-baseline against 0.0.15 as traffic arrives. The 0.0.14 exploratory sample cannot identify missing codecs, affected installations or the effect of 0.0.15 recovery. Engineering loopback events are not production evidence. No live PostHog report is changed by this unit.
+
+## Android
+
+Android uses the same explicit opt-in and random installation identifier. Its capture properties
+are `os: "android"`, `os_major` (the numeric Android release when available), `app_version` and
+`app_build` (the Android version code). Capture disables person profiles and GeoIP.
+
+Android sends `feature_opened` for Live TV and Settings, and `playlist_added` and
+`playlist_removed` when the observed provider count changes and remains above zero. The final removal clears statistics without sending a removal event. It sends no viewing details,
+provider addresses, logins, titles or search text. Off cancels delivery and clears the identity
+and outbox. A refused Off remains pending, blocks delivery and is retried before later delivery
+or saves; a separate revocation marker carries that retry across launches when writable.
+When storage refuses both the statistics record and the revocation marker, Off holds for the session only.
+Unreadable storage never grants consent. Removing the last provider clears identity and outbox
+without changing the saved choice.

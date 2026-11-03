@@ -3,6 +3,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import type { EdgeInsets } from "react-native-safe-area-context";
 import type { Destination, DestinationRoute, SharedScreen } from "../navigation/destinations.ts";
 import { useKeyboardFocus } from "./focus.ts";
+import { t } from "../navigation/copy.ts";
 import { IconButton } from "./icon-button.tsx";
 import { colors } from "./theme.ts";
 
@@ -78,7 +79,7 @@ export function NavigationRail({
     >
       <IconButton
         icon="search"
-        label="Search"
+        label={t("Search")}
         onPress={() => onOpen("search")}
         width={56}
         height={72}
@@ -97,7 +98,7 @@ export function NavigationRail({
       <View style={{ flex: 1 }} />
       <IconButton
         icon="download"
-        label="Downloads"
+        label={t("Downloads")}
         onPress={() => onOpen("downloads")}
         color={colors.secondary}
         width={56}
@@ -105,7 +106,7 @@ export function NavigationRail({
       />
       <IconButton
         icon="settings"
-        label="Settings"
+        label={t("Settings")}
         onPress={() => onOpen("settings")}
         color={colors.secondary}
         width={56}
