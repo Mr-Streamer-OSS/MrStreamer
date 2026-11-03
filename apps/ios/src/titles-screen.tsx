@@ -14,8 +14,8 @@ import {
   Docked,
   libraryStatus,
   loadingStatus,
-  Placeholders,
   Placeholder,
+  Placeholders,
   useDockInset,
   type Status,
 } from "./loading.tsx";

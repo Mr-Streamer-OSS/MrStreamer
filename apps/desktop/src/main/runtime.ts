@@ -371,9 +371,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
 }
 
 /** Maps the saved roster to viewing owners, keeping their transaction-time presence check. */
-export function viewingAccount(
-  subscriptions: typeof Subscriptions.Service,
-): typeof ViewingAccount.Service {
+export function viewingAccount(subscriptions: Subscriptions["Service"]): ViewingAccount["Service"] {
   return {
     owners: Effect.map(subscriptions.saved, (saved) =>
       saved.map((owner) => ({

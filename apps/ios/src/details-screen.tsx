@@ -51,7 +51,7 @@ import { tabSides, useContentWidth } from "./content-width.ts";
 import { useStore } from "./store.ts";
 import { members, retryTitles, useRoster } from "./account.ts";
 import { describeError } from "./errors.ts";
-import { Docked, loadingStatus, PlaceholderLines, Placeholders, Placeholder } from "./loading.tsx";
+import { Docked, loadingStatus, Placeholder, PlaceholderLines, Placeholders } from "./loading.tsx";
 import { openDetails, versionOf } from "./resume.ts";
 import { SeriesDownloadRow } from "./series-download-row.tsx";
 import { pickedVersion, pickVersion, useSavedState } from "./storage.ts";

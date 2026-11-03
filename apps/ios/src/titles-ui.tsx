@@ -14,7 +14,7 @@ import {
 import { useArtwork } from "./artwork-cache.ts";
 import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/live.ts";
-import { Placeholders, Placeholder, useDockInset } from "./loading.tsx";
+import { Placeholder, Placeholders, useDockInset } from "./loading.tsx";
 import { useContentWidth } from "./content-width.ts";
 import { colors } from "./ui.tsx";
 

@@ -28,8 +28,8 @@ import type { Channel, Library } from "../../../library.ts";
 import {
   Docked,
   libraryStatus,
-  Placeholders,
   Placeholder,
+  Placeholders,
   useDockInset,
 } from "../../../loading.tsx";
 import {

@@ -503,9 +503,9 @@ const Clock = createContext<Animated.Value | null>(null);
 
 /**
  * Still shapes standing in for content that hasn't come, hidden from VoiceOver, with one clock
- * for the highlight of every `Placeholder` in it. The clock runs only while the viewer sees the group
- * (its screen in front, Watch closed, the app active) and Reduce Motion is known to be off; it
- * stops, and the band goes, the moment any of that changes or the content replaces the group.
+ * for the highlight of every `Placeholder` in it. The clock runs only while the viewer sees the
+ * group (its screen in front, Watch closed, the app active) and Reduce Motion is known to be off;
+ * it stops, and the band goes, the moment any of that changes or the content replaces the group.
  */
 export function Placeholders({
   style,
