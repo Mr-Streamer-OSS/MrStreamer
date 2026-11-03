@@ -1,0 +1,27 @@
+# Weekly version updates, opened as normal pull requests for review.
+# Options: https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
+version: 2
+updates:
+  # The root pnpm workspace covers the desktop, marketing and shared packages; the iOS and
+  # Android apps keep their own installs and lockfiles (see pnpm-workspace.yaml).
+  - package-ecosystem: npm
+    directories:
+      - /
+      - /apps/ios
+      - /apps/android
+    schedule:
+      interval: weekly
+    groups:
+      # One PR for both; grouping doesn't force equal versions, so keep both exact pins identical.
+      oxlint:
+        patterns:
+          - oxlint
+          - "@oxlint/plugins"
+
+  # "/" scans .github/workflows; composite actions each have their own action.yml.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
