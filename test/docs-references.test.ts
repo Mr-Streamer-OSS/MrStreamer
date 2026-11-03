@@ -31,7 +31,8 @@ const elsewhere = new Set([
 function folders(document: string): string[] {
   const found: string[] = [];
   for (let folder = dirname(document); folder !== "."; folder = dirname(folder)) found.push(folder);
-  return [...found, "."];
+  found.push(".");
+  return found;
 }
 
 function ignored(path: string): boolean {
