@@ -67,7 +67,7 @@ Wi-Fi and battery. Capture the full screen at native pixels, without resizing:
 
 Capture each language with the matching app interface language. Record the full
 built app commit, device/simulator identity, OS and timezone-qualified capture
-instant. Device and OS are plain labels without `://`, `/`, `\`, `@`, `?` or `~`. Bind that record to the original capture's SHA-256. A 1x layout reference,
+instant. Device and OS are plain names of at most 64 letters, digits, spaces and `.,()'"+-`. Bind that record to the original capture's SHA-256. A 1x layout reference,
 a Paper placeholder or a screenshot of another app cannot qualify, and native
 size alone does not prove a capture: source acceptance inspects the actual view
 and its provenance. The tool downsizes the full capture for composition;

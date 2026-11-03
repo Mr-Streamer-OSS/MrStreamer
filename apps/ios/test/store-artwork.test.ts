@@ -163,7 +163,7 @@ test("refuses a layout reference instead of a native-pixel capture", async () =>
 test("refuses missing provenance before creating an output directory", async () => {
   const { dir, slots } = await inputs();
   slots["duo-inner"] = { file: "duo-inner.png", sha256: "a".repeat(64) };
-  await expect(run(dir, slots)).rejects.toThrow(/provenance/);
+  await expect(run(dir, slots)).rejects.toThrow(/duo-inner provenance must be an object/);
   await expect(stat(join(dir, "en-US"))).rejects.toMatchObject({ code: "ENOENT" });
 });
 
@@ -185,7 +185,7 @@ test("places a local frame at its cutout without losing the captured screen", as
     source: "https://developer.apple.com/design/resources/",
     termsSource: "https://developer.apple.com/app-store/marketing/guidelines/",
     cutout: { left: 40, top: 40, width: slot.width, height: slot.height },
-    cornerRadius: 165,
+    cornerRadius: RADIUS,
     opaqueShare: expect.any(Number),
     sha256: hash(frame),
     licenceSha256: hash(await readFile(join(dir, "terms.txt"))),
@@ -209,6 +209,10 @@ test("places a local frame at its cutout without losing the captured screen", as
   expect([...pixel]).toEqual([0x12, 0x56, 0x78]);
 });
 
+// Large enough that the rounded corners alone exceed the 1% opaque allowance, so a frame check
+// that ignored cornerRadius and inspected a square opening would refuse these frames.
+const RADIUS = 300;
+
 async function withFrame(
   dir: string,
   slots: Record<string, Capture>,
@@ -225,10 +229,10 @@ async function withFrame(
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <mask id="opening">
         <rect width="${width}" height="${height}" fill="white"/>
-        <rect x="40" y="40" width="${slot.width}" height="${slot.height}" rx="165" fill="black"/>
+        <rect x="40" y="40" width="${slot.width}" height="${slot.height}" rx="${RADIUS}" fill="black"/>
       </mask>
       <rect width="${width}" height="${height}" fill="#abcdef" mask="url(#opening)"/>
-      <rect x="40" y="40" width="${slot.width}" height="${slot.height}" rx="165" fill="white" opacity="${openingOpacity}"/>
+      <rect x="40" y="40" width="${slot.width}" height="${slot.height}" rx="${RADIUS}" fill="white" opacity="${openingOpacity}"/>
       <rect x="${width / 2 - 75}" y="60" width="150" height="40" rx="20" fill="#abcdef"/>
     </svg>`),
   )
@@ -243,7 +247,7 @@ async function withFrame(
     termsSource: "https://developer.apple.com/app-store/marketing/guidelines/",
     licenceFile: "terms.txt",
     cutout: { left: 40, top: 40, width: slot.width, height: slot.height },
-    cornerRadius: 165,
+    cornerRadius: RADIUS,
   };
 
   return bytes;
@@ -299,7 +303,7 @@ test.each([
   },
   {
     mutate: async (_dir: string, slots: Record<string, Capture>) => {
-      slots["ipad-13"]!.provenance!.device = "https://private.invalid/stream?login=secret";
+      slots["ipad-13"]!.provenance!.device = "login:secret";
     },
     error: /device must be a plain label/,
   },

@@ -64,11 +64,12 @@ function string(value: unknown, label: string): string {
   return value;
 }
 
-/** Keep provenance labels free of paths, URLs and login-like values. */
+/** Device and OS names only: letters, digits, spaces and `.,()'"+-`, so no path, URL or login. */
 function plainLabel(value: unknown, label: string): string {
   const text = string(value, label);
 
-  if (/[/\\@?~]/.test(text)) throw new Error(`${label} must be a plain label`);
+  if (!/^[\p{L}\p{N} .,()'"+-]{1,64}$/u.test(text))
+    throw new Error(`${label} must be a plain label`);
 
   return text;
 }
