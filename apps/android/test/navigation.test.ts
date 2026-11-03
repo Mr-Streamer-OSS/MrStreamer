@@ -23,6 +23,8 @@ const scenario = vi.hoisted(() => ({
   back: [] as (() => boolean)[],
   /** The open modal's Back. */
   modalBack: null as (() => void) | null,
+  /** Whether the screen under test is the one showing. */
+  showing: true,
   /** What the saved sources' store holds. */
   sources: { kind: "restoring" } as { kind: "restoring" } | { kind: "ready"; sources: object[] },
 }));
@@ -36,6 +38,7 @@ vi.mock("react-native", async () => {
     accessibilityState?: { selected?: boolean };
     onPress?: () => void;
     style?: { display?: string };
+    ref?: unknown;
   };
   const view =
     (tag: string) =>
@@ -46,10 +49,12 @@ vi.mock("react-native", async () => {
       accessibilityState,
       onPress,
       style,
+      ref,
     }: Props) =>
       h(
         tag,
         {
+          ref,
           "aria-label": accessibilityLabel,
           role: accessibilityRole,
           "aria-selected": accessibilityState?.selected,
@@ -64,6 +69,10 @@ vi.mock("react-native", async () => {
     Text: view("span"),
     Pressable: view("button"),
     StatusBar: () => null,
+    AccessibilityInfo: {
+      sendAccessibilityEvent: (view: { textContent: string }, event: string) =>
+        void scenario.asked.push(`${event} ${view.textContent}`),
+    },
     Modal: ({
       visible,
       onRequestClose,
@@ -109,6 +118,7 @@ vi.mock("expo-router", async () => {
       back: () => scenario.asked.push("back"),
     },
     useSegments: () => scenario.segments,
+    useIsFocused: () => scenario.showing,
     Stack,
     DarkTheme: { colors: {} },
     ThemeProvider: ({ children }: { children: ReactNode }) => children,
@@ -197,6 +207,7 @@ beforeEach(() => {
   scenario.segments = ["(tabs)", "(live)"];
   scenario.asked = [];
   scenario.focused = unstable_settings.anchor;
+  scenario.showing = true;
 });
 afterEach(() => {
   act(() => root?.unmount());
@@ -218,7 +229,7 @@ describe("the app", () => {
 });
 
 describe("the destinations", () => {
-  it("are anchored on Live, which Back from another root returns to, and run along a phone's foot", () => {
+  it("are anchored on Live, with Back set to return there, and run along a phone's foot", () => {
     expect(unstable_settings.anchor).toBe("(live)");
     const shown = show(createElement(DestinationsLayout));
     expect(labels(shown, '[aria-selected="true"]')).toEqual(["Live"]);
@@ -289,14 +300,15 @@ describe("a screen's top app bar", () => {
 
 describe("a screen's detail pane", () => {
   const detail = {
+    title: "Evening News",
     content: createElement("p", { "aria-label": "Programme" }),
     onClose: () => void scenario.asked.push("close"),
   };
-  const framed = () =>
+  const framed = (pushed = false) =>
     show(
       createElement(
         Screen,
-        { title: "Live", detail },
+        { title: "Live", pushed, detail },
         createElement("p", { "aria-label": "Guide" }),
       ),
     );
@@ -304,25 +316,36 @@ describe("a screen's detail pane", () => {
     labels(shown, "p").filter(
       (_, index) => !shown.querySelectorAll("p")[index]?.closest("[hidden]"),
     );
+  const heading = (shown: ReturnType<typeof show>) =>
+    shown.querySelector('[role="header"]')?.textContent;
 
-  it("takes its list's place on a phone, where the bar's Back and Android's close it first", () => {
+  it("takes its list's place on a phone under its own title, closed first by either Back", () => {
     const shown = framed();
     expect(visible(shown)).toEqual(["Programme"]);
+    expect(heading(shown)).toBe("Evening News");
     expect(labels(shown, "button")).toEqual(["Back"]);
     press(shown, "Back");
     expect(pressBack()).toBe(true);
-    expect(scenario.asked).toEqual(["close", "close"]);
+    expect(scenario.asked).toEqual(["focus Evening News", "close", "close"]);
   });
 
-  it("shows beside its list from 840dp, and Back still closes it before the stack", () => {
+  it("shows beside its list from 840dp, still closed before the stack, pushed or not", () => {
     scenario.width = 840;
-    const shown = framed();
+    const shown = framed(true);
     expect(visible(shown)).toEqual(["Guide", "Programme"]);
-    expect(labels(shown, "button")).toEqual([]);
+    expect(heading(shown)).toBe("Live");
+    press(shown, "Back");
     expect(pressBack()).toBe(true);
-    expect(scenario.asked).toEqual(["close"]);
+    expect(scenario.asked).toEqual(["close", "close"]);
     act(() => root?.unmount());
     expect(pressBack()).toBe(false);
+  });
+
+  it("leaves Back to the screen showing while its own is under another or on another tab", () => {
+    scenario.showing = false;
+    framed();
+    expect(pressBack()).toBe(false);
+    expect(scenario.asked).toEqual([]);
   });
 });
 

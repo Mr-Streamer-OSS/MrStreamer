@@ -1,6 +1,7 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import type { ComponentProps } from "react";
 import { Pressable } from "react-native";
+import { useKeyboardFocus } from "./focus.ts";
 import { colors } from "./theme.ts";
 
 export type IconName = ComponentProps<typeof MaterialIcons>["name"];
@@ -24,15 +25,23 @@ export function IconButton({
   width?: number;
   height?: number;
 }) {
+  const { focused, handlers } = useKeyboardFocus();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      android_ripple={{ color: colors.ripple, borderless: true, radius: 24 }}
+      {...handlers}
+      android_ripple={{
+        color: colors.ripple,
+        borderless: true,
+        radius: Math.min(width, height) / 2,
+      }}
       style={{
         width,
         height,
+        borderRadius: Math.min(width, height) / 2,
+        backgroundColor: focused ? colors.focus : undefined,
         flexShrink: 0,
         alignItems: "center",
         justifyContent: "center",

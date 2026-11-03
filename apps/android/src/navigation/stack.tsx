@@ -2,8 +2,10 @@ import { Stack } from "expo-router";
 import { colors } from "../ui/theme.ts";
 
 /**
- * Each destination's root is under whatever opens on its stack, a link straight to
- * `/movies/settings` included, so Back from it reaches the root.
+ * Each destination's stack starts on its `index`, not on the first screen declared below, and a
+ * link that opens the app straight to `/movies/settings` gets that root under it, so Back reaches
+ * it. Navigating into another destination's stack while the app runs passes `withAnchor: true`
+ * for the same root.
  */
 export const unstable_settings = { anchor: "index" };
 

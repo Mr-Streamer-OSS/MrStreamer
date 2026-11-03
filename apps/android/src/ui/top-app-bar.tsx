@@ -1,4 +1,5 @@
-import { Text, View } from "react-native";
+import { useEffect, useRef, type ComponentRef } from "react";
+import { AccessibilityInfo, Text, View } from "react-native";
 import type { EdgeInsets } from "react-native-safe-area-context";
 import type { NavigationLayout } from "../navigation/destinations.ts";
 import { useOpenShared } from "../navigation/open.ts";
@@ -7,15 +8,16 @@ import { colors } from "./theme.ts";
 
 /**
  * A screen's top app bar. A destination's root shows its title, with Search, Downloads and
- * Settings on phones (the rail carries them from 600dp); a pushed screen, or a detail pane
- * folded over its list, shows Back before its title instead. Paper A: 64dp with a 16dp margin on phones, 56dp with 24dp margins beside the
- * rail; Back's icon sits on the title's margin.
+ * Settings on phones (the rail carries them from 600dp); a pushed screen, or one with a detail
+ * pane open, shows Back before its title instead. Paper A: 64dp with a 16dp margin on phones,
+ * 56dp with 24dp margins beside the rail; Back's icon sits on the title's margin.
  */
 export function TopAppBar({
   title,
   layout,
   insets,
   onBack,
+  focusTitle = false,
 }: {
   title: string;
   layout: NavigationLayout;
@@ -23,8 +25,16 @@ export function TopAppBar({
   insets: EdgeInsets;
   /** Given, the bar offers Back, which calls it, in place of Search, Downloads and Settings. */
   onBack?: (() => void) | undefined;
+  /** Moves TalkBack to the title as it shows, when what it names has replaced the screen. */
+  focusTitle?: boolean;
 }) {
   const open = useOpenShared();
+  const heading = useRef<ComponentRef<typeof Text>>(null);
+  useEffect(() => {
+    if (focusTitle && heading.current) {
+      AccessibilityInfo.sendAccessibilityEvent(heading.current, "focus");
+    }
+  }, [focusTitle, title]);
   const bar = layout === "bar";
   const margin = bar ? 16 : 24;
   return (
@@ -42,6 +52,7 @@ export function TopAppBar({
     >
       {onBack ? <IconButton icon="arrow-back" label="Back" onPress={onBack} /> : null}
       <Text
+        ref={heading}
         accessibilityRole="header"
         numberOfLines={1}
         style={{

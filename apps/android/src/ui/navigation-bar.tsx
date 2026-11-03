@@ -2,6 +2,7 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import type { EdgeInsets } from "react-native-safe-area-context";
 import type { Destination, DestinationRoute, SharedScreen } from "../navigation/destinations.ts";
+import { useKeyboardFocus } from "./focus.ts";
 import { IconButton } from "./icon-button.tsx";
 import { colors } from "./theme.ts";
 
@@ -129,15 +130,23 @@ function Item({
   onPress: () => void;
   placement: "bar" | "rail";
 }) {
+  const { focused, handlers } = useKeyboardFocus();
   return (
     <Pressable
       accessibilityRole="tab"
       accessibilityState={{ selected }}
       accessibilityLabel={destination.label}
       onPress={onPress}
+      {...handlers}
       android_ripple={{ color: colors.ripple }}
       style={[
-        { alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 8 },
+        {
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 4,
+          paddingVertical: 8,
+          backgroundColor: focused ? colors.focus : undefined,
+        },
         placement === "bar"
           ? { flex: 1, minHeight: 79 }
           : {

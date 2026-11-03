@@ -4,11 +4,12 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors } from "./theme.ts";
 
 /**
- * A modal bottom sheet over the screen that opened it. Back, Escape and a tap on the scrim close
- * it before anything under it, and TalkBack stays inside it while it shows. Its content fills it
- * under the drag handle, up to 560dp wide, and pads the system's navigation bar itself from
- * `useSafeAreaInsets`. Paper A: a #141414 surface with 28dp top corners over a 60% black scrim,
- * a 32x4dp handle in a 36dp band.
+ * A modal bottom sheet over the screen that opened it. Back and a tap on the scrim close it before
+ * anything under it (React Native's Modal also takes Escape as Back), and TalkBack stays inside
+ * it while it shows. Its content fills it under the drag handle, up to 560dp wide, and must pad
+ * the system's navigation bar itself from `useSafeAreaInsets`, which here gives the sheet's own
+ * window's insets. Paper A: a #141414 surface with 28dp top corners over a 60% black scrim, a
+ * 32x4dp handle in a 36dp band.
  */
 export function Sheet({
   visible,
@@ -38,6 +39,8 @@ export function Sheet({
           accessibilityRole="button"
           accessibilityLabel={`Close ${label}`}
           onPress={onClose}
+          // TalkBack offers it; the keyboard skips it for the sheet's own controls.
+          focusable={false}
           style={{ position: "absolute", inset: 0, backgroundColor: colors.scrim }}
         />
         <View
