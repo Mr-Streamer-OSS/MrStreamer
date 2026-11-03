@@ -151,8 +151,8 @@ export class LiveCaptures extends Context.Service<
     /**
      * Answers `address` of the HLS stream `key` names, the playlist or one of its segments: from
      * what the provider answered another reader of that stream, else through `open`, as
-     * ./hls-capture.ts says. `owner` names the play or recording that reads it, and `signal`
-     * ends this answer.
+     * ./hls-capture.ts says. `owner` names the play or recording that reads it, `signal` ends
+     * this answer, and `joining` says it was admitted to share what reads `key` now.
      */
     resource(
       key: string,
@@ -160,14 +160,10 @@ export class LiveCaptures extends Context.Service<
       address: string,
       open: (address: string, signal: AbortSignal) => Promise<Response>,
       signal: AbortSignal,
+      joining?: boolean,
     ): Promise<Response>;
     /** Whether something reads `key` now, so reading it too asks the provider nothing more. */
     reading(key: string): boolean;
-    /**
-     * Whether something reads `key` now, though reading it too might not share it: an HLS stream
-     * held to a variant a recording can't read.
-     */
-    taken(key: string): boolean;
     /**
      * The variant of the multivariant HLS stream `key` a reader joining it now holds, as its
      * playlist names it; null for any other stream, or one nothing reads.
@@ -436,10 +432,6 @@ function make(options: LiveCapturesOptions) {
       reading: (key: string) => {
         const entry = entries.get(key);
         return entry?.kind === "open" || entry?.kind === "opening" || hls.reading(key);
-      },
-      taken: (key: string) => {
-        const entry = entries.get(key);
-        return entry?.kind === "open" || entry?.kind === "opening" || hls.taken(key);
       },
       joins: hls.joins,
       fixed: hls.fixed,

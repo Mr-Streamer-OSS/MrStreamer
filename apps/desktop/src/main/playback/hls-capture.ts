@@ -5,9 +5,9 @@
 //   when asked at the address the provider redirected it to, or at the one that redirected there:
 //   the latest answer is the playlist at each of those addresses. A reader is never given the same
 //   answer twice, so a reader alone reads the playlist as it would without this.
-// - A segment is known by its media and discontinuity sequence numbers in the playlist and its
+// - A segment is known by its playlist, its media and discontinuity sequence numbers in it and its
 //   address but for its query, so the same segment under another query token is one segment, and
-//   one of another host or path, as another packager's, is not. Addresses the last NAMED_READS
+//   one of another variant, host or path, as another packager's, is not. Addresses the last NAMED_READS
 //   reads of each playlist named are known. A playlist whose media sequence went back, as after
 //   the provider's packager restarted, lets every segment and address it named before go: numbers
 //   are named anew.
@@ -29,7 +29,9 @@
 // recording joins it, or the recording's while Watch does. An owner asking for another variant's
 // playlist meanwhile is given the held one's, so the provider sends one quality, and `fixed` says
 // which each owner holds, for Watch to show and keep. Once one owner is left, it reads what it
-// asks for again: Watch goes back to Auto.
+// asks for again: Watch goes back to Auto. A reader that comes while the others read a variant
+// none can be held to, and wasn't admitted to share it (`joining`), asks the provider itself for
+// as long as it reads, on the connection it was admitted on.
 // An owner reads one stream at a time, Watch one of a channel's streams and a recording the one it
 // records from, so asking for one leaves any other it read. The last owner leaving aborts what is
 // under way, and `leave` waits for every request of each share its owner left to end.
@@ -42,6 +44,8 @@ const KEPT_BYTES = 64 * 1024 * 1024;
 const ANSWER_BYTES = 256 * 1024 * 1024;
 /** How long a playlist answered counts as current, at least: half its target duration else. */
 const FRESH_MS = 250;
+/** Addresses a variant is known by besides its own, at most: a token's each, as they change. */
+const ALIASES = 256;
 /** Playlist reads whose segment addresses are known, the latest: as many as readers lag by. */
 const NAMED_READS = 3;
 
@@ -106,13 +110,17 @@ interface Share {
   /** The multivariant playlist kept, and its variants. */
   master: Answer | null;
   variants: readonly Variant[];
+  /** Those variants by the addresses a multivariant playlist asked for again names them. */
+  readonly aliases: Map<string, Variant>;
   /** The variant each owner read last. */
   readonly current: Map<string, Variant>;
   /** The variant every owner holds while two or more read. */
   fixed: Variant | null;
+  /** Readers that came while it couldn't be shared, which ask the provider themselves. */
+  readonly strangers: Set<string>;
   /** Playlists by the address asked for, and by the address they came from. */
   readonly playlists: Map<string, Answer>;
-  /** Segments by media and discontinuity sequence numbers and address without its query. */
+  /** Segments by playlist, media and discontinuity sequence numbers and address but for its query. */
   readonly segments: Map<string, Answer>;
   /** Its requests to the provider until each ended, kept or not. */
   readonly requests: Set<Answer>;
@@ -313,19 +321,29 @@ export function hlsShares({
     null;
 
   /**
-   * The variant whose playlist `asked` is: by its address, with any query a player added to it,
-   * else the only one at that path.
+   * The variant whose playlist `asked` is, as the kept multivariant playlist or one asked for
+   * again names it: by its address, else the most specific whose query `asked` has with what a
+   * player adds to it, else the only one at that path.
    */
   const variantOf = (share: Share, asked: string) => {
     const url = URL.parse(asked);
     if (!url) return undefined;
-    const at = share.variants.filter((each) => pathOf(each.address) === pathOf(asked));
-    const named = at.find((each) =>
-      [...new URL(each.address).searchParams].every(
-        ([name, value]) => url.searchParams.get(name) === value,
-      ),
-    );
-    return named ?? (at.length === 1 ? at[0] : undefined);
+    const named = [
+      ...share.variants.map((each) => [each.address, each] as const),
+      ...share.aliases,
+    ];
+    const at = named.filter(([address]) => pathOf(address) === pathOf(asked));
+    const exact = at.find(([address]) => address === asked);
+    if (exact) return exact[1];
+    const query = (address: string) => [...new URL(address).searchParams];
+    const within = at
+      .filter(([address]) =>
+        query(address).every(([name, value]) => url.searchParams.get(name) === value),
+      )
+      .toSorted(([a], [b]) => query(b).length - query(a).length);
+    if (within[0]) return within[0][1];
+    const distinct = new Set(at.map(([, variant]) => variant));
+    return distinct.size === 1 ? at[0]![1] : undefined;
   };
 
   /** Holds every owner to one variant while two or more read, telling each when that changed. */
@@ -387,8 +405,16 @@ export function hlsShares({
       }
       decide(variants.length ? "variants" : "other");
       if (share.kind !== "variants" || !variants.length) return forget(share, answer);
-      // One asked again is its asker's alone: the variants held stay the first's.
-      if (share.master) return;
+      // One asked again is its asker's alone, and the variants held stay the first's: its own,
+      // as under new tokens, are those in the same place at the same path.
+      if (share.master) {
+        for (const [at, each] of variants.entries()) {
+          const kept = share.variants[at];
+          if (kept && pathOf(kept.address) === pathOf(each.address))
+            share.aliases.set(each.address, kept);
+        }
+        return;
+      }
       share.master = answer;
       share.variants = variants;
     } else {
@@ -398,7 +424,11 @@ export function hlsShares({
       answer.targetMs = media.target * 1000;
       // Addresses a recent read of this playlist named stay known while their segments are
       // listed: another reader may have that read. Numbers that went back are named anew.
-      const of = variantOf(share, address)?.address ?? pathOf(url);
+      // A variant's playlist at the address it sent on to is that variant's too.
+      const variant = variantOf(share, address);
+      if (variant && url !== address && share.aliases.size < ALIASES)
+        share.aliases.set(url, variant);
+      const of = variant?.address ?? pathOf(url);
       answer.playlist = of;
       const oldest = media.segments[0]!.sequence;
       const last = share.media.get(of);
@@ -414,7 +444,7 @@ export function hlsShares({
         for (const [segment, each] of share.segments)
           if (each.of === of) share.segments.delete(segment);
       for (const each of media.segments) {
-        const segment = `${each.sequence} ${each.epoch} ${pathOf(each.address)}`;
+        const segment = `${of} ${each.sequence} ${each.epoch} ${pathOf(each.address)}`;
         share.names.set(each.address, { segment, sequence: each.sequence, read, of });
       }
     }
@@ -439,6 +469,7 @@ export function hlsShares({
     asked: string,
     open: (address: string, signal: AbortSignal) => Promise<Response>,
     signal: AbortSignal,
+    joining = false,
   ): Promise<Response> => {
     for (;;) {
       signal.throwIfAborted();
@@ -452,8 +483,10 @@ export function hlsShares({
         kind: null,
         master: null,
         variants: [],
+        aliases: new Map(),
         current: new Map(),
         fixed: null,
+        strangers: new Set(),
         playlists: new Map(),
         segments: new Map(),
         requests: new Set(),
@@ -462,8 +495,13 @@ export function hlsShares({
         closing: null,
       };
       shares.set(key, share);
+      if (share.strangers.has(owner)) return open(asked, signal);
       if (!share.owners.has(owner)) {
         drop(owner, key);
+        if (!joining && share.kind === "variants" && share.current.size > 0 && !joins(share)) {
+          share.strangers.add(owner);
+          return open(asked, signal);
+        }
         share.owners.add(owner);
         settle(share);
       }
@@ -526,7 +564,9 @@ export function hlsShares({
   /** Takes `owner` out of every share but `kept`'s, closing those it was the last of. */
   const drop = (owner: string, kept?: string) => {
     for (const [key, share] of shares) {
-      if (key === kept || !share.owners.delete(owner)) continue;
+      if (key === kept) continue;
+      share.strangers.delete(owner);
+      if (!share.owners.delete(owner)) continue;
       share.current.delete(owner);
       if (share.owners.size > 0) {
         settle(share);
@@ -557,6 +597,7 @@ export function hlsShares({
      * Answers `address` of the HLS stream `key` names: from what the provider answered another
      * reader, or through `open` of the address it asks, which is the held variant's playlist in
      * place of another variant's. `owner` names who reads it, and `signal` ends this answer.
+     * `joining` says it was admitted to share what reads `key` now.
      */
     resource,
     /**
@@ -568,11 +609,6 @@ export function hlsShares({
       const share = shares.get(key);
       if (!share || share.closing || share.owners.size === 0) return false;
       return share.kind === "media" || (share.kind === "variants" && joins(share) !== null);
-    },
-    /** Whether anything reads `key` now, shared or not. */
-    taken: (key: string) => {
-      const share = shares.get(key);
-      return share !== undefined && !share.closing && share.owners.size > 0;
     },
     /** The variant a reader joining `key` now holds, as its multivariant playlist names it. */
     joins: (key: string) => {

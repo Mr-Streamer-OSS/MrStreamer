@@ -42,6 +42,8 @@ export interface CaptureSource {
    * the one recorded.
    */
   readonly variant?: string | null;
+  /** Whether it was admitted to share what reads `shared` now. */
+  readonly joining?: boolean;
 }
 
 /** Live captures and who the recording reads them as, for a source's `shared`. */
@@ -226,7 +228,14 @@ async function openSource(
           !shared || !sharing
             ? await open(address, reading)
             : source.format === "hls"
-              ? await sharing.resource(shared, sharing.owner, address, open, reading)
+              ? await sharing.resource(
+                  shared,
+                  sharing.owner,
+                  address,
+                  open,
+                  reading,
+                  source.joining,
+                )
               : await sharing.request(
                   shared,
                   sharing.owner,

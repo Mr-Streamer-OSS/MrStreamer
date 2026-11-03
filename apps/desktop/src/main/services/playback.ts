@@ -347,6 +347,8 @@ interface LiveSession extends SessionBase {
    * recording from the archive, a receiver's stream and HLS it converts.
    */
   readonly shares: number | null;
+  /** Whether it was admitted to share a capture something else reads (`LiveCaptures`). */
+  readonly joined: boolean;
   /** Which stream plays, and those that failed before it: see `Playback.playing`. */
   delivered: LivePlaying;
   readonly format: StreamFormat;
@@ -3250,7 +3252,7 @@ function make(deps: PlaybackDeps) {
             !shared || !captures
               ? await open(url, asking)
               : session.kind === "live" && session.format === "hls"
-                ? await captures.resource(shared, session.id, url, open, asking)
+                ? await captures.resource(shared, session.id, url, open, asking, session.joined)
                 : await captures.request(shared, session.id, (opened) => open(url, opened), asking);
         } catch (cause) {
           return {
@@ -3440,6 +3442,7 @@ function make(deps: PlaybackDeps) {
             archive || receiver || !shareable(format, options.repair ?? false)
               ? null
               : source.revision,
+          joined: options.joining !== undefined,
           delivered: { variantId: null, failed: [] },
           request: source.provider.request,
           format,

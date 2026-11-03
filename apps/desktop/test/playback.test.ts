@@ -1299,7 +1299,7 @@ describe("live captures", () => {
     ].join("\n");
     const media = (name: string) =>
       `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:2,\n${name}-7.ts\n`;
-    const read = async (owner: string, name: string) => {
+    const read = async (owner: string, name: string, joining = false) => {
       const answer = await captures.resource(
         key,
         owner,
@@ -1310,6 +1310,7 @@ describe("live captures", () => {
           return Promise.resolve(new Response(file === "master" ? master : media(file ?? "")));
         },
         new AbortController().signal,
+        joining,
       );
       return answer.text();
     };
@@ -1343,21 +1344,28 @@ describe("live captures", () => {
     expect(captures.fixed("watch")).toBeNull();
     expect(await read("watch", "hd.m3u8?token=1")).toBe(media("hd"));
 
-    // In 2160 lines, more than a recording takes, it is no stream to join, and a recording that
-    // joins anyway holds Watch to the quality it reads instead.
+    // In 2160 lines, more than a recording takes, it is no stream to join: a recording admitted
+    // on a connection of its own reads the provider itself, holding Watch to nothing.
     await read("watch", "uhd.m3u8?token=1");
     expect(captures.reading(key)).toBe(false);
-    expect(captures.taken(key)).toBe(true);
     expect(captures.joins(key)).toBeNull();
-    await read("record", "master.m3u8");
+    asked.length = 0;
+    await read("other", "master.m3u8");
+    expect(await read("other", "sd.m3u8?token=1")).toBe(media("sd"));
+    expect(await read("other", "sd.m3u8?token=1")).toBe(media("sd"));
+    expect(asked).toEqual(["master.m3u8", "sd.m3u8", "sd.m3u8"]);
     expect(captures.fixed("watch")).toBeNull();
-    expect(await read("record", "sd.m3u8?token=1")).toBe(media("sd"));
+    // One admitted to share it as Watch went to 2160 holds Watch to the quality it reads instead.
+    await read("record", "master.m3u8", true);
+    expect(captures.fixed("watch")).toBeNull();
+    expect(await read("record", "sd.m3u8?token=1", true)).toBe(media("sd"));
     expect(captures.fixed("watch")).toBe(variant("sd"));
+    await captures.idle("other");
     await captures.idle("record");
     await captures.idle("watch");
   });
 
-  it("tells HLS variants apart by their query, and keeps the one held when asked for its variants again", async () => {
+  it("tells HLS variants and their segments apart by their query, also once its variants are asked for again", async () => {
     const { captures, source } = await capturing();
     const key = captureKey({ ...source, format: "hls", url: "http://provider/master.m3u8" });
     let token = 1;
@@ -1366,6 +1374,8 @@ describe("live captures", () => {
       [
         "#EXTM3U",
         '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="s",NAME="English",URI="subs.m3u8"',
+        "#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1920x1080",
+        "leaf.m3u8",
         ...["hd", "sd"].flatMap((quality) => [
           "#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=1280x720",
           `leaf.m3u8?quality=${quality}&token=${token}`,
@@ -1380,11 +1390,16 @@ describe("live captures", () => {
         owner,
         new URL(name, "http://provider/").href,
         (address) => {
-          const quality = new URL(address).searchParams.get("quality");
-          asked.push(quality ?? "master");
+          const url = new URL(address);
+          const quality = url.searchParams.get("quality") ?? "plain";
+          asked.push(`${url.pathname.slice(1)} ${quality}`);
           return Promise.resolve(
             new Response(
-              quality ? `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\n${quality}.ts\n` : master(),
+              url.pathname === "/master.m3u8"
+                ? master()
+                : url.pathname === "/leaf.m3u8"
+                  ? `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:5\n#EXTINF:2,\nsegment.ts?quality=${quality}\n`
+                  : quality,
             ),
           );
         },
@@ -1394,24 +1409,42 @@ describe("live captures", () => {
     };
     const sd = "http://provider/leaf.m3u8?quality=sd&token=1";
 
+    // Watch alone: a segment of each variant is that variant's.
     await read("watch", "master.m3u8");
-    expect(await read("watch", "leaf.m3u8?quality=sd&token=1&_HLS_msn=3")).toContain("sd.ts");
+    await read("watch", "leaf.m3u8?quality=hd&token=1");
+    expect(await read("watch", "segment.ts?quality=hd")).toBe("hd");
+    expect(await read("watch", "leaf.m3u8?quality=sd&token=1&_HLS_msn=5")).toContain("sd");
+    expect(await read("watch", "segment.ts?quality=sd")).toBe("sd");
+    // The variant without a query is a variant of its own.
     expect(captures.joins(key)).toBe(sd);
+
+    // A recording holds both to it, also once Watch's variants are asked for again under new
+    // tokens.
     await read("record", "master.m3u8");
     expect(captures.fixed("watch")).toBe(sd);
-    expect(await read("record", "leaf.m3u8?quality=hd&token=1")).toContain("sd.ts");
-    // Asked for again, under new tokens: the variant held stays.
+    expect(await read("record", "leaf.m3u8?quality=hd&token=1")).toContain("quality=sd");
     token = 2;
     expect(await read("watch", "master.m3u8")).toContain("token=2");
-    expect(captures.fixed("watch")).toBe(sd);
+    expect(await read("watch", "leaf.m3u8?quality=hd&token=2")).toContain("quality=sd");
     expect(captures.fixed("record")).toBe(sd);
-    expect(asked).not.toContain("hd");
+    expect(asked.filter((each) => each.endsWith(" hd"))).toEqual(["leaf.m3u8 hd", "segment.ts hd"]);
     await captures.idle("record");
 
     // Its subtitles in a rendition of their own, a recording would leave out: no stream to join.
     await read("watch", "leaf.m3u8?quality=subtitled&token=1");
     expect(captures.reading(key)).toBe(false);
     await captures.idle("watch");
+
+    // A recording reading such a quality: Watch, admitted on a connection of its own, reads the
+    // provider itself, and the recording keeps its quality.
+    await read("record", "master.m3u8");
+    await read("record", "leaf.m3u8?quality=subtitled&token=2");
+    await read("watch", "master.m3u8");
+    expect(await read("watch", "leaf.m3u8?quality=sd&token=2")).toContain("quality=sd");
+    expect(captures.fixed("record")).toBeNull();
+    expect(await read("record", "leaf.m3u8?quality=subtitled&token=2")).toContain("subtitled");
+    await captures.idle("watch");
+    await captures.idle("record");
   });
 });
 
