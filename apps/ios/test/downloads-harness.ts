@@ -270,6 +270,7 @@ afterEach(async () => {
   memory.appState = "active";
   memory.locked = false;
   native.held = null;
+  native.leaseDeadlines = null;
   native.sync = null;
   await background.forceQuit();
   // What an earlier launch left streaming ends before the next test asks the panels for files.
@@ -338,6 +339,7 @@ async function install() {
   native.requests.length = 0;
   native.pauseMs = 0;
   native.held = null;
+  native.leaseDeadlines = null;
   native.sync = null;
   memory.keychain.clear();
   memory.keychainMs = 0;
