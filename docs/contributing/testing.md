@@ -5,7 +5,7 @@ The suite checks what the services promise, through their public functions, agai
 ## Running the suite
 
 ```sh
-pnpm check                                                             # lint, format, types, unused code and workflows
+pnpm check                                                             # lint, format, types, unused code, workflows and documentation paths
 pnpm lint:fix                                                          # apply safe lint fixes, then check again
 pnpm test                                                              # every test file
 pnpm vitest run apps/desktop/test/receiver.test.ts --reporter=verbose  # one file, with each test's time

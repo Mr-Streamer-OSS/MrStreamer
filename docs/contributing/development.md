@@ -5,7 +5,7 @@ Needs Node 24 or later and the pnpm version pinned in [package.json](../../packa
 ```sh
 pnpm install --frozen-lockfile
 pnpm dev          # the app with hot reload
-pnpm check        # lint, formatting, types, unused code and workflows
+pnpm check        # lint, formatting, types, unused code, workflows and documentation paths
 pnpm lint:fix     # apply Oxlint's safe fixes
 pnpm fmt          # format with Prettier
 pnpm test         # Vitest
