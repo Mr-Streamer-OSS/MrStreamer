@@ -10,9 +10,10 @@ const DOMAINS = ["root", "file", "database", "sharedpref", "external"];
 const excluded = (section) =>
   [
     `  <${section}>`,
-    ...DOMAINS.flatMap((domain) => [domain, `device_${domain}`])
-      .filter((domain) => domain !== "device_external")
-      .map((domain) => `    <exclude domain="${domain}" path="." />`),
+    // Each domain and its device_ form; Android has no device_external.
+    ...DOMAINS.flatMap((domain) =>
+      domain === "external" ? [domain] : [domain, `device_${domain}`],
+    ).map((domain) => `    <exclude domain="${domain}" path="." />`),
     `  </${section}>`,
   ].join("\n");
 const RULES = [

@@ -1958,7 +1958,7 @@ function replay(from: number | undefined, paused: boolean) {
   void start(choice, {
     ...options,
     watch: state.get().watch,
-    ...(from === undefined ? {} : { from }),
+    ...defined({ from }),
   });
   if (paused) {
     held = { by: "viewer", acknowledged: false };

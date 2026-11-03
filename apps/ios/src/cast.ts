@@ -1,5 +1,6 @@
 import { rewritePlaylist, type Refusal, type RouteKind } from "./cast-media.ts";
 import { store, useStore, type Store } from "./store.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Play on TV: an open Cast sender, with no Google SDK. `modules/cast` finds TVs on the local
 // network, opens the TLS connection to one and serves media from the phone; everything the
@@ -826,7 +827,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
           metadata: { metadataType: 0, title: loaded.title, subtitle: loaded.subtitle },
         },
         autoplay: !loaded.paused,
-        ...(loaded.live ? {} : { currentTime: loaded.from }),
+        ...defined({ currentTime: loaded.live ? undefined : loaded.from }),
       });
       const firstOf = (answer: Record<string, unknown>) =>
         (Array.isArray(answer["status"]) ? answer["status"] : []).find(isRecord);
