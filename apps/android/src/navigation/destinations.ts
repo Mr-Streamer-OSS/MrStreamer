@@ -9,7 +9,7 @@ export interface Destination {
   /** The tab's route in `src/app/(tabs)/`. */
   readonly route: "home" | "(live)" | "movies" | "series";
   readonly label: string;
-  /** Material icons, outlined while another destination is selected. */
+  /** Material icons: `selectedIcon` while the destination shows, `icon` while another does. */
   readonly icon: IconName;
   readonly selectedIcon: IconName;
 }
