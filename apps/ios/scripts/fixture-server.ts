@@ -13,7 +13,8 @@
 // under ids of its own. Its requests are logged to requests-<port>.jsonl, and it says where it runs in server-<port>.json.
 // Everything it writes goes to .local/ios-fixture, or to FIXTURE_OUT, a directory of a session's
 // own, where it also makes its media and declares, in provenance.json (provenance-<port>.json for
-// a second provider), where each piece came from (scripts/native-fixtures/media.ts).
+// a second provider), where each piece came from (scripts/native-fixtures/media.ts). FIXTURE_MEDIA_CACHE,
+// a directory, keeps each piece it makes for later sessions to copy rather than encode again.
 //
 // Every channel is a live loop: the TEST channels loop their recording from
 // apps/desktop/test/fixtures, codecs as they are, so the ones AVPlayer can't decode fail as they
@@ -110,6 +111,7 @@ import {
 } from "./native-fixtures/media.ts";
 import { liveTracks, tracksChannel, TRACKS_STREAM_ID } from "./native-fixtures/tracks.ts";
 import { titleTransfers } from "./native-fixtures/transfers.ts";
+import { defined } from "../../../packages/core/src/defined.ts";
 
 const USERNAME = process.env.FIXTURE_USERNAME ?? "fixture";
 const PASSWORD = process.env.FIXTURE_PASSWORD ?? "fixture-pass";
@@ -132,7 +134,13 @@ const artLogin =
     : "";
 const log = join(out, second ? `requests-${port}.jsonl` : "requests.jsonl");
 
-const maker = mediaMaker(root, out, second ? `provenance-${port}.json` : "provenance.json");
+const cache = process.env.FIXTURE_MEDIA_CACHE;
+const maker = mediaMaker(
+  root,
+  out,
+  second ? `provenance-${port}.json` : "provenance.json",
+  cache ? resolve(cache) : undefined,
+);
 
 /**
  * A minute of test picture with its clock, inset on a light or a dark field, and a `tone`: 720p at
@@ -192,8 +200,10 @@ const provider = await startFakeProvider({
   password: PASSWORD,
   second,
   channelOf: tracksChannel,
-  ...(pngLogos ? { logoPng: pngLogo } : {}),
-  ...(browsing ? { titlesOf: (built: FakeTitles) => browseTitles(built, second) } : {}),
+  ...defined({
+    logoPng: pngLogos ? pngLogo : undefined,
+    titlesOf: browsing ? (built: FakeTitles) => browseTitles(built, second) : undefined,
+  }),
 });
 const browse = browsing ? browseControls(provider, second) : null;
 const lists = liveLists(provider);
@@ -432,7 +442,7 @@ createServer((request, response) => {
       channel: id,
       status,
       path: redacted(path),
-      ...(range ? { range } : {}),
+      ...defined({ range: range || undefined }),
     });
     if (status !== 200 && status !== 206 && status !== 416)
       answer(response, status, "text/plain", "");
@@ -553,7 +563,7 @@ createServer((request, response) => {
 
 writeFileSync(
   join(out, second ? `server-${port}.json` : "server.json"),
-  JSON.stringify({ port, controlPort, started, ...(profile ? { profile } : {}) }),
+  JSON.stringify({ port, controlPort, started, ...defined({ profile: profile ?? undefined }) }),
 );
 console.log(`fake TMDB at http://127.0.0.1:${port}/tmdb/3`);
 if (profile) console.log(`${profile.name} profile ${JSON.stringify(profile)}`);

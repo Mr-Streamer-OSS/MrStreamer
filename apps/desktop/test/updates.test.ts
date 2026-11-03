@@ -16,6 +16,7 @@ import {
   type UpdatesDeps,
 } from "../src/main/services/updates.ts";
 import { promised, runtimeFor, tempDir } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const METADATA = "latest-mac.yml";
 
@@ -743,7 +744,7 @@ describe("finding releases", () => {
       metadataFile: METADATA,
       userAgent: "MrStreamer/test",
       fetch: fetchImpl,
-      ...(now ? { now } : {}),
+      ...defined({ now }),
     });
 
   it("reads both channels from the feed with one request", async () => {
@@ -919,7 +920,7 @@ it("observes one actual shared update check and bounded failures, excluding inst
     observeCheck(channel) {
       channels.push(channel);
       starts++;
-      return (outcome, failure) => outcomes.push({ outcome, ...(failure ? { failure } : {}) });
+      return (outcome, failure) => outcomes.push({ outcome, ...defined({ failure }) });
     },
   });
   const first = service.check();

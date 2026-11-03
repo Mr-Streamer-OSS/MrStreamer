@@ -55,10 +55,9 @@ export const cases: readonly ProofCase[] = [
           return error instanceof Error ? error.name : "failed";
         }
       };
-      const statics = URL as unknown as Record<string, unknown>;
       return {
-        canParse: typeof statics["canParse"] === "function",
-        parse: typeof statics["parse"] === "function",
+        canParse: typeof URL.canParse === "function",
+        parse: typeof URL.parse === "function",
         relative: attempt(() => new URL("../ok?a=1", "http://line.test:8080/live/user/pass/1.ts")),
         absolutePath: attempt(() => new URL("/ok", "https://line.test/player_api.php?x=1")),
         otherHost: attempt(() => new URL("http://cdn.test/a b", "https://line.test/")),

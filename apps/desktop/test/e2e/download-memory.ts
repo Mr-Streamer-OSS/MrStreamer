@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { fileDisk, transfer, type Disk } from "../../src/main/downloads/transfer.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const BLOCK = 1024 * 1024;
 
@@ -57,7 +58,7 @@ if (process.argv[2] === "serve") {
       "Content-Length": size - from,
       "Accept-Ranges": "bytes",
       ETag: etag,
-      ...(ranged ? { "Content-Range": `bytes ${from}-${size - 1}/${size}` } : {}),
+      ...defined({ "Content-Range": ranged ? `bytes ${from}-${size - 1}/${size}` : undefined }),
     });
     const mine = generation;
     let at = from;
@@ -134,7 +135,7 @@ async function measure(mebibytes: number, out: string | undefined) {
       const result = {
         name,
         outcome: outcome.kind,
-        ...(outcome.kind === "failed" ? { failure: outcome.failure } : {}),
+        ...defined({ failure: outcome.kind === "failed" ? outcome.failure : undefined }),
         restarted: last.restarted,
         bytesOnDisk: onDisk,
         seconds: Math.round(seconds * 10) / 10,

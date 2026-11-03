@@ -137,13 +137,19 @@ Actual background and physical-device acceptance remain separate from source and
   guide grid, programme Search, catch-up, custom lists, reminders, Live audio and subtitle tracks,
   embedded and online subtitles, the next-episode countdown, speed and Now Playing, the download
   queue's pause and order, offline series, metadata and diagnostics recovery, interface language,
-  lighter launch and Automatic quality, and the adaptive iPad and Duo layouts below. It's source on
-  `main`: `app.json` still names 0.1.0, and there is no 0.2.0 TestFlight build or App Store release. Its simulator
+  lighter launch and Automatic quality, and the adaptive iPad and Duo layouts below. Build 19,
+  archived from `main` at `a80a34e2`, has been on TestFlight for the internal "Private iPhone
+  testing" group since 3 November 2026, with the Downloads header ring and Play on TV. Build 18,
+  from `7229b687`, predates both and stays available to the same group. There is no App Store
+  release of 0.2.0. Its simulator
   results go on the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148), and the [release card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288153777)
   holds what it still needs.
-- **Gated, not delivered:** more media formats and Google Cast each have a researched route that
-  hasn't been qualified on a device; their delivery cards are blocked
-  ([formats](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196422), [Cast](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196691)). AirPlay is the only TV output.
+- **Play on TV** ([card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196691))
+  is in build 19, not build 18: an open Cast sender without Google's SDK, and the phone serving
+  the stream on Wi-Fi while the app is in the foreground ([below](#play-on-tv)). It hasn't played
+  on a real TV or been tried on a physical iPhone or iPad yet. More media formats have a researched route that hasn't been qualified on a device; its
+  delivery card is blocked
+  ([formats](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196422)).
 - **Elsewhere:** the Mac App Store is a separate, planned desktop release whose sandbox feasibility comes first, with nothing submitted
   ([card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=262337967)), and an
   Apple TV app is a future plan. Full desktop parity isn't claimed.
@@ -337,6 +343,52 @@ pause only end it, as Space does, and Pause holds a Watch set aside paused. Each
 item it was sent for and is dropped once another shows. These are source and service checks; the real lock
 screen, Control Center, headphones and background behavior still need native acceptance, including
 where iOS shows next beside the ±10 s skips.
+
+## Play on TV
+
+Watch's TV button plays what plays on a Cast TV on the same Wi-Fi, through an open sender: no
+Google SDK, account or registration. `modules/cast` browses `_googlecast._tcp` only while the
+chooser is open, so Cast never makes iOS ask for Local Network before then; a provider on the
+local network may already have made it ask. Denying it keeps this iPhone and AirPlay. It opens TLS to the TV's port 8009 and serves media. `src/cast.ts`
+speaks the protocol (Default Media Receiver `CC1AD845`, LOAD, PLAY, PAUSE, SEEK, SET_VOLUME, STOP,
+CLOSE and the heartbeat), and `src/cast-media.ts` decides what a TV is given.
+
+- **One reader, on the phone.** A TV is a route of the one player (`playback.ts`): the same lease
+  and readers, with the relay as the stream's reader in AVPlayer's place. This iPhone, AirPlay,
+  Picture in Picture and a TV never play together: while a TV plays, Watch hides AirPlay and
+  Picture in Picture, so Disconnect and play here comes first.
+- **What the TV gets:** `http://<phone's Wi-Fi IPv4>:<port>/<128-bit token>/0.<ext>` for one load,
+  with the title and its line. The relay reads the provider with the source's headers, follows
+  redirects itself and rewrites every playlist to opaque paths under the token, so no provider
+  address, login or header reaches the TV. Revoking the token cuts its requests and connections.
+- **First profile.** Matroska goes through a format session from 0 as fMP4 HLS, with resume as
+  the LOAD's `currentTime`, the chosen sound track's rendition only and no subtitles. Refused
+  with a plain reason before anything reaches the TV: AVI and other files, keys (even one that
+  appears later), a channel that isn't HLS, no private Wi-Fi address, and HLS variants whose
+  CODECS name anything outside H.264 up to level 4.1, 1080p and AAC (a Matroska file's own
+  playlist must name them). MP4 and MOV go as they are, byte ranges and every track, and a
+  channel's variants that name no codecs go unchecked: a TV that can't play them says so, and
+  Watch says "<TV> couldn't play it." A Matroska file with any sound outside AAC, even beside an
+  AAC track, is refused, since its renditions don't say which is which. Watch hides Audio,
+  Subtitles and Speed while a TV plays.
+- **Foreground only.** Leaving the app with a TV connected asks iOS for background time at once:
+  the TV's media stops, the token goes, readers close and the lease returns, then the receiver
+  stops and the connection closes, and Watch says "Stopped on the TV when you left the app." Without that time, or once it ends,
+  the relay and the TV's connection close natively; a Matroska title's format session then
+  closes when the app runs again, as one paused here does. The screen stays on while a TV is
+  connected. There is no silent-audio keepalive. How long a TV plays what it buffered after the
+  phone stops serving is unmeasured.
+- **Ending on the TV.** Its remote, another sender's load or its receiver quitting ends the route
+  where the title got to, says "<TV> stopped playing it." and leaves the TV to whoever plays
+  there; a lost connection says "Lost <TV>." A title that finished stays finished.
+- **Trust.** The TV isn't authenticated, as on the desktop: whatever answers the browse as a TV
+  gets a TV's address and title, nothing more.
+
+`test/cast.test.ts` and `test/cast-media.test.ts` check the sender against a fake TV and the relay's
+rewriting on Linux. The module builds and links for the iOS 27 simulator, where Watch shows the
+TV button and the chooser; nothing has played on a real TV or iPhone. Local Network on a
+physical iPhone, discovery of a real TV, TLS to a real receiver, the relay reached from a TV,
+playback, background timing and energy all still need a device.
 
 ## How it is built
 
@@ -650,11 +702,15 @@ translated.
 iOS's own controls, such as text menus, follow the localizations the app bundle declares, which this
 leaves as they were.
 
-Downloads' header entry and Watch's existing button show the queue's actual percentage, received
-bytes when its size is unknown, provider wait, queue count or failure. Search offers the same
-entry while that status exists, closing Search onto Downloads on its original tab and keeping
-the query. All three read the existing downloads store (`src/download-status.tsx`); completed
-copies alone leave no extra status. There is no new timer, transfer or animated indicator.
+Downloads' header entry is one fixed 44-point slot with no text: its circle is a still ring of the
+transfer's actual fraction, dotted when the size is unknown, a dim track while waiting, queued or
+paused, and carries a badge when only retryable failures are left. Watch's existing button shows
+the queue's actual percentage, received bytes when its size is unknown, provider wait, queue
+count or failure as text. Search offers the same entry, with that text, while that status exists,
+closing Search onto Downloads on its original tab and keeping the query. VoiceOver reads the full
+status on all three. They read the existing downloads store (`src/download-status.tsx`);
+completed copies alone leave no extra status. There is no new timer, transfer or animated
+indicator.
 Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, because the view that
 starts Picture in Picture has to stay while it plays. Its Downloads and Settings open on the tab
 under it, closing Search first if Watch came back over it (`openOnTabs` in `src/header.tsx`):
@@ -921,7 +977,8 @@ only category it is in, away from Find countries or categories as well.
 The panel combines FFmpeg-generated test media with synthetic repository clips from
 `apps/desktop/test/fixtures`, silent unless `FIXTURE_SOUND=1`: a clip with sound is served as a
 copy whose sound is silent in the same streams and codecs ([testing](../../docs/contributing/testing.md#sound)). Generated artifacts are kept under `.local/ios-fixture` or
-`FIXTURE_OUT`. `scripts/native-fixtures/media.ts` records both kinds in the provenance: the
+`FIXTURE_OUT`. With `FIXTURE_MEDIA_CACHE`, a directory, each generated piece is also kept there
+and copied from it by later sessions instead of encoded again, as CI does. `scripts/native-fixtures/media.ts` records both kinds in the provenance: the
 control port's `/provenance` and `provenance.json` say where each piece came from; no provider
 or broadcast media is served. Catch-up plays as HLS on channel 1000 for three days and 1006 for
 two (`catch-up.ts`). Stream 7999, "TEST | Live sound and subtitles (EN/NL)", has two sound and two
@@ -983,12 +1040,15 @@ proof out: `src/app/proof.tsx` loads it only in development.
 ## Signed iPhone candidates and TestFlight
 
 The app installs as `app.mrstreamer.player`, the desktop's `appId`, in development and release
-builds alike. Its version is its own, not the desktop's: `version` in `app.json` is `0.1.0` for
-the public candidate as well as the private beta, and `main` hasn't moved it to 0.2.0. Build 17
-of 0.1.0 went to App Review on 27 October 2026 with manual release; leave that build and its review
-as they are. Read the current App Store Connect build and
-version inventory before allocating an unused `ios.buildNumber`; record the dated readback and
-allocation on the candidate's project card.
+builds alike. Its version is its own, not the desktop's: `app.json` names `0.2.0` with
+`ios.buildNumber` `19`. Build 19 was archived from `a80a34e2`, uploaded once and added to the
+internal TestFlight group on 3 November 2026, where App Store Connect shows it VALID and in beta
+testing; it has Play on TV and the Downloads header ring. Build 18, archived from `7229b687`,
+predates both and stays in that group. Build 17 of 0.1.0 went to App Review on 27 October 2026
+with manual release and is still waiting there; leave that build and its review as they are.
+Because 19 is now taken, the next archive needs a new number: before each archive, read the
+current App Store Connect build and upload inventory again, move `ios.buildNumber` to the next
+unused number, and record the dated readback and allocation on the candidate's project card.
 The submitted 0.1.0 candidate used `supportsTablet: false`, requesting iPhone device family 1
 without a native iPad target; Apple's iPhone compatibility mode on iPad is separate. The
 next-release source sets `supportsTablet: true`, requesting iPhone and iPad families 1 and 2.

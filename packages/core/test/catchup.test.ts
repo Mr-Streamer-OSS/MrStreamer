@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { ChannelVariant, LiveChannel } from "@mrstreamer/contracts/library";
 import { archiveVariants, DAY_MS } from "../src/catchup.ts";
+import { defined } from "../src/defined.ts";
 
 const NOW = Date.UTC(2026, 9, 13, 20, 0);
 const HOUR = 60 * 60 * 1000;
@@ -13,7 +14,7 @@ const variant = (id: string, catchupDays?: number): ChannelVariant => ({
   name: id,
   tags: [],
   quality: null,
-  ...(catchupDays ? { catchupDays } : {}),
+  ...defined({ catchupDays: catchupDays || undefined }),
 });
 
 const channel = (...variants: ChannelVariant[]): Pick<LiveChannel, "variants" | "catchupDays"> => ({

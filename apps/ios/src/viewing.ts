@@ -38,6 +38,7 @@ import {
   sameMembership,
   type Membership,
 } from "./viewing-membership.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Favourite channels, how far movies and episodes got, the episodes marked by hand and Continue
 // watching: core's viewing record service, the desktop's own rules, over core's in-memory store,
@@ -193,7 +194,7 @@ const layer = ViewingRecord.layer.pipe(
             const shown = channels;
             return (id: string) => shown.get(ownedKey({ subscriptionId, id }));
           }),
-        ...(remembers ? { favourite } : {}),
+        ...defined({ favourite: remembers ? favourite : undefined }),
       }),
       Layer.succeed(ViewingSeries, {
         identity: (series) =>

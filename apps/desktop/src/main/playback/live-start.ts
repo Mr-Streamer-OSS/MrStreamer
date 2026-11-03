@@ -3,6 +3,7 @@ import type { Codec, StreamFailure } from "@mrstreamer/contracts/playback";
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { createCleanStart } from "./clean-start.ts";
 import { createInspector, type Inspection, type StreamLayout } from "./inspect.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 export type Opened =
   | {
@@ -58,14 +59,15 @@ export async function inspectStart(
   let pending: Promise<ReadResult> | null = null;
   const facts = (): PlaybackDiagnostic => {
     const unresolved = latest?.open.flat() ?? [];
+    // Inspection's conservative codec guesses must never be reported as observed codecs.
+    const guessed = unresolved.length > 0 ? ("unknown" as const) : undefined;
     return {
-      // Inspection's conservative codec guesses must never be reported as observed codecs.
-      ...(unresolved.length > 0
-        ? { diagnostic_video_codec: "unknown" as const, diagnostic_audio_codec: "unknown" as const }
-        : {}),
-      ...(!latest || unresolved.length > 0
-        ? { diagnostic_reason: "inspection_undetermined" as const }
-        : {}),
+      ...defined({
+        diagnostic_video_codec: guessed,
+        diagnostic_audio_codec: guessed,
+        diagnostic_reason:
+          !latest || unresolved.length > 0 ? ("inspection_undetermined" as const) : undefined,
+      }),
     };
   };
   const deadline = Date.now() + INSPECT_LIMIT.ms;

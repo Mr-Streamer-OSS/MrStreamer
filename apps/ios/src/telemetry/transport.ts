@@ -1,6 +1,7 @@
 import { type } from "arktype";
 import type { AnalyticsSettings } from "@mrstreamer/contracts/analytics";
 import { CaptureEvent } from "./model.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 export type CaptureResult = "accepted" | "retry" | "discard";
 export interface CaptureTransport {
@@ -85,7 +86,7 @@ function capture(
           app_version: properties.app_version,
           app_build: properties.app_build,
           os: properties.os,
-          ...(properties.os_major === undefined ? {} : { os_major: properties.os_major }),
+          ...defined({ os_major: properties.os_major }),
           $process_person_profile: false,
           $geoip_disable: true,
           ...ownProperties(allowed),

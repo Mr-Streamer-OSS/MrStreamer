@@ -68,7 +68,7 @@ export const ipc = {
   },
   /** The arguments of each call to `method` so far, which its contract allowed. */
   argsOf: <M extends IpcMethod>(method: M): IpcInput<M>[] =>
-    calls.filter((each) => each.method === method).map((each) => each.args as IpcInput<M>),
+    calls.flatMap((each) => (each.method === method ? [each.args as IpcInput<M>] : [])),
   /** The methods called so far, in order. */
   methods: (): IpcMethod[] => calls.map((each) => each.method),
   /** Holds the next call to `method` until the test answers it. */
@@ -259,18 +259,23 @@ Object.defineProperty(document.documentElement, "requestFullscreen", {
  * are listed, and happy-dom draws nothing either way. It times none, so a test moves the element's
  * clock and sends `seeked` itself.
  */
-const inherited: object = Object.getPrototypeOf(TextTrack.prototype);
+const inherited = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(TextTrack.prototype),
+  "mode",
+);
+const { get: readMode, set: writeMode } = inherited ?? {};
+if (!readMode || !writeMode) throw new Error("happy-dom's TextTrack base no longer holds mode.");
 Object.defineProperty(TextTrack.prototype, "mode", {
   configurable: true,
   get(this: TextTrack): TextTrackMode {
-    return Reflect.get(inherited, "mode", this);
+    return readMode.call(this);
   },
   set(this: TextTrack, mode: TextTrackMode) {
-    Reflect.set(inherited, "mode", mode === "hidden" ? "showing" : mode, this);
+    writeMode.call(this, mode === "hidden" ? "showing" : mode);
   },
 });
 
 // The contract types each method's answer; the stand-in answers whatever the test gives.
-const api: BridgeApi = bridge as unknown as BridgeApi;
+const api: BridgeApi = bridge as BridgeApi;
 Object.assign(window, { mrStreamer: api });
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

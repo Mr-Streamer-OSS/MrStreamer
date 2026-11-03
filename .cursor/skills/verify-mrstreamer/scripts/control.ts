@@ -58,9 +58,12 @@ import {
   liveStreams,
   QUALITY_STREAM_IDS,
   startFakeProvider,
+  type FakeChannel,
+  type FakeProviderOptions,
 } from "../../../../apps/desktop/test/fake-provider.ts";
 import { startFakeTmdb } from "../../../../apps/desktop/test/fake-tmdb.ts";
 import { isLocale } from "../../../../packages/contracts/src/language.ts";
+import { defined } from "../../../../packages/core/src/defined.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const desktop = join(root, "apps/desktop");
@@ -106,6 +109,74 @@ const scenarios = [
   "custom-lists-round-trip",
 ] as const;
 type Scenario = (typeof scenarios)[number];
+
+/** A playable test channel with a guide channel of its own, for the guide scenarios. */
+const guided = (channel: FakeChannel): FakeChannel =>
+  channel.fixture
+    ? { ...channel, guideId: channel.guideId ?? `test${channel.streamId}.grid` }
+    : channel;
+
+/** The playable test channels get guides of their own, but for the third. */
+const gridded = (channel: FakeChannel): FakeChannel =>
+  channel.streamId === 1002 ? channel : guided(channel);
+
+/** What a scenario's fake provider serves beyond its channel and title counts. */
+function scenarioProvider(scenario: Scenario): FakeProviderOptions {
+  switch (scenario) {
+    case "guide-grid":
+      return { guideHours: { past: 6, ahead: 24 }, channelOf: gridded };
+    case "guide-grid-cells":
+      return { guideHours: { past: 6, ahead: 24 }, guideLengths: [1, 2, 30], channelOf: gridded };
+    case "recordings":
+      return {
+        // Half-hour programmes, so Record offers When it ends.
+        guideHours: { past: 1, ahead: 3 },
+        guideLengths: [30],
+        channelOf: guided,
+        streams: (channel, out, signal) => longStreams(channel, out, signal, liveStreams),
+      };
+    case "schedules":
+      // Half-hour programmes, so Record offers When it ends.
+      return { guideHours: { past: 1, ahead: 3 }, guideLengths: [30], channelOf: guided };
+    case "reminders":
+      // Three-minute programmes, so one comes due within the run.
+      return { guideHours: { past: 1, ahead: 6 }, guideLengths: [3], channelOf: guided };
+    case "guide-grid-scroll":
+      return {
+        guideHours: { past: 24, ahead: 24 },
+        // Every second listed channel has a guide channel of its own.
+        channelOf: (channel) =>
+          channel.fixture || channel.streamId < 2000
+            ? channel
+            : { ...channel, guideId: channel.streamId % 2 ? null : `grid${channel.streamId}` },
+      };
+    case "live-categories":
+      return {
+        channelOf: (channel) =>
+          channel.fixture || channel.streamId < 2000
+            ? channel
+            : { ...channel, name: `${channel.name} ${channel.streamId}`, guideId: null },
+      };
+    case "home-stage":
+    case "home-stage-live-only":
+      return {
+        channelOf: stageChannel,
+        logoSvg: stageLogo,
+        streams: stageStreams,
+        adultChannels: true,
+      };
+    case "guides":
+      return { guideIdOf: (channel) => sourcedGuideId(channel.name) ?? channel.guideId };
+    case "custom-lists-sources":
+      return { adultChannels: true };
+    case "live-names":
+      return { channelOf: longNamed };
+    case "guide-labels":
+      return { guideIdOf: (channel) => labelledGuideId(channel.name) ?? channel.guideId };
+    default:
+      return {};
+  }
+}
 const [command, selected] = process.argv.slice(2);
 if (command === "--help" || !command) {
   console.log(`Usage: pnpm verify:desktop doctor | ${scenarios.join(" | ")} | downloads-queue | downloads-series
@@ -234,78 +305,7 @@ async function run(scenario: Scenario, prior?: string) {
       // Poster grids read 120 titles a page; poster-grid crosses several.
       titles: scenario === "poster-grid" ? 400 : 30,
       live: true,
-      ...(scenario === "guide-grid" || scenario === "guide-grid-cells"
-        ? {
-            guideHours: { past: 6, ahead: 24 },
-            ...(scenario === "guide-grid-cells" ? { guideLengths: [1, 2, 30] } : {}),
-            // The playable test channels get guides of their own, but for the third.
-            channelOf: (channel) =>
-              channel.fixture && channel.streamId !== 1002
-                ? { ...channel, guideId: channel.guideId ?? `test${channel.streamId}.grid` }
-                : channel,
-          }
-        : {}),
-      ...(scenario === "recordings"
-        ? {
-            streams: (channel, out, signal) => longStreams(channel, out, signal, liveStreams),
-          }
-        : {}),
-      ...(scenario === "recordings" || scenario === "schedules"
-        ? {
-            // Half-hour programmes, so Record offers When it ends.
-            guideHours: { past: 1, ahead: 3 },
-            guideLengths: [30],
-            channelOf: (channel) =>
-              channel.fixture
-                ? { ...channel, guideId: channel.guideId ?? `test${channel.streamId}.grid` }
-                : channel,
-          }
-        : {}),
-      ...(scenario === "reminders"
-        ? {
-            // Three-minute programmes, so one comes due within the run.
-            guideHours: { past: 1, ahead: 6 },
-            guideLengths: [3],
-            channelOf: (channel) =>
-              channel.fixture
-                ? { ...channel, guideId: channel.guideId ?? `test${channel.streamId}.grid` }
-                : channel,
-          }
-        : {}),
-      ...(scenario === "guide-grid-scroll"
-        ? {
-            guideHours: { past: 24, ahead: 24 },
-            // Every second listed channel has a guide channel of its own.
-            channelOf: (channel) =>
-              channel.fixture || channel.streamId < 2000
-                ? channel
-                : { ...channel, guideId: channel.streamId % 2 ? null : `grid${channel.streamId}` },
-          }
-        : {}),
-      ...(scenario === "live-categories"
-        ? {
-            channelOf: (channel) =>
-              channel.fixture || channel.streamId < 2000
-                ? channel
-                : { ...channel, name: `${channel.name} ${channel.streamId}`, guideId: null },
-          }
-        : {}),
-      ...(stage
-        ? {
-            channelOf: stageChannel,
-            logoSvg: stageLogo,
-            streams: stageStreams,
-            adultChannels: true,
-          }
-        : {}),
-      ...(scenario === "guides"
-        ? { guideIdOf: (channel) => sourcedGuideId(channel.name) ?? channel.guideId }
-        : {}),
-      ...(scenario === "custom-lists-sources" ? { adultChannels: true } : {}),
-      ...(scenario === "live-names" ? { channelOf: longNamed } : {}),
-      ...(scenario === "guide-labels"
-        ? { guideIdOf: (channel) => labelledGuideId(channel.name) ?? channel.guideId }
-        : {}),
+      ...scenarioProvider(scenario),
     });
     if (scenario === "next-episode") provider.replaceEpisodeFile(81000, "title-h264-aac.mp4");
     if (scenario === "guides") {
@@ -432,16 +432,15 @@ async function run(scenario: Scenario, prior?: string) {
             !/^(LANGUAGE|LANG|LC_ALL|LC_MESSAGES)$/.test(name),
         ),
       );
+      if (process.platform === "linux")
+        Object.assign(env, { LANGUAGE: system, LANG: `${system}.UTF-8` });
       const started = spawn(running.executable, args, {
         cwd: root,
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
         env: {
           ...env,
-          ...(process.env["MR_STREAMER_FFMPEG"]
-            ? { MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] }
-            : {}),
-          ...(process.platform === "linux" ? { LANGUAGE: system, LANG: `${system}.UTF-8` } : {}),
+          ...defined({ MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] || undefined }),
           MR_STREAMER_UPDATE_CHECKS: "off",
           MR_STREAMER_TMDB_API: ownedTmdb.url,
           MR_STREAMER_TMDB_KEY: "test-key",
@@ -511,7 +510,7 @@ async function run(scenario: Scenario, prior?: string) {
         throw new Error("CDP belongs to another app than the prior release's.");
       const url = await live().evaluate<string>("location.href");
       if (!url.startsWith(running.renderer)) throw new Error(`Wrong renderer: ${url}`);
-      observed[running.app ? "doctor" : "priorDoctor"] = {
+      const doctor = {
         executable: running.executable,
         pid: app?.pid,
         port,
@@ -528,9 +527,11 @@ async function run(scenario: Scenario, prior?: string) {
           ...(labelHost ? [Number(new URL(labelHost.origin).port)] : []),
         ],
         url,
-        // A prior release's app is identified by its executable, not by this checkout's build.
-        ...(running.app ? build : {}),
       };
+      // A prior release's app is identified by its executable, not by this checkout's build.
+      observed[running.app ? "doctor" : "priorDoctor"] = running.app
+        ? { ...doctor, ...build }
+        : doctor;
     };
     await launch();
     const livePage = {
@@ -606,7 +607,7 @@ async function run(scenario: Scenario, prior?: string) {
         type: native ? "keyDown" : "rawKeyDown",
         key: name,
         windowsVirtualKeyCode: code,
-        ...(native ? { text: name === "Enter" ? "\r" : " " } : {}),
+        ...defined({ text: native ? (name === "Enter" ? "\r" : " ") : undefined }),
       });
       await send("Input.dispatchKeyEvent", {
         type: "keyUp",

@@ -190,6 +190,7 @@ import {
   type ReceiverLan,
   type ReceiverTools,
 } from "../playback/receiver-delivery.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** How long the provider gets to start answering before the stream counts as failed. */
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -2460,7 +2461,7 @@ function make(deps: PlaybackDeps) {
               }
             })
           : null;
-      lease.report({ start, ...(subtitles ? { subtitles: subtitles.receive } : {}) });
+      lease.report({ start, ...defined({ subtitles: subtitles ? subtitles.receive : undefined }) });
       // ffmpeg can be gone before the proxy has heard what it sent, as after a run of a file's
       // last seconds: that arrives in a moment.
       const heard = ended.then((code) =>
@@ -3625,7 +3626,7 @@ function make(deps: PlaybackDeps) {
             .remember(account, sourceStamp, {
               kind: title.kind,
               id: title.id,
-              ...(title.kind === "episode" ? { seriesId: title.seriesId } : {}),
+              ...defined({ seriesId: title.kind === "episode" ? title.seriesId : undefined }),
               fileKey,
               listingKey,
               audio: audioTracks(probe.audio).map((track) => track.language),
@@ -3795,7 +3796,7 @@ function make(deps: PlaybackDeps) {
               channel,
               url: `${base}/stream/${session.token}.${extension}`,
               format: session.delivery,
-              ...(session.archive ? { archive: session.archive } : {}),
+              ...defined({ archive: session.archive ?? undefined }),
             };
           }),
         ),

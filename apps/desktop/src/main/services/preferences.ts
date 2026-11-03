@@ -36,6 +36,7 @@ import * as Semaphore from "effect/Semaphore";
 import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 import { Subscriptions, type SavedSubscription } from "./subscription.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
+import { defined } from "@mrstreamer/core/defined";
 
 /**
  * preferences.json as stored: the preferences, and what the viewer left the original subscription
@@ -323,14 +324,12 @@ function make(dataDir: string, usage?: UsageObservers) {
                       ? {
                           ...general(file),
                           ...defaultSubscriptionPreferences,
-                          ...(file.interfaceLanguage === undefined
-                            ? {}
-                            : { interfaceLanguage: file.interfaceLanguage }),
+                          ...defined({ interfaceLanguage: file.interfaceLanguage }),
                         }
                       : file;
                     return {
                       ...kept,
-                      ...(rememberedLiveBrowse === undefined ? {} : { rememberedLiveBrowse }),
+                      ...defined({ rememberedLiveBrowse }),
                     };
                   });
                 }
@@ -399,8 +398,7 @@ function ofOriginal({
   return {
     lastChannelId,
     lastCategoryId,
-    ...(titleVersions ? { titleVersions } : {}),
-    ...(channelVariants ? { channelVariants } : {}),
+    ...defined({ titleVersions, channelVariants }),
   };
 }
 
@@ -428,9 +426,7 @@ function preferenceChanges(before: Stored, after: Stored) {
     ],
     ["home_rows", homeRows(before.homeRows), homeRows(after.homeRows)],
   ] as const;
-  return keys
-    .filter(([, previous, next]) => !isDeepStrictEqual(previous, next))
-    .map(([key]) => key);
+  return keys.flatMap(([key, previous, next]) => (isDeepStrictEqual(previous, next) ? [] : [key]));
 }
 
 function sameBaseline(a: OwnedId | null, b: OwnedId | null): boolean {

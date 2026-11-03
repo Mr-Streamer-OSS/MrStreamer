@@ -27,6 +27,7 @@ import {
   tempDir,
   testConfig,
 } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // CI points this at the bundled build, with ffprobe beside it; locally the ones on PATH do.
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
@@ -82,7 +83,7 @@ async function casting(
       ffmpeg: FFMPEG,
       ffprobe: FFPROBE,
       output: {
-        ...(options.observePlayback ? { observePlayback: options.observePlayback } : {}),
+        ...defined({ observePlayback: options.observePlayback }),
         adapters: [
           castAdapter({
             discovery: tv.discovery,
@@ -104,7 +105,7 @@ async function casting(
         ],
         addresses: () => ["127.0.0.1"],
         fetchMs: options.fetchMs ?? 60_000,
-        ...(options.checkpointMs ? { checkpointMs: options.checkpointMs } : {}),
+        ...defined({ checkpointMs: options.checkpointMs || undefined }),
       },
     }),
   );

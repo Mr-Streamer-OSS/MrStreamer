@@ -524,7 +524,10 @@ function reader(
     from programme join title on title.key = programme.title
     where programme.channel = ? and programme.start = ?`);
   const unended = (rows: Record<string, unknown>[], at: number) =>
-    rows.map(programmeOf).filter((programme) => programme.stop > at);
+    rows.flatMap((row) => {
+      const programme = programmeOf(row);
+      return programme.stop > at ? [programme] : [];
+    });
   return {
     channels: read.channels,
     ends: read.ends,

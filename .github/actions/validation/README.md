@@ -1,13 +1,33 @@
 # Secretless validation contract
 
 After checking out the exact candidate and trusted validation tools, call this composite action
-with `part: check`, `test`, or `website`, and a unique `report-name` when calling more than once. Run Check and Test in separate jobs, with the existing
-10/15-minute bounds. Check includes the production desktop build and workflow validation.
-Test preserves the full suite, multimedia setup, JSON artifact and completeness gate. Website
+with `part: check`, `test`, or `website`, and a unique `report-name` when calling more than once.
+Run Check and Test in separate jobs, bounded at 10 and 15 minutes; Checks bounds each test shard at
+15 minutes and its merging Test at 10. Check includes the production desktop build and workflow validation.
+Test preserves the full suite, multimedia setup, JSON artifact and completeness gate,
+and installs ffmpeg alongside Node and the dependencies. It restores
+the native fixture's encoded media from an Actions cache keyed by the ffmpeg package set and the
+fixture's sources, and saves it after a passing run that encoded it; each piece's name hashes its
+ffmpeg command, inputs and version, so the fixture copies only a piece made by the same command
+and encodes any other. Website
 requires only a read-only `GH_TOKEN` for release history. There are no signing or publishing steps.
 
+Checks splits Test across runners. `part: test` with `shard: <index>` and `shards: <count>` runs
+one Vitest shard (`--shard`) with the same multimedia setup, and uploads its blob report,
+report name and validation identity as `test-shard-<report-name>-<index>`, replaced by a rerun of
+that shard. The job named Test then calls `part: test-shards`: `.github/scripts/test-shards.ts`
+requires each shard 1 to `<count>` of its report name exactly once, with a blob, Vitest merges the
+blobs into the usual `test-results-<report-name>-<attempt>` report, with each file's seconds beside
+it as `test-durations.json` for the shard split, and the same completeness gate judges the union.
+`part: test-shards` installs only the root's dependencies, which the merge needs.
+Its identity output is the shared identity of every shard and its own runner, or empty when they
+differ, which refuses reuse without failing Test. The caller must also fail Test unless every
+shard job succeeded, and when the run was cancelled. Release fallback keeps the whole
+`part: test` in one job.
+
 The caller must execute trusted action code: for an older candidate, check out the workflow's
-reviewed tools separately with a full checkout, including `.github/scripts` and `.github/tests`,
+reviewed tools separately with a full checkout, including `.github/scripts`, `.github/tests` and
+`scripts/test-durations.ts`, the reporter Test's merge loads from those tools,
 and refer to that action path. A sparse checkout of actions alone is insufficient. Run from the
 candidate workspace.
 Do not load validation code from arbitrary forks in a privileged release workflow.

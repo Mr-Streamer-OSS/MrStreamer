@@ -7,6 +7,7 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { startFakeHls } from "./fake-hls.ts";
 import { promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 import { fixture } from "./fake-provider.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
@@ -580,7 +581,7 @@ it.each(["ended", "archive"] as const)(
     const start = Date.now() - 600_000;
     const session = await playback.open(channel("compatible"), ["h264", "aac"], {
       repair: true,
-      ...(mode === "archive" ? { archive: { start, end: start + 50_000 } } : {}),
+      ...defined({ archive: mode === "archive" ? { start, end: start + 50_000 } : undefined }),
     });
     const bytes = Buffer.from(await (await fetch(session.url)).arrayBuffer());
     const output = decoded(bytes);
@@ -1000,7 +1001,7 @@ it.each(["live", "ended", "archive"] as const)(
     });
     const session = await playback.open(channel("epochs"), ["h264", "aac"], {
       repair: true,
-      ...(mode === "archive" ? { archive: { start: 0, end: 60_000 } } : {}),
+      ...defined({ archive: mode === "archive" ? { start: 0, end: 60_000 } : undefined }),
     });
     expect(
       await fetch(session.url)

@@ -87,8 +87,11 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
       "SHA256SUMS.txt",
       strToU8(
         assets
-          .filter((asset) => asset.name !== "SHA256SUMS.txt")
-          .map((asset) => `${sha256(bodies.get(asset.name)!)}  ${asset.name}\n`)
+          .flatMap((asset) =>
+            asset.name !== "SHA256SUMS.txt"
+              ? [`${sha256(bodies.get(asset.name)!)}  ${asset.name}\n`]
+              : [],
+          )
           .join(""),
       ),
     );

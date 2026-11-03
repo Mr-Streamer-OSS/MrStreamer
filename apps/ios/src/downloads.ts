@@ -59,6 +59,7 @@ import {
   titleOf,
 } from "./titles.ts";
 import { recordProgress } from "./viewing.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Movies and episodes downloaded to this iPhone: the queue and the copies that play with no
 // provider, as the desktop's downloads do. This module alone writes downloads.json and the
@@ -734,7 +735,10 @@ async function apply(record: Stored, outcome: OutcomeV2, inFront: boolean, bound
     case "paused":
       // The same authorization goes on once its subscription's stream let go, or the viewer's
       // pause was let go.
-      update(id, () => ({ ...withoutFailure(record), ...(bound ? { transfer: bound } : {}) }));
+      update(id, () => ({
+        ...withoutFailure(record),
+        ...defined({ transfer: bound ?? undefined }),
+      }));
       break;
     case "cancelled":
       requeue();
@@ -1324,7 +1328,7 @@ async function firstForeground(): Promise<void> {
         if (record.state !== "complete" && record.transfer !== undefined) {
           update(record.id, (latest) => ({
             ...unbound(latest),
-            ...(latest.failure ? { failure: latest.failure } : {}),
+            ...defined({ failure: latest.failure }),
           }));
         }
       }
@@ -1764,7 +1768,7 @@ export async function addDownload(ref: TitleRef): Promise<Download> {
     addedAt: Date.now(),
     completedAt: null,
     progress: null,
-    ...(kept.continuation ? { continuation: kept.continuation } : {}),
+    ...defined({ continuation: kept.continuation }),
   };
   commit({ ...doc, items: [...doc.items, record] });
   void keepArtwork(record.id, kept.artwork);
@@ -2158,9 +2162,10 @@ function playCopy(id: string, record: Stored) {
       tmdbId: about.tmdbId ?? null,
       title: about.name,
       year: about.year,
-      ...(title.kind === "episode"
-        ? { episode: { season: title.season, number: title.episode } }
-        : {}),
+      ...defined({
+        episode:
+          title.kind === "episode" ? { season: title.season, number: title.episode } : undefined,
+      }),
     }),
   };
   const from =

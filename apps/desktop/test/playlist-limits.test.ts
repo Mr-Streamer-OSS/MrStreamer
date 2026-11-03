@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { playlistGroupId } from "@mrstreamer/core/playlist/import";
 import { playlistProvider } from "../src/main/providers/m3u.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const link = "https://example.test/list";
 const groups = [{ group: playlistGroupId("Films"), mode: "movie" as const }];
@@ -18,7 +19,7 @@ function playlist(count: number, distinctGroups = false): string {
 
 function provider(body: string, mapped = false) {
   return playlistProvider(
-    { link, ...(mapped ? { mapping: { version: 1 as const, groups } } : {}) },
+    { link, ...defined({ mapping: mapped ? { version: 1 as const, groups } : undefined }) },
     { userAgent: "test", fetch: async () => new Response(body) },
   );
 }
@@ -56,7 +57,7 @@ describe("explicit playlist mapping limits", () => {
         },
       });
       const source = playlistProvider(
-        { link, ...(mapped ? { mapping: { version: 1 as const, groups } } : {}) },
+        { link, ...defined({ mapping: mapped ? { version: 1 as const, groups } : undefined }) },
         { userAgent: "test", fetch: async () => new Response(body) },
       );
       await expect(source.playlistImport!()).rejects.toMatchObject({

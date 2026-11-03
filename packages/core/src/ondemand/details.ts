@@ -21,6 +21,7 @@ import type { ProviderDetails, ProviderEpisode } from "../provider.ts";
 import { suitability } from "./languages.ts";
 import { episodeName, titleName } from "./names.ts";
 import { t } from "../i18n.ts";
+import { defined } from "../defined.ts";
 
 export function movieDetails(
   title: Title,
@@ -68,20 +69,21 @@ export function seriesDetails(
       duration: episode.duration,
       stillUrl: episode.stillUrl,
       airDate: episode.airDate,
-      ...(sourceOrder ? { exactVersion: true as const } : {}),
-      ...(sourceOrder && versions.length > 1
-        ? {
-            versions: versions.map((file) => ({
-              id: file.id,
-              name: file.name,
-              tags: titleName(file.name).tags,
-              duration: file.duration,
-              container: file.container,
-              addedAt: file.addedAt,
-              listedOrder: listedOrder.get(file.id) ?? 0,
-            })),
-          }
-        : {}),
+      ...defined({
+        exactVersion: sourceOrder ? (true as const) : undefined,
+        versions:
+          sourceOrder && versions.length > 1
+            ? versions.map((file) => ({
+                id: file.id,
+                name: file.name,
+                tags: titleName(file.name).tags,
+                duration: file.duration,
+                container: file.container,
+                addedAt: file.addedAt,
+                listedOrder: listedOrder.get(file.id) ?? 0,
+              }))
+            : undefined,
+      }),
     };
     episodeOrder.push(shown.id);
     const list = bySeason.get(episode.season);
@@ -105,7 +107,10 @@ export function seriesDetails(
     kind: "series",
     ...shared(title, details, about),
     seasons,
-    ...(sourceOrder ? { episodeOrder, exactVersions: true as const } : {}),
+    ...defined({
+      episodeOrder: sourceOrder ? episodeOrder : undefined,
+      exactVersions: sourceOrder ? (true as const) : undefined,
+    }),
   };
 }
 

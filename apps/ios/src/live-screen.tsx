@@ -63,6 +63,7 @@ import {
   useListWidth,
   useRowHeight,
 } from "./ui.tsx";
+import { defined } from "@mrstreamer/core/defined";
 
 // Live, in Movies' and Series' shape: a large title, its Favourites row, which opens every
 // favourite (favourites-screen.tsx), a row for each of the viewer's lists
@@ -145,7 +146,8 @@ const detail = store<Detail | null>(null);
 
 /** A route's parameter, when it is the text its route gave. */
 const text = (params: object | undefined, name: string) => {
-  const value: unknown = params && name in params ? Reflect.get(params, name) : undefined;
+  // Navigation keeps its params as plain serializable objects, so each one is an own value.
+  const value: unknown = params && Object.getOwnPropertyDescriptor(params, name)?.value;
   return typeof value === "string" && value !== "" ? value : null;
 };
 
@@ -205,7 +207,7 @@ function useHandover(split: boolean) {
         channel: alone,
         day: null,
         programme: token,
-        ...(token ? {} : { start }),
+        ...defined({ start: token ? undefined : start }),
         alone: true,
       });
       navigation.dispatch({ type: "POP_TO_TOP", target });

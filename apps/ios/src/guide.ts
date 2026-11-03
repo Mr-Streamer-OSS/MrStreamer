@@ -17,6 +17,7 @@ import type { Part } from "./library.ts";
 import type { SourceLogin } from "./login-safety.ts";
 import { currentSource } from "./sources.ts";
 import { store } from "./store.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /**
  * What a guide downloads with: a subscription's Source, or an external guide's link
@@ -591,7 +592,7 @@ export function createGuide(
           generation: before.generation,
           failedAt: -Infinity,
           jobs: new Set(),
-          ...(before.part ? { part: before.part } : {}),
+          ...defined({ part: before.part }),
         };
         entries.set(key, pending);
       }

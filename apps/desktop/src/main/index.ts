@@ -97,6 +97,7 @@ import { Subscriptions } from "./services/subscription.ts";
 import { DEFAULT_SCHEDULE, Updates, type UpdatesConfig } from "./services/updates.ts";
 import { Watchlist } from "./services/watchlist.ts";
 import { CustomLists } from "./services/custom-lists.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Matches `appId` in electron-builder.yml: Windows groups taskbar entries and notifications by it.
 const APP_ID = "app.mrstreamer.player";
@@ -517,7 +518,7 @@ async function start(): Promise<void> {
             metadataFile: metadataFileFor(process.platform),
             userAgent,
             // A test feed serves its own files.
-            ...(process.env["MR_STREAMER_UPDATE_FEED"] ? { filesFrom: "" } : {}),
+            ...defined({ filesFrom: process.env["MR_STREAMER_UPDATE_FEED"] ? "" : undefined }),
           }),
           installer: installingOnceStopsKept(
             electronInstaller(),
@@ -571,9 +572,7 @@ async function start(): Promise<void> {
       // MR_STREAMER_TMDB_KEY at run time overrides the key built in, for testing.
       tmdbKey: process.env["MR_STREAMER_TMDB_KEY"] || __TMDB_KEY__ || null,
       region: app.getLocaleCountryCode() || "US",
-      ...(process.env["MR_STREAMER_TMDB_API"]
-        ? { tmdbApi: process.env["MR_STREAMER_TMDB_API"] }
-        : {}),
+      ...defined({ tmdbApi: process.env["MR_STREAMER_TMDB_API"] || undefined }),
       updates: updatesConfig(),
     }),
   );
@@ -1186,9 +1185,12 @@ function receiverAdapters(): ReceiverAdapter[] {
       adapters.push(
         airplayAdapter({
           helper,
-          ...(process.env["MR_STREAMER_AIRPLAY_LOG"] === "1"
-            ? { log: (line) => console.error(`[airplay] ${line}`) }
-            : {}),
+          ...defined({
+            log:
+              process.env["MR_STREAMER_AIRPLAY_LOG"] === "1"
+                ? (line: string) => console.error(`[airplay] ${line}`)
+                : undefined,
+          }),
         }),
       );
     }

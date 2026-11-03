@@ -82,6 +82,7 @@ import { SaveButton, SaveError } from "../watchlist/SaveButton.tsx";
 import { EpisodeMenu, MarkNotice, useEpisodeMarks } from "./EpisodeMarks.tsx";
 import { RelatedTitles } from "./RelatedTitles.tsx";
 import { VersionMenu } from "./VersionMenu.tsx";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Where the sheet stands, for a related title to leave from and for Back to restore. */
 interface SheetPlace {
@@ -990,9 +991,11 @@ function EpisodeVersionMenu({
         )({
           ...episode,
           id: version.id,
-          ...(episode.versions
-            ? { versions: episode.versions.filter((file) => file.id === version.id) }
-            : {}),
+          ...defined({
+            versions: episode.versions
+              ? episode.versions.filter((file) => file.id === version.id)
+              : undefined,
+          }),
           exactVersion: true,
         });
         playTitle(

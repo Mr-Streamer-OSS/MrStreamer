@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AttrList, Level } from "hls.js";
 import { createEngine, type Engine } from "../../src/renderer/src/player/engine.ts";
 import { streams, type Rendition } from "./hls-stand-in.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const fixture = vi.hoisted(() => ({
   parsed: () => {},
@@ -78,7 +79,7 @@ function level(
     bitrate,
     name: "fixture",
     url,
-    attrs: new AttrList({ "FRAME-RATE": "25", ...(group ? { AUDIO: group } : {}) }),
+    attrs: new AttrList({ "FRAME-RATE": "25", ...defined({ AUDIO: group || undefined }) }),
     videoCodec,
     audioCodec: "mp4a.40.2",
   });

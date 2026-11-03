@@ -17,6 +17,7 @@ import {
   testConfig,
   userAgent,
 } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
@@ -76,7 +77,7 @@ async function connected() {
     const file = await app.titles.file(ref);
     return playback.openTitle(ref, file.url, decoders, {
       ...file,
-      ...(turn === undefined ? {} : { turn }),
+      ...defined({ turn }),
     });
   };
   const [source] = await app.subscriptions.saved();

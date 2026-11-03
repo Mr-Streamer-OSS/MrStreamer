@@ -39,13 +39,15 @@ it("offers native field edits only where allowed by the focused field", () => {
 type Shape = readonly [role: string | null, label: string | undefined, items?: readonly Shape[]];
 
 function shape(items: readonly MenuItemConstructorOptions[]): Shape[] {
-  return items
-    .filter((item) => item.type !== "separator")
-    .map((item) =>
-      Array.isArray(item.submenu)
-        ? [item.role ?? null, item.label, shape(item.submenu)]
-        : [item.role ?? null, item.label],
-    );
+  return items.flatMap((item) =>
+    item.type !== "separator"
+      ? [
+          Array.isArray(item.submenu)
+            ? [item.role ?? null, item.label, shape(item.submenu)]
+            : [item.role ?? null, item.label],
+        ]
+      : [],
+  );
 }
 
 /** What the items do, without what they say. */

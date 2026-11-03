@@ -22,6 +22,7 @@ import {
   testSecrets,
   userAgent,
 } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // CI points this at the bundled build, with ffprobe beside it; locally the ones on PATH do.
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
@@ -960,7 +961,7 @@ describe("an HLS channel for a receiver", () => {
       const { pathname } = new URL(request.url ?? "/", "http://host");
       asked.push({
         path: pathname,
-        ...(request.headers["user-agent"] ? { userAgent: request.headers["user-agent"] } : {}),
+        ...defined({ userAgent: request.headers["user-agent"] || undefined }),
       });
       const body = routes.get(pathname);
       if (body === undefined) response.writeHead(404).end();

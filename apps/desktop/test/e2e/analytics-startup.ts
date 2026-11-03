@@ -101,11 +101,12 @@ function install(profile: string, delayMs: number) {
   ipcMain.handle = new Proxy(ipcMain.handle, {
     apply(target, receiver, [channel, listener]: Parameters<typeof ipcMain.handle>) {
       if (channel !== "preferences.get" && channel !== "preferences.update")
-        return Reflect.apply(target, receiver, [channel, listener]);
-      return Reflect.apply(target, receiver, [
+        return target.call(receiver, channel, listener);
+      return target.call(
+        receiver,
         channel,
         new Proxy(listener, {
-          async apply(handler, context, args) {
+          async apply(handler, context, args: Parameters<typeof listener>) {
             const sample = {
               startedMs: performance.now() - started,
               enabled: null as boolean | null,
@@ -128,7 +129,7 @@ function install(profile: string, delayMs: number) {
               preferenceReads.push(sample);
             if (channel === "preferences.update" && preferenceUpdates.length < 32)
               preferenceUpdates.push(update);
-            const reply: unknown = await Reflect.apply(handler, context, args);
+            const reply: unknown = await handler.apply(context, args);
             update.endedMs = performance.now() - started;
             if (
               reply &&
@@ -163,7 +164,7 @@ function install(profile: string, delayMs: number) {
             return reply;
           },
         }),
-      ]);
+      );
     },
   });
   let delayed = false;
@@ -223,7 +224,7 @@ function install(profile: string, delayMs: number) {
   ): T =>
     new Proxy(method, {
       apply(target, receiver, args: unknown[]) {
-        const run = () => Reflect.apply(target, receiver, args) as Promise<unknown>;
+        const run = () => target.apply(receiver, args as Parameters<T>);
         return matches(args[argument], operation === "directory") ? observe(operation, run) : run();
       },
     });

@@ -26,6 +26,7 @@ import {
 } from "./downloads.ts";
 import { appError, describeError } from "./errors.ts";
 import { inLanguage, t } from "./i18n/downloads.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // What a download says and what can be done with it, wherever one shows: Downloads' rows, the
 // details' capsule and episode rows. Each state offers its own actions, as the desktop's do:
@@ -360,9 +361,10 @@ export function showActions(
   const destructive = actions.flatMap((action, at) => (action.destructive ? [at] : []));
   ActionSheetIOS.showActionSheetWithOptions(
     {
-      ...(download?.status.kind === "failed"
-        ? { title: describeFailure(download.status.failure) }
-        : {}),
+      ...defined({
+        title:
+          download?.status.kind === "failed" ? describeFailure(download.status.failure) : undefined,
+      }),
       options: [...actions.map((action) => action.label), t("Cancel")],
       destructiveButtonIndex: destructive,
       cancelButtonIndex: actions.length,
@@ -418,12 +420,21 @@ export function DownloadGlyph({
 }
 
 /**
- * A still ring filled clockwise from the top by `done`. Each half is a circle's border coloured
- * on two sides, turned and clipped to its side of the ring; nothing animates.
+ * A still ring filled clockwise from the top by `done`, on a dim track. Each half is a circle's
+ * border coloured on two sides, turned and clipped to its side of the ring; nothing animates.
+ * `stroke` defaults to a ninth of `size`, at least 2; the tab header's Downloads action sets its
+ * own to match its symbol's ring.
  */
-function Ring({ done, size }: { done: number; size: number }) {
+export function Ring({
+  done,
+  size,
+  stroke = Math.max(2, Math.round(size / 9)),
+}: {
+  done: number;
+  size: number;
+  stroke?: number;
+}) {
   const turn = Math.min(1, Math.max(0, done));
-  const stroke = Math.max(2, Math.round(size / 9));
   const circle: ViewStyle = {
     position: "absolute",
     top: 0,

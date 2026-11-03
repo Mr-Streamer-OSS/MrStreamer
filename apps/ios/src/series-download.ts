@@ -217,13 +217,18 @@ export function startDownload(
   const standing = () => ended() === null;
   void (async () => {
     const failed: { ref: EpisodeRef; error: string }[] = [];
-    let result = NONE;
+    const tally = { added: 0, retried: 0, replaced: 0, removed: 0, skipped: 0 };
+    let cancelled = 0;
+    let stopped: Result["stopped"] = null;
+    /** The run as it stands, a snapshot of its own for each report. */
+    const result = (): Result => ({ ...tally, failed: [...failed], cancelled, stopped });
     let done = 0;
     for (const { ref, was } of steps) {
       await yieldNow();
-      const stopped = ended();
-      if (stopped) {
-        result = { ...result, stopped, cancelled: total - done };
+      const left = ended();
+      if (left) {
+        stopped = left;
+        cancelled = total - done;
         break;
       }
       let asked: Asked;
@@ -234,27 +239,22 @@ export function startDownload(
         asked = "failed";
       }
       if (asked === "stopped" || asked === "removed") {
-        if (asked === "removed") done++;
-        result = {
-          ...result,
-          stopped: ended() ?? "left",
-          cancelled: total - done,
-          removed: result.removed + (asked === "removed" ? 1 : 0),
-        };
+        if (asked === "removed") {
+          done++;
+          tally.removed++;
+        }
+        stopped = ended() ?? "left";
+        cancelled = total - done;
         break;
       }
-      result =
-        asked === "failed"
-          ? { ...result, failed: [...failed] }
-          : asked === "unchanged"
-            ? { ...result, skipped: result.skipped + 1 }
-            : { ...result, [asked]: result[asked] + 1 };
+      if (asked === "unchanged") tally.skipped++;
+      else if (asked !== "failed") tally[asked]++;
       done++;
-      runs.set({ id: me.id, phase: "running", done, total, result });
+      runs.set({ id: me.id, phase: "running", done, total, result: result() });
     }
     running = null;
     if (failed.length > 0) lastFailed = { id: me.id, plan, refs: failed.map((each) => each.ref) };
-    runs.set({ id: me.id, phase: "done", done, total, result });
+    runs.set({ id: me.id, phase: "done", done, total, result: result() });
   })();
   return me.id;
 }

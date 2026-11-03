@@ -148,7 +148,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
     const season = series?.seasons.at(-1);
     if (!series || !season?.[0]) throw new Error("The fake provider has no test series.");
     // The fake provider lists what its titles hold when asked.
-    (season as unknown as unknown[]).push({ ...season[0], id: 81_012 });
+    (season as unknown[]).push({ ...season[0], id: 81_012 });
     expect(await episodes()).toHaveLength(before.length);
     await onDemand.refresh();
 

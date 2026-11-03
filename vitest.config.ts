@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { defineConfig } from "vitest/config";
+import { DurationSequencer } from "./test/sequencer.ts";
 import { exclude, include } from "./test/suites.ts";
 
 // Node keeps the code it compiles, with TypeScript's types stripped, on disk and loads it from
@@ -10,14 +11,16 @@ process.env["NODE_COMPILE_CACHE"] ??= join(
   "node_modules/.cache/node-compile-cache",
 );
 
-// The iOS app keeps its own install, which CI doesn't make (pnpm-workspace.yaml leaves it out).
-// Its tests run the app's own TypeScript with the native modules mocked, so the shared packages,
-// React, ArkType, Effect and fflate it imports resolve from the desktop app's install instead: one
-// copy of each, as the app's Metro resolves the shared packages' imports from the app
-// (apps/ios/metro.config.cjs). ArkType, Effect and fflate stay aligned between installs; React
-// Native pins the iOS app's React separately.
+// The iOS and Android apps keep their own installs, which CI doesn't make (pnpm-workspace.yaml
+// leaves them out). Their tests run the app's own TypeScript with the native modules mocked, so
+// the shared packages, React, ArkType, Effect and fflate they import resolve from the desktop
+// app's install instead: one copy of each, as each app's Metro resolves the shared packages'
+// imports from the app (apps/ios/metro.config.cjs). ArkType, Effect and fflate stay aligned
+// between installs; React Native pins each app's React separately.
 // Vite names modules by path with forward slashes, on Windows too (its normalizePath).
-const ios = `${join(import.meta.dirname, "apps/ios").replaceAll("\\", "/")}/`;
+const mobile = ["apps/ios", "apps/android"].map(
+  (app) => `${join(import.meta.dirname, app).replaceAll("\\", "/")}/`,
+);
 const desktop = join(import.meta.dirname, "apps/desktop/package.json").replaceAll("\\", "/");
 const fromDesktop =
   /^(?:@mrstreamer\/(?:contracts|core)\/|(?:react(?:-dom)?|arktype|effect|fflate)(?:\/|$))/;
@@ -25,10 +28,11 @@ const fromDesktop =
 export default defineConfig({
   plugins: [
     {
-      name: "ios-tests-from-desktop-install",
+      name: "mobile-tests-from-desktop-install",
       enforce: "pre",
       resolveId(source, importer, options) {
-        if (!importer?.startsWith(ios) || !fromDesktop.test(source)) return null;
+        if (!mobile.some((app) => importer?.startsWith(app)) || !fromDesktop.test(source))
+          return null;
         return this.resolve(source, desktop, { ...options, skipSelf: true });
       },
     },
@@ -38,5 +42,7 @@ export default defineConfig({
     exclude,
     environment: "node",
     globalSetup: ["apps/desktop/test/catalogue-worker-bundle.ts"],
+    // CI's shards split by recorded file durations, and every run starts its longest files first.
+    sequence: { sequencer: DurationSequencer },
   },
 });

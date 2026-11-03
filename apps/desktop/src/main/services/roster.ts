@@ -25,6 +25,7 @@ import { Settings } from "./preferences.ts";
 import { Recordings } from "./recordings.ts";
 import { Reminders } from "./reminders.ts";
 import { Subscriptions, type Source } from "./subscription.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Lists older than this are fetched again in the background when the app starts. */
 const LISTS_MAX_AGE: Duration.Input = "12 hours";
@@ -195,7 +196,7 @@ function make() {
           // Erased as it goes, and not before: while the removal waits its turn the subscription
           // is saved still, and what is starred or saved for it then has to go with the rest.
           yield* subscriptions.remove(subscriptionId, {
-            ...(eraseViewing ? { erase: viewing.erase(subscription.key) } : {}),
+            ...defined({ erase: eraseViewing ? viewing.erase(subscription.key) : undefined }),
             // After login deletion, each owner settles before the folder goes. Settings uses
             // its existing turn both as the write barrier and to update remembered discovery.
             settle: [

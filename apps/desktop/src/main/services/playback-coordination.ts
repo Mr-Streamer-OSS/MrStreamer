@@ -127,18 +127,19 @@ export class PlaybackCoordination extends Context.Service<
       /** Connections the subscription's recordings read, but those in `joining`. */
       const recorded = (subscriptionId: string, joining: readonly string[] = []) =>
         new Set(
-          recordingsOf(subscriptionId)
-            .map((each) => each.connection)
-            .filter((connection) => !joining.includes(connection)),
+          recordingsOf(subscriptionId).flatMap(({ connection }) =>
+            joining.includes(connection) ? [] : [connection],
+          ),
         );
       /** One use per connection: a recording's, when one reads it, else Watch's. */
       const usesOf = (subscriptionId: string): ConnectionUse[] => {
         const recording = recorded(subscriptionId);
         const watching = new Set(
-          [...sessions.values()]
-            .filter((each) => each.subscriptionId === subscriptionId)
-            .map((each) => each.connection)
-            .filter((connection) => !recording.has(connection)),
+          [...sessions.values()].flatMap((each) =>
+            each.subscriptionId === subscriptionId && !recording.has(each.connection)
+              ? [each.connection]
+              : [],
+          ),
         );
         return [
           ...[...watching].map(() => "watch" as const),

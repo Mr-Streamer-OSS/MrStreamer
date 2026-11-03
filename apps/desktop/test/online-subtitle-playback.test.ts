@@ -15,6 +15,7 @@ import {
   tempDir,
   testConfig,
 } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
 /** What the window decodes: the movie's FLAC sound plays as it is, with nothing to convert. */
@@ -29,6 +30,7 @@ function serveSubdl() {
     if (url.hostname === "api.subdl.com") {
       requests++;
       const asked = url.searchParams;
+      const episode = asked.has("season_number");
       return Response.json({
         status: true,
         results: [{ tmdb_id: Number(asked.get("tmdb_id")), type: asked.get("type") }],
@@ -37,12 +39,10 @@ function serveSubdl() {
             language: "English",
             release_name: "Cinema cut",
             url: "https://dl.subdl.com/fixture.srt",
-            ...(asked.has("season_number")
-              ? {
-                  season: Number(asked.get("season_number")),
-                  episode: Number(asked.get("episode_number")),
-                }
-              : {}),
+            ...defined({
+              season: episode ? Number(asked.get("season_number")) : undefined,
+              episode: episode ? Number(asked.get("episode_number")) : undefined,
+            }),
           },
         ],
       });

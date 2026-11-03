@@ -41,6 +41,8 @@ import { parseArgs } from "node:util";
 import manifest from "../../../docs/assets/marketing-demo-sources.json" with { type: "json" };
 import { startFakeProvider, type FakeProvider } from "../test/fake-provider.ts";
 import { startFakeTmdb } from "../test/fake-tmdb.ts";
+// By path, not package: iOS scripts run this file with no install of their own.
+import { defined } from "../../../packages/core/src/defined.ts";
 
 const override = process.env["MR_STREAMER_FFMPEG"];
 const ffmpeg = override ?? "ffmpeg";
@@ -418,7 +420,7 @@ function about(url: URL, body: unknown): unknown {
   const title = titles.find((each) => each.tmdbId === id);
   if (!title || typeof body !== "object" || body === null) return body;
   const opened = url.searchParams.get("append_to_response") === "credits";
-  return {
+  const listed = {
     ...body,
     name: title.name,
     original_name: title.name,
@@ -426,23 +428,24 @@ function about(url: URL, body: unknown): unknown {
     genres: [{ id: title.genre }],
     vote_average: title.rating,
     backdrop_path: `/backdrop-${title.providerId}.jpg`,
-    ...(opened ? { poster_path: `/poster-${title.providerId}.jpg` } : {}),
-    ...(opened && title === featured
-      ? {
-          overview: featured.overview,
-          episode_run_time: [featured.runtime],
-          created_by: [{ name: featured.creator }],
-          credits: {
-            cast: featured.cast.map((person, index) => ({
-              name: person.name,
-              character: person.character,
-              profile_path: `/portrait-${index}.jpg`,
-            })),
-            crew: [],
-          },
-        }
-      : {}),
+    ...defined({ poster_path: opened ? `/poster-${title.providerId}.jpg` : undefined }),
   };
+  return opened && title === featured
+    ? {
+        ...listed,
+        overview: featured.overview,
+        episode_run_time: [featured.runtime],
+        created_by: [{ name: featured.creator }],
+        credits: {
+          cast: featured.cast.map((person, index) => ({
+            name: person.name,
+            character: person.character,
+            profile_path: `/portrait-${index}.jpg`,
+          })),
+          crew: [],
+        },
+      }
+    : listed;
 }
 
 function guideId(channel: { readonly streamId: number }): string {
@@ -566,7 +569,7 @@ function sendFile(path: string, request: IncomingMessage, response: ServerRespon
     "Content-Type": "video/x-matroska",
     "Accept-Ranges": "bytes",
     "Content-Length": end - start + 1,
-    ...(range ? { "Content-Range": `bytes ${start}-${end}/${size}` } : {}),
+    ...defined({ "Content-Range": range ? `bytes ${start}-${end}/${size}` : undefined }),
   });
   createReadStream(path, { start, end }).pipe(response);
 }

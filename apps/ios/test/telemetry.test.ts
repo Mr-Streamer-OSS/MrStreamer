@@ -135,9 +135,9 @@ const quiet = () => new Promise((done) => setTimeout(done, 150));
 
 const names = () => captured.map((body) => body["event"]);
 const ofName = (name: string) =>
-  captured
-    .filter((body) => body["event"] === name)
-    .map((body) => body["properties"] as Record<string, unknown>);
+  captured.flatMap((body) =>
+    body["event"] === name ? [body["properties"] as Record<string, unknown>] : [],
+  );
 const stored = () => JSON.parse(files.get("analytics.json") ?? "null") as AnalyticsRecord | null;
 
 let position = 0;
@@ -406,9 +406,9 @@ describe("playback", () => {
 
     await until(() => names().includes("stream_stopped"));
     expect(
-      captured
-        .filter((body) => String(body["event"]).startsWith("stream_"))
-        .map((body) => [body["event"], body["properties"]]),
+      captured.flatMap((body) =>
+        String(body["event"]).startsWith("stream_") ? [[body["event"], body["properties"]]] : [],
+      ),
     ).toEqual([
       ["stream_error", expect.objectContaining({ stream_type: "vod", error_type: "credentials" })],
       ["stream_started", expect.objectContaining({ stream_type: "vod" })],
@@ -478,9 +478,9 @@ describe("playback", () => {
 
     await until(() => names().includes("stream_stopped"));
     expect(
-      captured
-        .filter((body) => String(body["event"]).startsWith("stream_"))
-        .map((body) => [body["event"], body["properties"]]),
+      captured.flatMap((body) =>
+        String(body["event"]).startsWith("stream_") ? [[body["event"], body["properties"]]] : [],
+      ),
     ).toEqual([
       ["stream_started", expect.objectContaining({ stream_type: "live" })],
       ["stream_error", expect.objectContaining({ stream_type: "live", error_type: "unsupported" })],

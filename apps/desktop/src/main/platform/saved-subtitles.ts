@@ -20,6 +20,7 @@ import * as Layer from "effect/Layer";
 import { attempt, Database, transaction, unavailable } from "./database.ts";
 import type { FileProof } from "../playback/source-identity.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Main-only identity resolved from the current playback session and provider catalogue. */
 export interface SubtitleFile {
@@ -217,10 +218,12 @@ export const savedSubtitlesLayer = Layer.effect(
       const result = (saved: Stored): SavedSubtitle => ({
         timing: saved.timing,
         subtitle: saved.subtitle,
-        ...(saved.resultKey ? { selection: saved.resultKey } : {}),
+        ...defined({ selection: saved.resultKey || undefined }),
       });
       const visible = (saved: Stored | null): SavedSubtitle | null =>
-        saved ? { ...result(saved), ...(saved.shown === false ? { shown: false } : {}) } : null;
+        saved
+          ? { ...result(saved), ...defined({ shown: saved.shown === false ? false : undefined }) }
+          : null;
       const cachedResult = (file: SubtitleFile, key: string): SavedSubtitle | null => {
         const row = cached.get(...identity(file), key);
         if (!row) return null;
@@ -284,7 +287,7 @@ export const savedSubtitlesLayer = Layer.effect(
                     ? previous.timing
                     : DEFAULT_SUBTITLE_TIMING),
                 subtitle,
-                ...(key ? { resultKey: key } : {}),
+                ...defined({ resultKey: key || undefined }),
               },
               { proof },
             );

@@ -56,6 +56,7 @@ import {
 } from "./marketing-captures.ts";
 import { cacheDirectory, prepareMedia, startMarketingDemo } from "./marketing-demo.ts";
 import { startLinuxListing, verifyLinuxSources } from "./linux-listing.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const desktop = join(import.meta.dirname, "..");
 /** The window's size, and how many pixels a capture holds for each of its points. */
@@ -202,6 +203,7 @@ try {
       ([name]) => !name.startsWith("MR_STREAMER_") && name !== "ELECTRON_RUN_AS_NODE",
     ),
   );
+  if (linuxListing) Object.assign(env, { LANG: "en_US.UTF-8", LANGUAGE: "en" });
   const args = [
     `--remote-debugging-port=${port}`,
     "--remote-debugging-address=127.0.0.1",
@@ -217,13 +219,10 @@ try {
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...env,
-      ...(process.env["MR_STREAMER_FFMPEG"]
-        ? { MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] }
-        : {}),
+      ...defined({ MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] || undefined }),
       MR_STREAMER_UPDATE_CHECKS: "off",
       MR_STREAMER_TMDB_API: demo.tmdbApi,
       MR_STREAMER_TMDB_KEY: "marketing-capture",
-      ...(linuxListing ? { LANG: "en_US.UTF-8", LANGUAGE: "en" } : {}),
     },
   });
   for (const stream of [app.stdout, app.stderr])
@@ -461,7 +460,7 @@ try {
     proof["cleanup"] = {
       appExited: !app || app.exitCode !== null || app.signalCode !== null,
       profileRemoved: !existsSync(profile),
-      ...(linuxListing ? { fixturesClosed: true } : {}),
+      ...defined({ fixturesClosed: linuxListing ? true : undefined }),
     };
     if (cuaStarted) {
       proof["windowsAfterExit"] = cua("list_windows", { pid: app?.pid });

@@ -28,6 +28,7 @@ import {
   testSecrets,
   userAgent,
 } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** What Chromium on Linux decodes: no HEVC, no AC-3 or E-AC-3. */
 const LINUX: readonly Codec[] = ["h264", "aac", "mp3", "opus", "flac"];
@@ -275,7 +276,7 @@ function screenAt(changes: readonly SubtitleChange[], at: number): string | numb
 
 /** The lines of text on screen `at` seconds into the title. */
 function linesAt(lines: readonly Line[], at: number): string[] {
-  return lines.filter(([from, until]) => from <= at && at < until).map(([, , text]) => text);
+  return lines.flatMap(([from, until, text]) => (from <= at && at < until ? [text] : []));
 }
 
 function streamsOf(
@@ -499,9 +500,12 @@ describe.skipIf(!hasTools)("movies and episodes", { timeout: 20_000 }, () => {
         const failure = await playback.failure(session.sessionId);
         expect(failure).toMatchObject({
           kind: "unsupported",
-          ...(mode !== "missing"
-            ? { detail: expect.stringMatching(/^The file could not be played\./) }
-            : {}),
+          ...defined({
+            detail:
+              mode !== "missing"
+                ? expect.stringMatching(/^The file could not be played\./)
+                : undefined,
+          }),
           diagnostic: {
             diagnostic_stage: "convert",
             diagnostic_reason:

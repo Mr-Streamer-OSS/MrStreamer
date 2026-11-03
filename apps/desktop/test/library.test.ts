@@ -16,6 +16,7 @@ import {
   testSecrets,
   userAgent,
 } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** The library, settings and subscriptions on `dataDir`, as a start of the app reads them. */
 async function started(dataDir: string, fetchImpl?: typeof fetch) {
@@ -26,7 +27,7 @@ async function started(dataDir: string, fetchImpl?: typeof fetch) {
         Subscriptions.layer({
           dataDir,
           secrets: testSecrets,
-          providerOptions: { userAgent, ...(fetchImpl ? { fetch: fetchImpl } : {}) },
+          providerOptions: { userAgent, ...defined({ fetch: fetchImpl }) },
         }),
       ),
     ),

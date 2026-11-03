@@ -25,6 +25,8 @@
     },
     "packages/*": {}
   },
+  "ignoreIssues": { "tools/oxlint/anti-slop/**": ["exports", "types"] },
+  "ignoreUnresolved": ["^\\$ACTION_PATH/\\.\\./\\.\\./\\.\\./scripts/test-durations\\.ts$"],
   "ignoreBinaries": [
     "ffmpeg",
     "ffprobe",

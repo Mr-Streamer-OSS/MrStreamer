@@ -17,6 +17,7 @@ import { normalize as fold } from "../text.ts";
 import type { LiveCatalogue, ProviderCategory, ProviderChannel } from "../provider.ts";
 import { finish, pacer, type Steps } from "../steps.ts";
 import { leadingFlag, regionForCode, regionForName } from "./regions.ts";
+import { defined } from "../defined.ts";
 
 export interface NormalizedCatalogue {
   readonly categories: readonly Omit<Category, "channelCount" | "subscriptionId" | "members">[];
@@ -195,7 +196,7 @@ export function* normalizeSteps(catalogue: LiveCatalogue): Steps<NormalizedCatal
       region: recognised(name) ? name.region : (placed?.region ?? null),
       language: name.language ?? placed?.language ?? null,
       topics: own.flatMap((category) => category.topic ?? []),
-      ...(uncertain ? { searchUncertain: true } : {}),
+      ...defined({ searchUncertain: uncertain ? true : undefined }),
     });
   }
 

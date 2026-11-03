@@ -9,7 +9,9 @@ import { formatDecimal, formatLanguageName, formatNumber } from "@mrstreamer/cor
 import { languageCode } from "@mrstreamer/core/ondemand/tracks";
 import { lockAsync, OrientationLock, unlockAsync } from "expo-screen-orientation";
 import { isPictureInPictureSupported, VideoAirPlayButton, VideoView } from "expo-video";
+import { SymbolView } from "expo-symbols";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -23,8 +25,10 @@ import {
   AppState,
   Alert,
   Keyboard,
+  Linking,
   PanResponder,
   Pressable,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -41,6 +45,7 @@ import {
   playChannel,
   useCatalogue,
 } from "./account.ts";
+import { browseTvs, tvAvailable, useTvSearch, type Tv } from "./cast.ts";
 import { starChannel, useFavouriteKeys } from "./favourites.ts";
 import { Glass, IconButton } from "./glass.tsx";
 import { DownloadStatusButton } from "./download-status.tsx";
@@ -49,6 +54,7 @@ import { guide } from "./guide.ts";
 import { catchUpOf } from "./guide-screen.tsx";
 import { dayLabel, localDay, programmeRange } from "./guide-ui.tsx";
 import { openOnTabs, useTabs, type TabScreen } from "./header.tsx";
+import { t as tvT } from "./i18n/cast.ts";
 import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/watch.ts";
 import { NO_SHORTCUTS, useShortcuts, type Shortcut } from "./key-commands.ts";
@@ -84,7 +90,9 @@ import {
   pictureInPicture,
   player,
   playingItem,
+  playHere,
   playNext,
+  playOnTv,
   playUpNext,
   type Playing,
   type TrackChoice,
@@ -95,6 +103,7 @@ import {
   seekTo,
   setAside,
   setSpeed,
+  setTvVolume,
   showVersions,
   stop,
   togglePause,
@@ -105,12 +114,14 @@ import {
   usePlaybackClock,
   usePlaybackLength,
   usePlaybackSpeed,
+  useTvVolume,
   useUpNext,
 } from "./playback.ts";
 import type { UnshownSubtitles } from "./title-formats.ts";
 import { colors } from "./ui.tsx";
 import { currentSource } from "./sources.ts";
 import { store, useStore } from "./store.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 type WatchKey = "pause" | "rewind" | "skip" | "close" | "dismiss";
 
@@ -171,14 +182,26 @@ function showSheet(
  *
  * A subtitle downloaded for the movie or episode playing shows over the picture (`Cues`), above
  * the panel while the controls show.
+ *
+ * Play on TV, in a build that can, is the TV button beside AirPlay: it opens Play on TV's sheet
+ * (`TvSheet`). While a TV plays, the button is filled, Picture in Picture is off, and the picture's
+ * place says which TV plays it (`OnTv`); once the TV stopped, Watch says so and offers it again.
  */
 export function WatchLayer() {
   // Everything Watch shows draws again in a new language, in place: the player and its view stay.
   const locale = useLocale();
   const keys = useMemo(shortcuts, [locale]);
-  const { phase, watch, pip, external } = usePlayback();
+  const { phase, watch, pip, external, tv } = usePlayback();
   const view = useRef<VideoView>(null);
   const [controls, setControls] = useState(true);
+  // Play on TV's sheet, which closes with Watch.
+  const [tvSheet, setTvSheet] = useState(false);
+  const closeTvSheet = useCallback(() => setTvSheet(false), []);
+  useEffect(() => {
+    if (!watch) setTvSheet(false);
+  }, [watch]);
+  // A TV playing takes the picture: there is none here for Picture in Picture to take.
+  const onTv = tv.kind === "on";
   // The panel's height, which the cues sit above while the controls show.
   const [panel, setPanel] = useState(0);
   const insets = useSafeAreaInsets();
@@ -200,7 +223,8 @@ export function WatchLayer() {
   useEffect(() => {
     if (!tab) unsetAside();
   }, [tab]);
-  const pictureCanTake = phase.kind === "playing" && !external && isPictureInPictureSupported();
+  const pictureCanTake =
+    phase.kind === "playing" && !external && !onTv && isPictureInPictureSupported();
   const screens: readonly TabScreen[] = tab
     ? ["downloads", "settings"]
     : pictureCanTake
@@ -328,13 +352,16 @@ export function WatchLayer() {
           player={player()}
           nativeControls={false}
           contentFit="contain"
-          allowsPictureInPicture
-          startsPictureInPictureAutomatically
+          allowsPictureInPicture={!onTv}
+          startsPictureInPictureAutomatically={!onTv}
           onPictureInPictureStart={() => pictureInPicture(true)}
           onPictureInPictureStop={() => pictureInPicture(false)}
           onPictureInPictureRestore={({ nativeEvent }) => restore(nativeEvent.request)}
           style={StyleSheet.absoluteFill}
         />
+      ) : null}
+      {watch && phase.kind !== "idle" ? (
+        <OnTv top={insets.top + 68} bottom={insets.bottom + (controls ? 12 + panel + 12 : 24)} />
       ) : null}
       {watch ? (
         <Pressable
@@ -347,7 +374,7 @@ export function WatchLayer() {
           }}
         />
       ) : null}
-      {watch && streaming && item && !item.live ? (
+      {watch && streaming && item && !item.live && !onTv ? (
         <Cues
           item={item}
           // Over the panel and its bottom margin, with a gap.
@@ -360,8 +387,10 @@ export function WatchLayer() {
           screens={screens}
           onScreen={openScreen}
           onPanel={setPanel}
+          onTv={() => setTvSheet(true)}
         />
       ) : null}
+      {watch && tvSheet && phase.kind !== "idle" ? <TvSheet onClose={closeTvSheet} /> : null}
     </View>
   );
 }
@@ -375,52 +404,72 @@ function turn(change: () => Promise<void>) {
 /**
  * Watch's controls: the top buttons and the panel with what plays, the transport, Quality and the
  * star for a channel, the clock or scrubber, and the text-button row (Audio, Subtitles, Speed for
- * a movie or an episode, and the rest, `TextButtons`).
+ * a movie or an episode, and the rest, `TextButtons`). Once a TV stopped, the panel's Play plays
+ * here again and its row offers the TV again.
  */
 function Controls({
   onPictureInPicture,
   screens,
   onScreen,
   onPanel,
+  onTv,
 }: {
   onPictureInPicture: () => void;
+  /** Opens Play on TV's sheet. */
+  onTv: () => void;
   /** The screens Watch can open from here. */
   screens: readonly TabScreen[];
   onScreen: (screen: TabScreen) => void;
   /** The panel's height, as it lays out. */
   onPanel: (height: number) => void;
 }) {
-  const { phase } = usePlayback();
+  const { phase, tv } = usePlayback();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   if (phase.kind === "idle") return null;
   const wide = width >= 600;
   const edge = { left: insets.left + 16, right: insets.right + 16 };
   const streaming = phase.kind !== "failed";
+  // The TV button stays while a TV is chosen or just stopped, so it can be left or chosen again.
+  const tvButton = tvAvailable() && (streaming || tv.kind !== "off");
+  const stopped = phase.kind === "failed" && tv.kind === "ended" ? tv.tv : null;
   return (
     <>
       <Glass style={[styles.circle, { top: insets.top + 12, left: edge.left }]}>
         <IconButton symbol="xmark" label={t("Close")} onPress={closeWatch} testID="watch-close" />
       </Glass>
-      {streaming || screens.length > 0 ? (
+      {streaming || tvButton || screens.length > 0 ? (
         <Glass style={[styles.capsule, { top: insets.top + 12, right: edge.right }]}>
-          {streaming ? (
-            <>
-              <VideoAirPlayButton
-                style={styles.airplay}
-                tint={colors.text}
-                activeTint={colors.text}
-                accessibilityLabel="AirPlay"
-              />
-              {isPictureInPictureSupported() ? (
-                <IconButton
-                  symbol="pip.enter"
-                  label={t("Picture in Picture")}
-                  onPress={onPictureInPicture}
-                  testID="watch-pip"
-                />
-              ) : null}
-            </>
+          {/* The TV route has no item here for AirPlay to take: Disconnect and play here first. */}
+          {streaming && tv.kind !== "on" ? (
+            <VideoAirPlayButton
+              style={styles.airplay}
+              tint={colors.text}
+              activeTint={colors.text}
+              accessibilityLabel="AirPlay"
+            />
+          ) : null}
+          {tvButton ? (
+            <IconButton
+              symbol={tv.kind === "on" ? "tv.fill" : "tv"}
+              label={
+                tv.kind === "on"
+                  ? tvT("Playing on {tv}", { tv: tv.tv.name })
+                  : tv.kind === "connecting"
+                    ? tvT("Connecting to {tv}", { tv: tv.tv.name })
+                    : tvT("Play on TV")
+              }
+              onPress={onTv}
+              testID="watch-tv"
+            />
+          ) : null}
+          {streaming && tv.kind !== "on" && isPictureInPictureSupported() ? (
+            <IconButton
+              symbol="pip.enter"
+              label={t("Picture in Picture")}
+              onPress={onPictureInPicture}
+              testID="watch-pip"
+            />
           ) : null}
           {screens.includes("downloads") ? (
             <DownloadStatusButton onPress={() => onScreen("downloads")} testID="watch-downloads" />
@@ -451,11 +500,21 @@ function Controls({
                 ? phase.error
                 : phase.kind === "loading"
                   ? t("Connecting")
-                  : placeOf(phase.item)}
+                  : tv.kind === "on"
+                    ? `${placeOf(phase.item)} · ${tvT("On {tv}", { tv: tv.tv.name })}`
+                    : placeOf(phase.item)}
             </Text>
           </View>
           <View style={styles.buttons}>
-            {phase.kind === "failed" ? (
+            {stopped ? (
+              <IconButton
+                symbol="play.fill"
+                label={tvT("Play here")}
+                onPress={retry}
+                size={32}
+                testID="watch-play-here"
+              />
+            ) : phase.kind === "failed" ? (
               <>
                 <IconButton
                   symbol="arrow.clockwise"
@@ -517,8 +576,382 @@ function Controls({
         </View>
         {streaming ? phase.item.live ? <Clock /> : <Scrubber /> : null}
         {streaming ? <TextButtons item={phase.item} /> : null}
+        {stopped ? (
+          <View style={styles.textButtons}>
+            <TextControl
+              label={tvT("Play on {tv}", { tv: stopped.name })}
+              onPress={() => playOn(stopped)}
+              testID="watch-play-on-tv"
+            />
+          </View>
+        ) : null}
       </Glass>
     </>
+  );
+}
+
+/** Plays on `tv`, with the system's alert when it can't be reached. */
+function playOn(tv: Tv) {
+  void playOnTv(tv).then((message) => {
+    if (message) Alert.alert(message);
+  });
+}
+
+/**
+ * The picture's place while a TV plays it: the TV's name, and that it plays while the app is
+ * open. Once the TV stopped, that it did and why. Between the top buttons and the panel.
+ */
+function OnTv({ top, bottom }: { top: number; bottom: number }) {
+  const { tv, phase } = usePlayback();
+  const shown =
+    tv.kind === "on" && phase.kind !== "failed"
+      ? { title: tv.tv.name, line: tvT("Keep Mr. Streamer open while it plays.") }
+      : tv.kind === "ended" && phase.kind === "failed"
+        ? {
+            title: tvT("TV stopped"),
+            line:
+              tv.why === "left"
+                ? tvT("{tv} stops when you leave Mr. Streamer.", { tv: tv.tv.name })
+                : tv.why === "stopped"
+                  ? tvT("{tv} stopped playing it.", { tv: tv.tv.name })
+                  : tvT("Check that {tv} is on and on the same Wi-Fi as this iPhone.", {
+                      tv: tv.tv.name,
+                    }),
+          }
+        : null;
+  if (!shown) return null;
+  return (
+    <View pointerEvents="none" style={[styles.onTv, { top, bottom }]} testID="watch-on-tv">
+      <SymbolView name="tv" size={44} tintColor={colors.text} weight="light" />
+      <Text style={styles.onTvTitle}>{shown.title}</Text>
+      <Text style={styles.onTvLine}>{shown.line}</Text>
+    </View>
+  );
+}
+
+type TvSheetKey = "tv-done" | "tv-dismiss";
+
+/** The sheet's keys while it shows, as Watch's own: Esc, or ⌘. without one, closes it. */
+function tvSheetShortcuts(): readonly Shortcut<TvSheetKey>[] {
+  return [
+    { id: "tv-done", input: "escape", command: false, title: tvT("Done") },
+    { id: "tv-dismiss", input: ".", command: true, title: tvT("Done") },
+  ];
+}
+
+/** How long the chooser looks with nothing found before it says it found no TVs. */
+const QUIET_MS = 10_000;
+
+/**
+ * Play on TV's sheet, from Watch's bottom in a window under 600 points wide, as an iPhone's
+ * portrait one, else a popover under the top buttons, as on an iPad. It looks for TVs while it
+ * shows. With no TV playing it chooses one: the TVs found, while looking, none found, Local
+ * Network off, or looking failed. With one playing it holds that TV's volume, Disconnect and play
+ * here, and the other TVs to move to; a play the TV couldn't take says so first. A TV chosen here
+ * closes it once it plays. Done, a tap outside, a swipe down, Esc and VoiceOver's escape close it,
+ * and the keyboard is its own while it shows.
+ */
+function TvSheet({ onClose }: { onClose: () => void }) {
+  const locale = useLocale();
+  const keys = useMemo(tvSheetShortcuts, [locale]);
+  useShortcuts(keys, onClose);
+  useEffect(() => {
+    sheet.set(true);
+    return () => sheet.set(false);
+  }, []);
+  // Look again stops looking and starts again.
+  const [round, setRound] = useState(0);
+  useEffect(() => browseTvs(), [round]);
+  const search = useTvSearch();
+  const { tv, phase } = usePlayback();
+  const found = search.kind === "searching" ? search.tvs : [];
+  const looking = search.kind !== "denied" && search.kind !== "failed" && found.length === 0;
+  const [quiet, setQuiet] = useState(false);
+  useEffect(() => {
+    setQuiet(false);
+    if (!looking) return;
+    const timer = setTimeout(() => setQuiet(true), QUIET_MS);
+    return () => clearTimeout(timer);
+  }, [looking, round]);
+  const chosen = useRef<string | null>(null);
+  useEffect(() => {
+    if (tv.kind === "on" && tv.tv.id === chosen.current) onClose();
+  }, [tv, onClose]);
+  const choose = (to: Tv) => {
+    chosen.current = to.id;
+    playOn(to);
+  };
+  const again = () => setRound((count) => count + 1);
+
+  const close = useRef(onClose);
+  close.current = onClose;
+  const [drag, setDrag] = useState(0);
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, { dx, dy }) => dy > 8 && dy > Math.abs(dx),
+      onPanResponderMove: (_, { dy }) => setDrag(Math.max(0, dy)),
+      onPanResponderRelease: (_, { dy, vy }) => {
+        setDrag(0);
+        if (dy > 80 || vy > 1) close.current();
+      },
+      onPanResponderTerminate: () => setDrag(0),
+    }),
+  ).current;
+
+  const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const wide = width >= 600;
+  const connected = tv.kind === "on" ? tv.tv : null;
+  const others = connected ? found.filter((each) => each.id !== connected.id) : [];
+  // The chooser keeps its height while it looks and lists, with the note at its foot.
+  const listing = !connected && (looking ? !quiet : found.length > 0);
+  const done = wide ? null : (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onClose}
+      style={({ pressed }) => [styles.done, pressed && styles.pressed]}
+      testID="watch-tv-done"
+    >
+      <Text style={styles.doneLabel}>{tvT("Done")}</Text>
+    </Pressable>
+  );
+  const popover = insets.top + 88;
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <Pressable
+        style={[StyleSheet.absoluteFill, !wide && styles.dim]}
+        onPress={onClose}
+        accessible={false}
+        importantForAccessibility="no"
+      />
+      <View
+        accessibilityViewIsModal
+        onAccessibilityEscape={onClose}
+        style={
+          wide
+            ? [
+                styles.popover,
+                {
+                  top: popover,
+                  right: insets.right + 16,
+                  maxHeight: height - popover - insets.bottom - 16,
+                },
+              ]
+            : [
+                styles.tvSheet,
+                listing && styles.tall,
+                {
+                  paddingBottom: insets.bottom,
+                  maxHeight: height - insets.top - 24,
+                  transform: [{ translateY: drag }],
+                },
+              ]
+        }
+        testID="watch-tv-sheet"
+        {...(wide ? {} : pan.panHandlers)}
+      >
+        {wide ? null : <View style={styles.grabber} />}
+        {connected ? (
+          <View style={styles.sheetHeader}>
+            <View style={styles.names}>
+              <Text style={styles.sheetTitle} accessibilityRole="header">
+                {connected.name}
+              </Text>
+              {phase.kind === "failed" || phase.kind === "idle" ? null : (
+                <Text style={styles.sheetLine}>
+                  {tvT("Playing {title}", { title: phase.item.title })}
+                </Text>
+              )}
+            </View>
+            {done}
+          </View>
+        ) : (
+          <View style={[styles.sheetHeader, styles.chooserHeader]}>
+            <Text style={[styles.sheetTitle, styles.names]} accessibilityRole="header">
+              {tvT("Play on TV")}
+            </Text>
+            {done}
+          </View>
+        )}
+        <ScrollView contentContainerStyle={styles.sheetBody}>
+          {connected ? (
+            <>
+              {phase.kind === "failed" ? (
+                <SheetMessage
+                  title={phase.error}
+                  text={tvT("It still plays on this iPhone and with AirPlay.")}
+                />
+              ) : null}
+              <TvVolume />
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  playHere();
+                  onClose();
+                }}
+                style={({ pressed }) => [styles.disconnect, pressed && styles.pressed]}
+                testID="watch-tv-disconnect"
+              >
+                <Text style={styles.actionLabel}>{tvT("Disconnect and play here")}</Text>
+              </Pressable>
+              {others.length > 0 ? (
+                <View style={styles.moveTo}>
+                  <Text style={styles.moveLabel} accessibilityRole="header">
+                    {tvT("Move to another TV")}
+                  </Text>
+                  <TvRows tvs={others} onChoose={choose} />
+                </View>
+              ) : null}
+            </>
+          ) : search.kind === "denied" ? (
+            <SheetMessage
+              title={tvT("Local Network is off for Mr. Streamer")}
+              text={tvT("Turn it on in Settings to find TVs. AirPlay and this iPhone still play.")}
+              action={{ label: tvT("Open Settings"), run: () => void Linking.openSettings() }}
+            />
+          ) : search.kind === "failed" ? (
+            <SheetMessage
+              title={tvT("Can't look for TVs")}
+              text={tvT("Check that the TV is on and on the same Wi-Fi as this iPhone.")}
+              action={{ label: tvT("Look again"), run: again }}
+            />
+          ) : found.length > 0 ? (
+            <>
+              <TvRows tvs={found} onChoose={choose} />
+              <Text style={styles.stillLooking}>{tvT("Looking for more on this Wi-Fi")}</Text>
+            </>
+          ) : quiet ? (
+            <SheetMessage
+              title={tvT("No TVs found")}
+              text={tvT("Check that the TV is on and on the same Wi-Fi as this iPhone.")}
+              action={{ label: tvT("Look again"), run: again }}
+            />
+          ) : (
+            <Text style={styles.looking} accessibilityLiveRegion="polite">
+              {tvT("Looking for TVs on this Wi-Fi")}
+            </Text>
+          )}
+          {listing ? (
+            <>
+              <View style={styles.spacer} />
+              <View style={styles.note}>
+                <Text style={styles.noteTitle}>
+                  {tvT("Keep Mr. Streamer open while it plays on the TV.")}
+                </Text>
+                <Text style={styles.noteLine}>
+                  {tvT("Leaving the app stops playback on the TV.")}
+                </Text>
+              </View>
+            </>
+          ) : null}
+        </ScrollView>
+      </View>
+    </View>
+  );
+}
+
+/** A state of the sheet in a few words, with what to do about it. */
+function SheetMessage({ title, text, action }: { title: string; text: string; action?: Row }) {
+  return (
+    <View style={styles.message} accessibilityLiveRegion="polite">
+      <Text style={styles.messageTitle}>{title}</Text>
+      <Text style={styles.messageText}>{text}</Text>
+      {action ? (
+        <Pressable
+          accessibilityRole="button"
+          onPress={action.run}
+          style={({ pressed }) => [styles.messageAction, pressed && styles.pressed]}
+          testID="watch-tv-action"
+        >
+          <Text style={styles.actionLabel}>{action.label}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** TVs to choose, each by its name and model; the one connecting says so. */
+function TvRows({ tvs, onChoose }: { tvs: readonly Tv[]; onChoose: (tv: Tv) => void }) {
+  const { tv: route } = usePlayback();
+  return tvs.map((each) => {
+    const line =
+      route.kind === "connecting" && route.tv.id === each.id ? tvT("Connecting") : each.model;
+    return (
+      <Pressable
+        key={each.id}
+        accessibilityRole="button"
+        accessibilityLabel={line ? `${each.name}, ${line}` : each.name}
+        onPress={() => onChoose(each)}
+        style={({ pressed }) => [styles.tvRow, pressed && styles.pressed]}
+        testID={`watch-tv-${each.id}`}
+      >
+        <View style={styles.tvMark}>
+          <SymbolView name="tv" size={22} tintColor={colors.text} />
+        </View>
+        <View style={styles.tvLines}>
+          <Text style={styles.tvName}>{each.name}</Text>
+          {line ? <Text style={styles.sheetLine}>{line}</Text> : null}
+        </View>
+      </Pressable>
+    );
+  });
+}
+
+/**
+ * The TV's own volume while it says it, on a line to drag or tap; the TV hears where the drag
+ * ends. VoiceOver adjusts it a tenth at a time.
+ */
+function TvVolume() {
+  const volume = useTvVolume();
+  const [width, setWidth] = useState(1);
+  const [dragged, setDragged] = useState<number | null>(null);
+  const toLevel = (x: number) => Math.min(1, Math.max(0, x / width));
+  const toLevelRef = useRef(toLevel);
+  toLevelRef.current = toLevel;
+  const responder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (event) => setDragged(toLevelRef.current(event.nativeEvent.locationX)),
+      onPanResponderMove: (event) => setDragged(toLevelRef.current(event.nativeEvent.locationX)),
+      onPanResponderRelease: (event) => {
+        setTvVolume(toLevelRef.current(event.nativeEvent.locationX));
+        setDragged(null);
+      },
+      onPanResponderTerminate: () => setDragged(null),
+    }),
+  ).current;
+  if (!volume) return null;
+  const level = dragged ?? (volume.muted ? 0 : volume.level);
+  return (
+    <View style={styles.volume}>
+      <View style={styles.tvMark} accessibilityElementsHidden importantForAccessibility="no">
+        <SymbolView
+          name={level === 0 ? "speaker.slash.fill" : "speaker.wave.2.fill"}
+          size={18}
+          tintColor={colors.text}
+        />
+      </View>
+      <View
+        style={styles.scrub}
+        onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width || 1)}
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={tvT("TV volume")}
+        accessibilityValue={{ min: 0, max: 100, now: Math.round(level * 100) }}
+        accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
+        onAccessibilityAction={(event: AccessibilityActionEvent) =>
+          setTvVolume(level + (event.nativeEvent.actionName === "increment" ? 0.1 : -0.1))
+        }
+        testID="watch-tv-volume"
+        {...responder.panHandlers}
+      >
+        <View style={styles.rail}>
+          <View style={[styles.filled, { width: `${level * 100}%` }]} />
+        </View>
+        <View style={[styles.knob, { left: level * width - 7 }]} />
+      </View>
+    </View>
   );
 }
 
@@ -779,6 +1212,8 @@ function Scrubber() {
  */
 function TextButtons({ item }: { item: Playing }) {
   const upNext = useUpNext();
+  // The TV plays the sound chosen before it started, no subtitles, at its own speed.
+  const onTv = usePlayback().tv.kind === "on";
   // A copy's Next episode reads the downloads, so it shows again as its next copy comes or goes.
   useDownloads();
   const menu = useRef(0);
@@ -833,7 +1268,7 @@ function TextButtons({ item }: { item: Playing }) {
         title: t(of === "audio" ? "Audio" : "Subtitles"),
         options: [...rows.map((row) => row.label), t("Cancel")],
         cancelButtonIndex: rows.length,
-        ...(message ? { message } : {}),
+        ...defined({ message: message || undefined }),
       },
       (index) => {
         if (stands()) rows[index]?.run();
@@ -844,17 +1279,25 @@ function TextButtons({ item }: { item: Playing }) {
   if (upNext) return <UpNextRow key={upNext.place} {...upNext} />;
   return (
     <View style={styles.textButtons}>
-      <TextControl label={t("Audio")} onPress={() => void choose("audio")} testID="watch-audio" />
-      <TextControl
-        label={t("Subtitles")}
-        onPress={() => void choose("subtitles")}
-        testID="watch-subtitles"
-      />
+      {onTv ? null : (
+        <>
+          <TextControl
+            label={t("Audio")}
+            onPress={() => void choose("audio")}
+            testID="watch-audio"
+          />
+          <TextControl
+            label={t("Subtitles")}
+            onPress={() => void choose("subtitles")}
+            testID="watch-subtitles"
+          />
+        </>
+      )}
       {item.live ? (
         <StartOver item={item} />
       ) : (
         <>
-          {item.past ? null : <TitleSpeed />}
+          {item.past || onTv ? null : <TitleSpeed />}
           {item.next ? (
             <TextControl label={t("Next episode")} onPress={playNext} testID="watch-next" />
           ) : null}
@@ -908,7 +1351,7 @@ function TitleSpeed() {
           t("Cancel"),
         ],
         cancelButtonIndex: SPEEDS.length,
-        ...(message ? { message } : {}),
+        ...defined({ message: message || undefined }),
       },
       (index) => {
         const picked = SPEEDS[index];
@@ -1099,10 +1542,16 @@ const FPS = [
  * at subtitle fps over video fps.
  */
 const FRAME_RATES = FPS.flatMap((from) =>
-  FPS.filter((to) => to !== from).map((to) => ({
-    label: `${from.name} → ${to.name} fps`,
-    speed: from.fps / to.fps,
-  })),
+  FPS.flatMap((to) =>
+    to !== from
+      ? [
+          {
+            label: `${from.name} → ${to.name} fps`,
+            speed: from.fps / to.fps,
+          },
+        ]
+      : [],
+  ),
 );
 
 /**
@@ -1387,6 +1836,106 @@ const styles = StyleSheet.create({
   playNextLabel: { color: colors.text, fontSize: 15, fontWeight: "700" },
   pressed: { opacity: 0.5 },
   spacer: { flex: 1 },
+  onTv: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingHorizontal: 32,
+  },
+  onTvTitle: {
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: "700",
+    letterSpacing: -0.28,
+    textAlign: "center",
+  },
+  onTvLine: { color: colors.dim, fontSize: 15, textAlign: "center" },
+  dim: { backgroundColor: "#00000099" },
+  tvSheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.fill,
+    borderTopLeftRadius: 38,
+    borderTopRightRadius: 38,
+    paddingTop: 6,
+  },
+  tall: { minHeight: 440 },
+  popover: {
+    position: "absolute",
+    width: 360,
+    backgroundColor: colors.fill,
+    borderRadius: 20,
+    paddingTop: 6,
+    paddingBottom: 10,
+    shadowColor: "#000000",
+    shadowOpacity: 0.6,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+  },
+  grabber: {
+    alignSelf: "center",
+    width: 36,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "#5A5A5E",
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+  chooserHeader: { paddingBottom: 6 },
+  sheetTitle: { color: colors.text, fontSize: 17, fontWeight: "700" },
+  sheetLine: { color: colors.dim, fontSize: 13, marginTop: 2 },
+  done: { minHeight: 44, justifyContent: "center" },
+  doneLabel: { color: colors.text, fontSize: 17, fontWeight: "600" },
+  sheetBody: { flexGrow: 1 },
+  looking: { color: colors.text, fontSize: 15, paddingHorizontal: 16, paddingTop: 18 },
+  stillLooking: {
+    color: colors.dim,
+    fontSize: 13,
+    paddingLeft: 60,
+    paddingRight: 16,
+    paddingTop: 12,
+  },
+  note: { gap: 4, paddingHorizontal: 16, paddingTop: 12 },
+  noteTitle: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  noteLine: { color: colors.dim, fontSize: 13 },
+  message: { gap: 4, paddingHorizontal: 16, paddingTop: 18, paddingBottom: 16 },
+  messageTitle: { color: colors.text, fontSize: 17, fontWeight: "600" },
+  messageText: { color: colors.dim, fontSize: 15 },
+  messageAction: { minHeight: 44, justifyContent: "center", paddingTop: 4 },
+  actionLabel: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  tvRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16 },
+  tvMark: { width: 32, height: 44, alignItems: "center", justifyContent: "center" },
+  tvLines: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 60,
+    justifyContent: "center",
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  tvName: { color: colors.text, fontSize: 17 },
+  volume: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 4,
+  },
+  disconnect: { minHeight: 44, justifyContent: "center", paddingLeft: 60, paddingRight: 16 },
+  moveTo: { borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 14 },
+  moveLabel: { color: colors.dim, fontSize: 13, paddingHorizontal: 16, paddingBottom: 2 },
   cues: { position: "absolute", left: 24, right: 24, alignItems: "center" },
   cue: {
     color: colors.text,

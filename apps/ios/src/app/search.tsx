@@ -65,6 +65,7 @@ import {
 } from "../titles.ts";
 import { Artwork } from "../titles-ui.tsx";
 import { ChannelLogo, ChannelRow, colors, TextButton, useRowHeight } from "../ui.tsx";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Movies and series each show this many at first, and this many more at each Show more. */
 const PAGE = 20;
@@ -726,9 +727,12 @@ function searchLine(
       .filter(Boolean)
       .join(" "),
     actions,
-    ...(status?.loading && status.loading.of > 1
-      ? { progress: status.loading.settled / status.loading.of }
-      : {}),
+    ...defined({
+      progress:
+        status?.loading && status.loading.of > 1
+          ? status.loading.settled / status.loading.of
+          : undefined,
+    }),
     // Searching passes with each keystroke; only what the lists say is read out.
     announce: !pending,
   };

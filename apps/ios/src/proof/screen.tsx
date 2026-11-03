@@ -30,7 +30,7 @@ async function prove() {
   const results = await runCases({
     fixture,
     // expo/fetch implements fetch with types of its own; the cases use only what both share.
-    fetches: { global: fetch, expo: expoFetch as unknown as typeof fetch },
+    fetches: { global: fetch, expo: expoFetch as typeof fetch },
   });
   const started = Date.now();
   const keychain = await keychainProof(keychainSecrets).then(

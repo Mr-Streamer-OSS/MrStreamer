@@ -2,9 +2,11 @@
 # docs/maintainers/ci.md shows how the workflows fit together.
 #
 # Check always runs and reports. Test and Website run when their inputs changed, and whenever the
-# changed paths are unknown or couldn't be read. A release calls this with the commit it builds
-# (`sha`), which always checks and tests that commit. The validation evidence artifact records
-# what ran on the exact source; .github/actions/validation/README.md has its contract.
+# changed paths are unknown or couldn't be read. A pull request that only adds or edits Markdown and
+# images outside their inputs skips both, and its Check only checks formatting. Test merges three test shards' reports. A release
+# calls this with the commit it builds (`sha`), which always checks and tests that commit. The
+# validation evidence artifact records what ran on the exact source;
+# .github/actions/validation/README.md has its contract.
 #
 # Website checks here are secretless; the independent Website workflow owns deployment.
 # No secrets, so pull requests from forks run all of it.
@@ -44,6 +46,7 @@ jobs:
     outputs:
       desktop: ${{ steps.paths.outputs.desktop }}
       website: ${{ steps.paths.outputs.website }}
+      docs: ${{ steps.docs.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,6 +60,28 @@ jobs:
         env:
           VALIDATION_SHA: ${{ inputs.sha }}
         run: node .github/scripts/ci-inputs.ts
+      # Check's format-only shortcut: a pull request that selects neither Test nor Website and only
+      # adds or edits Markdown and images. Other files, deletions and renames keep the full Check.
+      - id: docs
+        if: >-
+          github.event_name == 'pull_request'
+          && steps.paths.outputs.desktop == 'false' && steps.paths.outputs.website == 'false'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          base=$(git merge-base "$BASE" "$HEAD")
+          git diff --no-renames --name-status -z "$base" "$HEAD" > "$RUNNER_TEMP/changes"
+          docs=false
+          while IFS= read -r -d '' status && IFS= read -r -d '' path; do
+            if [[ $status =~ ^[AM]$ && ${path,,} =~ \.(md|png|jpe?g|gif|svg|webp)$ ]]; then
+              docs=true
+            else
+              docs=false
+              break
+            fi
+          done < "$RUNNER_TEMP/changes"
+          echo "docs=$docs" >> "$GITHUB_OUTPUT"
 
   # Runs even when Inputs failed, and then fails itself, so the protected check always reports.
   check:
@@ -78,23 +103,75 @@ jobs:
           path: .local/validation-tools
           persist-credentials: false
       - id: validate
+        if: needs.inputs.outputs.docs != 'true'
         uses: ./.local/validation-tools/.github/actions/validation
         with:
           part: check
+      # Markdown and images feed no build, type or lint, so they need only Prettier, from the
+      # root's dependencies.
+      - if: needs.inputs.outputs.docs == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - if: needs.inputs.outputs.docs == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Format
+        if: needs.inputs.outputs.docs == 'true'
+        run: |
+          pnpm install --frozen-lockfile --filter mrstreamer-workspace
+          pnpm fmt:check
       - name: Require input selection
         env:
           INPUT_RESULT: ${{ needs.inputs.result }}
         run: test "$INPUT_RESULT" = success
 
-  test:
-    name: Test
+  # The suite runs in three shards side by side, each on its own runner as the whole suite ran.
+  test-shard:
+    name: Test shard ${{ matrix.shard }}
     needs: inputs
-    outputs:
-      identity: ${{ steps.validate.outputs.identity }}
     if: ${{ !cancelled() && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop != 'false') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      # Every shard finishes, so a failure's report is complete.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .local/validation-tools
+          persist-credentials: false
+      - uses: ./.local/validation-tools/.github/actions/validation
+        with:
+          part: test
+          shard: ${{ matrix.shard }}
+          shards: ${{ strategy.job-total }}
+          report-name: ${{ inputs.report-name || github.run_id }}
+
+  # The required Test status: the shards' reports merged into one, held to the completeness gate.
+  # It runs after a cancelled or failed shard too, so neither leaves Test skipped or green.
+  test:
+    name: Test
+    needs: [inputs, test-shard]
+    outputs:
+      identity: ${{ steps.validate.outputs.identity }}
+    if: ${{ always() && (needs.inputs.result != 'success' || needs.inputs.outputs.desktop != 'false') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # A cancelled run has no report worth merging. A failed or timed-out shard still merges.
+      - name: Require the shards to have run
+        if: ${{ cancelled() || needs.test-shard.result == 'skipped' }}
+        run: |
+          echo "The test shards were cancelled or skipped, so Test can't pass." >&2
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
@@ -107,8 +184,12 @@ jobs:
       - id: validate
         uses: ./.local/validation-tools/.github/actions/validation
         with:
-          part: test
+          part: test-shards
           report-name: ${{ inputs.report-name || github.run_id }}
+      - name: Require every shard to pass
+        env:
+          SHARDS_RESULT: ${{ needs.test-shard.result }}
+        run: test "$SHARDS_RESULT" = success
 
   website:
     name: Website

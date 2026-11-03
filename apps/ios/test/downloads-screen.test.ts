@@ -2,6 +2,7 @@ import { createRoot, document } from "./dom.ts";
 import * as React from "react";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { defined } from "@mrstreamer/core/defined";
 
 // Downloads as the viewer meets it: the queue, then the copies, and what each row's tap, button,
 // sheet and VoiceOver actions ask of the downloads owner. The real screen runs with React DOM on
@@ -81,7 +82,7 @@ vi.mock("react-native", async () => {
         { title, options }: { title?: string; options: readonly string[] },
         pick: (at: number) => void,
       ) => {
-        scenario.sheet = { ...(title ? { title } : {}), options, pick };
+        scenario.sheet = { ...defined({ title: title || undefined }), options, pick };
       },
     },
   };

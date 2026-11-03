@@ -12,7 +12,7 @@ const REACT_DOM = "react-dom/client";
 
 type Root = { render(node: unknown): void; unmount(): void };
 /** happy-dom's document; the app's own types have no DOM. */
-const { document } = globalThis as unknown as {
+const { document } = globalThis as typeof globalThis & {
   document: { createElement(tag: string): object };
 };
 const { createRoot } = (await import(REACT_DOM)) as {

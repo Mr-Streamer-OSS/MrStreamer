@@ -163,17 +163,21 @@ function DownloadedTiming() {
           </div>
           <div className="grid grid-cols-2 gap-1" aria-label={t("Subtitle FPS to video FPS")}>
             {FPS.flatMap((subtitleFps) =>
-              FPS.filter((videoFps) => subtitleFps !== videoFps).map((videoFps) => (
-                <button
-                  key={`${subtitleFps}:${videoFps}`}
-                  data-item
-                  className="rounded-lg px-2 py-1 text-left outline-none hover:bg-white/8 focus-visible:bg-white/10"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => press({ ...timing, speed: subtitleFps / videoFps })}
-                >
-                  {formatNumber(subtitleFps)} → {formatNumber(videoFps)} fps
-                </button>
-              )),
+              FPS.flatMap((videoFps) =>
+                subtitleFps !== videoFps
+                  ? [
+                      <button
+                        key={`${subtitleFps}:${videoFps}`}
+                        data-item
+                        className="rounded-lg px-2 py-1 text-left outline-none hover:bg-white/8 focus-visible:bg-white/10"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => press({ ...timing, speed: subtitleFps / videoFps })}
+                      >
+                        {formatNumber(subtitleFps)} → {formatNumber(videoFps)} fps
+                      </button>,
+                    ]
+                  : [],
+              ),
             )}
           </div>
         </>

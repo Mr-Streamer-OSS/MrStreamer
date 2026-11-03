@@ -10,6 +10,7 @@ import { WINDOW_BAR } from "../../../../shared/window-bar.ts";
 import { player } from "../../player/player.ts";
 import { useRecordings } from "../recordings/recordings.ts";
 import { LoginForm } from "./LoginForm.tsx";
+import { defined } from "@mrstreamer/core/defined";
 
 /**
  * The first subscription's login, shown while none is saved. Every later one is added in
@@ -29,7 +30,7 @@ export function ConnectScreen() {
         className="drag absolute inset-x-0 top-0 flex items-center justify-end px-3"
         style={{
           height: WINDOW_BAR.height,
-          ...(controls && !isMac ? { paddingRight: WINDOW_BAR.windowsInset } : {}),
+          ...defined({ paddingRight: controls && !isMac ? WINDOW_BAR.windowsInset : undefined }),
         }}
       >
         {kept > 0 && (

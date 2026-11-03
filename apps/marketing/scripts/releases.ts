@@ -34,6 +34,8 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
   const signal = AbortSignal.timeout(20_000);
   const releases: Release[] = [];
   const token = process.env["GH_TOKEN"] ?? process.env["GITHUB_TOKEN"];
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   try {
     // One deadline for the entire history, including pagination. An incomplete history is never
     // presented as all releases. The page limit also bounds a server that repeats full pages.
@@ -41,10 +43,7 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
       const response = await request(`${API}?per_page=100&page=${page}`, {
         signal,
         redirect: "error",
-        headers: {
-          Accept: "application/vnd.github+json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers,
       });
       if (!response.ok) return null;
       const rows: unknown = await response.json();

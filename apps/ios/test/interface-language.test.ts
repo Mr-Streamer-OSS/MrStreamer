@@ -106,7 +106,7 @@ vi.mock("../src/account.ts", () => ({
   members: () => scenario.members,
 }));
 
-const livingRoom = {
+const livingRoomFields: Partial<Member> = {
   entry: {
     id: "m3u-a",
     kind: "m3u",
@@ -119,7 +119,8 @@ const livingRoom = {
   needsSecret: false,
   live: { kind: "idle" },
   titles: { kind: "idle" },
-} as unknown as Member;
+};
+const livingRoom = livingRoomFields as Member;
 
 type ScreenOptions = ReturnType<typeof useTabScreenOptions>;
 

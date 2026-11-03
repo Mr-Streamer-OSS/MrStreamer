@@ -14,6 +14,7 @@
 // names the phases it covers, and counts toward neither total but the unattributed one.
 import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { defined } from "@mrstreamer/core/defined";
 
 interface Phase {
   readonly name: string;
@@ -113,7 +114,7 @@ export function timePhases(startedAt: number, lines: readonly Line[]): PhaseTime
       seconds: (end - start) / 1000,
       finished,
       covers: PHASES.slice(index + 1, coveredUntil).map((covered) => covered.name),
-      ...(submissions[index] ? { submission: submissions[index] } : {}),
+      ...defined({ submission: submissions[index] || undefined }),
     };
   });
 }

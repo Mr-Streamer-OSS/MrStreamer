@@ -255,9 +255,9 @@ it("keeps successful additions after a partial queue failure and retries only th
   );
   expect(ipc.argsOf("downloads.remove")).toHaveLength(0);
   await page.changed(
-    episodes
-      .filter((episode) => episode.id !== "2-2")
-      .map((episode) => download(episode, { kind: "queued" })),
+    episodes.flatMap((episode) =>
+      episode.id !== "2-2" ? [download(episode, { kind: "queued" })] : [],
+    ),
   );
   await page.click("Retry");
   await until(() => expect(ipc.argsOf("downloads.add")).toHaveLength(6));
@@ -348,9 +348,9 @@ it("removes the old resumed-file Retry when the episode is marked watched", asyn
   await act(async () => first.reject({ kind: "no-subscription" }));
   await until(() => expect(page.container.textContent).toContain("1 couldn't be added: S2 E2."));
   expect(ipc.argsOf("downloads.add")[0]?.title.id).toBe("resumed");
-  const copies = episodes
-    .filter((episode) => episode.id !== "2-2")
-    .map((episode) => download(episode, { kind: "queued" }));
+  const copies = episodes.flatMap((episode) =>
+    episode.id !== "2-2" ? [download(episode, { kind: "queued" })] : [],
+  );
   await page.changed(copies);
   await page.render(selected, "series", [
     { season: 2, episode: 2, watched: true, at: 2, revision: 2 },
