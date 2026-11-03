@@ -115,7 +115,14 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
 - **Sources.** `src/bootstrap/sources.ts` holds the app's one `sources` owner
   (`src/connect/sources.ts`): `restore`, `connect`, `retry`, `remove` and its `state` store. The
   root layout restores it at launch. `sources.json` in the app's files folder lists each
-  source's id, kind and host, and nothing of its login.
+  source's id, kind and host, and nothing of its login. Each source's `channels` is `ready`
+  with `rows`, `loading` with optional `channels`, or `failed` with `error` and optional
+  `channels`. The optional `channels` retains the last successful list during reloads and
+  repeated retries, while the loading status or failure remains visible. It lives only in memory
+  for that login: an accepted replacement login or an erased login drops it, including when the
+  registry refuses removal; a refused credential erase keeps the login and its list. Late answers
+  from replaced, removed or superseded reads cannot restore a list.
+  Settings opens Licences on the current destination's stack through its `licences` route.
 - **Credentials.** `modules/credentials` seals each source's authority with an AES-GCM key the
   Android Keystore holds, one file per source id under `noBackupFilesDir/credentials`. Native
   code reads it without JS through `app.mrstreamer.credentials.Credentials.read(context, id)`,

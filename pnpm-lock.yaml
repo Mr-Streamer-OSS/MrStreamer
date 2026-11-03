@@ -199,6 +199,9 @@ importers:
       '@mrstreamer/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@mrstreamer/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

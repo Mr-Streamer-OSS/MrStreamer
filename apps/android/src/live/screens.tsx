@@ -4,9 +4,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
 import type { ChannelRow, Sources } from "../connect/sources.ts";
-import { CatalogueScreen } from "../connect/catalogue-screen.tsx";
 import { ConnectScreen } from "../connect/connect-screen.tsx";
-import type { NavigationLayout } from "../navigation/destinations.ts";
+import { hrefOn, type NavigationLayout } from "../navigation/destinations.ts";
 import { Screen } from "../navigation/screen.tsx";
 import { store, useStore } from "../platform/store.ts";
 import { useKeyboardFocus } from "../ui/focus.ts";
@@ -356,7 +355,6 @@ export function LiveScreen() {
   const [tab, setTab] = useState<Tab>("All");
   const [choosing, setChoosing] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [managing, setManaging] = useState(false);
   const view = discover(state);
   const gaps = useGaps();
   const loading = view.restoring || view.loading.length > 0;
@@ -386,7 +384,7 @@ export function LiveScreen() {
       id: "providers",
       icon: "dns" as const,
       label: t("Providers"),
-      onPress: () => setManaging(true),
+      onPress: () => router.push(hrefOn("(live)", "settings")),
     },
   ];
 
@@ -515,17 +513,6 @@ export function LiveScreen() {
         }}
         onClose={() => setChoosing(false)}
       />
-      <Sheet
-        visible={managing && !adding}
-        label={t("Providers")}
-        onClose={() => setManaging(false)}
-      >
-        <CatalogueScreen
-          owner={sources}
-          sources={state.kind === "ready" ? state.sources : []}
-          onAdd={() => setAdding(true)}
-        />
-      </Sheet>
       <Sheet visible={adding} label={t("Add provider")} onClose={() => setAdding(false)}>
         <ConnectScreen
           owner={sources}

@@ -507,3 +507,185 @@ describe("Android sources", () => {
     expect(rowCount((await settled(owner))[0])).toBeGreaterThan(0);
   });
 });
+
+it("keeps the last listed channels through repeated failed and in-flight retries", async () => {
+  let fail = false;
+  let release = () => {};
+  let held: Promise<void> | null = null;
+  onTestFinished(() => release());
+
+  const flaky: typeof fetch = async (input, init) => {
+    if (String(input).includes("get_live_streams") && fail) {
+      await held;
+      throw new TypeError("Network request failed");
+    }
+
+    return fetch(input, init);
+  };
+
+  const owner = launch(newPhone(), flaky);
+  await owner.restore();
+  const connected = await owner.connect(xtream());
+
+  if (connected.kind !== "connected") throw new Error("not connected");
+  const before = (await settled(owner))[0]?.channels;
+
+  if (before?.kind !== "ready") throw new Error("no channels");
+  expect(before.rows.length).toBeGreaterThan(0);
+  fail = true;
+  owner.retry(connected.id);
+  expect(listed(owner)[0]?.channels).toEqual({ kind: "loading", channels: before.rows });
+  expect((await settled(owner))[0]?.channels).toMatchObject({
+    kind: "failed",
+    error: { kind: "unreachable" },
+    channels: before.rows,
+  });
+  held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  owner.retry(connected.id);
+  expect(listed(owner)[0]?.channels).toEqual({ kind: "loading", channels: before.rows });
+  owner.retry(connected.id);
+  expect(listed(owner)[0]?.channels).toEqual({ kind: "loading", channels: before.rows });
+  release();
+  expect((await settled(owner))[0]?.channels).toMatchObject({
+    kind: "failed",
+    channels: before.rows,
+  });
+});
+
+it.each(
+  ["remove", "replace", "partial-remove"].flatMap((action) =>
+    ["success", "failure"].map((completion) => ({ action, completion })),
+  ),
+)(
+  "drops retained channels on $action and ignores the old retry's late $completion",
+  async ({ action, completion }) => {
+    const phone = newPhone();
+    let mode: "normal" | "held" | "fail" = "normal";
+    let release = () => {};
+    let started = () => {};
+
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const asked = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+
+    onTestFinished(() => release());
+    let open = 0;
+
+    const fetching: typeof fetch = async (input, init) => {
+      if (!String(input).includes("get_live_streams")) return fetch(input, init);
+
+      if (mode === "fail") throw new TypeError("Network request failed");
+
+      if (mode === "normal") return fetch(input, init);
+      open++;
+      started();
+
+      try {
+        await held;
+
+        if (completion === "failure") throw new TypeError("late network failure");
+
+        return await fetch(input);
+      } finally {
+        open--;
+      }
+    };
+
+    const owner = launch(phone, fetching);
+    await owner.restore();
+    const connected = await owner.connect(xtream());
+
+    if (connected.kind !== "connected") throw new Error("not connected");
+    const before = (await settled(owner))[0]?.channels;
+
+    if (before?.kind !== "ready") throw new Error("no channels");
+    mode = "held";
+    owner.retry(connected.id);
+    await asked;
+    expect(listed(owner)[0]?.channels).toEqual({ kind: "loading", channels: before.rows });
+    mode = "fail";
+
+    if (action === "replace") {
+      expect(await owner.connect(xtream())).toMatchObject({ kind: "connected" });
+      expect((await settled(owner))[0]?.channels).toEqual({
+        kind: "failed",
+        error: expect.objectContaining({ kind: "unreachable" }),
+      });
+    } else if (action === "partial-remove") {
+      phone.full = true;
+      await expect(owner.remove(connected.id)).rejects.toThrow();
+      expect(listed(owner)[0]?.channels).toEqual({
+        kind: "failed",
+        error: { kind: "needs-secret", subscriptionId: connected.id },
+      });
+      phone.full = false;
+    } else {
+      await owner.remove(connected.id);
+      expect(listed(owner)).toEqual([]);
+    }
+
+    const current = listed(owner);
+    release();
+    await expect.poll(() => open).toBe(0);
+    // Listing another source gives the old completion a turn to publish if it were still admitted.
+    await owner.connect(m3u());
+    await settled(owner);
+    expect(listed(owner).filter((source) => source.id === connected.id)).toEqual(current);
+  },
+);
+
+it("re-enters a provider with changed account details into the same source", async () => {
+  const phone = newPhone();
+  const owner = launch(phone);
+  await owner.restore();
+  const first = await owner.connect(xtream());
+
+  if (first.kind !== "connected") throw Error("fixture did not connect");
+  await settled(owner);
+  const replaced = await owner.connect(m3u(), undefined, first.id);
+  expect(replaced).toEqual({ kind: "connected", id: first.id });
+  const rows = await settled(owner);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.id).toBe(first.id);
+  expect(phone.sealed.size).toBe(1);
+  const restarted = launch(phone);
+  await restarted.restore();
+  expect((await settled(restarted)).map(({ id }) => id)).toEqual([first.id]);
+});
+
+it("keeps the winning login when two re-entries overlap during a credential write", async () => {
+  const phone = newPhone();
+  const owner = launch(phone);
+  await owner.restore();
+  const first = await owner.connect(xtream());
+
+  if (first.kind !== "connected") throw Error("fixture");
+  await settled(owner);
+  let started!: () => void;
+  let finish!: () => void;
+
+  const waiting = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+
+  const asked = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+
+  onTestFinished(() => finish());
+  phone.hold = { started, until: waiting };
+  const stale = owner.connect(xtream(), undefined, first.id);
+  await asked;
+  phone.hold = null;
+  expect(await owner.connect(m3u(), undefined, first.id)).toMatchObject({ kind: "connected" });
+  const winner = phone.sealed.get(first.id);
+  finish();
+  expect(await stale).toEqual({ kind: "cancelled" });
+  expect(phone.sealed.get(first.id)).toEqual(winner);
+});
