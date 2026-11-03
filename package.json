@@ -34,7 +34,7 @@
   "packageManager": "pnpm@11.24.0",
   "devDependencies": {
     "@oxlint/plugins": "1.90.0",
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.6",
     "happy-dom": "21.0.4",
     "knip": "6.38.0",
     "oxlint": "1.90.0",
