@@ -41,25 +41,57 @@ export function identity(row: ChannelRow): Entry {
   return { sourceId: row.sourceId, channelId: row.key.slice(prefix.length), title: row.title };
 }
 
+interface SourceResolution {
+  readonly fallback: Resolution;
+  readonly rows: ReadonlyMap<string, Resolution>;
+}
+
+const resolutionCache = new WeakMap<Sources, Map<string, SourceResolution>>();
+
+/** Index each immutable catalogue state once, retaining ambiguous owners and channel ids. */
+function resolutions(sources: Extract<Sources, { kind: "ready" }>) {
+  const cached = resolutionCache.get(sources);
+
+  if (cached) return cached;
+
+  const index = new Map<string, SourceResolution>();
+
+  for (const source of sources.sources) {
+    if (index.has(source.id)) {
+      index.set(source.id, { fallback: { kind: "ambiguous" }, rows: new Map() });
+
+      continue;
+    }
+
+    const rows = new Map<string, Resolution>();
+
+    if (source.channels.kind === "ready")
+      for (const row of source.channels.rows) {
+        if (row.sourceId !== source.id) continue;
+
+        rows.set(row.key, rows.has(row.key) ? { kind: "ambiguous" } : { kind: "listed", row });
+      }
+
+    index.set(source.id, {
+      fallback: { kind: source.channels.kind === "ready" ? "missing" : source.channels.kind },
+      rows,
+    });
+  }
+
+  resolutionCache.set(sources, index);
+
+  return index;
+}
+
 /** Never resolves by title, row position, or an arbitrary first duplicate. */
 export function resolve(entry: Identity, sources: Sources): Resolution {
   if (sources.kind === "restoring") return { kind: "loading" };
-  const owners = sources.sources.filter((source) => source.id === entry.sourceId);
+  const owner = resolutions(sources).get(entry.sourceId);
 
-  if (owners.length > 1) return { kind: "ambiguous" };
-  const owner = owners[0];
-
-  if (!owner) return { kind: "removed" };
-
-  if (owner.channels.kind !== "ready") return { kind: owner.channels.kind };
-
-  const rows = owner.channels.rows.filter(
-    (row) => row.sourceId === entry.sourceId && row.key === `${entry.sourceId}:${entry.channelId}`,
+  return (
+    owner?.rows.get(`${entry.sourceId}:${entry.channelId}`) ??
+    owner?.fallback ?? { kind: "removed" }
   );
-
-  return rows.length === 1
-    ? { kind: "listed", row: rows[0]! }
-    : { kind: rows.length ? "ambiguous" : "missing" };
 }
 
 /** A row plays only its currently unique channel, with the catalogue's current title. */

@@ -20,7 +20,7 @@ vi.mock("react-native", () => {
       ListFooterComponent,
     }: {
       data: unknown[];
-      renderItem: (value: { item: unknown }) => ReactNode;
+      renderItem: (value: { item: unknown; index: number }) => ReactNode;
       ListHeaderComponent?: ReactNode;
       ListEmptyComponent?: ReactNode;
       ListFooterComponent?: ReactNode;
@@ -30,7 +30,7 @@ vi.mock("react-native", () => {
         {},
         ListHeaderComponent,
         data.length
-          ? data.map((item, i) => h("div", { key: i }, renderItem({ item })))
+          ? data.map((item, i) => h("div", { key: i }, renderItem({ item, index: i })))
           : ListEmptyComponent,
         ListFooterComponent,
       ),
@@ -40,8 +40,10 @@ vi.mock("react-native", () => {
 
 vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
 
+const params = vi.hoisted(() => ({ id: "custom", country: "" }));
+
 vi.mock("expo-router", () => ({
-  useLocalSearchParams: () => ({ id: "custom" }),
+  useLocalSearchParams: () => params,
   useIsFocused: () => true,
   router: { back() {}, push() {} },
 }));
@@ -69,6 +71,7 @@ vi.mock("../src/live/chrome.tsx", () => {
 
   return {
     RED: "red",
+    RAISED_RULE: "gray",
     Body: view,
     Frame: ({ children, bar }: { children: ReactNode; bar: ReactNode }) =>
       h("div", {}, bar, children),
@@ -88,11 +91,13 @@ vi.mock("../src/live/chrome.tsx", () => {
   };
 });
 
-vi.mock("../src/live/ui.tsx", () => ({
+vi.mock("../src/player/instance.ts", () => ({ player: { play: vi.fn() } }));
+
+vi.mock("../src/live/ui.tsx", async (importOriginal) => ({
   Empty: ({ title, body, action }: { title: string; body?: string; action?: ReactNode }) =>
     h("div", {}, title, body, action),
   NavRow: () => null,
-  Channel: () => null,
+  Channel: (await importOriginal<typeof import("../src/live/ui.tsx")>()).Channel,
   ListsSheet: () => null,
   StillRows: () => null,
   Badge: () => null,
@@ -135,12 +140,16 @@ const { createRoot } = (await import(moduleName)) as {
 
 const { ListScreen } = await import("../src/live/list-screen.tsx");
 const { LiveScreen } = await import("../src/live/screens.tsx");
+const { sources } = await import("../src/bootstrap/sources.ts");
+const { FAVOURITES } = await import("../src/live/store.ts");
 const { lists } = await import("../src/live/runtime.ts");
 const container = window.document.createElement("div");
 const root = createRoot(container);
 
 afterEach(async () => {
   await act(async () => root.render(null));
+  params.country = "";
+  sources.state.set({ kind: "ready", sources: [] });
 });
 
 it("offers Edit, Rename and Delete for an empty custom list", async () => {
@@ -177,4 +186,27 @@ it("shows a failed read and retry on Live and For you without claiming no favour
   );
   expect(container.textContent).not.toContain("Couldn't read your lists.");
   expect(container.textContent).toContain("No favourites yet.");
+});
+
+it("keeps an unavailable favourite and its reason in For you with a country selected", async () => {
+  params.country = "Belgium";
+  sources.state.set({ kind: "ready", sources: [] });
+  lists.state.set({
+    kind: "ready",
+    lists: [
+      {
+        id: FAVOURITES,
+        name: "Favourites",
+        entries: [{ sourceId: "removed", channelId: "news", title: "Saved News" }],
+      },
+    ],
+  });
+  await act(async () => root.render(h(LiveScreen)));
+  await act(async () =>
+    [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "For you")!
+      .click(),
+  );
+  expect(container.textContent).toContain("Saved News");
+  expect(container.textContent).toContain("Its provider was removed.");
 });

@@ -12,9 +12,9 @@ export interface Group {
   readonly rows: readonly ChannelRow[];
 }
 
-/** Only loaded rows contribute counts. Loading and failed providers remain separate, even with results. */
 const cache = new WeakMap<Sources, ReturnType<typeof collect>>();
 
+/** Only loaded rows contribute counts. Loading and failed providers remain separate, even with results. */
 export function discover(sources: Sources) {
   const cached = cache.get(sources);
 

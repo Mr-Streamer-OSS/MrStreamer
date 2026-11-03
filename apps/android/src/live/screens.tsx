@@ -55,6 +55,51 @@ const openList = (list: ChannelList) =>
     ? router.push(`${root}/favourites`)
     : router.push({ pathname: `${root}/list/[id]`, params: { id: list.id } });
 
+/** Shortcuts scroll away before the phone tabs stick above the list's rows. */
+function BrowseRows<Item>({
+  data,
+  keyExtractor,
+  renderItem,
+  header,
+  tabs,
+  empty,
+  footer,
+}: {
+  data: readonly Item[];
+  keyExtractor: (item: Item) => string;
+  renderItem: (item: Item, index: number) => ReactNode;
+  header?: ReactNode;
+  tabs?: ReactNode;
+  empty?: ReactNode;
+  footer?: ReactNode;
+}) {
+  const rows = data.map((item) => ({ kind: "row" as const, item }));
+  const cells = tabs ? [{ kind: "tabs" as const }, ...rows] : rows;
+
+  return (
+    <FlatList
+      style={{ flex: 1 }}
+      data={cells}
+      keyExtractor={(cell) => (cell.kind === "tabs" ? "tabs" : keyExtractor(cell.item))}
+      renderItem={({ item: cell, index }) =>
+        cell.kind === "tabs" ? (
+          <View style={{ backgroundColor: colors.background }}>{tabs}</View>
+        ) : (
+          renderItem(cell.item, index - (tabs ? 1 : 0))
+        )
+      }
+      ListHeaderComponent={<>{header}</>}
+      stickyHeaderIndices={tabs ? [1] : undefined}
+      ListFooterComponent={
+        <>
+          {!data.length ? empty : null}
+          {footer}
+        </>
+      }
+    />
+  );
+}
+
 /**
  * Channel rows with one Lists sheet for whichever is held, and still rows after them while a
  * provider is loading.
@@ -64,31 +109,45 @@ function Channels({
   still,
   empty,
   header,
+  tabs,
+  section,
   footer,
 }: {
   entries: readonly Entry[];
   still: boolean;
   empty?: ReactNode;
   header?: ReactNode;
+  tabs?: ReactNode;
+  section?: ReactNode;
   footer?: (onLists: (entry: Entry) => void) => ReactNode;
 }) {
   const [held, setHeld] = useState<Entry | null>(null);
 
   return (
     <>
-      <FlatList
-        style={{ flex: 1 }}
+      <BrowseRows
         data={entries}
         keyExtractor={keyOf}
-        renderItem={({ item }) => <Channel entry={item} onLists={setHeld} />}
-        ListHeaderComponent={<>{header}</>}
-        ListFooterComponent={
+        renderItem={(item, index) => (
+          <>
+            {index === 0 ? section : null}
+            <Channel entry={item} onLists={setHeld} />
+          </>
+        )}
+        header={header}
+        tabs={tabs}
+        footer={
           <>
             {still ? <StillRows /> : null}
             {footer?.(setHeld)}
           </>
         }
-        ListEmptyComponent={still ? undefined : <>{empty}</>}
+        empty={
+          <>
+            {section}
+            {still ? null : empty}
+          </>
+        }
       />
       <ListsSheet entry={held} onClose={() => setHeld(null)} />
     </>
@@ -364,23 +423,32 @@ export function LiveScreen() {
   const forYou = (favourites?.entries ?? []).filter((entry) => {
     const found = resolve(entry, state);
 
-    return !country || (found.kind === "listed" && inCountry.has(found.row));
+    return !country || found.kind !== "listed" || inCountry.has(found.row);
   });
+
+  const tabs = (
+    <Tabs tab={tab} onTab={setTab} country={country} onCountry={() => setChoosing(true)} />
+  );
+
+  const scrollingTabs = layout === "bar" ? tabs : undefined;
 
   return (
     <Frame framed={framed} bar={<LiveTop layout={layout} framed={framed} shortcuts={shortcuts} />}>
       <Body>
-        <Tabs tab={tab} onTab={setTab} country={country} onCountry={() => setChoosing(true)} />
+        {layout !== "bar" ? tabs : null}
         {tab === "All" ? (
-          <Channels header={header} entries={rows.map(identity)} still={loading} empty={empty} />
+          <Channels
+            header={header}
+            tabs={scrollingTabs}
+            entries={rows.map(identity)}
+            still={loading}
+            empty={empty}
+          />
         ) : tab === "For you" ? (
           <Channels
-            header={
-              <>
-                {header}
-                <SheetTitle>{t("Favourites")}</SheetTitle>
-              </>
-            }
+            header={header}
+            tabs={scrollingTabs}
+            section={<SheetTitle>{t("Favourites")}</SheetTitle>}
             entries={saved.kind === "ready" ? forYou : []}
             still={loading}
             empty={
@@ -412,12 +480,12 @@ export function LiveScreen() {
             }
           />
         ) : (
-          <FlatList
-            style={{ flex: 1 }}
-            ListHeaderComponent={header}
+          <BrowseRows
+            header={header}
+            tabs={scrollingTabs}
             data={categories}
             keyExtractor={(group) => group.name}
-            renderItem={({ item }) => (
+            renderItem={(item) => (
               <NavRow
                 icon="label-outline"
                 label={item.name}
@@ -430,8 +498,8 @@ export function LiveScreen() {
                 }
               />
             )}
-            ListFooterComponent={loading ? <StillRows count={3} /> : undefined}
-            ListEmptyComponent={loading ? undefined : (empty ?? undefined)}
+            footer={loading ? <StillRows count={3} /> : undefined}
+            empty={loading ? undefined : (empty ?? undefined)}
           />
         )}
         <StatusLine />

@@ -567,9 +567,11 @@ export function StatusLine() {
               ),
             ].join(" ")}
           </Text>
-          <View style={{ width: large ? "100%" : undefined, alignItems: "flex-start" }}>
-            {retryable ? <TextButton label={t("Retry")} onPress={retryFailed} /> : null}
-          </View>
+          {retryable ? (
+            <View style={{ width: large ? "100%" : undefined, alignItems: "flex-start" }}>
+              <TextButton label={t("Retry")} onPress={retryFailed} />
+            </View>
+          ) : null}
         </View>
       ) : null}
       {loading ? (
