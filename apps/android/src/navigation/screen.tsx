@@ -2,9 +2,17 @@ import { router, useIsFocused } from "expo-router";
 import { useEffect, useRef, type ReactNode } from "react";
 import { BackHandler, useWindowDimensions, View } from "react-native";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
+import { store, useStore } from "../platform/store.ts";
 import { colors } from "../ui/theme.ts";
 import { TopAppBar } from "../ui/top-app-bar.tsx";
 import { layoutFor } from "./destinations.ts";
+
+/**
+ * How far, in dp, what the root layout lays over the foot of every screen (the mini player)
+ * reaches up into it, 0 while nothing does. Its owner sets it from its own layout; `Screen` adds
+ * it to the bottom inset it gives its content.
+ */
+export const footOverlay = store(0);
 
 /** A detail pane over a screen's list: a programme, a schedule, a title. */
 export interface Detail {
@@ -33,7 +41,8 @@ const DETAIL_WIDTH = 360;
  * A feature renders its screen as `children` and pads only the insets left to it: the top app bar
  * takes the top, the navigation bar the bottom below 600dp, the rail the left from 600dp, and the
  * frame the sides, so a list padding `useSafeAreaInsets().bottom` still clears the system's
- * navigation bar beside the rail and a landscape phone's cutout never covers a row.
+ * navigation bar beside the rail and a landscape phone's cutout never covers a row. That bottom
+ * inset also takes in `footOverlay`, so the last row scrolls clear of the mini player.
  */
 export function Screen({
   title,
@@ -51,6 +60,7 @@ export function Screen({
   const layout = layoutFor(width);
   const insets = useSafeAreaInsets();
   const framed = { ...insets, ...(layout === "bar" ? { bottom: 0 } : { left: 0 }) };
+  const overlaid = useStore(footOverlay);
   const open = detail !== undefined;
   const focused = useIsFocused();
   // The latest `onClose`, so an inline one doesn't register Back again on every render.
@@ -84,7 +94,9 @@ export function Screen({
         onBack={onBack}
         focusTitle={folded && focused}
       />
-      <SafeAreaInsetsContext.Provider value={{ ...framed, top: 0, left: 0, right: 0 }}>
+      <SafeAreaInsetsContext.Provider
+        value={{ ...framed, top: 0, left: 0, right: 0, bottom: framed.bottom + overlaid }}
+      >
         <View
           style={{
             flex: 1,
