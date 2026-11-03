@@ -28,12 +28,29 @@ class MediaTest {
   @Test fun sessionCannotReplaceMediaOrChangeSpeed() {
     val owner = PlayerHost.owner(RuntimeEnvironment.getApplication())
     try {
+      owner.admit(Admission("session", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
       val exposed = PlayerHost.session!!.player
       exposed.setMediaItem(MediaItem.fromUri("https://example.invalid/file"))
       assertEquals(0, exposed.mediaItemCount)
       exposed.setPlaybackSpeed(2f)
       assertEquals(1f, exposed.playbackParameters.speed)
     } finally { owner.stopAll() }
+  }
+
+  @Test fun previewHasNoSessionOrPipAndNormalPlaybackRestoresSession() {
+    val activity = Robolectric.buildActivity(PipActivity::class.java).setup().get()
+    val owner = PlayerHost.owner(activity)
+    try {
+      PlayerPip.attach(activity)
+      owner.admit(Admission("normal", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      assertNotNull(PlayerHost.session)
+      owner.admit(Admission("preview", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing"), preview = true))
+      assertNull(PlayerHost.session)
+      PlayerPip.watch(true)
+      assertFalse(PlayerPip.enter())
+      owner.admit(Admission("normal-again", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      assertNotNull(PlayerHost.session)
+    } finally { owner.stopAll(); PlayerPip.watch(false); PlayerPip.detach(activity); activity.finish() }
   }
 
   @Test fun observationsDoNotRefreshControlsAndReplacementDoesNotAnnounceFinalStop() {

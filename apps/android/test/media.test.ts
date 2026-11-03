@@ -167,6 +167,46 @@ describe("Android media public contract", () => {
     f.emit("onMedia", { attempt, pip: true });
     expect(f.owner.media.state.get().error).toBeNull();
   });
+  it("keeps muted previews outside playback and replaces them without stale end affecting playback", async () => {
+    const f = setup();
+    const settled = vi.fn();
+    f.owner.onSettled(settled);
+    const preview = f.owner.preview(episode);
+    expect(preview).not.toBeNull();
+    expect(f.owner.state.get()).toEqual({ kind: "idle" });
+    await flush();
+    expect(f.native.admit).toHaveBeenLastCalledWith(
+      expect.objectContaining({ attempt: preview!.attempt, preview: true }),
+    );
+    f.emit("onState", { attempt: preview!.attempt, phase: "playing", positionMs: 42 });
+    expect(f.owner.previewState.get()).toMatchObject({
+      kind: "previewing",
+      phase: "playing",
+      positionMs: 42,
+    });
+    expect(settled).not.toHaveBeenCalled();
+    f.owner.play(episode);
+    expect(f.native.stop).toHaveBeenCalledWith(preview!.attempt);
+    expect(f.owner.previewState.get()).toEqual({ kind: "idle" });
+    await preview!.end();
+    expect(f.owner.state.get()).toMatchObject({ kind: "playing", intent: episode });
+    expect(f.owner.preview(episode)).toBeNull();
+    f.emit("onState", { attempt: preview!.attempt, phase: "paused", positionMs: 42 });
+    expect(settled).not.toHaveBeenCalled();
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it("ends only its own preview and Watch ends a preview", async () => {
+    const f = setup();
+    const old = f.owner.preview(episode)!;
+    await flush();
+    const next = f.owner.preview(episode)!;
+    await flush();
+    await old.end();
+    expect(f.owner.previewState.get()).toMatchObject({ attempt: next.attempt });
+    f.owner.media.watch(true);
+    expect(f.owner.previewState.get()).toEqual({ kind: "idle" });
+    expect(f.owner.state.get()).toEqual({ kind: "idle" });
+  });
   it("ticks and saves audio only after a supported native selection, and restores its identity on another source", async () => {
     const f = setup();
     f.owner.media.watch(true);

@@ -21,6 +21,8 @@ export type HoldRef =
  */
 export interface Admission {
   readonly attempt: string;
+  /** Muted Home preview: no focus, session or saved playback state. */
+  readonly preview?: boolean;
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly format: StreamFormat;

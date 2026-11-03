@@ -45,6 +45,7 @@ data class Admission(
   val startMs: Long,
   val hold: HoldRef,
   val title: String = "",
+  val preview: Boolean = false,
 )
 
 enum class Phase { PREPARING, BUFFERING, PLAYING, PAUSED, ENDED, FAILED, STOPPED }
@@ -122,6 +123,7 @@ class PlayerOwner(
   var changed: (() -> Unit)? = null
   val automatic: Boolean get() = player.trackSelectionParameters.overrides.values.none { it.type == C.TRACK_TYPE_VIDEO }
   var nextAvailable = false
+  val preview: Boolean get() = current?.admission?.preview == true
   val attempt: String? get() = current?.admission?.attempt
   val live: Boolean get() = current?.admission?.mode == "live"
   val isPlaying: Boolean get() = player.isPlaying
@@ -195,6 +197,9 @@ class PlayerOwner(
         events?.released(Release(admission.attempt, admission.hold, if (closed) outcomeOf(admission) else "unconfirmed"))
       }
     current = Current(admission, hold)
+    player.volume = if (admission.preview) 0f else 1f
+    player.setAudioAttributes(player.audioAttributes, !admission.preview)
+    notifyChanged()
     val local = admission.hold as? HoldRef.LocalFile
     if (local != null && !File(local.path).isFile) {
       player.stop()

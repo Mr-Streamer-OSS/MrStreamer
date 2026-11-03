@@ -433,6 +433,7 @@ export function mediaModel(
     },
     enterPip: () => native.enterPip?.() ?? Promise.resolve(false),
     watch(visible) {
+      if (visible && owner.previewState.get().kind === "previewing") void owner.stop();
       watching = visible;
 
       if (!visible) cancelNext();

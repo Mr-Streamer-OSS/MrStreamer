@@ -46,7 +46,9 @@ object PlayerHost {
     val launch = app.packageManager.getLaunchIntentForPackage(app.packageName)
       .let { it ?: Intent().setClassName(app.packageName, "${app.packageName}.MainActivity") }
       .setAction(Intent.ACTION_VIEW).setData(android.net.Uri.parse("mrstreamer://watch"))
-    session = MediaSession.Builder(app, OwnerPlayer(player, made)).setId("player")
+    fun ensureSession() {
+      if (session != null) return
+      session = MediaSession.Builder(app, OwnerPlayer(player, made)).setId("player")
       .setSessionActivity(PendingIntent.getActivity(app, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
       .setCallback(object : MediaSession.Callback {
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo) =
@@ -63,7 +65,12 @@ object PlayerHost {
           } else SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED)
         )
       }).build()
+    }
     made.changed = {
+      if (made.preview || made.attempt == null) {
+        session?.release()
+        session = null
+      } else ensureSession()
       session?.let { media ->
         for (controller in media.connectedControllers) {
           media.setAvailableCommands(controller, sessionCommands(made.live, made.nextAvailable), commands(made.live, made.nextAvailable))
@@ -71,13 +78,13 @@ object PlayerHost {
       }
       session?.setMediaButtonPreferences(buttons(app, made.live, made.nextAvailable))
       PlayerPip.refresh()
-      if (made.attempt != null && !serviceStarted) {
+      if (made.attempt != null && !made.preview && !serviceStarted) {
         try {
           app.startService(Intent(app, PlayerMediaService::class.java))
           serviceStarted = true
         } catch (_: IllegalStateException) { serviceStarted = false }
           catch (_: SecurityException) { serviceStarted = false }
-      } else if (made.attempt == null && serviceStarted) {
+      } else if ((made.attempt == null || made.preview) && serviceStarted) {
         app.stopService(Intent(app, PlayerMediaService::class.java))
         serviceStarted = false
       }

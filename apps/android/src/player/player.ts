@@ -45,6 +45,22 @@ export interface Playing {
 
 export type PlayerState = { readonly kind: "idle" } | Playing;
 
+export type PreviewState =
+  | { readonly kind: "idle" }
+  | {
+      readonly kind: "previewing";
+      readonly attempt: string;
+      readonly intent: PlayIntent;
+      readonly phase: PlaybackPhase;
+      readonly positionMs: number;
+    };
+
+export interface Preview {
+  readonly attempt: string;
+  /** Ends this preview only; no-op once replaced. */
+  end(): Promise<void>;
+}
+
 /**
  * Where an attempt was when it paused, stopped, was replaced or ended: what history saves to
  * continue from.
@@ -58,6 +74,8 @@ export interface Settled {
 
 export interface PlayerOwner {
   readonly state: Store<PlayerState>;
+  readonly previewState: Store<PreviewState>;
+  preview(intent: PlayIntent): Preview | null;
   readonly media: MediaModel;
   /** Plays `intent` in place of what plays, and returns its attempt. */
   play(intent: PlayIntent): string;
@@ -107,17 +125,18 @@ interface Admitted {
   readonly intent: PlayIntent;
   /** Where its media's position 0 is in the intent: what a retry continues from. */
   readonly startMs: number;
+  readonly preview: boolean;
   /** The phase and position it last settled at, so an unchanged settle isn't reported twice. */
   settled: string | null;
   readonly released: Promise<Release>;
   readonly settle: (release: Release) => void;
 }
 
-function admittedOf(intent: PlayIntent, startMs: number): Admitted {
+function admittedOf(intent: PlayIntent, startMs: number, preview = false): Admitted {
   let settle!: (release: Release) => void;
   const released = new Promise<Release>((resolve) => (settle = resolve));
 
-  return { intent, startMs, settled: null, released, settle };
+  return { intent, startMs, preview, settled: null, released, settle };
 }
 
 /**
@@ -142,6 +161,7 @@ export function playerOwner(
   persistence?: MediaPersistence,
 ): PlayerOwner {
   const state = store<PlayerState>({ kind: "idle" });
+  const previewState = store<PreviewState>({ kind: "idle" });
   const settledListeners = new Set<(settled: Settled) => void>();
   let attempts = 0;
   /** The attempt under way while its address is worked out. */
@@ -162,6 +182,23 @@ export function playerOwner(
     const entry = admitted.get(observation.attempt);
 
     if (!entry) return;
+    const preview = previewState.get();
+
+    if (preview.kind === "previewing" && preview.attempt === observation.attempt) {
+      previewState.set(
+        observation.phase === "stopped"
+          ? { kind: "idle" }
+          : {
+              ...preview,
+              phase: observation.phase,
+              positionMs: observation.positionMs,
+            },
+      );
+
+      return;
+    }
+
+    if (entry.preview) return;
     const { phase } = observation;
     const settles = phase === "paused" || phase === "stopped" || phase === "ended";
     const key = settles ? `${phase}@${observation.positionMs}` : null;
@@ -205,8 +242,20 @@ export function playerOwner(
     admitted.delete(release.attempt);
   });
 
+  function endPreview() {
+    const now = previewState.get();
+
+    if (now.kind === "idle") return Promise.resolve();
+    resolving?.abort();
+    resolving = null;
+    previewState.set({ kind: "idle" });
+
+    return admitted.has(now.attempt) ? native.stop(now.attempt).then(() => {}) : Promise.resolve();
+  }
+
   /** Ends the current attempt: its address stops being worked out, or the native player stops it. */
   async function end() {
+    const previewEnded = endPreview();
     owner.media.cancelNext();
     resolving?.abort();
     resolving = null;
@@ -214,6 +263,7 @@ export function playerOwner(
     state.set({ kind: "idle" });
 
     if (now && admitted.has(now.attempt)) await native.stop(now.attempt);
+    await previewEnded;
   }
 
   const command = async (run: (attempt: string) => Promise<boolean>) => {
@@ -224,11 +274,60 @@ export function playerOwner(
 
   const owner: PlayerOwner = {
     state,
+    previewState,
+    preview(intent) {
+      if (state.get().kind !== "idle") return null;
+      void endPreview();
+      const controller = new AbortController();
+      resolving = controller;
+      const attempt = `preview-${++attempts}-${Date.now().toString(36)}`;
+      previewState.set({ kind: "previewing", attempt, intent, phase: "resolving", positionMs: 0 });
+      resolve(intent, controller.signal).then(
+        async (request) => {
+          if (resolving !== controller) return;
+          resolving = null;
+          admitted.set(attempt, admittedOf(intent, request.startMs, true));
+
+          try {
+            await native.admit({ ...request, attempt, title: intent.title, preview: true });
+          } catch {
+            admitted
+              .get(attempt)
+              ?.settle({ attempt, hold: holdOf(intent), outcome: "unconfirmed" });
+            admitted.delete(attempt);
+            previewState.set((now) =>
+              now.kind === "previewing" && now.attempt === attempt
+                ? { ...now, phase: "failed" }
+                : now,
+            );
+          }
+        },
+        () => {
+          previewState.set((now) =>
+            now.kind === "previewing" && now.attempt === attempt
+              ? { ...now, phase: "failed" }
+              : now,
+          );
+        },
+      );
+
+      return {
+        attempt,
+        end: () => {
+          const now = previewState.get();
+
+          return now.kind === "previewing" && now.attempt === attempt
+            ? endPreview()
+            : Promise.resolve();
+        },
+      };
+    },
     get media() {
       return media;
     },
 
     play(intent) {
+      void endPreview();
       owner.media.cancelNext();
       const before = playing();
       resolving?.abort();
@@ -328,6 +427,9 @@ export function playerOwner(
     async release(matches) {
       // Taken before stopping: a release reported while the stop is under way is still counted.
       const holding = [...admitted.values()].filter((entry) => matches(holdOf(entry.intent)));
+      const preview = previewState.get();
+
+      if (preview.kind === "previewing" && matches(holdOf(preview.intent))) await endPreview();
       const now = playing();
 
       if (now && matches(holdOf(now.intent))) await end();

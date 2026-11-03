@@ -26,6 +26,7 @@ class AdmissionRecord : Record {
   @Field val mode: String = "title"
   @Field val startMs: Double = 0.0
   @Field val title: String = ""
+  @Field val preview: Boolean = false
   @Field val sourceId: String? = null
   @Field val path: String? = null
 }
@@ -65,7 +66,7 @@ class PlayerModule : Module() {
         record.path?.let { HoldRef.LocalFile(it) }
           ?: HoldRef.Source(record.sourceId ?: throw IllegalArgumentException("An admission names its source or file"))
       owner().admit(
-        Admission(record.attempt, record.url, record.headers, record.format, record.mode, record.startMs.toLong(), hold, record.title),
+        Admission(record.attempt, record.url, record.headers, record.format, record.mode, record.startMs.toLong(), hold, record.title, record.preview),
       )
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("pause") { attempt: String -> owner().pause(attempt) }.runOnQueue(Queues.MAIN)

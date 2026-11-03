@@ -117,6 +117,22 @@ class PlayerOwnerTest {
   private fun untilPhase(attempt: String, vararg phases: Phase) =
     until { recorder.of(attempt).lastOrNull()?.phase in phases }
 
+  @Test fun previewIsMutedAndNeverRequestsAudioFocus() {
+    val player = TestExoPlayerBuilder(context)
+      .setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO)).build()
+    players += player
+    player.setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
+    val owner = PlayerOwner(player, recorder)
+    val media = fixture("h264-aac.mp4")
+    try {
+      owner.admit(file("preview", media).copy(preview = true))
+      until { recorder.of("preview").any { it.phase == Phase.PLAYING } }
+      assertEquals(0f, player.volume)
+      val audio = org.robolectric.Shadows.shadowOf(context.getSystemService(android.media.AudioManager::class.java))
+      assertEquals(null, audio.lastAudioFocusRequest)
+    } finally { owner.stopAll(); media.delete() }
+  }
+
   @Test
   fun replacingAnAttemptStopsItClosesItsFileAndRefusesItsCommands() {
     val owner = owner()

@@ -30,7 +30,7 @@ object PlayerPip {
   private val receiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
       if (intent.getStringExtra("token") != token) return
-      val owner = PlayerHost.existing() ?: return
+      val owner = PlayerHost.existing()?.takeUnless { it.preview } ?: return
       if (intent.getStringExtra("attempt") != owner.attempt) return
       when (intent.action) {
         "app.mrstreamer.player.PAUSE" -> if (owner.isPlaying) owner.pauseCurrent() else owner.resumeCurrent()
@@ -46,7 +46,7 @@ object PlayerPip {
       addAction("app.mrstreamer.player.PAUSE"); addAction("app.mrstreamer.player.BACK"); addAction("app.mrstreamer.player.FORWARD")
     }
     ContextCompat.registerReceiver(host, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-    PlayerHost.existing()?.reconcile()
+    PlayerHost.existing()?.takeUnless { it.preview }?.reconcile()
     refresh()
   }
   fun detach(host: Activity) {
@@ -56,7 +56,7 @@ object PlayerPip {
   fun watch(enabled: Boolean) { if (watch && !enabled) requestNotifications(); watch = enabled; refresh() }
   fun requestNotifications() {
     val host = activity.get() ?: return
-    if (Build.VERSION.SDK_INT >= 33 && !permissionAsked && PlayerHost.existing()?.attempt != null &&
+    if (Build.VERSION.SDK_INT >= 33 && !permissionAsked && PlayerHost.existing()?.takeUnless { it.preview }?.attempt != null &&
       host.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
       try {
         host.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 501)
@@ -67,11 +67,11 @@ object PlayerPip {
   }
   fun enter(): Boolean {
     val host = activity.get() ?: return false
-    if (!supported(host) || !watch || PlayerHost.existing()?.attempt == null) return false
+    if (!supported(host) || !watch || PlayerHost.existing()?.takeUnless { it.preview }?.attempt == null) return false
     return try { host.enterPictureInPictureMode(params(host)) } catch (_: IllegalStateException) { false }
   }
   fun home() {
-    if (Build.VERSION.SDK_INT < 31 && watch && PlayerHost.existing()?.isPlaying == true) enter()
+    if (Build.VERSION.SDK_INT < 31 && watch && PlayerHost.existing()?.takeUnless { it.preview }?.isPlaying == true) enter()
   }
   fun mode(inPip: Boolean) {
     val wasPip = pip
@@ -81,18 +81,18 @@ object PlayerPip {
       // Expansion starts the Activity; dismissal leaves it stopped. Let lifecycle callbacks settle.
       android.os.Handler(android.os.Looper.getMainLooper()).post {
         val current = activity.get()
-        if (leavingPip && current != null && dismissed(stopped, false, current.isChangingConfigurations, locked(current))) PlayerHost.existing()?.stopAll()
+        if (leavingPip && current != null && dismissed(stopped, false, current.isChangingConfigurations, locked(current))) PlayerHost.existing()?.takeUnless { it.preview }?.stopAll()
       }
     }
     val host = activity.get()
-    if (wasPip && !inPip && host != null && dismissed(stopped, false, host.isChangingConfigurations, locked(host))) PlayerHost.existing()?.stopAll()
-    PlayerHost.existing()?.let { owner -> owner.attempt?.let { owner.events?.media(it, inPip) } }
+    if (wasPip && !inPip && host != null && dismissed(stopped, false, host.isChangingConfigurations, locked(host))) PlayerHost.existing()?.takeUnless { it.preview }?.stopAll()
+    PlayerHost.existing()?.takeUnless { it.preview }?.let { owner -> owner.attempt?.let { owner.events?.media(it, inPip) } }
   }
   fun started() { stopped = false; leavingPip = false }
   fun stopped(host: Activity) {
     stopped = true
     if ((pip || leavingPip) && dismissed(true, host.isInPictureInPictureMode, host.isChangingConfigurations, locked(host))) {
-      PlayerHost.existing()?.stopAll()
+      PlayerHost.existing()?.takeUnless { it.preview }?.stopAll()
       mode(false)
     }
   }
@@ -104,7 +104,7 @@ object PlayerPip {
     host.getSystemService(AppOpsManager::class.java).checkOpNoThrow(AppOpsManager.OPSTR_PICTURE_IN_PICTURE, host.applicationInfo.uid, host.packageName) == AppOpsManager.MODE_ALLOWED
   fun refresh() { activity.get()?.let { if (supported(it)) it.setPictureInPictureParams(params(it)) } }
   private fun params(host: Activity): PictureInPictureParams {
-    val owner = PlayerHost.existing()
+    val owner = PlayerHost.existing()?.takeUnless { it.preview }
     fun action(name: String, label: String, icon: Int, request: Int): RemoteAction {
       val intent = Intent("app.mrstreamer.player.$name").setPackage(host.packageName).putExtra("attempt", owner?.attempt).putExtra("token", token)
       return RemoteAction(Icon.createWithResource(host, icon), label, label,
