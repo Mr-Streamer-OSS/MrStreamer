@@ -102,6 +102,8 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
   The app never logs either. Nothing native holds a source's work yet: the first card that adds
   such a worker also adds the step that stops it before `remove` erases the authority.
 
+- **Long work.** `src/platform/tasks.ts` runs core's paced steps a few slices per task, as the iOS
+  app does, so catalogue mapping and naming leave taps and Back responsive.
 - **Storage.** `src/platform/storage.ts` reads and replaces whole JSON files in the app's files
   folder. Downloads and other durable native data choose their own private folders.
 - **Backup and network.** Nothing of the app is backed up or moved to another phone:
@@ -114,7 +116,7 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
 - **Launch.** Restore erases every sealed authority that `sources.json` doesn't name, so a
   damaged list or a connect cut short leaves no login behind.
 - **Temporary copies.** `src/connect/playlist.ts` reads M3U links under the iOS app's limits, and
-  `src/platform/storage.ts` and `store.ts` follow the iOS app's. The card "Share mobile account
+  `src/platform/storage.ts`, `store.ts` and `tasks.ts` follow the iOS app's. The card "Share mobile account
   and catalogue behavior without changing iOS outcomes" owns their one shared replacement.
 
 ## Where it stands

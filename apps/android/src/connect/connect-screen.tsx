@@ -1,6 +1,14 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useEffect, useRef, useState, type ComponentProps, type ComponentRef } from "react";
-import { BackHandler, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import {
+  AccessibilityInfo,
+  BackHandler,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
@@ -52,7 +60,11 @@ export function ConnectScreen({
     if (controller.signal.aborted || result.kind === "cancelled") return;
     setBusy(false);
     if (result.kind === "connected") onConnected();
-    else setFailure({ error: result.error, http: result.http });
+    else {
+      setFailure({ error: result.error, http: result.http });
+      // TalkBack reads a live region's changes, not one that has just appeared.
+      AccessibilityInfo.announceForAccessibility(describeFailure(result.error));
+    }
   }
 
   // Fields and actions share one lane: a 24dp icon at 16dp, text at 56dp.

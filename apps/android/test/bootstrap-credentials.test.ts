@@ -59,6 +59,7 @@ describe("Android credentials", () => {
       credentials.read("a"),
       credentials.write("a", { kind: "m3u", link: "http://x.example/list.m3u" }),
       credentials.remove("a"),
+      credentials.retain(["a"]),
     ])
       await expect(attempt).rejects.toMatchObject({ error: { kind: "keychain-refused" } });
   });

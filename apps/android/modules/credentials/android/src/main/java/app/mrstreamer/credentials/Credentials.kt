@@ -68,7 +68,7 @@ object Credentials {
   @JvmStatic
   fun remove(context: Context, id: String) = synchronized(this) {
     fileOf(context, id).delete()
-    check(!fileOf(context, id).baseFile.exists()) { "A credential could not be removed." }
+    check(filesOf(context, setOf(nameOf(id))).isEmpty()) { "A credential could not be removed." }
   }
 
   /**
@@ -78,10 +78,14 @@ object Credentials {
   @JvmStatic
   fun retain(context: Context, ids: Collection<String>) = synchronized(this) {
     val kept = ids.map(::nameOf).toSet()
-    for (file in folder(context).listFiles().orEmpty()) {
-      if (file.name.substringBefore('.') !in kept) file.delete()
-    }
+    val others = folder(context).listFiles().orEmpty().filter { it.name.substringBefore('.') !in kept }
+    for (file in others) file.delete()
+    check(others.none(File::exists)) { "A credential could not be removed." }
   }
+
+  /** The files of the ids named [names], with any AtomicFile side files of theirs. */
+  private fun filesOf(context: Context, names: Set<String>): List<File> =
+    folder(context).listFiles().orEmpty().filter { it.name.substringBefore('.') in names }
 
   private fun folder(context: Context): File =
     File(context.noBackupFilesDir, "credentials").apply { mkdirs() }

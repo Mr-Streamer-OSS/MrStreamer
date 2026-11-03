@@ -30,15 +30,20 @@ export function CatalogueScreen({
   );
 
   const remove = (source: ConnectedSource) =>
-    Alert.alert(`Remove ${source.label}?`, "Its login is erased from this phone.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () =>
-          void owner.remove(source.id).catch(() => Alert.alert("Couldn't remove this provider.")),
-      },
-    ]);
+    Alert.alert(
+      `Remove ${source.label}?`,
+      "Its login is erased from this phone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () =>
+            void owner.remove(source.id).catch(() => Alert.alert("Couldn't remove this provider.")),
+        },
+      ],
+      { cancelable: true },
+    );
 
   const header = (
     <View style={{ borderBottomWidth: 1, borderColor: HAIRLINE }}>

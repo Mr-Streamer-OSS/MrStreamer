@@ -2,7 +2,7 @@ import { type } from "arktype";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import { isAdultCategory } from "@mrstreamer/core/adult";
-import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
+import { normalizeSteps } from "@mrstreamer/core/catalogue/normalize";
 import type { LiveCatalogue } from "@mrstreamer/core/provider";
 import { sha256Hex } from "@mrstreamer/core/sha256";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@mrstreamer/core/xtream";
 import type { Authority, Credentials } from "../platform/credentials.ts";
 import { store, type Store } from "../platform/store.ts";
+import { inTasks } from "../platform/tasks.ts";
 import { playlistReader } from "./playlist.ts";
 
 // The viewer's saved sources (Xtream logins and M3U links) and the channels each lists, all shown
@@ -111,10 +112,15 @@ const failureOf = (cause: unknown): AppError =>
     : { kind: "unexpected", detail: cause instanceof Error ? cause.message : String(cause) };
 
 /**
- * Channels to show. Adults' are left out until a setting can show them: those the provider marks,
- * and those in a category named for adults, as the iOS app reads them (apps/ios/src/library.ts).
+ * Channels to show, worked out a few slices per task so taps and Back go on (null once `wanted`
+ * fails). Adults' are left out until a setting can show them: those the provider marks, and those
+ * in a category named for adults, as the iOS app reads them (apps/ios/src/library.ts).
  */
-function rowsOf(sourceId: string, catalogue: LiveCatalogue): readonly ChannelRow[] {
+async function rowsOf(
+  sourceId: string,
+  catalogue: LiveCatalogue,
+  wanted: () => boolean,
+): Promise<readonly ChannelRow[] | null> {
   const adultCategories = new Set(
     catalogue.categories.filter((each) => isAdultCategory(each.name)).map((each) => each.id),
   );
@@ -123,7 +129,9 @@ function rowsOf(sourceId: string, catalogue: LiveCatalogue): readonly ChannelRow
       .filter((each) => each.adult || each.categoryIds.some((id) => adultCategories.has(id)))
       .map((each) => each.id),
   );
-  const { categories, streams } = normalizeCatalogue(catalogue);
+  const normalized = await inTasks(normalizeSteps(catalogue), wanted);
+  if (!normalized) return null;
+  const { categories, streams } = normalized;
   const names = new Map(categories.map((category) => [category.id, category.name]));
   return streams
     .filter((stream) => !adult.has(stream.id))
@@ -165,7 +173,7 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
   function readerOf(authority: Authority): CatalogueReader {
     const options = { userAgent: platform.userAgent, fetch: platform.fetch };
     return authority.kind === "xtream"
-      ? xtreamProvider(authority, options)
+      ? xtreamProvider(authority, { ...options, inTasks })
       : playlistReader(authority.link, options);
   }
 
@@ -196,10 +204,10 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
     const { signal } = controller;
     (checked ? Promise.resolve() : reader.authenticate(signal))
       .then(() => reader.liveCatalogue(signal))
-      .then((catalogue) => rowsOf(id, catalogue))
+      .then((catalogue) => rowsOf(id, catalogue, () => reads.get(id) === controller))
       .then(
         (rows) => {
-          if (reads.get(id) === controller) setChannels(id, { kind: "ready", rows });
+          if (rows && reads.get(id) === controller) setChannels(id, { kind: "ready", rows });
         },
         (cause: unknown) => {
           if (reads.get(id) === controller)
@@ -267,18 +275,30 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       const saved = savedOf(authority);
       await ready;
       if (signal?.aborted) return { kind: "cancelled" };
-      const others = listed().filter((source) => source.id !== saved.id);
-      const known = others.length < listed().length;
+      const known = listed().some((source) => source.id === saved.id);
+      // What a cancel or a refused list puts back: the login this source had, or none. A new
+      // login left behind no list names, and the next launch erases it.
+      const previous = known ? await platform.credentials.read(saved.id).catch(() => null) : null;
+      const undo = () =>
+        (previous
+          ? platform.credentials.write(saved.id, previous)
+          : platform.credentials.remove(saved.id)
+        ).catch(() => {});
       try {
         await platform.credentials.write(saved.id, authority);
       } catch (cause) {
         return { kind: "failed", error: failureOf(cause), http: null };
       }
+      if (signal?.aborted) {
+        await undo();
+        return { kind: "cancelled" };
+      }
+      // Read after the write: a source removed meanwhile stays removed.
+      const others = listed().filter((source) => source.id !== saved.id);
       try {
         writeRegistry([...others, saved]);
       } catch (cause) {
-        // A new login no list names; the next launch erases it if this can't.
-        if (!known) await platform.credentials.remove(saved.id).catch(() => {});
+        await undo();
         return { kind: "failed", error: failureOf(cause), http: null };
       }
       readers.set(saved.id, reader);

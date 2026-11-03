@@ -18,6 +18,8 @@ interface Phone {
   unreadable: boolean;
   /** Set to make the files folder refuse writes, as a full disk does. */
   full: boolean;
+  /** Set to hold credential writes, as a slow Keystore does: `started` is told, `until` releases. */
+  hold: { readonly started: () => void; readonly until: Promise<void> } | null;
 }
 
 const newPhone = (): Phone => ({
@@ -26,6 +28,7 @@ const newPhone = (): Phone => ({
   refuse: false,
   unreadable: false,
   full: false,
+  hold: null,
 });
 
 function launch(phone: Phone, fetchImpl: typeof fetch = fetch): SourcesOwner {
@@ -38,7 +41,12 @@ function launch(phone: Phone, fetchImpl: typeof fetch = fetch): SourcesOwner {
       if (phone.unreadable) throw new Error("damaged");
       return phone.sealed.get(id) ?? null;
     },
-    write: async (id, authority) => void (guard(), phone.sealed.set(id, authority)),
+    write: async (id, authority) => {
+      guard();
+      phone.hold?.started();
+      await phone.hold?.until;
+      phone.sealed.set(id, authority);
+    },
     remove: async (id) => void (guard(), phone.sealed.delete(id)),
     retain: async (ids) => {
       guard();
@@ -309,7 +317,7 @@ describe("Android sources", () => {
     expect(phone.sealed.size).toBe(0);
   });
 
-  it("removes a source: its read stops, its login is erased and a relaunch doesn't bring it back", async () => {
+  it("removes a source while its channels load: its login is erased and a relaunch doesn't bring it back", async () => {
     const phone = newPhone();
     const owner = launch(phone);
     await owner.restore();
@@ -327,6 +335,54 @@ describe("Android sources", () => {
     const relaunched = launch(phone);
     await relaunched.restore();
     expect((await settled(relaunched)).map((source) => source.kind)).toEqual(["m3u"]);
+  });
+
+  it("saves nothing when Connect is cancelled while the login is being saved", async () => {
+    const phone = newPhone();
+    const owner = launch(phone);
+    await owner.restore();
+    const cancel = new AbortController();
+    let release = () => {};
+    const started = new Promise<void>((resolve) => {
+      phone.hold = { started: resolve, until: new Promise((done) => (release = done)) };
+    });
+
+    const connecting = owner.connect(xtream(), cancel.signal);
+    await started;
+    cancel.abort();
+    release();
+
+    expect(await connecting).toEqual({ kind: "cancelled" });
+    expect(listed(owner)).toEqual([]);
+    expect(phone.sealed.size).toBe(0);
+  });
+
+  it("keeps an earlier source's channels that arrive while another source's login is saved", async () => {
+    const phone = newPhone();
+    let showList = () => {};
+    const listHeld = new Promise<void>((resolve) => (showList = resolve));
+    const held: typeof fetch = async (input, init) => {
+      if (String(input).includes("get_live_streams")) await listHeld;
+      return fetch(input, init);
+    };
+    const owner = launch(phone, held);
+    await owner.restore();
+    await owner.connect(xtream());
+
+    let release = () => {};
+    const started = new Promise<void>((resolve) => {
+      phone.hold = { started: resolve, until: new Promise((done) => (release = done)) };
+    });
+    const adding = owner.connect(m3u());
+    await started;
+    showList();
+    await expect.poll(() => listed(owner)[0]?.channels.kind).toBe("ready");
+    release();
+    await adding;
+
+    const [panelSource, playlistSource] = await settled(owner);
+    expect(rowCount(panelSource)).toBeGreaterThan(0);
+    expect(rowCount(playlistSource)).toBeGreaterThan(0);
   });
 
   it("keeps a source it erased but couldn't forget listed, and removes it on a second try", async () => {
