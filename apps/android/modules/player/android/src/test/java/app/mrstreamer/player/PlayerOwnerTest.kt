@@ -72,6 +72,7 @@ class PlayerOwnerTest {
 
   @After
   fun tearDown() {
+    resetPlayerState()
     players.forEach { it.release() }
     servers.forEach { it.shutdown() }
   }

@@ -41,6 +41,7 @@ object PlayerPip {
   }
   fun attach(host: Activity) {
     activity = WeakReference(host)
+    pip = host.isInPictureInPictureMode
     val filter = IntentFilter().apply {
       addAction("app.mrstreamer.player.PAUSE"); addAction("app.mrstreamer.player.BACK"); addAction("app.mrstreamer.player.FORWARD")
     }
@@ -88,7 +89,7 @@ object PlayerPip {
     if (wasPip && !inPip && host != null && dismissed(stopped, false, host.isChangingConfigurations, locked(host))) PlayerHost.existing()?.takeUnless { it.preview }?.stopAll()
     PlayerHost.existing()?.takeUnless { it.preview }?.let { owner -> owner.attempt?.let { owner.events?.media(it, inPip) } }
   }
-  fun canPreview(): Boolean = activity.get()?.let { !stopped && !pip && !it.isInPictureInPictureMode } == true
+  fun canPreview(): Boolean = activity.get()?.let { !watch && !stopped && !pip && !it.isInPictureInPictureMode } == true
   fun started() { stopped = false; leavingPip = false }
   fun stopped(host: Activity) {
     stopped = true

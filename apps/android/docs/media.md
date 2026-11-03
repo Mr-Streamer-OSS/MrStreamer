@@ -46,7 +46,9 @@ rotation, TalkBack or keyboard/D-pad delivery. Those remain unobserved while the
 mismatch is unresolved. The base player's source/read and installed-runtime limits remain.
 No device, signing or publication is part of this change.
 
-Home may call player.preview(intent) only while player.state is idle. It uses the existing
+Home may call player.preview(intent) only while player.state is idle, Watch is hidden, and the
+activity is started outside PiP. A native refusal leaves previewState idle; a stream failure reports
+failed. Activity stop and PiP entry end a preview. It uses the existing
 PlayerSurface and one native player, muted without audio focus or a MediaSession. Preview observations
 live only in player.previewState, never saved media preferences or resume history. A normal play
 or entering Watch ends the preview immediately; an old preview handle cannot end its replacement.

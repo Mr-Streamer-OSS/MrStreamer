@@ -209,6 +209,18 @@ describe("Android media public contract", () => {
     expect(settled).not.toHaveBeenCalled();
     expect(f.write).not.toHaveBeenCalled();
   });
+  it("leaves a refused native preview idle but reports a broken stream as failed", async () => {
+    const f = setup();
+    vi.mocked(f.native.admit).mockResolvedValueOnce(false);
+    f.owner.preview(episode);
+    await flush();
+    expect(f.owner.previewState.get()).toEqual({ kind: "idle" });
+    const accepted = f.owner.preview(episode)!;
+    await flush();
+    f.emit("onState", { attempt: accepted.attempt, phase: "failed", positionMs: 0 });
+    expect(f.owner.previewState.get()).toMatchObject({ kind: "previewing", phase: "failed" });
+  });
+
   it("refuses previews on Watch without touching native playback", async () => {
     const f = setup();
     f.owner.media.watch(true);

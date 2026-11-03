@@ -189,9 +189,9 @@ class PlayerOwner(
     )
   }
 
-  /** Plays [admission], replacing what played before. */
-  fun admit(admission: Admission) {
-    check(!admission.preview || PlayerPip.canPreview()) { "Preview requires a started activity outside PiP" }
+  /** Plays [admission], replacing what played before; false means a preview was not admitted. */
+  fun admit(admission: Admission): Boolean {
+    if (admission.preview && !PlayerPip.canPreview()) return false
     val ending = end(notify = false)
     val hold =
       Hold(main) { closed ->
@@ -207,7 +207,7 @@ class PlayerOwner(
       player.clearMediaItems()
       ending?.let(::letGo)
       observe(Failure("file-missing", "ERROR_CODE_IO_FILE_NOT_FOUND"))
-      return
+      return true
     }
     try {
       prepare(admission, hold, local)
@@ -230,6 +230,7 @@ class PlayerOwner(
     player.playWhenReady = true
     player.prepare()
     observe()
+    return true
   }
 
   /** Gives the player [admission]'s media, read through [hold]. */

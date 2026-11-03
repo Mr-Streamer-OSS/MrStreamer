@@ -109,7 +109,8 @@ export interface Capabilities {
 type Listener<T> = (event: T) => void;
 
 export interface NativePlayer {
-  admit(admission: Admission): Promise<void>;
+  /** False refuses a preview; older native clients return no admission result. */
+  admit(admission: Admission): Promise<boolean | void>;
   pause(attempt: string): Promise<boolean>;
   resume(attempt: string): Promise<boolean>;
   seek(attempt: string, positionMs: number): Promise<boolean>;

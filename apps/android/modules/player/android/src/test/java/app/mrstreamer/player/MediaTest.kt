@@ -16,6 +16,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import com.google.common.collect.ImmutableList
 import org.junit.Assert.*
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -25,6 +26,8 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class MediaTest {
+  @After fun reset() = resetPlayerState()
+
   @Test fun sessionCannotReplaceMediaOrChangeSpeed() {
     val owner = PlayerHost.owner(RuntimeEnvironment.getApplication())
     try {
@@ -45,8 +48,15 @@ class MediaTest {
       PlayerPip.started()
       owner.admit(Admission("same", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
       assertNotNull(PlayerHost.session)
+      shadowOf(activity.packageManager).setSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE, true)
+      PlayerPip.watch(true)
+      assertTrue(PlayerPip.enter())
+      PlayerPip.watch(false)
       owner.admit(Admission("same", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing"), preview = true))
       assertNull(PlayerHost.session)
+      PlayerPip.watch(true)
+      assertFalse(PlayerPip.enter())
+      PlayerPip.watch(false)
       owner.admit(Admission("same", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
       assertNotNull(PlayerHost.session)
     } finally { owner.stopAll(); PlayerPip.watch(false); PlayerPip.detach(activity); activity.finish() }
@@ -58,19 +68,23 @@ class MediaTest {
     fun preview() = owner.admit(Admission("preview", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing"), preview = true))
     try {
       PlayerPip.attach(activity)
-      assertThrows(IllegalStateException::class.java) { preview() }
+      assertFalse(preview())
       PlayerPip.started()
+      PlayerPip.watch(true)
+      assertFalse(preview())
+      assertNull(owner.attempt)
+      PlayerPip.watch(false)
       preview()
       assertEquals("preview", owner.attempt)
       PlayerPip.stopped(activity)
       assertNull(owner.attempt)
-      assertThrows(IllegalStateException::class.java) { preview() }
+      assertFalse(preview())
       PlayerPip.started()
       preview()
       activity.inPip = true
       PlayerPip.mode(true)
       assertNull(owner.attempt)
-      assertThrows(IllegalStateException::class.java) { preview() }
+      assertFalse(preview())
       owner.admit(Admission("normal", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
       PlayerPip.stopped(activity)
       assertEquals("normal", owner.attempt)
@@ -84,6 +98,7 @@ class MediaTest {
     try {
       play("first")
       val session = PlayerHost.session!!
+      assertFalse(service.sessions.contains(session))
       service.onStartCommand(null, 0, 1)
       assertTrue(service.sessions.contains(session))
       owner.stopAll()
@@ -94,6 +109,50 @@ class MediaTest {
       service.onStartCommand(null, 0, 2)
       assertTrue(service.sessions.contains(session))
     } finally { owner.stopAll(); service.onDestroy() }
+  }
+
+
+  @Test fun survivingServiceReplacesReleasedSessionAfterPreview() {
+    val activity = Robolectric.buildActivity(PipActivity::class.java).setup().get()
+    val owner = PlayerHost.owner(activity)
+    val service = Robolectric.buildService(PlayerMediaService::class.java).create().get()
+    fun play(id: String, preview: Boolean = false) = owner.admit(Admission(id, "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing"), preview = preview))
+    try {
+      PlayerPip.attach(activity); PlayerPip.started()
+      play("normal")
+      service.onStartCommand(null, 0, 1)
+      val old = PlayerHost.session!!
+      assertEquals(listOf(old), service.sessions)
+      androidx.media3.test.utils.robolectric.RobolectricUtil.runMainLooperUntil { old.connectedControllers.isNotEmpty() }
+      owner.stopAll()
+      play("preview", true)
+      assertFalse(service.sessions.contains(old))
+      assertNull(PlayerHost.session)
+      play("normal-again")
+      val current = PlayerHost.session!!
+      assertNotSame(old, current)
+      service.onStartCommand(null, 0, 2)
+      assertEquals(listOf(current), service.sessions)
+    } finally { owner.stopAll(); service.onDestroy(); PlayerPip.detach(activity); activity.finish() }
+  }
+
+  @Test fun recreationInPipThenDismissalStopsPlayback() {
+    val first = Robolectric.buildActivity(PipActivity::class.java).setup().get()
+    val second = Robolectric.buildActivity(PipActivity::class.java).setup().get()
+    val owner = PlayerHost.owner(first)
+    try {
+      PlayerPip.attach(first); PlayerPip.started()
+      owner.admit(Admission("pip", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      first.inPip = true; PlayerPip.mode(true)
+      PlayerPip.detach(first)
+      second.inPip = true
+      PlayerPip.attach(second); PlayerPip.started()
+      PlayerPip.stopped(second)
+      assertEquals("pip", owner.attempt)
+      second.inPip = false
+      PlayerPip.mode(false)
+      assertNull(owner.attempt)
+    } finally { PlayerPip.detach(second); owner.stopAll(); first.finish(); second.finish() }
   }
 
   @Test fun observationsDoNotRefreshControlsAndReplacementDoesNotAnnounceFinalStop() {

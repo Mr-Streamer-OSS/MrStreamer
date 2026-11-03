@@ -292,7 +292,22 @@ export function playerOwner(
           admitted.set(attempt, admittedOf(intent, request.startMs, true));
 
           try {
-            await native.admit({ ...request, attempt, title: intent.title, preview: true });
+            const accepted = await native.admit({
+              ...request,
+              attempt,
+              title: intent.title,
+              preview: true,
+            });
+
+            if (accepted === false) {
+              admitted
+                .get(attempt)
+                ?.settle({ attempt, hold: holdOf(intent), outcome: "unconfirmed" });
+              admitted.delete(attempt);
+              previewState.set((now) =>
+                now.kind === "previewing" && now.attempt === attempt ? { kind: "idle" } : now,
+              );
+            }
           } catch {
             admitted
               .get(attempt)
