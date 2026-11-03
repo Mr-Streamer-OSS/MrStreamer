@@ -1,7 +1,8 @@
 # Mr. Streamer for iOS
 
 React Native on Hermes (Expo SDK 58), building toward the desktop app's features. It shares
-`@mrstreamer/contracts` and the parts of `@mrstreamer/core` that run without Node, and brings its
+`@mrstreamer/contracts`, the parts of `@mrstreamer/core` that run without Node, and with the
+Android app `@mrstreamer/mobile` (which login answers each subscription's lists), and brings its
 own native adapters: the Keychain, app storage, one managed native player and the modules in
 `modules/` (background downloads, the downloads folder, the guide, title formats, media controls,
 key commands, programme reminders and forgetting cached logins). Nothing of it is in the desktop's

@@ -2,7 +2,8 @@
 
 React Native on Hermes (Expo SDK 58), for Android phones and tablets. It shares
 `@mrstreamer/contracts` and the parts of `@mrstreamer/core` that run without Node with the
-desktop and iOS apps, and brings its own Android adapters. Nothing of it is in the desktop's
+desktop and iOS apps, and `@mrstreamer/mobile` (which login answers each source's lists) with the
+iOS app, and brings its own Android adapters. Nothing of it is in the desktop's
 install, build or packages, and it shares no install, lockfile, native module or config with
 `apps/ios`.
 

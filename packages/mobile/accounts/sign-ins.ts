@@ -19,7 +19,7 @@ export interface Load<Login> {
   stands(): boolean;
 }
 
-export interface SignIns<Login> {
+export interface SignIns<Login extends object> {
   /** `id`'s login, if signed in. */
   current(id: string): Login | undefined;
   /** `id`'s login, or a `needs-secret` failure when it has none. */
@@ -38,7 +38,7 @@ export interface SignIns<Login> {
   begin(id: string, list: string): Load<Login> | null;
 }
 
-export function signIns<Login>(): SignIns<Login> {
+export function signIns<Login extends object>(): SignIns<Login> {
   const logins = new Map<string, Login>();
   /** The load under way of each source's lists, by source id, then list. */
   const loads = new Map<string, Map<string, AbortController>>();
@@ -98,8 +98,7 @@ export function signIns<Login>(): SignIns<Login> {
       loads.set(id, lists);
       const { signal } = controller;
 
-      // Every sign-in again and sign-out aborts, so the signal alone tells.
-      return { login, signal, stands: () => !signal.aborted };
+      return { login, signal, stands: () => !signal.aborted && logins.get(id) === login };
     },
   };
 }
