@@ -22,7 +22,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommands
 
-/** The process owns one player and one session, including across Activity recreation. */
+/** One process player; normal playback retains its session across replacements, previews suppress it. */
 @UnstableApi
 object PlayerHost {
   private var owner: PlayerOwner? = null
@@ -67,10 +67,10 @@ object PlayerHost {
       }).build()
     }
     made.changed = {
-      if (made.preview || made.attempt == null) {
+      if (made.preview) {
         session?.release()
         session = null
-      } else ensureSession()
+      } else if (made.attempt != null) ensureSession()
       session?.let { media ->
         for (controller in media.connectedControllers) {
           media.setAvailableCommands(controller, sessionCommands(made.live, made.nextAvailable), commands(made.live, made.nextAvailable))

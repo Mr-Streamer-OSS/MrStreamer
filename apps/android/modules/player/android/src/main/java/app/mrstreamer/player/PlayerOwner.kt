@@ -117,7 +117,7 @@ class PlayerOwner(
 
   private var lastControls: List<Any?>? = null
   private fun notifyChanged() {
-    val controls = listOf(attempt, live, nextAvailable, isPlaying)
+    val controls = listOf(attempt, live, nextAvailable, isPlaying, preview)
     if (controls != lastControls) { lastControls = controls; changed?.invoke() }
   }
   var changed: (() -> Unit)? = null
@@ -191,6 +191,7 @@ class PlayerOwner(
 
   /** Plays [admission], replacing what played before. */
   fun admit(admission: Admission) {
+    check(!admission.preview || PlayerPip.canPreview()) { "Preview requires a started activity outside PiP" }
     val ending = end(notify = false)
     val hold =
       Hold(main) { closed ->

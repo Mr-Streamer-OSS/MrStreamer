@@ -76,6 +76,8 @@ export interface PlayerOwner {
   readonly state: Store<PlayerState>;
   readonly previewState: Store<PreviewState>;
   preview(intent: PlayIntent): Preview | null;
+  /** Ends only the preview, leaving viewer playback and media state alone. */
+  endPreview(): Promise<void>;
   readonly media: MediaModel;
   /** Plays `intent` in place of what plays, and returns its attempt. */
   play(intent: PlayIntent): string;
@@ -275,8 +277,9 @@ export function playerOwner(
   const owner: PlayerOwner = {
     state,
     previewState,
+    endPreview,
     preview(intent) {
-      if (state.get().kind !== "idle") return null;
+      if (state.get().kind !== "idle" || owner.media.watching) return null;
       void endPreview();
       const controller = new AbortController();
       resolving = controller;
@@ -303,6 +306,8 @@ export function playerOwner(
           }
         },
         () => {
+          if (resolving !== controller) return;
+          resolving = null;
           previewState.set((now) =>
             now.kind === "previewing" && now.attempt === attempt
               ? { ...now, phase: "failed" }

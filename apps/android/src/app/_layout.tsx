@@ -34,7 +34,6 @@ export default function RootLayout() {
       <Stack
         screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}
       >
-        <Stack.Screen name="offline" />
         <Stack.Protected guard={signedIn}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="watch" options={{ animation: "fade" }} />
@@ -42,6 +41,7 @@ export default function RootLayout() {
         <Stack.Protected guard={!signedIn}>
           <Stack.Screen name="connect" />
         </Stack.Protected>
+        <Stack.Screen name="offline" />
       </Stack>
       {signedIn ? <MiniPlayer /> : null}
     </ThemeProvider>

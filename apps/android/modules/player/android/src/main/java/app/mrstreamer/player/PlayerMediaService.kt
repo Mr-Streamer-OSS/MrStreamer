@@ -12,6 +12,10 @@ class PlayerMediaService : MediaSessionService() {
     super.onCreate()
     PlayerHost.session?.let { addSession(it) }
   }
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    PlayerHost.session?.let { addSession(it) }
+    return super.onStartCommand(intent, flags, startId)
+  }
   override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = PlayerHost.session
   override fun onTaskRemoved(rootIntent: Intent?) {
     PlayerHost.existing()?.stopAll()

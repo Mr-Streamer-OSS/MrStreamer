@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NativePlayer, Observation, Track } from "../src/player/native.ts";
 import type { EpisodeIntent, MediaPreferences } from "../src/player/media.ts";
+import type { Resolve } from "../src/player/resolve.ts";
 import { playerOwner } from "../src/player/player.ts";
 
 vi.mock("expo", () => ({ requireNativeModule: vi.fn() }));
@@ -30,7 +31,7 @@ const audio: Track = {
   selected: false,
 };
 
-function setup(failSave = false, failRead = false) {
+function setup(failSave = false, failRead = false, resolve?: Resolve) {
   const listeners = new Map<string, Set<(event: never) => void>>();
 
   const emit = (event: string, value: unknown) => {
@@ -66,14 +67,15 @@ function setup(failSave = false, failRead = false) {
 
   const owner = playerOwner(
     native,
-    async () => ({
-      url: "",
-      headers: {},
-      mode: "title",
-      format: "progressive",
-      startMs: 0,
-      sourceId: "test",
-    }),
+    resolve ??
+      (async () => ({
+        url: "",
+        headers: {},
+        mode: "title",
+        format: "progressive",
+        startMs: 0,
+        sourceId: "test",
+      })),
     {
       read: () => {
         if (failRead) throw new Error("read failed");
@@ -184,16 +186,94 @@ describe("Android media public contract", () => {
       phase: "playing",
       positionMs: 42,
     });
+
+    for (const phase of ["paused", "ended"] as const) {
+      f.emit("onState", { attempt: preview!.attempt, phase, positionMs: 42 });
+    }
+
     expect(settled).not.toHaveBeenCalled();
+    expect(f.write).not.toHaveBeenCalled();
     f.owner.play(episode);
     expect(f.native.stop).toHaveBeenCalledWith(preview!.attempt);
     expect(f.owner.previewState.get()).toEqual({ kind: "idle" });
     await preview!.end();
     expect(f.owner.state.get()).toMatchObject({ kind: "playing", intent: episode });
+    await flush();
+    const admits = vi.mocked(f.native.admit).mock.calls.length;
+    const stops = vi.mocked(f.native.stop).mock.calls.length;
     expect(f.owner.preview(episode)).toBeNull();
+    await flush();
+    expect(f.native.admit).toHaveBeenCalledTimes(admits);
+    expect(f.native.stop).toHaveBeenCalledTimes(stops);
     f.emit("onState", { attempt: preview!.attempt, phase: "paused", positionMs: 42 });
     expect(settled).not.toHaveBeenCalled();
     expect(f.write).not.toHaveBeenCalled();
+  });
+  it("refuses previews on Watch without touching native playback", async () => {
+    const f = setup();
+    f.owner.media.watch(true);
+    expect(f.owner.preview(episode)).toBeNull();
+    await flush();
+    expect(f.native.admit).not.toHaveBeenCalled();
+    expect(f.native.stop).not.toHaveBeenCalled();
+  });
+  it("clears a failed preview resolve before ending the handle", async () => {
+    let signal!: AbortSignal;
+
+    const f = setup(false, false, async (_intent, received) => {
+      signal = received;
+      throw new Error("offline");
+    });
+
+    const preview = f.owner.preview(episode)!;
+    await flush();
+    expect(f.owner.previewState.get()).toMatchObject({ phase: "failed" });
+    await preview.end();
+    expect(signal.aborted).toBe(false);
+  });
+  it("ignores a preview resolve settling after normal play", async () => {
+    let finish!: (request: Awaited<ReturnType<Resolve>>) => void;
+
+    const request = {
+      url: "",
+      headers: {},
+      mode: "title",
+      format: "progressive",
+      startMs: 0,
+      sourceId: "test",
+    } as const;
+
+    const f = setup(
+      false,
+      false,
+      vi
+        .fn<Resolve>()
+        .mockImplementationOnce(
+          () =>
+            new Promise((done) => {
+              finish = done;
+            }),
+        )
+        .mockResolvedValue(request),
+    );
+
+    f.owner.preview(episode);
+    const attempt = f.owner.play(episode);
+    await flush();
+    finish(request);
+    await flush();
+    expect(f.native.admit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ attempt }));
+    expect(f.native.stop).not.toHaveBeenCalled();
+    expect(f.owner.state.get()).toMatchObject({ kind: "playing", attempt });
+  });
+  it("Watch ends only the preview without changing playback state", async () => {
+    const f = setup();
+    f.owner.preview(episode);
+    await flush();
+    const playback = f.owner.state.get();
+    f.owner.media.watch(true);
+    expect(f.owner.previewState.get()).toEqual({ kind: "idle" });
+    expect(f.owner.state.get()).toBe(playback);
   });
   it("ends only its own preview and Watch ends a preview", async () => {
     const f = setup();

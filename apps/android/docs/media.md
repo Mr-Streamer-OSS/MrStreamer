@@ -50,3 +50,5 @@ Home may call player.preview(intent) only while player.state is idle. It uses th
 PlayerSurface and one native player, muted without audio focus or a MediaSession. Preview observations
 live only in player.previewState, never saved media preferences or resume history. A normal play
 or entering Watch ends the preview immediately; an old preview handle cannot end its replacement.
+
+Mount PlayerSurface for a preview only while previewing: the newest attached surface shows the picture.

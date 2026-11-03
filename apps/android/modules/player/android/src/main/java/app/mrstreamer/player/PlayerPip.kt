@@ -23,7 +23,7 @@ object PlayerPip {
   private var activity = WeakReference<Activity>(null)
   private var watch = false
   private var pip = false
-  private var stopped = false
+  private var stopped = true
   private var leavingPip = false
   private var permissionAsked = false
   private val token = java.util.UUID.randomUUID().toString()
@@ -41,7 +41,6 @@ object PlayerPip {
   }
   fun attach(host: Activity) {
     activity = WeakReference(host)
-    stopped = false
     val filter = IntentFilter().apply {
       addAction("app.mrstreamer.player.PAUSE"); addAction("app.mrstreamer.player.BACK"); addAction("app.mrstreamer.player.FORWARD")
     }
@@ -51,7 +50,7 @@ object PlayerPip {
   }
   fun detach(host: Activity) {
     host.unregisterReceiver(receiver)
-    if (activity.get() === host) activity.clear()
+    if (activity.get() === host) { activity.clear(); stopped = true; pip = false }
   }
   fun watch(enabled: Boolean) { if (watch && !enabled) requestNotifications(); watch = enabled; refresh() }
   fun requestNotifications() {
@@ -76,6 +75,7 @@ object PlayerPip {
   fun mode(inPip: Boolean) {
     val wasPip = pip
     pip = inPip
+    if (inPip) PlayerHost.existing()?.takeIf { it.preview }?.stopAll()
     if (wasPip && !inPip) {
       leavingPip = true
       // Expansion starts the Activity; dismissal leaves it stopped. Let lifecycle callbacks settle.
@@ -88,9 +88,11 @@ object PlayerPip {
     if (wasPip && !inPip && host != null && dismissed(stopped, false, host.isChangingConfigurations, locked(host))) PlayerHost.existing()?.takeUnless { it.preview }?.stopAll()
     PlayerHost.existing()?.takeUnless { it.preview }?.let { owner -> owner.attempt?.let { owner.events?.media(it, inPip) } }
   }
+  fun canPreview(): Boolean = activity.get()?.let { !stopped && !pip && !it.isInPictureInPictureMode } == true
   fun started() { stopped = false; leavingPip = false }
   fun stopped(host: Activity) {
     stopped = true
+    PlayerHost.existing()?.takeIf { it.preview }?.stopAll()
     if ((pip || leavingPip) && dismissed(true, host.isInPictureInPictureMode, host.isChangingConfigurations, locked(host))) {
       PlayerHost.existing()?.takeUnless { it.preview }?.stopAll()
       mode(false)

@@ -41,6 +41,7 @@ export interface MediaState {
 /** The designer reads this store with useStore, and invokes these actions on the existing player. */
 export interface MediaModel {
   readonly state: Store<MediaState>;
+  readonly watching: boolean;
   readonly speeds: readonly number[];
   audio(id: string): Promise<boolean>;
   text(id: string | null): Promise<boolean>;
@@ -432,8 +433,11 @@ export function mediaModel(
       );
     },
     enterPip: () => native.enterPip?.() ?? Promise.resolve(false),
+    get watching() {
+      return watching;
+    },
     watch(visible) {
-      if (visible && owner.previewState.get().kind === "previewing") void owner.stop();
+      if (visible) void owner.endPreview();
       watching = visible;
 
       if (!visible) cancelNext();

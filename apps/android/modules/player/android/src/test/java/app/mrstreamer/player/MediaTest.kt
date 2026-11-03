@@ -42,15 +42,58 @@ class MediaTest {
     val owner = PlayerHost.owner(activity)
     try {
       PlayerPip.attach(activity)
-      owner.admit(Admission("normal", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      PlayerPip.started()
+      owner.admit(Admission("same", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
       assertNotNull(PlayerHost.session)
-      owner.admit(Admission("preview", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing"), preview = true))
+      owner.admit(Admission("same", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing"), preview = true))
       assertNull(PlayerHost.session)
-      PlayerPip.watch(true)
-      assertFalse(PlayerPip.enter())
-      owner.admit(Admission("normal-again", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      owner.admit(Admission("same", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
       assertNotNull(PlayerHost.session)
     } finally { owner.stopAll(); PlayerPip.watch(false); PlayerPip.detach(activity); activity.finish() }
+  }
+
+  @Test fun previewsRequireStartedActivityOutsidePipAndEndOnDeparture() {
+    val activity = Robolectric.buildActivity(PipActivity::class.java).setup().get()
+    val owner = PlayerHost.owner(activity)
+    fun preview() = owner.admit(Admission("preview", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing"), preview = true))
+    try {
+      PlayerPip.attach(activity)
+      assertThrows(IllegalStateException::class.java) { preview() }
+      PlayerPip.started()
+      preview()
+      assertEquals("preview", owner.attempt)
+      PlayerPip.stopped(activity)
+      assertNull(owner.attempt)
+      assertThrows(IllegalStateException::class.java) { preview() }
+      PlayerPip.started()
+      preview()
+      activity.inPip = true
+      PlayerPip.mode(true)
+      assertNull(owner.attempt)
+      assertThrows(IllegalStateException::class.java) { preview() }
+      owner.admit(Admission("normal", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      PlayerPip.stopped(activity)
+      assertEquals("normal", owner.attempt)
+    } finally { owner.stopAll(); PlayerPip.detach(activity); activity.finish() }
+  }
+
+  @Test fun normalSessionSurvivesStopAndRegistersWhenServiceRestarts() {
+    val owner = PlayerHost.owner(RuntimeEnvironment.getApplication())
+    fun play(id: String) = owner.admit(Admission(id, "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+    val service = Robolectric.buildService(PlayerMediaService::class.java).create().get()
+    try {
+      play("first")
+      val session = PlayerHost.session!!
+      service.onStartCommand(null, 0, 1)
+      assertTrue(service.sessions.contains(session))
+      owner.stopAll()
+      assertSame(session, PlayerHost.session)
+      play("second")
+      assertSame(session, PlayerHost.session)
+      service.removeSession(session)
+      service.onStartCommand(null, 0, 2)
+      assertTrue(service.sessions.contains(session))
+    } finally { owner.stopAll(); service.onDestroy() }
   }
 
   @Test fun observationsDoNotRefreshControlsAndReplacementDoesNotAnnounceFinalStop() {
@@ -78,6 +121,7 @@ class MediaTest {
     try {
       owner.admit(Admission("permission", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
       PlayerPip.attach(activity)
+      PlayerPip.started()
       PlayerPip.watch(true); PlayerPip.watch(false)
       assertArrayEquals(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), shadowOf(activity).lastRequestedPermission.requestedPermissions)
       val first = shadowOf(activity).lastRequestedPermission
@@ -98,6 +142,7 @@ class MediaTest {
     val keyguard = shadowOf(activity.getSystemService(KeyguardManager::class.java))
     try {
       PlayerPip.attach(activity)
+      PlayerPip.started()
       owner.admit(Admission("pip", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
       activity.inPip = true; PlayerPip.mode(true)
       keyguard.setKeyguardLocked(true)
@@ -126,6 +171,7 @@ class MediaTest {
     val owner = PlayerHost.owner(activity)
     try {
       PlayerPip.attach(activity)
+      PlayerPip.started()
       owner.admit(Admission("permission-entry", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
       PlayerPip.watch(true)
       PlayerPip.home()
@@ -139,6 +185,7 @@ class MediaTest {
     val owner = PlayerHost.owner(activity)
     try {
       PlayerPip.attach(activity)
+      PlayerPip.started()
       owner.admit(Admission("guessable", "https://example.invalid/video.mp4", emptyMap(), "progressive", "title", 0, HoldRef.Source("test")))
       val view = androidx.media3.ui.PlayerView(activity)
       owner.attach(view)
