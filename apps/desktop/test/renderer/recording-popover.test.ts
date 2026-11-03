@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // Recording, in Live TV's now strip while the channel records: its popover stops that recording in
 // place, gives the keys to Record once Recording gives way to it, and says why a refused Stop
-// failed. Escape closes it and gives the keys back to Recording.
+// failed. Escape closes it and gives the keys back to Recording. While what plays here shares the
+// recording's stream, it says the quality stays fixed.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -10,6 +11,7 @@ import { expect, it, onTestFinished, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Recording } from "@mrstreamer/contracts/recordings";
 import { RecordButton } from "../../src/renderer/src/features/recordings/RecordButton.tsx";
+import { player } from "../../src/renderer/src/player/player.ts";
 import { syncRecordings } from "../../src/renderer/src/features/recordings/recordings.ts";
 
 const channel: LiveChannel = {
@@ -118,4 +120,26 @@ it("asks to stop once while its popover reopens before and after the reply", asy
   expect(button("Stop recording")?.disabled).toBe(true);
   await act(async () => button("Stop recording")?.click());
   expect(ipc.argsOf("recordings.stop")).toEqual([{ id: "r1" }]);
+});
+
+it("says the quality stays fixed only while what plays here shares the recording's stream", async () => {
+  const { popup } = await opened();
+  const opening = ipc.hold("playback.open");
+  player.play(channel);
+  onTestFinished(() => player.reset());
+  await vi.waitFor(() => expect(ipc.argsOf("playback.open")).toHaveLength(1));
+  opening.resolve({
+    sessionId: "s1",
+    channel: { subscriptionId: SUBSCRIPTION, id: "11" },
+    url: "http://127.0.0.1/stream/11",
+    format: "hls",
+  });
+  await vi.waitFor(() => expect(player.element.src).toBe("http://127.0.0.1/stream/11"));
+  const note = "Quality stays fixed while this records.";
+  expect(popup.textContent).not.toContain(note);
+  await act(async () => ipc.emit("playback.fixed", { sessionId: "s1", variant: "720p" }));
+  expect(popup.textContent).toContain(note);
+  // The recording stopped sharing: the player picks again.
+  await act(async () => ipc.emit("playback.fixed", { sessionId: "s1", variant: null }));
+  expect(popup.textContent).not.toContain(note);
 });

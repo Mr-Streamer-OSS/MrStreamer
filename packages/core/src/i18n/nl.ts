@@ -1445,6 +1445,7 @@ export const nl: Translation = {
   "Stop recording {title}": "Opname van {title} stoppen",
   "Stop recording": "Opname stoppen",
   "{channel} · to {time}": "{channel} · tot {time}",
+  "Quality stays fixed while this records.": "De kwaliteit blijft vast tijdens deze opname.",
   "The provider refused the stream. Another device may be using your connection.":
     "De provider weigerde de stream. Misschien gebruikt een ander apparaat je verbinding.",
   "The channel has no stream right now.": "De zender heeft nu geen stream.",

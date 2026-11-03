@@ -1457,6 +1457,7 @@ export const de: Translation = {
   "Stop recording {title}": "Aufnahme von {title} beenden",
   "Stop recording": "Aufnahme beenden",
   "{channel} · to {time}": "{channel} · bis {time}",
+  "Quality stays fixed while this records.": "Die Qualität bleibt während dieser Aufnahme fest.",
   "The provider refused the stream. Another device may be using your connection.":
     "Der Anbieter hat den Stream abgelehnt. Vielleicht nutzt ein anderes Gerät deine Verbindung.",
   "The channel has no stream right now.": "Der Sender hat gerade keinen Stream.",

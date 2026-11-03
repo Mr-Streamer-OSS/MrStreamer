@@ -5,7 +5,8 @@
 // shares the one playing that channel here. When every one is held, it says so, and where only
 // playing here holds them, offers to stop that and record.
 // While the channel records, the button reads Recording and opens a popover that stops that
-// recording in place, so what plays here plays on, or opens Recordings.
+// recording in place, so what plays here plays on, or opens Recordings. While what plays here
+// shares that recording's stream, and so holds one quality, it says so.
 import { Popover } from "@base-ui/react/popover";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check } from "lucide-react";
@@ -19,7 +20,7 @@ import {
   type Recording,
   type RecordingConnections,
 } from "@mrstreamer/contracts/recordings";
-import { ownedId } from "@mrstreamer/contracts/subscription";
+import { ownedId, sameOwned } from "@mrstreamer/contracts/subscription";
 import { formatDate, t, type PlainKey } from "@mrstreamer/core/i18n";
 import { openView } from "../../app/ui-store.ts";
 import { Button } from "../../components/ui/button.tsx";
@@ -30,7 +31,7 @@ import { appError, describeError } from "../../lib/errors.ts";
 import { clockTime } from "../../lib/format.ts";
 import { call } from "../../lib/ipc.ts";
 import { cn } from "../../lib/utils.ts";
-import { player } from "../../player/player.ts";
+import { player, usePlayer } from "../../player/player.ts";
 import { useRecordingOf } from "./recordings.ts";
 
 /** How long after the guide's end "When it ends" records. */
@@ -204,8 +205,8 @@ export function RecordButton({
 }
 
 /**
- * Recording, while the channel records: its popover names the recording and when it stops, and
- * stops it here, which leaves what plays of the channel playing, or opens Recordings, which stops
+ * Recording, while the channel records: its popover names the recording and when it stops, says
+ * while what plays here keeps one quality to share its stream, and stops it here, which leaves what plays of the channel playing, or opens Recordings, which stops
  * that. Escape gives the keys back to Recording.
  */
 function RecordingPopover({
@@ -220,6 +221,10 @@ function RecordingPopover({
 }) {
   const popup = useRef<HTMLDivElement>(null);
   const now = useNow();
+  // Watch plays this channel's stream with the recording, so it holds one quality meanwhile.
+  const fixed = usePlayer(
+    (state) => state.fixed && state.channel !== null && sameOwned(state.channel, recording.channel),
+  );
   const stop = useMutation({
     mutationFn: () => {
       onStopping(true);
@@ -260,6 +265,11 @@ function RecordingPopover({
                   time: clockTime(recording.stop, now),
                 })}
               </p>
+              {fixed && (
+                <p className="text-[0.8125rem] text-muted-foreground">
+                  {t("Quality stays fixed while this records.")}
+                </p>
+              )}
             </div>
             {stop.isError && (
               <p role="alert" className="px-2 pb-3 text-[0.8125rem] text-destructive">
