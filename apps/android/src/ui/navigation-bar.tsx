@@ -12,7 +12,10 @@ interface Props {
   insets: EdgeInsets;
 }
 
-/** Phones: the destinations along the bottom, over the system's navigation bar. */
+/**
+ * Phones: the destinations along the bottom, over the system's navigation bar. Paper A: 80dp tall
+ * with its top hairline, the selected destination marked only by white and bold.
+ */
 export function NavigationBar({ destinations, selected, onSelect, insets }: Props) {
   return (
     <View
@@ -33,6 +36,7 @@ export function NavigationBar({ destinations, selected, onSelect, insets }: Prop
           destination={destination}
           selected={destination.route === selected}
           onPress={() => onSelect(destination.route)}
+          placement="bar"
         />
       ))}
     </View>
@@ -41,7 +45,8 @@ export function NavigationBar({ destinations, selected, onSelect, insets }: Prop
 
 /**
  * From 600dp wide: the destinations down the side, with Search above them and Downloads and
- * Settings at the foot.
+ * Settings at the foot. Paper A: 88dp wide with its right hairline, 4dp between slots, the
+ * selected destination marked by a 3dp white bar on its leading edge.
  */
 export function NavigationRail({
   destinations,
@@ -58,38 +63,65 @@ export function NavigationRail({
         paddingBottom: insets.bottom + 8,
         paddingLeft: insets.left,
         alignItems: "center",
+        gap: 4,
         borderRightWidth: 1,
         borderColor: colors.hairline,
         backgroundColor: colors.background,
       }}
     >
-      <IconButton icon="search" label="Search" onPress={() => onOpen("search")} />
-      <View accessibilityRole="tablist" style={{ alignSelf: "stretch", marginTop: 24, gap: 12 }}>
+      <IconButton
+        icon="search"
+        label="Search"
+        onPress={() => onOpen("search")}
+        width={56}
+        height={72}
+      />
+      <View accessibilityRole="tablist" style={{ alignSelf: "stretch", gap: 4 }}>
         {destinations.map((destination) => (
           <Item
             key={destination.route}
             destination={destination}
             selected={destination.route === selected}
             onPress={() => onSelect(destination.route)}
+            placement="rail"
           />
         ))}
       </View>
       <View style={{ flex: 1 }} />
-      <IconButton icon="download" label="Downloads" onPress={() => onOpen("downloads")} />
-      <IconButton icon="settings" label="Settings" onPress={() => onOpen("settings")} />
+      <IconButton
+        icon="download"
+        label="Downloads"
+        onPress={() => onOpen("downloads")}
+        color={colors.secondary}
+        width={56}
+        height={56}
+      />
+      <IconButton
+        icon="settings"
+        label="Settings"
+        onPress={() => onOpen("settings")}
+        color={colors.secondary}
+        width={56}
+        height={56}
+      />
     </View>
   );
 }
 
-/** One destination: its icon over its label, at least 48dp tall, growing with the text size. */
+/**
+ * One destination: its 24dp icon 4dp over its 12dp label, 79dp tall in the bar (80 with the
+ * hairline) and 64dp in the rail, growing with the text size.
+ */
 function Item({
   destination,
   selected,
   onPress,
+  placement,
 }: {
   destination: Destination;
   selected: boolean;
   onPress: () => void;
+  placement: "bar" | "rail";
 }) {
   return (
     <Pressable
@@ -97,20 +129,24 @@ function Item({
       accessibilityState={{ selected }}
       accessibilityLabel={destination.label}
       onPress={onPress}
-      style={{
-        flex: 1,
-        minHeight: 64,
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 4,
-        paddingVertical: 8,
-      }}
+      style={[
+        { alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 8 },
+        placement === "bar"
+          ? { flex: 1, minHeight: 79 }
+          : {
+              minHeight: 64,
+              // The bar's width is balanced on the trailing side so the icon stays centred.
+              ...(selected
+                ? { borderLeftWidth: 3, borderColor: colors.text, paddingRight: 3 }
+                : null),
+            },
+      ]}
     >
       <MaterialIcons
         importantForAccessibility="no-hide-descendants"
         name={selected ? destination.selectedIcon : destination.icon}
         size={24}
-        color={selected ? colors.text : colors.secondary}
+        color={selected ? colors.text : colors.inactive}
       />
       <Text
         importantForAccessibility="no"

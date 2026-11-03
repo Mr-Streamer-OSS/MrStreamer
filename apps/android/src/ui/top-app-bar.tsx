@@ -9,7 +9,8 @@ import { colors } from "./theme.ts";
 /**
  * A screen's top app bar. A destination's root shows its title, with Search, Downloads and
  * Settings on phones (the rail carries them from 600dp); a pushed screen shows Back before its
- * title instead.
+ * title instead. Paper A: 64dp with a 16dp margin on phones, 56dp with 24dp margins beside the
+ * rail; Back's icon sits on the title's margin.
  */
 export function TopAppBar({
   title,
@@ -22,15 +23,18 @@ export function TopAppBar({
 }) {
   const insets = useSafeAreaInsets();
   const open = useOpenShared();
+  const bar = layout === "bar";
+  const margin = bar ? 16 : 24;
   return (
     <View
       style={{
         flexDirection: "row",
         alignItems: "center",
-        minHeight: 64,
+        minHeight: insets.top + (bar ? 64 : 56),
         paddingTop: insets.top,
-        paddingLeft: insets.left + (pushed ? 4 : 16),
-        paddingRight: insets.right + 4,
+        // Back's 48dp target pads its 24dp icon by 12dp.
+        paddingLeft: insets.left + (pushed ? margin - 12 : margin),
+        paddingRight: insets.right + (bar ? 4 : margin),
         backgroundColor: colors.background,
       }}
     >
@@ -50,7 +54,7 @@ export function TopAppBar({
       >
         {title}
       </Text>
-      {!pushed && layout === "bar" ? (
+      {!pushed && bar ? (
         <>
           <IconButton icon="search" label="Search" onPress={() => open("search")} />
           <IconButton icon="download" label="Downloads" onPress={() => open("downloads")} />

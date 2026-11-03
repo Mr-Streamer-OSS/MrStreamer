@@ -5,15 +5,24 @@ import { colors } from "./theme.ts";
 
 export type IconName = ComponentProps<typeof MaterialIcons>["name"];
 
-/** A 48dp icon-only button, named for TalkBack by `label`. */
+/**
+ * An icon-only button, named for TalkBack by `label`: a 24dp icon centred in a target of at least
+ * 48dp, which the rail widens to its own 56dp slots.
+ */
 export function IconButton({
   icon,
   label,
   onPress,
+  color = colors.text,
+  width = 48,
+  height = 48,
 }: {
   icon: IconName;
   label: string;
   onPress: () => void;
+  color?: string;
+  width?: number;
+  height?: number;
 }) {
   return (
     <Pressable
@@ -21,8 +30,8 @@ export function IconButton({
       accessibilityLabel={label}
       onPress={onPress}
       style={{
-        width: 48,
-        height: 48,
+        width: Math.max(width, 48),
+        height: Math.max(height, 48),
         flexShrink: 0,
         alignItems: "center",
         justifyContent: "center",
@@ -32,7 +41,7 @@ export function IconButton({
         importantForAccessibility="no-hide-descendants"
         name={icon}
         size={24}
-        color={colors.text}
+        color={color}
       />
     </Pressable>
   );

@@ -4,8 +4,9 @@ import { colors } from "./theme.ts";
 
 /**
  * A modal bottom sheet over the screen that opened it. Back, Escape and a tap on the scrim close
- * it before anything under it, and TalkBack stays inside it while it shows. Its content fills it,
- * up to 640dp wide on tablets, and pads the system's navigation bar itself.
+ * it before anything under it, and TalkBack stays inside it while it shows. Its content fills it
+ * under the drag handle, up to 560dp wide, and pads the system's navigation bar itself. Paper A: a
+ * #141414 surface with 28dp top corners over a 60% black scrim, a 32x4dp handle in a 36dp band.
  */
 export function Sheet({
   visible,
@@ -33,23 +34,29 @@ export function Sheet({
           accessibilityRole="button"
           accessibilityLabel={`Close ${label}`}
           onPress={onClose}
-          style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0, 0, 0, 0.6)" }}
+          style={{ position: "absolute", inset: 0, backgroundColor: colors.scrim }}
         />
         <View
           style={{
             height: "88%",
             width: "100%",
-            maxWidth: 640,
+            maxWidth: 560,
             alignSelf: "center",
+            paddingBottom: 8,
             borderTopLeftRadius: 28,
             borderTopRightRadius: 28,
-            borderWidth: 1,
-            borderBottomWidth: 0,
-            borderColor: colors.hairline,
-            backgroundColor: colors.background,
+            backgroundColor: colors.surface,
             overflow: "hidden",
           }}
         >
+          <View
+            importantForAccessibility="no-hide-descendants"
+            style={{ height: 36, alignItems: "center", justifyContent: "center" }}
+          >
+            <View
+              style={{ width: 32, height: 4, borderRadius: 2, backgroundColor: colors.handle }}
+            />
+          </View>
           {children}
         </View>
       </View>
