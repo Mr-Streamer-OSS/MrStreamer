@@ -1,8 +1,9 @@
-import { catalogue } from "../live/catalogue.ts";
+import { catalogue } from "@mrstreamer/mobile/language";
 
-/** Media controls use the same English/Dutch catalogue contract as Live. */
+/** The player's copy: the mini player's hint and the media controls, in English and Dutch. */
 export const t = catalogue(
   {
+    "Opens the player": "Opens the player",
     Audio: "Audio",
     Subtitles: "Subtitles",
     Speed: "Speed",
@@ -39,6 +40,7 @@ export const t = catalogue(
   },
   {
     "nl-NL": {
+      "Opens the player": "Opent de speler",
       Audio: "Audio",
       Subtitles: "Ondertiteling",
       Speed: "Snelheid",

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { t } from "../navigation/copy.ts";
 import { Modal, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors } from "./theme.ts";
@@ -9,10 +10,8 @@ import { colors } from "./theme.ts";
  * it while it shows. Its content fills it under the drag handle, up to 560dp wide, and must pad
  * the system's navigation bar itself from `useSafeAreaInsets`, which here gives the sheet's own
  * window's insets. Paper A: a #141414 surface with 28dp top corners over a 60% black scrim, a
- * 32x4dp handle in a 36dp band.
- *
- * It is 88% of the window tall, its content laying itself out in that height. With `fit` it is
- * as tall as its content up to that 88%, and scrolls it past there, as Watch's media sheets are.
+ * 32x4dp handle in a 36dp band. A form takes 88% of the window; a `fit` sheet (a picker, a row's
+ * actions) is as tall as its content, up to that.
  */
 export function Sheet({
   visible,
@@ -69,7 +68,7 @@ export function Sheet({
               style={{ width: 32, height: 4, borderRadius: 2, backgroundColor: colors.handle }}
             />
           </View>
-          {fit ? <ScrollView style={{ flexGrow: 0 }}>{children}</ScrollView> : children}
+          {fit ? <ScrollView style={{ flexShrink: 1 }}>{children}</ScrollView> : children}
         </View>
       </SafeAreaProvider>
     </Modal>
