@@ -4,8 +4,8 @@ Source: [ESLint Stylistic](https://github.com/eslint-stylistic/eslint-stylistic)
 
 Copied files:
 
-- `packages/eslint-plugin/rules/padding-line-between-statements/padding-line-between-statements.ts`
-- `packages/eslint-plugin/rules/padding-line-between-statements/types.d.ts` → `padding-line-options.d.ts`
+- [padding-line-between-statements.ts](https://github.com/eslint-stylistic/eslint-stylistic/blob/435c3ea0fd26a5fef9042c4b36b6e165fbbf8d08/packages/eslint-plugin/rules/padding-line-between-statements/padding-line-between-statements.ts)
+- [types.d.ts](https://github.com/eslint-stylistic/eslint-stylistic/blob/435c3ea0fd26a5fef9042c4b36b6e165fbbf8d08/packages/eslint-plugin/rules/padding-line-between-statements/types.d.ts) → `padding-line-options.d.ts`
 - Root `LICENSE`, retained verbatim. Both OpenJS Foundation and ESLint Stylistic notices apply.
 
 The rule is MIT-licensed. Keep `LICENSE` with every redistributed copy, including skill assets. No Stylistic, ESLint, TypeScript-ESLint, or additional parser runtime dependency is required.
@@ -25,4 +25,4 @@ The opinionated policy lives outside this directory in `../../rules/require-read
 
 Fetch an explicit upstream revision, compare the original rule and types against this revision, and port relevant fixes while retaining the adapters above. Update this record and preserve the license. Run `pnpm check` and `pnpm sync:skill-assets` as required by repository guidance.
 
-Focused Oxlint RuleTester cases live in `../../rules/require-readable-spacing.test.ts`; they test exact fixes, JSDoc/trailing comments, same-line statements, semicolon-free code, TypeScript exports/overloads, Effect-style generators, and upstream removal behavior. `../../rules/require-readable-spacing-cli.test.ts` verifies the exported plugin through the native Oxlint CLI on multiple files, including rejection, autofix, and repeated-fix stability. The complete upstream JS/TS test suites have not been ported; this is focused compatibility evidence, not a claim of full upstream conformance.
+Focused Oxlint RuleTester cases live upstream in [require-readable-spacing.test.ts](https://github.com/dmmulroy/anti-slop/blob/13909c9e07590f5a85d93c62712259fe14a883f7/src/rules/require-readable-spacing.test.ts), which this repository did not copy; they test exact fixes, JSDoc/trailing comments, same-line statements, semicolon-free code, TypeScript exports/overloads, Effect-style generators, and upstream removal behavior. [require-readable-spacing-cli.test.ts](https://github.com/dmmulroy/anti-slop/blob/13909c9e07590f5a85d93c62712259fe14a883f7/src/rules/require-readable-spacing-cli.test.ts) verifies the exported plugin through the native Oxlint CLI on multiple files, including rejection, autofix, and repeated-fix stability. The complete upstream JS/TS test suites have not been ported; this is focused compatibility evidence, not a claim of full upstream conformance.
