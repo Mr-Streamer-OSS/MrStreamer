@@ -99,7 +99,7 @@ export const t = catalogue(
   {
     "nl-NL": {
       Guide: "Gids",
-      Schedule: "Uitzendschema",
+      Schedule: "Zendschema",
       "Couldn't read your lists.": "Je lijsten konden niet worden gelezen.",
       "Nothing was moved.": "Er is niets verplaatst.",
       Live: "Live",

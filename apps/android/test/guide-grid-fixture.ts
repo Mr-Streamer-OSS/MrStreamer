@@ -5,6 +5,13 @@ import { vi } from "vitest";
 const ui = vi.hoisted(() => ({
   params: { query: "news", country: "" },
   push: vi.fn(),
+  back: vi.fn(),
+  input: (_s: string) => {},
+  backHandler: (): boolean => false,
+  dimensions: { width: 400, fontScale: 1 },
+  status: { availability: "available", stale: false, error: null as string | null },
+  links: [] as { id: string }[],
+  retryChannels: vi.fn(),
   schedule: vi.fn(),
   search: vi.fn(),
   swipe: (_dx: number, _dy: number) => {},
@@ -24,7 +31,7 @@ vi.mock("expo-router", () => ({
   useLocalSearchParams: () => ui.params,
   router: {
     push: ui.push,
-    back: vi.fn(),
+    back: ui.back,
     setParams: (p: Partial<typeof ui.params>) => Object.assign(ui.params, p),
   },
 }));
@@ -48,11 +55,18 @@ vi.mock("../src/guide/ui.tsx", () => ({
     children,
     onPress,
     accessibilityLabel,
+    style,
   }: {
     children: ReactNode;
     onPress: () => void;
     accessibilityLabel: string;
-  }) => h("button", { onClick: onPress, "aria-label": accessibilityLabel }, children),
+    style?: unknown;
+  }) =>
+    h(
+      "button",
+      { onClick: onPress, "aria-label": accessibilityLabel, "data-style": JSON.stringify(style) },
+      children,
+    ),
   Button: ({ label, onPress }: { label: string; onPress: () => void }) =>
     h("button", { onClick: onPress }, label),
   Still: ({ text }: { text: string }) => h("p", {}, text),
@@ -66,24 +80,46 @@ vi.mock("../src/live/chrome.tsx", () => ({
   Frame: ({ bar, children }: { bar: ReactNode; children: ReactNode }) =>
     h("main", {}, bar, children),
   Body: ({ children }: { children: ReactNode }) => h("div", {}, children),
-  Bar: ({ title, trailing }: { title: ReactNode; trailing?: ReactNode }) =>
-    h("header", {}, title, trailing),
+  Bar: ({
+    title,
+    trailing,
+    leading,
+  }: {
+    title: ReactNode;
+    trailing?: ReactNode;
+    leading: { onPress: () => void };
+  }) => h("header", {}, h("button", { onClick: leading.onPress }, "Back"), title, trailing),
   TextButton: ({ label, onPress }: { label: string; onPress: () => void }) =>
     h("button", { onClick: onPress }, label),
 }));
 
 vi.mock("react-native", () => ({
-  View: ({ children }: { children: ReactNode }) => h("div", {}, children),
+  View: ({ children, style }: { children: ReactNode; style?: unknown }) =>
+    h("div", { "data-style": JSON.stringify(style) }, children),
   Pressable: ({ children }: { children: ReactNode }) => h("div", {}, children),
-  TextInput: ({ value, onChangeText }: { value: string; onChangeText: (s: string) => void }) =>
-    h("input", {
+  TextInput: ({ value, onChangeText }: { value: string; onChangeText: (s: string) => void }) => {
+    ui.input = onChangeText;
+
+    return h("input", {
       value,
       onChange: (e: { target: { value: string } }) => onChangeText(e.target.value),
-    }),
-  BackHandler: { addEventListener: () => ({ remove() {} }) },
+    });
+  },
+  BackHandler: {
+    addEventListener: (_name: string, handler: () => boolean) => {
+      ui.backHandler = handler;
+
+      return {
+        remove() {
+          ui.backHandler = () => false;
+        },
+      };
+    },
+  },
   Text: ({ children }: { children: ReactNode }) => h("span", {}, children),
-  ScrollView: ({ children }: { children: ReactNode }) => h("div", {}, children),
-  useWindowDimensions: () => ({ width: 400, fontScale: 1 }),
+  ScrollView: ({ children, style }: { children: ReactNode; style?: unknown }) =>
+    h("div", { "data-style": JSON.stringify(style) }, children),
+  useWindowDimensions: () => ui.dimensions,
   PanResponder: {
     create: (handlers: {
       onMoveShouldSetPanResponder: (event: null, gesture: { dx: number; dy: number }) => boolean;
@@ -101,17 +137,20 @@ vi.mock("react-native", () => ({
     data,
     renderItem,
     ListEmptyComponent,
+    ListHeaderComponent,
     onViewableItemsChanged,
   }: {
     data: unknown[];
     renderItem: (p: { item: unknown; index: number }) => ReactNode;
     ListEmptyComponent?: ReactNode;
+    ListHeaderComponent?: ReactNode;
     onViewableItemsChanged?: (p: { viewableItems: { item: unknown }[] }) => void;
   }) => {
     // Native viewability can report more than the contract permits. The screen must bound it.
     return h(
       "section",
       {},
+      ListHeaderComponent,
       h(
         "button",
         {
@@ -135,7 +174,7 @@ vi.mock("../src/bootstrap/sources.ts", async () => {
   return { sources: { state: store({ kind: "ready", sources: [] }) } };
 });
 
-vi.mock("../src/guide/guide-sources.ts", () => ({ guides: { useLinks: () => [] } }));
+vi.mock("../src/guide/guide-sources.ts", () => ({ guides: { useLinks: () => ui.links } }));
 
 vi.mock("../src/guide/hooks.ts", () => ({
   useGuideStart() {},
@@ -143,28 +182,34 @@ vi.mock("../src/guide/hooks.ts", () => ({
   useProgramme: () => ({ pending: false, value: null, failed: false }),
 }));
 
-vi.mock("../src/guide/runtime.ts", () => ({
-  useGuideStatus() {},
-  guide: {
-    channels: () =>
-      new Map([
-        [
-          "source",
-          Array.from({ length: 40 }, (_, i) => ({
-            key: `source:${i}`,
-            id: String(i),
-            title: `Channel ${i}`,
-          })),
-        ],
-      ]),
-    channel: (key: string) => ({ title: `Channel ${key.split(":").at(-1)}` }),
-    withdrawals: { subscribe: () => () => {} },
-    withdrawn: () => 0,
-    status: () => ({ availability: "available", stale: false, error: null }),
-    schedule: ui.schedule,
-    search: ui.search,
-  },
-}));
+vi.mock("../src/guide/runtime.ts", async () => {
+  const { store } = await import("../src/platform/store.ts");
+
+  return {
+    catalogueFailures: store(new Set<string>()),
+    retryGuideChannels: ui.retryChannels,
+    useGuideStatus() {},
+    guide: {
+      channels: () =>
+        new Map([
+          [
+            "source",
+            Array.from({ length: 40 }, (_, i) => ({
+              key: `source:${i}`,
+              id: String(i),
+              title: `Channel ${i}`,
+            })),
+          ],
+        ]),
+      channel: (key: string) => ({ title: `Channel ${key.split(":").at(-1)}` }),
+      withdrawals: { subscribe: () => () => {} },
+      withdrawn: () => 0,
+      status: () => ui.status,
+      schedule: ui.schedule,
+      search: ui.search,
+    },
+  };
+});
 
 const window = new Window();
 
@@ -179,7 +224,7 @@ const { createRoot } = (await import(REACT_DOM)) as {
   };
 };
 
-export async function mount(node: ReactNode) {
+export async function mount(node: ReactNode, resetWindow = true) {
   const container = window.document.createElement("div");
   const root = createRoot(container);
   await act(async () => root.render(node));
@@ -189,8 +234,13 @@ export async function mount(node: ReactNode) {
       ?.click(),
   );
 
+  const now = [...container.querySelectorAll("button")].find((b) => b.textContent === "Now");
+
+  if (now && resetWindow) await act(async () => now.click());
+
   return {
     container,
+    render: async (next: ReactNode) => act(async () => root.render(next)),
     close: async () => act(async () => root.unmount()),
     click: async (label: string) =>
       act(async () => {

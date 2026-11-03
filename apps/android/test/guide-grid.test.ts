@@ -6,7 +6,7 @@ import { guideFixture } from "./guide-fixture.ts";
 import { GuideGrid, t } from "../src/guide/grid.tsx";
 import { createGuide, localDay } from "../src/guide/guide.ts";
 
-it("reads at most 24 visible channels and two pages, and opens Schedule without playing", async () => {
+it("reads at most 24 visible channels and two pages, and opens the channel Schedule", async () => {
   ui.schedule.mockImplementation(async (_key, _day, cursor) => ({
     programmes: [],
     cursor: cursor ? "more" : "second",
@@ -36,10 +36,12 @@ it("keeps the local time window when changing day across DST, and Now resets it"
   const screen = await mount(h(GuideGrid));
 
   try {
+    expect(screen.container.textContent).not.toContain("13:00");
     await screen.click("Later");
+    expect(screen.container.textContent).toContain("13:00");
     expect(screen.container.textContent).toContain("12:30");
     await act(async () => ui.swipe(-80, 5));
-    expect(screen.container.textContent).toContain("13:00");
+    expect(screen.container.textContent).toContain("13:30");
     await act(async () => ui.swipe(-5, 80));
     expect(screen.container.textContent).toContain("13:00");
     await screen.click("Next day");
@@ -73,10 +75,9 @@ it("translates guide browsing and search copy into Dutch", () => {
       "Some programmes not searched.",
       "Guides",
       "Retry",
-      "Couldn't update schedule",
     ] as const)
       expect(t(key)).not.toBe(key);
-    expect(t("Schedule for {channel}", { channel: "News" })).toBe("Uitzendschema voor News");
+    expect(t("Schedule for {channel}", { channel: "News" })).toBe("Zendschema voor News");
     expect(t('Nothing named "{query}"', { query: "news" })).toBe('Niets met de naam "news"');
   } finally {
     setLanguage({ locale: "en-US", formats: "en-US" });
@@ -100,7 +101,9 @@ it("keeps first-page programmes if the second read fails and offers Schedule and
     expect(screen.container.textContent).toContain("Couldn't update schedule");
     expect(screen.container.textContent).toContain("More in Schedule");
     ui.schedule.mockResolvedValue({ programmes: [], cursor: null });
+    const calls = ui.schedule.mock.calls.length;
     await screen.click("Retry");
+    expect(ui.schedule.mock.calls.length).toBeGreaterThan(calls);
     expect(screen.container.textContent).toContain("News");
     expect(screen.container.textContent).toContain("Couldn't update schedule");
   } finally {
@@ -158,5 +161,214 @@ it("browses programmes through the real guide fixture and passes its revocable d
   } finally {
     await screen.close();
     await owner.forget("source");
+  }
+});
+
+it.each([
+  ["none", [], null, "Guide unavailable"],
+  ["available", [], null, "No programme information"],
+  [
+    "available",
+    [{ start: 1, stop: 2, title: "Old", detail: "old" }],
+    null,
+    "Nothing in this window",
+  ],
+  ["available", [], "more", "More in Schedule"],
+] as const)("maps %s rows to %s", async (availability, programmes, cursor, message) => {
+  ui.status.availability = availability;
+  ui.schedule.mockResolvedValue({ programmes, cursor });
+  const screen = await mount(h(GuideGrid));
+
+  try {
+    expect(
+      [...screen.container.querySelectorAll("section span")].some(
+        (span) => span.textContent === message,
+      ),
+    ).toBe(true);
+  } finally {
+    await screen.close();
+    ui.status.availability = "available";
+  }
+});
+
+it.each(["stale", "unavailable"])("shows the %s guide banner", async (kind) => {
+  ui.status.stale = kind === "stale";
+  ui.status.availability = kind === "unavailable" ? "none" : "available";
+  ui.schedule.mockResolvedValue({ programmes: [], cursor: null });
+  const screen = await mount(h(GuideGrid));
+
+  try {
+    expect(screen.container.textContent).toContain(
+      kind === "stale" ? "Guide may be out of date" : "Provider settings",
+    );
+  } finally {
+    await screen.close();
+    ui.status.stale = false;
+    ui.status.availability = "available";
+  }
+});
+
+it("uses an available external guide for an M3U row", async () => {
+  const { guide } = await import("../src/guide/runtime.ts");
+
+  const status = vi.spyOn(guide, "status").mockImplementation((id) => ({
+    availability: id === "xml" ? "available" : "none",
+    activity: "idle",
+    fetchedAt: null,
+    stale: false,
+    error: null,
+  }));
+
+  ui.links = [{ id: "xml" }];
+  ui.schedule.mockResolvedValue({ programmes: [], cursor: null });
+  const screen = await mount(h(GuideGrid));
+
+  try {
+    expect(screen.container.textContent).toContain("No programme information");
+    expect(screen.container.textContent).not.toContain("Guide unavailable");
+  } finally {
+    await screen.close();
+    status.mockRestore();
+    ui.links = [];
+  }
+});
+
+it("keeps the page cursor on an empty refused second page", async () => {
+  const now = Date.now();
+  ui.schedule.mockImplementation(async (_key, _day, cursor) =>
+    cursor
+      ? { programmes: [], cursor: null }
+      : {
+          programmes: [{ start: now, stop: now + 3600000, title: "Retained", detail: "d" }],
+          cursor: "next",
+        },
+  );
+  const screen = await mount(h(GuideGrid));
+
+  try {
+    expect(screen.container.textContent).toContain("Retained");
+    expect(screen.container.textContent).toContain("Couldn't update schedule");
+    expect(screen.container.textContent).toContain("More in Schedule");
+  } finally {
+    await screen.close();
+  }
+});
+
+it.each([
+  { width: 900, fontScale: 1 },
+  { width: 400, fontScale: 2 },
+])("mounts accessible cells at $width dp and $fontScale text", async (dimensions) => {
+  ui.dimensions = dimensions;
+  const now = Date.now();
+  ui.schedule.mockResolvedValue({
+    programmes: [{ start: now, stop: now + 3600000, title: "Accessible", detail: "d" }],
+    cursor: null,
+  });
+  const screen = await mount(h(GuideGrid));
+
+  try {
+    expect(screen.container.innerHTML).toContain(
+      dimensions.fontScale === 2
+        ? "&quot;flexDirection&quot;:&quot;column&quot;"
+        : "&quot;width&quot;:168",
+    );
+    expect(
+      [...screen.container.querySelectorAll("button")].some((b) =>
+        b.getAttribute("aria-label")?.includes(", Accessible"),
+      ),
+    ).toBe(true);
+  } finally {
+    await screen.close();
+    ui.dimensions = { width: 400, fontScale: 1 };
+  }
+});
+
+it.each(["loading", "failed", "unknown"])(
+  "distinguishes a %s catalogue from an empty day",
+  async (kind) => {
+    const { sources } = await import("../src/bootstrap/sources.ts");
+    const { catalogueFailures } = await import("../src/guide/runtime.ts");
+
+    if (kind !== "unknown")
+      sources.state.set({
+        kind: "ready",
+        sources: [{ id: "pending", label: "Provider", kind: "m3u", channels: { kind: "loading" } }],
+      });
+
+    if (kind === "failed") catalogueFailures.set(new Set(["pending"]));
+    ui.params.country = "Gone";
+    const screen = await mount(h(GuideGrid));
+
+    try {
+      expect(screen.container.textContent).toContain(
+        kind === "loading"
+          ? "Loading channels…"
+          : kind === "failed"
+            ? "Couldn't load channels"
+            : "Country unavailable",
+      );
+      expect(screen.container.textContent).not.toContain("No programme information");
+
+      if (kind === "failed") {
+        await screen.click("Retry");
+        expect(ui.retryChannels).toHaveBeenCalled();
+      }
+    } finally {
+      await screen.close();
+      ui.params.country = "";
+      sources.state.set({ kind: "ready", sources: [] });
+      catalogueFailures.set(new Set());
+    }
+  },
+);
+
+it("keeps an open tablet detail and its Back handler when folded to phone width", async () => {
+  const { Beside } = await import("../src/guide/grid.tsx");
+  const close = vi.fn();
+  ui.dimensions = { width: 900, fontScale: 1 };
+
+  const node = h(Beside, {
+    detail: h("p", {}, "Selected programme"),
+    onClose: close,
+    children: h("p", {}, "Grid"),
+  });
+
+  const screen = await mount(node);
+
+  try {
+    expect(screen.container.textContent).toContain("Selected programme");
+    ui.dimensions = { width: 400, fontScale: 1 };
+    await screen.render(
+      h(Beside, {
+        detail: h("p", {}, "Selected programme"),
+        onClose: close,
+        children: h("p", {}, "Grid"),
+      }),
+    );
+    expect(screen.container.textContent).toContain("Selected programme");
+    expect(ui.backHandler()).toBe(true);
+    expect(close).toHaveBeenCalledOnce();
+  } finally {
+    await screen.close();
+    ui.dimensions = { width: 400, fontScale: 1 };
+  }
+});
+
+it("pins a manually moved day across midnight and a Live tab remount", async () => {
+  const at = new Date(2026, 9, 24, 12).getTime();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(at);
+  ui.schedule.mockResolvedValue({ programmes: [], cursor: null });
+  const first = await mount(h(GuideGrid));
+  await first.click("Later");
+  await first.close();
+  clock.mockReturnValue(localDay(at, 1).from + 12 * 3600000);
+  const second = await mount(h(GuideGrid), false);
+
+  try {
+    expect(ui.schedule.mock.calls.at(-1)?.[1]).toEqual(localDay(at));
+  } finally {
+    await second.click("Now");
+    await second.close();
+    clock.mockRestore();
   }
 });

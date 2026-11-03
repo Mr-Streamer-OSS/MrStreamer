@@ -157,7 +157,7 @@ function Channels({
   );
 }
 
-/** Live's tabs after the country it shows: For you, Categories and All. Scrolls when text grows. */
+/** Live's tabs after the country it shows: For you, Categories, All and Guide. Scrolls when text grows. */
 function Tabs({
   tab,
   onTab,

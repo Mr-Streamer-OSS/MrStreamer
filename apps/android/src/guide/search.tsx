@@ -6,7 +6,7 @@ import { t as liveText } from "../live/copy.ts";
 import { destinationIn } from "../navigation/open.ts";
 import { IconButton } from "../ui/icon-button.tsx";
 import { useLocale } from "./catalogue.ts";
-import { Beside, t } from "./grid.tsx";
+import { Beside, CatalogueNotice, useCatalogueState, t } from "./grid.tsx";
 import { type FoundProgramme, type ProgrammeSearch, localDay } from "./guide.ts";
 import { useGuideStart, useListingRevision } from "./hooks.ts";
 import { dayLabel, initials, programmeRange } from "./present.ts";
@@ -29,7 +29,14 @@ export function GuideSearchScreen() {
   useGuideStatus();
   const revision = useListingRevision();
   const params = useLocalSearchParams<{ query?: string }>();
-  const query = param(params.query);
+  const [query, setQuery] = useState(() => param(params.query));
+
+  const changeQuery = (text: string) => {
+    setQuery(text);
+    router.setParams({ query: text });
+  };
+
+  const catalogue = useCatalogueState();
   const destination = destinationIn(useSegments());
   const { width } = useWindowDimensions();
   const { layout, framed } = useFrame();
@@ -43,7 +50,7 @@ export function GuideSearchScreen() {
   } | null>(null);
 
   useEffect(() => {
-    if (!query.trim()) {
+    if (!query.trim() || catalogue.loading) {
       setBusy(false);
 
       return;
@@ -58,7 +65,14 @@ export function GuideSearchScreen() {
         { signal: controller.signal },
       )
       .then((value) => {
-        if (!controller.signal.aborted) setRead({ query, value });
+        if (!controller.signal.aborted)
+          setRead((before) => ({
+            query,
+            value:
+              value.unsearched && before?.query === query && before.value.found.length
+                ? { ...value, found: before.value.found }
+                : value,
+          }));
       })
       .catch(() => {
         if (!controller.signal.aborted)
@@ -72,7 +86,7 @@ export function GuideSearchScreen() {
       });
 
     return () => controller.abort();
-  }, [query, revision, attempt]);
+  }, [query, revision, attempt, catalogue.loading, catalogue.failed]);
   const value = read?.query === query ? read.value : null;
   const now = Date.now();
 
@@ -85,6 +99,19 @@ export function GuideSearchScreen() {
         a.programme.start - b.programme.start,
     )
     .slice(0, 20);
+
+  // Refill the bounded result set when one of the shown programmes ends.
+  const nextEnd = found.length ? Math.min(...found.map((f) => f.programme.stop)) : null;
+  useEffect(() => {
+    if (nextEnd === null) return;
+
+    const timer = setTimeout(
+      () => retry((n) => n + 1),
+      Math.min(2_147_483_647, Math.max(0, nextEnd - Date.now())),
+    );
+
+    return () => clearTimeout(timer);
+  }, [nextEnd, attempt]);
 
   const identityOf = (key: string): ChannelIdentity | null => {
     for (const [sourceId, channels] of guide.channels()) {
@@ -105,7 +132,7 @@ export function GuideSearchScreen() {
       cursorColor={guideColors.text}
       selectionColor={guideColors.focus}
       value={query}
-      onChangeText={(query) => router.setParams({ query })}
+      onChangeText={changeQuery}
       returnKeyType="search"
       style={{
         flex: 1,
@@ -137,7 +164,11 @@ export function GuideSearchScreen() {
           framed={framed}
           height={64}
           rule
-          leading={{ icon: "arrow-back", label: liveText("Back"), onPress: () => router.back() }}
+          leading={{
+            icon: "arrow-back",
+            label: liveText("Back"),
+            onPress: () => (selection ? setSelection(null) : router.back()),
+          }}
           title={field}
           trailing={
             query ? (
@@ -145,7 +176,7 @@ export function GuideSearchScreen() {
                 icon="close"
                 label={liveText("Clear")}
                 color={guideColors.secondary}
-                onPress={() => router.setParams({ query: "" })}
+                onPress={() => changeQuery("")}
               />
             ) : null
           }
@@ -161,6 +192,7 @@ export function GuideSearchScreen() {
             contentContainerStyle={{ paddingBottom: 16 }}
             ListHeaderComponent={
               <>
+                <CatalogueNotice {...catalogue} />
                 {busy ? (
                   <Text accessibilityLiveRegion="polite" style={quiet}>
                     {t("Searching.")}
@@ -199,7 +231,12 @@ export function GuideSearchScreen() {
               </>
             }
             ListEmptyComponent={
-              !busy && value && !found.length ? (
+              !busy &&
+              !catalogue.failed &&
+              !catalogue.loading &&
+              value &&
+              !value.unsearched &&
+              !found.length ? (
                 <Text accessibilityLiveRegion="polite" style={quiet}>
                   {t('Nothing named "{query}"', { query })}
                 </Text>

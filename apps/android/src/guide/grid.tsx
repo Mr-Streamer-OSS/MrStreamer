@@ -1,7 +1,16 @@
 import { formatDate } from "@mrstreamer/core/i18n";
 import { catalogue } from "@mrstreamer/mobile/language";
 import { router, useIsFocused, useLocalSearchParams, useSegments } from "expo-router";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { BackHandler, FlatList, PanResponder, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { sources } from "../bootstrap/sources.ts";
@@ -16,7 +25,7 @@ import { localDay, type DayPage, type ScheduleItem } from "./guide.ts";
 import { useGuideStart, useListingRevision } from "./hooks.ts";
 import { dayLabel, initials, programmeRange } from "./present.ts";
 import { BESIDE, param, programmeHref, scheduleHref, type ChannelIdentity } from "./routes.ts";
-import { guide, useGuideStatus } from "./runtime.ts";
+import { catalogueFailures, retryGuideChannels, guide, useGuideStatus } from "./runtime.ts";
 import { ProgrammeDetails } from "./schedule-screen.tsx";
 import { t as guideText } from "./strings.ts";
 import { Button, Icon, OutOfDate, Press, Still, guideColors, text } from "./ui.tsx";
@@ -41,7 +50,7 @@ export const t = catalogue(
     'Nothing named "{query}"': 'Nothing named "{query}"',
     Guides: "Guides",
     Retry: "Retry",
-    "Couldn't update schedule": "Couldn't update schedule",
+    "Country unavailable": "Country unavailable",
   },
   {
     "nl-NL": {
@@ -49,24 +58,56 @@ export const t = catalogue(
       Earlier: "Eerder",
       Later: "Later",
       Now: "Nu",
-      "More in Schedule": "Meer in het uitzendschema",
+      "More in Schedule": "Meer in het zendschema",
       "Nothing in this window": "Niets in dit tijdvak",
       "No programme information": "Geen programma-informatie",
       "Search programmes": "Programma’s zoeken",
       Programmes: "Programma’s",
-      "Schedule for {channel}": "Uitzendschema voor {channel}",
+      "Schedule for {channel}": "Zendschema voor {channel}",
       "Searching.": "Zoeken.",
       "Some programmes not searched.": "Sommige programma’s zijn niet doorzocht.",
       'Nothing named "{query}"': 'Niets met de naam "{query}"',
       Guides: "Gidsen",
       Retry: "Opnieuw",
-      "Couldn't update schedule": "Kon het uitzendschema niet bijwerken",
+      "Country unavailable": "Land niet beschikbaar",
     },
   },
 );
 
-const browseHref = (destination: DestinationRoute, screen: "grid" | "search", country = "") =>
-  `${destination === "(live)" ? "" : `/${destination}`}/guide/${screen}?${new URLSearchParams({ country })}`;
+// Navigation context only; programme data stays with the guide owner.
+const place = {
+  day: null as number | null,
+  offset: null as number | null,
+  last: "",
+  scroll: new Map<string, number>(),
+};
+
+export function useCatalogueState() {
+  const state = useStore(sources.state);
+  const failures = useStore(catalogueFailures);
+  useListingRevision();
+  const failed = state.kind === "ready" && state.sources.some((s) => failures.has(s.id));
+
+  const loading =
+    state.kind !== "ready" ||
+    state.sources.some((s) => !guide.channels().has(s.id) && !failures.has(s.id));
+
+  return { failed, loading };
+}
+
+export function CatalogueNotice({ failed, loading }: { failed: boolean; loading: boolean }) {
+  return failed ? (
+    <View>
+      <Still text={guideText("Couldn't load channels")} />
+      <Button label={t("Retry")} onPress={retryGuideChannels} />
+    </View>
+  ) : loading ? (
+    <Still text={guideText("Loading channels…")} />
+  ) : null;
+}
+
+const searchHref = (destination: DestinationRoute) =>
+  `${destination === "(live)" ? "" : `/${destination}`}/guide/search`;
 
 /** Reads only a visible row, with no more than two owner pages for its local day. */
 function useGridRow(key: string, from: number, active: boolean) {
@@ -94,6 +135,11 @@ function useGridRow(key: string, from: number, active: boolean) {
       if (first.cursor) {
         try {
           second = await guide.schedule(key, day, first.cursor, { signal: controller.signal });
+
+          if (!second.programmes.length && !second.cursor) {
+            failed = true;
+            second = null;
+          }
         } catch {
           failed = true;
         }
@@ -106,8 +152,12 @@ function useGridRow(key: string, from: number, active: boolean) {
         : first;
 
       setRead((before) =>
-        !page.programmes.length && before?.id === id && before.page.programmes.length
-          ? { ...before, failed: true }
+        (failed || !page.programmes.length) && before?.id === id && before.page.programmes.length
+          ? {
+              ...before,
+              page: { ...before.page, cursor: page.cursor ?? before.page.cursor },
+              failed: true,
+            }
           : { id, page, failed },
       );
     })().catch(() => {
@@ -153,18 +203,23 @@ export function GuideGrid({
 
     return () => clearInterval(timer);
   }, []);
-  const [chosen, setChosen] = useState<number | null>(null);
-  const [offset, setOffset] = useState<number | null>(null);
+  const [chosen, setChosen] = useState(() => place.day);
+  const [offset, setOffset] = useState(() => place.offset);
 
   const [selection, setSelection] = useState<{
     identity: ChannelIdentity;
     item: ScheduleItem;
   } | null>(null);
 
-  const [last, setLast] = useState("");
+  const [last, setLast] = useState(() => place.last);
+  useEffect(() => {
+    place.day = chosen;
+    place.offset = offset;
+    place.last = last;
+  }, [chosen, offset, last]);
   const [strip, setStrip] = useState(240);
   const [visible, setVisible] = useState<readonly string[]>([]);
-  const scroll = useRef(new Map<string, number>());
+  const scroll = useRef(place.scroll);
   const list = useRef<FlatList<GridChannel>>(null);
 
   const viewability = useRef(({ viewableItems }: { viewableItems: { item: GridChannel }[] }) =>
@@ -190,7 +245,6 @@ export function GuideGrid({
     list.current?.scrollToOffset({ offset: scroll.current.get(country) ?? 0, animated: false });
 
   useEffect(() => {
-    setVisible([]);
     restore();
   }, [country]);
   const large = fontScale >= 1.8;
@@ -202,8 +256,13 @@ export function GuideGrid({
   const from = day.from + Math.max(0, Math.min(latest, relative));
   const until = from + span;
 
-  const shift = (direction: number) =>
+  const shift = (direction: number) => {
+    setChosen(day.from);
     setOffset(Math.max(0, Math.min(latest, from - day.from + direction * HALF)));
+  };
+
+  const shiftRef = useRef(shift);
+  shiftRef.current = shift;
 
   const moveDay = (direction: number) => {
     const next = localDay(day.from, direction);
@@ -214,13 +273,35 @@ export function GuideGrid({
     setChosen(next.from);
   };
 
-  const gesture = PanResponder.create({
-    onMoveShouldSetPanResponder: (_, g) =>
-      Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-    onPanResponderRelease: (_, g) => {
-      if (Math.abs(g.dx) > 24) shift(g.dx < 0 ? 1 : -1);
+  const gestureRef = useRef<ReturnType<typeof PanResponder.create> | null>(null);
+
+  if (!gestureRef.current)
+    gestureRef.current = PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+      onPanResponderRelease: (_, g) => {
+        if (Math.abs(g.dx) > 24) shiftRef.current(g.dx < 0 ? 1 : -1);
+      },
+    });
+
+  const gesture = gestureRef.current;
+  const catalogueState = useCatalogueState();
+  const unknownCountry = !!country && !discover(state).countries.some((c) => c.name === country);
+
+  const onSchedule = useCallback(
+    (channel: GridChannel) => router.push(scheduleHref(destination, channel, day.from)),
+    [destination, day.from],
+  );
+
+  const onProgramme = useCallback(
+    (channel: GridChannel, programme: ScheduleItem) => {
+      setLast(`${channel.key} ${programme.start}`);
+
+      if (width >= BESIDE) setSelection({ identity: channel, item: programme });
+      else router.push(programmeHref(destination, channel, programme.start, programme.detail));
     },
-  });
+    [destination, width],
+  );
 
   const openShared = useOpenShared();
   const links = guides.useLinks();
@@ -248,7 +329,12 @@ export function GuideGrid({
 
   const moves = (
     <>
-      <Move label={t("Earlier")} onPress={() => shift(-1)} wide={wide || large} />
+      <Move
+        disabled={from <= day.from}
+        label={t("Earlier")}
+        onPress={() => shift(-1)}
+        wide={wide || large}
+      />
       <Move
         label={t("Now")}
         strong={following}
@@ -258,12 +344,18 @@ export function GuideGrid({
           setOffset(null);
         }}
       />
-      <Move label={t("Later")} onPress={() => shift(1)} wide={wide || large} />
+      <Move
+        disabled={until >= day.until}
+        label={t("Later")}
+        onPress={() => shift(1)}
+        wide={wide || large}
+      />
     </>
   );
 
   const grid = (
     <>
+      <CatalogueNotice {...catalogueState} />
       <View
         style={{
           flexDirection: "row",
@@ -288,7 +380,7 @@ export function GuideGrid({
           icon="search"
           label={t("Search programmes")}
           box={large ? 56 : 48}
-          onPress={() => router.push(browseHref(destination, "search", country))}
+          onPress={() => router.push(searchHref(destination))}
         />
       </View>
       {large ? (
@@ -341,13 +433,15 @@ export function GuideGrid({
         // Live's body already pads the bottom inset; a pushed grid pads its own.
         contentContainerStyle={{ paddingBottom: (pushed ? insets.bottom : 0) + 16 }}
         ListEmptyComponent={
-          <Still
-            text={guideText(
-              state.kind === "ready"
-                ? "No programme information for this day"
-                : "Loading channels…",
-            )}
-          />
+          !catalogueState.failed && !catalogueState.loading ? (
+            <Still
+              text={
+                unknownCountry
+                  ? t("Country unavailable")
+                  : guideText("No programme information for this day")
+              }
+            />
+          ) : undefined
         }
         renderItem={({ item }) => (
           <GridRow
@@ -366,13 +460,8 @@ export function GuideGrid({
             gesture={gesture.panHandlers}
             onWidth={setStrip}
             last={last}
-            onSchedule={() => router.push(scheduleHref(destination, item, day.from))}
-            onProgramme={(programme) => {
-              setLast(`${item.key} ${programme.start}`);
-
-              if (wide) setSelection({ identity: item, item: programme });
-              else router.push(programmeHref(destination, item, programme.start, programme.detail));
-            }}
+            onSchedule={onSchedule}
+            onProgramme={onProgramme}
           />
         )}
       />
@@ -438,7 +527,13 @@ const nameText = {
 /** A cell's or row message's left hairline. */
 const edge = { borderLeftWidth: 1, borderColor: guideColors.hairline } as const;
 
-const rowNote = { color: guideColors.secondary, fontSize: 14, lineHeight: 18 } as const;
+const rowNote = {
+  backgroundColor: guideColors.background,
+  alignSelf: "flex-start",
+  color: guideColors.secondary,
+  fontSize: 14,
+  lineHeight: 18,
+} as const;
 
 /** An icon button of the day row: a 24dp icon in its 48dp target, 32dp at large text. */
 function Target({
@@ -478,16 +573,20 @@ function Move({
   onPress,
   strong = false,
   wide = false,
+  disabled = false,
 }: {
   label: string;
   onPress: () => void;
   /** Bold and white, as Now while following now; otherwise grey. */
   strong?: boolean;
   wide?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Press
       accessibilityLabel={label}
+      disabled={disabled}
+      accessibilityState={{ disabled }}
       onPress={onPress}
       style={{ minHeight: 48, justifyContent: "center", paddingHorizontal: wide ? 12 : 10 }}
     >
@@ -599,7 +698,7 @@ function Ruler({
 /**
  * The grid or Search under a bar its screen draws (Live's, or Search's field), with the chosen
  * programme in A's 360dp pane beside it from 840dp, as `Screen` shows a pushed screen's. Narrower,
- * a programme is pushed instead, so the pane never folds. Back closes the pane first.
+ * an already open programme folds to full width. Back closes the detail at any width.
  */
 export function Beside({
   detail,
@@ -611,7 +710,8 @@ export function Beside({
   children: ReactNode;
 }) {
   const { width } = useWindowDimensions();
-  const open = detail !== null && width >= BESIDE;
+  const open = detail !== null;
+  const beside = width >= BESIDE;
   const focused = useIsFocused();
   const close = useRef(onClose);
   useEffect(() => {
@@ -631,9 +731,15 @@ export function Beside({
 
   return (
     <View style={{ flex: 1, flexDirection: "row" }}>
-      <View style={{ flex: 1 }}>{children}</View>
+      <View style={{ flex: 1, display: open && !beside ? "none" : "flex" }}>{children}</View>
       {open ? (
-        <View style={{ width: 360, borderLeftWidth: 1, borderColor: guideColors.hairline }}>
+        <View
+          style={
+            beside
+              ? { width: 360, borderLeftWidth: 1, borderColor: guideColors.hairline }
+              : { flex: 1 }
+          }
+        >
           {detail}
         </View>
       ) : null}
@@ -649,7 +755,7 @@ type GridChannel = ChannelIdentity & { key: string; title: string };
  * marked. Now's line runs under the cells' text and never under the name. A day read with nothing
  * in the window says why, or offers More in Schedule; a failed or partial read adds a line below.
  */
-function GridRow({
+const GridRow = memo(function GridRow({
   channel,
   active,
   day,
@@ -684,27 +790,32 @@ function GridRow({
   gesture: ReturnType<typeof PanResponder.create>["panHandlers"];
   onWidth: (width: number) => void;
   last: string;
-  onSchedule: () => void;
-  onProgramme: (p: ScheduleItem) => void;
+  onSchedule: (channel: GridChannel) => void;
+  onProgramme: (channel: GridChannel, p: ScheduleItem) => void;
 }) {
+  useGuideStatus();
+  useLocale();
   const { read, retry } = useGridRow(channel.key, day, active);
   const items = read?.page.programmes.filter((p) => p.start < until && p.stop > from) ?? [];
-  const status = guide.status(read?.page.guide ?? channel.sourceId);
+  const links = guides.useLinks();
+  const statuses = [channel.sourceId, ...links.map((l) => l.id)].map(guide.status);
+  const available = statuses.some((s) => s.availability === "available");
   const failed = read?.failed ?? false;
   const lastStop = read?.page.programmes.at(-1)?.stop ?? -Infinity;
   // More in Schedule shows where the window reaches past the pages read, or a page failed.
   const more = !!read?.page.cursor && (failed || !items.length || until > lastStop);
 
   const waiting =
-    status.activity === "loading" || (status.availability === "unknown" && !status.error);
+    statuses.some((s) => s.activity === "loading") ||
+    !statuses.some((s) => s.error || s.availability === "none");
 
   const message = failed
-    ? t("Couldn't update schedule")
-    : !read || (!read.page.programmes.length && status.availability !== "none" && waiting)
+    ? guideText("Couldn't update schedule")
+    : !read || (!read.page.programmes.length && !available && waiting)
       ? guideText("Loading guide…")
       : read.page.programmes.length
         ? t("Nothing in this window")
-        : status.availability === "none"
+        : !available
           ? guideText("Guide unavailable")
           : t("No programme information");
 
@@ -713,7 +824,7 @@ function GridRow({
       <View style={{ flexDirection: large ? "column" : "row" }}>
         <Press
           accessibilityLabel={t("Schedule for {channel}", { channel: channel.title })}
-          onPress={onSchedule}
+          onPress={() => onSchedule(channel)}
           style={
             large
               ? { minHeight: 48, justifyContent: "center", paddingHorizontal: 16 }
@@ -796,7 +907,7 @@ function GridRow({
                 key={item.start}
                 accessibilityLabel={`${channel.title}, ${programmeRange(item)}, ${item.title}${item.start <= now && item.stop > now ? `, ${t("Now")}` : ""}`}
                 accessibilityState={{ selected: marked }}
-                onPress={() => onProgramme(item)}
+                onPress={() => onProgramme(channel, item)}
                 style={{
                   ...edge,
                   position: "absolute",
@@ -845,7 +956,7 @@ function GridRow({
           {items.length ? null : more && !failed ? (
             <Press
               accessibilityLabel={t("More in Schedule")}
-              onPress={onSchedule}
+              onPress={() => onSchedule(channel)}
               style={{
                 ...edge,
                 flex: 1,
@@ -856,7 +967,9 @@ function GridRow({
                 paddingRight: 4,
               }}
             >
-              <Text style={nameText}>{t("More in Schedule")}</Text>
+              <Text style={[nameText, { backgroundColor: guideColors.background }]}>
+                {t("More in Schedule")}
+              </Text>
               <Icon name="chevron-right" color={guideColors.secondary} />
             </Press>
           ) : (
@@ -883,15 +996,17 @@ function GridRow({
               accessibilityLiveRegion="polite"
               style={[rowNote, { flexGrow: 1, flexShrink: 1, paddingLeft: 12 }]}
             >
-              {t("Couldn't update schedule")}
+              {guideText("Couldn't update schedule")}
             </Text>
           ) : (
             <View style={{ flexGrow: 1 }} />
           )}
           {failed ? <Move label={t("Retry")} strong onPress={retry} /> : null}
-          {more ? <Move label={t("More in Schedule")} strong onPress={onSchedule} /> : null}
+          {more ? (
+            <Move label={t("More in Schedule")} strong onPress={() => onSchedule(channel)} />
+          ) : null}
         </View>
       ) : null}
     </View>
   );
-}
+});

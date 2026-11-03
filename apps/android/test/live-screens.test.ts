@@ -3,8 +3,23 @@ import { act, createElement as h, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 
 vi.mock("react-native", () => {
-  const view = ({ children, onPress }: { children?: ReactNode; onPress?: () => void }) =>
-    h(onPress ? "button" : "div", { onClick: onPress }, children);
+  const view = ({
+    children,
+    onPress,
+    onAccessibilityAction,
+  }: {
+    children?: ReactNode;
+    onPress?: () => void;
+    onAccessibilityAction?: (e: { nativeEvent: { actionName: string } }) => void;
+  }) =>
+    h(
+      onPress ? "button" : "div",
+      {
+        onClick: onPress,
+        onContextMenu: () => onAccessibilityAction?.({ nativeEvent: { actionName: "schedule" } }),
+      },
+      children,
+    );
 
   return {
     View: view,
@@ -89,6 +104,10 @@ vi.mock("../src/live/chrome.tsx", () => {
     useGaps: () => ({}),
   };
 });
+
+vi.mock("../src/guide/grid.tsx", () => ({
+  GuideGrid: ({ country }: { country: string }) => h("p", {}, `Guide grid for ${country}`),
+}));
 
 vi.mock("../src/player/instance.ts", () => ({ player: { play: vi.fn() } }));
 
@@ -222,4 +241,45 @@ it("opens Settings from the Providers shortcut", async () => {
   expect(providers).toBeDefined();
   await act(async () => providers!.click());
   expect(router.push).toHaveBeenCalledWith("/settings");
+});
+
+it("opens the Guide tab with the selected country", async () => {
+  params.country = "Belgium";
+  await act(async () => root.render(h(LiveScreen)));
+  const tab = [...container.querySelectorAll("button")].find((b) => b.textContent === "Guide");
+  expect(tab).toBeDefined();
+  await act(async () => tab!.click());
+  expect(container.textContent).toContain("Guide grid for Belgium");
+});
+
+it("opens the channel Schedule through its Live accessibility action", async () => {
+  sources.state.set({
+    kind: "ready",
+    sources: [
+      {
+        id: "source",
+        label: "Provider",
+        kind: "m3u",
+        channels: {
+          kind: "ready",
+          rows: [
+            { key: "source:news", sourceId: "source", title: "News", number: null, category: null },
+          ],
+        },
+      },
+    ],
+  });
+  const { Channel } = await import("../src/live/ui.tsx");
+  const { router } = await import("expo-router");
+  await act(async () =>
+    root.render(
+      h(Channel, { entry: { sourceId: "source", channelId: "news", title: "News" }, onLists() {} }),
+    ),
+  );
+  const row = container.querySelector("button");
+  expect(row).toBeTruthy();
+  await act(async () => {
+    row!.dispatchEvent(new window.Event("contextmenu", { bubbles: true }));
+  });
+  expect(router.push).toHaveBeenLastCalledWith("/guide/schedule?source=source&channel=news");
 });
