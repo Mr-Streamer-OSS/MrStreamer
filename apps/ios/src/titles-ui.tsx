@@ -14,7 +14,7 @@ import {
 import { useArtwork } from "./artwork-cache.ts";
 import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/live.ts";
-import { Placeholders, Shape, useDockInset } from "./loading.tsx";
+import { Placeholders, Placeholder, useDockInset } from "./loading.tsx";
 import { useContentWidth } from "./content-width.ts";
 import { colors } from "./ui.tsx";
 
@@ -231,13 +231,13 @@ export function PlaceholderShelf() {
   return (
     <Placeholders style={styles.shelf} testID="placeholder-shelf">
       <View style={styles.shelfHead}>
-        <Shape style={styles.headShape} />
+        <Placeholder style={styles.headPlaceholder} />
       </View>
       <View style={[styles.shelfRow, styles.stillRow]}>
         {Array.from({ length: 4 }, (_, index) => (
           <View key={index} style={{ width }}>
-            <Shape style={{ width, height: Math.round(width * 1.5), borderRadius: 6 }} />
-            <Shape style={styles.captionShape} />
+            <Placeholder style={{ width, height: Math.round(width * 1.5), borderRadius: 6 }} />
+            <Placeholder style={styles.captionPlaceholder} />
           </View>
         ))}
       </View>
@@ -303,7 +303,10 @@ export function PlaceholderGrid({ header }: { header?: ReactNode }) {
       {header}
       <Placeholders style={styles.stillGrid} testID="placeholder-grid">
         {Array.from({ length: 9 }, (_, index) => (
-          <Shape key={index} style={{ width, height: Math.round(width * 1.5), borderRadius: 6 }} />
+          <Placeholder
+            key={index}
+            style={{ width, height: Math.round(width * 1.5), borderRadius: 6 }}
+          />
         ))}
       </Placeholders>
     </ScrollView>
@@ -418,8 +421,8 @@ const styles = StyleSheet.create({
   tabSelected: { color: colors.text, fontWeight: "700" },
   grid: { paddingHorizontal: 16, paddingBottom: 24, gap: 14 },
   gridRow: { gap: 10 },
-  headShape: { width: 120, height: 18 },
+  headPlaceholder: { width: 120, height: 18 },
   stillRow: { flexDirection: "row", overflow: "hidden" },
-  captionShape: { width: "70%", height: 10, marginTop: 8 },
+  captionPlaceholder: { width: "70%", height: 10, marginTop: 8 },
   stillGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, rowGap: 14 },
 });

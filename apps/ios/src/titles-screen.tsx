@@ -15,7 +15,7 @@ import {
   libraryStatus,
   loadingStatus,
   Placeholders,
-  Shape,
+  Placeholder,
   useDockInset,
   type Status,
 } from "./loading.tsx";
@@ -162,7 +162,7 @@ export function TitlesHome({ kind }: { kind: TitleKind }) {
           testID={`${kind}-loading`}
         >
           <Placeholders style={styles.featured}>
-            <Shape style={styles.featuredArt} />
+            <Placeholder style={styles.featuredArt} />
           </Placeholders>
           <PlaceholderShelf />
           <PlaceholderShelf />

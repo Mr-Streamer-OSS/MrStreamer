@@ -38,14 +38,18 @@ it("offers native field edits only where allowed by the focused field", () => {
 });
 
 /** Each item as its role and label, with the items of its menu. */
-type Shape = readonly [role: string | null, label: string | undefined, items?: readonly Shape[]];
+type MenuEntry = readonly [
+  role: string | null,
+  label: string | undefined,
+  items?: readonly MenuEntry[],
+];
 
-function shape(items: readonly MenuItemConstructorOptions[]): Shape[] {
+function menuEntries(items: readonly MenuItemConstructorOptions[]): MenuEntry[] {
   return items.flatMap((item) =>
     item.type !== "separator"
       ? [
           Array.isArray(item.submenu)
-            ? [item.role ?? null, item.label, shape(item.submenu)]
+            ? [item.role ?? null, item.label, menuEntries(item.submenu)]
             : [item.role ?? null, item.label],
         ]
       : [],
@@ -53,15 +57,15 @@ function shape(items: readonly MenuItemConstructorOptions[]): Shape[] {
 }
 
 /** What the items do, without what they say. */
-function roles(menu: readonly Shape[]): unknown[] {
+function roles(menu: readonly MenuEntry[]): unknown[] {
   return menu.map(([role, , items]) => [role, items && roles(items)]);
 }
 
 describe("the macOS menu bar", () => {
   it("names its items in the interface language and keeps what each does", () => {
-    const english = shape(macMenu("Mr. Streamer", () => {}));
+    const english = menuEntries(macMenu("Mr. Streamer", () => {}));
     setLanguage({ locale: "de-DE", formats: "de-DE" });
-    const german = shape(macMenu("Mr. Streamer", () => {}));
+    const german = menuEntries(macMenu("Mr. Streamer", () => {}));
 
     expect(roles(german)).toEqual(roles(english));
     expect(german).toContainEqual([

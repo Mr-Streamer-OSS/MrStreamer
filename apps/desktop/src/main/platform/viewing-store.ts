@@ -268,7 +268,7 @@ interface AccountRecord {
   readonly sequence: number;
 }
 
-const TitleRowShape = lazy(() =>
+const TitleRowSchema = lazy(() =>
   type({
     title: type("string.json.parse").pipe(RawTitleRef()),
     position: "number",
@@ -544,7 +544,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
   const titleRows = (rows: readonly unknown[]): TitleRow[] =>
     rows.flatMap((raw) => {
-      const row = TitleRowShape()(raw);
+      const row = TitleRowSchema()(raw);
 
       if (row instanceof type.errors) return [];
 

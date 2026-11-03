@@ -503,7 +503,7 @@ const Clock = createContext<Animated.Value | null>(null);
 
 /**
  * Still shapes standing in for content that hasn't come, hidden from VoiceOver, with one clock
- * for the highlight of every `Shape` in it. The clock runs only while the viewer sees the group
+ * for the highlight of every `Placeholder` in it. The clock runs only while the viewer sees the group
  * (its screen in front, Watch closed, the app active) and Reduce Motion is known to be off; it
  * stops, and the band goes, the moment any of that changes or the content replaces the group.
  */
@@ -556,13 +556,13 @@ export function Placeholders({
 }
 
 /** One still shape, sized by `style`, with the group's band crossing it while the clock runs. */
-export function Shape({ style }: { style?: StyleProp<ViewStyle> }) {
+export function Placeholder({ style }: { style?: StyleProp<ViewStyle> }) {
   const clock = useContext(Clock);
   const [width, setWidth] = useState(0);
 
   return (
     <View
-      style={[styles.shape, style]}
+      style={[styles.placeholder, style]}
       onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
     >
       {clock && width > 0 ? <Band clock={clock} width={width} /> : null}
@@ -591,10 +591,10 @@ export function PlaceholderRows({ height, count = 8 }: { height: number; count?:
     <Placeholders testID="placeholder-rows">
       {Array.from({ length: count }, (_, index) => (
         <View key={index} style={[styles.row, { height }]}>
-          <Shape style={styles.rowMark} />
+          <Placeholder style={styles.rowMark} />
           <View style={styles.names}>
-            <Shape style={[styles.bar, { width: `${55 - (index % 3) * 10}%` }]} />
-            <Shape style={[styles.bar, styles.barShort]} />
+            <Placeholder style={[styles.bar, { width: `${55 - (index % 3) * 10}%` }]} />
+            <Placeholder style={[styles.bar, styles.barShort]} />
           </View>
         </View>
       ))}
@@ -607,7 +607,7 @@ export function PlaceholderLines({ widths }: { widths: readonly `${number}%`[] }
   return (
     <Placeholders style={styles.lines} testID="placeholder-lines">
       {widths.map((width, index) => (
-        <Shape key={index} style={[styles.bar, { width }]} />
+        <Placeholder key={index} style={[styles.bar, { width }]} />
       ))}
     </Placeholders>
   );
@@ -655,7 +655,7 @@ const styles = StyleSheet.create({
   },
   filled: { height: 2, backgroundColor: colors.text },
   actions: { flexDirection: "row", flexWrap: "wrap", columnGap: 20 },
-  shape: { backgroundColor: colors.fill, borderRadius: 4, overflow: "hidden" },
+  placeholder: { backgroundColor: colors.fill, borderRadius: 4, overflow: "hidden" },
   band: {
     position: "absolute",
     top: 0,

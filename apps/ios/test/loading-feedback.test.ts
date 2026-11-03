@@ -221,7 +221,7 @@ const { default: Live } = await import("../src/app/(tabs)/live/index.tsx");
 const { DiscoverScreen } = await import("../src/live-discover.tsx");
 const { TitlesHome } = await import("../src/titles-screen.tsx");
 
-const { Placeholders, Shape, StatusLine, libraryStatus, useProviderStatus } =
+const { Placeholders, Placeholder, StatusLine, libraryStatus, useProviderStatus } =
   await import("../src/loading.tsx");
 
 const failure = { kind: "unexpected", detail: "" } as const;
@@ -843,9 +843,9 @@ describe("the shapes' highlight", () => {
       React.createElement(
         Placeholders,
         null,
-        React.createElement(Shape),
-        React.createElement(Shape),
-        React.createElement(Shape),
+        React.createElement(Placeholder),
+        React.createElement(Placeholder),
+        React.createElement(Placeholder),
       );
 
     open(group());

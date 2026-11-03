@@ -128,7 +128,7 @@ vi.mock("../src/loading.tsx", async () => {
     loadingStatus: () => null,
     PlaceholderRows: () => null,
     Placeholders: () => null,
-    Shape: () => null,
+    Placeholder: () => null,
   };
 });
 
