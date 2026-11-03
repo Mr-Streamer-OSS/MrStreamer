@@ -29,6 +29,7 @@
     "plugins": [
       ["expo-router", { "root": "./src/app" }],
       "./plugins/no-backup.cjs",
+      "./plugins/player-media.cjs",
       ["expo-splash-screen", { "backgroundColor": "#000000" }],
       [
         "expo-build-properties",

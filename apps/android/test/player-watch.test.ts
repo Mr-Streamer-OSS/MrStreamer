@@ -52,6 +52,8 @@ vi.mock("react-native", async () => {
     Pressable: view("button"),
     StatusBar: () => null,
     useWindowDimensions: () => ({ width: 412, height: 900 }),
+    AppState: { addEventListener: () => ({ remove() {} }) },
+    BackHandler: { addEventListener: () => ({ remove() {} }) },
     AccessibilityInfo: {
       isScreenReaderEnabled: () => new Promise<boolean>(() => {}),
       addEventListener: () => ({ remove() {} }),
@@ -86,6 +88,12 @@ vi.mock("../src/player/instance.ts", async () => {
   return {
     player: {
       state,
+      media: {
+        state: store({ pip: false }),
+        watch() {},
+        reconcile() {},
+        cancelNext() {},
+      },
       play(intent: PlayIntent) {
         scenario.played.push(intent);
         state.set(playing(intent));

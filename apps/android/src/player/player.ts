@@ -12,6 +12,7 @@ import type {
   Release,
   Track,
 } from "./native.ts";
+import { mediaModel, type MediaModel, type MediaPersistence } from "./media.ts";
 import type { Resolve } from "./resolve.ts";
 
 // The app's one player, for Watch, the mini player and whatever plays next: it turns an intent
@@ -57,6 +58,7 @@ export interface Settled {
 
 export interface PlayerOwner {
   readonly state: Store<PlayerState>;
+  readonly media: MediaModel;
   /** Plays `intent` in place of what plays, and returns its attempt. */
   play(intent: PlayIntent): string;
   /** Each answers false when nothing plays or the command doesn't apply, such as seeking live. */
@@ -134,7 +136,11 @@ function continued(intent: PlayIntent, positionMs: number, startMs: number): Pla
   }
 }
 
-export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner {
+export function playerOwner(
+  native: NativePlayer,
+  resolve: Resolve,
+  persistence?: MediaPersistence,
+): PlayerOwner {
   const state = store<PlayerState>({ kind: "idle" });
   const settledListeners = new Set<(settled: Settled) => void>();
   let attempts = 0;
@@ -173,7 +179,12 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
       for (const listener of settledListeners) listener(settled);
     } else entry.settled = key;
 
-    if (phase === "stopped") return;
+    if (phase === "stopped") {
+      if (playing()?.attempt === observation.attempt) state.set({ kind: "idle" });
+
+      return;
+    }
+
     update(observation.attempt, (now) => ({
       ...now,
       phase,
@@ -196,6 +207,7 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
 
   /** Ends the current attempt: its address stops being worked out, or the native player stops it. */
   async function end() {
+    owner.media.cancelNext();
     resolving?.abort();
     resolving = null;
     const now = playing();
@@ -212,8 +224,12 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
 
   const owner: PlayerOwner = {
     state,
+    get media() {
+      return media;
+    },
 
     play(intent) {
+      owner.media.cancelNext();
       const before = playing();
       resolving?.abort();
       const controller = new AbortController();
@@ -250,7 +266,7 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
           if (resolving !== controller) return;
           resolving = null;
           admitted.set(attempt, admittedOf(intent, request.startMs));
-          native.admit({ ...request, attempt }).catch((cause: unknown) => {
+          native.admit({ ...request, attempt, title: intent.title }).catch((cause: unknown) => {
             // Whatever the native player opened before it failed is unknown: say so.
             admitted
               .get(attempt)
@@ -269,11 +285,19 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
       return attempt;
     },
 
-    pause: () => command((attempt) => native.pause(attempt)),
+    pause: () => {
+      owner.media.cancelNext();
+
+      return command((attempt) => native.pause(attempt));
+    },
     resume: () => command((attempt) => native.resume(attempt)),
-    seek: (positionMs) => command((attempt) => native.seek(attempt, positionMs)),
-    setSpeed: (speed) => command((attempt) => native.setSpeed(attempt, speed)),
-    setQuality: (trackId) => command((attempt) => native.setQuality(attempt, trackId)),
+    seek: (positionMs) => {
+      owner.media.cancelNext();
+
+      return command((attempt) => native.seek(attempt, positionMs));
+    },
+    setSpeed: (speed) => owner.media.speed(speed),
+    setQuality: (trackId) => owner.media.quality(trackId),
     stop: end,
 
     retry() {
@@ -308,6 +332,8 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
 
     capabilities: () => native.capabilities(),
   };
+
+  const media = mediaModel(owner, native, persistence);
 
   return owner;
 }

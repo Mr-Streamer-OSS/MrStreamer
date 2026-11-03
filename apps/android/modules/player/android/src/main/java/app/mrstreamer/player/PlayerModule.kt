@@ -25,6 +25,7 @@ class AdmissionRecord : Record {
   @Field val format: String = "progressive"
   @Field val mode: String = "title"
   @Field val startMs: Double = 0.0
+  @Field val title: String = ""
   @Field val sourceId: String? = null
   @Field val path: String? = null
 }
@@ -42,6 +43,9 @@ class PlayerModule : Module() {
       override fun tracks(attempt: String, tracks: List<Track>) =
         sendEvent("onTracks", mapOf("attempt" to attempt, "tracks" to tracks.map(::mapOf)))
 
+      override fun media(attempt: String, pip: Boolean) = sendEvent("onMedia", mapOf("attempt" to attempt, "pip" to pip))
+      override fun mediaCommand(attempt: String, command: String) = sendEvent("onMediaCommand", mapOf("attempt" to attempt, "command" to command))
+
       override fun released(release: Release) =
         sendEvent(
           "onReleased",
@@ -54,14 +58,14 @@ class PlayerModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("Player")
-    Events("onState", "onTracks", "onReleased")
+    Events("onState", "onTracks", "onReleased", "onMedia", "onMediaCommand")
 
     AsyncFunction("admit") { record: AdmissionRecord ->
       val hold =
         record.path?.let { HoldRef.LocalFile(it) }
           ?: HoldRef.Source(record.sourceId ?: throw IllegalArgumentException("An admission names its source or file"))
       owner().admit(
-        Admission(record.attempt, record.url, record.headers, record.format, record.mode, record.startMs.toLong(), hold),
+        Admission(record.attempt, record.url, record.headers, record.format, record.mode, record.startMs.toLong(), hold, record.title),
       )
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("pause") { attempt: String -> owner().pause(attempt) }.runOnQueue(Queues.MAIN)
@@ -72,6 +76,15 @@ class PlayerModule : Module() {
       .runOnQueue(Queues.MAIN)
     AsyncFunction("setQuality") { attempt: String, trackId: String? -> owner().setQuality(attempt, trackId) }
       .runOnQueue(Queues.MAIN)
+    AsyncFunction("setAudio") { attempt: String, trackId: String -> owner().setAudio(attempt, trackId) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("setText") { attempt: String, trackId: String? -> owner().setText(attempt, trackId) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("setNextAvailable") { attempt: String, available: Boolean ->
+      val current = owner()
+      if (current.attempt == attempt && current.nextAvailable != available) { current.nextAvailable = available; current.changed?.invoke() }
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("setWatch") { enabled: Boolean -> PlayerPip.watch(enabled) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("enterPip") { PlayerPip.enter() }.runOnQueue(Queues.MAIN)
+    AsyncFunction("reconcile") { owner().reconcile(); PlayerPip.reconcile() }.runOnQueue(Queues.MAIN)
     AsyncFunction("stop") { attempt: String -> owner().stop(attempt) }.runOnQueue(Queues.MAIN)
     Function("capabilities") {
       mapOf("containers" to Capabilities.CONTAINERS, "decoders" to Capabilities.decoders())
@@ -93,6 +106,7 @@ class PlayerModule : Module() {
       "live" to observation.live,
       "seekable" to observation.seekable,
       "speed" to observation.speed.toDouble(),
+      "qualityAutomatic" to (PlayerHost.existing()?.automatic ?: true),
       "failure" to
         observation.failure?.let { mapOf("kind" to it.kind, "code" to it.code, "status" to it.status) },
     )

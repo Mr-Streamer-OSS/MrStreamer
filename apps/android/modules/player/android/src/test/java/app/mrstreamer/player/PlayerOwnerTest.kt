@@ -213,7 +213,7 @@ class PlayerOwnerTest {
     }
     val files = ladder.map { fixture("hls-ladder/$it") }
     val owner = owner()
-    owner.admit(file("a", files.first(), format = "hls"))
+    owner.admit(file("a", files.first(), format = "hls").copy(mode = "live"))
     untilPhase("a", Phase.PLAYING)
     val video = recorder.tracks.getValue("a").filter { it.type == "video" }
     assertEquals(listOf(180, 90), video.map { it.height })

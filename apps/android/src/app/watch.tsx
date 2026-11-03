@@ -5,6 +5,8 @@ import { router, useIsFocused, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AccessibilityInfo,
+  AppState,
+  BackHandler,
   Pressable,
   StatusBar,
   Text,
@@ -39,6 +41,25 @@ const HIDE_AFTER_MS = 4000;
 const JUMP_MS = 10_000;
 
 export default function Watch() {
+  useEffect(() => {
+    player.media.reconcile();
+
+    const back = BackHandler.addEventListener("hardwareBackPress", () => {
+      player.media.cancelNext();
+
+      return false;
+    });
+
+    const app = AppState.addEventListener("change", (state) => {
+      if (state === "active") player.media.reconcile();
+    });
+
+    return () => {
+      back.remove();
+      app.remove();
+      player.media.cancelNext();
+    };
+  }, []);
   const { play } = useLocalSearchParams<{ play?: string }>();
   const intent = useMemo(() => linkedIntent(play), [play]);
   useEffect(() => {
@@ -53,6 +74,12 @@ export default function Watch() {
   // Stopped from elsewhere (a notification, Remove): nothing is left to watch. Only the showing
   // Watch leaves, so a screen opened over it is never the one taken away.
   const focused = useIsFocused();
+  const media = useStore(player.media.state);
+  useEffect(() => {
+    player.media.watch(focused);
+
+    return () => player.media.watch(false);
+  }, [focused]);
   const played = useRef(false);
   useEffect(() => {
     if (state.kind === "playing") played.current = true;
@@ -93,7 +120,7 @@ export default function Watch() {
 
     return () => clearTimeout(timer);
   }, [shown, phase, touched, kept]);
-  const controls = shown || reader || kept || phase !== "playing";
+  const controls = !media.pip && (shown || reader || kept || phase !== "playing");
   // Rebuffering keeps play, pause and the jumps; only a start with nothing yet shows Loading.
   const loading = phase === "resolving" || phase === "preparing";
 
@@ -193,6 +220,8 @@ export default function Watch() {
 
 /** Leaves Watch for the screen under it, or Live when a link opened the app here. */
 function leave() {
+  player.media.cancelNext();
+
   if (router.canGoBack()) router.back();
   else router.replace("/");
 }

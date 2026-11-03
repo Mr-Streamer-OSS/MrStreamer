@@ -127,7 +127,7 @@ describe("player", () => {
     const attempt = owner.play(live("7"));
     expect(owner.state.get()).toMatchObject({ kind: "playing", attempt, phase: "resolving" });
     await flush();
-    expect(native.admitted).toEqual([{ ...request(), attempt }]);
+    expect(native.admitted).toEqual([{ ...request(), attempt, title: "7" }]);
 
     native.observe(attempt, { phase: "playing", positionMs: 1200, bufferedMs: 4000 });
     native.tracks(attempt, [

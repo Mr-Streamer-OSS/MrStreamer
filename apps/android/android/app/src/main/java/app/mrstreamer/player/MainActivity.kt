@@ -21,6 +21,7 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+    app.mrstreamer.player.PlayerPip.attach(this)
   }
 
   /**
@@ -62,4 +63,13 @@ class MainActivity : ReactActivity() {
       // because it's doing more than [Activity.moveTaskToBack] in fact.
       super.invokeDefaultOnBackPressed()
   }
+
+  // player-media lifecycle
+  override fun onUserLeaveHint() { super.onUserLeaveHint(); app.mrstreamer.player.PlayerPip.home() }
+  override fun onPictureInPictureModeChanged(inPip: Boolean, config: android.content.res.Configuration) {
+    super.onPictureInPictureModeChanged(inPip, config)
+    app.mrstreamer.player.PlayerPip.mode(inPip)
+  }
+  override fun onStop() { super.onStop(); app.mrstreamer.player.PlayerPip.stopped(this) }
+  override fun onDestroy() { app.mrstreamer.player.PlayerPip.detach(this); super.onDestroy() }
 }
