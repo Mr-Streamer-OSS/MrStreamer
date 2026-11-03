@@ -394,11 +394,14 @@ releaseRuntimeClasspath - Runtime classpath of '/release'.
 |         |    +--- com.facebook.fresco:memory-type-native:3.7.0 (*)
 |         |    +--- com.facebook.fresco:memory-type-java:3.7.0 (*)
 |         |    +--- com.facebook.fresco:middleware:3.7.0 (*)
-|         |    +--- com.squareup.okhttp3:okhttp:3.14.9 -> 4.9.2
-|         |    |    +--- com.squareup.okio:okio:2.8.0 -> 3.16.0
+|         |    +--- com.squareup.okhttp3:okhttp:3.14.9 -> 4.12.0
+|         |    |    +--- com.squareup.okio:okio:3.6.0 -> 3.16.0
 |         |    |    |    \--- com.squareup.okio:okio-jvm:3.16.0
 |         |    |    |         \--- org.jetbrains.kotlin:kotlin-stdlib:2.2.0 -> 2.2.20 (*)
-|         |    |    \--- org.jetbrains.kotlin:kotlin-stdlib:1.4.10 -> 2.2.20 (*)
+|         |    |    \--- org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.21 -> 1.8.22
+|         |    |         +--- org.jetbrains.kotlin:kotlin-stdlib:1.8.22 -> 2.2.20 (*)
+|         |    |         \--- org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22 -> 2.2.10
+|         |    |              \--- org.jetbrains.kotlin:kotlin-stdlib:2.2.10 -> 2.2.20 (*)
 |         |    \--- org.jetbrains.kotlin:kotlin-stdlib:2.2.0 -> 2.2.20 (*)
 |         +--- com.facebook.fresco:middleware:3.7.0 (*)
 |         +--- com.facebook.fresco:ui-common:3.7.0 (*)
@@ -407,12 +410,9 @@ releaseRuntimeClasspath - Runtime classpath of '/release'.
 |         +--- com.facebook.yoga:proguard-annotations:1.19.0
 |         +--- com.google.code.findbugs:jsr305:3.0.2
 |         +--- com.squareup.okhttp3:okhttp-urlconnection:4.9.2
-|         |    +--- com.squareup.okhttp3:okhttp:4.9.2 (*)
-|         |    \--- org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.4.10 -> 1.8.22
-|         |         +--- org.jetbrains.kotlin:kotlin-stdlib:1.8.22 -> 2.2.20 (*)
-|         |         \--- org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22 -> 2.2.10
-|         |              \--- org.jetbrains.kotlin:kotlin-stdlib:2.2.10 -> 2.2.20 (*)
-|         +--- com.squareup.okhttp3:okhttp:4.9.2 (*)
+|         |    +--- com.squareup.okhttp3:okhttp:4.9.2 -> 4.12.0 (*)
+|         |    \--- org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.4.10 -> 1.8.22 (*)
+|         +--- com.squareup.okhttp3:okhttp:4.9.2 -> 4.12.0 (*)
 |         +--- com.squareup.okio:okio:2.9.0 -> 3.16.0 (*)
 |         +--- javax.inject:javax.inject:1
 |         \--- org.jetbrains.kotlin:kotlin-stdlib:2.2.10 -> 2.2.20 (*)
@@ -426,68 +426,7 @@ releaseRuntimeClasspath - Runtime classpath of '/release'.
 |    |    +--- org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.2.10 (*)
 |    |    +--- org.jetbrains:annotations:23.0.0
 |    |    +--- com.facebook.react:react-android -> 0.88.0-rc.4 (*)
-|    |    +--- com.google.android.material:material:1.13.0
-|    |    |    +--- org.jetbrains.kotlin:kotlin-bom:1.8.22
-|    |    |    |    +--- org.jetbrains.kotlin:kotlin-stdlib:1.8.22 -> 2.2.20 (c)
-|    |    |    |    +--- org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22 -> 2.2.10 (c)
-|    |    |    |    +--- org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22 (c)
-|    |    |    |    \--- org.jetbrains.kotlin:kotlin-reflect:1.8.22 -> 2.2.10 (c)
-|    |    |    +--- com.google.errorprone:error_prone_annotations:2.15.0
-|    |    |    +--- androidx.activity:activity:1.8.0 -> 1.8.1 (*)
-|    |    |    +--- androidx.annotation:annotation:1.2.0 -> 1.9.1 (*)
-|    |    |    +--- androidx.annotation:annotation-experimental:1.0.0 -> 1.4.1 (*)
-|    |    |    +--- androidx.appcompat:appcompat:1.7.0 -> 1.7.1 (*)
-|    |    |    +--- androidx.cardview:cardview:1.0.0
-|    |    |    |    \--- androidx.annotation:annotation:1.0.0 -> 1.9.1 (*)
-|    |    |    +--- androidx.coordinatorlayout:coordinatorlayout:1.1.0 -> 1.2.0
-|    |    |    |    +--- androidx.collection:collection:1.0.0 -> 1.4.4 (*)
-|    |    |    |    +--- androidx.annotation:annotation:1.1.0 -> 1.9.1 (*)
-|    |    |    |    +--- androidx.core:core:1.3.0 -> 1.17.0 (*)
-|    |    |    |    \--- androidx.customview:customview:1.0.0 -> 1.1.0 (*)
-|    |    |    +--- androidx.constraintlayout:constraintlayout:2.1.0
-|    |    |    |    +--- androidx.appcompat:appcompat:1.2.0 -> 1.7.1 (*)
-|    |    |    |    +--- androidx.core:core:1.3.2 -> 1.17.0 (*)
-|    |    |    |    \--- androidx.constraintlayout:constraintlayout-core:1.0.0
-|    |    |    +--- androidx.core:core:1.6.0 -> 1.17.0 (*)
-|    |    |    +--- androidx.drawerlayout:drawerlayout:1.1.1 (*)
-|    |    |    +--- androidx.dynamicanimation:dynamicanimation:1.1.0
-|    |    |    |    +--- androidx.collection:collection:1.4.2 -> 1.4.4 (*)
-|    |    |    |    +--- androidx.core:core:1.1.0 -> 1.17.0 (*)
-|    |    |    |    \--- org.jspecify:jspecify:1.0.0
-|    |    |    +--- androidx.fragment:fragment:1.2.5 -> 1.8.9 (*)
-|    |    |    +--- androidx.lifecycle:lifecycle-runtime:2.0.0 -> 2.8.0 (*)
-|    |    |    +--- androidx.recyclerview:recyclerview:1.2.1 -> 1.3.0
-|    |    |    |    +--- androidx.annotation:annotation:1.1.0 -> 1.9.1 (*)
-|    |    |    |    +--- androidx.collection:collection:1.0.0 -> 1.4.4 (*)
-|    |    |    |    +--- androidx.core:core:1.7.0 -> 1.17.0 (*)
-|    |    |    |    +--- androidx.customview:customview:1.0.0 -> 1.1.0 (*)
-|    |    |    |    \--- androidx.customview:customview-poolingcontainer:1.0.0
-|    |    |    |         +--- androidx.core:core-ktx:1.5.0 -> 1.17.0 (*)
-|    |    |    |         \--- org.jetbrains.kotlin:kotlin-stdlib:1.6.21 -> 2.2.20 (*)
-|    |    |    +--- androidx.resourceinspection:resourceinspection-annotation:1.0.1 (*)
-|    |    |    +--- androidx.transition:transition:1.5.0 -> 1.7.0
-|    |    |    |    +--- androidx.annotation:annotation:1.8.1 -> 1.9.1 (*)
-|    |    |    |    +--- androidx.collection:collection:1.4.2 -> 1.4.4 (*)
-|    |    |    |    +--- androidx.core:core:1.16.0 -> 1.17.0 (*)
-|    |    |    |    +--- androidx.dynamicanimation:dynamicanimation:1.1.0 (*)
-|    |    |    |    +--- org.jetbrains.kotlin:kotlin-stdlib:2.0.21 -> 2.2.20 (*)
-|    |    |    |    +--- org.jspecify:jspecify:1.0.0
-|    |    |    |    \--- androidx.transition:transition-ktx:1.7.0 (c)
-|    |    |    +--- androidx.vectordrawable:vectordrawable:1.1.0 (*)
-|    |    |    +--- androidx.viewpager2:viewpager2:1.0.0
-|    |    |    |    +--- androidx.annotation:annotation:1.1.0 -> 1.9.1 (*)
-|    |    |    |    +--- androidx.fragment:fragment:1.1.0 -> 1.8.9 (*)
-|    |    |    |    +--- androidx.recyclerview:recyclerview:1.1.0 -> 1.3.0 (*)
-|    |    |    |    +--- androidx.core:core:1.1.0 -> 1.17.0 (*)
-|    |    |    |    \--- androidx.collection:collection:1.1.0 -> 1.4.4 (*)
-|    |    |    \--- androidx.graphics:graphics-shapes:1.0.1
-|    |    |         \--- androidx.graphics:graphics-shapes-android:1.0.1
-|    |    |              +--- androidx.annotation:annotation:1.8.1 -> 1.9.1 (*)
-|    |    |              +--- androidx.annotation:annotation-experimental:1.4.1 (*)
-|    |    |              +--- androidx.collection:collection:1.4.2 -> 1.4.4 (*)
-|    |    |              +--- androidx.core:core-ktx:1.10.0 -> 1.17.0 (*)
-|    |    |              \--- org.jetbrains.kotlin:kotlin-stdlib:1.8.22 -> 2.2.20 (*)
-|    |    +--- com.squareup.okhttp3:okhttp:3.14.9 -> 4.9.2 (*)
+|    |    +--- com.squareup.okhttp3:okhttp:3.14.9 -> 4.12.0 (*)
 |    |    +--- com.google.code.gson:gson:2.8.6
 |    |    \--- io.github.expo.pika:pika-api:1.1.0 (*)
 |    +--- project :credentials
@@ -522,6 +461,11 @@ releaseRuntimeClasspath - Runtime classpath of '/release'.
 |    |    +--- com.facebook.react:react-android -> 0.88.0-rc.4 (*)
 |    |    +--- io.github.expo.pika:pika-api:1.1.0 (*)
 |    |    \--- io.github.expo.kolibri:kolibri-android -> 0.2.4 (*)
+|    +--- project :guide
+|    |    +--- org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.2.10 (*)
+|    |    +--- org.jetbrains:annotations:23.0.0
+|    |    +--- com.squareup.okhttp3:okhttp:4.12.0 (*)
+|    |    \--- io.github.expo.pika:pika-api:1.1.0 (*)
 |    +--- project :player
 |    |    +--- org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.2.10 (*)
 |    |    +--- org.jetbrains:annotations:23.0.0
@@ -595,14 +539,21 @@ releaseRuntimeClasspath - Runtime classpath of '/release'.
 |    |    |    \--- org.jetbrains.kotlin:kotlin-stdlib:2.2.10 -> 2.2.20 (*)
 |    |    +--- androidx.media3:media3-ui:1.11.1
 |    |    |    +--- androidx.annotation:annotation:1.6.0 -> 1.9.1 (*)
-|    |    |    +--- androidx.recyclerview:recyclerview:1.3.0 (*)
+|    |    |    +--- androidx.recyclerview:recyclerview:1.3.0
+|    |    |    |    +--- androidx.annotation:annotation:1.1.0 -> 1.9.1 (*)
+|    |    |    |    +--- androidx.collection:collection:1.0.0 -> 1.4.4 (*)
+|    |    |    |    +--- androidx.core:core:1.7.0 -> 1.17.0 (*)
+|    |    |    |    +--- androidx.customview:customview:1.0.0 -> 1.1.0 (*)
+|    |    |    |    \--- androidx.customview:customview-poolingcontainer:1.0.0
+|    |    |    |         +--- androidx.core:core-ktx:1.5.0 -> 1.17.0 (*)
+|    |    |    |         \--- org.jetbrains.kotlin:kotlin-stdlib:1.6.21 -> 2.2.20 (*)
 |    |    |    +--- androidx.media3:media3-common:1.11.1 (*)
 |    |    |    \--- org.jetbrains.kotlin:kotlin-stdlib:2.2.10 -> 2.2.20 (*)
 |    |    \--- io.github.expo.pika:pika-api:1.1.0 (*)
 |    +--- expo.modules.asset:expo.modules.asset:58.0.19
 |    |    +--- org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.2.10 (*)
 |    |    +--- org.jetbrains:annotations:23.0.0
-|    |    +--- com.squareup.okhttp3:okhttp:4.9.2 (*)
+|    |    +--- com.squareup.okhttp3:okhttp:4.9.2 -> 4.12.0 (*)
 |    |    +--- com.facebook.react:react-android -> 0.88.0-rc.4 (*)
 |    |    \--- io.github.expo.pika:pika-api:1.1.0 (*)
 |    +--- host.exp.exponent:expo.modules.filesystem:58.0.13
@@ -611,7 +562,7 @@ releaseRuntimeClasspath - Runtime classpath of '/release'.
 |    |    +--- com.facebook.react:react-android -> 0.88.0-rc.4 (*)
 |    |    +--- commons-codec:commons-codec:1.10
 |    |    +--- commons-io:commons-io:1.4
-|    |    +--- com.squareup.okhttp3:okhttp:4.9.2 (*)
+|    |    +--- com.squareup.okhttp3:okhttp:4.9.2 -> 4.12.0 (*)
 |    |    +--- com.squareup.okhttp3:okhttp-urlconnection:4.9.2 (*)
 |    |    +--- com.squareup.okio:okio:2.9.0 -> 3.16.0 (*)
 |    |    +--- androidx.documentfile:documentfile:1.1.0
@@ -635,9 +586,62 @@ releaseRuntimeClasspath - Runtime classpath of '/release'.
 |    +--- expo.modules.router:expo.modules.router:58.0.18
 |    |    +--- org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.2.10 (*)
 |    |    +--- org.jetbrains:annotations:23.0.0
-|    |    +--- com.google.android.material:material:1.13.0 (*)
+|    |    +--- com.google.android.material:material:1.13.0
+|    |    |    +--- org.jetbrains.kotlin:kotlin-bom:1.8.22
+|    |    |    |    +--- org.jetbrains.kotlin:kotlin-stdlib:1.8.22 -> 2.2.20 (c)
+|    |    |    |    +--- org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22 -> 2.2.10 (c)
+|    |    |    |    +--- org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22 (c)
+|    |    |    |    \--- org.jetbrains.kotlin:kotlin-reflect:1.8.22 -> 2.2.10 (c)
+|    |    |    +--- com.google.errorprone:error_prone_annotations:2.15.0
+|    |    |    +--- androidx.activity:activity:1.8.0 -> 1.8.1 (*)
+|    |    |    +--- androidx.annotation:annotation:1.2.0 -> 1.9.1 (*)
+|    |    |    +--- androidx.annotation:annotation-experimental:1.0.0 -> 1.4.1 (*)
+|    |    |    +--- androidx.appcompat:appcompat:1.7.0 -> 1.7.1 (*)
+|    |    |    +--- androidx.cardview:cardview:1.0.0
+|    |    |    |    \--- androidx.annotation:annotation:1.0.0 -> 1.9.1 (*)
+|    |    |    +--- androidx.coordinatorlayout:coordinatorlayout:1.1.0 -> 1.2.0
+|    |    |    |    +--- androidx.collection:collection:1.0.0 -> 1.4.4 (*)
+|    |    |    |    +--- androidx.annotation:annotation:1.1.0 -> 1.9.1 (*)
+|    |    |    |    +--- androidx.core:core:1.3.0 -> 1.17.0 (*)
+|    |    |    |    \--- androidx.customview:customview:1.0.0 -> 1.1.0 (*)
+|    |    |    +--- androidx.constraintlayout:constraintlayout:2.1.0
+|    |    |    |    +--- androidx.appcompat:appcompat:1.2.0 -> 1.7.1 (*)
+|    |    |    |    +--- androidx.core:core:1.3.2 -> 1.17.0 (*)
+|    |    |    |    \--- androidx.constraintlayout:constraintlayout-core:1.0.0
+|    |    |    +--- androidx.core:core:1.6.0 -> 1.17.0 (*)
+|    |    |    +--- androidx.drawerlayout:drawerlayout:1.1.1 (*)
+|    |    |    +--- androidx.dynamicanimation:dynamicanimation:1.1.0
+|    |    |    |    +--- androidx.collection:collection:1.4.2 -> 1.4.4 (*)
+|    |    |    |    +--- androidx.core:core:1.1.0 -> 1.17.0 (*)
+|    |    |    |    \--- org.jspecify:jspecify:1.0.0
+|    |    |    +--- androidx.fragment:fragment:1.2.5 -> 1.8.9 (*)
+|    |    |    +--- androidx.lifecycle:lifecycle-runtime:2.0.0 -> 2.8.0 (*)
+|    |    |    +--- androidx.recyclerview:recyclerview:1.2.1 -> 1.3.0 (*)
+|    |    |    +--- androidx.resourceinspection:resourceinspection-annotation:1.0.1 (*)
+|    |    |    +--- androidx.transition:transition:1.5.0 -> 1.7.0
+|    |    |    |    +--- androidx.annotation:annotation:1.8.1 -> 1.9.1 (*)
+|    |    |    |    +--- androidx.collection:collection:1.4.2 -> 1.4.4 (*)
+|    |    |    |    +--- androidx.core:core:1.16.0 -> 1.17.0 (*)
+|    |    |    |    +--- androidx.dynamicanimation:dynamicanimation:1.1.0 (*)
+|    |    |    |    +--- org.jetbrains.kotlin:kotlin-stdlib:2.0.21 -> 2.2.20 (*)
+|    |    |    |    +--- org.jspecify:jspecify:1.0.0
+|    |    |    |    \--- androidx.transition:transition-ktx:1.7.0 (c)
+|    |    |    +--- androidx.vectordrawable:vectordrawable:1.1.0 (*)
+|    |    |    +--- androidx.viewpager2:viewpager2:1.0.0
+|    |    |    |    +--- androidx.annotation:annotation:1.1.0 -> 1.9.1 (*)
+|    |    |    |    +--- androidx.fragment:fragment:1.1.0 -> 1.8.9 (*)
+|    |    |    |    +--- androidx.recyclerview:recyclerview:1.1.0 -> 1.3.0 (*)
+|    |    |    |    +--- androidx.core:core:1.1.0 -> 1.17.0 (*)
+|    |    |    |    \--- androidx.collection:collection:1.1.0 -> 1.4.4 (*)
+|    |    |    \--- androidx.graphics:graphics-shapes:1.0.1
+|    |    |         \--- androidx.graphics:graphics-shapes-android:1.0.1
+|    |    |              +--- androidx.annotation:annotation:1.8.1 -> 1.9.1 (*)
+|    |    |              +--- androidx.annotation:annotation-experimental:1.4.1 (*)
+|    |    |              +--- androidx.collection:collection:1.4.2 -> 1.4.4 (*)
+|    |    |              +--- androidx.core:core-ktx:1.10.0 -> 1.17.0 (*)
+|    |    |              \--- org.jetbrains.kotlin:kotlin-stdlib:1.8.22 -> 2.2.20 (*)
 |    |    \--- io.github.expo.pika:pika-api:1.1.0 (*)
-|    +--- host.exp.exponent:expo.modules.splashscreen:58.0.8
+|    +--- host.exp.exponent:expo.modules.splashscreen:58.0.12
 |    |    +--- org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.2.10 (*)
 |    |    +--- org.jetbrains:annotations:23.0.0
 |    |    +--- androidx.appcompat:appcompat:1.7.1 (*)
