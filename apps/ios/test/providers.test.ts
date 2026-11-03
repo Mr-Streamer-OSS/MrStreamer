@@ -30,6 +30,10 @@ const memory = vi.hoisted(() => ({
   /** Channel lists held until a test lets them through. */
   heldChannels: [] as Array<() => void>,
   holdChannels: false,
+  /** How a held channel list answers once let through: as asked, or as if its signal weren't. */
+  lateChannels: null as "fails" | "answers" | null,
+  /** Requests to a panel that haven't answered yet. */
+  open: 0,
   /** Movie lists held until a test lets them through. */
   heldMovies: [] as Array<() => void>,
   holdMovies: false,
@@ -70,6 +74,16 @@ vi.mock("../src/telemetry/index.ts", () => ({
 const passThrough = globalThis.fetch;
 
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+  memory.open++;
+
+  try {
+    return await panelAnswer(input, init);
+  } finally {
+    memory.open--;
+  }
+});
+
+async function panelAnswer(input: string, init?: RequestInit) {
   const url = new URL(input);
   memory.caching.push(new Headers(init?.headers).get("Cache-Control"));
   const login = url.pathname.endsWith("/player_api.php") && !url.searchParams.has("action");
@@ -78,6 +92,10 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
 
   if (url.searchParams.get("action") === "get_live_streams" && memory.holdChannels) {
     await new Promise<void>((go) => memory.heldChannels.push(go));
+
+    if (memory.lateChannels === "fails") throw new TypeError("Network request failed");
+
+    if (memory.lateChannels === "answers") return passThrough(input);
   }
 
   if (url.searchParams.get("action") === "get_vod_streams" && memory.holdMovies) {
@@ -85,7 +103,7 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   }
 
   return passThrough(input, init);
-});
+}
 
 /** What these tests use of the desktop tests' fake panel. */
 interface FakeTitles {
@@ -281,6 +299,8 @@ beforeEach(() => {
   memory.held.length = 0;
   memory.holdChannels = false;
   memory.heldChannels.length = 0;
+  memory.lateChannels = null;
+  memory.open = 0;
   memory.holdMovies = false;
   memory.heldMovies.length = 0;
   memory.holdSecrets = false;
@@ -743,6 +763,46 @@ describe("everything together", () => {
     await editing;
     expect(member(app, b)?.live.kind).toBe("ready");
     expect(channelsReady(app, 2)).toBe(true);
+  });
+
+  describe.each([
+    ["Reload", (app: App, id: string) => void app.reloadChannels(id)],
+    ["a new password", (app: App, id: string) => void app.update(id, { password: TWO.password })],
+  ])("after %s", (_, again) => {
+    it.each(["fails", "answers"] as const)(
+      "drops the earlier channel list that %s late",
+      async (late) => {
+        const { app, a, b } = await twoProviders();
+        memory.lateChannels = late;
+        memory.holdChannels = true;
+        app.reloadChannels(b);
+        // Only the held list is left of the first reload.
+        await until(
+          () => memory.heldChannels.length === 1 && memory.open === 1,
+          "the first reload's list",
+        );
+        memory.holdChannels = false;
+
+        again(app, b);
+        await until(() => member(app, b)?.live.kind === "ready", "the later list");
+        const shown = member(app, b)?.live;
+
+        for (const go of memory.heldChannels.splice(0)) go();
+        await until(() => memory.open === 0, "the late answer");
+        // A list asked after the late answer, and shown, leaves it time to have shown too.
+        const other = member(app, a)?.live;
+        app.reloadChannels(a);
+        await until(() => {
+          const now = member(app, a)?.live;
+
+          return now !== other && now?.kind === "ready";
+        }, "the other provider's list");
+
+        expect(member(app, b)?.live).toBe(shown);
+        const now = app.currentCatalogue();
+        expect(now.kind === "ready" && now.failing).toEqual([]);
+      },
+    );
   });
 
   it("counts a change of channel, not the first one or the same one again", async () => {

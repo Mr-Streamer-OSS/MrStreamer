@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // It runs on Hermes, inside the two apps, whose tsconfigs type React Native's globals
+    // (AbortController among them) with Node's, as this one does.
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "include": ["accounts", "test"]
+}

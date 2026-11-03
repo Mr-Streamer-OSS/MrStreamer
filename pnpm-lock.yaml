@@ -194,6 +194,12 @@ importers:
         specifier: 4.0.0-rc.118
         version: 4.0.0-rc.118
 
+  packages/mobile:
+    dependencies:
+      '@mrstreamer/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
 packages:
 
   '@ark/schema@0.56.8':

@@ -16,7 +16,8 @@ process.env["NODE_COMPILE_CACHE"] ??= join(
 // the shared packages, React, ArkType, Effect and fflate they import resolve from the desktop
 // app's install instead: one copy of each, as each app's Metro resolves the shared packages'
 // imports from the app (apps/ios/metro.config.cjs). ArkType, Effect and fflate stay aligned
-// between installs; React Native pins each app's React separately.
+// between installs; React Native pins each app's React separately. The behavior only the two
+// mobile apps share (packages/mobile) is no desktop dependency: it resolves from its own package.
 // Vite names modules by path with forward slashes, on Windows too (its normalizePath).
 const mobile = ["apps/ios", "apps/android"].map(
   (app) => `${join(import.meta.dirname, app).replaceAll("\\", "/")}/`,
@@ -27,16 +28,26 @@ const desktop = join(import.meta.dirname, "apps/desktop/package.json").replaceAl
 const fromDesktop =
   /^(?:@mrstreamer\/(?:contracts|core)\/|(?:react(?:-dom)?|arktype|effect|fflate)(?:\/|$))/;
 
+const mobilePackage = join(import.meta.dirname, "packages/mobile/package.json").replaceAll(
+  "\\",
+  "/",
+);
+
 export default defineConfig({
   plugins: [
     {
       name: "mobile-tests-from-desktop-install",
       enforce: "pre",
       resolveId(source, importer, options) {
-        if (!mobile.some((app) => importer?.startsWith(app)) || !fromDesktop.test(source))
-          return null;
+        if (!mobile.some((app) => importer?.startsWith(app))) return null;
 
-        return this.resolve(source, desktop, { ...options, skipSelf: true });
+        const from = source.startsWith("@mrstreamer/mobile/")
+          ? mobilePackage
+          : fromDesktop.test(source)
+            ? desktop
+            : null;
+
+        return from && this.resolve(source, from, { ...options, skipSelf: true });
       },
     },
   ],
