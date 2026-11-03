@@ -570,7 +570,11 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   /** Closing in order: the receiver's answer to STOP is no loss. */
   let closing = false;
   let requests = 0;
-  const waiting = new Map<number, (payload: Record<string, unknown>) => void>();
+  /** Each request waiting for its answer: told the answer, or failed when the channel goes. */
+  const waiting = new Map<
+    number,
+    { answer: (payload: Record<string, unknown>) => void; fail: (cause: Error) => void }
+  >();
   let transport: string | null = null;
   let session: string | null = null;
   /** The load whose statuses count: its media session once the LOAD named it, and its requests. */
@@ -606,9 +610,15 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         waiting.delete(requestId);
         reject(new Error("The TV didn't answer."));
       }, ms);
-      waiting.set(requestId, (answer) => {
-        clearTimeout(timer);
-        resolve(answer);
+      waiting.set(requestId, {
+        answer: (answer) => {
+          clearTimeout(timer);
+          resolve(answer);
+        },
+        fail: (cause) => {
+          clearTimeout(timer);
+          reject(cause);
+        },
       });
       send(to, namespace, { ...payload, requestId });
     });
@@ -620,6 +630,9 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     timers = [];
     channels.delete(channel);
     module.disconnect(channel);
+    // Nothing waiting can be answered any more.
+    for (const { fail } of waiting.values()) fail(new Error("The TV went."));
+    waiting.clear();
     // What the TV last said stands: where a title got to is kept for playing it again.
     if (by !== "us") lostNow(by);
   };
@@ -642,7 +655,8 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     if (!ours && !closing) end("stopped");
   };
 
-  const mediaStatus = (payload: Record<string, unknown>) => {
+  /** `own` when it answers one of this load's requests, rather than the TV's own word. */
+  const mediaStatus = (payload: Record<string, unknown>, own: boolean) => {
     const statuses = Array.isArray(payload["status"]) ? payload["status"] : [];
     const ids = statuses.map((status) =>
       isRecord(status) ? numberOr(status["mediaSessionId"], null) : null,
@@ -653,6 +667,9 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     if (ids.length > 0 && !ids.includes(media.id)) {
       return media.status({ state: "taken", time: 0, duration: null });
     }
+    // Asked, the TV no longer names this load's media: it went unannounced, as the TV's remote
+    // or another sender stopping it leaves an empty answer.
+    if (own && ids.length === 0) return media.status({ state: "stopped", time: 0, duration: null });
     for (const status of statuses) {
       if (!isRecord(status) || !media) continue;
       const id = numberOr(status["mediaSessionId"], null);
@@ -687,7 +704,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         const answer = waiting.get(requestId);
         if (answer) {
           waiting.delete(requestId);
-          answer(payload);
+          answer.answer(payload);
         }
         if (payload["type"] === "RECEIVER_STATUS") receiverStatus(payload);
         // The TV's own word, or an answer to this load's requests; an answer to a load given up
@@ -696,7 +713,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
           payload["type"] === "MEDIA_STATUS" &&
           (requestId === 0 || media?.requests.has(requestId))
         ) {
-          mediaStatus(payload);
+          mediaStatus(payload, requestId !== 0);
         }
       }
     },
@@ -831,7 +848,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         throw new Error("The TV couldn't play it.");
       }
       mine.id = numberOr(first["mediaSessionId"], null);
-      mediaStatus(answer);
+      mediaStatus(answer, true);
       const poll = setInterval(() => {
         if (media !== mine) return clearInterval(poll);
         mine.requests.add(++requests);

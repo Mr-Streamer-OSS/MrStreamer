@@ -344,22 +344,22 @@ final class CastRelay {
     for (name, value) in served.headers { request.setValue(value, forHTTPHeaderField: name) }
     // Bytes as the provider sends them, so the length it says is the length the TV gets.
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-    var result: (url: String, body: String)?
-    let done = DispatchSemaphore(value: 0)
-    let task = Self.session.dataTask(with: request) { data, response, _ in
-      defer { done.signal() }
-      if let data, data.count <= Self.playlistLimit,
-        let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-        let body = String(data: data, encoding: .utf8)
-      {
-        result = ((http.url ?? url).absoluteString, body)
-      }
+    let reading = PlaylistRead(limit: Self.playlistLimit)
+    let session = URLSession(
+      configuration: Self.configuration, delegate: reading, delegateQueue: nil)
+    let task = session.dataTask(with: request)
+    guard let id = track(task, in: served) else {
+      session.invalidateAndCancel()
+      return nil
     }
-    guard let id = track(task, in: served) else { return nil }
     task.resume()
-    done.wait()
+    reading.done.wait()
     untrack(id, in: served)
-    return result
+    session.finishTasksAndInvalidate()
+    guard reading.completed, let body = String(data: reading.body, encoding: .utf8) else {
+      return nil
+    }
+    return ((reading.address ?? url).absoluteString, body)
   }
 
   /// Registers an upstream task so revoking cancels it; nil once revoked.
@@ -490,7 +490,6 @@ final class CastRelay {
     made.timeoutIntervalForRequest = 20
     return made
   }()
-  private static let session = URLSession(configuration: configuration)
 
   private static func token() -> String? {
     var bytes = [UInt8](repeating: 0, count: 16)
@@ -570,5 +569,42 @@ private final class Streaming: NSObject, URLSessionDataDelegate {
     completionHandler: @escaping (URLRequest?) -> Void
   ) {
     completionHandler(request)
+  }
+}
+
+/// A playlist read whole, but never past `limit`: a provider answering with a stream instead is
+/// cut off there. `completed` once a 2xx answer arrived whole; `address` is where it was after
+/// redirects.
+private final class PlaylistRead: NSObject, URLSessionDataDelegate {
+  let limit: Int
+  let done = DispatchSemaphore(value: 0)
+  private(set) var body = Data()
+  private(set) var completed = false
+  private(set) var address: URL?
+
+  init(limit: Int) { self.limit = limit }
+
+  func urlSession(
+    _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+  ) {
+    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+      http.expectedContentLength <= Int64(limit)
+    else { return completionHandler(.cancel) }
+    address = http.url
+    completionHandler(.allow)
+  }
+
+  func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    body.append(data)
+    if body.count > limit {
+      body = Data()
+      dataTask.cancel()
+    }
+  }
+
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    completed = error == nil && task.response != nil
+    done.signal()
   }
 }

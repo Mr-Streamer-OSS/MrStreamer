@@ -104,14 +104,17 @@ function answerAsTv(channel: string, message: Sent) {
   const status = () => ({
     type: "MEDIA_STATUS",
     requestId,
-    status: [
-      {
-        mediaSessionId: 1,
-        playerState: tvState,
-        currentTime: tvTime,
-        media: { duration: 600 },
-      },
-    ],
+    status:
+      tvState === "GONE"
+        ? []
+        : [
+            {
+              mediaSessionId: 1,
+              playerState: tvState,
+              currentTime: tvTime,
+              media: { duration: 600 },
+            },
+          ],
   });
   if (message.namespace === RECEIVER && type === "LAUNCH") {
     tvSays(channel, "receiver-0", RECEIVER, {
@@ -509,6 +512,40 @@ describe("Play on TV", () => {
     expect(playbackState.get().phase).toMatchObject({
       error: "Living Room TV stopped playing it.",
     });
+  });
+
+  it("ends the route when the TV, asked, no longer names this load's media", async () => {
+    void play(title("m1"), file("mp4"), options);
+    await settle();
+    await playOnTv(tv);
+    await relayCloses();
+    // The fake TV answers this load's next poll with no media at all.
+    tvState = "GONE";
+    await new Promise((done) => setTimeout(done, 1100));
+    await relayCloses();
+    expect(playbackState.get().tv).toEqual({ kind: "ended", tv, why: "stopped" });
+    expect(events.some((each) => each.startsWith("release"))).toBe(true);
+  });
+
+  it("keeps where the title got to when the TV fails it", async () => {
+    void play(title("m1"), file("mp4"), options);
+    await settle();
+    await playOnTv(tv);
+    await relayCloses();
+    tvSays(channel, "t1", MEDIA, {
+      type: "MEDIA_STATUS",
+      status: [{ mediaSessionId: 1, playerState: "PLAYING", currentTime: 300 }],
+    });
+    tvSays(channel, "t1", MEDIA, {
+      type: "MEDIA_STATUS",
+      status: [{ mediaSessionId: 1, playerState: "IDLE", idleReason: "ERROR" }],
+    });
+    await relayCloses();
+    expect(playbackState.get().phase).toMatchObject({ error: "Living Room TV couldn't play it." });
+    playHere();
+    await relayCloses();
+    fakePlayer.ready();
+    expect(fakePlayer.currentTime).toBe(300);
   });
 
   it("takes no answer to another load's request as this load's end", async () => {

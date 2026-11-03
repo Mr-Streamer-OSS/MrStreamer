@@ -232,12 +232,14 @@ function soundsKept(lines: readonly string[], sound: string | null): Set<string>
   }
   const kept = new Set<string>();
   for (const members of groups.values()) {
-    const chosen =
-      (sound === null
-        ? undefined
-        : members.find(({ values }) => languageCode(unquoted(values.get("LANGUAGE"))) === sound)) ??
-      members.find(({ values }) => unquoted(values.get("DEFAULT")) === "YES") ??
-      members[0];
+    const isDefault = ({ values }: (typeof members)[number]) =>
+      unquoted(values.get("DEFAULT")) === "YES";
+    // As the phone decides: in the language, its default track first; else the default.
+    const spoken =
+      sound === null
+        ? []
+        : members.filter(({ values }) => languageCode(unquoted(values.get("LANGUAGE"))) === sound);
+    const chosen = spoken.find(isDefault) ?? spoken[0] ?? members.find(isDefault) ?? members[0];
     if (chosen) kept.add(chosen.line);
   }
   return kept;

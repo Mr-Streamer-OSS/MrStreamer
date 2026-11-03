@@ -1861,8 +1861,15 @@ function onTvStatus(owned: NonNullable<typeof current>, resource: Resource, stat
     return void (link === tv.link && endTv("stopped"));
   }
   const before = tv.status?.state;
-  tv.status = status;
-  clock.set(Math.max(0, status.time - owned.offset));
+  // An idle TV says 0 or nothing for where it was: the last real place stands, or the end.
+  const idle = status.state === "ended" || status.state === "failed";
+  const time = !idle
+    ? status.time
+    : status.state === "ended"
+      ? (status.duration ?? tv.status?.duration ?? tv.status?.time ?? 0)
+      : (tv.status?.time ?? 0);
+  tv.status = { ...status, time, duration: status.duration ?? tv.status?.duration ?? null };
+  clock.set(Math.max(0, time - owned.offset));
   if (!owned.item.live && status.duration !== null) {
     length.set(lengthOf(owned.item, status.duration));
   }
@@ -1889,6 +1896,16 @@ function onTvStatus(owned: NonNullable<typeof current>, resource: Resource, stat
     return;
   }
   const playing = status.state === "playing";
+  // The TV's report acknowledges the viewer's Pause, and playing again after it clears it, as
+  // the player's own reports do here.
+  if (status.state === "paused") {
+    if (held) held.acknowledged = true;
+    if (pauseOnStart === "viewer" || pauseOnStart === "viewer-applied") pauseOnStart = false;
+  } else if (playing && held?.acknowledged) held = null;
+  // A programme from catch-up stops at its end, even where its recording sends on.
+  if (playing && owned.item.past && time - owned.offset >= lengthOf(owned.item, null)) {
+    tv.loaded?.pause();
+  }
   // Paused from the start, as after Pause while connecting, its place on the TV still counts.
   if (playing || status.state === "paused") owned.loaded = true;
   if (playing && owned.epoch.playedOn === null) {
@@ -2162,8 +2179,15 @@ export function togglePause() {
   // On the TV, its own report of playing or paused follows the request.
   const onTv = current?.resource.tv?.loaded;
   if (onTv && phase.kind !== "idle" && phase.kind !== "failed") {
-    if (phase.kind === "paused") onTv.play();
-    else onTv.pause();
+    if (phase.kind === "paused") {
+      held = null;
+      pauseOnStart = false;
+      onTv.play();
+    } else {
+      held = { by: "viewer", acknowledged: false };
+      onTv.pause();
+    }
+    attentionChanged();
     return;
   }
   if (phase.kind === "playing" || phase.kind === "loading") {
