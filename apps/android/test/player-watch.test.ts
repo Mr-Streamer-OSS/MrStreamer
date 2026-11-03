@@ -168,6 +168,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  footOverlay.set(0);
   act(() => root?.unmount());
   root = null;
   window.document.body.innerHTML = "";
@@ -229,28 +230,43 @@ describe("Watch", () => {
     expect(scenario.played).toEqual([]);
   });
 
-  it("keeps its controls up while one has keyboard focus, and hides them again after it leaves", () => {
+  it("keeps its controls up while one has keyboard focus, and hides them a full wait after it leaves", () => {
     vi.useFakeTimers();
-    player.state.set(playing(estuary));
+
+    const recording = (change: Partial<Playing> = {}) =>
+      playing(estuary, { live: false, seekable: true, durationMs: 600_000, ...change });
+
+    player.state.set(recording());
     const shown = open(estuary);
-    const back = () => shown.querySelector('[aria-label="Back"]');
+    const find = (label: string) => shown.querySelector(`[aria-label="${label}"]`);
+
+    const focus = (label: string) => {
+      const control = find(label);
+
+      if (!(control instanceof window.HTMLElement)) throw new Error(`No ${label}`);
+      act(() => control.focus());
+
+      return control;
+    };
+
     act(() => vi.advanceTimersByTime(4000));
-    expect(back()).toBeNull();
+    expect(find("Back")).toBeNull();
 
-    // A tap on the picture brings them back.
-    act(() => shown.querySelector("button")?.click());
-    const pause = shown.querySelector('[aria-label="Pause"]');
-
-    if (!(pause instanceof window.HTMLElement)) throw new Error("No Pause");
-    act(() => pause.focus());
+    // Paused elsewhere, the controls show; Back takes focus, then it plays on while focus moves
+    // to Pause and the seek bar.
+    act(() => player.state.set(recording({ phase: "paused" })));
+    focus("Back");
+    act(() => player.state.set(recording()));
+    focus("Pause");
+    const bar = focus("Position");
     act(() => vi.advanceTimersByTime(60_000));
-    expect(back()).not.toBeNull();
+    expect(find("Back")).not.toBeNull();
 
-    act(() => pause.blur());
+    act(() => bar.blur());
     act(() => vi.advanceTimersByTime(3999));
-    expect(back()).not.toBeNull();
+    expect(find("Back")).not.toBeNull();
     act(() => vi.advanceTimersByTime(1));
-    expect(back()).toBeNull();
+    expect(find("Back")).toBeNull();
   });
 });
 

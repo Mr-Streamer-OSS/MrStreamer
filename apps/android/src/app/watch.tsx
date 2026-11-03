@@ -80,6 +80,11 @@ export default function Watch() {
   );
 
   const kept = held || focusedControls > 0;
+  // Kept controls count as shown, so letting go of them starts the full wait whatever hid or
+  // showed them meanwhile (a pause elsewhere, then playing on).
+  useEffect(() => {
+    if (kept) setShown(true);
+  }, [kept]);
 
   const phase = state.kind === "playing" ? state.phase : null;
   useEffect(() => {

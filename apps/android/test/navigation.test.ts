@@ -255,6 +255,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root?.unmount());
+  footOverlay.set(0);
   window.document.body.innerHTML = "";
 });
 
@@ -362,7 +363,6 @@ describe("a screen's content", () => {
     expect(foot(shown)).toBe("16");
     act(() => footOverlay.set(72));
     expect(foot(shown)).toBe("88");
-    act(() => footOverlay.set(0));
   });
 });
 
