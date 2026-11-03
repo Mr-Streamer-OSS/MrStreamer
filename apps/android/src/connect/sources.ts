@@ -4,7 +4,12 @@ import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
 import type { LiveCatalogue } from "@mrstreamer/core/provider";
 import { sha256Hex } from "@mrstreamer/core/sha256";
-import { httpsUnavailable, parseLogin, xtreamProvider } from "@mrstreamer/core/xtream";
+import {
+  httpsUnavailable,
+  parseLogin,
+  xtreamProvider,
+  type ParsedLogin,
+} from "@mrstreamer/core/xtream";
 import type { Authority, Credentials } from "../platform/credentials.ts";
 import { store, type Store } from "../platform/store.ts";
 import { playlistReader } from "./playlist.ts";
@@ -196,22 +201,18 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       const saved = parsed instanceof type.errors ? [] : parsed.sources;
       const restoredSources = await Promise.all(
         saved.map(async (source): Promise<ConnectedSource> => {
+          let error: AppError;
           try {
             const authority = await platform.credentials.read(source.id);
             if (authority) {
               readers.set(source.id, readerOf(authority));
               return { ...source, channels: { kind: "loading" } };
             }
-            return {
-              ...source,
-              channels: {
-                kind: "failed",
-                error: { kind: "needs-secret", subscriptionId: source.id },
-              },
-            };
+            error = { kind: "needs-secret", subscriptionId: source.id };
           } catch (cause) {
-            return { ...source, channels: { kind: "failed", error: failureOf(cause) } };
+            error = failureOf(cause);
           }
+          return { ...source, channels: { kind: "failed", error } };
         }),
       );
       state.set({ kind: "ready", sources: restoredSources });
@@ -220,15 +221,13 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
     },
 
     async connect(input, signal) {
-      let authority: Authority;
-      let schemeless: boolean;
+      let parsed: ParsedLogin;
       try {
-        const parsed = parseLogin(input);
-        authority = parsed.account;
-        schemeless = parsed.schemeless;
+        parsed = parseLogin(input);
       } catch (cause) {
         return { kind: "failed", error: failureOf(cause), http: null };
       }
+      const { account: authority, schemeless } = parsed;
       const reader = readerOf(authority);
       try {
         await reader.authenticate(signal);

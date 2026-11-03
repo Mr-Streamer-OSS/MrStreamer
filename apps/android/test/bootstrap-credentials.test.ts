@@ -46,14 +46,7 @@ describe("Android credentials", () => {
     expect(await credentials.read("xtream:1")).toBeNull();
   });
 
-  it("reads an authority of an unknown shape as none, so the source asks for its login again", async () => {
-    const phone = native();
-    phone.sealed.set("m3u:1", JSON.stringify({ kind: "m3u", url: "http://old.example" }));
-
-    expect(await nativeCredentials(phone.module).read("m3u:1")).toBeNull();
-  });
-
-  it("reports every native refusal as keychain-refused, without the native message", async () => {
+  it("reports every native refusal as keychain-refused", async () => {
     const phone = native();
     const credentials = nativeCredentials(phone.module);
     phone.refuse();

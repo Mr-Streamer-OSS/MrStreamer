@@ -125,6 +125,7 @@ export function ConnectScreen({
     </Pressable>
   );
 
+  const http = failure?.http;
   return (
     <View style={{ flex: 1 }}>
       <View
@@ -194,10 +195,8 @@ export function ConnectScreen({
         ) : null}
         <View style={{ paddingTop: failure ? 0 : 8 }}>
           {action(busy ? "Connecting" : "Connect", "login", () => void connect(input), true)}
-          {failure?.http
-            ? action("Connect without encryption (http)", "no-encryption", () => {
-                if (failure.http) void connect(failure.http);
-              })
+          {http
+            ? action("Connect without encryption (http)", "no-encryption", () => void connect(http))
             : null}
         </View>
       </ScrollView>

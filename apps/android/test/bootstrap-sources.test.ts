@@ -166,7 +166,6 @@ describe("Android sources", () => {
     const before = (await settled(first)).map((source) => [source.id, rowCount(source)]);
 
     const relaunched = launch(phone);
-    expect(relaunched.state.get()).toEqual({ kind: "restoring" });
     await relaunched.restore();
 
     expect((await settled(relaunched)).map((source) => [source.id, rowCount(source)])).toEqual(

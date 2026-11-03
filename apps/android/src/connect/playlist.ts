@@ -46,7 +46,7 @@ function decoded(text: string): string {
 }
 
 /** What of a playlist link is a login: its user info and `LOGIN_NAMES` values for certain. */
-export function playlistLogin(link: string): ProviderLogin {
+function playlistLogin(link: string): ProviderLogin {
   const url = new URL(link);
   const secrets = [decoded(url.username), decoded(url.password)];
   const uncertain: string[] = [];
