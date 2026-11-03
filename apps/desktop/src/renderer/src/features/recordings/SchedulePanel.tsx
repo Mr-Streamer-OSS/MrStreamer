@@ -34,6 +34,7 @@ import {
   type Repeat,
   type ScheduleBasis,
 } from "./schedules.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 export function SchedulePanel({
   basis,
@@ -72,7 +73,7 @@ export function SchedulePanel({
   const preview = useQuery({ ...planQuery(plan, schedule?.id), placeholderData: keepPreviousData });
   const save = useMutation({
     mutationFn: () =>
-      call("recordings.schedule", { plan, ...(schedule ? { id: schedule.id } : {}) }),
+      call("recordings.schedule", { plan, ...defined({ id: schedule ? schedule.id : undefined }) }),
     onSuccess: (saved) => {
       // The list says so as main tells, a moment later; the guide's mark shows now.
       client.setQueryData(

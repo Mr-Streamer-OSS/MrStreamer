@@ -27,6 +27,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Readable, type Writable } from "node:stream";
 import { URL } from "node:url";
 import { crc32 as zlibCrc32, deflateSync } from "node:zlib";
+import { defined } from "@mrstreamer/core/defined";
 
 export interface FakeChannel {
   readonly streamId: number;
@@ -457,7 +458,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         },
         server_info: {
           timestamp_now: now,
-          ...(timeZone === null ? {} : { timezone: timeZone }),
+          ...defined({ timezone: timeZone ?? undefined }),
         },
       });
     }
@@ -778,12 +779,14 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       if (response.destroyed) return;
       response.writeHead(range ? 206 : 200, {
         "Content-Type": title.container === "mkv" ? "video/x-matroska" : "video/mp4",
-        ...(options.wholeFiles ? {} : { "Accept-Ranges": "bytes" }),
+        ...defined({ "Accept-Ranges": options.wholeFiles ? undefined : "bytes" }),
         ...(options.fileDates
           ? { "Last-Modified": new Date().toUTCString() }
           : { ETag: `"${host}-${id}-${other?.times ?? 0}"` }),
         "Content-Length": end - start + 1,
-        ...(range ? { "Content-Range": `bytes ${start}-${end}/${bytes.length}` } : {}),
+        ...defined({
+          "Content-Range": range ? `bytes ${start}-${end}/${bytes.length}` : undefined,
+        }),
       });
       // In pieces, counted as they leave: a reader that stops early took only so many.
       const pieces = Readable.from(sent(bytes.subarray(start, end + 1), start, stalls.get(title)));
@@ -1025,7 +1028,7 @@ function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
     fixture: test.fixture,
     // The first test channel has a guide, so a packaged app shows programmes on Home.
     guideId: index === 0 ? "aac.test" : null,
-    ...(test.archiveDays ? { archiveDays: test.archiveDays } : {}),
+    ...defined({ archiveDays: test.archiveDays || undefined }),
   }));
 
   const groups = REGIONS.flatMap((region) => GENRES.map((genre) => `${region} | ${genre}`));
@@ -1096,7 +1099,7 @@ function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
         offline: false,
         fixture: "h264-aac.mpegts",
         guideId: flagged ? "afterhours.adult" : null,
-        ...(flagged ? { adult: true } : {}),
+        ...defined({ adult: flagged ? true : undefined }),
       });
     add(4000, "AFTER HOURS", "2", true);
     add(4001, "LATE SHOW", adult, false);
@@ -1213,7 +1216,9 @@ function buildTitles(
     added: base - index,
     container: test.container,
     fixture: test.fixture,
-    ...(test.versionOf === undefined ? {} : { tmdb: String(90_000 + test.versionOf + 10_000) }),
+    ...defined({
+      tmdb: test.versionOf === undefined ? undefined : String(90_000 + test.versionOf + 10_000),
+    }),
   }));
   for (let index = 0; movies.length < size; index++) {
     const id = 91_000 + index;
@@ -1240,12 +1245,16 @@ function buildTitles(
       added: base - 1000 - Math.floor(random() * 1_000_000),
       container: index % 3 === 0 ? "mkv" : "mp4",
       fixture: "title-h264-aac.mp4",
-      ...(!second
-        ? {}
-        : own
-          ? { tmdb: String(id + 20_000) }
-          : // What the default sends for that film: its TMDB id, and "0" for a few.
-            { tmdb: (91_000 + of) % 7 === 0 ? "0" : String(91_000 + of + 10_000) }),
+      ...defined({
+        tmdb: !second
+          ? undefined
+          : own
+            ? String(id + 20_000)
+            : // What the default sends for that film: its TMDB id, and "0" for a few.
+              (91_000 + of) % 7 === 0
+              ? "0"
+              : String(91_000 + of + 10_000),
+      }),
     });
   }
   const seriesCategories = [

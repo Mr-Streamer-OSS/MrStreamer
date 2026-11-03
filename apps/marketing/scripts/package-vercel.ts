@@ -91,8 +91,10 @@ function check(name: string, expected: Record<string, string>) {
   const named = [...page.matchAll(/\s(?:href|src|srcset|content)="([^"]+)"/g)]
     .flatMap(([, value = ""]) => value.split(","))
     .map((entry) => entry.trim().split(/\s+/)[0] ?? "")
-    .map((address) => (address.startsWith(`${SITE}/`) ? address.slice(SITE.length) : address))
-    .filter((address) => /^\/[^/].*\.\w+$/.test(address));
+    .flatMap((address) => {
+      const path = address.startsWith(`${SITE}/`) ? address.slice(SITE.length) : address;
+      return /^\/[^/].*\.\w+$/.test(path) ? [path] : [];
+    });
   for (const path of new Set(named)) {
     packed.add(path);
     if (!existsSync(join(files, path))) problems.push(`${name} names ${path}, which is missing.`);

@@ -69,6 +69,7 @@ import type {
   WorkerStatus,
 } from "./protocol.ts";
 import { lazy } from "@mrstreamer/contracts/lazy";
+import { defined } from "@mrstreamer/core/defined";
 
 const setup = workerData as WorkerSetup;
 
@@ -81,7 +82,7 @@ let viewerLanguage = "en";
 const metadata = metadataStore({
   path: setup.metadataPath,
   client: setup.tmdb
-    ? tmdb({ key: setup.tmdb.key, ...(setup.tmdb.api ? { api: setup.tmdb.api } : {}) })
+    ? tmdb({ key: setup.tmdb.key, ...defined({ api: setup.tmdb.api || undefined }) })
     : null,
   region: setup.tmdb?.region ?? "US",
   onChange: ({ content }) => {
@@ -237,8 +238,8 @@ function remember(
   const kept: Loaded = {
     subscriptionId,
     fetchedAt,
-    ...(catalogueStamp ? { catalogueStamp } : {}),
-    ...(importRevision ? { importRevision } : {}),
+    ...defined({ catalogueStamp: catalogueStamp || undefined }),
+    ...defined({ importRevision: importRevision || undefined }),
     catalogue,
     movies: catalogue.movies.length,
     series: catalogue.series.length,
@@ -280,9 +281,9 @@ function named(title: Title, language: string): Title {
   const backdrop = title.backdropUrl ? null : known?.backdrop;
   return {
     ...title,
-    ...(found ? { title: found.name, originalTitle: found.original } : {}),
+    ...defined({ title: found?.name, originalTitle: found?.original }),
     originalLanguage: known?.language ?? null,
-    ...(backdrop ? { backdropUrl: tmdbImage(backdrop, 1280) } : {}),
+    ...defined({ backdropUrl: backdrop ? tmdbImage(backdrop, 1280) : undefined }),
   };
 }
 
@@ -333,8 +334,8 @@ function save(): Promise<void> {
           version: 2,
           key: owner.key,
           fetchedAt,
-          ...(kept.catalogueStamp ? { catalogueStamp: kept.catalogueStamp } : {}),
-          ...(kept.importRevision ? { importRevision: kept.importRevision } : {}),
+          ...defined({ catalogueStamp: kept.catalogueStamp || undefined }),
+          ...defined({ importRevision: kept.importRevision || undefined }),
           ...catalogue,
         });
         await removeFile(legacyCachePath(owner));
@@ -470,7 +471,7 @@ function filterFiles(found: Shown, kind: TitleKind, known: readonly KnownFile[])
     const files = result.get(key) ?? [];
     files.push({
       tags: file.tags ?? version.tags,
-      ...(file.tracks ? { tracks: file.tracks } : {}),
+      ...defined({ tracks: file.tracks }),
     });
     result.set(key, files);
   }
@@ -509,8 +510,8 @@ function statusOf(found: Loaded | null): WorkerStatus {
     movies: found?.movies ?? 0,
     series: found?.series ?? 0,
     fetchedAt: found?.fetchedAt ?? null,
-    ...(found?.catalogueStamp ? { catalogueStamp: found.catalogueStamp } : {}),
-    ...(found?.importRevision ? { importRevision: found.importRevision } : {}),
+    ...defined({ catalogueStamp: found?.catalogueStamp ? found.catalogueStamp : undefined }),
+    ...defined({ importRevision: found?.importRevision ? found.importRevision : undefined }),
   };
 }
 
@@ -641,7 +642,7 @@ function aliases(title: Title) {
   const kind = title.kind === "movie" ? "movie" : "tv";
   const shown = metadata.name(kind, title.tmdbId, viewerLanguage);
   return {
-    ...(shown ? { title: shown.name, original: shown.original } : {}),
+    ...defined({ title: shown?.name, original: shown?.original }),
     names: metadata.searchAliases(kind, title.tmdbId),
   };
 }
@@ -856,7 +857,7 @@ const handlers: {
       name: made.name(id) ?? "",
       total: titles.length,
       titles: titles.slice(offset, offset + limit),
-      ...(filters ? { unfiltered: unfiltered.length } : {}),
+      ...defined({ unfiltered: filters ? unfiltered.length : undefined }),
     };
   },
   saved: async ({ language, adults: shown, members, sort, offset, limit, owners }) => {

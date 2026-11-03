@@ -28,6 +28,7 @@ import { finish, pacer, type Steps } from "../steps.ts";
 import { trustedGuideIds } from "./guide-ids.ts";
 import type { NormalizedStream } from "./normalize.ts";
 import { countryForCode, isBroadRegion } from "./regions.ts";
+import { defined } from "../defined.ts";
 
 /** How many of a channel's streams Auto tries, one after another, before it gives up. */
 const AUTO_TRIES = 3;
@@ -125,7 +126,7 @@ export function* liveChannelSteps(streams: readonly NormalizedStream[]): Steps<L
       : yield* searchIdentityOf(group, trusted);
     const channel = {
       ...(yield* joined(stream, group)),
-      ...(searchIdentity ? { searchIdentity } : {}),
+      ...defined({ searchIdentity }),
     };
     channels.push(channel);
     const spellings = new Set<string>();
@@ -373,7 +374,7 @@ function* joined(
       name: stream.name,
       tags: stream.tags,
       quality: qualityOf(stream.tags),
-      ...(stream.catchupDays ? { catchupDays: stream.catchupDays } : {}),
+      ...defined({ catchupDays: stream.catchupDays || undefined }),
     });
     catchupDays = Math.max(catchupDays, stream.catchupDays ?? 0);
   }

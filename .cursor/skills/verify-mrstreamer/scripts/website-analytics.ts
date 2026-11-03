@@ -491,19 +491,18 @@ app.on('window-all-closed', () => app.quit());
     await scrollToEnd();
     const homeSections = ["tricks", "screens", "what-you-need", "faq", "downloads"];
     const reachedSections = () =>
-      captures
-        .filter((c) => c.raw.includes('"feature_section_viewed"'))
-        .map((c) => {
-          const body: unknown = JSON.parse(c.raw);
-          if (typeof body !== "object" || body === null || !("properties" in body))
-            return undefined;
-          const properties = body.properties;
-          return typeof properties === "object" &&
-            properties !== null &&
-            "feature_name" in properties
+      captures.flatMap((c) => {
+        if (!c.raw.includes('"feature_section_viewed"')) return [];
+        const body: unknown = JSON.parse(c.raw);
+        if (typeof body !== "object" || body === null || !("properties" in body))
+          return [undefined];
+        const properties = body.properties;
+        return [
+          typeof properties === "object" && properties !== null && "feature_name" in properties
             ? properties.feature_name
-            : undefined;
-        });
+            : undefined,
+        ];
+      });
     await wait(() => reachedSections().length >= homeSections.length, "home sections", 50);
     const reached = reachedSections();
     if (
@@ -1048,8 +1047,11 @@ app.on('window-all-closed', () => app.quit());
       events.find((e) => e.event === "$pageleave" && e.pathname === pathname)?.properties;
     const vitalOf = (pathname: string, name: string) =>
       events
-        .filter((e) => e.event === "$web_vitals" && e.pathname === pathname)
-        .map((e) => e.properties[`$web_vitals_${name}_value`])
+        .flatMap((e) =>
+          e.event === "$web_vitals" && e.pathname === pathname
+            ? [e.properties[`$web_vitals_${name}_value`]]
+            : [],
+        )
         .filter((value) => typeof value === "number");
     const expected = observed["measuredDepthExpected"] as { scroll: number; content: number };
     observed["measurements"] = {

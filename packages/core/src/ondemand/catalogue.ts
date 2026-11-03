@@ -18,6 +18,7 @@ import { indexNames, nameQuery, scoreNames, yearQuery, type SearchNames } from "
 import { suitability } from "./languages.ts";
 import { titleName, type TitleName } from "./names.ts";
 import { filterTitles, type FilterFiles } from "./filters.ts";
+import { defined } from "../defined.ts";
 
 /** How many titles of each kind a search returns. */
 export const SEARCH_LIMIT = 60;
@@ -207,7 +208,7 @@ function* indexKind(
         container: item.container,
         addedAt: item.addedAt,
         listedOrder,
-        ...(item.episodeFiles ? { episodeFiles: item.episodeFiles } : {}),
+        ...defined({ episodeFiles: item.episodeFiles }),
       });
     }
     const title: Title = {
@@ -411,7 +412,7 @@ export function* searchPageSteps(
   const due = pacer();
   const asked = nameQuery(query);
   if (asked.words.length === 0)
-    return { titles: [], total: 0, ...(selection ? { unfiltered: 0 } : {}) };
+    return { titles: [], total: 0, ...defined({ unfiltered: selection ? 0 : undefined }) };
   const qualified = yearQuery(query);
   const indexed = kindOf(catalogue, kind);
   const { titles } = indexed;
@@ -459,7 +460,7 @@ export function* searchPageSteps(
   return {
     titles: ranked.slice(0, limit).map((entry) => entry.title),
     total,
-    ...(selection ? { unfiltered } : {}),
+    ...defined({ unfiltered: selection ? unfiltered : undefined }),
   };
 }
 

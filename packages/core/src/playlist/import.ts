@@ -17,6 +17,7 @@ import {
 } from "./catalogue.ts";
 import { playlistEpisode } from "./episode.ts";
 import type { PlaylistEntry } from "./m3u.ts";
+import { defined } from "../defined.ts";
 
 export type { ImportedPlaylist } from "./catalogue.ts";
 
@@ -185,8 +186,8 @@ function classifiedPlaylist(
       container,
       kind: mode === "movie" ? "movie" : "episode",
       headers: {
-        ...(entry.userAgent ? { "User-Agent": entry.userAgent } : {}),
-        ...(entry.referrer ? { Referer: entry.referrer } : {}),
+        ...defined({ "User-Agent": entry.userAgent || undefined }),
+        ...defined({ Referer: entry.referrer || undefined }),
       },
     });
     if (mode === "movie") {

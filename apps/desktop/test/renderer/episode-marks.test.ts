@@ -22,6 +22,7 @@ import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 import { queries, syncViewing } from "../../src/renderer/src/lib/queries.ts";
 import { useContinueWatching } from "../../src/renderer/src/lib/titles.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** The series version these tests open, as requests name it. */
 const HARBOUR = { subscriptionId: SUBSCRIPTION, id: "harbour" };
@@ -563,27 +564,28 @@ it.each([
         episodes: season.episodes.map((episode) => ({
           ...episode,
           exactVersion: true as const,
-          ...(episode.id === "1-2"
-            ? {
-                versions: [
-                  {
-                    id: "1-2",
-                    name: "Part 1.2 HD",
-                    tags: ["HD"],
-                    duration: 2700,
-                    container: "mp4",
-                  },
-                  {
-                    id: "alternate",
-                    name: "Part 1.2 4K",
-                    tags: ["4K"],
-                    duration: 2800,
-                    container: "mkv",
-                    observed: { files: 1, audio: ["en"], subtitles: ["nl"] },
-                  },
-                ],
-              }
-            : {}),
+          ...defined({
+            versions:
+              episode.id === "1-2"
+                ? [
+                    {
+                      id: "1-2",
+                      name: "Part 1.2 HD",
+                      tags: ["HD"],
+                      duration: 2700,
+                      container: "mp4",
+                    },
+                    {
+                      id: "alternate",
+                      name: "Part 1.2 4K",
+                      tags: ["4K"],
+                      duration: 2800,
+                      container: "mkv",
+                      observed: { files: 1, audio: ["en"], subtitles: ["nl"] },
+                    },
+                  ]
+                : undefined,
+          }),
         })),
       })),
     };

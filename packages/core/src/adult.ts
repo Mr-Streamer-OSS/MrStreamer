@@ -47,7 +47,7 @@ export function adultIn(
   categories: readonly ProviderCategory[],
 ): (item: { readonly adult?: boolean; readonly categoryIds: readonly string[] }) => boolean {
   const adult = new Set(
-    categories.filter((category) => isAdultCategory(category.name)).map(({ id }) => id),
+    categories.flatMap((category) => (isAdultCategory(category.name) ? [category.id] : [])),
   );
   return (item) => item.adult === true || item.categoryIds.some((id) => adult.has(id));
 }

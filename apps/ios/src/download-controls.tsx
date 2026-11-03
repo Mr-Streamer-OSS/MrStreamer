@@ -26,6 +26,7 @@ import {
 } from "./downloads.ts";
 import { appError, describeError } from "./errors.ts";
 import { inLanguage, t } from "./i18n/downloads.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // What a download says and what can be done with it, wherever one shows: Downloads' rows, the
 // details' capsule and episode rows. Each state offers its own actions, as the desktop's do:
@@ -360,9 +361,10 @@ export function showActions(
   const destructive = actions.flatMap((action, at) => (action.destructive ? [at] : []));
   ActionSheetIOS.showActionSheetWithOptions(
     {
-      ...(download?.status.kind === "failed"
-        ? { title: describeFailure(download.status.failure) }
-        : {}),
+      ...defined({
+        title:
+          download?.status.kind === "failed" ? describeFailure(download.status.failure) : undefined,
+      }),
       options: [...actions.map((action) => action.label), t("Cancel")],
       destructiveButtonIndex: destructive,
       cancelButtonIndex: actions.length,

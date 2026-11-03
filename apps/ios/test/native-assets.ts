@@ -6,7 +6,7 @@ import Module, { createRequire } from "node:module";
 createRequire(import.meta.url).extensions[".png"] = (module) => {
   module.exports = 1;
 };
-const resolving = Module as unknown as {
+const resolving = Module as typeof Module & {
   _resolveFilename(request: string, ...rest: unknown[]): string;
 };
 const resolve = resolving._resolveFilename.bind(resolving);

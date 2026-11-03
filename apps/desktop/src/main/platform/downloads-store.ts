@@ -20,6 +20,7 @@ import * as Layer from "effect/Layer";
 import { t } from "@mrstreamer/core/i18n";
 import { attempt, Database, transaction, unavailable } from "./database.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
+import { defined } from "@mrstreamer/core/defined";
 
 /** What was kept of a title's details for its copy, shown without asking anyone. */
 const About = lazy(() =>
@@ -199,8 +200,8 @@ function readRecord(record: unknown): StoredDownload | null {
     const kept = series === undefined ? null : SeriesKept()(series);
     return {
       ...rest,
-      ...(failure ? { failure: failureOf(failure) } : {}),
-      ...(kept && !(kept instanceof type.errors) ? { series: kept } : {}),
+      ...defined({ failure: failure ? failureOf(failure) : undefined }),
+      ...defined({ series: kept && !(kept instanceof type.errors) ? kept : undefined }),
     };
   } catch {
     return null;

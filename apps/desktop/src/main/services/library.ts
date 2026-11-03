@@ -63,6 +63,7 @@ import {
   type PlaylistRefresh,
 } from "./subscription.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
+import { defined } from "@mrstreamer/core/defined";
 
 /** How many results a search returns. Enough to scroll, small enough to send per keystroke. */
 const SEARCH_LIMIT = 200;
@@ -367,7 +368,7 @@ function make(options: LibraryOptions) {
           version: 4,
           key: source.key,
           fetchedAt: yield* Clock.currentTimeMillis,
-          ...(source.importRevision ? { importRevision: source.importRevision } : {}),
+          ...defined({ importRevision: source.importRevision || undefined }),
           categories: fetched.categories,
           channels: fetched.channels,
         };
@@ -713,7 +714,7 @@ function index(file: CatalogueFile, subscriptionId: string, outdated: boolean): 
   return {
     subscriptionId,
     fetchedAt: file.fetchedAt,
-    ...(file.importRevision ? { importRevision: file.importRevision } : {}),
+    ...defined({ importRevision: file.importRevision || undefined }),
     outdated,
     categories: categories
       .map((category) => ({
@@ -873,9 +874,10 @@ function search(channels: readonly LiveChannel[], query: string): readonly LiveC
   ).slice(0, SEARCH_LIMIT);
   const copies = groups.flatMap((group) => group.copies);
   const selected = new Set(copies.map(ownedKey));
-  const matched = ranked
-    .map((entry) => entry.channel)
-    .filter((channel) => selected.has(ownedKey(channel)));
+  const matched = ranked.flatMap((entry) => {
+    const channel = entry.channel;
+    return selected.has(ownedKey(channel)) ? [channel] : [];
+  });
   const matchedKeys = new Set(matched.map(ownedKey));
   return stampSearchGroups(
     [...matched, ...copies.filter((channel) => !matchedKeys.has(ownedKey(channel)))],

@@ -382,14 +382,15 @@ async function subscriptions(members: Member[]) {
 const channels = [
   { key: "a:1", title: "NPO 1" },
   { key: "a:2", title: "BBC One" },
-] as unknown as Channel[];
-const library = {
+] as Channel[];
+const libraryFields: Partial<Library> = {
   regions: [{ name: "Netherlands", channels, shelves: [] }],
   channels,
   byKey: new Map(),
   placeOf: new Map(),
   labels: new Map(),
-} as unknown as Library;
+};
+const library = libraryFields as Library;
 const ready: Catalogue = { kind: "ready", library, failing: [] };
 
 let container: ReturnType<typeof document.createElement>;
@@ -1092,9 +1093,10 @@ describe("Search over the tabs", () => {
 describe("Every movie and series that matches", () => {
   /** The ids of the movies or series that show, in order. */
   const shownIds = (kind: TitleKind) =>
-    [...container.querySelectorAll('[data-testid^="search-title-"]')]
-      .map((row) => row.getAttribute("data-testid")!.slice("search-title-".length))
-      .filter((id) => id.startsWith(kind === "movie" ? "m" : "s"));
+    [...container.querySelectorAll('[data-testid^="search-title-"]')].flatMap((row) => {
+      const id = row.getAttribute("data-testid")!.slice("search-title-".length);
+      return id.startsWith(kind === "movie" ? "m" : "s") ? [id] : [];
+    });
   /** The ids "`prefix`1" to "`prefix``count`". */
   const ids = (prefix: string, count: number, from = 1) =>
     Array.from({ length: count }, (_, at) => `${prefix}${from + at}`);
@@ -1103,11 +1105,12 @@ describe("Every movie and series that matches", () => {
     `text-Show ${count} more ${count === 1 ? name[kind][1] : name[kind][2]}`;
   /** The Show more buttons of `kind` on screen, whatever count they offer. */
   const moreButtons = (kind: TitleKind) =>
-    [...container.querySelectorAll('[data-testid^="text-Show "]')]
-      .map((button) => button.getAttribute("data-testid")!)
-      .filter((testID) =>
-        kind === "series" ? testID.endsWith(" series") : / movies?$/.test(testID),
-      );
+    [...container.querySelectorAll('[data-testid^="text-Show "]')].flatMap((button) => {
+      const testID = button.getAttribute("data-testid")!;
+      return (kind === "series" ? testID.endsWith(" series") : / movies?$/.test(testID))
+        ? [testID]
+        : [];
+    });
 
   it.each([0, 20, 21, 125])(
     "shows %i matches of each kind 20 at a time, best first, each kind on its own",
@@ -1495,11 +1498,12 @@ describe("Same-query Search continuity", () => {
 });
 
 describe("Programmes in Search", () => {
-  const guideChannels = [
+  const guideChannelsFields: Partial<Channel>[] = [
     { key: "a:1", title: "NPO 1", subscriptionId: "a", tags: [], logoUrl: null },
     { key: "b:7", title: "BBC One", subscriptionId: "b", tags: [], logoUrl: null },
-  ] as unknown as Channel[];
-  const twoProviders = {
+  ];
+  const guideChannels = guideChannelsFields as Channel[];
+  const twoProvidersFields: Partial<Library> = {
     regions: [],
     channels: guideChannels,
     byKey: new Map(guideChannels.map((channel) => [channel.key, channel])),
@@ -1508,7 +1512,8 @@ describe("Programmes in Search", () => {
       ["a", "Northwind"],
       ["b", "Southwind"],
     ]),
-  } as unknown as Library;
+  };
+  const twoProviders = twoProvidersFields as Library;
   // A whole minute an hour ahead: the programme is always still to come, so its detail offers
   // Watch live rather than catch-up, whatever day the suite runs.
   const at = Math.ceil(Date.now() / 60_000) * 60_000 + 3_600_000;

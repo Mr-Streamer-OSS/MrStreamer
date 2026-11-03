@@ -403,7 +403,8 @@ export function useListOrder(
         order,
         focus: { channel, part, asked: draft.focus.asked + 1 },
         // Another order than the one that failed is another save, under an id of its own.
-        ...(to === from ? {} : { status: "editing", commandId: null }),
+        status: to === from ? draft.status : "editing",
+        commandId: to === from ? draft.commandId : null,
         said: t("{name}, {position} of {count}", {
           name: channel.title,
           position: to + 1,

@@ -12,6 +12,7 @@ import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { appError } from "../../lib/errors.ts";
 import { call } from "../../lib/ipc.ts";
 import { queries } from "../../lib/queries.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** A change of the lists, which answers them as stored. */
 export type ListChange = () => Promise<readonly CustomList[]>;
@@ -173,7 +174,11 @@ export function useNewList(onMade: (id: string) => void) {
       if (!field || field.text.trim() === "" || change.state.status === "saving") return null;
       const { id, text, channel } = field;
       const made = await change.run(() =>
-        call("customLists.create", { id, name: text, ...(channel ? { channel } : {}) }),
+        call("customLists.create", {
+          id,
+          name: text,
+          ...defined({ channel: channel ?? undefined }),
+        }),
       );
       if (!made) return null;
       setField(null);

@@ -57,6 +57,7 @@ import { rowPlays, searchQualities, type SearchChannelRow } from "./search-rows.
 import type { RowPart } from "./reorder.ts";
 import { holds } from "./custom-lists.ts";
 import { ListMenu, UnlistedRows, type UnlistedChannel } from "./CustomListControls.tsx";
+import { defined } from "@mrstreamer/core/defined";
 
 const ROW_REM = 3.75;
 const NONE: readonly string[] = [];
@@ -468,7 +469,7 @@ function ChannelRow({
                     .filter((part) => part != null && part !== "")
                     .join(", ")
                 : undefined,
-              ...(grouped ? { "aria-expanded": copiesOpen } : {}),
+              ...defined({ "aria-expanded": grouped ? copiesOpen : undefined }),
               onKeyDown: (event) => {
                 if (!searchRow || event.target !== event.currentTarget || event.repeat) return;
                 // Enter belongs to the page, which also commits a typed channel number.

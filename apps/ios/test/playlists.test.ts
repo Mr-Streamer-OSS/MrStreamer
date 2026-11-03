@@ -412,9 +412,9 @@ describe("a playlist subscription", () => {
     const text = (value: unknown) =>
       value instanceof Uint8Array ? new TextDecoder().decode(value) : String(value);
     const details = () =>
-      [...memory.files]
-        .filter(([path]) => path.startsWith("/cache/details/"))
-        .map(([, value]) => text(value));
+      [...memory.files].flatMap(([path, value]) =>
+        path.startsWith("/cache/details/") ? [text(value)] : [],
+      );
     await until(() => details().some((each) => each.includes("Harbour")), "the saved details");
     await new Promise((settled) => setTimeout(settled, 200));
     expect(details()).toHaveLength(1);

@@ -59,6 +59,7 @@ import {
   type TcpConnect,
 } from "../providers/xtream.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
+import { defined } from "@mrstreamer/core/defined";
 
 const AccountRecord = lazy(() =>
   type({
@@ -326,7 +327,7 @@ function make(deps: SubscriptionDeps) {
       const account: ProviderAccount =
         stored.kind === "xtream"
           ? { kind: "xtream", server: stored.server, username: stored.username, password: secret }
-          : { kind: "m3u", link: secret, ...(stored.mapping ? { mapping: stored.mapping } : {}) };
+          : { kind: "m3u", link: secret, ...defined({ mapping: stored.mapping }) };
       return { provider: providerFor(account, deps.providerOptions), account };
     }
 
@@ -464,9 +465,9 @@ function make(deps: SubscriptionDeps) {
       const entry = saved && {
         ...kept,
         id: saved.id,
-        ...(saved.original ? { original: true } : {}),
+        ...defined({ original: saved.original ? true : undefined }),
         key: keyOf(saved.stored),
-        ...(saved.name === null ? {} : { name: saved.name }),
+        ...defined({ name: saved.name ?? undefined }),
       };
       const rest = entries.filter((_, each) => each !== index);
       const subscriptions = !entry
@@ -516,23 +517,26 @@ function make(deps: SubscriptionDeps) {
     const seal = (secret: string) =>
       Effect.try({ try: () => deps.secrets.seal(secret), catch: failedWith });
 
-    const publicOf = (subscription: Saved): SavedSubscription => ({
-      id: subscription.id,
-      revision: subscription.revision,
-      fileRevision: createHash("sha256").update(sealedOf(subscription.stored)).digest("hex"),
-      key: keyOf(subscription.stored),
-      kind: subscription.stored.kind,
-      ...(subscription.stored.kind === "m3u"
-        ? {
-            playlistMapped: !!subscription.stored.mapping,
-            importRevision: createHash("sha256")
-              .update(JSON.stringify(subscription.stored.mapping ?? null))
-              .digest("hex"),
-          }
-        : {}),
-      dir: subscription.original ? deps.dataDir : folderOf(subscription.id),
-      original: subscription.original,
-    });
+    const publicOf = (subscription: Saved): SavedSubscription => {
+      const playlist = subscription.stored.kind === "m3u" ? subscription.stored : null;
+      return {
+        id: subscription.id,
+        revision: subscription.revision,
+        fileRevision: createHash("sha256").update(sealedOf(subscription.stored)).digest("hex"),
+        key: keyOf(subscription.stored),
+        kind: subscription.stored.kind,
+        ...defined({
+          playlistMapped: playlist ? !!playlist.mapping : undefined,
+          importRevision: playlist
+            ? createHash("sha256")
+                .update(JSON.stringify(playlist.mapping ?? null))
+                .digest("hex")
+            : undefined,
+        }),
+        dir: subscription.original ? deps.dataDir : folderOf(subscription.id),
+        original: subscription.original,
+      };
+    };
 
     const sourceOf = (subscription: Saved): Source | null =>
       subscription.provider ? { ...publicOf(subscription), ...subscription.provider } : null;
@@ -606,7 +610,7 @@ function make(deps: SubscriptionDeps) {
                 stored.kind === "m3u" && previous?.stored.kind === "m3u"
                   ? {
                       ...stored,
-                      ...(previous.stored.mapping ? { mapping: previous.stored.mapping } : {}),
+                      ...defined({ mapping: previous.stored.mapping }),
                     }
                   : stored;
               const result = yield* save(
@@ -874,7 +878,7 @@ function summary({ id, name, stored, provider }: Saved): SubscriptionSummary {
     username: stored.kind === "xtream" ? stored.username : "",
     account: stored.account,
     needsSecret: provider === null,
-    ...(stored.kind === "m3u" ? { playlistMapped: !!stored.mapping } : {}),
+    ...defined({ playlistMapped: stored.kind === "m3u" ? !!stored.mapping : undefined }),
   };
 }
 

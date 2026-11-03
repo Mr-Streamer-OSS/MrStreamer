@@ -97,6 +97,7 @@ import { mediaClaim, video } from "./shared-media.ts";
 import { RECONNECT_DELAYS_MS, STABLE_PLAYBACK_MS } from "./recovery-policy.ts";
 import { rememberSubtitles } from "./subtitle-preferences.ts";
 import { hydrateSubtitleLook } from "./subtitle-look.ts";
+import { defined } from "@mrstreamer/core/defined";
 export { STABLE_PLAYBACK_MS } from "./recovery-policy.ts";
 export { rememberSubtitles } from "./subtitle-preferences.ts";
 import {
@@ -466,15 +467,17 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
     };
     if (mine !== selection) return;
     session = await call("playback.open", {
-      ...(measurement ? { measurement } : {}),
+      ...defined({ measurement: measurement ?? undefined }),
       channel: ownedId(channel),
-      ...(recording ? { archive: { start: recording.at, end: recording.programme.stop } } : {}),
+      ...defined({
+        archive: recording ? { start: recording.at, end: recording.programme.stop } : undefined,
+      }),
       decoders: [...decoders],
       repair,
-      ...(sound.audio !== null ? { audio: sound.audio } : {}),
-      ...(sound.audioLanguage !== null ? { audioLanguage: sound.audioLanguage } : {}),
+      ...defined({ audio: sound.audio ?? undefined }),
+      ...defined({ audioLanguage: sound.audioLanguage ?? undefined }),
       // Said so the main process refuses it when a receiver took playback since this began.
-      ...(preview ? { preview } : {}),
+      ...defined({ preview: preview || undefined }),
     });
   } catch (cause) {
     if (mine === selection) {
@@ -612,11 +615,13 @@ async function startOnReceiver(channel: LiveChannel): Promise<void> {
     if (mine !== selection) return;
     observation.remote();
     const media = await call("output.playChannel", {
-      ...(measurement ? { measurement } : {}),
+      ...defined({ measurement: measurement ?? undefined }),
       channel: ownedId(channel),
       name: channel.title,
-      ...(audioId !== null ? { audio: audioId } : {}),
-      ...(preferred && preferred !== ORIGINAL_SOUND ? { audioLanguage: preferred } : {}),
+      ...defined({ audio: audioId ?? undefined }),
+      ...defined({
+        audioLanguage: preferred && preferred !== ORIGINAL_SOUND ? preferred : undefined,
+      }),
     });
     if (mine !== selection || !onReceiver) {
       // Stopped meanwhile: the receiver is told so. One another channel replaced has gone already.
@@ -774,7 +779,7 @@ async function recover(
   const [upstream, stream, context] = await Promise.all([
     call("playback.failure", {
       sessionId: session.sessionId,
-      ...(error.failure ? { selector: error.failure } : {}),
+      ...defined({ selector: error.failure }),
     }).catch(() => null),
     call("playback.playing", { sessionId: session.sessionId }).catch(() => null),
     call("playback.diagnostic", { sessionId: session.sessionId }).catch(() => null),

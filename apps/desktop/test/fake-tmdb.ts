@@ -126,8 +126,8 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
       const id = Number(title[2]);
       const { name, original } = tmdbName(id, language);
       const series = title[1] === "tv";
-      const answer = () =>
-        json(response, {
+      const answer = () => {
+        const listed = {
           ...(series
             ? { name, original_name: original }
             : { title: name, original_title: original }),
@@ -139,9 +139,13 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
           vote_count: 400,
           belongs_to_collection: null,
           backdrop_path: `/backdrop-${id}.jpg`,
-          // What a title's details ask for when it opens.
-          ...(opened
+        };
+        // What a title's details ask for when it opens.
+        return json(
+          response,
+          opened
             ? {
+                ...listed,
                 overview: `TMDB's story of ${name}.`,
                 poster_path: `/poster-${id}.jpg`,
                 runtime: series ? null : 101,
@@ -152,8 +156,9 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
                   crew: [{ name: "Grace Director", job: "Director" }],
                 },
               }
-            : {}),
-        });
+            : listed,
+        );
+      };
       if (opened && aboutHeld) return void held.push(answer);
       return answer();
     }

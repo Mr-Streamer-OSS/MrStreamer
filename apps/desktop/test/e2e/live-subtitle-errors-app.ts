@@ -573,7 +573,9 @@ try {
     const masters = mine.filter((request) => request.file === "master.m3u8").length;
     const bad = mine.filter((request) => /^fr\./.test(request.file)).length;
     const subtitles = mine.filter((request) => /^(en|de|fr)\./.test(request.file)).length;
-    const errors = [...new Set(observations.map((sample) => sample.failure).filter(Boolean))];
+    const errors = [
+      ...new Set(observations.flatMap((sample) => (sample.failure ? [sample.failure] : []))),
+    ];
     const backwards = observations.some(
       (sample, index) => index > 0 && sample.time + 1 < observations[index - 1]!.time,
     );

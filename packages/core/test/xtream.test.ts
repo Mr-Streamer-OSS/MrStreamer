@@ -2,6 +2,7 @@
 // desktop app's, HLS for AVPlayer on iOS. Panels serve both from the same login.
 import { describe, expect, it } from "vitest";
 import { xtreamProvider } from "../src/xtream.ts";
+import { defined } from "../src/defined.ts";
 
 const account = { server: "http://panel.test:8080", username: "fixture user", password: "p/w" };
 const unused: typeof fetch = () => Promise.reject(new Error("no request expected"));
@@ -39,7 +40,7 @@ describe("Xtream catch-up recordings", () => {
     const provider = xtreamProvider(account, {
       userAgent: "fixture",
       fetch: panel,
-      ...(live ? { live } : {}),
+      ...defined({ live }),
     });
     expect(await provider.archiveStream("1001", window)).toEqual({
       url: `http://panel.test:8080/timeshift/fixture%20user/p%2Fw/60/2026-10-13:16-05/1001.${extension}`,

@@ -30,6 +30,7 @@ import {
   subtitlePresenter,
   subtitlesDue,
 } from "./subtitles.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Stop at the first limit; a wait entered full drains below the second before reading again. */
 const AHEAD_S = { stop: 60, resume: 40 } as const;
@@ -396,8 +397,8 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     const videoDelivery = delivered("x-title-video");
     const audioDelivery = delivered("x-title-audio");
     delivery = {
-      ...(videoDelivery ? { video: videoDelivery } : {}),
-      ...(audioDelivery ? { audio: audioDelivery } : {}),
+      ...defined({ video: videoDelivery }),
+      ...defined({ audio: audioDelivery }),
     };
     const pictureStart = Number(response.headers.get("x-start")) || 0;
 
@@ -425,18 +426,17 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     codecs = start.codecs;
     const type = `video/mp4; codecs="${start.codecs}"`;
     if (!MediaSource.isTypeSupported(type)) {
+      const videoRefused = start.codecs
+        .split(",")
+        .some(
+          (codec) =>
+            /^(?:avc|hev|hvc)/.test(codec.trim()) &&
+            !MediaSource.isTypeSupported(`video/mp4; codecs="${codec.trim()}"`),
+        );
       throw {
         kind: "unsupported",
         detail: t("This system can't play {codecs}.", { codecs: start.codecs }),
-        ...(start.codecs
-          .split(",")
-          .some(
-            (codec) =>
-              /^(?:avc|hev|hvc)/.test(codec.trim()) &&
-              !MediaSource.isTypeSupported(`video/mp4; codecs="${codec.trim()}"`),
-          )
-          ? { rejectedTrack: "video" as const }
-          : {}),
+        ...defined({ rejectedTrack: videoRefused ? ("video" as const) : undefined }),
       } satisfies TitleError;
     }
     if (run.duration) mediaSource.duration = run.duration;

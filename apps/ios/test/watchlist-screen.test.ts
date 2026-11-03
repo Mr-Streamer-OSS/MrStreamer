@@ -169,9 +169,10 @@ function open() {
 const rerender = () => root && React.act(() => root!.render(React.createElement(WatchlistScreen)));
 /** The rows as VoiceOver reads them, in order. */
 const rows = () =>
-  [...container.querySelectorAll("button[aria-label]")]
-    .map((row) => row.getAttribute("aria-label")!)
-    .filter((label) => !label.startsWith("Sort, "));
+  [...container.querySelectorAll("button[aria-label]")].flatMap((row) => {
+    const label = row.getAttribute("aria-label")!;
+    return !label.startsWith("Sort, ") ? [label] : [];
+  });
 function press(testID: string) {
   const button = container.querySelector(`[data-testid="${testID}"]`) as {
     click(): void;

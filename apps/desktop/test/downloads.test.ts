@@ -37,6 +37,7 @@ import {
   tempDir,
   testConfig,
 } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
@@ -59,13 +60,13 @@ async function app(
   const runtime = runtimeFor(
     mainLayer({
       ...testConfig(dataDir),
-      ...(tmdb ? { tmdbKey: "test-key", tmdbApi: tmdb.url } : {}),
+      ...defined({ tmdbKey: tmdb ? "test-key" : undefined, tmdbApi: tmdb?.url }),
       ffmpeg: "ffmpeg",
       ffprobe: "ffprobe",
       downloads: {
         fetch: pictures,
-        ...(disk ? { disk } : {}),
-        ...(observeTransfer ? { observeTransfer } : {}),
+        ...defined({ disk }),
+        ...defined({ observeTransfer }),
       },
     }),
   );
@@ -211,7 +212,9 @@ async function playlistHost() {
         "Content-Type": "video/mp4",
         "Content-Length": film.length - start,
         ETag: '"twelve"',
-        ...(range ? { "Content-Range": `bytes ${start}-${film.length - 1}/${film.length}` } : {}),
+        ...defined({
+          "Content-Range": range ? `bytes ${start}-${film.length - 1}/${film.length}` : undefined,
+        }),
       });
       response.end(film.subarray(start));
     });
@@ -273,7 +276,9 @@ async function cutsHost({ film = "title-h264-aac.mp4", lengthless = false } = {}
       "Content-Type": type,
       "Content-Length": bytes.length - start,
       ETag: '"one"',
-      ...(range ? { "Content-Range": `bytes ${start}-${bytes.length - 1}/${bytes.length}` } : {}),
+      ...defined({
+        "Content-Range": range ? `bytes ${start}-${bytes.length - 1}/${bytes.length}` : undefined,
+      }),
     });
     if (state.held) response.write(bytes.subarray(start, 40_000));
     else response.end(bytes.subarray(start));
@@ -2150,7 +2155,7 @@ it("observes actual download runs, successful completion, disk failure and cance
   let starts = 0;
   const observeTransfer: OperationObserver = () => {
     starts++;
-    return (outcome, failure) => outcomes.push({ outcome, ...(failure ? { failure } : {}) });
+    return (outcome, failure) => outcomes.push({ outcome, ...defined({ failure }) });
   };
   // The file system's room until the last download, which finds none.
   let full = false;

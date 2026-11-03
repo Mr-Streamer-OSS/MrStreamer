@@ -36,6 +36,7 @@ import {
   waitFor,
   type Page,
 } from "./app.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const { values: options, positionals } = parseArgs({
   options: {
@@ -110,7 +111,7 @@ for (let index = 0; index < SUBSCRIPTIONS; index++)
       second: index > 0,
       channels: 13_000,
       titles: TITLES,
-      ...(SERIES ? { series: SERIES } : {}),
+      ...defined({ series: SERIES || undefined }),
       maxConnections: 1,
       longSeries: true,
       // Every channel plays the same endless 720p programme, encoded as it goes.
@@ -291,8 +292,8 @@ try {
           environment: environment({
             executable,
             electron,
-            ...(appDirectory ? { appDirectory } : {}),
-            ...(options.revision ? { revision: options.revision } : {}),
+            ...defined({ appDirectory: appDirectory || undefined }),
+            ...defined({ revision: options.revision || undefined }),
           }),
           calibration,
           workload: { subscriptions: SUBSCRIPTIONS, channelsPerSubscription: 13000 },
@@ -480,10 +481,10 @@ try {
       schemaVersion: 1,
       tool: "app",
       environment: environment({
-        ...(options.revision ? { revision: options.revision } : {}),
+        ...defined({ revision: options.revision || undefined }),
         electron,
         executable,
-        ...(appDirectory ? { appDirectory } : {}),
+        ...defined({ appDirectory: appDirectory || undefined }),
       }),
       workload: {
         channelsPerSubscription: 13000,
@@ -516,9 +517,11 @@ try {
             metric("ms", samples),
           ]),
         ),
-        ...(options["cold-search"]
-          ? { "cold process exact title search": metric("ms", coldSearchSamples) }
-          : {}),
+        ...defined({
+          "cold process exact title search": options["cold-search"]
+            ? metric("ms", coldSearchSamples)
+            : undefined,
+        }),
       },
       checks: {
         completeMetrics: true,
@@ -546,8 +549,8 @@ try {
         environment: environment({
           executable,
           electron,
-          ...(options.revision ? { revision: options.revision } : {}),
-          ...(appDirectory ? { appDirectory } : {}),
+          ...defined({ revision: options.revision || undefined }),
+          ...defined({ appDirectory: appDirectory || undefined }),
         }),
         workload: {
           runs: RUNS,

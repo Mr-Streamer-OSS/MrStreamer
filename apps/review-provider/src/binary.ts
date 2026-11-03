@@ -1,4 +1,5 @@
 import type { ObjectFact } from "./catalogue.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Only the native R2 capabilities this service reads, also usable by explicit test ports. */
 export interface Bucket {
@@ -52,7 +53,7 @@ export function privateError(status: number, head = false): Response {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
         "Cache-Control": "private, no-store",
-        ...(status === 405 ? { Allow: "GET, HEAD" } : {}),
+        ...defined({ Allow: status === 405 ? "GET, HEAD" : undefined }),
       },
     },
   );
@@ -94,7 +95,7 @@ export async function binaryResponse(
   const selected = range ?? { offset: 0, length: fact.bytes };
   const object = await bucket.get(fact.key, {
     onlyIf: { etagMatches: metadata.etag },
-    ...(range ? { range: selected } : {}),
+    ...defined({ range: range ? selected : undefined }),
   });
   if (!object || !("body" in object) || !object.body || object.size !== fact.bytes)
     return privateError(503, head);

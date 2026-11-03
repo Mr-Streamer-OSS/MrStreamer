@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { profileSummary, traceSummary, type TraceEvent } from "./e2e/app-attribution.ts";
 import { cpuDelta, wakeupSupport } from "./e2e/app-probes.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 it("reports cumulative CPU in seconds and percent of one core over the actual window", () => {
   expect(cpuDelta(20, 21.2, 60_000)).toMatchObject({
@@ -116,7 +117,7 @@ it("counts each thread's outer task time once and never reports missing thread t
     tid,
     ts,
     dur,
-    ...(tdur === undefined ? {} : { tdur }),
+    ...defined({ tdur }),
   });
   const summary = traceSummary(
     [

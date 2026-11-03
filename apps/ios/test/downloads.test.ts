@@ -29,6 +29,7 @@ import {
   type App,
 } from "./downloads-harness.ts";
 import { describe, expect, it, vi } from "vitest";
+import { defined } from "@mrstreamer/core/defined";
 
 // Downloads' catalogue exclusions, subtitles, pictures and transfers, the background queue and its
 // receipts. The app, its fake providers and the native models come from downloads-harness.ts.
@@ -396,7 +397,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(kept.shownSubtitle()?.title.query).toEqual({
       kind: "movie",
       title: copy.name,
-      ...(copy.year === null ? {} : { year: copy.year }),
+      ...defined({ year: copy.year ?? undefined }),
     });
   });
 

@@ -9,6 +9,7 @@ import { Analytics } from "../../src/main/analytics/service.ts";
 import { analyticsStore, profileOrigin } from "../../src/main/analytics/storage.ts";
 import type { CaptureTransport } from "../../src/main/analytics/transport.ts";
 import { tempDir } from "../support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Clock-driven sessions use clones; persistence and failure contracts keep the real store. */
 export function memoryStore(
@@ -68,7 +69,7 @@ export function analyticsFixture(
       properties: build,
       store,
       transport: transport ? { ...transport, kind: "local" } : null,
-      ...(options.monotonic ? { monotonic: options.monotonic } : {}),
+      ...defined({ monotonic: options.monotonic }),
     });
     owners.push(owner);
     await owner.settings();

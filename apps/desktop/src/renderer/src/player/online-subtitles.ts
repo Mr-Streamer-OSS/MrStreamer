@@ -8,6 +8,7 @@ import type {
 import { t } from "@mrstreamer/core/i18n";
 import { call } from "../lib/ipc.ts";
 import { onSubtitleChoice, titlePlayer } from "./title-player.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 interface SearchState {
   readonly sessionId: string | null;
@@ -70,7 +71,7 @@ export const onlineSubtitles = {
     try {
       const answer = await call("subtitles.search", {
         sessionId,
-        ...(languages ? { languages: [...languages] } : {}),
+        ...defined({ languages: languages ? [...languages] : undefined }),
       });
       if (mine !== request || store.getState().sessionId !== sessionId) return;
       store.setState({ ...answer, pending: null, searched: true });

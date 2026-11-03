@@ -209,7 +209,7 @@ async function render(element: React.ReactElement) {
       React.act(async () => {
         // React tracks the value it last rendered; setting it through the prototype lets the
         // input event read as a change.
-        const input = find(id) as unknown as HTMLInputElement;
+        const input = find(id) as HTMLInputElement;
         Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")!.set!.call(
           input,
           value,

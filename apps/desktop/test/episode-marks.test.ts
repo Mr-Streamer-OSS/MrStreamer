@@ -16,6 +16,7 @@ import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** The provider's ids of the series' Dutch and English versions, and of two listed alone. */
 const NL = "80000";
@@ -603,7 +604,9 @@ describe("what a mark is kept by", () => {
       ...all,
       series: all.series.map((each) => {
         const id = tmdb[String(each.id)];
-        return id === undefined ? each : { ...each, tmdb: id, ...(name ? { name } : {}) };
+        return id === undefined
+          ? each
+          : { ...each, tmdb: id, ...defined({ name: name || undefined }) };
       }),
     }));
     await onDemand.refresh(a);

@@ -29,6 +29,7 @@ import { useNow } from "../../lib/clock.ts";
 import { usePresentationVisible } from "../../lib/presentation.ts";
 import { endOfDay } from "../../lib/format.ts";
 import { queries, subscriptionName, useSubscriptions } from "../../lib/queries.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 export const PROVIDER_LISTS = "provider-lists";
 const EMPTY_BROWSE: LiveBrowseResult = {
@@ -501,7 +502,7 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
           list: { kind: "topic", topic },
           title: topicTitle(topic),
           count: counts.get(topic) ?? 0,
-          ...(at === 0 ? { apart: true as const } : {}),
+          ...defined({ apart: at === 0 ? (true as const) : undefined }),
         })),
         { kind: "group", group: PROVIDER_LISTS, count: catalogue.data?.total ?? 0 },
       );

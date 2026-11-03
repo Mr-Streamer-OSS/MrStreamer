@@ -44,7 +44,7 @@ async function resolveDownloads(): Promise<DownloadResult> {
       ? `Download links: ${found.version}, every installer.`
       : `::warning::Download links: ${found ? `GitHub didn't answer for ${found.version}'s ${missing.join(", ")}` : "no current stable release could be verified"}. The Releases page is linked instead.`,
   );
-  return { downloads: found, ...(verifiedAt === undefined ? {} : { verifiedAt }) };
+  return verifiedAt === undefined ? { downloads: found } : { downloads: found, verifiedAt };
 }
 
 async function resolveReleases(): Promise<Release[] | null> {

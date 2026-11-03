@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defined } from "@mrstreamer/core/defined";
 
 // Resolve the exact patched copy that electron-builder loads for signed Mac apps.
 const require = createRequire(import.meta.url);
@@ -182,7 +183,10 @@ describe.skipIf(process.platform === "win32")("stapling the notarized release ap
     ) => {
       if (args[0] === "stapler") given.push(options.timeout);
       const timeout = args[0] === "stapler" ? options.timeout && options.timeout / 100 : undefined;
-      return spawnSync(command, args, { ...options, ...(timeout ? { timeout } : {}) });
+      return spawnSync(command, args, {
+        ...options,
+        ...defined({ timeout: timeout || undefined }),
+      });
     }) as typeof spawnSync);
     const started = performance.now();
     await expect(run()).rejects.toThrow("code: unknown");

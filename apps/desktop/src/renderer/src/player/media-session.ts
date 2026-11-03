@@ -25,6 +25,7 @@ import { queries } from "../lib/queries.ts";
 import { useOutput } from "./output.ts";
 import { player, receiverState, usePlayer } from "./player.ts";
 import { offersNext, titlePlayer, useTitlePlayer } from "./title-player.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** How far the system's back and forward buttons skip when they don't say. */
 const SKIP_S = 10;
@@ -198,7 +199,7 @@ export function useTitleSession(): void {
         seekto: (details) => {
           if (details.seekTime !== undefined) titlePlayer.seek(details.seekTime);
         },
-        ...(hasNext ? { nexttrack: () => titlePlayer.playNext() } : {}),
+        ...defined({ nexttrack: hasNext ? () => titlePlayer.playNext() : undefined }),
       },
     );
   }, [view, now, hasNext]);

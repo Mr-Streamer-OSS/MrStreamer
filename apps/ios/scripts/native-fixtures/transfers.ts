@@ -14,6 +14,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { defined } from "@mrstreamer/core/defined";
 
 /** What a file is sent in, and how often the rate is kept to. */
 const PIECE = 64 * 1024;
@@ -66,7 +67,9 @@ export function titleTransfers(known: (title: string) => boolean) {
         "Content-Length": end - start + 1,
         "Accept-Ranges": "bytes",
         ETag: etag,
-        ...(range ? { "Content-Range": `bytes ${start}-${end}/${bytes.length}` } : {}),
+        ...defined({
+          "Content-Range": range ? `bytes ${start}-${end}/${bytes.length}` : undefined,
+        }),
       });
       if (request.method === "HEAD") {
         response.end();

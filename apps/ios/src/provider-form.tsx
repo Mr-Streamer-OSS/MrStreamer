@@ -5,6 +5,7 @@ import { appError, failureOf, hostOf } from "./errors.ts";
 import { useLocale } from "./i18n/catalogue.ts";
 import { t } from "./i18n/onboarding.ts";
 import { colors, TextButton } from "./ui.tsx";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Connect adds the first provider, Settings the next ones, and edits a saved one. */
 export type FormMode =
@@ -89,7 +90,7 @@ export function ProviderForm({
     const secret = kind === "m3u" ? link : password;
     const named = mode.kind === "add" ? { name } : {};
     const saving = saved
-      ? update(saved.id, { name, ...(secret ? { password: secret } : {}) }, signal)
+      ? update(saved.id, { name, ...defined({ password: secret || undefined }) }, signal)
       : kind === "m3u"
         ? add({ server: link, username: "", password: "", ...named }, signal)
         : add({ server, username, password, ...named }, signal);

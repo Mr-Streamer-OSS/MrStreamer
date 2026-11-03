@@ -210,7 +210,7 @@ function press(testID: string) {
   navigate();
 }
 function type(text: string) {
-  const field = find("discover-field") as unknown as {
+  const field = find("discover-field") as {
     value: string;
     dispatchEvent(event: unknown): void;
   } | null;
@@ -222,7 +222,7 @@ function type(text: string) {
     field.dispatchEvent(new window.Event("input", { bubbles: true }));
   });
 }
-const value = () => (find("discover-field") as unknown as { value: string } | null)?.value;
+const value = () => (find("discover-field") as { value: string } | null)?.value;
 /** Each result on the discovery screen: its name, kind and line, as VoiceOver reads it. */
 const results = () =>
   [

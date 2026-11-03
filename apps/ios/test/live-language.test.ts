@@ -140,7 +140,7 @@ function press(testID: string) {
   React.act(() => button.click());
 }
 function type(query: string) {
-  const field = find("discover-field") as unknown as {
+  const field = find("discover-field") as {
     dispatchEvent(event: unknown): void;
   } | null;
   if (!field) throw new Error("No field on screen");

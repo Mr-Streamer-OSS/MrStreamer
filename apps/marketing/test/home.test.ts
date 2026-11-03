@@ -53,8 +53,7 @@ const shown = (selector: string): HTMLElement[] =>
 /** What an element says, without the parts of it that don't show. */
 const said = (element: Element): string =>
   [...element.childNodes]
-    .filter(displayed)
-    .map((node) => node.textContent)
+    .flatMap((node) => (displayed(node) ? [node.textContent] : []))
     .join("")
     .replace(/\s+/g, " ")
     .trim();

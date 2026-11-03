@@ -17,6 +17,7 @@ import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture } from "./fake-provider.ts";
 import { promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // CI points this at the bundled build, with ffprobe beside it; locally the one on PATH does.
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
@@ -63,7 +64,7 @@ async function connected(entries: (plain: string) => readonly string[], link = L
     response.writeHead(range ? 206 : 200, {
       "Content-Length": end - start + 1,
       "Accept-Ranges": "bytes",
-      ...(range ? { "Content-Range": `bytes ${start}-${end}/${body.length}` } : {}),
+      ...defined({ "Content-Range": range ? `bytes ${start}-${end}/${body.length}` : undefined }),
     });
     response.end(body.subarray(start, end + 1));
   });

@@ -6,6 +6,7 @@
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import type { ProcessMetric } from "electron";
 import { calibrate, delay, key, observe, waitFor, type Page } from "./app.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const STEADY_PROFILE_MS = 60_000;
 const STEADY_TRACE_MS = 20_000;
@@ -282,16 +283,17 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
         count,
         wallMs,
         cpuMs: observedEvents === count ? observedCpuMs : null,
-        ...(observedEvents === count
-          ? {}
-          : {
-              cpu: {
-                status: observedEvents === 0 ? ("unsupported" as const) : ("partial" as const),
-                observedMs: observedCpuMs,
-                observedEvents,
-                missingEvents: count - observedEvents,
-              },
-            }),
+        ...defined({
+          cpu:
+            observedEvents === count
+              ? undefined
+              : {
+                  status: observedEvents === 0 ? ("unsupported" as const) : ("partial" as const),
+                  observedMs: observedCpuMs,
+                  observedEvents,
+                  missingEvents: count - observedEvents,
+                },
+        }),
       }))
       .sort(
         (a, b) =>

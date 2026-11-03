@@ -49,6 +49,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { removeFile } from "./json-file.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
+import { defined } from "@mrstreamer/core/defined";
 
 const ID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 /** An index's name. */
@@ -266,10 +267,10 @@ export const guideStoreLayer: Layer.Layer<GuideStore> = Layer.succeed(GuideStore
             identity: external.identity,
             sealedAddress: external.sealedAddress,
             document: { file: external.document.file, fetchedAt: external.document.fetchedAt },
-            ...(external.failure ? { failure: external.failure } : {}),
-            ...(external.source ? { source: external.source } : {}),
+            ...defined({ failure: external.failure ?? undefined }),
+            ...defined({ source: external.source || undefined }),
             // 0.0.12 needs it to read the address at all.
-            ...(external.since !== null ? { since: external.since } : {}),
+            ...defined({ since: external.since ?? undefined }),
           },
           mappings: Object.fromEntries(
             Object.entries(mappings).map(([channelId, { guideId, name, source }]) => [
@@ -304,10 +305,10 @@ export const guideStoreLayer: Layer.Layer<GuideStore> = Layer.succeed(GuideStore
           version: 1,
           sources: sources.map(({ label, document, failure, movedFrom, ...source }) => ({
             ...source,
-            ...(label === null ? {} : { label }),
+            ...defined({ label: label ?? undefined }),
             document: document && { file: document.file, fetchedAt: document.fetchedAt },
-            ...(failure ? { failure } : {}),
-            ...(movedFrom ? { movedFrom } : {}),
+            ...defined({ failure: failure ?? undefined }),
+            ...defined({ movedFrom: movedFrom ?? undefined }),
           })),
         };
         await replaceFile(sourcesPath(store), JSON.stringify(file));

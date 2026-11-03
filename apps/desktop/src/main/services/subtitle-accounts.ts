@@ -18,6 +18,7 @@ import { t } from "@mrstreamer/core/i18n";
 import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 import type { Secrets } from "../platform/secrets.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
+import { defined } from "@mrstreamer/core/defined";
 
 const Stored = lazy(() =>
   OnlineSubtitlePreferences().merge({
@@ -88,24 +89,24 @@ function make(dataDir: string, secrets: Secrets) {
               try: () => ({
                 ...previous,
                 ...OnlineSubtitlePreferences().assert(preferences),
-                ...(credentials.subdl !== undefined
-                  ? {
-                      subdl:
-                        credentials.subdl === null
-                          ? null
-                          : secrets.seal(JSON.stringify(SubDL().assert(credentials.subdl))),
-                    }
-                  : {}),
-                ...(credentials.opensubtitles !== undefined
-                  ? {
-                      opensubtitles:
-                        credentials.opensubtitles === null
-                          ? null
-                          : secrets.seal(
-                              JSON.stringify(OpenSubtitles().assert(credentials.opensubtitles)),
-                            ),
-                    }
-                  : {}),
+                ...defined({
+                  subdl:
+                    credentials.subdl !== undefined
+                      ? credentials.subdl === null
+                        ? null
+                        : secrets.seal(JSON.stringify(SubDL().assert(credentials.subdl)))
+                      : undefined,
+                }),
+                ...defined({
+                  opensubtitles:
+                    credentials.opensubtitles !== undefined
+                      ? credentials.opensubtitles === null
+                        ? null
+                        : secrets.seal(
+                            JSON.stringify(OpenSubtitles().assert(credentials.opensubtitles)),
+                          )
+                      : undefined,
+                }),
               }),
               catch: secretFailure,
             });

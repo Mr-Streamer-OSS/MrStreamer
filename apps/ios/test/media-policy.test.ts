@@ -22,6 +22,7 @@ import {
   type Recovery,
   type TrackContext,
 } from "../src/media-policy.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Native snapshots as the patched expo-video player reports them: option ids are positions in the
 // item's selection group, languages as the file tags them, defaults and forced flags the player's.
@@ -40,8 +41,8 @@ const named = (language: string | null, facts: Facts) => ({
   label: facts.label ?? language ?? "Unknown",
   isDefault: facts.isDefault ?? false,
   isPlayable: facts.isPlayable ?? true,
-  ...(language === null ? {} : { language }),
-  ...(facts.name === undefined ? {} : { name: facts.name }),
+  ...defined({ language: language ?? undefined }),
+  ...defined({ name: facts.name }),
 });
 
 const sound = (id: string, language: string | null, facts: Facts = {}): ObservedAudioTrack => ({

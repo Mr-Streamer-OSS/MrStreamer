@@ -24,6 +24,7 @@ import {
   type MediaStatus,
   type ReceiverStatus,
 } from "./messages.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /**
  * Google's Default Media Receiver: the app every Cast receiver can start, which plays the address
@@ -600,16 +601,19 @@ export async function openSession(
                 // Generic: a title, a line under it and a picture.
                 metadataType: 0,
                 title: media.metadata.title,
-                ...(media.metadata.subtitle === null ? {} : { subtitle: media.metadata.subtitle }),
-                ...(media.metadata.artworkUrl === null
-                  ? {}
-                  : { images: [{ url: media.metadata.artworkUrl }] }),
+                ...defined({ subtitle: media.metadata.subtitle ?? undefined }),
+                ...defined({
+                  images:
+                    media.metadata.artworkUrl === null
+                      ? undefined
+                      : [{ url: media.metadata.artworkUrl }],
+                }),
               },
             },
             autoplay: !media.paused,
             // A channel carries no position: a receiver given none starts at the live edge, and
             // given 0 it may start at the oldest segment the playlist lists.
-            ...(media.live ? {} : { currentTime: media.position }),
+            ...defined({ currentTime: media.live ? undefined : media.position }),
           },
           timings.load,
           requestId,

@@ -1151,20 +1151,18 @@ export async function runNativeTelemetry(c: Context) {
                 await delay(1200);
                 assert.equal(c.bodies.length, from);
               }
-              receipt.proof = {
-                old,
-                after: await saved(`compat-${variant}-return`),
-                ...(legacy
-                  ? {
-                      transport:
-                        "Actual old durable reservation sent to retryable HTTP 503, not refused connect. Other queued events may consume three attempts first.",
-                      rejectedFrom,
-                      oldDelivery: legacy,
-                      killedAt,
-                      candidateDeliveryFrom: from,
-                    }
-                  : {}),
-              };
+              const proof = { old, after: await saved(`compat-${variant}-return`) };
+              receipt.proof = legacy
+                ? {
+                    ...proof,
+                    transport:
+                      "Actual old durable reservation sent to retryable HTTP 503, not refused connect. Other queued events may consume three attempts first.",
+                    rejectedFrom,
+                    oldDelivery: legacy,
+                    killedAt,
+                    candidateDeliveryFrom: from,
+                  }
+                : proof;
             } else {
               await select("candidate");
               await c.connect();
