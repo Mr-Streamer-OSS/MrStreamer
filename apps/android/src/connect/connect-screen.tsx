@@ -12,6 +12,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
+import { useLocale } from "../live/catalogue.ts";
+import { t } from "./copy.ts";
 import { describeFailure } from "./failure.ts";
 import type { SourcesOwner } from "./sources.ts";
 
@@ -34,6 +36,7 @@ export function ConnectScreen({
   onDone?: () => void;
   onConnected: () => void;
 }) {
+  useLocale();
   const insets = useSafeAreaInsets();
   const [input, setInput] = useState<LoginInput>({ server: "", username: "", password: "" });
   const [busy, setBusy] = useState(false);
@@ -176,7 +179,7 @@ export function ConnectScreen({
         {onDone ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Cancel"
+            accessibilityLabel={t("Cancel")}
             onPress={onDone}
             style={{ width: 48, height: 48, alignItems: "center", justifyContent: "center" }}
           >
@@ -199,16 +202,16 @@ export function ConnectScreen({
             letterSpacing: -0.22,
           }}
         >
-          Add provider
+          {t("Add provider")}
         </Text>
       </View>
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
       >
-        {field("server", "Server or M3U link", "link", "url", "username")}
-        {field("username", "Username", "person-outline", "username", "password")}
-        {field("password", "Password", "lock-outline", "password")}
+        {field("server", t("Server or M3U link"), "link", "url", "username")}
+        {field("username", t("Username"), "person-outline", "username", "password")}
+        {field("password", t("Password"), "lock-outline", "password")}
         {failure ? (
           <View
             accessible
@@ -229,9 +232,13 @@ export function ConnectScreen({
           </View>
         ) : null}
         <View style={{ paddingTop: failure ? 0 : 8 }}>
-          {action(busy ? "Connecting" : "Connect", "login", () => void connect(input), true)}
+          {action(busy ? t("Connecting") : t("Connect"), "login", () => void connect(input), true)}
           {http
-            ? action("Connect without encryption (http)", "no-encryption", () => void connect(http))
+            ? action(
+                t("Connect without encryption (http)"),
+                "no-encryption",
+                () => void connect(http),
+              )
             : null}
         </View>
       </ScrollView>

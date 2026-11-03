@@ -97,8 +97,7 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
   starts on its `index`, and a link that opens the app straight to a pushed screen gets that
   root under it; navigating into another destination's stack while the app runs passes
   `withAnchor: true` for the same. A link to no screen is dropped while the app runs, and one that
-  opens the app opens Live, or Connect while no source is saved (`+not-found.tsx`). Live's root shows the bootstrap's channel list under its own header
-  until the Live card replaces it.
+  opens the app opens Live, or Connect while no source is saved (`+not-found.tsx`). Live combines providers in All, Categories and country-filtered For you with saved favourites and up to four category previews of six channels. Its scrolling shortcuts open Find, Favourites, custom lists and Providers; Providers keeps Add, Remove, failure advice and retry reachable until Settings supports provider management. Failed list reads offer Try again; unavailable favourites keep their reason, and provider gaps remain visible while loaded channels can play.
 - **Screens.** Each screen frames itself with `Screen` (`src/navigation/screen.tsx`): its top
   app bar, and the insets `useSafeAreaInsets` still gives its content (the bottom only beside
   the rail). A screen with a list and a selected item passes `detail` (`title`, `content` and
