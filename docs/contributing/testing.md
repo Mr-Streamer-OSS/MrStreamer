@@ -477,7 +477,7 @@ The Windows installed package smoke also runs the focused `windows-retry` teleme
 
 `.github/workflows/checks.yml` runs on every pull request and push to `main`; [CI](../maintainers/ci.md) shows how it fits with the release workflows.
 
-- **Check:** unused files, exports and dependencies (`pnpm knip`), lint (`pnpm lint`), format, typecheck, the workflows (`pnpm actionlint`) and the production build. Lint, typecheck and tests cover the website's code too. A pull request that only adds or edits Markdown and images outside Test's and Website's inputs gets the format check alone.
+- **Check:** unused files, exports and dependencies (`pnpm knip`), lint (`pnpm lint`), format, typecheck, the workflows (`pnpm actionlint`) and the production build. Lint, typecheck and tests cover the website's code too. A pull request that only adds or edits Markdown and images outside Test's and Website's inputs gets formatting and documentation path checks.
 - **Test:** installs Ubuntu's complete ffmpeg and ffprobe (`apps/desktop/scripts/ci-ffmpeg.sh` fails unless both run and their codecs are there), runs the suite with Vitest's JSON reporter, keeps the report and checks it.
 - **Website:** on pull requests, builds the website, installing only what `apps/marketing` declares. On `main`, `website.yml` builds it after every change to what the page is built from; [the website's README](../../apps/marketing/README.md#how-it-gets-published) describes publishing.
 

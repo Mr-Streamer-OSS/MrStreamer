@@ -3,7 +3,8 @@
 #
 # Check always runs and reports. Test and Website run when their inputs changed, and whenever the
 # changed paths are unknown or couldn't be read. A pull request that only adds or edits Markdown and
-# images outside their inputs skips both, and its Check only checks formatting. Test merges three test shards' reports. A release
+# images outside their inputs skips both; its Check checks formatting and documented paths. Test
+# merges three test shards' reports. A release
 # calls this with the commit it builds (`sha`), which always checks and tests that commit. The
 # validation evidence artifact records what ran on the exact source;
 # .github/actions/validation/README.md has its contract.
@@ -107,8 +108,7 @@ jobs:
         uses: ./.local/validation-tools/.github/actions/validation
         with:
           part: check
-      # Markdown and images feed no build, type or lint, so they need only Prettier, from the
-      # root's dependencies.
+      # Markdown and images need formatting and documented-path checks, without the app build.
       - if: needs.inputs.outputs.docs == 'true'
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - if: needs.inputs.outputs.docs == 'true'
@@ -121,6 +121,7 @@ jobs:
         run: |
           pnpm install --frozen-lockfile --filter mrstreamer-workspace
           pnpm fmt:check
+          node scripts/docs-references.ts
       - name: Require input selection
         env:
           INPUT_RESULT: ${{ needs.inputs.result }}
