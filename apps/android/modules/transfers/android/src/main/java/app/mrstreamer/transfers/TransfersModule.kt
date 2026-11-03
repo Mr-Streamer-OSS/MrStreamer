@@ -14,15 +14,7 @@ class TransfersModule : Module() {
     Name("Transfers")
     AsyncFunction("restore") Coroutine { ->
       withContext(Dispatchers.IO) {
-        val manager = androidx.work.WorkManager.getInstance(context)
-        synchronized(Ledger.lock) {
-          val running = manager.getWorkInfosForUniqueWork("downloads").get()
-            .any { it.state == androidx.work.WorkInfo.State.RUNNING }
-          Transfers.clearAuthority()
-          val result = Transfers.snapshot(context, !running)
-          Transfers.kick(context)
-          result
-        }
+        Transfers.restore(context)
       }
     }
     AsyncFunction("snapshot") { Transfers.snapshot(context, false) }
@@ -61,18 +53,7 @@ class TransfersModule : Module() {
     }
     AsyncFunction("filePath") { id: String -> Ledger(context).media(id).absolutePath }
     AsyncFunction("path") { id: String ->
-      synchronized(Ledger.lock) {
-        val ledger = Ledger(context)
-        val rows = ledger.read()
-        val row = rows.first { it.getString("id") == id }
-        val file = ledger.media(id)
-        if (row.getString("state") != "complete" || !file.canRead() || file.length() <= 0 || file.length() != row.getLong("total")) {
-          ledger.recover(row)
-          ledger.save(rows)
-          error("missing")
-        }
-        file.absolutePath
-      }
+      Transfers.path(context, id)
     }
     AsyncFunction("blockSource") { source: String, blocked: Boolean ->
       Transfers.block(context, source, blocked)

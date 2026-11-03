@@ -53,6 +53,33 @@ object Transfers {
       .any { it.state == WorkInfo.State.RUNNING }) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE, work)
   }
 
+  /** Restore process authority, reconcile orphaned work and schedule its continuation. */
+  fun restore(context: Context): String {
+    val manager = WorkManager.getInstance(context)
+    return synchronized(Ledger.lock) {
+      val running = manager.getWorkInfosForUniqueWork("downloads").get()
+        .any { it.state == WorkInfo.State.RUNNING }
+      clearAuthority()
+      val result = snapshot(context, !running)
+      kick(context)
+      result
+    }
+  }
+
+  /** Return a playable copy, persisting missing or truncated completions before refusing it. */
+  fun path(context: Context, id: String): String = synchronized(Ledger.lock) {
+    val ledger = Ledger(context)
+    val rows = ledger.read()
+    val row = rows.first { it.getString("id") == id }
+    val file = ledger.media(id)
+    if (row.getString("state") != "complete" || !file.canRead() || file.length() <= 0 || file.length() != row.getLong("total")) {
+      ledger.recover(row)
+      ledger.save(rows)
+      error("missing")
+    }
+    file.absolutePath
+  }
+
   fun snapshot(context: Context, reconcile: Boolean): String = synchronized(Ledger.lock) {
     val ledger = Ledger(context)
     val rows = ledger.read()
