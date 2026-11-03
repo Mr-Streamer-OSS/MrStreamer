@@ -141,3 +141,34 @@ for mode in ('corrupt-middle', 'corrupt-first', 'corrupt-last', 'variable-info',
              'variable-strategy', 'length-change', 'zero-rate', 'overlong-number'):
     save(mode)
     print(mode + '.mkv')
+
+# Track metadata stays distinct from STREAMINFO in Matroska's Audio element.
+tracks = next(e for e in top if e[0] == 0x1654AE6B)
+audio = next(a for t in elements(base, tracks[4], tracks[5]) if t[0] == 0xAE
+             for a in elements(base, t[4], t[5]) if a[0] == 0xE1)
+import struct
+for name, kind, value in [('track-rate', 0xB5, 44100), ('track-channels', 0x9F, 6)]:
+    b = bytearray(base)
+    field = next(e for e in elements(b, audio[4], audio[5]) if e[0] == kind)
+    start, end = field[4:6]
+    b[start:end] = (struct.pack('>d' if end-start == 8 else '>f', value) if kind == 0xB5
+                    else value.to_bytes(end-start, 'big'))
+    (out / (name + '.mkv')).write_bytes(b)
+for name in ('crc8-only', 'channel-assignment'):
+    b = bytearray(base)
+    p, n = frames[60]
+    f = bytearray(b[p:p+n])
+    end = header_end(f)
+    if name == 'crc8-only':
+        f[end] ^= 1  # Keep CRC-16 valid so only the header CRC rejects it.
+    else:
+        f[3] &= 15  # Claim one channel instead of STREAMINFO's stereo.
+        f[end] = crc(f[:end], 8, 7)
+    f[-2:] = crc(f[:-2], 16, 0x8005).to_bytes(2, 'big')
+    b[p:p+n] = f
+    (out / (name + '.mkv')).write_bytes(b)
+for name, source in [('invalid-lead', 'lead-source'), ('late-corrupt', 'late-source')]:
+    b = bytearray((out / (source + '.mkv')).read_bytes())
+    for p, n in flac_frames(b)[:1500 if name == 'invalid-lead' else 1]:
+        b[p+n//2] ^= 1
+    (out / (name + '.mkv')).write_bytes(b)

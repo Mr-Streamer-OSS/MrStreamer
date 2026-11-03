@@ -229,8 +229,12 @@ typedef struct Made {
 
 struct TitleHls {
   TitleHlsSource source;
-  /** FLAC frames left out for failing their checks. */
+  /** Whether a FLAC frame was left out for failing its checks. */
   int flac_dropped;
+  /** Whether any FLAC frame passed its checks, even outside the starting segment. */
+  int flac_kept;
+  /** The last read stopped at the invalid FLAC stretch limit. */
+  int flac_limit;
   int64_t position;
   /** Bytes reading may still take, or -1 for no limit. */
   int64_t budget;
@@ -402,6 +406,8 @@ static const char *flac_unplayable(const AVCodecParameters *par) {
   if (channels > FLAC_CHANNELS_MOST) return "Its FLAC sound has more than two channels.";
   if (bits != 16 && bits != 24) return "Its FLAC sound isn't 16 or 24 bit.";
   if (rate != 44100 && rate != 48000) return "Its FLAC sound isn't 44.1 or 48 kHz.";
+  if (par->sample_rate != rate || par->ch_layout.nb_channels != channels)
+    return "Its FLAC track disagrees with STREAMINFO.";
   return NULL;
 }
 
@@ -413,7 +419,7 @@ static const char *flac_unplayable(const AVCodecParameters *par) {
 static int flac_length(const AVPacket *packet, const uint8_t *info) {
   const uint8_t *x = packet->data;
   int size = packet->size;
-  if (size < 10 || x[0] != 0xFF || x[1] != 0xF8 || (x[3] & 1)) return 0;
+  if (!info || size < 10 || x[0] != 0xFF || x[1] != 0xF8 || (x[3] & 1)) return 0;
   int rate, channels, bits;
   flac_format(info, &rate, &channels, &bits);
   int code = x[2] >> 4, rate_code = x[2] & 15, assignment = x[3] >> 4, depth = (x[3] >> 1) & 7;
@@ -822,6 +828,8 @@ static int fill(const TitleHls *title, const Sound *sound, Packets *packets, int
   int64_t slots[2] = {slot_at(title, sound, first, from), slot_at(title, sound, first, to)};
   if (!sound->silence) {
     int64_t edge = (int64_t)(EDGE_S * sound->rate / sound->frame);
+    if (title->input->streams[sound->stream]->codecpar->codec_id == AV_CODEC_ID_FLAC && edge < 1)
+      edge = 1;
     int64_t inside[2] = {slot_at(title, sound, first, title->cuts[0]) + edge,
                          slot_at(title, sound, first, title->cuts[title->count]) - edge};
     int i = 0;
@@ -1332,10 +1340,13 @@ static void mark_read(Text *text, int64_t time) {
  * failed it fails too, until `make` or `recall` clears the error for its seek: FFmpeg reads on
  * past a failed read and may skip what that read held, and a seek alone doesn't clear it.
  * FLAC frames failing `flac_length` are left out, their slots empty for `fill` to refuse; the
- * others carry their length in samples as their duration, for `flac_grid`.
+ * others carry their length in samples as their duration, for `flac_grid`. A run of rejected
+ * frames is bounded by LEAD_PACKETS_MOST and LEAD_BYTES_MOST and fails explicitly at either limit.
  */
 static int read_frame(TitleHls *title, AVPacket *packet) {
-  int error;
+  int error, dropped = 0;
+  size_t bytes = 0;
+  title->flac_limit = 0;
   for (;;) {
     error = av_read_frame(title->input, packet);
     if (error >= 0 && title->io->error < 0) {
@@ -1347,11 +1358,17 @@ static int read_frame(TitleHls *title, AVPacket *packet) {
     if (!par || par->codec_id != AV_CODEC_ID_FLAC) break;
     int length = flac_length(packet, flac_info(par));
     if (length && length <= flac_block(par)) {
+      title->flac_kept = 1;
       packet->duration = length;
       break;
     }
-    title->flac_dropped++;
+    title->flac_dropped = 1;
+    bytes += (size_t)packet->size;
     av_packet_unref(packet);
+    if (++dropped >= LEAD_PACKETS_MOST || bytes >= LEAD_BYTES_MOST) {
+      title->flac_limit = 1;
+      return AVERROR_INVALIDDATA;
+    }
   }
   Text *text = error < 0 ? NULL : text_of(title, packet);
   if (text && (error = keep_cue(title, text, packet)) < 0) av_packet_unref(packet);
@@ -2006,7 +2023,10 @@ static void flac_grid(const Sound *sound, Packets *packets, int last) {
     int64_t off = at - llrint((double)at / sound->frame) * sound->frame;
     int whole = packet->duration == sound->frame || (last && i == packets->count - 1);
     if (llabs(off) <= tick && whole) packets->items[kept++] = packet;
-    else av_packet_free(&packet);
+    else {
+      packets->bytes -= (size_t)packet->size;
+      av_packet_free(&packet);
+    }
   }
   packets->count = kept;
 }
@@ -2039,7 +2059,9 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
     title->io->error = 0;
     title->io->eof_reached = 0;
     if ((error = recall_before(title, index)) < 0 || (error = reach(title, index, &title->ahead)) < 0) {
-      say(detail, detail_size, "The file couldn't be read at this point.");
+      say(detail, detail_size, title->flac_limit
+          ? "Its FLAC sound has too many invalid frames in a row."
+          : "The file couldn't be read at this point.");
       return failure(title, error);
     }
   }
@@ -2061,7 +2083,9 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
     if (error == AVERROR_EOF) break;
     if (error < 0) {
       result = failure(title, error);
-      say(detail, detail_size, "The file couldn't be read at this point.");
+      say(detail, detail_size, title->flac_limit
+          ? "Its FLAC sound has too many invalid frames in a row."
+          : "The file couldn't be read at this point.");
       goto end;
     }
     Packets *into = NULL;
@@ -2275,6 +2299,10 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
     others |= par->codec_type == AVMEDIA_TYPE_AUDIO && par->codec_id != AV_CODEC_ID_FLAC &&
               sound_playable(par) && par->sample_rate > 0;
     const char *why = par->codec_id == AV_CODEC_ID_FLAC ? flac_unplayable(par) : NULL;
+    if (!why && par->codec_id == AV_CODEC_ID_FLAC &&
+        av_compare_ts(flac_block(par), (AVRational){1, par->sample_rate},
+                      2, title->input->streams[i]->time_base) < 0)
+      why = "Its FLAC frames are too short for the track's clock.";
     if (why) flac_reason = why;
   }
   for (unsigned i = 0; i < title->input->nb_streams; i++) {
@@ -2283,6 +2311,9 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
     if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
       any = 1;
       if (sound_playable(st->codecpar) && st->codecpar->sample_rate > 0 &&
+          !(st->codecpar->codec_id == AV_CODEC_ID_FLAC &&
+            av_compare_ts(flac_block(st->codecpar), (AVRational){1, st->codecpar->sample_rate},
+                          2, st->time_base) < 0) &&
           !(others && st->codecpar->codec_id == AV_CODEC_ID_FLAC) &&
           title->sound_count < SOUNDS_MOST) {
         Sound *sound = &title->sounds[title->sound_count++];
@@ -2361,7 +2392,9 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
   if ((result = choose(title, detail, detail_size)) != TITLE_HLS_OK) goto fail;
   if ((error = read_lead(title)) < 0) {
     result = failure(title, error);
-    say(detail, detail_size, "The file couldn't be read at its start.");
+    say(detail, detail_size, title->flac_limit
+          ? "Its FLAC sound has too many invalid frames in a row."
+          : "The file couldn't be read at its start.");
     goto fail;
   }
   // Matroska reads its index on the first seek.
@@ -2381,10 +2414,12 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
   title->start = start > 0 && start < length ? start : 0;
   if ((error = sample(title, segment_at(title, title->start))) < 0) {
     result = failure(title, error);
-    say(detail, detail_size, "The file couldn't be read where it starts playing.");
+    say(detail, detail_size, title->flac_limit
+          ? "Its FLAC sound has too many invalid frames in a row."
+          : "The file couldn't be read where it starts playing.");
     goto fail;
   }
-  if (title->sound_count == 0 && title->flac_dropped) {
+  if (title->sound_count == 0 && title->flac_dropped && !title->flac_kept) {
     result = TITLE_HLS_UNSUPPORTED;
     say(detail, detail_size, "Its FLAC sound has frames this can't play.");
     goto fail;

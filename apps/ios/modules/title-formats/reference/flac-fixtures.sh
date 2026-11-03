@@ -21,4 +21,14 @@ flac surround 48000 6 s16 4608
 flac rate96 96000 2 s16 4608
 ffmpeg -v error -y -i "$out/stereo16.mkv" -map 0:v -map 0:a -map 0:a \
   -c:v copy -c:a:0 aac -c:a:1 copy "$out/aac-flac.mkv"
+flac tiny-block 48000 2 s16 16
+# One 44.1 kHz frame is longer than EDGE_S; ending 50 ms early must still serve.
+ffmpeg -v error -y -i "$out/picture.mkv" -f lavfi -i 'sine=sample_rate=44100:duration=19.95' \
+  -map 0:v -map 1:a -c:v copy -c:a flac -frame_size 4608 "$out/early-end.mkv"
+# More than 1024 invalid packets precede the picture's first keyframe.
+ffmpeg -v error -y -itsoffset 12 -i "$out/picture.mkv" -f lavfi -i 'sine=sample_rate=48000:duration=32' \
+  -map 0:v -map 1:a -c:v copy -c:a flac -frame_size 192 "$out/lead-source.mkv"
+# Opening later has no nearby sound, but the lead held valid frames as well as one bad one.
+ffmpeg -v error -y -itsoffset 0.2 -i "$out/picture.mkv" -f lavfi -i 'sine=sample_rate=48000:duration=1' \
+  -map 0:v -map 1:a -c:v copy -c:a flac -ac 2 -frame_size 4608 "$out/late-source.mkv"
 python3 -I "$here/flac-fixtures.py" "$out"
