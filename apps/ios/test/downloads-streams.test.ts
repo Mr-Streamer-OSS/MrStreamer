@@ -295,6 +295,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     // The request ends at last; Try again takes the connection, though the queue had it again.
     const held = native.held;
     native.held = null;
+    native.leaseDeadlines = null;
     for (const ending of held) ending();
     await until(() => statusOf(app, film.id)?.kind !== "transferring", "the transfer to end");
     app.playback.retry();

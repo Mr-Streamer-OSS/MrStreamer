@@ -45,8 +45,8 @@ interface Native {
   held: (() => void)[] | null;
   /**
    * While a list, each of a stream lease's two five-second waits for a download's request to end,
-   * paused and then cancelled, is kept here and passes only when the test runs it. Null: each
-   * passes after five seconds.
+   * paused and then cancelled, is kept here: a request that hasn't ended by then runs out of time
+   * only when the test runs it. Null: it runs out after five seconds.
    */
   leaseDeadlines: (() => void)[] | null;
   /**
