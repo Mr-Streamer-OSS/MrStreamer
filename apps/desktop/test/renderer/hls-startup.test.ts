@@ -121,12 +121,40 @@ it("holds the quality a shared recording reads from the start, and picks again o
   engine.fix?.(high.uri);
   await vi.dynamicImportSettled();
   fixture.parsed();
+  await settle();
   expect(fixture.starts).toEqual([high]);
   expect(fixture.held).toEqual([1]);
   engine.fix?.(null);
   engine.fix?.(low.uri);
+  await settle();
   expect(fixture.held).toEqual([1, -1, 0]);
 });
+
+// The main process sends only the recording's variant while they share: another can't stand in.
+it.each(["before", "after"])(
+  "fails as unsupported, never holding a quality it can't decode, named %s its levels are listed",
+  async (when) => {
+    const high = level(512, undefined, "hvc1.2.4.L153.B0", "http://localhost/high.m3u8");
+    const low = level(128, undefined, undefined, "http://localhost/low.m3u8");
+    fixture.levels = [high, low];
+    fixture.unsupported.add(high);
+    engine = createEngine("hls", document.createElement("video"), "http://localhost/master.m3u8", {
+      audio: null,
+      audioLanguage: null,
+    });
+    let failure: unknown;
+    engine.started.catch((error: unknown) => (failure = error));
+    if (when === "before") engine.fix?.(high.uri);
+    await vi.dynamicImportSettled();
+    fixture.parsed();
+    if (when === "after") engine.fix?.(high.uri);
+    await settle();
+    expect(failure).toMatchObject({ kind: "unsupported" });
+    // Named later, it finds the stream already loading at its own pick.
+    expect(fixture.starts).toEqual(when === "before" ? [] : [low]);
+    expect(fixture.held).toEqual([]);
+  },
+);
 
 it("starts with the lowest bitrate when no audio group changes", async () => {
   const low = level(128);

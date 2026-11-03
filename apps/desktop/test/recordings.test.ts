@@ -1598,6 +1598,11 @@ describe.skipIf(!hasTools)("recordings", () => {
     const player = playing(sd!);
     await player.reaches(2);
     expect(host.requests().filter((path) => path.includes("qualities-sd"))).toEqual([]);
+    // A player that can't decode the recorded quality asks for a repaired stream of its own,
+    // which never shares: the recording holds the only connection, so it is refused.
+    await expect(playback.open(channel, ["h264", "aac"], { repair: true })).rejects.toMatchObject({
+      error: { kind: "recording-holds" },
+    });
     await recordings.stop(answer.recording.id);
     // It recorded 1080, whose sound is AAC, not 720's MP3.
     const [done] = await until(recordings.list, ([first]) => first?.status.kind === "stopped");

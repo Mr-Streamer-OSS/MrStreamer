@@ -96,7 +96,8 @@ export interface Engine {
   readonly tracks: EngineTracks | null;
   /**
    * Holds an HLS stream's quality at the variant whose playlist is at `variant`, from the next
-   * segment on, or with null lets the engine pick again. Engines without qualities ignore it.
+   * segment on, or with null lets the engine pick again. A variant this player can't decode fails
+   * as unsupported rather than leaving another in its place. Engines without qualities ignore it.
    */
   fix?(variant: string | null): void;
   info(): StreamInfo;
@@ -315,21 +316,21 @@ function hlsEngine(
   const tracks = hlsTracks(hls, video, sound);
   let released = false;
   let supportTimer: ReturnType<typeof setTimeout> | undefined;
-  // The variant a recording sharing the stream holds it at, by its playlist's address (`fix`),
-  // and whether its levels are listed yet: until then, startup holds it.
+  // While a recording shares the stream, the main process sends only the variant it holds, which
+  // `fix` names by its playlist's address. Once the levels are listed, `follow` holds it, or
+  // with null lets hls.js pick again.
   let fixed: string | null = null;
-  let listed = false;
-  const heldLevel = () => (fixed === null ? -1 : hls.levels.findIndex(({ uri }) => uri === fixed));
+  let follow: (() => void) | null = null;
+  let loading = false;
+  /** Starts loading once: at `level`, else where hls.js would. */
+  const load = (level?: number) => {
+    if (loading) return;
+    loading = true;
+    if (level !== undefined) hls.startLevel = level;
+    hls.startLoad();
+  };
   if (ends === null) {
     hls.once(Hls.Events.MANIFEST_PARSED, () => {
-      listed = true;
-      const held = heldLevel();
-      if (held >= 0) {
-        hls.startLevel = held;
-        hls.startLoad();
-        hls.loadLevel = held;
-        return;
-      }
       // Reading firstAutoLevel starts hls.js's own capability checks. Let their handlers remove
       // unsupported levels before using any index; another read can start further checks.
       const checked = new Set<Promise<unknown>>();
@@ -339,7 +340,8 @@ function hlsEngine(
         supportTimer = setTimeout(() => resolve("timeout"), 1000);
       });
       async function start(): Promise<void> {
-        while (!released) {
+        // A held level takes over from this (`hold`).
+        while (!released && !loading && fixed === null) {
           const initial = hls.firstAutoLevel;
           const pending = hls.levels.flatMap((level) =>
             level.supportedPromise && !checked.has(level.supportedPromise)
@@ -351,7 +353,7 @@ function hlsEngine(
             const result = await Promise.race([Promise.allSettled(pending), deadline]);
             if (released) return;
             if (result === "timeout") {
-              hls.startLoad();
+              if (fixed === null) load();
               return;
             }
             continue;
@@ -400,30 +402,75 @@ function hlsEngine(
               ]);
               if (released) return;
               if (result === "timeout") {
-                hls.startLoad();
+                if (fixed === null) load();
                 return;
               }
               validated.set(candidate, result);
               continue;
             }
-            hls.startLevel = lowest;
+            return load(lowest);
           }
-          hls.startLoad();
-          return;
+          return load();
         }
       }
-      // Selection is optional. Unexpected selection errors fall back to normal loading; a
-      // loader failure still uses the engine's existing failure path.
-      void start()
-        .catch(() => {
+      /**
+       * Whether this player decodes `level`, as hls.js's capability check says. It is advisory:
+       * one that fails or doesn't answer within a second counts as yes.
+       */
+      const decodes = (level: (typeof hls.levels)[number]): Promise<boolean> => {
+        if (level.supportedResult) return Promise.resolve(level.supportedResult.supported);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        return Promise.race([
+          hls.getMediaDecodingInfo(level).then(
+            (info) => info.supported,
+            () => true,
+          ),
+          new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(true), 1000);
+          }),
+        ]).finally(() => clearTimeout(timer));
+      };
+      /**
+       * Holds the level `fixed` names, from the start while nothing loads yet, or else picks as
+       * startup does. The main process sends no other variant meanwhile, so one this player can't
+       * decode, or that hls.js left out as such, can't play here: that fails as unsupported, and
+       * the player asks for a stream of its own instead, which never shares the recording's.
+       */
+      async function hold(): Promise<void> {
+        const variant = fixed;
+        if (variant === null) {
+          if (loading) hls.loadLevel = -1;
+          else await start();
+          return;
+        }
+        const level = hls.levels.find(({ uri }) => uri === variant);
+        const playable = level !== undefined && (await decodes(level));
+        // A later `fix` holds its own.
+        if (released || fixed !== variant) return;
+        const index = level ? hls.levels.indexOf(level) : -1;
+        if (!playable || index < 0) {
+          life.fail({ kind: "unsupported", detail: t("The stream could not be decoded.") });
+          return;
+        }
+        load(index);
+        hls.loadLevel = index;
+      }
+      // Selection is optional. Unexpected selection errors fall back to normal loading, but for
+      // a held level, which nothing may stand in for. A loader failure still uses the engine's
+      // existing failure path.
+      follow = () =>
+        void hold().catch(() => {
           if (released) return;
-          try {
-            hls.startLoad();
-          } catch {
-            life.fail({ kind: "media", detail: t("The stream could not be decoded.") });
+          if (fixed === null) {
+            try {
+              return load();
+            } catch {
+              // Fails below.
+            }
           }
-        })
-        .finally(() => clearTimeout(supportTimer));
+          life.fail({ kind: "media", detail: t("The stream could not be decoded.") });
+        });
+      follow();
     });
   }
   const life = lifecycle(
@@ -452,9 +499,7 @@ function hlsEngine(
     tracks: tracks.handle,
     fix(variant) {
       fixed = variant;
-      if (released || !listed) return;
-      // One it doesn't list is still the only one the main process sends meanwhile: it picks.
-      hls.loadLevel = heldLevel();
+      if (!released) follow?.();
     },
     info() {
       const level = hls.levels[hls.currentLevel];
