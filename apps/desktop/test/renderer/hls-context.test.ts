@@ -4,9 +4,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import Hls, { type ErrorData } from "hls.js";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { createEngine, type Engine } from "../../src/renderer/src/player/engine.ts";
+import type { StandInData } from "./hls-stand-in.ts";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 
-const events = vi.hoisted(() => ({ error: (_data: unknown) => {} }));
+const events = vi.hoisted(() => ({ error: (_data: ErrorData) => {} }));
 
 vi.mock("hls.js", async (original) => {
   const real = await original<typeof import("hls.js")>();
@@ -14,14 +15,14 @@ vi.mock("hls.js", async (original) => {
 
   return {
     default: class extends standIn(real.default) {
-      errors: ((event: string, data: unknown) => void)[] = [];
+      errors: ((event: string, data: StandInData) => void)[] = [];
       constructor() {
         super();
         events.error = (data) => {
           for (const listener of this.errors) listener(real.default.Events.ERROR, data);
         };
       }
-      override on(event: string, listener: (event: string, data: unknown) => void) {
+      override on(event: string, listener: (event: string, data: StandInData) => void) {
         if (event === real.default.Events.ERROR) this.errors.push(listener);
         else super.on(event, listener);
       }

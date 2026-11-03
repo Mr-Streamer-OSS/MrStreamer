@@ -23,6 +23,7 @@
 //
 // A test plays the stream's part through `streams.latest()`.
 import type Hls from "hls.js";
+import type { ErrorData } from "hls.js";
 import { defined } from "@mrstreamer/core/defined";
 
 /** A rendition as a multivariant playlist declares it. */
@@ -39,7 +40,24 @@ export interface Rendition {
 /** A rendition with its place in the playing group, as hls.js numbers it. */
 type Listed = Rendition & { default: boolean; forced: boolean; id: number };
 
-type Listener = (event: string, data: unknown) => void;
+/** Event payloads this stand-in emits, with only the fields its consumers read. */
+export type StandInData =
+  | ErrorData
+  | Listed
+  | Partial<Omit<ErrorData, "context" | "frag">> & {
+      context?: { type: string; id: number } | undefined;
+      frag?: { type: string; level?: number; start?: number; duration?: number } | undefined;
+    }
+  | { id: number; details?: { targetduration: number; live: boolean } }
+  | { success: boolean; frag: { level: number; start: number; duration: number }; part: null; error?: Error }
+  | { captions: readonly Rendition[] }
+  | { audioTracks: Listed[] }
+  | { subtitleTracks: Listed[] }
+  | { level: number }
+  | { type: string; track: string; subtitleTrack?: Listed; cues: VTTCue[] }
+  | { tracks: { _id: string; label: string; kind: string; default: boolean }[] };
+
+type Listener = (event: string, data: StandInData) => void;
 
 /** How long a subtitle segment lasts. */
 const SEGMENT_S = 6;
@@ -147,7 +165,7 @@ export function standIn(real: typeof Hls) {
       this.on(event, first);
     }
 
-    #tell(event: string, data: unknown = {}): void {
+    #tell(event: string, data: StandInData = {}): void {
       for (const listener of this.#listeners.get(event) ?? []) listener(event, data);
     }
 
