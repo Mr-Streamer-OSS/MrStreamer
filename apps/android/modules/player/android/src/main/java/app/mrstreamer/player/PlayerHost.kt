@@ -18,8 +18,7 @@ object PlayerHost {
   private var owner: PlayerOwner? = null
 
   /** The media session over [owner]'s player, for media controls and notifications. */
-  var session: MediaSession? = null
-    private set
+  private var session: MediaSession? = null
 
   fun owner(context: Context): PlayerOwner {
     check(Looper.myLooper() == Looper.getMainLooper()) { "The player is used on the main thread" }

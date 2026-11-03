@@ -103,7 +103,7 @@ interface PlayerEvents {
 @UnstableApi
 class PlayerOwner(
   private val context: Context,
-  val player: ExoPlayer,
+  private val player: ExoPlayer,
   var events: PlayerEvents? = null,
 ) {
   private class Current(val admission: Admission, val hold: Hold) {
@@ -229,7 +229,7 @@ class PlayerOwner(
       player.setPlaybackSpeed(speed)
     }
 
-  /** Plays the video track [trackId] from [tracks], or chooses by itself again for null. */
+  /** Plays the video track [trackId] from the reported tracks, or chooses by itself again for null. */
   fun setQuality(attempt: String, trackId: String?): Boolean {
     if (trackId == null) {
       return command(attempt) {
@@ -281,9 +281,6 @@ class PlayerOwner(
     else if (view.player === player) view.player = null
     views.lastOrNull()?.keepScreenOn = player.isPlaying
   }
-
-  /** The tracks of the current attempt as last reported. */
-  fun tracks(): List<Track> = tracksOf(player.currentTracks)
 
   private fun command(attempt: String, allowed: () -> Boolean = { true }, action: () -> Unit): Boolean {
     val now = current ?: return false

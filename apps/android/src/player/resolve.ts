@@ -4,11 +4,11 @@ import { archiveAddress } from "@mrstreamer/core/playlist/catchup";
 import { playlistCatalogue, type PlaylistStream } from "@mrstreamer/core/playlist/catalogue";
 import { safeName } from "@mrstreamer/core/playlist/import";
 import { m3uReader, type PlaylistEntry } from "@mrstreamer/core/playlist/m3u";
-import { providerFetch, type ProviderLogin } from "@mrstreamer/core/provider";
+import { providerFetch, type LiveStream, type ProviderLogin } from "@mrstreamer/core/provider";
 import { describeNetworkError, xtreamProvider } from "@mrstreamer/core/xtream";
 import type { Credentials } from "../platform/credentials.ts";
 import type { PlayIntent } from "./intent.ts";
-import type { Admission } from "./native.ts";
+import type { Admission, PlaybackMode, StreamFormat } from "./native.ts";
 
 // From an intent to the address the native player opens, read from the source's protected login
 // each time. Xtream addresses are core's; a playlist's channel is found by reading the playlist
@@ -155,11 +155,6 @@ async function playlistStream(
 
 /** Resolves intents for the sources whose logins `platform.credentials` holds. */
 export function sourceStreams(platform: ResolvePlatform): Resolve {
-  const withAgent = (headers: Readonly<Record<string, string>> | undefined) => ({
-    "User-Agent": platform.userAgent,
-    ...headers,
-  });
-
   return async (intent, signal) => {
     if (intent.kind === "file") {
       return {
@@ -181,6 +176,23 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
     signal.throwIfAborted();
     if (!authority) throw new AppFailure({ kind: "needs-secret", subscriptionId: sourceId });
 
+    const request = (
+      stream: Pick<LiveStream, "url" | "headers">,
+      format: StreamFormat,
+      mode: PlaybackMode,
+      startMs = 0,
+    ): StreamRequest => ({
+      url: stream.url,
+      headers: { "User-Agent": platform.userAgent, ...stream.headers },
+      format,
+      mode,
+      startMs,
+      sourceId,
+    });
+    /** A recording starting at `start` plays from the intent's `from`, else its window's start. */
+    const archiveStartMs = (start: number) =>
+      intent.kind === "catch-up" ? Math.max(0, (intent.from ?? intent.window.start) - start) : 0;
+
     if (authority.kind === "xtream") {
       const provider = xtreamProvider(authority, {
         userAgent: platform.userAgent,
@@ -189,36 +201,15 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
       switch (intent.kind) {
         case "live": {
           const stream = await provider.liveStream(intent.channelId, signal);
-          return {
-            url: stream.url,
-            headers: withAgent(stream.headers),
-            format: stream.format,
-            mode: "live",
-            startMs: 0,
-            sourceId,
-          };
+          return request(stream, stream.format, "live");
         }
         case "catch-up": {
           const stream = await provider.archiveStream(intent.channelId, intent.window, signal);
-          return {
-            url: stream.url,
-            headers: withAgent(stream.headers),
-            format: stream.format,
-            mode: "archive",
-            startMs: Math.max(0, (intent.from ?? intent.window.start) - stream.start),
-            sourceId,
-          };
+          return request(stream, stream.format, "archive", archiveStartMs(stream.start));
         }
         case "title": {
           const file = await provider.titleFile(intent.media, intent.id, intent.container, signal);
-          return {
-            url: file.url,
-            headers: withAgent(file.headers),
-            format: "progressive",
-            mode: "title",
-            startMs: intent.resumeAt ?? 0,
-            sourceId,
-          };
+          return request(file, "progressive", "title", intent.resumeAt);
         }
       }
     }
@@ -227,27 +218,16 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
     if (intent.kind === "title")
       throw new AppFailure({ kind: "title-not-found", titleId: intent.id });
     const stream = await playlistStream(authority.link, intent.channelId, platform, signal);
-    if (intent.kind === "live") {
-      return {
-        url: stream.url,
-        headers: withAgent(stream.headers),
-        format: stream.format,
-        mode: "live",
-        startMs: 0,
-        sourceId,
-      };
-    }
+    if (intent.kind === "live") return request(stream, stream.format, "live");
     const archive = stream.catchup
       ? archiveAddress(stream.catchup, intent.window, platform.now())
       : null;
     if (!archive) throw new AppFailure({ kind: "catch-up", reason: "none" });
-    return {
-      url: archive.url,
-      headers: withAgent(stream.headers),
-      format: stream.format,
-      mode: "archive",
-      startMs: Math.max(0, (intent.from ?? intent.window.start) - archive.start),
-      sourceId,
-    };
+    return request(
+      { url: archive.url, headers: stream.headers },
+      stream.format,
+      "archive",
+      archiveStartMs(archive.start),
+    );
   };
 }

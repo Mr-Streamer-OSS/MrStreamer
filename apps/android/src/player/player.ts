@@ -24,7 +24,7 @@ export type PlaybackFailure =
   | { readonly kind: "resolve"; readonly error: AppError }
   | { readonly kind: "native"; readonly failure: NativeFailure };
 
-export type PlaybackPhase = "resolving" | Exclude<NativePhase, "stopped" | "failed"> | "failed";
+export type PlaybackPhase = "resolving" | Exclude<NativePhase, "stopped">;
 
 export interface Playing {
   readonly kind: "playing";

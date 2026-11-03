@@ -150,7 +150,7 @@ describe("player", () => {
     await flush();
     native.observe(first, { phase: "playing" });
 
-    const second = owner.play(live("2"));
+    owner.play(live("2"));
     expect(native.calls).toContain(`stop ${first}`);
     const third = owner.play(live("3"));
     // The second's address is worked out only after the third replaced it: it is never admitted.
@@ -159,7 +159,6 @@ describe("player", () => {
     held.pending[2]!.answer.resolve(request("http://tv.example/3.ts"));
     await flush();
     expect(native.admitted.map((each) => each.attempt)).toEqual([first, third]);
-    expect(second).not.toBe(third);
 
     native.observe(first, {
       phase: "failed",

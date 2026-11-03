@@ -189,6 +189,11 @@ function Centre({ children }: { children: ReactNode }) {
 /** Play or pause between the 10 s jumps, which show only where the media seeks. */
 function Transport({ now, onTouch }: { now: Playing; onTouch: () => void }) {
   const control = playPause(now);
+  // Each press starts the wait to hide the controls again.
+  const press = (run: () => void) => () => {
+    onTouch();
+    run();
+  };
   const jump = (by: number) => {
     const to = Math.max(0, now.positionMs + by);
     void player.seek(now.durationMs === null ? to : Math.min(to, now.durationMs));
@@ -200,30 +205,16 @@ function Transport({ now, onTouch }: { now: Playing; onTouch: () => void }) {
           icon="replay-10"
           label={t("Back 10 seconds")}
           size={56}
-          onPress={() => {
-            onTouch();
-            jump(-JUMP_MS);
-          }}
+          onPress={press(() => jump(-JUMP_MS))}
         />
       ) : null}
-      <Round
-        icon={control.icon}
-        label={control.label}
-        size={72}
-        onPress={() => {
-          onTouch();
-          control.run();
-        }}
-      />
+      <Round icon={control.icon} label={control.label} size={72} onPress={press(control.run)} />
       {now.seekable ? (
         <Round
           icon="forward-10"
           label={t("Forward 10 seconds")}
           size={56}
-          onPress={() => {
-            onTouch();
-            jump(JUMP_MS);
-          }}
+          onPress={press(() => jump(JUMP_MS))}
         />
       ) : null}
     </View>
