@@ -41,7 +41,8 @@ import { parseArgs } from "node:util";
 import manifest from "../../../docs/assets/marketing-demo-sources.json" with { type: "json" };
 import { startFakeProvider, type FakeProvider } from "../test/fake-provider.ts";
 import { startFakeTmdb } from "../test/fake-tmdb.ts";
-import { defined } from "@mrstreamer/core/defined";
+// By path, not package: iOS scripts run this file with no install of their own.
+import { defined } from "../../../packages/core/src/defined.ts";
 
 const override = process.env["MR_STREAMER_FFMPEG"];
 const ffmpeg = override ?? "ffmpeg";

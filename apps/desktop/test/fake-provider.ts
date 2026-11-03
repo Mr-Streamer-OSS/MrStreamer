@@ -27,7 +27,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { Readable, type Writable } from "node:stream";
 import { URL } from "node:url";
 import { crc32 as zlibCrc32, deflateSync } from "node:zlib";
-import { defined } from "@mrstreamer/core/defined";
+// By path, not package: iOS scripts run this file with no install of their own.
+import { defined } from "../../../packages/core/src/defined.ts";
 
 export interface FakeChannel {
   readonly streamId: number;
