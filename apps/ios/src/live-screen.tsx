@@ -922,8 +922,9 @@ function GuideGrid({
   const saved = useRef(gridScroll.get(scope));
   const list = useRef<FlatList<Channel>>(null);
   const navigation = useNavigation();
-  // End events include the final position missed by throttled scroll samples, including
-  // accessibility scrolling. Ignore the synthetic end event when a covered screen detaches.
+
+  // Save drag, momentum, accessibility and scroll-to-top completion while this screen is focused.
+  // Ignore the synthetic end event when a covered screen detaches.
   const remember = ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (navigation.isFocused()) gridScroll.set(scope, nativeEvent.contentOffset.y);
   };
@@ -1034,6 +1035,7 @@ function GuideGrid({
       onScrollEndDrag={remember}
       onMomentumScrollEnd={remember}
       onScrollToTop={remember}
+      scrollEventThrottle={100}
       onViewableItemsChanged={onVisible}
       viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
       initialNumToRender={12}
