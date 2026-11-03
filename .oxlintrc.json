@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["import", "typescript"],
+  "plugins": ["import", "typescript", "oxc"],
+  "jsPlugins": [{ "name": "anti-slop", "specifier": "./tools/oxlint/anti-slop/index.ts" }],
   "ignorePatterns": [
     "node_modules/",
     "out/",
@@ -13,17 +14,51 @@
     "apps/android/android/",
     "apps/android/.expo/",
     "apps/marketing/public/generated/",
-    "apps/marketing/.vercel/"
+    "apps/marketing/.vercel/",
+    "tools/oxlint/anti-slop/"
   ],
   "rules": {
     "unicorn/no-useless-spread": "off",
     "import/no-cycle": "error",
-    "typescript/no-explicit-any": "error"
+    "typescript/no-explicit-any": "error",
+    "oxc/no-accumulating-spread": "error",
+    "oxc/bad-array-method-on-arguments": "off",
+    "oxc/bad-char-at-comparison": "off",
+    "oxc/bad-comparison-sequence": "off",
+    "oxc/bad-match-all-arg": "off",
+    "oxc/bad-min-max-func": "off",
+    "oxc/bad-object-literal-comparison": "off",
+    "oxc/bad-replace-all-arg": "off",
+    "oxc/const-comparisons": "off",
+    "oxc/double-comparisons": "off",
+    "oxc/erasing-op": "off",
+    "oxc/missing-throw": "off",
+    "oxc/number-arg-out-of-range": "off",
+    "oxc/only-used-in-recursion": "off",
+    "oxc/uninvoked-array-callback": "off",
+    "anti-slop/no-array-filter-map": "error",
+    "anti-slop/no-chained-type-assertions": "error",
+    "anti-slop/no-conditional-empty-object-spread": "error",
+    "anti-slop/no-reduce-accumulator-copy": "error",
+    "anti-slop/no-reflect-apply": "error",
+    "anti-slop/no-reflect-get": "error",
+    "anti-slop/no-known-value-widening": "off",
+    "anti-slop/no-module-mocking": "off",
+    "anti-slop/no-object-parameters": "off",
+    "anti-slop/no-runtime-typeof": "off",
+    "anti-slop/no-shape-in-symbol-names": "off",
+    "anti-slop/no-unknown-parameters": "off",
+    "anti-slop/no-unknown-returns": "off",
+    "anti-slop/no-unknown-type-aliases": "off",
+    "anti-slop/no-unsafe-dictionary-type": "off",
+    "anti-slop/no-widen-then-assert": "off",
+    "anti-slop/require-readable-spacing": "off",
+    "anti-slop/require-safety-comment-for-type-assertion": "off"
   },
   "overrides": [
     {
       "files": ["**/*"],
-      "plugins": ["import", "typescript", "react", "promise"],
+      "plugins": ["import", "typescript", "react", "promise", "oxc"],
       "rules": {
         "react/jsx-no-duplicate-props": "error",
         "react/jsx-props-no-spread-multi": "error",
@@ -36,7 +71,7 @@
     },
     {
       "files": ["apps/desktop/src/renderer/**"],
-      "plugins": ["import", "typescript", "react", "promise"],
+      "plugins": ["import", "typescript", "react", "promise", "oxc"],
       "rules": {
         "react/rules-of-hooks": "error"
       }

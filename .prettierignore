@@ -12,3 +12,4 @@ apps/ios/.expo/
 apps/ios/build/
 apps/android/android/
 apps/android/.expo/
+tools/oxlint/anti-slop/
