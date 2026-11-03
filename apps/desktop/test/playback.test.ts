@@ -1367,7 +1367,6 @@ describe("live captures", () => {
     expect(captures.fixed("watch")).toBeNull();
     expect(await read("record", "sd.m3u8?token=1", true)).toBe(media("sd"));
     expect(captures.fixed("watch")).toBe(variant("sd"));
-    await captures.idle("other");
     await captures.idle("record");
     await captures.idle("watch");
   });
@@ -1498,10 +1497,15 @@ describe("live captures", () => {
 
     await read("watch", "master.m3u8");
     await read("watch", "hd.m3u8");
-    // Many master tokens must not stop a newly redirected playlist being held to the share.
+    // More than 256 variant addresses must not stop a new redirect being held to the share.
     for (token = 1; token <= 130; token++) await read("watch", "master.m3u8");
     moved = "next";
     await read("watch", "hd.m3u8");
+    // Reading at the redirect itself keeps it recent while other tokens turn over.
+    for (token = 131; token <= 261; token++) {
+      await read("watch", "master.m3u8");
+      await read("watch", "next/hd.m3u8?token=1");
+    }
     await read("watch", "sd.m3u8");
     await read("record", "master.m3u8");
     expect(await read("watch", "next/hd.m3u8?token=1")).toContain("sd-10.ts");

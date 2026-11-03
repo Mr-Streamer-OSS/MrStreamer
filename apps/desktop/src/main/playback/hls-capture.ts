@@ -44,7 +44,7 @@ const KEPT_BYTES = 64 * 1024 * 1024;
 const ANSWER_BYTES = 256 * 1024 * 1024;
 /** How long a playlist answered counts as current, at least: half its target duration else. */
 const FRESH_MS = 250;
-/** Addresses a variant is known by besides its own, at most: a token's each, as they change. */
+/** Variant aliases kept across the share, newest last, forgetting the oldest beyond this limit. */
 const ALIASES = 256;
 /** Playlist reads whose segment addresses are known, the latest: as many as readers lag by. */
 const NAMED_READS = 3;
@@ -306,9 +306,10 @@ export function hlsShares({
   readonly changed: (owner: string) => void;
 }) {
   const shares = new Map<string, Share>();
-  // An independently admitted reader outlives the share it couldn't join, until it leaves.
+  /** An independently admitted reader outlives the share it couldn't join, until it leaves. */
   const strangers = new Map<string, string>();
 
+  /** Remember a variant's most recently used addresses, bounded across the share. */
   const rememberAlias = (share: Share, address: string, variant: Variant) => {
     share.aliases.delete(address);
     share.aliases.set(address, variant);
@@ -432,7 +433,7 @@ export function hlsShares({
       // listed: another reader may have that read. Numbers that went back are named anew.
       // A variant's playlist at the address it sent on to is that variant's too.
       const variant = variantOf(share, address);
-      if (variant && url !== address) rememberAlias(share, url, variant);
+      if (variant && url !== variant.address) rememberAlias(share, url, variant);
       const of = variant?.address ?? pathOf(url);
       answer.playlist = of;
       const oldest = media.segments[0]!.sequence;
@@ -567,7 +568,7 @@ export function hlsShares({
   const closings = new Map<string, Set<Promise<void>>>();
   /** Takes `owner` out of every share but `kept`'s, closing those it was the last of. */
   const drop = (owner: string, kept?: string) => {
-    if (strangers.get(owner) !== kept) strangers.delete(owner);
+    strangers.delete(owner);
     for (const [key, share] of shares) {
       if (key === kept) continue;
       if (!share.owners.delete(owner)) continue;
