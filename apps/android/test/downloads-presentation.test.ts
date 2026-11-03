@@ -130,11 +130,11 @@ it("presents only the exact episode file and dispatches its state action", async
   ).toBeUndefined();
 
   for (const [state, icon, action] of [
-    ["queued", "stop", "pause"],
+    ["queued", "empty", "pause"],
     ["running", "stop", "pause"],
     ["paused", "empty", "resume"],
     ["failed", "retry", "retry"],
-    ["complete", "done", "play"],
+    ["complete", "done", "open"],
   ] as const) {
     const saved = { ...queued, state };
     const shown = libraryDownload([saved], identity, act);

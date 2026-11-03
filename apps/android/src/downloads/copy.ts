@@ -1,4 +1,4 @@
-import { catalogue } from "../library/catalogue.ts";
+import { catalogue } from "@mrstreamer/mobile/language";
 
 // Downloads' own messages. Wherever iOS says the same thing, the text and its Dutch follow
 // apps/ios/src/i18n/downloads.ts.

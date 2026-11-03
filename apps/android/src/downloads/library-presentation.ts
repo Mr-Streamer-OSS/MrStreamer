@@ -6,7 +6,7 @@ import { t } from "./copy.ts";
 export function libraryDownload(
   rows: readonly DownloadRow[],
   media: MediaIdentity,
-  act: (row: DownloadRow, action: "pause" | "resume" | "retry" | "play") => void,
+  act: (row: DownloadRow, action: "pause" | "resume" | "retry" | "open") => void,
 ): DownloadPresentation | undefined {
   const id = media.kind === "movie" ? media.titleId : media.episodeId;
 
@@ -23,7 +23,7 @@ export function libraryDownload(
 
   const action =
     state === "complete"
-      ? "play"
+      ? "open"
       : state === "failed"
         ? "retry"
         : state === "paused"
@@ -47,8 +47,8 @@ export function libraryDownload(
                 : "Queued",
     ),
     label: t(
-      action === "play"
-        ? "Play offline"
+      action === "open"
+        ? "Downloads"
         : action === "retry"
           ? "Retry"
           : action === "resume"
@@ -60,7 +60,7 @@ export function libraryDownload(
         ? "done"
         : state === "failed"
           ? "retry"
-          : state === "paused"
+          : state === "paused" || state === "queued"
             ? "empty"
             : "stop",
     progress: row.total > 0 ? Math.min(1, row.bytes / row.total) : 0,

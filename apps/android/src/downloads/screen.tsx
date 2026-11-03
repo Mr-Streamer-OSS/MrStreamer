@@ -1,10 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { formatBytes } from "@mrstreamer/core/i18n";
 import { sources } from "../bootstrap/sources.ts";
-import { useLocale } from "../library/catalogue.ts";
+import { currentLanguage, onLanguageChange } from "@mrstreamer/mobile/language";
 import { Artwork, Icon, Press } from "../library/parts.tsx";
 import { Dialog, FitSheet, RED, SheetRow, TextButton } from "../live/chrome.tsx";
 import { Screen } from "../navigation/screen.tsx";
@@ -57,7 +57,7 @@ type Overlay =
  * route. Paper A: one list, Queue in its order then On this device, side by side on tablets.
  */
 export default function DownloadsScreen() {
-  useLocale();
+  useSyncExternalStore(onLanguageChange, currentLanguage);
   const owner = downloads();
   const state = useStore(owner.state);
   const roster = useStore(sources.state);

@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import { requireNativeModule } from "expo";
 import { AppState } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
@@ -115,10 +116,7 @@ function createRuntime() {
         subscribe: model.state.subscribe,
         read: (media) =>
           libraryDownload(model.state.get().rows, media, (row, action) => {
-            if (action === "play")
-              void downloads()
-                .playCopy(row)
-                .catch(() => {});
+            if (action === "open") router.push("/offline");
             else void model.change(() => native.command(row.id, action));
           }),
       });

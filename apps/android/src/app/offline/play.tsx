@@ -1,6 +1,7 @@
 import { downloads } from "../../downloads/runtime.ts";
 import { t } from "../../downloads/copy.ts";
-import { useLocale } from "../../library/catalogue.ts";
+import { useSyncExternalStore } from "react";
+import { currentLanguage, onLanguageChange } from "@mrstreamer/mobile/language";
 import { Dialog, RED, TextButton } from "../../live/chrome.tsx";
 import { player } from "../../player/instance.ts";
 import { useStore } from "../../platform/store.ts";
@@ -12,7 +13,7 @@ import Watch from "../watch.tsx";
  * A copy that can't be read stops with Delete download or OK and never resolves a provider stream.
  */
 export default function OfflinePlay() {
-  useLocale();
+  useSyncExternalStore(onLanguageChange, currentLanguage);
   const state = useStore(player.state);
   const copy = state.kind === "playing" && state.intent.kind === "file" ? state.intent : null;
   const failed = copy && state.kind === "playing" && state.failure ? copy : null;

@@ -14,6 +14,8 @@ vi.mock("expo", () => ({
   }),
 }));
 
+vi.mock("expo-router", () => ({ router: { push: vi.fn() } }));
+
 vi.mock("react-native", () => ({ AppState: {} }));
 
 vi.mock("../src/bootstrap/sources.ts", () => ({ sources: {} }));
