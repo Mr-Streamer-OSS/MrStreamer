@@ -2,13 +2,14 @@ import { Window } from "happy-dom";
 import { act, createElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Paper A's navigation as the viewer meets it: the destinations along the bottom on a phone and
-// down a rail from 600dp, with Search, Downloads and Settings opening on the stack of the
-// destination showing. The real tabs layout, bar, rail and top app bar render with React DOM on a
-// happy-dom window; React Native's views are elements, and the router records what it is asked.
-// Expo Router's own tab and stack reducers (Back to Live, then out; a reselected tab back to its
-// root) aren't installed in CI, so the layout's settings for them are checked here and their
-// effect on a device.
+// Paper A's navigation as the viewer meets it: Connect or the destinations, the destinations
+// along the bottom on a phone and down a rail from 600dp, Search, Downloads and Settings opening
+// on the stack of the destination showing, a detail pane beside or over its list, and a sheet. The
+// real layouts, bar, rail, top app bar, screen frame and sheet render with React DOM on a
+// happy-dom window; React Native's views are elements, Back is a list of listeners run newest
+// first, and the router records what it is asked. Expo Router's own tab and stack reducers (Back
+// to Live, then out; a reselected tab back to its root) aren't installed in CI, so the layouts'
+// settings for them are checked here and their effect against the installed router.
 
 const scenario = vi.hoisted(() => ({
   width: 412,
@@ -16,8 +17,14 @@ const scenario = vi.hoisted(() => ({
   asked: [] as string[],
   /** What the tabs layout gave the navigator, but its children and bar. */
   navigator: {} as Record<string, unknown>,
-  /** The layout's initial route, where the navigator opens. */
-  initial: "",
+  /** The destination the tabs show. */
+  focused: "",
+  /** Back's listeners, oldest first. */
+  back: [] as (() => boolean)[],
+  /** The open modal's Back. */
+  modalBack: null as (() => void) | null,
+  /** What the saved sources' store holds. */
+  sources: { kind: "restoring" } as { kind: "restoring" } | { kind: "ready"; sources: object[] },
 }));
 
 vi.mock("react-native", async () => {
@@ -28,24 +35,53 @@ vi.mock("react-native", async () => {
     accessibilityRole?: string;
     accessibilityState?: { selected?: boolean };
     onPress?: () => void;
+    style?: { display?: string };
   };
   const view =
     (tag: string) =>
-    ({ children, accessibilityLabel, accessibilityRole, accessibilityState, onPress }: Props) =>
+    ({
+      children,
+      accessibilityLabel,
+      accessibilityRole,
+      accessibilityState,
+      onPress,
+      style,
+    }: Props) =>
       h(
         tag,
         {
           "aria-label": accessibilityLabel,
           role: accessibilityRole,
           "aria-selected": accessibilityState?.selected,
+          hidden: style?.display === "none",
           onClick: onPress,
         },
         children,
       );
   return {
     View: view("div"),
+    ScrollView: view("div"),
     Text: view("span"),
     Pressable: view("button"),
+    StatusBar: () => null,
+    Modal: ({
+      visible,
+      onRequestClose,
+      children,
+    }: {
+      visible: boolean;
+      onRequestClose: () => void;
+      children: ReactNode;
+    }) => {
+      scenario.modalBack = visible ? onRequestClose : null;
+      return visible ? h("dialog", { open: true }, children) : null;
+    },
+    BackHandler: {
+      addEventListener: (_: "hardwareBackPress", listener: () => boolean) => {
+        scenario.back.push(listener);
+        return { remove: () => scenario.back.splice(scenario.back.indexOf(listener), 1) };
+      },
+    },
     useWindowDimensions: () => ({ width: scenario.width, height: 900 }),
   };
 });
@@ -55,21 +91,38 @@ vi.mock("react-native-safe-area-context", async () => {
   const insets = { top: 24, bottom: 16, left: 0, right: 0 };
   return {
     SafeAreaInsetsContext: createContext(insets),
+    SafeAreaProvider: ({ children }: { children: ReactNode }) => children,
     useSafeAreaInsets: () => insets,
   };
 });
-vi.mock("expo-router", () => ({
-  router: {
-    navigate: (href: string) => scenario.asked.push(`navigate ${href}`),
-    back: () => scenario.asked.push("back"),
-  },
-  useSegments: () => scenario.segments,
+vi.mock("expo-router", async () => {
+  const { createElement: h } = await import("react");
+  /** The root stack: a section for each screen its guards let through. */
+  const Stack = Object.assign(({ children }: { children: ReactNode }) => children, {
+    Protected: ({ guard, children }: { guard: boolean; children: ReactNode }) =>
+      guard ? children : null,
+    Screen: ({ name }: { name: string }) => h("section", { "aria-label": name }),
+  });
+  return {
+    router: {
+      navigate: (href: string) => scenario.asked.push(`navigate ${href}`),
+      back: () => scenario.asked.push("back"),
+    },
+    useSegments: () => scenario.segments,
+    Stack,
+    DarkTheme: { colors: {} },
+    ThemeProvider: ({ children }: { children: ReactNode }) => children,
+  };
+});
+vi.mock("../src/bootstrap/sources.ts", () => ({
+  sources: { state: null, restore: () => void scenario.asked.push("restore") },
 }));
+vi.mock("../src/platform/store.ts", () => ({ useStore: () => scenario.sources }));
 vi.mock("expo-router/js-tabs", async () => {
   const { Children, isValidElement } = await import("react");
   type Bar = (props: object) => ReactElement;
   const Screen: (props: { name: string }) => null = () => null;
-  /** The navigator on its initial route, drawing only its bar. */
+  /** The navigator on the destination showing, drawing only its bar. */
   const Tabs = ({
     tabBar,
     children,
@@ -84,7 +137,7 @@ vi.mock("expo-router/js-tabs", async () => {
       .filter(isValidElement<{ name: string }>)
       .map(({ props: { name } }) => ({ key: `${name}-key`, name }));
     return tabBar({
-      state: { index: routes.findIndex(({ name }) => name === scenario.initial), routes },
+      state: { index: routes.findIndex(({ name }) => name === scenario.focused), routes },
       descriptors: {},
       insets: { top: 24, bottom: 16, left: 0, right: 0 },
       emitter: {
@@ -107,10 +160,11 @@ const { createRoot } = (await import(REACT_DOM)) as {
   createRoot(container: object): { render(node: unknown): void; unmount(): void };
 };
 
+const { default: RootLayout } = await import("../src/app/_layout.tsx");
 const { default: DestinationsLayout, unstable_settings } =
   await import("../src/app/(tabs)/_layout.tsx");
-scenario.initial = unstable_settings.initialRouteName;
 const { Screen } = await import("../src/navigation/screen.tsx");
+const { Sheet } = await import("../src/ui/sheet.tsx");
 
 let root: ReturnType<typeof createRoot> | null = null;
 
@@ -131,18 +185,41 @@ function press(container: ReturnType<typeof show>, label: string) {
   act(() => (button as unknown as { click(): void }).click());
 }
 
+/** Presses Back: its listeners run newest first until one takes it. Says whether one did. */
+function pressBack() {
+  let taken = false;
+  act(() => void (taken = scenario.back.toReversed().some((listener) => listener())));
+  return taken;
+}
+
 beforeEach(() => {
   scenario.width = 412;
   scenario.segments = ["(tabs)", "(live)"];
   scenario.asked = [];
+  scenario.focused = unstable_settings.anchor;
 });
 afterEach(() => {
   act(() => root?.unmount());
   window.document.body.innerHTML = "";
 });
 
+describe("the app", () => {
+  it("shows nothing until its sources are read, then Connect without one and the destinations with one", () => {
+    const screens = () => labels(show(createElement(RootLayout)), "section");
+    expect(screens()).toEqual([]);
+    expect(scenario.asked).toEqual(["restore"]);
+    act(() => root?.unmount());
+    scenario.sources = { kind: "ready", sources: [] };
+    expect(screens()).toEqual(["connect"]);
+    act(() => root?.unmount());
+    scenario.sources = { kind: "ready", sources: [{}] };
+    expect(screens()).toEqual(["(tabs)"]);
+  });
+});
+
 describe("the destinations", () => {
-  it("open on Live along the bottom of a phone, and Back returns to Live before leaving", () => {
+  it("are anchored on Live, which Back from another root returns to, and run along a phone's foot", () => {
+    expect(unstable_settings.anchor).toBe("(live)");
     const shown = show(createElement(DestinationsLayout));
     expect(labels(shown, '[aria-selected="true"]')).toEqual(["Live"]);
     expect(scenario.navigator).toMatchObject({ backBehavior: "initialRoute" });
@@ -150,7 +227,7 @@ describe("the destinations", () => {
     expect(labels(shown, 'button:not([role="tab"])')).toEqual([]);
   });
 
-  it("show another destination's stack as it was, and return the one showing to its root", () => {
+  it("switch to another destination, and leave a reselected one's stack to answer its tabPress", () => {
     const shown = show(createElement(DestinationsLayout));
     press(shown, "Movies");
     press(shown, "Live");
@@ -179,8 +256,10 @@ describe("the destinations", () => {
       "Settings",
     ]);
     press(shown, "Search");
-    press(shown, "Settings");
-    expect(scenario.asked).toEqual(["navigate /search", "navigate /settings"]);
+    act(() => root?.unmount());
+    scenario.focused = "movies";
+    press(show(createElement(DestinationsLayout)), "Settings");
+    expect(scenario.asked).toEqual(["navigate /search", "navigate /movies/settings"]);
   });
 });
 
@@ -205,5 +284,63 @@ describe("a screen's top app bar", () => {
     expect(labels(shown, "button")).toEqual(["Back"]);
     press(shown, "Back");
     expect(scenario.asked).toEqual(["back"]);
+  });
+});
+
+describe("a screen's detail pane", () => {
+  const detail = {
+    content: createElement("p", { "aria-label": "Programme" }),
+    onClose: () => void scenario.asked.push("close"),
+  };
+  const framed = () =>
+    show(
+      createElement(
+        Screen,
+        { title: "Live", detail },
+        createElement("p", { "aria-label": "Guide" }),
+      ),
+    );
+  const visible = (shown: ReturnType<typeof show>) =>
+    labels(shown, "p").filter(
+      (_, index) => !shown.querySelectorAll("p")[index]?.closest("[hidden]"),
+    );
+
+  it("takes its list's place on a phone, where the bar's Back and Android's close it first", () => {
+    const shown = framed();
+    expect(visible(shown)).toEqual(["Programme"]);
+    expect(labels(shown, "button")).toEqual(["Back"]);
+    press(shown, "Back");
+    expect(pressBack()).toBe(true);
+    expect(scenario.asked).toEqual(["close", "close"]);
+  });
+
+  it("shows beside its list from 840dp, and Back still closes it before the stack", () => {
+    scenario.width = 840;
+    const shown = framed();
+    expect(visible(shown)).toEqual(["Guide", "Programme"]);
+    expect(labels(shown, "button")).toEqual([]);
+    expect(pressBack()).toBe(true);
+    expect(scenario.asked).toEqual(["close"]);
+    act(() => root?.unmount());
+    expect(pressBack()).toBe(false);
+  });
+});
+
+describe("a sheet", () => {
+  it("closes from its scrim and from Back", () => {
+    const sheet = (visible: boolean) =>
+      createElement(Sheet, {
+        visible,
+        label: "Add provider",
+        onClose: () => void scenario.asked.push("close"),
+        children: createElement("p", { "aria-label": "Form" }),
+      });
+    const shown = show(sheet(true));
+    expect(labels(shown, "dialog p")).toEqual(["Form"]);
+    press(shown, "Close Add provider");
+    act(() => scenario.modalBack?.());
+    expect(scenario.asked).toEqual(["close", "close"]);
+    act(() => root?.render(sheet(false)));
+    expect(labels(shown, "dialog")).toEqual([]);
   });
 });

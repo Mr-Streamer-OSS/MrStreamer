@@ -1,1 +1,1 @@
-export { DestinationStack as default } from "../../../navigation/stack.tsx";
+export { DestinationStack as default, unstable_settings } from "../../../navigation/stack.tsx";

@@ -1,5 +1,5 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import type { EdgeInsets } from "react-native-safe-area-context";
 import type { Destination, DestinationRoute, SharedScreen } from "../navigation/destinations.ts";
 import { IconButton } from "./icon-button.tsx";
@@ -55,18 +55,24 @@ export function NavigationRail({
   onOpen,
   insets,
 }: Props & { onOpen: (screen: SharedScreen) => void }) {
+  // Scrolls when the window is shorter than the rail, as a phone in landscape is (about 484dp of
+  // rail against 360dp), and more so at large text, so Downloads and Settings stay reachable.
   return (
-    <View
+    <ScrollView
       style={{
+        flexGrow: 0,
         width: 88 + insets.left,
+        borderRightWidth: 1,
+        borderColor: colors.hairline,
+        backgroundColor: colors.background,
+      }}
+      contentContainerStyle={{
+        flexGrow: 1,
         paddingTop: insets.top + 8,
         paddingBottom: insets.bottom + 8,
         paddingLeft: insets.left,
         alignItems: "center",
         gap: 4,
-        borderRightWidth: 1,
-        borderColor: colors.hairline,
-        backgroundColor: colors.background,
       }}
     >
       <IconButton
@@ -104,7 +110,7 @@ export function NavigationRail({
         width={56}
         height={56}
       />
-    </View>
+    </ScrollView>
   );
 }
 
@@ -129,6 +135,7 @@ function Item({
       accessibilityState={{ selected }}
       accessibilityLabel={destination.label}
       onPress={onPress}
+      android_ripple={{ color: colors.ripple }}
       style={[
         { alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 8 },
         placement === "bar"

@@ -12,4 +12,6 @@ export const colors = {
   /** The drag handle at the top of a sheet. */
   handle: "#5C5C5C",
   scrim: "rgba(0, 0, 0, 0.6)",
+  /** Press and keyboard focus feedback on a control: Android's ripple, white at 16%. */
+  ripple: "rgba(255, 255, 255, 0.16)",
 } as const;

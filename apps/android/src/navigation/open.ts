@@ -14,7 +14,8 @@ export function destinationIn(segments: readonly string[]): DestinationRoute {
 
 /**
  * Opens Search, Downloads or Settings on the stack of the destination showing, as the top app bar
- * and the rail do. One already open on that stack is returned to rather than opened twice.
+ * and the rail do. One already on that stack moves to its top rather than opening twice
+ * (`DestinationStack`).
  */
 export function useOpenShared(): (screen: SharedScreen) => void {
   const segments: readonly string[] = useSegments();

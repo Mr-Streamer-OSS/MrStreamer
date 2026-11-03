@@ -87,16 +87,25 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
 - **Routes.** `index.ts` starts Expo Router on `src/app/`. The root layout shows `connect` while
   no source is saved and the destinations (`(tabs)`) after: Home, Live, Movies and Series
   (`src/navigation/destinations.ts`), each with its own stack, along the bottom on phones and
-  down a rail from 600dp. Live (`(live)`, at `/`) is where the app opens, and Back at another
-  destination's root returns to it before leaving the app. A feature card owns its
-  destination's `index.tsx` and adds its own pushed routes beside it (`movies/title/[id].tsx`);
-  Search, Downloads and Settings are `(live)/search.tsx`, `downloads.tsx` and `settings.tsx`,
-  which the other destinations re-export so each opens on the stack it was opened from
-  (`hrefOn`). Each screen frames itself with `Screen` (`src/navigation/screen.tsx`), its top
-  app bar, and pads only the insets `useSafeAreaInsets` still gives it.
+  down a rail from 600dp, which scrolls when the window is shorter than it. Live (`(live)`, at
+  `/`) is where the app opens, and Back at another destination's root returns to it before
+  leaving the app. A feature card owns its destination's `index.tsx` and adds its own pushed
+  routes beside it (`movies/title/[id].tsx`); Search, Downloads and Settings are
+  `(live)/search.tsx`, `downloads.tsx` and `settings.tsx`, which the other destinations
+  re-export so each opens on the stack it was opened from (`hrefOn`), at most once. Each stack
+  is anchored on its `index`, so a link straight to a pushed screen still has its root under it,
+  and a link to no screen opens Live (`+not-found.tsx`). Live's root shows the bootstrap's
+  channel list under its own header until the Live card replaces it.
+- **Screens.** Each screen frames itself with `Screen` (`src/navigation/screen.tsx`): its top
+  app bar, and the insets `useSafeAreaInsets` still gives its content, the bottom on tablets
+  only. A screen with a list and a selected item passes `detail` (`content` and `onClose`): from
+  840dp it shows beside the list, below that it takes the list's place with Back in the bar.
+  Keep the selection in the route's params so it survives rotation into either form.
 - **Back order.** A `Sheet` (`src/ui/sheet.tsx`), a dialog or an alert closes before anything
-  under it. A detail pane or player registers its own `BackHandler` listener while it shows: the
-  newest listener runs first, before the stacks', so it closes before a pushed screen.
+  under it, then a detail pane (its `BackHandler` listener is newer than the stacks'), then a
+  pushed screen, then the destination, back to Live and out. A player or other layer that takes
+  Back registers its listener the same way while it shows. This order is checked against the
+  installed router and React Native's listeners; on a device it is not yet observed.
 - **Sources.** `src/bootstrap/sources.ts` holds the app's one `sources` owner
   (`src/connect/sources.ts`): `restore`, `connect`, `retry`, `remove` and its `state` store. The
   root layout restores it at launch. `sources.json` in the app's files folder lists each

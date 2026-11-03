@@ -29,6 +29,7 @@ export function IconButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
+      android_ripple={{ color: colors.ripple, borderless: true, radius: 24 }}
       style={{
         width,
         height,

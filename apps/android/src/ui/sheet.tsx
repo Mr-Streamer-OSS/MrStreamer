@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 import { Modal, Pressable, View } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors } from "./theme.ts";
 
 /**
  * A modal bottom sheet over the screen that opened it. Back, Escape and a tap on the scrim close
  * it before anything under it, and TalkBack stays inside it while it shows. Its content fills it
- * under the drag handle, up to 560dp wide, and pads the system's navigation bar itself. Paper A: a
- * #141414 surface with 28dp top corners over a 60% black scrim, a 32x4dp handle in a 36dp band.
+ * under the drag handle, up to 560dp wide, and pads the system's navigation bar itself from
+ * `useSafeAreaInsets`. Paper A: a #141414 surface with 28dp top corners over a 60% black scrim,
+ * a 32x4dp handle in a 36dp band.
  */
 export function Sheet({
   visible,
@@ -29,7 +31,9 @@ export function Sheet({
       navigationBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={{ flex: 1, justifyContent: "flex-end" }}>
+      {/* Its own window's insets, not those of the screen it opened over, which may have left
+          the navigation bar's to the destinations' bar. */}
+      <SafeAreaProvider style={{ flex: 1, justifyContent: "flex-end" }}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Close ${label}`}
@@ -59,7 +63,7 @@ export function Sheet({
           </View>
           {children}
         </View>
-      </View>
+      </SafeAreaProvider>
     </Modal>
   );
 }

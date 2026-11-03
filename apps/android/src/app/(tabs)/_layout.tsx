@@ -4,7 +4,7 @@ import { DestinationBar } from "../../navigation/destination-bar.tsx";
 import { DESTINATIONS, layoutFor, START_DESTINATION } from "../../navigation/destinations.ts";
 import { colors } from "../../ui/theme.ts";
 
-export const unstable_settings = { initialRouteName: START_DESTINATION };
+export const unstable_settings = { anchor: START_DESTINATION };
 
 // Home, Live, Movies and Series, each keeping its own stack while another shows. Back at a
 // destination's root returns to Live, and at Live's root leaves the app.
