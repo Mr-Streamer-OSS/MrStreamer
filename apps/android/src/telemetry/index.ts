@@ -1,5 +1,4 @@
-import Constants from "expo-constants";
-import { Platform } from "react-native";
+import { build } from "../settings/build.ts";
 import { preferences } from "../platform/preferences.ts";
 import { androidAnalytics } from "./analytics.ts";
 import { analyticsTransport } from "./transport.ts";
@@ -16,11 +15,7 @@ export const statistics = androidAnalytics({
 
       return (letter === "x" ? random : (random & 3) | 8).toString(16);
     }),
-  build: androidBuild(
-    Platform.OS === "android" ? Platform.constants.Release : "unknown",
-    Constants.expoConfig?.version ?? "unknown",
-    String(Constants.expoConfig?.android?.versionCode ?? "unknown"),
-  ),
+  build: androidBuild(build.release, build.version, build.code),
   transport: analyticsTransport({
     development: __DEV__,
     releaseBuild: process.env.EXPO_PUBLIC_MR_STREAMER_ANALYTICS_RELEASE_BUILD,

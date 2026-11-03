@@ -17,7 +17,7 @@ import { Screen } from "../navigation/screen.tsx";
 import { colors } from "../ui/theme.ts";
 import { t } from "./copy.ts";
 import { useInterfaceLanguage } from "./language.ts";
-import { licenceAt, licences } from "./licences.ts";
+import licences from "../../licenses/manifest.json";
 import { PaneTitle } from "./pane-title.tsx";
 import { Pressed, useSnackbar } from "./parts.tsx";
 
@@ -39,7 +39,7 @@ export function LicencesScreen() {
   const { snackbar, show: notify } = useSnackbar();
   const rows = useRef(new Map<number, ComponentRef<typeof Pressable>>());
   const at = licence === undefined ? -1 : Number(licence);
-  const selected = licenceAt(at);
+  const selected = licences[at];
   const beside = width >= BESIDE;
 
   const openLink = (url: string) =>

@@ -6,7 +6,6 @@ export const t = catalogue(
     Settings: "Settings",
     General: "General",
     "Interface language": "Interface language",
-    "System default": "System default",
     "System default ({language})": "System default ({language})",
     English: "English",
     Nederlands: "Nederlands",
@@ -66,7 +65,6 @@ export const t = catalogue(
       Settings: "Instellingen",
       General: "Algemeen",
       "Interface language": "Taal van de interface",
-      "System default": "Systeem",
       "System default ({language})": "Systeem ({language})",
       // Each language is named in its own words, so a viewer finds theirs in any.
       English: "English",

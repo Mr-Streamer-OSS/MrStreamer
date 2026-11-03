@@ -4,6 +4,7 @@ Uses only published POM metadata, artefact notices and licence URLs. Missing not
 """
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import hashlib
 import io
 import json
 import os
@@ -19,7 +20,7 @@ CACHE = APP.parents[1] / '.local' / 'licence-inputs'
 CACHE.mkdir(parents=True, exist_ok=True)
 
 def fetch(url):
-    key = __import__('hashlib').sha256(url.encode()).hexdigest()
+    key = hashlib.sha256(url.encode()).hexdigest()
     path = CACHE / key
     if path.exists(): return path.read_bytes()
     try:
@@ -98,8 +99,7 @@ for licence, packages in js.items():
                         text = comment[1].strip()
                         break
             if not text and repository:
-                repo = repository if '://' in repository else 'https://github.com/' + repository
-                repo = repo.removeprefix('git+').replace('ssh://git@github.com/', 'https://github.com/').removesuffix('.git')
+                repo = repository_url(repository)
                 if repo.startswith('https://github.com/'):
                     location = repo.removeprefix('https://github.com/')
                     published = fetch(f"https://registry.npmjs.org/{package['name']}/{metadata['version']}")

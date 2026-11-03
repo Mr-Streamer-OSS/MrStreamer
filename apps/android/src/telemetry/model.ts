@@ -6,11 +6,10 @@ import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 // (docs/telemetry.md) wherever the Android app has the same observation, under its own build
 // dimensions. Nothing here names a device, a person, a provider or anything played.
 
-/** The desktop's actions the Android app can observe. Its other actions have no Android feature yet. */
+/** The desktop's actions the Android app observes. Its other actions have no Android feature yet. */
 export const androidActions = [
   "playlist_added",
   "playlist_removed",
-  "playlist_refreshed",
 ] as const satisfies readonly AnalyticsAction[];
 
 export type AndroidAction = (typeof androidActions)[number];
@@ -44,10 +43,6 @@ const Common = lazy(() =>
     .onUndeclaredKey("delete"),
 );
 
-type CommonProperties = Infer<typeof Common>;
-
-const Day = /^\d{4}-\d{2}-\d{2}$/;
-
 function event<const Name extends string, Properties extends object>(
   name: type.Any<Name>,
   properties: type.Any<Properties>,
@@ -63,37 +58,17 @@ function event<const Name extends string, Properties extends object>(
 
 /** Every capture: one fixed name with its own fixed property set. Unknown keys are deleted. */
 export const CaptureEvent = lazy(() =>
-  event(type.unit("installation_observed"), Common())
-    .or(
-      event(
-        type.unit("app_active_day"),
-        Common().merge({ activity_date: Day }).onUndeclaredKey("delete"),
-      ),
-    )
-    .or(event(type.enumerated(...androidActions), Common()))
-    .or(
-      event(
-        type.unit("feature_opened"),
-        Common()
-          .merge({ feature: type.enumerated(...androidFeatures) })
-          .onUndeclaredKey("delete"),
-      ),
+  event(type.enumerated(...androidActions), Common()).or(
+    event(
+      type.unit("feature_opened"),
+      Common()
+        .merge({ feature: type.enumerated(...androidFeatures) })
+        .onUndeclaredKey("delete"),
     ),
+  ),
 );
 
 export type CaptureEvent = Infer<typeof CaptureEvent>;
-
-export type CaptureName = CaptureEvent["event"];
-
-export type CaptureOf<Name extends CaptureName> = CaptureEvent & { event: Name };
-
-/** An event's own properties, by name, before the common build dimensions are added. */
-export type EventProperties<Name extends CaptureName> =
-  CaptureOf<Name>["properties"] extends infer Properties
-    ? Properties extends unknown
-      ? Omit<Properties, keyof CommonProperties>
-      : never
-    : never;
 
 /** Platform.Version is an API level on Android; Release is the operating system version. */
 export function androidBuild(release: string, version: string, build: string): AndroidBuild {

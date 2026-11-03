@@ -12,5 +12,3 @@ export {
   formatDate,
   formatNumber,
 } from "@mrstreamer/core/i18n";
-
-export type AndroidLocale = "en-US" | "nl-NL";

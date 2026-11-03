@@ -278,10 +278,14 @@ it("asks for the statistics choice until it is answered, not closing for Back or
   });
 });
 
-it("shares only the diagnostics text, with no provider's address", async () => {
+it("counts the generated licence manifest, and shares only the diagnostics text, with no provider's address", async () => {
   setLanguage({ locale: "en-US", formats: "en-US" });
   scenario.params = { show: "diagnostics" };
   const shown = show(createElement(SettingsScreen));
+  const { default: manifest } = await import("../licenses/manifest.json");
+  expect(shown.querySelector('button[aria-label="Licences"]')?.textContent).toContain(
+    String(manifest.length),
+  );
   press(shown, "Share");
   await act(async () => {});
   expect(scenario.shared).toEqual([

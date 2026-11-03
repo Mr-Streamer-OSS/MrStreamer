@@ -7,7 +7,9 @@ import { preferences } from "../src/platform/preferences.ts";
 import { diagnosticsText } from "../src/settings/diagnostics.ts";
 import { t } from "../src/settings/copy.ts";
 import { androidAnalytics } from "../src/telemetry/analytics.ts";
-import { recoveryAction, providerRecovery } from "../src/settings/recovery.ts";
+import { providerRecovery } from "../src/settings/recovery.ts";
+import { androidBuild } from "../src/telemetry/model.ts";
+import { analyticsTransport } from "../src/telemetry/transport.ts";
 import { store } from "../src/platform/store.ts";
 import type { PlayerOwner } from "../src/player/player.ts";
 import type { Sources } from "../src/connect/sources.ts";
@@ -78,52 +80,11 @@ it("diagnostics only include anonymous kinds and counts despite private input", 
     expect(text).not.toContain(secret);
 });
 
-it("reports a partial removal and only clears statistics once the last provider is removed", async () => {
-  const source = {
-    id: "source",
-    kind: "m3u" as const,
-    label: "example.invalid",
-    channels: {
-      kind: "failed" as const,
-      error: { kind: "needs-secret" as const, subscriptionId: "source" },
-    },
-  };
-
-  const state = store<Sources>({ kind: "ready", sources: [source] });
-  const discard = vi.fn(() => true);
-  let fails = true;
-
-  const recovery = providerRecovery(
-    {
-      state,
-      restore: async () => {},
-      connect: async () => ({ kind: "cancelled" }),
-      retry: () => {},
-      remove: async () => {
-        if (fails) throw new Error("registry refused");
-        state.set({ kind: "ready", sources: [] });
-      },
-    },
-    discard,
-    { release: async () => [] },
-  );
-
-  expect(recoveryAction(source)).toBe("enter-login");
-  expect(await recovery.remove("source")).toMatchObject({ erase: "partial" });
-  expect(discard).not.toHaveBeenCalled();
-  fails = false;
-  expect(await recovery.remove("source")).toMatchObject({ erase: "removed" });
-  expect(discard).toHaveBeenCalledOnce();
-});
-
 it("captures only Android fields and aborts delivery when switched Off", async () => {
   const send = vi.fn(async (_event: unknown, _signal: AbortSignal) => "accepted" as const);
 
   const build = {
-    os: "android" as const,
-    os_major: 16,
-    app_version: "0.1.0",
-    app_build: "1",
+    ...androidBuild("16", "0.1.0", "1"),
     model: "private-model",
     locale: "private-locale",
     provider: "private-provider",
@@ -136,7 +97,7 @@ it("captures only Android fields and aborts delivery when switched Off", async (
     save: () => true,
     uuid: () => "11111111-1111-4111-8111-111111111111",
     build,
-    transport: { kind: "local", send },
+    transport: { send },
   });
 
   owner.noteFeature("settings");
@@ -165,16 +126,11 @@ it("captures only Android fields and aborts delivery when switched Off", async (
   await Promise.resolve();
 });
 
-it("lists exactly the generated licence manifest and full notices", async () => {
-  const { licences, licenceCount, licenceAt } = await import("../src/settings/licences.ts");
+it("has every manifest component's licence, version, source and full notice", async () => {
   const { default: manifest } = await import("../licenses/manifest.json");
-  expect(licenceCount).toBe(manifest.length);
-  expect(licences).toEqual(manifest);
-  expect(licenceCount).toBeGreaterThan(0);
-  expect(licenceAt(-1)).toBeNull();
-  expect(licenceAt(licenceCount)).toBeNull();
+  expect(manifest.length).toBeGreaterThan(0);
 
-  for (const component of licences) {
+  for (const component of manifest) {
     expect(component.name).not.toBe("");
     expect(component.version).not.toBe("");
     expect(component.licence).not.toBe("");
@@ -183,16 +139,7 @@ it("lists exactly the generated licence manifest and full notices", async () => 
   }
 });
 
-it("uses the Android release major, version and build, with release-only production gating", async () => {
-  const { androidBuild } = await import("../src/telemetry/model.ts");
-  const { analyticsTransport } = await import("../src/telemetry/transport.ts");
-  expect(androidBuild("16", "0.1.0", "1")).toEqual({
-    os: "android",
-    os_major: 16,
-    app_version: "0.1.0",
-    app_build: "1",
-  });
-
+it("sends to production only from a release bundle with an approved host", () => {
   const config = {
     development: false,
     releaseBuild: "1",
@@ -201,14 +148,48 @@ it("uses the Android release major, version and build, with release-only product
     localEndpoint: undefined,
   };
 
-  expect(analyticsTransport(config)?.kind).toBe("production");
+  expect(analyticsTransport(config)).not.toBeNull();
   expect(analyticsTransport({ ...config, development: true })).toBeNull();
   expect(analyticsTransport({ ...config, releaseBuild: undefined })).toBeNull();
   expect(analyticsTransport({ ...config, host: "https://example.invalid" })).toBeNull();
 });
 
+it("clears statistics only once the last provider is removed", async () => {
+  const ready = (id: string) => ({
+    id,
+    kind: "m3u" as const,
+    label: "example.invalid",
+    channels: { kind: "ready" as const, rows: [] },
+  });
+
+  const state = store<Sources>({ kind: "ready", sources: [ready("first"), ready("last")] });
+  const discard = vi.fn(() => true);
+
+  const recovery = providerRecovery(
+    {
+      state,
+      restore: async () => {},
+      connect: async () => ({ kind: "cancelled" }),
+      retry: () => {},
+      remove: async (id) => {
+        const now = state.get();
+
+        if (now.kind === "ready")
+          state.set({ kind: "ready", sources: now.sources.filter((each) => each.id !== id) });
+      },
+    },
+    discard,
+    { release: async () => [] },
+  );
+
+  expect(await recovery.remove("first")).toMatchObject({ erase: "removed" });
+  expect(discard).not.toHaveBeenCalled();
+  expect(await recovery.remove("last")).toMatchObject({ erase: "removed" });
+  expect(discard).toHaveBeenCalledOnce();
+});
+
 it.each(["removed", "partial", "refused"] as const)(
-  "awaits only this source's playback before erase, retaining unconfirmed release with %s",
+  "awaits only this source's playback before erase, retaining unconfirmed release, and keeps statistics unless erased, with %s",
   async (erase) => {
     const source = {
       id: "source",
@@ -225,6 +206,7 @@ it.each(["removed", "partial", "refused"] as const)(
 
     const state = store<Sources>({ kind: "ready", sources: [source] });
     const events: string[] = [];
+    const discard = vi.fn(() => true);
     let finish!: () => void;
 
     const waiting = new Promise<void>((resolve) => {
@@ -261,7 +243,7 @@ it.each(["removed", "partial", "refused"] as const)(
           state.set({ kind: "ready", sources: [] });
         },
       },
-      () => true,
+      discard,
       { release },
     );
 
@@ -279,5 +261,6 @@ it.each(["removed", "partial", "refused"] as const)(
       ],
     });
     expect(events).toEqual(["release", "released", "erase"]);
+    expect(discard).toHaveBeenCalledTimes(erase === "removed" ? 1 : 0);
   },
 );

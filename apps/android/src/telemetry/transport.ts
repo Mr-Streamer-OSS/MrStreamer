@@ -1,12 +1,10 @@
 import { type } from "arktype";
-import type { AnalyticsSettings } from "@mrstreamer/contracts/analytics";
 import { CaptureEvent } from "./model.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 export type CaptureResult = "accepted" | "retry" | "discard";
 
 export interface CaptureTransport {
-  readonly kind: Exclude<AnalyticsSettings["transport"], "unconfigured" | "unavailable">;
   send(event: CaptureEvent, signal: AbortSignal): Promise<CaptureResult>;
 }
 
@@ -49,7 +47,7 @@ export function analyticsTransport(config: {
   )
     return null;
 
-  return capture(PRODUCTION[host], projectToken, "production");
+  return capture(PRODUCTION[host], projectToken);
 }
 
 /** Verification only: literal loopback over plain HTTP, PostHog's capture path, nothing else. */
@@ -69,16 +67,11 @@ function localCapture(endpoint: string): CaptureTransport | null {
   )
     return null;
 
-  return capture(url.href, "mrstreamer-local-verification", "local");
+  return capture(url.href, "mrstreamer-local-verification");
 }
 
-function capture(
-  endpoint: string,
-  projectToken: string,
-  kind: CaptureTransport["kind"],
-): CaptureTransport {
+function capture(endpoint: string, projectToken: string): CaptureTransport {
   return {
-    kind,
     async send(event, signal) {
       const allowed = CaptureEvent()(event);
 
@@ -99,7 +92,7 @@ function capture(
           ...defined({ os_major: properties.os_major }),
           $process_person_profile: false,
           $geoip_disable: true,
-          ...ownProperties(allowed),
+          ...(allowed.event === "feature_opened" && { feature: allowed.properties.feature }),
         },
       });
 
@@ -134,16 +127,4 @@ function capture(
       }
     },
   };
-}
-
-/** Copies each event's own fixed fields by name. */
-function ownProperties(event: CaptureEvent) {
-  switch (event.event) {
-    case "app_active_day":
-      return { activity_date: event.properties.activity_date };
-    case "feature_opened":
-      return { feature: event.properties.feature };
-    default:
-      return {};
-  }
 }

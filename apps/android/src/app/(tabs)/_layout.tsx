@@ -8,6 +8,8 @@ import { DestinationBar } from "../../navigation/destination-bar.tsx";
 import { DESTINATIONS, layoutFor, START_DESTINATION } from "../../navigation/destinations.ts";
 import { colors } from "../../ui/theme.ts";
 
+// The statistics choice, loaded only on Android: a runtime without `Platform` (the navigation
+// tests' React Native) never loads its storage and telemetry.
 const Preferences = lazy(() => import("../../settings/consent-prompt.tsx"));
 
 export const unstable_settings = { anchor: START_DESTINATION };

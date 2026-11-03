@@ -7,21 +7,27 @@ export interface RemovalResult {
   readonly release: readonly Release[];
 }
 
-export function recoveryAction(source: ConnectedSource): "enter-login" | "retry" {
-  return source.channels.kind === "failed" && source.channels.error.kind === "needs-secret"
-    ? "enter-login"
-    : "retry";
+/** This phone no longer has the source's login, so it needs its password or link again. */
+export function needsLogin(source: ConnectedSource): boolean {
+  return source.channels.kind === "failed" && source.channels.error.kind === "needs-secret";
 }
 
-/** Retry and reload channels use the source owner's authenticated list load. */
+/**
+ * Settings' provider removal: release only this source's playback, then erase it. A refused erase
+ * that left the source listed without its login is `partial`; the last removal clears statistics.
+ */
 export function providerRecovery(
   owner: SourcesOwner,
   discardStatistics: () => boolean,
   player: Pick<PlayerOwner, "release">,
 ) {
+  const listed = (id: string) => {
+    const now = owner.state.get();
+
+    return now.kind === "ready" ? now.sources.find((each) => each.id === id) : undefined;
+  };
+
   return {
-    retry: (id: string) => owner.retry(id),
-    reloadChannels: (id: string) => owner.retry(id),
     async remove(id: string): Promise<RemovalResult> {
       const release = await player.release(
         (hold) => hold.kind === "source" && hold.sourceId === id,
@@ -30,15 +36,9 @@ export function providerRecovery(
       try {
         await owner.remove(id);
       } catch {
-        const now = owner.state.get();
+        const source = listed(id);
 
-        const source =
-          now.kind === "ready" ? now.sources.find((each) => each.id === id) : undefined;
-
-        return {
-          erase: source && recoveryAction(source) === "enter-login" ? "partial" : "refused",
-          release,
-        };
+        return { erase: source && needsLogin(source) ? "partial" : "refused", release };
       }
 
       const now = owner.state.get();

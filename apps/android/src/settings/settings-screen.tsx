@@ -29,7 +29,7 @@ import { build } from "./build.ts";
 import { t } from "./copy.ts";
 import { DiagnosticsPane } from "./diagnostics-pane.tsx";
 import { chooseLanguage, languageChoice, useInterfaceLanguage } from "./language.ts";
-import { licenceCount } from "./licences.ts";
+import licences from "../../licenses/manifest.json";
 import { onStack } from "./paths.ts";
 import {
   Dialog,
@@ -42,7 +42,7 @@ import {
   SwitchRow,
   useSnackbar,
 } from "./parts.tsx";
-import { providerRecovery, recoveryAction } from "./recovery.ts";
+import { needsLogin, providerRecovery } from "./recovery.ts";
 
 const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
 
@@ -242,7 +242,7 @@ export function SettingsScreen() {
           <Row label={t("Version")} value={`${build.version} (${build.code})`} />
           <Row
             label={t("Licences")}
-            value={formatNumber(licenceCount)}
+            value={formatNumber(licences.length)}
             trailing="next"
             onPress={() => router.push(onStack(segments, "licences"))}
           />
@@ -264,11 +264,7 @@ export function SettingsScreen() {
             onLogin={() => setOpen({ kind: "form", id: selected.id })}
             onRetry={() => {
               close();
-              recovery.retry(selected.id);
-            }}
-            onReload={() => {
-              close();
-              recovery.reloadChannels(selected.id);
+              sources.retry(selected.id);
             }}
             onRemove={() => {
               close();
@@ -388,17 +384,15 @@ function ProviderActions({
   source,
   onLogin,
   onRetry,
-  onReload,
   onRemove,
 }: {
   source: ConnectedSource;
   onLogin: () => void;
+  /** Retry, or Reload channels: the source's list loads again either way. */
   onRetry: () => void;
-  onReload: () => void;
   onRemove: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const needsLogin = recoveryAction(source) === "enter-login";
   const failed = source.channels.kind === "failed";
 
   return (
@@ -412,7 +406,7 @@ function ProviderActions({
         </Text>
         <Status source={source} />
       </View>
-      {needsLogin ? (
+      {needsLogin(source) ? (
         <SheetAction
           icon={source.kind === "m3u" ? "link" : "vpn-key"}
           label={source.kind === "m3u" ? t("Enter playlist link") : t("Enter password")}
@@ -422,7 +416,7 @@ function ProviderActions({
       ) : failed ? (
         <SheetAction icon="refresh" label={t("Retry")} onPress={onRetry} primary />
       ) : (
-        <SheetAction icon="live-tv" label={t("Reload channels")} onPress={onReload} />
+        <SheetAction icon="live-tv" label={t("Reload channels")} onPress={onRetry} />
       )}
       <SheetAction icon="delete" label={t("Remove")} onPress={onRemove} />
     </View>
