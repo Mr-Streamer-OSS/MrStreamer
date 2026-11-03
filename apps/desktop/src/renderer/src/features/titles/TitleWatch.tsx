@@ -59,7 +59,7 @@ import {
   type TitlePlayerState,
   type TitleProblem,
 } from "../../player/title-player.ts";
-import { CloseMessage, pressesClose, useClosed } from "../watch/CloseMessage.tsx";
+import { CloseMessage, pressesClose, useClosed, type Closable } from "../watch/CloseMessage.tsx";
 import { openDownloads, pressesDownloads } from "../downloads/DownloadsNotice.tsx";
 import { Flash, flash, flashNote } from "../watch/Flash.tsx";
 import { useFullscreen, useWake } from "../watch/layout.ts";
@@ -751,7 +751,7 @@ function Stated({
   line?: ReactNode;
   title?: string;
   body?: ReactNode;
-  failure?: object | undefined;
+  failure?: Closable | undefined;
   children?: ReactNode;
 }) {
   return (
@@ -1116,7 +1116,7 @@ function EndOfEpisode({
   title: string;
   detail: ReactNode;
   /** A next episode that didn't start, whose message the viewer can close. */
-  failure?: object;
+  failure?: Closable;
   children: ReactNode;
 }) {
   return (

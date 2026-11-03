@@ -2,6 +2,7 @@ import { createSocket } from "node:dgram";
 import dnsPacket from "dns-packet";
 import protobuf from "protobufjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { JsonObject } from "@mrstreamer/contracts/json";
 import type { Receiver } from "@mrstreamer/contracts/output";
 import {
   ReceiverFailed,
@@ -82,7 +83,7 @@ async function connected(timings: Partial<CastTimings> = {}) {
 /** Sends synthetic ASCII status messages within each frame's limit, even with a long sender. */
 function sendInParts(
   receiver: Awaited<ReturnType<typeof startFakeCastReceiver>>,
-  payload: object,
+  payload: JsonObject,
   fields: CastFields,
 ) {
   const text = JSON.stringify(payload);

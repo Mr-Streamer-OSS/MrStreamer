@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import * as React from "react";
+import type { Element } from "happy-dom";
 import { describe, expect, it } from "vitest";
 
 // A screen's read answers only the request it was made for: once the viewer picks another
@@ -14,11 +15,11 @@ type Root = { render(node: unknown): void; unmount(): void };
 
 /** happy-dom's document; the app's own types have no DOM. */
 const { document } = globalThis as typeof globalThis & {
-  document: { createElement(tag: string): object };
+  document: { createElement(tag: string): Element };
 };
 
 const { createRoot } = (await import(REACT_DOM)) as {
-  createRoot(container: object): Root;
+  createRoot(container: Element): Root;
 };
 
 const { useRead } = await import("../src/read.ts");

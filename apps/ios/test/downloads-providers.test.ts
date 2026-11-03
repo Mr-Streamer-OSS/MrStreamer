@@ -544,9 +544,29 @@ describe("offline Next", { timeout: 30_000 }, () => {
     const { a } = await withProviders(app);
     const { details } = await seriesDetails(app, a);
     const [first, second] = details.seasons[0]!.episodes.slice(1, 3);
+    const asked = native.tasks.length;
     const from = await app.addDownload(episodeOf(first!));
     const to = await app.addDownload(episodeOf(second!));
-    await until(() => isComplete(app, from.id) && isComplete(app, to.id), "the episode copies");
+
+    // Each copy fetches its pictures in the background. Tests that spy on the network after a
+    // relaunch must not count those, so wait until both stills were asked for and no picture
+    // request, this test's or an earlier one's, is still open: a copy asks for its next picture
+    // as its last request ends, so none is left to start.
+    const open = (task: (typeof native.tasks)[number]) =>
+      task.state === "idle" || task.state === "active";
+
+    const ended = (url: string | null) =>
+      native.tasks.slice(asked).some((each) => each.url === url && !open(each));
+
+    await until(
+      () =>
+        isComplete(app, from.id) &&
+        isComplete(app, to.id) &&
+        ended(first!.stillUrl) &&
+        ended(second!.stillUrl) &&
+        !native.tasks.some(open),
+      "the episode copies and their pictures",
+    );
 
     return { app, a, from, to };
   }

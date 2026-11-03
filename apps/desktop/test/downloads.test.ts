@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
 import { basename, join } from "node:path";
 import { Writable } from "node:stream";
-import type { Download } from "@mrstreamer/contracts/downloads";
+import type { Download, DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import { setLanguage } from "@mrstreamer/core/i18n";
 import { playlistGroupId } from "@mrstreamer/core/playlist/import";
@@ -791,7 +791,7 @@ describe.skipIf(!hasTools)("downloads", () => {
     const film = movie(provider, subscriptionId, "TEST | Index at the end");
     const queued = await downloads.add(film.ref);
 
-    const failsWith = (failure: object) =>
+    const failsWith = (failure: DownloadFailure) =>
       vi.waitFor(
         async () => expect((await find(queued.id))?.status).toEqual({ kind: "failed", failure }),
         { timeout: LONG },

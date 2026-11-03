@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Window } from "happy-dom";
+import { Window, type Element } from "happy-dom";
 import { expect, it, vi } from "vitest";
 import type { Roster } from "../src/account.ts";
 
@@ -115,7 +115,7 @@ it("keeps the splash until routes are known, then mounts saved-account navigatio
   const REACT_DOM = "react-dom/client";
 
   const { createRoot } = (await import(REACT_DOM)) as {
-    createRoot(container: object): { render(node: React.ReactNode): void; unmount(): void };
+    createRoot(container: Element): { render(node: React.ReactNode): void; unmount(): void };
   };
 
   const { default: RootLayout } = await import("../src/app/_layout.tsx");

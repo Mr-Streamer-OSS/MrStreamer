@@ -1,6 +1,7 @@
 import { rewritePlaylist, type Refusal, type RouteKind } from "./cast-media.ts";
 import { store, useStore, type Store } from "./store.ts";
 import { defined } from "@mrstreamer/core/defined";
+import type { JsonObject } from "@mrstreamer/contracts/json";
 
 // Play on TV: an open Cast sender, with no Google SDK. `modules/cast` finds TVs on the local
 // network, opens the TLS connection to one and serves media from the phone; everything the
@@ -117,6 +118,9 @@ interface RelayRoute {
 }
 
 type Listener<E> = (event: E) => void;
+
+/** What a message on a namespace carries: a JSON object that names its type. */
+export type Payload = JsonObject & { readonly type: string };
 
 interface CastModule {
   /** Starts browsing for TVs; `onBrowse` says how it goes and what it found. */
@@ -677,7 +681,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   const lost = new Promise<"lost" | "stopped">((resolve) => (lostNow = resolve));
   let timers: ReturnType<typeof setInterval>[] = [];
 
-  const send = (to: string, namespace: string, payload: object) => {
+  const send = (to: string, namespace: string, payload: Payload) => {
     if (!open) return;
     module.write(
       channel,
@@ -692,7 +696,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     );
   };
 
-  const ask = (to: string, namespace: string, payload: object, ms = TIMING.answer) => {
+  const ask = (to: string, namespace: string, payload: Payload, ms = TIMING.answer) => {
     const requestId = ++requests;
 
     return new Promise<Record<string, unknown>>((resolve, reject) => {
@@ -999,7 +1003,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
 
       timers.push(poll);
 
-      const command = (payload: object) => {
+      const command = (payload: Payload) => {
         if (media === mine && mine.id !== null) {
           mine.requests.add(++requests);
           send(to, NAMESPACE.media, { ...payload, mediaSessionId: mine.id, requestId: requests });

@@ -46,11 +46,14 @@ type Handlers = Partial<Record<MediaSessionAction, MediaSessionActionHandler>>;
 /** The system's session, where Chromium has one. */
 const session = "mediaSession" in navigator ? navigator.mediaSession : null;
 
+/** A view's hold on the session: one of its own, told apart from every other view's. */
+type View = symbol;
+
 /**
  * The view whose playback the system shows. Watch can open before a playing title has gone, so
  * a view that closes clears the session only while it is still its own.
  */
-let owner: object | null = null;
+let owner: View | null = null;
 
 /** Plays nothing audible, in step with a receiver, while one plays what a view presents. */
 let silent: HTMLAudioElement | null = null;
@@ -129,7 +132,7 @@ function answer(handlers: Handlers): void {
 }
 
 /** Shows `metadata` for `view`, which owns the session from now on. */
-function present(view: object, metadata: MediaMetadataInit, handlers: Handlers): void {
+function present(view: View, metadata: MediaMetadataInit, handlers: Handlers): void {
   if (!session) return;
   owner = view;
   session.metadata = new MediaMetadata(metadata);
@@ -137,13 +140,13 @@ function present(view: object, metadata: MediaMetadataInit, handlers: Handlers):
 }
 
 /** Says whether `view`'s playback plays, while the session is its own. */
-function showState(view: object, state: MediaSessionPlaybackState): void {
+function showState(view: View, state: MediaSessionPlaybackState): void {
   if (session && owner === view) session.playbackState = state;
 }
 
 /** A view of its own, whose session ends when the view closes. */
-function useView(): object {
-  const view = useRef({}).current;
+function useView(): View {
+  const view = useRef(Symbol("media session view")).current;
   useEffect(
     () => () => {
       if (!session || owner !== view) return;

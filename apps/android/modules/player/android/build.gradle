@@ -1,0 +1,33 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'app.mrstreamer'
+version = '0.1.0'
+
+// Media3 1.11.1, 11 September 2026.
+def media3 = '1.11.1'
+
+android {
+  namespace "app.mrstreamer.playback"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  testOptions {
+    unitTests.includeAndroidResources = true
+  }
+}
+
+dependencies {
+  implementation "androidx.media3:media3-exoplayer:$media3"
+  implementation "androidx.media3:media3-exoplayer-hls:$media3"
+  implementation "androidx.media3:media3-session:$media3"
+  implementation "androidx.media3:media3-ui:$media3"
+
+  testImplementation "androidx.media3:media3-test-utils:$media3"
+  testImplementation "androidx.media3:media3-test-utils-robolectric:$media3"
+  testImplementation "org.robolectric:robolectric:4.17"
+  testImplementation "junit:junit:4.13.2"
+}

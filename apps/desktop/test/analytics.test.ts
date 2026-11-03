@@ -6,6 +6,7 @@ import { setTimeout as pause } from "node:timers/promises";
 import { type } from "arktype";
 import { describe, expect, it, vi } from "vitest";
 import { ipcInputs } from "@mrstreamer/contracts/ipc";
+import type { JsonObject } from "@mrstreamer/contracts/json";
 import { analyticsBuild, analyticsReleaseConfiguration } from "../src/main/analytics/build.ts";
 import {
   AnalyticsRecord,
@@ -1107,7 +1108,7 @@ describe("direct product and reliability events", () => {
 });
 
 describe("persisted state migration", () => {
-  const legacy = (event: string, extra: object, attempts: number) => ({
+  const legacy = (event: string, extra: JsonObject, attempts: number) => ({
     event: {
       uuid: randomUUID(),
       distinct_id: "f157c0b7-1b97-4a60-a96b-1c2ca9e56904",

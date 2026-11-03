@@ -1,6 +1,7 @@
-import { Window } from "happy-dom";
+import { Window, type Element } from "happy-dom";
 import { act, createElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Store } from "../src/platform/store.ts";
 
 // Paper A's navigation as the viewer meets it: Connect or the destinations, the destinations
 // along the bottom on a phone and down a rail from 600dp, Search, Downloads and Settings opening
@@ -103,13 +104,13 @@ vi.mock("react-native", async () => {
 vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
 
 vi.mock("react-native-safe-area-context", async () => {
-  const { createContext } = await import("react");
-  const insets = { top: 24, bottom: 16, left: 0, right: 0 };
+  const { createContext, useContext } = await import("react");
+  const SafeAreaInsetsContext = createContext({ top: 24, bottom: 16, left: 0, right: 0 });
 
   return {
-    SafeAreaInsetsContext: createContext(insets),
+    SafeAreaInsetsContext,
     SafeAreaProvider: ({ children }: { children: ReactNode }) => children,
-    useSafeAreaInsets: () => insets,
+    useSafeAreaInsets: () => useContext(SafeAreaInsetsContext),
   };
 });
 
@@ -137,15 +138,37 @@ vi.mock("expo-router", async () => {
 });
 
 vi.mock("../src/bootstrap/sources.ts", () => ({
-  sources: { state: null, restore: () => void scenario.asked.push("restore") },
+  sources: { state: "sources", restore: () => void scenario.asked.push("restore") },
 }));
 
-vi.mock("../src/platform/store.ts", () => ({ useStore: () => scenario.sources }));
+// The saved sources' store holds what the scenario says; other stores are real.
+vi.mock("../src/platform/store.ts", async (actual) => {
+  const real = await actual<typeof import("../src/platform/store.ts")>();
+
+  return {
+    ...real,
+    useStore: <S>(source: Store<S>) =>
+      (source as unknown) === "sources" ? scenario.sources : real.useStore(source),
+  };
+});
+
+vi.mock("../src/player/mini-player.tsx", () => ({ MiniPlayer: () => null }));
 
 vi.mock("expo-router/js-tabs", async () => {
   const { Children, isValidElement } = await import("react");
 
-  type Bar = (props: object) => ReactElement;
+  /** What this navigator hands its bar: the tab bar props it builds for the destination bar. */
+  type Bar = (props: {
+    state: { index: number; routes: { key: string; name: string }[] };
+    descriptors: Record<string, never>;
+    insets: { top: number; bottom: number; left: number; right: number };
+    emitter: {
+      emit: (event: { type: string; target: string; canPreventDefault?: boolean }) => {
+        defaultPrevented: boolean;
+      };
+    };
+    navigateToTab: (key: string) => void;
+  }) => ReactElement;
 
   const Screen: (props: { name: string }) => null = () => null;
 
@@ -192,7 +215,7 @@ Object.assign(globalThis, { window, document: window.document });
 const REACT_DOM = "react-dom/client";
 
 const { createRoot } = (await import(REACT_DOM)) as {
-  createRoot(container: object): { render(node: unknown): void; unmount(): void };
+  createRoot(container: Element): { render(node: unknown): void; unmount(): void };
 };
 
 const { default: RootLayout } = await import("../src/app/_layout.tsx");
@@ -200,7 +223,8 @@ const { default: RootLayout } = await import("../src/app/_layout.tsx");
 const { default: DestinationsLayout, unstable_settings } =
   await import("../src/app/(tabs)/_layout.tsx");
 
-const { Screen } = await import("../src/navigation/screen.tsx");
+const { Screen, footOverlay } = await import("../src/navigation/screen.tsx");
+const { useSafeAreaInsets } = await import("react-native-safe-area-context");
 const { Sheet } = await import("../src/ui/sheet.tsx");
 
 let root: ReturnType<typeof createRoot> | null = null;
@@ -242,6 +266,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root?.unmount());
+  footOverlay.set(0);
   window.document.body.innerHTML = "";
 });
 
@@ -255,7 +280,7 @@ describe("the app", () => {
     expect(screens()).toEqual(["connect"]);
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [{}] };
-    expect(screens()).toEqual(["(tabs)"]);
+    expect(screens()).toEqual(["(tabs)", "watch"]);
   });
 });
 
@@ -326,6 +351,29 @@ describe("a screen's top app bar", () => {
     expect(labels(shown, "button")).toEqual(["Back"]);
     press(shown, "Back");
     expect(scenario.asked).toEqual(["back"]);
+  });
+});
+
+describe("a screen's content", () => {
+  /** A list padding its foot as the catalogue's does, showing by how much. */
+  const List = () => createElement("output", null, String(useSafeAreaInsets().bottom));
+
+  const foot = (shown: ReturnType<typeof show>) => shown.querySelector("output")?.textContent;
+
+  it("pads its foot clear of what overlays it, on a phone and beside the rail, until it goes", () => {
+    let shown = show(createElement(Screen, { title: "Live" }, createElement(List)));
+    expect(foot(shown)).toBe("0");
+    act(() => footOverlay.set(72));
+    expect(foot(shown)).toBe("72");
+    act(() => footOverlay.set(0));
+    expect(foot(shown)).toBe("0");
+    act(() => root?.unmount());
+
+    scenario.width = 700;
+    shown = show(createElement(Screen, { title: "Live" }, createElement(List)));
+    expect(foot(shown)).toBe("16");
+    act(() => footOverlay.set(72));
+    expect(foot(shown)).toBe("88");
   });
 });
 

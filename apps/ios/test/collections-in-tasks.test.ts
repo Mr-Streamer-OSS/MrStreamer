@@ -13,7 +13,7 @@ import {
 } from "@mrstreamer/core/ondemand/collections";
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { xtreamProvider } from "@mrstreamer/core/xtream";
-import { Window } from "happy-dom";
+import { Window, type Element } from "happy-dom";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { adultIn } from "@mrstreamer/core/adult";
 import { browseFixture } from "./title-browse-fixture.ts";
@@ -902,7 +902,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
       const { createRoot } = (await import(REACT_DOM)) as {
-        createRoot(container: object): Root;
+        createRoot(container: Element): Root;
       };
 
       container = window.document.createElement("div");

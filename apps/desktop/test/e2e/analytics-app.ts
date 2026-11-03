@@ -1,5 +1,6 @@
 import { preferenceValues } from "./preference-reply.ts";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
+import type { JsonObject } from "@mrstreamer/contracts/json";
 // Built-app proof through the actual Settings control, with an isolated profile and loopback only.
 import { watch } from "node:fs";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
@@ -2096,7 +2097,7 @@ try {
     profiles.push(profile);
     const legacyId = randomUUID();
 
-    const legacyEnvelope = (event: string, extra: object) => ({
+    const legacyEnvelope = (event: string, extra: JsonObject) => ({
       uuid: randomUUID(),
       distinct_id: legacyId,
       timestamp: new Date(Date.now() - 86_400_000).toISOString(),
