@@ -139,7 +139,8 @@ Actual background and physical-device acceptance remain separate from source and
   queue's pause and order, offline series, metadata and diagnostics recovery, interface language,
   lighter launch and Automatic quality, and the adaptive iPad and Duo layouts below. Build 18,
   archived from `main` at `7229b687`, has been on TestFlight for the internal "Private iPhone
-  testing" group since 3 November 2026. There is no App Store release of 0.2.0. Its simulator
+  testing" group since 3 November 2026. `main` now names build 19 for the next candidate, which
+  hasn't been archived or uploaded. There is no App Store release of 0.2.0. Its simulator
   results go on the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148), and the [release card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288153777)
   holds what it still needs.
 - **Play on TV** ([card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196691))
@@ -1039,12 +1040,14 @@ proof out: `src/app/proof.tsx` loads it only in development.
 
 The app installs as `app.mrstreamer.player`, the desktop's `appId`, in development and release
 builds alike. Its version is its own, not the desktop's: `app.json` names `0.2.0` with
-`ios.buildNumber` `18`. Build 18 was archived from `7229b687`, uploaded once and added to the
-internal TestFlight group on 3 November 2026; source after that commit, such as Play on TV, isn't
-in it. Build 17 of 0.1.0 went to App Review on 27 October 2026 with manual release; leave that
-build and its review as they are. Before each archive, read the current App Store Connect build
-and upload inventory again, move `ios.buildNumber` to the next unused number (18 is taken now),
-and record the dated readback and allocation on the candidate's project card.
+`ios.buildNumber` `19`, the next unused build in App Store Connect on 3 November 2026. Nothing
+has been archived or uploaded as build 19. Build 18 was archived from `7229b687`, uploaded once
+and added to the internal TestFlight group on 3 November 2026; source after that commit, such as
+Play on TV and the Downloads header ring, isn't in it. Build 17 of 0.1.0 went to App Review on 27
+October 2026 with manual release; leave that build and its review as they are. Before each
+archive, read the current App Store Connect build and upload inventory again, move
+`ios.buildNumber` to the next unused number if 19 is taken by then, and record the dated readback
+and allocation on the candidate's project card.
 The submitted 0.1.0 candidate used `supportsTablet: false`, requesting iPhone device family 1
 without a native iPad target; Apple's iPhone compatibility mode on iPad is separate. The
 next-release source sets `supportsTablet: true`, requesting iPhone and iPad families 1 and 2.
