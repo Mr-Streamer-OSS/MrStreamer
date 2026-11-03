@@ -46,11 +46,11 @@
         "height": 803
       },
       "headlines": {
-        "en-GB": "The whole Guide.",
-        "nl-NL": "De hele Gids.",
-        "fr-FR": "Tout le Guide.",
+        "en-GB": "The whole guide.",
+        "nl-NL": "De hele gids.",
+        "fr-FR": "Tout le guide.",
         "de-DE": "Der ganze Programmführer.",
-        "es-ES": "Toda la Guía."
+        "es-ES": "Toda la guía."
       }
     },
     {
@@ -77,11 +77,11 @@
         "height": 495
       },
       "headlines": {
-        "en-GB": "Unfold the Guide.",
-        "nl-NL": "Vouw de Gids open.",
-        "fr-FR": "Dépliez le Guide.",
+        "en-GB": "Unfold the guide.",
+        "nl-NL": "Vouw de gids open.",
+        "fr-FR": "Dépliez le guide.",
         "de-DE": "Den Programmführer entfalten.",
-        "es-ES": "Despliega la Guía."
+        "es-ES": "Despliega la guía."
       }
     },
     {
