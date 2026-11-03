@@ -142,6 +142,8 @@ vi.mock("../src/bootstrap/sources.ts", () => ({
 
 vi.mock("../src/platform/store.ts", () => ({ useStore: () => scenario.sources }));
 
+vi.mock("../src/player/mini-player.tsx", () => ({ MiniPlayer: () => null }));
+
 vi.mock("expo-router/js-tabs", async () => {
   const { Children, isValidElement } = await import("react");
 
@@ -255,7 +257,7 @@ describe("the app", () => {
     expect(screens()).toEqual(["connect"]);
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [{}] };
-    expect(screens()).toEqual(["(tabs)"]);
+    expect(screens()).toEqual(["(tabs)", "watch"]);
   });
 });
 
