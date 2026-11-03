@@ -4,7 +4,11 @@ The generator prepares Paper A candidates: one genuine capture and one short
 headline on true black, using Inter from the desktop brand assets. The committed
 master is `apps/ios/assets/store/spec.json`. It holds slot geometry and copy in
 English, Dutch, French, German and Spanish. Guide, Gids, Guide, Programmführer and
-Guía follow `apps/ios/src/i18n/live.ts`. Copy and composition still need final
+Guía follow `apps/ios/src/i18n/live.ts`. Its layout is in Paper points: the
+headline column and picture box of row A for a supplied frame, and of the
+frameless fallback row otherwise. A headline that needs more lines than the Paper
+design reserves shrinks a point at a time, to no less than 80% of its size, so the
+picture keeps its place in every language. Copy and composition still need final
 owner visual acceptance. Nothing here changes an Apple listing or the submitted
 0.1.0 build.
 
@@ -133,7 +137,7 @@ before retrying. Existing candidates are never overwritten.
 
 Each batch contains three opaque RGB PNGs and `manifest.json`, recording output
 hashes, source capture hashes and provenance, frame source/terms and licence hash
-(or `frameless`), layout, screen placement, translated headline, input JSON hash,
+(or `frameless`), layout, screen placement, translated headline and its point size, input JSON hash,
 Inter hash/licence and Sharp/libvips versions. Keep the input JSON and raw captures
 beside the manifest for reproduction. Rendering libraries can change pixels;
 review hashes and full-size output after regeneration.

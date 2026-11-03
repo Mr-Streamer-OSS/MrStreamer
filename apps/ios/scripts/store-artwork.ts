@@ -79,6 +79,85 @@ if (outputParent !== local) insideLocal(outputParent);
 
 const font = await readFile(fontPath);
 const exports = [];
+const { title: titleStyle, hairline } = spec.style;
+
+// Pango crops rendered text to its ink. An invisible bar at each end of a line gives every
+// line the same box whatever its glyphs, so lines sit on a fixed baseline across languages.
+const strut = '<span alpha="1">|</span>';
+
+// Where that box starts against a CSS line box, in ems: its top is INK_TOP above the line's
+// middle and its left is INK_LEFT before the text origin. Measured on Paper's own exports of
+// these headlines, within 1 point at every slot size.
+const INK_TOP = 0.607;
+const INK_LEFT = 0.253;
+
+// A headline longer than the design's reserves shrinks, down to this share of its Paper size.
+const MIN_TITLE_SCALE = 0.8;
+
+const markup = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+/** Renders one headline line at a pixel size; `advance` is its CSS width with letter spacing. */
+async function renderLine(text: string, px: number) {
+  const render = (content: string) =>
+    sharp({
+      text: {
+        text: `<span foreground="${titleStyle.colour}" weight="${titleStyle.weight}" letter_spacing="${Math.round(titleStyle.letterSpacing * px * 1024)}">${strut}${content}${strut}</span>`,
+        font: `${titleStyle.font} ${px}`,
+        fontfile: fontPath,
+        dpi: 72,
+        rgba: true,
+      },
+    })
+      .png()
+      .toBuffer({ resolveWithObject: true });
+
+  const [line, empty] = await Promise.all([render(markup(text)), render("")]);
+
+  return { data: line.data, advance: line.info.width - empty.info.width };
+}
+
+/**
+ * Wraps a headline greedily into the column like the Paper text box, shrinking it a point at a
+ * time until it fits the slot's reserved lines. Sizes are in points; lines come back rendered.
+ */
+async function fitTitle(text: string, slot: (typeof spec.slots)[number], width: number) {
+  const words = text.split(" ");
+
+  for (let size = slot.title.size; size >= slot.title.size * MIN_TITLE_SCALE; size--) {
+    const px = size * slot.scale;
+    const lines: Awaited<ReturnType<typeof renderLine>>[] = [];
+    let current = await renderLine(words[0]!, px);
+    let currentText = words[0]!;
+
+    for (const word of words.slice(1)) {
+      const longer = await renderLine(`${currentText} ${word}`, px);
+
+      if (longer.advance <= width * slot.scale) {
+        current = longer;
+        currentText = `${currentText} ${word}`;
+      } else {
+        lines.push(current);
+        current = await renderLine(word, px);
+        currentText = word;
+      }
+    }
+
+    lines.push(current);
+
+    if (
+      lines.length <= slot.title.lines &&
+      lines.every((line) => line.advance <= width * slot.scale)
+    )
+      return {
+        size,
+        px,
+        lineHeight: (slot.title.lineHeight * size * slot.scale) / slot.title.size,
+        lines,
+      };
+  }
+
+  throw new Error(`${slot.id}: "${text}" does not fit ${slot.title.lines} line(s) of its column`);
+}
 
 for (const slot of spec.slots) {
   const capture = object(slots[slot.id], `${slot.id} capture`);
@@ -126,6 +205,10 @@ for (const slot of spec.slots) {
   let frame: "frameless" | Record<string, unknown> = "frameless";
   let picture: Buffer;
   let screenGeometry;
+  // Paper A for a supplied frame, the frameless fallback row otherwise: a headline column over
+  // the picture, both centred, the picture at most the column's width and box height.
+  const column = capture.frame === undefined ? slot.frameless : slot.framed;
+  const box = { width: column.width * slot.scale, height: column.height * slot.scale };
 
   if (capture.frame !== undefined) {
     const supplied = object(capture.frame, "frame");
@@ -171,8 +254,8 @@ for (const slot of spec.slots) {
 
     const resized = await sharp(image.bytes)
       .resize({
-        width: slot.picture.width,
-        height: slot.picture.height,
+        width: box.width,
+        height: box.height,
         fit: "inside",
         withoutEnlargement: true,
       })
@@ -219,12 +302,12 @@ for (const slot of spec.slots) {
       nativeHeight: info.height,
     };
   } else {
-    const border = slot.scale; // One point at the slot's native scale, square corners.
+    const border = hairline.width * slot.scale; // Square corners, so it never reads as hardware.
 
     const screen = await sharp(source.bytes)
       .resize({
-        width: slot.picture.width - border * 2,
-        height: slot.picture.height - border * 2,
+        width: box.width - border * 2,
+        height: box.height - border * 2,
         fit: "inside",
         withoutEnlargement: true,
       })
@@ -232,7 +315,13 @@ for (const slot of spec.slots) {
       .toBuffer({ resolveWithObject: true });
 
     picture = await sharp(screen.data)
-      .extend({ top: border, bottom: border, left: border, right: border, background: "#2C2C2E" })
+      .extend({
+        top: border,
+        bottom: border,
+        left: border,
+        right: border,
+        background: hairline.colour,
+      })
       .png()
       .toBuffer();
     screenGeometry = {
@@ -246,41 +335,43 @@ for (const slot of spec.slots) {
   const headlines: Record<string, string> = slot.headlines;
   const headline = headlines[locale]!;
 
-  const title = await sharp({
-    text: {
-      text: `<span foreground="#fff" weight="700">${headline}</span>`,
-      font: `Inter ${slot.title.size}`,
-      fontfile: fontPath,
-      dpi: 72,
-      rgba: true,
-      width: slot.title.width,
-      wrap: "word",
-    },
-  })
-    .png()
-    .toBuffer({ resolveWithObject: true });
-
-  if (title.info.height > slot.title.height)
-    throw new Error(`${slot.id}: headline exceeds its reserved area`);
+  const title = await fitTitle(headline, slot, column.width);
   const pictureInfo = await sharp(picture).metadata();
+  const columnLeft = (slot.width - column.width * slot.scale) / 2;
+  const columnTop = column.top * slot.scale;
 
+  // The picture follows the reserved headline lines and the Paper gap, so it stays put in every language.
   const geometry = {
-    left: slot.picture.left + Math.floor((slot.picture.width - pictureInfo.width!) / 2),
-    top: slot.picture.top + Math.floor((slot.picture.height - pictureInfo.height!) / 2),
+    left: Math.floor((slot.width - pictureInfo.width!) / 2),
+    top: columnTop + (slot.title.lines * slot.title.lineHeight + column.gap) * slot.scale,
     width: pictureInfo.width!,
     height: pictureInfo.height!,
   };
 
+  if (geometry.left < 0 || geometry.top + geometry.height > slot.height)
+    throw new Error(`${slot.id}: picture does not fit the slot`);
+
   const layers: OverlayOptions[] = [
     { input: picture, left: geometry.left, top: geometry.top },
-    { input: title.data, left: slot.title.left, top: slot.title.top },
+    ...title.lines.map((line, index) => ({
+      input: line.data,
+      left: Math.round(columnLeft - INK_LEFT * title.px),
+      top: Math.round(
+        columnTop + index * title.lineHeight + title.lineHeight / 2 - INK_TOP * title.px,
+      ),
+    })),
   ];
 
   const bytes = await sharp({
-    create: { width: slot.width, height: slot.height, channels: 3, background: "#000" },
+    create: {
+      width: slot.width,
+      height: slot.height,
+      channels: 3,
+      background: spec.style.background,
+    },
   })
     .composite(layers)
-    .flatten({ background: "#000" })
+    .flatten({ background: spec.style.background })
     .removeAlpha()
     .toColourspace("srgb")
     .png()
@@ -301,6 +392,7 @@ for (const slot of spec.slots) {
     geometry,
     screenGeometry,
     headline,
+    headlineSize: title.size,
     data: bytes,
   });
 }
