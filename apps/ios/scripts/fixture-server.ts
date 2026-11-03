@@ -111,7 +111,7 @@ import {
 } from "./native-fixtures/media.ts";
 import { liveTracks, tracksChannel, TRACKS_STREAM_ID } from "./native-fixtures/tracks.ts";
 import { titleTransfers } from "./native-fixtures/transfers.ts";
-import { defined } from "@mrstreamer/core/defined";
+import { defined } from "../../../packages/core/src/defined.ts";
 
 const USERNAME = process.env.FIXTURE_USERNAME ?? "fixture";
 const PASSWORD = process.env.FIXTURE_PASSWORD ?? "fixture-pass";
@@ -563,7 +563,7 @@ createServer((request, response) => {
 
 writeFileSync(
   join(out, second ? `server-${port}.json` : "server.json"),
-  JSON.stringify({ port, controlPort, started, ...defined({ profile }) }),
+  JSON.stringify({ port, controlPort, started, ...defined({ profile: profile ?? undefined }) }),
 );
 console.log(`fake TMDB at http://127.0.0.1:${port}/tmdb/3`);
 if (profile) console.log(`${profile.name} profile ${JSON.stringify(profile)}`);

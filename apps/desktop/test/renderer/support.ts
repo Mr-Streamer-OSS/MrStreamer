@@ -263,13 +263,15 @@ const inherited = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(TextTrack.prototype),
   "mode",
 );
+const { get: readMode, set: writeMode } = inherited ?? {};
+if (!readMode || !writeMode) throw new Error("happy-dom's TextTrack base no longer holds mode.");
 Object.defineProperty(TextTrack.prototype, "mode", {
   configurable: true,
   get(this: TextTrack): TextTrackMode {
-    return inherited?.get?.call(this);
+    return readMode.call(this);
   },
   set(this: TextTrack, mode: TextTrackMode) {
-    inherited?.set?.call(this, mode === "hidden" ? "showing" : mode);
+    writeMode.call(this, mode === "hidden" ? "showing" : mode);
   },
 });
 

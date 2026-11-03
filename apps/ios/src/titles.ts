@@ -361,7 +361,7 @@ function askWith(yours: string) {
         await metadata.close().catch(() => undefined);
         metadata = metadataOf();
       }
-      client = key ? tmdb({ key, ...defined({ api: TMDB_API }) }) : null;
+      client = key ? tmdb({ key, ...defined({ api: TMDB_API || undefined }) }) : null;
       keyInstalled = change;
       // Only now, so details asked with the old client while the store closed are let go too.
       if (fresh) {

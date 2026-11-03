@@ -14,7 +14,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { defined } from "@mrstreamer/core/defined";
+import { defined } from "../../../../packages/core/src/defined.ts";
 
 /** What a file is sent in, and how often the rate is kept to. */
 const PIECE = 64 * 1024;
