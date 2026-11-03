@@ -66,7 +66,7 @@ Kodi is compared with its official [IPTV Simple](https://github.com/kodi-pvr/pvr
 
 ## Download and set up
 
-Stable 0.0.20 runs on macOS 13 or later on Apple silicon, Windows 11 on x64 and x86_64 Linux. [Installers and checksums](https://mrstreamer.app/download) · [GitHub Releases](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest) · [Homebrew, AUR and updates](docs/user/updates.md)
+The stable release runs on macOS 13 or later on Apple silicon, Windows 11 on x64 and x86_64 Linux. [Installers and checksums](https://mrstreamer.app/download) · [GitHub Releases](https://github.com/Mr-Streamer-OSS/MrStreamer/releases/latest) · [Homebrew, AUR and updates](docs/user/updates.md)
 
 Open the app and add your Xtream Codes login or M3U link on the Connect screen. [Subscriptions guide](docs/user/subscriptions.md)
 
