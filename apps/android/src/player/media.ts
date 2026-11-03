@@ -34,7 +34,7 @@ export interface MediaState {
   readonly automatic: boolean;
   readonly next: NextEpisode | null;
   readonly remaining: number | null;
-  readonly error: "audio" | "text" | "speed" | "quality" | "save" | "read" | null;
+  readonly error: keyof MediaPreferences | "save" | "read" | null;
 }
 
 /** The designer reads this store with useStore, and invokes these actions on the existing player. */
@@ -53,6 +53,15 @@ export interface MediaModel {
   registerNext(resolver: NextEpisodeResolver): () => void;
   retryPreferences(): void;
   dismissError(): void;
+}
+
+/** A change asked of the native player, saved once the player reports it. */
+interface Request {
+  readonly attempt: string;
+  readonly key: keyof MediaPreferences;
+  readonly value: NonNullable<MediaPreferences[keyof MediaPreferences]>;
+  /** The track asked for, or null for none; speed has none. */
+  readonly id?: string | null;
 }
 
 const choice = (track: Track): Choice => ({
@@ -106,17 +115,8 @@ export function mediaModel(
   let attempt: string | undefined;
   let ended = false;
   let timer: ReturnType<typeof setInterval> | undefined;
-
-  let pending:
-    | {
-        attempt: string;
-        key: keyof MediaPreferences;
-        value: Choice | "off" | "automatic" | number;
-        id?: string | null;
-      }
-    | undefined;
-
-  const restored = new Set<string>();
+  let pending: Request | undefined;
+  const restored = new Set<keyof MediaPreferences>();
 
   function cancelNext() {
     if (timer) clearInterval(timer);
@@ -144,23 +144,30 @@ export function mediaModel(
     if (next) owner.play(next.intent);
   }
 
-  function save(key: keyof MediaPreferences, value: Choice | "off" | "automatic" | number) {
-    const updated = { ...(unsaved ?? saved), [key]: value };
-
-    if (unread) {
-      patch({ error: "read" });
-
-      return;
-    }
-
+  /** Writes `value`; a failed write keeps the saved data and leaves `value` for a retry. */
+  function persist(value: MediaPreferences) {
     try {
-      persistence?.write(updated);
-      saved = updated;
+      persistence?.write(value);
+      saved = value;
       unsaved = null;
+
+      return true;
     } catch {
-      unsaved = updated;
+      unsaved = value;
       patch({ error: "save" });
+
+      return false;
     }
+  }
+
+  /** Saves the pending change the player now reports. A failed read is never overwritten. */
+  function settle() {
+    if (!pending) return;
+    const { key, value } = pending;
+    pending = undefined;
+
+    if (unread) patch({ error: "read" });
+    else persist({ ...(unsaved ?? saved), [key]: value });
   }
 
   owner.state.subscribe(() => {
@@ -210,20 +217,14 @@ export function mediaModel(
 
     if (event.qualityAutomatic !== undefined) patch({ automatic: event.qualityAutomatic });
 
-    if (pending?.attempt === attempt && pending.key === "speed" && event.speed === pending.value) {
-      save("speed", event.speed);
-      pending = undefined;
-    }
-
+    // Speed and Automatic quality are reported here, tracks by onTracks.
     if (
       pending?.attempt === attempt &&
-      pending.key === "quality" &&
-      pending.value === "automatic" &&
-      event.qualityAutomatic
-    ) {
-      save("quality", "automatic");
-      pending = undefined;
-    }
+      (pending.key === "speed"
+        ? event.speed === pending.value
+        : pending.key === "quality" && pending.value === "automatic" && event.qualityAutomatic)
+    )
+      settle();
 
     if (!event.live && event.phase !== "preparing" && saved.speed && !restored.has("speed")) {
       restored.add("speed");
@@ -233,38 +234,32 @@ export function mediaModel(
   native.addListener("onTracks", ({ attempt: id, tracks }) => {
     if (id !== attempt) return;
     patch({ tracksKnown: true });
-    const request = pending;
 
-    if (request?.attempt === id && request.key !== "speed" && request.value !== "automatic") {
+    if (pending?.attempt === id && pending.key !== "speed" && pending.value !== "automatic") {
+      const chosen = pending.id;
+
       const selected =
-        request.id === null
+        chosen === null
           ? !tracks.some((t) => t.type === "text" && t.selected)
-          : tracks.some((t) => t.id === request.id && t.supported && t.selected);
+          : tracks.some((t) => t.id === chosen && t.supported && t.selected);
 
-      if (selected) {
-        save(request.key, request.value);
-        pending = undefined;
-      }
+      if (selected) settle();
     }
 
+    // Saved choices apply once per attempt, by identity, to the first tracks that match them.
     for (const key of ["audio", "text", "quality"] as const) {
-      if (restored.has(key) || pending?.key === key) continue;
       const value = saved[key];
 
-      if (!value) continue;
+      if (!value || restored.has(key) || pending?.key === key) continue;
+
+      if (value === "off" || value === "automatic") {
+        restored.add(key);
+
+        if (value === "off") void native.setText?.(id, null);
+        continue;
+      }
+
       const type = key === "quality" ? "video" : key;
-
-      if (value === "off") {
-        restored.add(key);
-        void native.setText?.(id, null);
-        continue;
-      }
-
-      if (value === "automatic") {
-        restored.add(key);
-        continue;
-      }
-
       const match = tracks.find((t) => t.type === type && matches(t, value));
 
       if (!match) continue;
@@ -285,49 +280,53 @@ export function mediaModel(
     else cancelNext();
   });
 
+  /** Asks for `request` through `change`; a refusal while its attempt plays is shown. */
+  async function ask(request: Request, change: () => Promise<boolean> | undefined) {
+    pending = request;
+    restored.add(request.key);
+    let accepted = false;
+
+    try {
+      accepted = (await change()) ?? false;
+    } catch {
+      /* Refused below; no selection is invented. */
+    }
+
+    if (!accepted && attempt === request.attempt) {
+      if (pending === request) pending = undefined;
+      patch({ error: request.key });
+    }
+
+    return accepted;
+  }
+
   async function select(key: "audio" | "text" | "quality", id: string | null) {
     const now = owner.state.get();
 
     if (now.kind !== "playing") return false;
     const type = key === "quality" ? "video" : key;
-    const track = now.tracks.find((t) => t.id === id && t.type === type && t.supported);
+    const choices = now.tracks.filter((t) => t.type === type && t.supported);
+    const track = choices.find((t) => t.id === id);
 
-    if (
-      (id !== null && !track) ||
-      (key === "audio" && !track) ||
-      (key === "quality" &&
-        (!now.live || now.tracks.filter((t) => t.type === "video" && t.supported).length < 2))
-    )
-      return false;
+    if (id !== null && !track) return false;
+    const { attempt: at } = now;
 
-    const request = {
-      attempt: now.attempt,
-      key,
-      id,
-      value: track ? choice(track) : key === "text" ? ("off" as const) : ("automatic" as const),
-    };
+    if (key === "audio")
+      return track
+        ? ask({ attempt: at, key, id, value: choice(track) }, () => native.setAudio?.(at, track.id))
+        : false;
 
-    pending = request;
-    restored.add(key);
-    let accepted = false;
+    if (key === "text")
+      return ask({ attempt: at, key, id, value: track ? choice(track) : "off" }, () =>
+        native.setText?.(at, id),
+      );
 
-    try {
-      accepted =
-        key === "audio"
-          ? ((await native.setAudio?.(now.attempt, id!)) ?? false)
-          : key === "text"
-            ? ((await native.setText?.(now.attempt, id)) ?? false)
-            : await native.setQuality(now.attempt, id);
-    } catch {
-      /* The refusal is displayed below; no selection is invented. */
-    }
+    // Quality is Live's, and only where the provider offers a real choice.
+    if (!now.live || choices.length < 2) return false;
 
-    if (!accepted && attempt === now.attempt) {
-      if (pending === request) pending = undefined;
-      patch({ error: key });
-    }
-
-    return accepted;
+    return ask({ attempt: at, key, id, value: track ? choice(track) : "automatic" }, () =>
+      native.setQuality(at, id),
+    );
   }
 
   return {
@@ -347,23 +346,10 @@ export function mediaModel(
         value > 4
       )
         return false;
-      const request = { attempt: now.attempt, key: "speed" as const, value };
-      pending = request;
-      restored.add("speed");
-      let accepted = false;
 
-      try {
-        accepted = await native.setSpeed(now.attempt, value);
-      } catch {
-        /* Refused below. */
-      }
-
-      if (!accepted && attempt === now.attempt) {
-        if (pending === request) pending = undefined;
-        patch({ error: "speed" });
-      }
-
-      return accepted;
+      return ask({ attempt: now.attempt, key: "speed", value }, () =>
+        native.setSpeed(now.attempt, value),
+      );
     },
     enterPip: () => native.enterPip?.() ?? Promise.resolve(false),
     watch(visible) {
@@ -391,16 +377,7 @@ export function mediaModel(
     retryPreferences() {
       if (unread) read();
 
-      if (unsaved) {
-        try {
-          persistence?.write(unsaved);
-          saved = unsaved;
-          unsaved = null;
-          patch({ error: null });
-        } catch {
-          patch({ error: "save" });
-        }
-      }
+      if (unsaved && persist(unsaved)) patch({ error: null });
     },
     dismissError() {
       patch({ error: null });
