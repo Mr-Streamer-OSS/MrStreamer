@@ -169,7 +169,7 @@ class PlayerOwnerTest {
   }
 
   @Test
-  fun startsATitleWhereItWasLeftAndEnds() {
+  fun startsAFileWhereItWasLeftAndEnds() {
     val owner = owner()
     owner.admit(file("a", fixture("h264-aac.mp4"), startMs = 3_000))
     untilPhase("a", Phase.PLAYING)

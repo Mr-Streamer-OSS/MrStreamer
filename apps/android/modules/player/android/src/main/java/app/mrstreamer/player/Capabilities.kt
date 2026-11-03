@@ -30,8 +30,9 @@ object Capabilities {
     )
 
   /**
-   * Containers Media3's readers in this build recognise. MPEG-2 sound inside a container is
-   * decoded only where the phone has a decoder for it, which [decoders] says.
+   * Containers Media3's readers in this build recognise (the tests read MPEG-TS, MP4, Matroska,
+   * WebM and HLS). What a container holds is decoded only where the phone has a decoder for it,
+   * which [decoders] says.
    */
   val CONTAINERS = listOf("hls", "mpegts", "mp4", "matroska", "webm", "flv", "ogg", "avi", "mp3", "adts", "flac", "wav")
 

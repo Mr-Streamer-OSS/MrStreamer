@@ -159,7 +159,7 @@ describe("player addresses", () => {
     ).rejects.toEqual(new AppFailure({ kind: "needs-secret", subscriptionId: "missing" }));
   });
 
-  it("finds every channel a playlist's catalogue lists, by the id it lists it under", async () => {
+  it("finds channels the playlist's catalogue lists, duplicates included, by the id it lists them under", async () => {
     const link = "https://lists.example/tv.m3u?token=abc";
 
     const catalogue = await playlistReader(link, {
