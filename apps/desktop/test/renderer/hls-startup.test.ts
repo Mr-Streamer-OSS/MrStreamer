@@ -156,6 +156,67 @@ it.each(["before", "after"])(
   },
 );
 
+it("holds a quality hls.js couldn't tell it decodes, as for an unsupported supplemental codec", async () => {
+  const low = level(128, undefined, undefined, "http://localhost/low.m3u8");
+  const high = level(512, undefined, undefined, "http://localhost/high.m3u8");
+  high.supportedResult = {
+    supported: false,
+    configurations: [],
+    decodingInfoResults: [],
+    error: new Error("SUPPLEMENTAL-CODECS not supported"),
+  };
+  fixture.levels = [low, high];
+  engine = createEngine("hls", document.createElement("video"), "http://localhost/master.m3u8", {
+    audio: null,
+    audioLanguage: null,
+  });
+  engine.fix?.(high.uri);
+  await vi.dynamicImportSettled();
+  fixture.parsed();
+  await settle();
+  expect(fixture.starts).toEqual([high]);
+  expect(fixture.held).toEqual([1]);
+});
+
+// hls.js lists one of two twins at different addresses: the main process sends the held one.
+it("starts as it would alone when hls.js doesn't list the held quality", async () => {
+  const low = level(128);
+  fixture.levels = [low, level(512)];
+  engine = createEngine("hls", document.createElement("video"), "http://localhost/master.m3u8", {
+    audio: null,
+    audioLanguage: "es",
+  });
+  let failure: unknown;
+  engine.started.catch((error: unknown) => (failure = error));
+  engine.fix?.("http://localhost/twin.m3u8");
+  await vi.dynamicImportSettled();
+  fixture.parsed();
+  await settle();
+  expect(failure).toBeUndefined();
+  expect(fixture.starts).toEqual([low]);
+});
+
+it("still waits for capability checks when a hold comes and goes during startup", async () => {
+  const low = level(128, undefined, undefined, "http://localhost/low.m3u8");
+  const middle = level(256, undefined, undefined, "http://localhost/middle.m3u8");
+  const high = level(512, undefined, undefined, "http://localhost/high.m3u8");
+  fixture.levels = [low, middle, high];
+  const check = Promise.withResolvers<NonNullable<Level["supportedResult"]>>();
+  low.supportedPromise = check.promise;
+  void check.promise.then((result) => {
+    low.supportedResult = result;
+    fixture.levels.splice(fixture.levels.indexOf(low), 1);
+  });
+  const playing = await open();
+  playing.fix?.(high.uri);
+  playing.fix?.(null);
+  await settle();
+  expect(fixture.starts).toEqual([]);
+  check.resolve({ supported: false, decodingInfoResults: [], configurations: [] });
+  await settle();
+  expect(fixture.starts).toEqual([middle]);
+});
+
 it("starts with the lowest bitrate when no audio group changes", async () => {
   const low = level(128);
   fixture.levels = [low, level(512)];

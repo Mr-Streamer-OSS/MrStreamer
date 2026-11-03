@@ -1980,8 +1980,11 @@ function make(deps: RecordingsDeps) {
         Effect.gen(function* () {
           const limit = yield* limitOf(subscriptionId);
           const uses = yield* coordination.uses(subscriptionId);
-          if (!of?.variants.length) return { limit, uses };
-          const source = yield* subscriptions.sourceOf(subscriptionId);
+          // A source that can't be read, as without its login, still gets the count, unshared.
+          const source = of?.variants.length
+            ? yield* Effect.orElseSucceed(subscriptions.sourceOf(subscriptionId), () => null)
+            : null;
+          if (!of || !source) return { limit, uses };
           const streams = yield* Effect.forEach(of.variants, (id) =>
             Effect.promise(async () => ({
               id,

@@ -325,10 +325,13 @@ function hlsEngine(
   /** Starts loading once: at `level`, else where hls.js would. */
   const load = (level?: number) => {
     if (loading) return;
-    loading = true;
     if (level !== undefined) hls.startLevel = level;
     hls.startLoad();
+    loading = true;
   };
+  /** The level `fixed` names, when hls.js lists it. */
+  const heldLevel = () =>
+    fixed === null ? undefined : hls.levels.find(({ uri }) => uri === fixed);
   if (ends === null) {
     hls.once(Hls.Events.MANIFEST_PARSED, () => {
       // Reading firstAutoLevel starts hls.js's own capability checks. Let their handlers remove
@@ -341,7 +344,7 @@ function hlsEngine(
       });
       async function start(): Promise<void> {
         // A held level takes over from this (`hold`).
-        while (!released && !loading && fixed === null) {
+        while (!released && !loading && !heldLevel()) {
           const initial = hls.firstAutoLevel;
           const pending = hls.levels.flatMap((level) =>
             level.supportedPromise && !checked.has(level.supportedPromise)
@@ -353,7 +356,7 @@ function hlsEngine(
             const result = await Promise.race([Promise.allSettled(pending), deadline]);
             if (released) return;
             if (result === "timeout") {
-              if (fixed === null) load();
+              if (!heldLevel()) load();
               return;
             }
             continue;
@@ -402,7 +405,7 @@ function hlsEngine(
               ]);
               if (released) return;
               if (result === "timeout") {
-                if (fixed === null) load();
+                if (!heldLevel()) load();
                 return;
               }
               validated.set(candidate, result);
@@ -413,38 +416,43 @@ function hlsEngine(
           return load();
         }
       }
+      /** The one startup selection under way, which a hold given up meanwhile shares. */
+      let starting: Promise<void> | null = null;
       /**
        * Whether this player decodes `level`, as hls.js's capability check says. It is advisory:
-       * one that fails or doesn't answer within a second counts as yes.
+       * one hls.js couldn't make, as when the capability service failed or only a supplemental
+       * codec isn't supported, or that doesn't answer within a second, counts as yes.
        */
       async function decodes(level: (typeof hls.levels)[number]): Promise<boolean> {
-        if (level.supportedResult) return level.supportedResult.supported;
+        const decoded = ({ supported, error }: NonNullable<typeof level.supportedResult>) =>
+          supported || error !== undefined;
+        if (level.supportedResult) return decoded(level.supportedResult);
         let timer: ReturnType<typeof setTimeout> | undefined;
         return Promise.race([
-          hls.getMediaDecodingInfo(level).then(
-            (info) => info.supported,
-            () => true,
-          ),
+          hls.getMediaDecodingInfo(level).then(decoded, () => true),
           new Promise<boolean>((resolve) => {
             timer = setTimeout(() => resolve(true), 1000);
           }),
         ]).finally(() => clearTimeout(timer));
       }
       /**
-       * Holds the level `fixed` names, from the start while nothing loads yet, or with null picks
-       * as startup does. The main process sends no other variant meanwhile, so one this player can't
-       * decode, or that hls.js left out as such, can't play here: that fails as unsupported, and
-       * the player asks for a stream of its own instead, which never shares the recording's.
+       * Holds the level `fixed` names, from the start while nothing loads yet. The main process
+       * sends no other variant meanwhile, so one this player can't decode can't play here: that
+       * fails as unsupported, and the player asks for a stream of its own instead, which never
+       * shares the recording's. With none held, or one hls.js doesn't list, as a twin of another
+       * at a second address, hls.js picks as startup does, while the main process still sends only
+       * the held one.
        */
       async function hold(): Promise<void> {
         const variant = fixed;
-        if (variant === null) {
+        const level = heldLevel();
+        if (!level) {
           if (loading) hls.loadLevel = -1;
-          else await start();
+          else await (starting ??= start().finally(() => (starting = null)));
           return;
         }
-        const level = hls.levels.find(({ uri }) => uri === variant);
-        const playable = level !== undefined && (await decodes(level));
+        // The level playing already plays.
+        const playable = level === hls.levels[hls.currentLevel] || (await decodes(level));
         // A later `fix` holds its own.
         if (released || fixed !== variant) return;
         // hls.js may have removed it meanwhile as unsupported.
@@ -463,7 +471,7 @@ function hlsEngine(
         void hold().catch(() => {
           if (released) return;
           try {
-            if (fixed === null) return load();
+            if (!heldLevel()) return load();
           } catch {
             // Fails below.
           }
